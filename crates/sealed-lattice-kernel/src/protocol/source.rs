@@ -15,10 +15,9 @@ use super::preparation_parent::{
     verify_preparation_parent_carrier,
 };
 use super::preparation_plaintext::{
-    AFFINE_COEFFICIENT_BYTE_LENGTH, AFFINE_MODULE_VALUE_BYTE_LENGTH,
-    CONTRIBUTION_OPENING_BYTE_LENGTH, HeldAffineEvaluation, HeldSubsetKey,
-    PreparationMaterialContext, derive_held_affine_evaluations, derive_held_subset_keys,
-    sender_subset_slots, verify_local_preparation_material, verify_preparation_plaintext,
+    CONTRIBUTION_OPENING_BYTE_LENGTH, HeldSubsetKey, PreparationMaterialContext,
+    derive_held_subset_keys, sender_subset_slots, verify_local_preparation_material,
+    verify_preparation_plaintext,
 };
 
 pub const ABSTENTION_SOURCE_BODY_BYTE_LENGTH: usize = 326;
@@ -27,10 +26,6 @@ pub const HELD_SUBSET_KEY_COUNT: usize = 120;
 pub const HELD_SUBSET_KEY_BYTE_LENGTH: usize = 32;
 pub const HELD_SUBSET_KEY_VECTOR_BYTE_LENGTH: usize =
     HELD_SUBSET_KEY_COUNT * HELD_SUBSET_KEY_BYTE_LENGTH;
-pub const HELD_AFFINE_EVALUATION_COUNT: usize = 10;
-pub const HELD_AFFINE_EVALUATION_VECTOR_BYTE_LENGTH: usize =
-    HELD_AFFINE_EVALUATION_COUNT * 2 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
-pub const LOCAL_AFFINE_CONSTANT_VECTOR_BYTE_LENGTH: usize = 2 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
 pub const SCORE_ENCODING_COUNT: usize = 10;
 pub const SCORE_BIT_WIDTH: usize = 4;
 pub const SOURCE_BIT_COUNT: usize = SCORE_ENCODING_COUNT * SCORE_BIT_WIDTH;
@@ -252,14 +247,6 @@ pub struct VerifiedCompletePreparation {
     pub root: Hash512,
     pub parent_identities: Vec<Hash512>,
     pub held_subset_keys: Vec<HeldSubsetKey>,
-    pub held_affine_evaluations: Vec<HeldAffineEvaluation>,
-    pub local_affine_constants: [u8; LOCAL_AFFINE_CONSTANT_VECTOR_BYTE_LENGTH],
-}
-
-impl Drop for VerifiedCompletePreparation {
-    fn drop(&mut self) {
-        self.local_affine_constants.zeroize();
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,7 +266,6 @@ pub fn verify_complete_preparation(
     parent_bodies: &[Vec<u8>],
     parent_signatures: &[Vec<u8>],
     own_opening_bytes: &[u8],
-    own_affine_coefficient_bytes: &[u8],
     remote_plaintext_bytes: &[Vec<u8>],
 ) -> Result<VerifiedCompletePreparation, SourceError> {
     validate_position(COMPLETION_PROFILE_PARTICIPANT_COUNT, local_position)?;
@@ -289,7 +275,6 @@ pub fn verify_complete_preparation(
         || parent_signatures.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
         || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
         || own_opening_bytes.len() != HELD_SUBSET_KEY_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
-        || own_affine_coefficient_bytes.len() != AFFINE_COEFFICIENT_BYTE_LENGTH
         || action_key_set_roster_identity(action_key_sets).map_err(|_| SourceError::WrongContext)?
             != context.action_key_set_roster_identity
     {
@@ -338,13 +323,8 @@ pub fn verify_complete_preparation(
     let local_parent = parents
         .get(usize::from(local_position))
         .ok_or(SourceError::WrongParticipantPosition)?;
-    verify_local_preparation_material(
-        local_parent,
-        context,
-        own_opening_bytes,
-        own_affine_coefficient_bytes,
-    )
-    .map_err(|_| SourceError::WrongContext)?;
+    verify_local_preparation_material(local_parent, context, own_opening_bytes)
+        .map_err(|_| SourceError::WrongContext)?;
 
     for sender_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
         if sender_position == local_position {
@@ -387,26 +367,10 @@ pub fn verify_complete_preparation(
     let held_subset_keys =
         derive_held_subset_keys(local_position, own_opening_bytes, remote_plaintext_bytes)
             .map_err(|_| SourceError::WrongSubsetKeyVector)?;
-    let held_affine_evaluations = derive_held_affine_evaluations(
-        local_position,
-        own_affine_coefficient_bytes,
-        remote_plaintext_bytes,
-    )
-    .map_err(|_| SourceError::WrongContext)?;
-    let mut local_affine_constants = [0_u8; LOCAL_AFFINE_CONSTANT_VECTOR_BYTE_LENGTH];
-    local_affine_constants[..AFFINE_MODULE_VALUE_BYTE_LENGTH]
-        .copy_from_slice(&own_affine_coefficient_bytes[..AFFINE_MODULE_VALUE_BYTE_LENGTH]);
-    let affine_b_constant_start = 10 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
-    local_affine_constants[AFFINE_MODULE_VALUE_BYTE_LENGTH..].copy_from_slice(
-        &own_affine_coefficient_bytes
-            [affine_b_constant_start..affine_b_constant_start + AFFINE_MODULE_VALUE_BYTE_LENGTH],
-    );
     Ok(VerifiedCompletePreparation {
         root,
         parent_identities,
         held_subset_keys,
-        held_affine_evaluations,
-        local_affine_constants,
     })
 }
 
@@ -446,52 +410,6 @@ pub fn decode_held_subset_keys(
                 key: key
                     .try_into()
                     .map_err(|_| SourceError::WrongSubsetKeyVector)?,
-            })
-        })
-        .collect()
-}
-
-pub fn encode_held_affine_evaluations(
-    held_affine_evaluations: &[HeldAffineEvaluation],
-) -> Result<Vec<u8>, SourceError> {
-    if held_affine_evaluations.len() != HELD_AFFINE_EVALUATION_COUNT
-        || held_affine_evaluations
-            .iter()
-            .enumerate()
-            .any(|(position, evaluation)| usize::from(evaluation.receiver_position) != position)
-    {
-        return Err(SourceError::WrongItemTypeOrLength);
-    }
-    Ok(held_affine_evaluations
-        .iter()
-        .flat_map(|evaluation| {
-            evaluation
-                .affine_a_evaluation
-                .into_iter()
-                .chain(evaluation.affine_b_evaluation)
-        })
-        .collect())
-}
-
-pub fn decode_held_affine_evaluations(
-    bytes: &[u8],
-) -> Result<Vec<HeldAffineEvaluation>, SourceError> {
-    if bytes.len() != HELD_AFFINE_EVALUATION_VECTOR_BYTE_LENGTH {
-        return Err(SourceError::WrongItemTypeOrLength);
-    }
-    bytes
-        .chunks_exact(2 * AFFINE_MODULE_VALUE_BYTE_LENGTH)
-        .enumerate()
-        .map(|(position, bytes)| {
-            Ok(HeldAffineEvaluation {
-                receiver_position: u16::try_from(position)
-                    .map_err(|_| SourceError::WrongItemTypeOrLength)?,
-                affine_a_evaluation: bytes[..AFFINE_MODULE_VALUE_BYTE_LENGTH]
-                    .try_into()
-                    .map_err(|_| SourceError::WrongItemTypeOrLength)?,
-                affine_b_evaluation: bytes[AFFINE_MODULE_VALUE_BYTE_LENGTH..]
-                    .try_into()
-                    .map_err(|_| SourceError::WrongItemTypeOrLength)?,
             })
         })
         .collect()

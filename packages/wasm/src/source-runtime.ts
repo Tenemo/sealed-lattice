@@ -6,7 +6,6 @@ import {
 } from './construction-kernel-command-runtime.js';
 import type { ConstructionKernelCommandRuntime } from './foundation-kernel/kernel-runtime.js';
 import {
-    preparationAffineCoefficientByteLength,
     preparationContributionOpeningVectorByteLength,
     preparationPlaintextByteLength,
 } from './preparation-material-runtime.js';
@@ -21,13 +20,11 @@ const verifySourceCarrierCommand = 22;
 const completionProfileParticipantCount = 10;
 const preparationParentBodyByteLength = 8_502;
 export const heldSubsetKeyVectorByteLength = 3_840;
-export const heldAffineEvaluationVectorByteLength = 960;
-export const localAffineConstantVectorByteLength = 96;
 export const preparationParentIdentityVectorByteLength = 640;
 export const abstentionSourceBodyByteLength = 326;
 export const submittedSourceBodyByteLength = 337;
 export const sourceScoreEncodingCount = 10;
-export const sourceCorrectionByteLength = 5;
+const sourceCorrectionByteLength = 5;
 const identityByteLength = 64;
 
 export type SourceDeclaration = 'abstain' | 'submit';
@@ -55,8 +52,6 @@ export type VerifiedCompletePreparation = Readonly<{
     root: Uint8Array;
     parentIdentities: Uint8Array;
     heldSubsetKeys: Uint8Array;
-    heldAffineEvaluations: Uint8Array;
-    localAffineConstants: Uint8Array;
 }>;
 
 export type EncodedSourceBody = Readonly<{
@@ -79,7 +74,6 @@ export type SourceRuntime = Readonly<{
         actionKeySetBodies: readonly Uint8Array[],
         preparationParents: readonly PreparationParentCarrier[],
         ownContributionOpenings: Uint8Array,
-        ownAffineCoefficients: Uint8Array,
         remotePlaintexts: readonly Uint8Array[],
     ): VerifiedCompletePreparation;
     deriveHonestCorrection(
@@ -204,7 +198,6 @@ export const openSourceRuntime = (
         actionKeySetBodies,
         preparationParents,
         ownContributionOpenings,
-        ownAffineCoefficients,
         remotePlaintexts,
     ) => {
         validatePreparationContext(context);
@@ -232,11 +225,6 @@ export const openSourceRuntime = (
             preparationContributionOpeningVectorByteLength,
             'ownContributionOpenings',
         );
-        requireExactConstructionBytes(
-            ownAffineCoefficients,
-            preparationAffineCoefficientByteLength,
-            'ownAffineCoefficients',
-        );
         if (remotePlaintexts.length !== completionProfileParticipantCount - 1) {
             throw new RangeError(
                 'remotePlaintexts must contain every remote sender in roster order.',
@@ -262,7 +250,6 @@ export const openSourceRuntime = (
             request.writeBytes(parent.signature);
         }
         request.writeBytes(ownContributionOpenings);
-        request.writeBytes(ownAffineCoefficients);
         for (const plaintext of remotePlaintexts) {
             request.writeBytes(plaintext);
         }
@@ -277,21 +264,10 @@ export const openSourceRuntime = (
                 heldSubsetKeyVectorByteLength,
                 'heldSubsetKeys',
             );
-            const heldAffineEvaluations = Uint8Array.from(reader.readBytes());
-            requireExactConstructionBytes(
-                heldAffineEvaluations,
-                heldAffineEvaluationVectorByteLength,
-                'heldAffineEvaluations',
-            );
-            const localAffineConstants = Uint8Array.from(
-                reader.readFixed(localAffineConstantVectorByteLength),
-            );
             return {
                 root,
                 parentIdentities,
                 heldSubsetKeys,
-                heldAffineEvaluations,
-                localAffineConstants,
             };
         });
     },

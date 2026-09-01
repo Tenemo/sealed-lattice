@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { ConstructionKernelCommandError } from '../../src/construction-kernel-command-runtime.js';
+import {
+    ConstructionCommandWriter,
+    ConstructionKernelCommandError,
+    executeConstructionCommand,
+} from '../../src/construction-kernel-command-runtime.js';
 import { instantiateConstructionKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
 import {
     openPreparationMaterialRuntime,
-    preparationAffineCoefficientByteLength,
     preparationContributionOpeningVectorByteLength,
     preparationPlaintextByteLength,
     preparationSubsetCommitmentVectorByteLength,
@@ -39,6 +42,20 @@ const context: PreparationMaterialContextInput = {
 };
 
 describe('preparation material scalar WASM runtime', () => {
+    it('tombstones every rejected activation command identifier', async () => {
+        const kernel = await instantiateConstructionKernelCommandRuntime(
+            kernelUrl,
+            { allowUnpinnedKernel: true },
+        );
+        for (let command = 27; command <= 33; command += 1) {
+            const request = new ConstructionCommandWriter();
+            request.writeU8(command);
+            expect(() =>
+                executeConstructionCommand(kernel, request, () => undefined),
+            ).toThrowError(/rejected tally activation command is tombstoned/u);
+        }
+    });
+
     it('generates exact pair payloads and verifies every signed opening slot', async () => {
         const kernel = await instantiateConstructionKernelCommandRuntime(
             kernelUrl,
@@ -52,7 +69,6 @@ describe('preparation material scalar WASM runtime', () => {
                 preparationContributionOpeningVectorByteLength,
                 0x5001n,
             ),
-            deterministicBytes(preparationAffineCoefficientByteLength, 0x6001n),
         );
         expect(material.subsetCommitments).toHaveLength(
             preparationSubsetCommitmentVectorByteLength,
@@ -103,6 +119,19 @@ describe('preparation material scalar WASM runtime', () => {
                 7,
                 parent.body,
                 material.recipientPlaintexts[7] ?? new Uint8Array(),
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
+        const rejectedVersion = Uint8Array.from(
+            material.recipientPlaintexts[0] ?? [],
+        );
+        rejectedVersion.set(new Uint8Array([1, 0]), 2);
+        expect(() =>
+            materialRuntime.verifyPlaintext(
+                context,
+                0,
+                parent.body,
+                rejectedVersion,
             ),
         ).toThrow(ConstructionKernelCommandError);
     });

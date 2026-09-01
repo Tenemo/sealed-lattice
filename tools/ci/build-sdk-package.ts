@@ -1,17 +1,16 @@
-import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { buildWasmKernel } from './build-wasm-kernel.js';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
-const kernelSourcePath = path.join(
+const kernelStagingPath = path.join(
     repositoryRoot,
-    'packages',
-    'wasm',
-    'dist',
+    'target',
+    'public-sdk-kernel',
     'sealed-lattice-kernel.wasm',
 );
 const sdkOutputDirectoryPath = path.join(
@@ -25,19 +24,12 @@ const kernelOutputPath = path.join(
     'sealed-lattice-kernel.wasm',
 );
 
-const hashWasmKernel = (bytes: Uint8Array): string =>
-    createHash('sha256').update(bytes).digest('hex');
-
 export const buildSdkPackage = async (): Promise<void> => {
-    let kernelBytes: Buffer;
-    try {
-        kernelBytes = await readFile(kernelSourcePath);
-    } catch {
-        throw new Error(
-            'Build @sealed-lattice/wasm before building the public SDK.',
-        );
-    }
-    const kernelHash = hashWasmKernel(kernelBytes);
+    const { hash: kernelHash } = await buildWasmKernel({
+        includeConstruction: false,
+        outputFilePath: kernelStagingPath,
+    });
+    const kernelBytes = await readFile(kernelStagingPath);
     const runner = resolvePackageManagerRunner();
     const output = runPackageManagerAndCaptureOutput(
         runner,
@@ -63,9 +55,9 @@ export const buildSdkPackage = async (): Promise<void> => {
     if (output.length > 0) process.stdout.write(output);
 
     await mkdir(sdkOutputDirectoryPath, { recursive: true });
-    await copyFile(kernelSourcePath, kernelOutputPath);
+    await copyFile(kernelStagingPath, kernelOutputPath);
     if (!kernelBytes.equals(await readFile(kernelOutputPath))) {
-        throw new Error('The public SDK kernel copy differs from its source.');
+        throw new Error('The public SDK kernel copy differs from its build.');
     }
     console.log(`Public SDK bundled with exact kernel ${kernelHash}.`);
 };

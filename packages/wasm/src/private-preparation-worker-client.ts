@@ -12,13 +12,10 @@ import type {
     PublishedFinalityPackage,
     PublishedPreparationPackage,
     PublishedSourcePackage,
-    PublishedTallyActivation,
-    PublishedTallyActivationChunk,
     RegisteredActionKeys,
     SourcePublicationChoice,
     TallyEvaluationProgress,
 } from './private-preparation-worker-protocol.js';
-import type { SignedActivationManifest } from './tally-activation-runtime.js';
 
 type PendingRequest = Readonly<{
     reject(error: Error): void;
@@ -31,6 +28,7 @@ const copyActionContext = (
     context: PrivatePreparationActionContext,
 ): PrivatePreparationActionContext => ({
     actionProposalIdentity: copyBytes(context.actionProposalIdentity),
+    actionDefinitionIdentity: copyBytes(context.actionDefinitionIdentity),
     predecessorIdentity: copyBytes(context.predecessorIdentity),
     participantPosition: context.participantPosition,
 });
@@ -51,14 +49,6 @@ const copyFinalitySignatures = (
     signatures.map((signature) => ({
         signerPosition: signature.signerPosition,
         signature: copyBytes(signature.signature),
-    }));
-
-const copyActivationManifests = (
-    manifests: readonly SignedActivationManifest[],
-): SignedActivationManifest[] =>
-    manifests.map((manifest) => ({
-        body: copyBytes(manifest.body),
-        signature: copyBytes(manifest.signature),
     }));
 
 const copySourceChoice = (
@@ -108,31 +98,16 @@ const collectRequestTransferables = (
     }
     if (
         request.operation === 'create-finality-signature' ||
-        request.operation === 'create-tally-activation' ||
-        request.operation === 'finalize-no-result' ||
-        request.operation === 'advance-tally'
+        request.operation === 'finalize-no-result'
     ) {
         for (const source of request.input.sources) {
             collect(source.body);
             collect(source.signature);
         }
     }
-    if (
-        request.operation === 'create-tally-activation' ||
-        request.operation === 'finalize-no-result' ||
-        request.operation === 'advance-tally'
-    ) {
+    if (request.operation === 'finalize-no-result') {
         for (const signature of request.input.finalitySignatures) {
             collect(signature.signature);
-        }
-    }
-    if (request.operation === 'advance-tally') {
-        for (const manifest of request.input.activationManifests) {
-            collect(manifest.body);
-            collect(manifest.signature);
-        }
-        for (const chunk of request.input.chunks) {
-            collect(chunk);
         }
     }
     return transferables;
@@ -316,27 +291,6 @@ export class PrivatePreparationWorkerClient {
         });
     }
 
-    createTallyActivation(
-        context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
-        preparationAttempt: number,
-        sources: readonly SourceCarrier[],
-        finalitySignatures: readonly FinalitySignatureCarrier[],
-        topCount: number,
-    ): Promise<PublishedTallyActivation> {
-        return this.send({
-            operation: 'create-tally-activation',
-            input: {
-                ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
-                preparationAttempt,
-                sources: copySources(sources),
-                finalitySignatures: copyFinalitySignatures(finalitySignatures),
-                topCount,
-            },
-        });
-    }
-
     finalizeNoResult(
         context: PrivatePreparationActionContext,
         actionKeySetBodies: readonly Uint8Array[],
@@ -354,44 +308,6 @@ export class PrivatePreparationWorkerClient {
                 sources: copySources(sources),
                 finalitySignatures: copyFinalitySignatures(finalitySignatures),
                 topCount,
-            },
-        });
-    }
-
-    readTallyActivationChunk(
-        context: PrivatePreparationActionContext,
-        chunkIndex: number,
-    ): Promise<PublishedTallyActivationChunk> {
-        return this.send({
-            operation: 'read-tally-activation-chunk',
-            input: { ...copyActionContext(context), chunkIndex },
-        });
-    }
-
-    advanceTally(
-        context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
-        preparationAttempt: number,
-        sources: readonly SourceCarrier[],
-        finalitySignatures: readonly FinalitySignatureCarrier[],
-        topCount: number,
-        activationManifests: readonly SignedActivationManifest[],
-        rangeIndex: number,
-        chunks: readonly Uint8Array[],
-    ): Promise<TallyEvaluationProgress> {
-        return this.send({
-            operation: 'advance-tally',
-            input: {
-                ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
-                preparationAttempt,
-                sources: copySources(sources),
-                finalitySignatures: copyFinalitySignatures(finalitySignatures),
-                topCount,
-                activationManifests:
-                    copyActivationManifests(activationManifests),
-                rangeIndex,
-                chunks: chunks.map(copyBytes),
             },
         });
     }

@@ -54,21 +54,6 @@ impl TallyCircuitProfile {
             top_count,
         })
     }
-
-    #[cfg(test)]
-    pub(crate) const fn participant_count(self) -> u16 {
-        self.participant_count
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn option_count(self) -> u16 {
-        self.option_count
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn top_count(self) -> u16 {
-        self.top_count
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,11 +84,6 @@ pub(crate) struct CompiledTallyCircuit {
 }
 
 impl CompiledTallyCircuit {
-    #[cfg(test)]
-    pub(crate) const fn profile(&self) -> TallyCircuitProfile {
-        self.profile
-    }
-
     pub(crate) const fn input_bit_count(&self) -> usize {
         self.input_bit_count
     }
@@ -133,10 +113,6 @@ impl CompiledTallyCircuit {
         );
         output_wires
     }
-
-    pub(crate) fn wire_count(&self) -> usize {
-        self.input_bit_count.saturating_add(self.operations.len())
-    }
 }
 
 #[cfg(test)]
@@ -146,29 +122,10 @@ pub(crate) struct TallyEvaluationInput {
 }
 
 #[cfg(test)]
-impl TallyEvaluationInput {
-    pub(crate) fn new(participant_ballots: Vec<TallyBallotInput>) -> Self {
-        Self {
-            participant_ballots,
-        }
-    }
-}
-
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyBallotInput {
     is_present: bool,
     score_encodings: Vec<u8>,
-}
-
-#[cfg(test)]
-impl TallyBallotInput {
-    pub(crate) fn new(is_present: bool, score_encodings: Vec<u8>) -> Self {
-        Self {
-            is_present,
-            score_encodings,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -188,10 +145,6 @@ impl TallyEvaluationOutcome {
     pub(crate) fn accepted_ordered_option_positions(&self) -> Option<&[u16]> {
         self.has_selected_ballot
             .then_some(self.ordered_option_positions.as_slice())
-    }
-
-    pub(crate) fn accepted_ballot_authorship(&self) -> &[bool] {
-        &self.accepted_ballot_authorship
     }
 }
 

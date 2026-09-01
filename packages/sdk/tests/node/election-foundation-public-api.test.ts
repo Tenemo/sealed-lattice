@@ -38,6 +38,14 @@ const expectedPublicRuntimeExportNames = [
     'verifyCanonicalCeremonyContext',
     'verifyCanonicalManifest',
 ] as const;
+const expectedPublicWasmExportNames = [
+    '__data_end',
+    '__heap_base',
+    'memory',
+    'sealed_lattice_allocate',
+    'sealed_lattice_deallocate',
+    'sealed_lattice_foundation_command_with_length',
+] as const;
 
 describe('election foundation public package API in Node', () => {
     it('exposes safe runtime functions and keeps runtime exports callable', () => {
@@ -50,6 +58,25 @@ describe('election foundation public package API in Node', () => {
                 publicFunctionName,
             ).toBe('function');
         }
+    });
+
+    it('ships a foundation-only WebAssembly export inventory', () => {
+        const module = new WebAssembly.Module(
+            readFileSync(
+                new URL(
+                    '../../dist/sealed-lattice-kernel.wasm',
+                    import.meta.url,
+                ),
+            ),
+        );
+        const exportNames = WebAssembly.Module.exports(module)
+            .map((entry) => entry.name)
+            .sort();
+
+        expect(exportNames).toEqual(expectedPublicWasmExportNames);
+        expect(exportNames).not.toContain(
+            'sealed_lattice_construction_command_with_length',
+        );
     });
 
     it('creates and verifies canonical manifest bytes through one packaged kernel instance', async () => {

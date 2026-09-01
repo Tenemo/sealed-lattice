@@ -2,6 +2,7 @@ use core::str;
 
 use crate::foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
 
+#[cfg(feature = "construction")]
 mod construction_command;
 mod foundation_command;
 
@@ -165,11 +166,8 @@ impl BinaryWriter {
         self.extend(&[value])
     }
 
+    #[cfg(feature = "construction")]
     pub fn write_u16(&mut self, value: u16) -> CanonicalResult<()> {
-        self.extend(&value.to_le_bytes())
-    }
-
-    pub fn write_u32(&mut self, value: u32) -> CanonicalResult<()> {
         self.extend(&value.to_le_bytes())
     }
 
@@ -232,6 +230,7 @@ pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
+#[cfg(feature = "construction")]
 pub(super) fn run_construction_command(input: &[u8]) -> Vec<u8> {
     if input.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
         return encode_error(CanonicalError::new(

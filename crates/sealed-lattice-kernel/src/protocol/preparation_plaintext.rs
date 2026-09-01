@@ -15,21 +15,14 @@ pub const CONTRIBUTION_SEED_BYTE_LENGTH: usize = 32;
 pub const CONTRIBUTION_SALT_BYTE_LENGTH: usize = 48;
 pub const CONTRIBUTION_OPENING_BYTE_LENGTH: usize =
     CONTRIBUTION_SEED_BYTE_LENGTH + CONTRIBUTION_SALT_BYTE_LENGTH;
-pub const AFFINE_MODULE_VALUE_BYTE_LENGTH: usize = 48;
-pub const AFFINE_COEFFICIENT_COUNT: usize = 14;
-pub const AFFINE_COEFFICIENT_BYTE_LENGTH: usize =
-    AFFINE_COEFFICIENT_COUNT * AFFINE_MODULE_VALUE_BYTE_LENGTH;
 pub const PAIR_OPENING_COUNT: usize = 84;
 pub const PAIR_OPENING_BYTE_LENGTH: usize = PAIR_OPENING_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH;
-pub const PREPARATION_PLAINTEXT_BYTE_LENGTH: usize =
-    8 + 2 * 6 + PAIR_OPENING_BYTE_LENGTH + 2 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
+pub const PREPARATION_PLAINTEXT_BYTE_LENGTH: usize = 8 + 6 + PAIR_OPENING_BYTE_LENGTH;
 
 const LOW_SUBSET_SIZE: u16 = 7;
 const STATUS_SUBSET_SIZE: u16 = 8;
-const LOW_COEFFICIENT_COUNT: usize = 10;
-const STATUS_COEFFICIENT_COUNT: usize = 4;
 const PREPARATION_PLAINTEXT_SCHEMA_IDENTIFIER: u16 = 0x0207;
-const PREPARATION_PLAINTEXT_SCHEMA_VERSION: u16 = 1;
+const PREPARATION_PLAINTEXT_SCHEMA_VERSION: u16 = 2;
 const SUBSET_CONTRIBUTION_PURPOSE: u16 = 1;
 const SUBSET_CONTRIBUTION_COMMITMENT_DOMAIN: &str =
     "sealed-lattice/construction/subset-contribution-commitment/v1";
@@ -38,7 +31,6 @@ const VERIFIED_PREPARATION_PLAINTEXT_IDENTITY_DOMAIN: &str =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparationPlaintextError {
-    InvalidAffineMask,
     InvalidCanonicalEncoding,
     WrongCommitment,
     WrongContext,
@@ -50,7 +42,6 @@ pub enum PreparationPlaintextError {
 impl fmt::Display for PreparationPlaintextError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidAffineMask => "preparation affine mask has a zero constant",
             Self::InvalidCanonicalEncoding => "preparation plaintext is not canonically encoded",
             Self::WrongCommitment => "preparation opening does not match the signed commitment",
             Self::WrongContext => "preparation plaintext has the wrong parent context",
@@ -97,21 +88,11 @@ impl ContributionOpening {
 #[derive(Clone, PartialEq, Eq, Zeroize)]
 pub struct PreparationPlaintext {
     openings: [ContributionOpening; PAIR_OPENING_COUNT],
-    affine_a_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
-    affine_b_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
 }
 
 impl PreparationPlaintext {
-    fn new(
-        openings: [ContributionOpening; PAIR_OPENING_COUNT],
-        affine_a_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
-        affine_b_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
-    ) -> Self {
-        Self {
-            openings,
-            affine_a_evaluation,
-            affine_b_evaluation,
-        }
+    fn new(openings: [ContributionOpening; PAIR_OPENING_COUNT]) -> Self {
+        Self { openings }
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, PreparationPlaintextError> {
@@ -119,16 +100,11 @@ impl PreparationPlaintext {
         for opening in self.openings {
             opening.append_to(&mut opening_bytes);
         }
-        let mut affine_bytes = Vec::with_capacity(2 * AFFINE_MODULE_VALUE_BYTE_LENGTH);
-        affine_bytes.extend_from_slice(&self.affine_a_evaluation);
-        affine_bytes.extend_from_slice(&self.affine_b_evaluation);
         let encoded = CanonicalTuple::new(
             PREPARATION_PLAINTEXT_SCHEMA_IDENTIFIER,
             PREPARATION_PLAINTEXT_SCHEMA_VERSION,
             vec![
                 CanonicalItem::fixed_bytes(opening_bytes)
-                    .map_err(|_| PreparationPlaintextError::InvalidCanonicalEncoding)?,
-                CanonicalItem::fixed_bytes(affine_bytes)
                     .map_err(|_| PreparationPlaintextError::InvalidCanonicalEncoding)?,
             ],
         )
@@ -151,11 +127,9 @@ impl PreparationPlaintext {
         {
             return Err(PreparationPlaintextError::WrongSchema);
         }
-        if tuple.items.len() != 2
+        if tuple.items.len() != 1
             || tuple.items[0].item_type() != CanonicalItemType::RawBytes
-            || tuple.items[1].item_type() != CanonicalItemType::RawBytes
             || tuple.items[0].canonical_bytes().len() != PAIR_OPENING_BYTE_LENGTH
-            || tuple.items[1].canonical_bytes().len() != 2 * AFFINE_MODULE_VALUE_BYTE_LENGTH
         {
             return Err(PreparationPlaintextError::WrongItemTypeOrLength);
         }
@@ -166,16 +140,7 @@ impl PreparationPlaintext {
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
-        let affine_bytes = tuple.items[1].canonical_bytes();
-        let plaintext = Self::new(
-            openings,
-            affine_bytes[..AFFINE_MODULE_VALUE_BYTE_LENGTH]
-                .try_into()
-                .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?,
-            affine_bytes[AFFINE_MODULE_VALUE_BYTE_LENGTH..]
-                .try_into()
-                .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?,
-        );
+        let plaintext = Self::new(openings);
         if plaintext.encode()?.as_slice() != bytes {
             return Err(PreparationPlaintextError::InvalidCanonicalEncoding);
         }
@@ -193,19 +158,6 @@ pub struct HeldSubsetKey {
     pub family: u16,
     pub subset: u16,
     pub key: [u8; CONTRIBUTION_SEED_BYTE_LENGTH],
-}
-
-#[derive(Zeroize)]
-pub struct HeldAffineEvaluation {
-    pub receiver_position: u16,
-    pub affine_a_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
-    pub affine_b_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
-}
-
-impl Drop for HeldAffineEvaluation {
-    fn drop(&mut self) {
-        self.zeroize();
-    }
 }
 
 impl Drop for HeldSubsetKey {
@@ -226,12 +178,9 @@ pub struct PreparationMaterialContext {
 pub fn generate_preparation_material(
     context: &PreparationMaterialContext,
     opening_bytes: &[u8],
-    affine_coefficient_bytes: &[u8],
 ) -> Result<GeneratedPreparationMaterial, PreparationPlaintextError> {
     validate_position(context.sender_position)?;
-    if opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
-        || affine_coefficient_bytes.len() != AFFINE_COEFFICIENT_BYTE_LENGTH
-    {
+    if opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH {
         return Err(PreparationPlaintextError::WrongItemTypeOrLength);
     }
     let openings = Zeroizing::new(
@@ -240,23 +189,6 @@ pub fn generate_preparation_material(
             .map(ContributionOpening::decode)
             .collect::<Result<Vec<_>, _>>()?,
     );
-    let affine_coefficients = Zeroizing::new(
-        affine_coefficient_bytes
-            .chunks_exact(AFFINE_MODULE_VALUE_BYTE_LENGTH)
-            .map(|bytes| {
-                bytes
-                    .try_into()
-                    .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)
-            })
-            .collect::<Result<Vec<[u8; AFFINE_MODULE_VALUE_BYTE_LENGTH]>, _>>()?,
-    );
-    if affine_coefficients[LOW_COEFFICIENT_COUNT]
-        .iter()
-        .all(|byte| *byte == 0)
-    {
-        return Err(PreparationPlaintextError::InvalidAffineMask);
-    }
-
     let sender_slots = sender_subset_slots(context.sender_position);
     if sender_slots.len() != SUBSET_COMMITMENT_COUNT || openings.len() != sender_slots.len() {
         return Err(PreparationPlaintextError::WrongItemTypeOrLength);
@@ -297,19 +229,7 @@ pub fn generate_preparation_material(
             .collect::<Vec<_>>()
             .try_into()
             .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
-        let point = u8::try_from(recipient_position + 1)
-            .map_err(|_| PreparationPlaintextError::WrongParticipantPosition)?;
-        let affine_a_evaluation =
-            evaluate_module_polynomial(&affine_coefficients[..LOW_COEFFICIENT_COUNT], point);
-        let affine_b_evaluation = evaluate_module_polynomial(
-            &affine_coefficients
-                [LOW_COEFFICIENT_COUNT..LOW_COEFFICIENT_COUNT + STATUS_COEFFICIENT_COUNT],
-            point,
-        );
-        recipient_plaintexts.push(
-            PreparationPlaintext::new(pair_openings, affine_a_evaluation, affine_b_evaluation)
-                .encode()?,
-        );
+        recipient_plaintexts.push(PreparationPlaintext::new(pair_openings).encode()?);
     }
     Ok(GeneratedPreparationMaterial {
         subset_commitments,
@@ -321,7 +241,6 @@ pub fn verify_local_preparation_material(
     parent: &PreparationParent,
     expected_context: &PreparationMaterialContext,
     opening_bytes: &[u8],
-    affine_coefficient_bytes: &[u8],
 ) -> Result<(), PreparationPlaintextError> {
     if parent.participant_count() != COMPLETION_PROFILE_PARTICIPANT_COUNT
         || parent.action_proposal_identity() != expected_context.action_proposal_identity
@@ -333,8 +252,7 @@ pub fn verify_local_preparation_material(
     {
         return Err(PreparationPlaintextError::WrongContext);
     }
-    let mut material =
-        generate_preparation_material(expected_context, opening_bytes, affine_coefficient_bytes)?;
+    let mut material = generate_preparation_material(expected_context, opening_bytes)?;
     let matches = material
         .subset_commitments
         .iter()
@@ -417,76 +335,6 @@ pub fn derive_held_subset_keys(
         });
     }
     Ok(held_keys)
-}
-
-pub fn derive_held_affine_evaluations(
-    participant_position: u16,
-    own_affine_coefficient_bytes: &[u8],
-    remote_plaintext_bytes: &[Vec<u8>],
-) -> Result<Vec<HeldAffineEvaluation>, PreparationPlaintextError> {
-    validate_position(participant_position)?;
-    if own_affine_coefficient_bytes.len() != AFFINE_COEFFICIENT_BYTE_LENGTH
-        || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
-    {
-        return Err(PreparationPlaintextError::WrongItemTypeOrLength);
-    }
-    let own_coefficients = Zeroizing::new(
-        own_affine_coefficient_bytes
-            .chunks_exact(AFFINE_MODULE_VALUE_BYTE_LENGTH)
-            .map(|bytes| {
-                bytes
-                    .try_into()
-                    .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)
-            })
-            .collect::<Result<Vec<[u8; AFFINE_MODULE_VALUE_BYTE_LENGTH]>, _>>()?,
-    );
-    if own_coefficients[LOW_COEFFICIENT_COUNT]
-        .iter()
-        .all(|byte| *byte == 0)
-    {
-        return Err(PreparationPlaintextError::InvalidAffineMask);
-    }
-    let remote_plaintexts = Zeroizing::new(
-        remote_plaintext_bytes
-            .iter()
-            .map(|bytes| PreparationPlaintext::decode(bytes))
-            .collect::<Result<Vec<_>, _>>()?,
-    );
-    let local_point = u8::try_from(participant_position + 1)
-        .map_err(|_| PreparationPlaintextError::WrongParticipantPosition)?;
-    let local_affine_a_evaluation =
-        evaluate_module_polynomial(&own_coefficients[..LOW_COEFFICIENT_COUNT], local_point);
-    let local_affine_b_evaluation = evaluate_module_polynomial(
-        &own_coefficients[LOW_COEFFICIENT_COUNT..LOW_COEFFICIENT_COUNT + STATUS_COEFFICIENT_COUNT],
-        local_point,
-    );
-
-    let mut held_evaluations =
-        Vec::with_capacity(usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT));
-    for receiver_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
-        if receiver_position == participant_position {
-            held_evaluations.push(HeldAffineEvaluation {
-                receiver_position,
-                affine_a_evaluation: local_affine_a_evaluation,
-                affine_b_evaluation: local_affine_b_evaluation,
-            });
-            continue;
-        }
-        let remote_index = if receiver_position < participant_position {
-            usize::from(receiver_position)
-        } else {
-            usize::from(receiver_position - 1)
-        };
-        let plaintext = remote_plaintexts
-            .get(remote_index)
-            .ok_or(PreparationPlaintextError::WrongItemTypeOrLength)?;
-        held_evaluations.push(HeldAffineEvaluation {
-            receiver_position,
-            affine_a_evaluation: plaintext.affine_a_evaluation,
-            affine_b_evaluation: plaintext.affine_b_evaluation,
-        });
-    }
-    Ok(held_evaluations)
 }
 
 pub fn verify_preparation_plaintext(
@@ -604,35 +452,6 @@ const fn subset_contains(subset: u16, participant_position: u16) -> bool {
     subset & (1_u16 << participant_position) != 0
 }
 
-fn evaluate_module_polynomial(
-    coefficients: &[[u8; AFFINE_MODULE_VALUE_BYTE_LENGTH]],
-    point: u8,
-) -> [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH] {
-    let mut result = [0_u8; AFFINE_MODULE_VALUE_BYTE_LENGTH];
-    for coefficient in coefficients.iter().rev() {
-        for (result_byte, coefficient_byte) in result.iter_mut().zip(coefficient) {
-            *result_byte = gf16_mul_byte(*result_byte, point) ^ coefficient_byte;
-        }
-    }
-    result
-}
-
-fn gf16_mul_byte(value: u8, point: u8) -> u8 {
-    gf16_mul(value >> 4, point) << 4 | gf16_mul(value & 0x0f, point)
-}
-
-fn gf16_mul(mut left: u8, mut right: u8) -> u8 {
-    let mut product = 0_u8;
-    for _ in 0..4 {
-        product ^= (0_u8.wrapping_sub(right & 1)) & left;
-        let high_bit = left >> 3;
-        left = (left << 1) & 0x0f;
-        left ^= (0_u8.wrapping_sub(high_bit)) & 0x03;
-        right >>= 1;
-    }
-    product & 0x0f
-}
-
 fn validate_position(position: u16) -> Result<(), PreparationPlaintextError> {
     if position >= COMPLETION_PROFILE_PARTICIPANT_COUNT {
         return Err(PreparationPlaintextError::WrongParticipantPosition);
@@ -673,7 +492,6 @@ mod tests {
                 SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH,
                 0x5001,
             ),
-            &deterministic_bytes(AFFINE_COEFFICIENT_BYTE_LENGTH, 0x6001),
         )
         .expect("preparation material generates")
     }
@@ -733,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn mutation_wrong_recipient_and_zero_affine_constant_refuse() {
+    fn mutation_wrong_recipient_and_rejected_version_refuse() {
         let material = generated();
         let parent = parent(&material);
         let mut mutated = material.recipient_plaintexts[7].clone();
@@ -744,20 +562,11 @@ mod tests {
             Err(PreparationPlaintextError::WrongCommitment)
         );
 
-        let mut affine = deterministic_bytes(AFFINE_COEFFICIENT_BYTE_LENGTH, 0x6001);
-        affine[LOW_COEFFICIENT_COUNT * AFFINE_MODULE_VALUE_BYTE_LENGTH
-            ..(LOW_COEFFICIENT_COUNT + 1) * AFFINE_MODULE_VALUE_BYTE_LENGTH]
-            .fill(0);
+        let mut rejected_version = material.recipient_plaintexts[0].clone();
+        rejected_version[2..4].copy_from_slice(&1_u16.to_le_bytes());
         assert!(matches!(
-            generate_preparation_material(
-                &context(),
-                &deterministic_bytes(
-                    SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH,
-                    0x5001,
-                ),
-                &affine,
-            ),
-            Err(PreparationPlaintextError::InvalidAffineMask)
+            PreparationPlaintext::decode(&rejected_version),
+            Err(PreparationPlaintextError::WrongSchema)
         ));
     }
 }

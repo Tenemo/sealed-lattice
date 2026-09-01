@@ -458,7 +458,7 @@ mod tests {
         .expect("private preparation body seals");
         assert_eq!(context.encode().expect("header encodes").len(), 356);
         let encoded = body.encode().expect("body encodes");
-        assert_eq!(encoded.len(), 8_322);
+        assert_eq!(encoded.len(), PRIVATE_PREPARATION_BODY_BYTE_LENGTH);
         let decoded = PrivatePreparationBody::decode(10, &encoded).expect("body decodes");
         assert_eq!(decoded.context, context);
         assert_eq!(

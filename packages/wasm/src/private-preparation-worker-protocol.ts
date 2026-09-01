@@ -7,10 +7,6 @@ import type {
     KernelResourceMeasurement,
 } from './foundation-kernel/kernel-runtime.js';
 import type { PreparationParentCarrier } from './source-runtime.js';
-import type {
-    ActivationChunkDescriptor,
-    SignedActivationManifest,
-} from './tally-activation-runtime.js';
 
 export type PrivatePreparationWorkerInitialization = Readonly<{
     databaseName: string;
@@ -22,6 +18,7 @@ export type PrivatePreparationWorkerInitialization = Readonly<{
 
 export type PrivatePreparationActionContext = Readonly<{
     actionProposalIdentity: Uint8Array;
+    actionDefinitionIdentity: Uint8Array;
     predecessorIdentity: Uint8Array;
     participantPosition: number;
 }>;
@@ -89,17 +86,6 @@ export type PrivatePreparationWorkerRequest =
       }>
     | Readonly<{
           requestId: number;
-          operation: 'create-tally-activation';
-          input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
-              preparationAttempt: number;
-              sources: readonly SourceCarrier[];
-              finalitySignatures: readonly FinalitySignatureCarrier[];
-              topCount: number;
-          };
-      }>
-    | Readonly<{
-          requestId: number;
           operation: 'finalize-no-result';
           input: PrivatePreparationActionContext & {
               actionKeySetBodies: readonly Uint8Array[];
@@ -107,27 +93,6 @@ export type PrivatePreparationWorkerRequest =
               sources: readonly SourceCarrier[];
               finalitySignatures: readonly FinalitySignatureCarrier[];
               topCount: number;
-          };
-      }>
-    | Readonly<{
-          requestId: number;
-          operation: 'read-tally-activation-chunk';
-          input: PrivatePreparationActionContext & {
-              chunkIndex: number;
-          };
-      }>
-    | Readonly<{
-          requestId: number;
-          operation: 'advance-tally';
-          input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
-              preparationAttempt: number;
-              sources: readonly SourceCarrier[];
-              finalitySignatures: readonly FinalitySignatureCarrier[];
-              topCount: number;
-              activationManifests: readonly SignedActivationManifest[];
-              rangeIndex: number;
-              chunks: readonly Uint8Array[];
           };
       }>
     | Readonly<{
@@ -170,44 +135,11 @@ export type PublishedFinalityPackage = Readonly<{
     finalitySignature: Uint8Array;
 }>;
 
-export type PublishedTallyActivation = Readonly<{
-    targetIdentity: Uint8Array;
-    topCount: number;
-    sourceSubmissionBitmap: number;
-    operationCount: number;
-    constantOperationCount: number;
-    exclusiveOrOperationCount: number;
-    conjunctionCount: number;
-    negationOperationCount: number;
-    outputBitCount: number;
-    chunks: readonly ActivationChunkDescriptor[];
-    manifestBody: Uint8Array;
-    manifestSignature: Uint8Array;
+export type TallyEvaluationProgress = Readonly<{
+    kind: 'no-result';
+    acceptedBallotAuthorshipBitmap: number;
+    resources: KernelResourceMeasurement;
 }>;
-
-export type PublishedTallyActivationChunk = Readonly<{
-    chunkIndex: number;
-    chunk: Uint8Array;
-}>;
-
-export type TallyEvaluationProgress =
-    | Readonly<{
-          kind: 'pending';
-          nextRangeIndex: number;
-          checkpointByteLength: number;
-          resources: KernelResourceMeasurement;
-      }>
-    | Readonly<{
-          kind: 'no-result';
-          acceptedBallotAuthorshipBitmap: number;
-          resources: KernelResourceMeasurement;
-      }>
-    | Readonly<{
-          kind: 'result';
-          acceptedBallotAuthorshipBitmap: number;
-          orderedOptionPositions: readonly number[];
-          resources: KernelResourceMeasurement;
-      }>;
 
 export type PrivatePreparationWorkerSuccess = Readonly<{
     requestId: number;
@@ -218,8 +150,6 @@ export type PrivatePreparationWorkerSuccess = Readonly<{
         | PublishedPreparationPackage
         | PublishedFinalityPackage
         | PublishedSourcePackage
-        | PublishedTallyActivation
-        | PublishedTallyActivationChunk
         | RegisteredActionKeys
         | TallyEvaluationProgress
         | Readonly<{ initialized: true }>;

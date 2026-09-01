@@ -133,6 +133,7 @@ impl CanonicalItem {
         })
     }
 
+    #[cfg(feature = "construction")]
     pub fn nested_tuple(value: &CanonicalTuple) -> Result<Self, CanonicalCodecError> {
         let canonical_bytes = value.encode()?;
         ensure_default_item_limit(&canonical_bytes)?;

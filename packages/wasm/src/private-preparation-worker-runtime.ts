@@ -31,10 +31,7 @@ import {
 } from './pair-encryption-runtime.js';
 import {
     openPreparationMaterialRuntime,
-    preparationAffineCoefficientByteLength,
-    preparationAffineModuleValueByteLength,
     preparationContributionOpeningVectorByteLength,
-    preparationLowAffineCoefficientCount,
     preparationPlaintextByteLength,
     type PreparationMaterialRuntime,
 } from './preparation-material-runtime.js';
@@ -70,19 +67,14 @@ import type {
     PublishedFinalityPackage,
     PublishedPreparationPackage,
     PublishedSourcePackage,
-    PublishedTallyActivation,
-    PublishedTallyActivationChunk,
     RegisteredActionKeys,
     SourcePublicationChoice,
     TallyEvaluationProgress,
 } from './private-preparation-worker-protocol.js';
 import {
     abstentionSourceBodyByteLength,
-    heldAffineEvaluationVectorByteLength,
     heldSubsetKeyVectorByteLength,
-    localAffineConstantVectorByteLength,
     sourceScoreEncodingCount,
-    sourceCorrectionByteLength,
     openSourceRuntime,
     submittedSourceBodyByteLength,
     type PreparationParentCarrier,
@@ -90,28 +82,23 @@ import {
     type SourceRuntime,
     type VerifiedCompletePreparation,
 } from './source-runtime.js';
-import {
-    openTallyActivationRuntime,
-    type ActivationChunkDescriptor,
-    type SignedActivationManifest,
-} from './tally-activation-runtime.js';
 
 const completionProfileParticipantCount = 10;
 const signaturePurposeCount = 4;
 const pairKeyCount = completionProfileParticipantCount - 1;
 const identityByteLength = 64;
 const localContextDomainByteLength = 32;
-const localContextDomain = 'sealed-lattice/local-record/v1';
+const localContextDomain = 'sealed-lattice/local-record/v2';
 const localContextByteLength =
-    localContextDomainByteLength + 5 * identityByteLength + 2 + 2 + 8 + 2 + 8;
+    localContextDomainByteLength + 6 * identityByteLength + 2 + 2 + 8 + 2 + 8;
 const noPeerPosition = 0xffff;
 const actionStateKind = 1;
 const preparationStateKind = 2;
 const privatePreparationSlotStateKind = 3;
 const sourceStateKind = 4;
 const finalityStateKind = 5;
-const activationStateKind = 6;
-const evaluationStateKind = 7;
+// Object kinds 6 and 7 are reserved for rejected tally-activation records.
+const noResultStateKind = 8;
 const registeredActionPhase = 1;
 const confirmedRosterPhase = 2;
 const unsignedPreparationPhase = 1;
@@ -123,11 +110,6 @@ const unsignedSourcePhase = 1;
 const publishedSourcePhase = 2;
 const unsignedFinalityPhase = 1;
 const publishedFinalityPhase = 2;
-const unsignedActivationPhase = 1;
-const publishedActivationPhase = 2;
-const pendingEvaluationStatus = 1;
-const noResultEvaluationStatus = 2;
-const resultEvaluationStatus = 3;
 const privatePreparationOperationOrdinal = 1n;
 const sourceOperationOrdinal = 0n;
 
@@ -142,6 +124,7 @@ type LocalRecordContext = Readonly<{
     runtimeIdentity: Uint8Array;
     candidateBuildIdentity: Uint8Array;
     actionProposalIdentity: Uint8Array;
+    actionDefinitionIdentity: Uint8Array;
     actionKeySetRosterIdentity: Uint8Array;
     predecessorIdentity: Uint8Array;
     participantPosition: number;
@@ -157,6 +140,7 @@ type ActionState = {
     runtimeIdentity: Uint8Array;
     candidateBuildIdentity: Uint8Array;
     actionProposalIdentity: Uint8Array;
+    actionDefinitionIdentity: Uint8Array;
     actionKeySetRosterIdentity: Uint8Array;
     predecessorIdentity: Uint8Array;
     participantPosition: number;
@@ -183,7 +167,6 @@ type PreparationState = {
     privateBodyIdentities: Uint8Array[];
     privateBodies: Uint8Array[];
     contributionOpenings: Uint8Array;
-    affineCoefficients: Uint8Array;
 };
 
 type LoadedPreparationState = Readonly<{
@@ -221,8 +204,6 @@ type SourceState = {
     sourceBodyIdentity: Uint8Array;
     sourceSignature: Uint8Array;
     heldSubsetKeys: Uint8Array;
-    heldAffineEvaluations: Uint8Array;
-    localAffineConstants: Uint8Array;
 };
 
 type LoadedSourceState = Readonly<{
@@ -249,51 +230,17 @@ type LoadedFinalityState = Readonly<{
     state: FinalityState;
 }>;
 
-type ActivationState = {
-    phase: typeof publishedActivationPhase | typeof unsignedActivationPhase;
-    generation: bigint;
-    preparationAttempt: number;
-    targetIdentity: Uint8Array;
-    topCount: number;
-    sourceSubmissionBitmap: number;
-    sourceCorrections: (Uint8Array | undefined)[];
-    activationSeed: Uint8Array;
-    operationCount: number;
-    constantOperationCount: number;
-    exclusiveOrOperationCount: number;
-    conjunctionCount: number;
-    negationOperationCount: number;
-    outputBitCount: number;
-    chunks: ActivationChunkDescriptor[];
-    manifestBody: Uint8Array;
-    manifestIdentity: Uint8Array;
-    manifestSignature: Uint8Array;
-};
-
-type LoadedActivationState = Readonly<{
-    record: ProtectedRecord;
-    state: ActivationState;
-}>;
-
-type EvaluationState = {
+type NoResultState = {
     generation: bigint;
     targetIdentity: Uint8Array;
     topCount: number;
     sourceSubmissionBitmap: number;
-    activationRosterDigest: Uint8Array;
-    nextRangeIndex: number;
-    status:
-        | typeof noResultEvaluationStatus
-        | typeof pendingEvaluationStatus
-        | typeof resultEvaluationStatus;
     acceptedBallotAuthorshipBitmap: number;
-    orderedOptionPositions: number[];
-    checkpoint: Uint8Array;
 };
 
-type LoadedEvaluationState = Readonly<{
+type LoadedNoResultState = Readonly<{
     record: ProtectedRecord;
-    state: EvaluationState;
+    state: NoResultState;
 }>;
 
 type VerifiedTallyContext = Readonly<{
@@ -304,8 +251,14 @@ type VerifiedTallyContext = Readonly<{
     sourceSubmissionBitmap: number;
     topCount: number;
     targetKind: 'computation' | 'no-result';
-    sourceCorrections: readonly (Uint8Array | undefined)[];
 }>;
+
+const zeroVerifiedTallyContext = (context: VerifiedTallyContext): void => {
+    context.verifiedPreparationRoot.fill(0);
+    context.targetBody.fill(0);
+    context.targetIdentity.fill(0);
+    context.sourceBodyIdentities.fill(0);
+};
 
 class FixedWriter {
     readonly #bytes: Uint8Array;
@@ -323,11 +276,6 @@ class FixedWriter {
     writeU16(value: number): void {
         new DataView(this.#bytes.buffer).setUint16(this.#offset, value, true);
         this.#offset += 2;
-    }
-
-    writeU32(value: number): void {
-        new DataView(this.#bytes.buffer).setUint32(this.#offset, value, true);
-        this.#offset += 4;
     }
 
     writeU64(value: bigint): void {
@@ -369,15 +317,6 @@ class FixedReader {
             bytes.byteOffset,
             bytes.byteLength,
         ).getUint16(0, true);
-    }
-
-    readU32(): number {
-        const bytes = this.readFixed(4);
-        return new DataView(
-            bytes.buffer,
-            bytes.byteOffset,
-            bytes.byteLength,
-        ).getUint32(0, true);
     }
 
     readU64(): bigint {
@@ -464,6 +403,13 @@ const copyActionContext = (
             value.actionProposalIdentity,
             identityByteLength,
             'actionProposalIdentity',
+        ),
+    ),
+    actionDefinitionIdentity: Uint8Array.from(
+        requireBytes(
+            value.actionDefinitionIdentity,
+            identityByteLength,
+            'actionDefinitionIdentity',
         ),
     ),
     predecessorIdentity: Uint8Array.from(
@@ -624,82 +570,6 @@ const copyFinalitySignatures = (
     }));
 };
 
-const copyActivationManifests = (
-    manifests: readonly SignedActivationManifest[],
-): SignedActivationManifest[] => {
-    if (manifests.length !== completionProfileParticipantCount) {
-        throw new TypeError(
-            'activationManifests must contain the complete roster.',
-        );
-    }
-    return manifests.map((manifest, position) => {
-        if (
-            !(manifest.body instanceof Uint8Array) ||
-            manifest.body.byteLength === 0
-        ) {
-            throw new TypeError(
-                `activationManifests[${String(position)}].body must be nonempty.`,
-            );
-        }
-        return {
-            body: Uint8Array.from(manifest.body),
-            signature: Uint8Array.from(
-                requireBytes(
-                    manifest.signature,
-                    actionSignatureCarrierByteLength,
-                    `activationManifests[${String(position)}].signature`,
-                ),
-            ),
-        };
-    });
-};
-
-const copyActivationChunks = (chunks: readonly Uint8Array[]): Uint8Array[] => {
-    if (chunks.length !== completionProfileParticipantCount) {
-        throw new TypeError('chunks must contain the complete roster.');
-    }
-    return chunks.map((chunk, position) => {
-        if (!(chunk instanceof Uint8Array) || chunk.byteLength === 0) {
-            throw new TypeError(
-                `chunks[${String(position)}] must be a nonempty Uint8Array.`,
-            );
-        }
-        return Uint8Array.from(chunk);
-    });
-};
-
-const digestActivationRoster = async (
-    manifests: readonly SignedActivationManifest[],
-): Promise<Uint8Array> => {
-    const byteLength = manifests.reduce(
-        (sum, manifest) =>
-            sum +
-            4 +
-            manifest.body.byteLength +
-            4 +
-            manifest.signature.byteLength,
-        0,
-    );
-    const encoded = new Uint8Array(byteLength);
-    const view = new DataView(encoded.buffer);
-    let offset = 0;
-    for (const manifest of manifests) {
-        view.setUint32(offset, manifest.body.byteLength, true);
-        offset += 4;
-        encoded.set(manifest.body, offset);
-        offset += manifest.body.byteLength;
-        view.setUint32(offset, manifest.signature.byteLength, true);
-        offset += 4;
-        encoded.set(manifest.signature, offset);
-        offset += manifest.signature.byteLength;
-    }
-    try {
-        return new Uint8Array(await crypto.subtle.digest('SHA-256', encoded));
-    } finally {
-        encoded.fill(0);
-    }
-};
-
 const randomBytes = (length: number): Uint8Array => {
     const output = new Uint8Array(length);
     for (let offset = 0; offset < output.byteLength; offset += 65_536) {
@@ -756,19 +626,11 @@ const finalityIdentifier = (
         action.actionProposalIdentity,
     )}.${String(action.participantPosition)}`;
 
-const activationIdentifier = (
+const noResultIdentifier = (
     configuration: WorkerConfiguration,
     action: PrivatePreparationActionContext,
 ): string =>
-    `activation.${bytesToHex(configuration.runtimeIdentity)}.${bytesToHex(
-        action.actionProposalIdentity,
-    )}.${String(action.participantPosition)}`;
-
-const evaluationIdentifier = (
-    configuration: WorkerConfiguration,
-    action: PrivatePreparationActionContext,
-): string =>
-    `evaluation.${bytesToHex(configuration.runtimeIdentity)}.${bytesToHex(
+    `no-result.${bytesToHex(configuration.runtimeIdentity)}.${bytesToHex(
         action.actionProposalIdentity,
     )}.${String(action.participantPosition)}`;
 
@@ -810,56 +672,14 @@ const copyPublishedFinalityPackage = (
     finalitySignature: Uint8Array.from(state.finalitySignature),
 });
 
-const copyPublishedTallyActivation = (
-    state: ActivationState,
-): PublishedTallyActivation => ({
-    targetIdentity: Uint8Array.from(state.targetIdentity),
-    topCount: state.topCount,
-    sourceSubmissionBitmap: state.sourceSubmissionBitmap,
-    operationCount: state.operationCount,
-    constantOperationCount: state.constantOperationCount,
-    exclusiveOrOperationCount: state.exclusiveOrOperationCount,
-    conjunctionCount: state.conjunctionCount,
-    negationOperationCount: state.negationOperationCount,
-    outputBitCount: state.outputBitCount,
-    chunks: state.chunks.map((chunk) => ({
-        firstOperation: chunk.firstOperation,
-        operationEnd: chunk.operationEnd,
-        includesTerminalRekey: chunk.includesTerminalRekey,
-        byteLength: chunk.byteLength,
-        identity: Uint8Array.from(chunk.identity),
-    })),
-    manifestBody: Uint8Array.from(state.manifestBody),
-    manifestSignature: Uint8Array.from(state.manifestSignature),
-});
-
 const copyTallyEvaluationProgress = (
-    state: EvaluationState,
+    state: NoResultState,
     resources: KernelResourceMeasurement,
-): TallyEvaluationProgress => {
-    if (state.status === pendingEvaluationStatus) {
-        return {
-            kind: 'pending',
-            nextRangeIndex: state.nextRangeIndex,
-            checkpointByteLength: state.checkpoint.byteLength,
-            resources,
-        };
-    }
-    if (state.status === noResultEvaluationStatus) {
-        return {
-            kind: 'no-result',
-            acceptedBallotAuthorshipBitmap:
-                state.acceptedBallotAuthorshipBitmap,
-            resources,
-        };
-    }
-    return {
-        kind: 'result',
-        acceptedBallotAuthorshipBitmap: state.acceptedBallotAuthorshipBitmap,
-        orderedOptionPositions: [...state.orderedOptionPositions],
-        resources,
-    };
-};
+): TallyEvaluationProgress => ({
+    kind: 'no-result',
+    acceptedBallotAuthorshipBitmap: state.acceptedBallotAuthorshipBitmap,
+    resources,
+});
 
 const encodeLocalRecordContext = (context: LocalRecordContext): Uint8Array => {
     const writer = new FixedWriter(localContextByteLength);
@@ -874,6 +694,7 @@ const encodeLocalRecordContext = (context: LocalRecordContext): Uint8Array => {
     writer.writeFixed(context.runtimeIdentity);
     writer.writeFixed(context.candidateBuildIdentity);
     writer.writeFixed(context.actionProposalIdentity);
+    writer.writeFixed(context.actionDefinitionIdentity);
     writer.writeFixed(context.actionKeySetRosterIdentity);
     writer.writeFixed(context.predecessorIdentity);
     writer.writeU16(context.participantPosition);
@@ -899,6 +720,7 @@ const decodeLocalRecordContext = (bytes: ArrayBuffer): LocalRecordContext => {
         runtimeIdentity: reader.readFixed(identityByteLength),
         candidateBuildIdentity: reader.readFixed(identityByteLength),
         actionProposalIdentity: reader.readFixed(identityByteLength),
+        actionDefinitionIdentity: reader.readFixed(identityByteLength),
         actionKeySetRosterIdentity: reader.readFixed(identityByteLength),
         predecessorIdentity: reader.readFixed(identityByteLength),
         participantPosition: reader.readU16(),
@@ -916,7 +738,7 @@ const actionStateByteLength =
     1 +
     2 +
     8 +
-    5 * identityByteLength +
+    6 * identityByteLength +
     actionKeySetBodyByteLength(completionProfileParticipantCount) +
     identityByteLength +
     signaturePurposeCount * identityByteLength +
@@ -925,13 +747,14 @@ const actionStateByteLength =
 
 const encodeActionState = (state: ActionState): Uint8Array => {
     const writer = new FixedWriter(actionStateByteLength);
-    writer.writeU8(1);
+    writer.writeU8(2);
     writer.writeU8(state.phase);
     writer.writeU16(state.participantPosition);
     writer.writeU64(state.generation);
     writer.writeFixed(state.runtimeIdentity);
     writer.writeFixed(state.candidateBuildIdentity);
     writer.writeFixed(state.actionProposalIdentity);
+    writer.writeFixed(state.actionDefinitionIdentity);
     writer.writeFixed(state.actionKeySetRosterIdentity);
     writer.writeFixed(state.predecessorIdentity);
     writer.writeFixed(state.actionKeySetBody);
@@ -956,7 +779,7 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 1) {
+    if (reader.readU8() !== 2) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has the wrong version.',
@@ -976,6 +799,7 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         runtimeIdentity: reader.readFixed(identityByteLength),
         candidateBuildIdentity: reader.readFixed(identityByteLength),
         actionProposalIdentity: reader.readFixed(identityByteLength),
+        actionDefinitionIdentity: reader.readFixed(identityByteLength),
         actionKeySetRosterIdentity: reader.readFixed(identityByteLength),
         predecessorIdentity: reader.readFixed(identityByteLength),
         actionKeySetBody: reader.readFixed(
@@ -1019,12 +843,11 @@ const preparationStateByteLength =
     actionSignatureCarrierByteLength +
     remoteParticipantCount * identityByteLength +
     remoteParticipantCount * privatePreparationBodyByteLength +
-    preparationContributionOpeningVectorByteLength +
-    preparationAffineCoefficientByteLength;
+    preparationContributionOpeningVectorByteLength;
 
 const encodePreparationState = (state: PreparationState): Uint8Array => {
     const writer = new FixedWriter(preparationStateByteLength);
-    writer.writeU8(1);
+    writer.writeU8(2);
     writer.writeU8(state.phase);
     writer.writeU64(state.generation);
     writer.writeU16(state.preparationAttempt);
@@ -1038,7 +861,6 @@ const encodePreparationState = (state: PreparationState): Uint8Array => {
         writer.writeFixed(body);
     }
     writer.writeFixed(state.contributionOpenings);
-    writer.writeFixed(state.affineCoefficients);
     return writer.finish();
 };
 
@@ -1050,7 +872,7 @@ const decodePreparationState = (bytes: Uint8Array): PreparationState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 1) {
+    if (reader.readU8() !== 2) {
         throw new DurableStateError(
             'CorruptState',
             'The retained preparation has the wrong version.',
@@ -1083,9 +905,6 @@ const decodePreparationState = (bytes: Uint8Array): PreparationState => {
         contributionOpenings: reader.readFixed(
             preparationContributionOpeningVectorByteLength,
         ),
-        affineCoefficients: reader.readFixed(
-            preparationAffineCoefficientByteLength,
-        ),
     };
     reader.finish();
     if (
@@ -1102,7 +921,6 @@ const decodePreparationState = (bytes: Uint8Array): PreparationState => {
 
 const zeroPreparationState = (state: PreparationState): void => {
     state.contributionOpenings.fill(0);
-    state.affineCoefficients.fill(0);
 };
 
 const sourceStateByteLength =
@@ -1116,9 +934,7 @@ const sourceStateByteLength =
     submittedSourceBodyByteLength +
     identityByteLength +
     actionSignatureCarrierByteLength +
-    heldSubsetKeyVectorByteLength +
-    heldAffineEvaluationVectorByteLength +
-    localAffineConstantVectorByteLength;
+    heldSubsetKeyVectorByteLength;
 
 const encodeSourceState = (state: SourceState): Uint8Array => {
     const expectedBodyByteLength =
@@ -1137,7 +953,7 @@ const encodeSourceState = (state: SourceState): Uint8Array => {
         );
     }
     const writer = new FixedWriter(sourceStateByteLength);
-    writer.writeU8(3);
+    writer.writeU8(4);
     writer.writeU8(state.phase);
     writer.writeU64(state.generation);
     writer.writeU16(state.preparationAttempt);
@@ -1151,8 +967,6 @@ const encodeSourceState = (state: SourceState): Uint8Array => {
     writer.writeFixed(state.sourceBodyIdentity);
     writer.writeFixed(state.sourceSignature);
     writer.writeFixed(state.heldSubsetKeys);
-    writer.writeFixed(state.heldAffineEvaluations);
-    writer.writeFixed(state.localAffineConstants);
     return writer.finish();
 };
 
@@ -1164,7 +978,7 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 3) {
+    if (reader.readU8() !== 4) {
         throw new DurableStateError(
             'CorruptState',
             'The retained source has the wrong version.',
@@ -1229,12 +1043,6 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
         sourceBodyIdentity: reader.readFixed(identityByteLength),
         sourceSignature: reader.readFixed(actionSignatureCarrierByteLength),
         heldSubsetKeys: reader.readFixed(heldSubsetKeyVectorByteLength),
-        heldAffineEvaluations: reader.readFixed(
-            heldAffineEvaluationVectorByteLength,
-        ),
-        localAffineConstants: reader.readFixed(
-            localAffineConstantVectorByteLength,
-        ),
     };
     reader.finish();
     if (state.phase === unsignedSourcePhase && !isZero(state.sourceSignature)) {
@@ -1254,8 +1062,6 @@ const zeroSourceState = (state: SourceState): void => {
     state.sourceBodyIdentity.fill(0);
     state.sourceSignature.fill(0);
     state.heldSubsetKeys.fill(0);
-    state.heldAffineEvaluations.fill(0);
-    state.localAffineConstants.fill(0);
 };
 
 const sourceBodyIdentityVectorByteLength =
@@ -1358,267 +1164,53 @@ const zeroFinalityState = (state: FinalityState): void => {
     state.finalitySignature.fill(0);
 };
 
-const activationChunkDescriptorByteLength = 4 + 4 + 1 + 4 + identityByteLength;
-const activationCorrectionVectorByteLength =
-    completionProfileParticipantCount * (1 + sourceCorrectionByteLength);
-const activationStateFixedByteLength =
-    1 +
-    1 +
-    8 +
-    2 +
-    identityByteLength +
-    2 +
-    2 +
-    activationCorrectionVectorByteLength +
-    32 +
-    4 +
-    4 +
-    4 +
-    4 +
-    4 +
-    2 +
-    2 +
-    4 +
-    identityByteLength +
-    actionSignatureCarrierByteLength;
+const noResultStateByteLength = 1 + 8 + identityByteLength + 2 + 2 + 2;
 
-const encodeActivationState = (state: ActivationState): Uint8Array => {
-    const byteLength =
-        activationStateFixedByteLength +
-        state.chunks.length * activationChunkDescriptorByteLength +
-        state.manifestBody.byteLength;
-    const writer = new FixedWriter(byteLength);
-    writer.writeU8(2);
-    writer.writeU8(state.phase);
-    writer.writeU64(state.generation);
-    writer.writeU16(state.preparationAttempt);
-    writer.writeFixed(state.targetIdentity);
-    writer.writeU16(state.topCount);
-    writer.writeU16(state.sourceSubmissionBitmap);
-    for (const correction of state.sourceCorrections) {
-        writer.writeU8(correction === undefined ? 0 : 1);
-        writer.writeFixed(
-            correction ?? new Uint8Array(sourceCorrectionByteLength),
-        );
-    }
-    writer.writeFixed(state.activationSeed);
-    writer.writeU32(state.operationCount);
-    writer.writeU32(state.constantOperationCount);
-    writer.writeU32(state.exclusiveOrOperationCount);
-    writer.writeU32(state.conjunctionCount);
-    writer.writeU32(state.negationOperationCount);
-    writer.writeU16(state.outputBitCount);
-    writer.writeU16(state.chunks.length);
-    for (const chunk of state.chunks) {
-        writer.writeU32(chunk.firstOperation);
-        writer.writeU32(chunk.operationEnd);
-        writer.writeU8(chunk.includesTerminalRekey ? 1 : 0);
-        writer.writeU32(chunk.byteLength);
-        writer.writeFixed(chunk.identity);
-    }
-    writer.writeU32(state.manifestBody.byteLength);
-    writer.writeFixed(state.manifestBody);
-    writer.writeFixed(state.manifestIdentity);
-    writer.writeFixed(state.manifestSignature);
-    return writer.finish();
-};
-
-const decodeActivationState = (bytes: Uint8Array): ActivationState => {
-    if (bytes.byteLength < activationStateFixedByteLength) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained activation state is truncated.',
-        );
-    }
-    const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 2) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained activation state has the wrong version.',
-        );
-    }
-    const phase = reader.readU8();
-    if (
-        phase !== unsignedActivationPhase &&
-        phase !== publishedActivationPhase
-    ) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained activation state has an invalid phase.',
-        );
-    }
-    const generation = reader.readU64();
-    const preparationAttempt = reader.readU16();
-    const targetIdentity = reader.readFixed(identityByteLength);
-    const topCount = reader.readU16();
-    const sourceSubmissionBitmap = reader.readU16();
-    const sourceCorrections = Array.from(
-        { length: completionProfileParticipantCount },
-        () => {
-            const present = reader.readU8();
-            const correction = reader.readFixed(sourceCorrectionByteLength);
-            if (present === 0) {
-                if (!isZero(correction)) {
-                    throw new DurableStateError(
-                        'CorruptState',
-                        'An absent retained source correction is nonzero.',
-                    );
-                }
-                return undefined;
-            }
-            if (present !== 1) {
-                throw new DurableStateError(
-                    'CorruptState',
-                    'A retained source correction has an invalid presence code.',
-                );
-            }
-            return correction;
-        },
-    );
-    const activationSeed = reader.readFixed(32);
-    const operationCount = reader.readU32();
-    const constantOperationCount = reader.readU32();
-    const exclusiveOrOperationCount = reader.readU32();
-    const conjunctionCount = reader.readU32();
-    const negationOperationCount = reader.readU32();
-    const outputBitCount = reader.readU16();
-    const chunkCount = reader.readU16();
-    const chunks = Array.from({ length: chunkCount }, () => ({
-        firstOperation: reader.readU32(),
-        operationEnd: reader.readU32(),
-        includesTerminalRekey: reader.readU8() === 1,
-        byteLength: reader.readU32(),
-        identity: reader.readFixed(identityByteLength),
-    }));
-    const manifestBody = reader.readFixed(reader.readU32());
-    const state: ActivationState = {
-        phase,
-        generation,
-        preparationAttempt,
-        targetIdentity,
-        topCount,
-        sourceSubmissionBitmap,
-        sourceCorrections,
-        activationSeed,
-        operationCount,
-        constantOperationCount,
-        exclusiveOrOperationCount,
-        conjunctionCount,
-        negationOperationCount,
-        outputBitCount,
-        chunks,
-        manifestBody,
-        manifestIdentity: reader.readFixed(identityByteLength),
-        manifestSignature: reader.readFixed(actionSignatureCarrierByteLength),
-    };
-    reader.finish();
-    return state;
-};
-
-const zeroActivationState = (state: ActivationState): void => {
-    state.targetIdentity.fill(0);
-    for (const correction of state.sourceCorrections) {
-        correction?.fill(0);
-    }
-    state.activationSeed.fill(0);
-    for (const chunk of state.chunks) {
-        chunk.identity.fill(0);
-    }
-    state.manifestBody.fill(0);
-    state.manifestIdentity.fill(0);
-    state.manifestSignature.fill(0);
-};
-
-const evaluationStateFixedByteLength =
-    1 + 8 + identityByteLength + 2 + 2 + 32 + 2 + 1 + 2 + 2 + 4;
-
-const encodeEvaluationState = (state: EvaluationState): Uint8Array => {
-    const writer = new FixedWriter(
-        evaluationStateFixedByteLength +
-            state.orderedOptionPositions.length * 2 +
-            state.checkpoint.byteLength,
-    );
+const encodeNoResultState = (state: NoResultState): Uint8Array => {
+    const writer = new FixedWriter(noResultStateByteLength);
     writer.writeU8(1);
     writer.writeU64(state.generation);
     writer.writeFixed(state.targetIdentity);
     writer.writeU16(state.topCount);
     writer.writeU16(state.sourceSubmissionBitmap);
-    writer.writeFixed(state.activationRosterDigest);
-    writer.writeU16(state.nextRangeIndex);
-    writer.writeU8(state.status);
     writer.writeU16(state.acceptedBallotAuthorshipBitmap);
-    writer.writeU16(state.orderedOptionPositions.length);
-    for (const position of state.orderedOptionPositions) {
-        writer.writeU16(position);
-    }
-    writer.writeU32(state.checkpoint.byteLength);
-    writer.writeFixed(state.checkpoint);
     return writer.finish();
 };
 
-const decodeEvaluationState = (bytes: Uint8Array): EvaluationState => {
-    if (bytes.byteLength < evaluationStateFixedByteLength) {
+const decodeNoResultState = (bytes: Uint8Array): NoResultState => {
+    if (bytes.byteLength !== noResultStateByteLength) {
         throw new DurableStateError(
             'CorruptState',
-            'The retained tally evaluation state is truncated.',
+            'The retained no-result state has the wrong byte length.',
         );
     }
     const reader = new FixedReader(bytes);
     if (reader.readU8() !== 1) {
         throw new DurableStateError(
             'CorruptState',
-            'The retained tally evaluation state has the wrong version.',
+            'The retained no-result state has the wrong version.',
         );
     }
-    const generation = reader.readU64();
-    const targetIdentity = reader.readFixed(identityByteLength);
-    const topCount = reader.readU16();
-    const sourceSubmissionBitmap = reader.readU16();
-    const activationRosterDigest = reader.readFixed(32);
-    const nextRangeIndex = reader.readU16();
-    const status = reader.readU8();
-    if (
-        status !== pendingEvaluationStatus &&
-        status !== noResultEvaluationStatus &&
-        status !== resultEvaluationStatus
-    ) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained tally evaluation status is invalid.',
-        );
-    }
-    const acceptedBallotAuthorshipBitmap = reader.readU16();
-    const resultCount = reader.readU16();
-    if (resultCount > completionProfileParticipantCount) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained tally result has too many positions.',
-        );
-    }
-    const orderedOptionPositions = Array.from({ length: resultCount }, () =>
-        reader.readU16(),
-    );
-    const checkpoint = reader.readFixed(reader.readU32());
-    const state: EvaluationState = {
-        generation,
-        targetIdentity,
-        topCount,
-        sourceSubmissionBitmap,
-        activationRosterDigest,
-        nextRangeIndex,
-        status,
-        acceptedBallotAuthorshipBitmap,
-        orderedOptionPositions,
-        checkpoint,
+    const state: NoResultState = {
+        generation: reader.readU64(),
+        targetIdentity: reader.readFixed(identityByteLength),
+        topCount: reader.readU16(),
+        sourceSubmissionBitmap: reader.readU16(),
+        acceptedBallotAuthorshipBitmap: reader.readU16(),
     };
     reader.finish();
+    if (state.acceptedBallotAuthorshipBitmap !== 0) {
+        zeroNoResultState(state);
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained no-result state claims accepted ballots.',
+        );
+    }
     return state;
 };
 
-const zeroEvaluationState = (state: EvaluationState): void => {
+const zeroNoResultState = (state: NoResultState): void => {
     state.targetIdentity.fill(0);
-    state.activationRosterDigest.fill(0);
-    state.checkpoint.fill(0);
 };
 
 const privatePreparationSlotStateByteLength =
@@ -1705,6 +1297,7 @@ const actionLocalContext = (
     runtimeIdentity: configuration.runtimeIdentity,
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
+    actionDefinitionIdentity: action.actionDefinitionIdentity,
     actionKeySetRosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
@@ -1724,6 +1317,7 @@ const preparationLocalContext = (
     runtimeIdentity: configuration.runtimeIdentity,
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
+    actionDefinitionIdentity: action.actionDefinitionIdentity,
     actionKeySetRosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
@@ -1742,6 +1336,7 @@ const sourceLocalContext = (
     runtimeIdentity: configuration.runtimeIdentity,
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
+    actionDefinitionIdentity: action.actionDefinitionIdentity,
     actionKeySetRosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
@@ -1761,6 +1356,7 @@ const terminalLocalContext = (
     runtimeIdentity: configuration.runtimeIdentity,
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
+    actionDefinitionIdentity: action.actionDefinitionIdentity,
     actionKeySetRosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
@@ -1796,6 +1392,10 @@ const assertTerminalLocalContext = (
             localContext.actionProposalIdentity,
             action.actionProposalIdentity,
         ) ||
+        !bytesEqual(
+            localContext.actionDefinitionIdentity,
+            action.actionDefinitionIdentity,
+        ) ||
         !bytesEqual(localContext.actionKeySetRosterIdentity, rosterIdentity) ||
         !bytesEqual(
             localContext.predecessorIdentity,
@@ -1819,6 +1419,7 @@ const privatePreparationSlotLocalContext = (
     runtimeIdentity: configuration.runtimeIdentity,
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
+    actionDefinitionIdentity: action.actionDefinitionIdentity,
     actionKeySetRosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
@@ -1863,6 +1464,14 @@ const assertActionStateContext = (
             localContext.actionProposalIdentity,
             action.actionProposalIdentity,
         ) ||
+        !bytesEqual(
+            state.actionDefinitionIdentity,
+            action.actionDefinitionIdentity,
+        ) ||
+        !bytesEqual(
+            localContext.actionDefinitionIdentity,
+            action.actionDefinitionIdentity,
+        ) ||
         !bytesEqual(state.predecessorIdentity, action.predecessorIdentity) ||
         !bytesEqual(
             localContext.predecessorIdentity,
@@ -1897,9 +1506,6 @@ class PrivatePreparationWorkerRuntime {
         private readonly preparationParentRuntime: PreparationParentRuntime,
         private readonly privatePreparationBodyRuntime: PrivatePreparationBodyRuntime,
         private readonly sourceRuntime: SourceRuntime,
-        private readonly tallyActivationRuntime: ReturnType<
-            typeof openTallyActivationRuntime
-        >,
     ) {}
 
     static async create(
@@ -1967,7 +1573,6 @@ class PrivatePreparationWorkerRuntime {
             openPreparationParentRuntime(kernel),
             openPrivatePreparationBodyRuntime(kernel),
             openSourceRuntime(kernel),
-            openTallyActivationRuntime(kernel),
         );
     }
 
@@ -2048,6 +1653,7 @@ class PrivatePreparationWorkerRuntime {
                     candidateBuildIdentity:
                         this.configuration.candidateBuildIdentity,
                     actionProposalIdentity: action.actionProposalIdentity,
+                    actionDefinitionIdentity: action.actionDefinitionIdentity,
                     actionKeySetRosterIdentity: new Uint8Array(
                         identityByteLength,
                     ),
@@ -2655,14 +2261,6 @@ class PrivatePreparationWorkerRuntime {
                                 !bytesEqual(
                                     loadedSource.state.heldSubsetKeys,
                                     verifiedPreparation.heldSubsetKeys,
-                                ) ||
-                                !bytesEqual(
-                                    loadedSource.state.heldAffineEvaluations,
-                                    verifiedPreparation.heldAffineEvaluations,
-                                ) ||
-                                !bytesEqual(
-                                    loadedSource.state.localAffineConstants,
-                                    verifiedPreparation.localAffineConstants,
                                 )
                             ) {
                                 throw new DurableStateError(
@@ -2710,8 +2308,6 @@ class PrivatePreparationWorkerRuntime {
                     );
                 } finally {
                     verifiedPreparation.heldSubsetKeys.fill(0);
-                    verifiedPreparation.heldAffineEvaluations.fill(0);
-                    verifiedPreparation.localAffineConstants.fill(0);
                 }
             } finally {
                 zeroActionState(loadedAction.state);
@@ -2875,9 +2471,7 @@ class PrivatePreparationWorkerRuntime {
                         verified,
                     );
                 } finally {
-                    for (const correction of verified.sourceCorrections) {
-                        correction?.fill(0);
-                    }
+                    zeroVerifiedTallyContext(verified);
                 }
             } finally {
                 zeroSourceState(loadedSource.state);
@@ -3100,186 +2694,6 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    async createTallyActivation(
-        input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
-            preparationAttempt: number;
-            sources: readonly SourceCarrier[];
-            finalitySignatures: readonly FinalitySignatureCarrier[];
-            topCount: number;
-        },
-    ): Promise<PublishedTallyActivation> {
-        const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
-        );
-        const preparationAttempt = requireUnsigned16(
-            input.preparationAttempt,
-            'preparationAttempt',
-        );
-        const sources = copySourceCarriers(input.sources);
-        const finalitySignatures = copyFinalitySignatures(
-            input.finalitySignatures,
-        );
-        const topCount = requireUnsigned16(input.topCount, 'topCount');
-        if (topCount < 1 || topCount > completionProfileParticipantCount) {
-            throw new TypeError('topCount is outside the completion profile.');
-        }
-        return this.durableState.exclusive(async () => {
-            const actionRecord = await this.durableState.readProtected(
-                'actions',
-                actionIdentifier(this.configuration, action),
-            );
-            const sourceRecord = await this.durableState.readProtected(
-                'sources',
-                sourceIdentifier(this.configuration, action),
-            );
-            if (actionRecord === undefined || sourceRecord === undefined) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'Published local source state is absent for activation.',
-                );
-            }
-            const loadedAction = await this.loadActionState(
-                action,
-                actionRecord,
-            );
-            const loadedSource = await this.loadSourceState(
-                action,
-                loadedAction.state.actionKeySetRosterIdentity,
-                sourceRecord,
-            );
-            try {
-                this.verifyConfirmedActionRoster(
-                    action,
-                    loadedAction.state,
-                    actionKeySetBodies,
-                );
-                this.validateSourceState(
-                    action,
-                    actionKeySetBodies,
-                    loadedAction.state,
-                    loadedSource.state,
-                );
-                if (
-                    loadedSource.state.phase !== publishedSourcePhase ||
-                    loadedSource.state.preparationAttempt !== preparationAttempt
-                ) {
-                    throw new DurableStateError(
-                        'Conflict',
-                        'The retained source is not the finalized preparation attempt.',
-                    );
-                }
-                const verified = this.deriveVerifiedTallyContext(
-                    action,
-                    actionKeySetBodies,
-                    preparationAttempt,
-                    sources,
-                    topCount,
-                    loadedAction.state,
-                    loadedSource.state,
-                );
-                try {
-                    this.verifyComputationCertificate(
-                        verified,
-                        actionKeySetBodies,
-                        finalitySignatures,
-                    );
-                    const identifier = activationIdentifier(
-                        this.configuration,
-                        action,
-                    );
-                    const existing = await this.durableState.readProtected(
-                        'activations',
-                        identifier,
-                    );
-                    const boundIdentity =
-                        loadedAction.state.signatureBodyIdentities[3];
-                    if (boundIdentity === undefined) {
-                        throw new DurableStateError(
-                            'CorruptState',
-                            'The activation-signature slot is absent.',
-                        );
-                    }
-                    if (existing !== undefined) {
-                        if (isZero(boundIdentity)) {
-                            throw new DurableStateError(
-                                'StateLost',
-                                'Retained activation exists without its action-level binding.',
-                            );
-                        }
-                        const loadedActivation = await this.loadActivationState(
-                            action,
-                            loadedAction.state.actionKeySetRosterIdentity,
-                            existing,
-                        );
-                        try {
-                            this.validateActivationState(
-                                action,
-                                actionKeySetBodies,
-                                loadedAction.state,
-                                loadedActivation.state,
-                                verified,
-                                topCount,
-                            );
-                            if (
-                                !bytesEqual(
-                                    boundIdentity,
-                                    loadedActivation.state.manifestIdentity,
-                                )
-                            ) {
-                                throw new DurableStateError(
-                                    'Conflict',
-                                    'The action is already bound to another activation manifest.',
-                                );
-                            }
-                            if (
-                                loadedActivation.state.phase ===
-                                publishedActivationPhase
-                            ) {
-                                return copyPublishedTallyActivation(
-                                    loadedActivation.state,
-                                );
-                            }
-                            return await this.publishRetainedActivation(
-                                action,
-                                actionKeySetBodies,
-                                loadedAction,
-                                loadedActivation,
-                                verified,
-                                topCount,
-                            );
-                        } finally {
-                            zeroActivationState(loadedActivation.state);
-                        }
-                    }
-                    if (!isZero(boundIdentity)) {
-                        throw new DurableStateError(
-                            'StateLost',
-                            'The activation-signature slot is consumed but retained activation is absent.',
-                        );
-                    }
-                    return await this.createAndPublishActivation(
-                        action,
-                        actionKeySetBodies,
-                        preparationAttempt,
-                        loadedAction,
-                        loadedSource.state,
-                        verified,
-                        topCount,
-                    );
-                } finally {
-                    for (const correction of verified.sourceCorrections) {
-                        correction?.fill(0);
-                    }
-                }
-            } finally {
-                zeroSourceState(loadedSource.state);
-                zeroActionState(loadedAction.state);
-            }
-        });
-    }
-
     async finalizeNoResult(
         input: PrivatePreparationActionContext & {
             actionKeySetBodies: readonly Uint8Array[];
@@ -3365,7 +2779,7 @@ class PrivatePreparationWorkerRuntime {
                         actionKeySetBodies,
                         finalitySignatures,
                     );
-                    const identifier = evaluationIdentifier(
+                    const identifier = noResultIdentifier(
                         this.configuration,
                         action,
                     );
@@ -3374,47 +2788,42 @@ class PrivatePreparationWorkerRuntime {
                         identifier,
                     );
                     if (existing !== undefined) {
-                        const loadedEvaluation = await this.loadEvaluationState(
+                        const loadedNoResult = await this.loadNoResultState(
                             action,
                             loadedAction.state.actionKeySetRosterIdentity,
                             existing,
                         );
                         try {
                             this.validateFinalizedNoResultState(
-                                loadedEvaluation.state,
+                                loadedNoResult.state,
                                 verified,
                             );
                             return copyTallyEvaluationProgress(
-                                loadedEvaluation.state,
+                                loadedNoResult.state,
                                 this.constructionKernelRuntime.measureResources(),
                             );
                         } finally {
-                            zeroEvaluationState(loadedEvaluation.state);
+                            zeroNoResultState(loadedNoResult.state);
                         }
                     }
-                    const state: EvaluationState = {
+                    const state: NoResultState = {
                         generation: 1n,
                         targetIdentity: Uint8Array.from(
                             verified.targetIdentity,
                         ),
                         topCount: verified.topCount,
-                        sourceSubmissionBitmap: 0,
-                        activationRosterDigest: new Uint8Array(32),
-                        nextRangeIndex: 0,
-                        status: noResultEvaluationStatus,
+                        sourceSubmissionBitmap: verified.sourceSubmissionBitmap,
                         acceptedBallotAuthorshipBitmap: 0,
-                        orderedOptionPositions: [],
-                        checkpoint: new Uint8Array(),
                     };
                     try {
                         this.validateFinalizedNoResultState(state, verified);
-                        await this.insertEvaluationState(
+                        await this.insertNoResultState(
                             action,
                             loadedAction,
                             state,
                         );
                     } finally {
-                        zeroEvaluationState(state);
+                        zeroNoResultState(state);
                     }
                     const retained = await this.durableState.readProtected(
                         'evaluations',
@@ -3426,7 +2835,7 @@ class PrivatePreparationWorkerRuntime {
                             'The durable no-result terminal disappeared after persistence.',
                         );
                     }
-                    const reloaded = await this.loadEvaluationState(
+                    const reloaded = await this.loadNoResultState(
                         action,
                         loadedAction.state.actionKeySetRosterIdentity,
                         retained,
@@ -3441,675 +2850,16 @@ class PrivatePreparationWorkerRuntime {
                             this.constructionKernelRuntime.measureResources(),
                         );
                     } finally {
-                        zeroEvaluationState(reloaded.state);
+                        zeroNoResultState(reloaded.state);
                     }
                 } finally {
-                    for (const correction of verified.sourceCorrections) {
-                        correction?.fill(0);
-                    }
+                    zeroVerifiedTallyContext(verified);
                 }
             } finally {
                 zeroSourceState(loadedSource.state);
                 zeroActionState(loadedAction.state);
             }
         });
-    }
-
-    private async createAndPublishActivation(
-        action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
-        preparationAttempt: number,
-        loadedAction: LoadedActionState,
-        sourceState: SourceState,
-        verified: VerifiedTallyContext,
-        topCount: number,
-    ): Promise<PublishedTallyActivation> {
-        const plan = this.tallyActivationRuntime.plan(topCount);
-        const activationSeed = randomBytes(32);
-        const context = this.activationContext(verified, topCount);
-        const material = {
-            participantPosition: action.participantPosition,
-            activationSeed,
-            heldSubsetKeys: sourceState.heldSubsetKeys,
-            heldAffineEvaluations: sourceState.heldAffineEvaluations,
-            localAffineConstants: sourceState.localAffineConstants,
-        };
-        const chunks: ActivationChunkDescriptor[] = [];
-        try {
-            for (const range of plan.ranges) {
-                const chunk = this.tallyActivationRuntime.generateChunk(
-                    context,
-                    material,
-                    range,
-                );
-                try {
-                    chunks.push({
-                        ...range,
-                        byteLength: chunk.byteLength,
-                        identity:
-                            this.tallyActivationRuntime.identifyChunk(chunk),
-                    });
-                } finally {
-                    chunk.fill(0);
-                }
-            }
-            const manifest = this.tallyActivationRuntime.encodeManifest(
-                context,
-                action.participantPosition,
-                chunks,
-            );
-            const state: ActivationState = {
-                phase: unsignedActivationPhase,
-                generation: 1n,
-                preparationAttempt,
-                targetIdentity: Uint8Array.from(verified.targetIdentity),
-                topCount,
-                sourceSubmissionBitmap: verified.sourceSubmissionBitmap,
-                sourceCorrections: verified.sourceCorrections.map(
-                    (correction) =>
-                        correction === undefined
-                            ? undefined
-                            : Uint8Array.from(correction),
-                ),
-                activationSeed: Uint8Array.from(activationSeed),
-                operationCount: plan.operationCount,
-                constantOperationCount: plan.constantOperationCount,
-                exclusiveOrOperationCount: plan.exclusiveOrOperationCount,
-                conjunctionCount: plan.conjunctionCount,
-                negationOperationCount: plan.negationOperationCount,
-                outputBitCount: plan.outputBitCount,
-                chunks,
-                manifestBody: manifest.body,
-                manifestIdentity: manifest.identity,
-                manifestSignature: new Uint8Array(
-                    actionSignatureCarrierByteLength,
-                ),
-            };
-            try {
-                const activationPlaintext = encodeActivationState(state);
-                const activationContext = encodeLocalRecordContext(
-                    terminalLocalContext(
-                        this.configuration,
-                        action,
-                        loadedAction.state.actionKeySetRosterIdentity,
-                        state.generation,
-                        activationStateKind,
-                    ),
-                );
-                let activationRecord: ProtectedRecord;
-                try {
-                    activationRecord = await createProtectedRecord(
-                        activationIdentifier(this.configuration, action),
-                        activationContext,
-                        activationPlaintext,
-                        loadedAction.rootKey,
-                    );
-                } finally {
-                    activationPlaintext.fill(0);
-                    activationContext.fill(0);
-                }
-                const replacementActionState: ActionState = {
-                    ...loadedAction.state,
-                    generation: loadedAction.state.generation + 1n,
-                    signatureBodyIdentities:
-                        loadedAction.state.signatureBodyIdentities.map(
-                            (identity, index) =>
-                                index === 3
-                                    ? Uint8Array.from(state.manifestIdentity)
-                                    : Uint8Array.from(identity),
-                        ),
-                };
-                const actionPlaintext = encodeActionState(
-                    replacementActionState,
-                );
-                const actionContext = encodeLocalRecordContext(
-                    actionLocalContext(
-                        this.configuration,
-                        action,
-                        replacementActionState.actionKeySetRosterIdentity,
-                        replacementActionState.generation,
-                    ),
-                );
-                let actionRecord: ProtectedRecord;
-                try {
-                    actionRecord = await createProtectedRecord(
-                        actionIdentifier(this.configuration, action),
-                        actionContext,
-                        actionPlaintext,
-                        loadedAction.rootKey,
-                    );
-                } finally {
-                    actionPlaintext.fill(0);
-                    actionContext.fill(0);
-                }
-                await this.durableState.replaceExactAndPutIfAbsent(
-                    'actions',
-                    loadedAction.record,
-                    actionRecord,
-                    'activations',
-                    activationRecord,
-                );
-                const [retainedActionRecord, retainedActivationRecord] =
-                    await Promise.all([
-                        this.durableState.readProtected(
-                            'actions',
-                            actionIdentifier(this.configuration, action),
-                        ),
-                        this.durableState.readProtected(
-                            'activations',
-                            activationIdentifier(this.configuration, action),
-                        ),
-                    ]);
-                if (
-                    retainedActionRecord === undefined ||
-                    retainedActivationRecord === undefined
-                ) {
-                    throw new DurableStateError(
-                        'StateLost',
-                        'The atomic activation binding disappeared after persistence.',
-                    );
-                }
-                const reboundAction = await this.loadActionState(
-                    action,
-                    retainedActionRecord,
-                );
-                const retainedActivation = await this.loadActivationState(
-                    action,
-                    reboundAction.state.actionKeySetRosterIdentity,
-                    retainedActivationRecord,
-                );
-                try {
-                    return await this.publishRetainedActivation(
-                        action,
-                        actionKeySetBodies,
-                        reboundAction,
-                        retainedActivation,
-                        verified,
-                        topCount,
-                    );
-                } finally {
-                    zeroActionState(reboundAction.state);
-                    zeroActivationState(retainedActivation.state);
-                }
-            } finally {
-                zeroActivationState(state);
-            }
-        } finally {
-            activationSeed.fill(0);
-        }
-    }
-
-    private async publishRetainedActivation(
-        action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
-        loadedAction: LoadedActionState,
-        loadedActivation: LoadedActivationState,
-        verified: VerifiedTallyContext,
-        topCount: number,
-    ): Promise<PublishedTallyActivation> {
-        if (loadedActivation.state.phase !== unsignedActivationPhase) {
-            throw new DurableStateError(
-                'Conflict',
-                'The retained tally activation is already published.',
-            );
-        }
-        this.validateActivationState(
-            action,
-            actionKeySetBodies,
-            loadedAction.state,
-            loadedActivation.state,
-            verified,
-            topCount,
-        );
-        const secretKey = loadedAction.state.signatureSecretKeys[3];
-        if (secretKey === undefined) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The tally activation signing key is absent.',
-            );
-        }
-        const signature = this.actionSignatureRuntime.signBodyIdentity(
-            secretKey,
-            loadedActivation.state.manifestIdentity,
-        );
-        let signatureCarrier: Uint8Array;
-        try {
-            signatureCarrier = this.tallyActivationRuntime.encodeSignature(
-                action.participantPosition,
-                loadedActivation.state.manifestIdentity,
-                signature,
-            );
-        } finally {
-            signature.fill(0);
-        }
-        const replacementState: ActivationState = {
-            ...loadedActivation.state,
-            phase: publishedActivationPhase,
-            generation: loadedActivation.state.generation + 1n,
-            manifestSignature: signatureCarrier,
-        };
-        await this.replaceActivationState(
-            action,
-            loadedAction,
-            loadedActivation,
-            replacementState,
-        );
-        const retained = await this.durableState.readProtected(
-            'activations',
-            loadedActivation.record.id,
-        );
-        if (retained === undefined) {
-            throw new DurableStateError(
-                'StateLost',
-                'The published tally activation disappeared after persistence.',
-            );
-        }
-        const reloaded = await this.loadActivationState(
-            action,
-            loadedAction.state.actionKeySetRosterIdentity,
-            retained,
-        );
-        try {
-            this.validateActivationState(
-                action,
-                actionKeySetBodies,
-                loadedAction.state,
-                reloaded.state,
-                verified,
-                topCount,
-            );
-            return copyPublishedTallyActivation(reloaded.state);
-        } finally {
-            zeroActivationState(reloaded.state);
-        }
-    }
-
-    async readTallyActivationChunk(
-        input: PrivatePreparationActionContext & { chunkIndex: number },
-    ): Promise<PublishedTallyActivationChunk> {
-        const action = copyActionContext(input);
-        const chunkIndex = requireUnsigned16(input.chunkIndex, 'chunkIndex');
-        return this.durableState.exclusive(async () => {
-            const actionRecord = await this.durableState.readProtected(
-                'actions',
-                actionIdentifier(this.configuration, action),
-            );
-            const sourceRecord = await this.durableState.readProtected(
-                'sources',
-                sourceIdentifier(this.configuration, action),
-            );
-            const activationRecord = await this.durableState.readProtected(
-                'activations',
-                activationIdentifier(this.configuration, action),
-            );
-            if (
-                actionRecord === undefined ||
-                sourceRecord === undefined ||
-                activationRecord === undefined
-            ) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'The durable tally activation material is incomplete.',
-                );
-            }
-            const loadedAction = await this.loadActionState(
-                action,
-                actionRecord,
-            );
-            const loadedSource = await this.loadSourceState(
-                action,
-                loadedAction.state.actionKeySetRosterIdentity,
-                sourceRecord,
-            );
-            const loadedActivation = await this.loadActivationState(
-                action,
-                loadedAction.state.actionKeySetRosterIdentity,
-                activationRecord,
-            );
-            try {
-                if (
-                    loadedSource.state.phase !== publishedSourcePhase ||
-                    loadedActivation.state.phase !== publishedActivationPhase ||
-                    loadedSource.state.preparationAttempt !==
-                        loadedActivation.state.preparationAttempt ||
-                    !bytesEqual(
-                        loadedAction.state.signatureBodyIdentities[3] ??
-                            new Uint8Array(),
-                        loadedActivation.state.manifestIdentity,
-                    )
-                ) {
-                    throw new DurableStateError(
-                        'StateLost',
-                        'The retained tally activation is not a published coherent state.',
-                    );
-                }
-                const descriptor = loadedActivation.state.chunks[chunkIndex];
-                if (descriptor === undefined) {
-                    throw new TypeError(
-                        'chunkIndex is outside the activation plan.',
-                    );
-                }
-                const chunk = this.tallyActivationRuntime.generateChunk(
-                    {
-                        targetIdentity: loadedActivation.state.targetIdentity,
-                        topCount: loadedActivation.state.topCount,
-                        sourceSubmissionBitmap:
-                            loadedActivation.state.sourceSubmissionBitmap,
-                        sourceCorrections:
-                            loadedActivation.state.sourceCorrections,
-                    },
-                    {
-                        participantPosition: action.participantPosition,
-                        activationSeed: loadedActivation.state.activationSeed,
-                        heldSubsetKeys: loadedSource.state.heldSubsetKeys,
-                        heldAffineEvaluations:
-                            loadedSource.state.heldAffineEvaluations,
-                        localAffineConstants:
-                            loadedSource.state.localAffineConstants,
-                    },
-                    descriptor,
-                );
-                const identity =
-                    this.tallyActivationRuntime.identifyChunk(chunk);
-                if (
-                    chunk.byteLength !== descriptor.byteLength ||
-                    !bytesEqual(identity, descriptor.identity)
-                ) {
-                    chunk.fill(0);
-                    identity.fill(0);
-                    throw new DurableStateError(
-                        'CorruptState',
-                        'A regenerated activation chunk differs from its signed descriptor.',
-                    );
-                }
-                identity.fill(0);
-                return { chunkIndex, chunk };
-            } finally {
-                zeroActivationState(loadedActivation.state);
-                zeroSourceState(loadedSource.state);
-                zeroActionState(loadedAction.state);
-            }
-        });
-    }
-
-    async advanceTally(
-        input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
-            preparationAttempt: number;
-            sources: readonly SourceCarrier[];
-            finalitySignatures: readonly FinalitySignatureCarrier[];
-            topCount: number;
-            activationManifests: readonly SignedActivationManifest[];
-            rangeIndex: number;
-            chunks: readonly Uint8Array[];
-        },
-    ): Promise<TallyEvaluationProgress> {
-        const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
-        );
-        const preparationAttempt = requireUnsigned16(
-            input.preparationAttempt,
-            'preparationAttempt',
-        );
-        const sources = copySourceCarriers(input.sources);
-        const finalitySignatures = copyFinalitySignatures(
-            input.finalitySignatures,
-        );
-        const topCount = requireUnsigned16(input.topCount, 'topCount');
-        if (topCount < 1 || topCount > completionProfileParticipantCount) {
-            throw new TypeError('topCount is outside the completion profile.');
-        }
-        const activationManifests = copyActivationManifests(
-            input.activationManifests,
-        );
-        const rangeIndex = requireUnsigned16(input.rangeIndex, 'rangeIndex');
-        const chunks = copyActivationChunks(input.chunks);
-        const activationRosterDigest =
-            await digestActivationRoster(activationManifests);
-        try {
-            return await this.durableState.exclusive(async () => {
-                const actionRecord = await this.durableState.readProtected(
-                    'actions',
-                    actionIdentifier(this.configuration, action),
-                );
-                const sourceRecord = await this.durableState.readProtected(
-                    'sources',
-                    sourceIdentifier(this.configuration, action),
-                );
-                if (actionRecord === undefined || sourceRecord === undefined) {
-                    throw new DurableStateError(
-                        'StateLost',
-                        'Published local source state is absent for tally evaluation.',
-                    );
-                }
-                const loadedAction = await this.loadActionState(
-                    action,
-                    actionRecord,
-                );
-                const loadedSource = await this.loadSourceState(
-                    action,
-                    loadedAction.state.actionKeySetRosterIdentity,
-                    sourceRecord,
-                );
-                try {
-                    this.verifyConfirmedActionRoster(
-                        action,
-                        loadedAction.state,
-                        actionKeySetBodies,
-                    );
-                    this.validateSourceState(
-                        action,
-                        actionKeySetBodies,
-                        loadedAction.state,
-                        loadedSource.state,
-                    );
-                    if (
-                        loadedSource.state.phase !== publishedSourcePhase ||
-                        loadedSource.state.preparationAttempt !==
-                            preparationAttempt
-                    ) {
-                        throw new DurableStateError(
-                            'Conflict',
-                            'The retained source is not the finalized preparation attempt.',
-                        );
-                    }
-                    const verified = this.deriveVerifiedTallyContext(
-                        action,
-                        actionKeySetBodies,
-                        preparationAttempt,
-                        sources,
-                        topCount,
-                        loadedAction.state,
-                        loadedSource.state,
-                    );
-                    try {
-                        this.verifyComputationCertificate(
-                            verified,
-                            actionKeySetBodies,
-                            finalitySignatures,
-                        );
-                        const plan = this.tallyActivationRuntime.plan(topCount);
-                        const range = plan.ranges[rangeIndex];
-                        if (range === undefined) {
-                            throw new TypeError(
-                                'rangeIndex is outside the activation plan.',
-                            );
-                        }
-                        const identifier = evaluationIdentifier(
-                            this.configuration,
-                            action,
-                        );
-                        const existing = await this.durableState.readProtected(
-                            'evaluations',
-                            identifier,
-                        );
-                        let loadedEvaluation: LoadedEvaluationState | undefined;
-                        if (existing !== undefined) {
-                            loadedEvaluation = await this.loadEvaluationState(
-                                action,
-                                loadedAction.state.actionKeySetRosterIdentity,
-                                existing,
-                            );
-                            this.validateEvaluationState(
-                                loadedEvaluation.state,
-                                verified,
-                                topCount,
-                                activationRosterDigest,
-                                plan.ranges.length,
-                            );
-                            if (
-                                loadedEvaluation.state.status !==
-                                pendingEvaluationStatus
-                            ) {
-                                const progress = copyTallyEvaluationProgress(
-                                    loadedEvaluation.state,
-                                    this.constructionKernelRuntime.measureResources(),
-                                );
-                                zeroEvaluationState(loadedEvaluation.state);
-                                return progress;
-                            }
-                            if (
-                                rangeIndex <
-                                loadedEvaluation.state.nextRangeIndex
-                            ) {
-                                const progress = copyTallyEvaluationProgress(
-                                    loadedEvaluation.state,
-                                    this.constructionKernelRuntime.measureResources(),
-                                );
-                                zeroEvaluationState(loadedEvaluation.state);
-                                return progress;
-                            }
-                            if (
-                                rangeIndex !==
-                                loadedEvaluation.state.nextRangeIndex
-                            ) {
-                                zeroEvaluationState(loadedEvaluation.state);
-                                throw new DurableStateError(
-                                    'StateLost',
-                                    'The tally evaluation range has a missing predecessor.',
-                                );
-                            }
-                        } else if (rangeIndex !== 0) {
-                            throw new DurableStateError(
-                                'StateLost',
-                                'The first durable tally checkpoint is absent.',
-                            );
-                        }
-
-                        try {
-                            const advance = this.tallyActivationRuntime.advance(
-                                this.activationContext(verified, topCount),
-                                loadedEvaluation?.state.checkpoint,
-                                range,
-                                actionKeySetBodies,
-                                activationManifests,
-                                chunks,
-                            );
-                            const replacementState: EvaluationState = {
-                                generation:
-                                    (loadedEvaluation?.state.generation ?? 0n) +
-                                    1n,
-                                targetIdentity: Uint8Array.from(
-                                    verified.targetIdentity,
-                                ),
-                                topCount,
-                                sourceSubmissionBitmap:
-                                    verified.sourceSubmissionBitmap,
-                                activationRosterDigest: Uint8Array.from(
-                                    activationRosterDigest,
-                                ),
-                                nextRangeIndex: rangeIndex + 1,
-                                status:
-                                    advance.kind === 'pending'
-                                        ? pendingEvaluationStatus
-                                        : advance.kind === 'no-result'
-                                          ? noResultEvaluationStatus
-                                          : resultEvaluationStatus,
-                                acceptedBallotAuthorshipBitmap:
-                                    advance.kind === 'pending'
-                                        ? 0
-                                        : advance.acceptedBallotAuthorshipBitmap,
-                                orderedOptionPositions:
-                                    advance.kind === 'result'
-                                        ? [...advance.orderedOptionPositions]
-                                        : [],
-                                checkpoint:
-                                    advance.kind === 'pending'
-                                        ? Uint8Array.from(advance.checkpoint)
-                                        : new Uint8Array(),
-                            };
-                            try {
-                                if (loadedEvaluation === undefined) {
-                                    await this.insertEvaluationState(
-                                        action,
-                                        loadedAction,
-                                        replacementState,
-                                    );
-                                } else {
-                                    await this.replaceEvaluationState(
-                                        action,
-                                        loadedAction,
-                                        loadedEvaluation,
-                                        replacementState,
-                                    );
-                                }
-                                const retained =
-                                    await this.durableState.readProtected(
-                                        'evaluations',
-                                        identifier,
-                                    );
-                                if (retained === undefined) {
-                                    throw new DurableStateError(
-                                        'StateLost',
-                                        'The durable tally checkpoint disappeared after persistence.',
-                                    );
-                                }
-                                const reloaded = await this.loadEvaluationState(
-                                    action,
-                                    loadedAction.state
-                                        .actionKeySetRosterIdentity,
-                                    retained,
-                                );
-                                try {
-                                    this.validateEvaluationState(
-                                        reloaded.state,
-                                        verified,
-                                        topCount,
-                                        activationRosterDigest,
-                                        plan.ranges.length,
-                                    );
-                                    return copyTallyEvaluationProgress(
-                                        reloaded.state,
-                                        this.constructionKernelRuntime.measureResources(),
-                                    );
-                                } finally {
-                                    zeroEvaluationState(reloaded.state);
-                                }
-                            } finally {
-                                zeroEvaluationState(replacementState);
-                            }
-                        } finally {
-                            if (loadedEvaluation !== undefined) {
-                                zeroEvaluationState(loadedEvaluation.state);
-                            }
-                        }
-                    } finally {
-                        for (const correction of verified.sourceCorrections) {
-                            correction?.fill(0);
-                        }
-                    }
-                } finally {
-                    zeroSourceState(loadedSource.state);
-                    zeroActionState(loadedAction.state);
-                }
-            });
-        } finally {
-            activationRosterDigest.fill(0);
-            for (const chunk of chunks) {
-                chunk.fill(0);
-            }
-        }
     }
 
     async readTallyResult(
@@ -4132,28 +2882,28 @@ class PrivatePreparationWorkerRuntime {
                 actionRecord,
             );
             try {
-                const evaluationRecord = await this.durableState.readProtected(
+                const noResultRecord = await this.durableState.readProtected(
                     'evaluations',
-                    evaluationIdentifier(this.configuration, action),
+                    noResultIdentifier(this.configuration, action),
                 );
-                if (evaluationRecord !== undefined) {
-                    const loadedEvaluation = await this.loadEvaluationState(
+                if (noResultRecord !== undefined) {
+                    const loadedNoResult = await this.loadNoResultState(
                         action,
                         loadedAction.state.actionKeySetRosterIdentity,
-                        evaluationRecord,
+                        noResultRecord,
                     );
                     try {
                         return copyTallyEvaluationProgress(
-                            loadedEvaluation.state,
+                            loadedNoResult.state,
                             this.constructionKernelRuntime.measureResources(),
                         );
                     } finally {
-                        zeroEvaluationState(loadedEvaluation.state);
+                        zeroNoResultState(loadedNoResult.state);
                     }
                 }
                 throw new DurableStateError(
                     'StateLost',
-                    'No certificate-verified durable tally result or checkpoint is available.',
+                    'No certificate-verified durable no-result terminal is available.',
                 );
             } finally {
                 zeroActionState(loadedAction.state);
@@ -4175,6 +2925,7 @@ class PrivatePreparationWorkerRuntime {
             runtimeIdentity: this.configuration.runtimeIdentity,
             candidateBuildIdentity: this.configuration.candidateBuildIdentity,
             actionProposalIdentity: action.actionProposalIdentity,
+            actionDefinitionIdentity: action.actionDefinitionIdentity,
             actionKeySetRosterIdentity: actionState.actionKeySetRosterIdentity,
             preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
@@ -4197,92 +2948,17 @@ class PrivatePreparationWorkerRuntime {
             actionKeySetBodies,
             sources,
         );
-        const sourceCorrections: (Uint8Array | undefined)[] = [];
-        try {
-            for (const [senderPosition, source] of sources.entries()) {
-                const verifiedSource = this.sourceRuntime.verify(
-                    {
-                        participantCount: completionProfileParticipantCount,
-                        actionProposalIdentity: action.actionProposalIdentity,
-                        actionKeySetRosterIdentity:
-                            actionState.actionKeySetRosterIdentity,
-                        preparationAttempt,
-                        predecessorIdentity: action.predecessorIdentity,
-                        verifiedPreparationRoot:
-                            sourceState.verifiedPreparationRoot,
-                        senderPosition,
-                    },
-                    source.declaration,
-                    actionKeySetBodies,
-                    source.body,
-                    source.signature,
-                );
-                const expectedIdentity = target.sourceBodyIdentities.subarray(
-                    senderPosition * identityByteLength,
-                    (senderPosition + 1) * identityByteLength,
-                );
-                if (
-                    verifiedSource.senderPosition !== senderPosition ||
-                    !bytesEqual(
-                        verifiedSource.verifiedPreparationRoot,
-                        sourceState.verifiedPreparationRoot,
-                    ) ||
-                    !bytesEqual(verifiedSource.bodyIdentity, expectedIdentity)
-                ) {
-                    verifiedSource.correction?.fill(0);
-                    throw new Error(
-                        'The source verifier returned inconsistent finalized metadata.',
-                    );
-                }
-                sourceCorrections.push(
-                    verifiedSource.correction === undefined
-                        ? undefined
-                        : Uint8Array.from(verifiedSource.correction),
-                );
-                verifiedSource.correction?.fill(0);
-            }
-            return {
-                verifiedPreparationRoot: Uint8Array.from(
-                    sourceState.verifiedPreparationRoot,
-                ),
-                targetBody: target.targetBody,
-                targetIdentity: target.targetIdentity,
-                sourceBodyIdentities: target.sourceBodyIdentities,
-                sourceSubmissionBitmap: target.sourceSubmissionBitmap,
-                topCount: target.topCount,
-                targetKind: target.targetKind,
-                sourceCorrections,
-            };
-        } catch (error: unknown) {
-            for (const correction of sourceCorrections) {
-                correction?.fill(0);
-            }
-            throw error;
-        }
-    }
-
-    private verifyComputationCertificate(
-        verified: VerifiedTallyContext,
-        actionKeySetBodies: readonly Uint8Array[],
-        finalitySignatures: readonly FinalitySignatureCarrier[],
-    ): void {
-        const certificate = this.finalityRuntime.verifyCertificate(
-            verified.targetBody,
-            actionKeySetBodies,
-            finalitySignatures,
-        );
-        if (
-            verified.targetKind !== 'computation' ||
-            certificate.targetKind !== 'computation' ||
-            certificate.sourceSubmissionBitmap !==
-                verified.sourceSubmissionBitmap ||
-            certificate.topCount !== verified.topCount ||
-            !bytesEqual(certificate.targetIdentity, verified.targetIdentity)
-        ) {
-            throw new Error(
-                'Tally activation requires the exact finalized computation target.',
-            );
-        }
+        return {
+            verifiedPreparationRoot: Uint8Array.from(
+                sourceState.verifiedPreparationRoot,
+            ),
+            targetBody: target.targetBody,
+            targetIdentity: target.targetIdentity,
+            sourceBodyIdentities: target.sourceBodyIdentities,
+            sourceSubmissionBitmap: target.sourceSubmissionBitmap,
+            topCount: target.topCount,
+            targetKind: target.targetKind,
+        };
     }
 
     private verifyNoResultCertificate(
@@ -4307,23 +2983,6 @@ class PrivatePreparationWorkerRuntime {
                 'No-result finalization requires the exact finalized empty source inventory.',
             );
         }
-    }
-
-    private activationContext(
-        verified: VerifiedTallyContext,
-        topCount: number,
-    ): Readonly<{
-        targetIdentity: Uint8Array;
-        topCount: number;
-        sourceSubmissionBitmap: number;
-        sourceCorrections: readonly (Uint8Array | undefined)[];
-    }> {
-        return {
-            targetIdentity: verified.targetIdentity,
-            topCount,
-            sourceSubmissionBitmap: verified.sourceSubmissionBitmap,
-            sourceCorrections: verified.sourceCorrections,
-        };
     }
 
     private validateFinalityState(
@@ -4377,186 +3036,14 @@ class PrivatePreparationWorkerRuntime {
         }
         this.finalityRuntime.verifySignature(
             action.participantPosition,
-            state.targetIdentity,
+            state.targetBody,
             actionKeySetBodies,
             state.finalitySignature,
         );
     }
 
-    private validateActivationState(
-        action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
-        actionState: ActionState,
-        state: ActivationState,
-        verified: VerifiedTallyContext,
-        topCount: number,
-    ): void {
-        const plan = this.tallyActivationRuntime.plan(topCount);
-        const boundIdentity = actionState.signatureBodyIdentities[3];
-        const correctionsMatch = state.sourceCorrections.every(
-            (correction, position) => {
-                const expected = verified.sourceCorrections[position];
-                return correction === undefined
-                    ? expected === undefined
-                    : expected !== undefined &&
-                          bytesEqual(correction, expected);
-            },
-        );
-        const chunksMatch = state.chunks.every((chunk, index) => {
-            const range = plan.ranges[index];
-            return (
-                range !== undefined &&
-                chunk.firstOperation === range.firstOperation &&
-                chunk.operationEnd === range.operationEnd &&
-                chunk.includesTerminalRekey === range.includesTerminalRekey &&
-                chunk.byteLength > 0 &&
-                chunk.byteLength <= 480_000 &&
-                chunk.identity.byteLength === identityByteLength
-            );
-        });
-        if (
-            state.generation < 1n ||
-            state.preparationAttempt > 0xffff ||
-            state.targetIdentity.byteLength !== identityByteLength ||
-            state.topCount !== topCount ||
-            verified.topCount !== topCount ||
-            state.sourceSubmissionBitmap !== verified.sourceSubmissionBitmap ||
-            state.sourceCorrections.length !==
-                completionProfileParticipantCount ||
-            !correctionsMatch ||
-            state.activationSeed.byteLength !== 32 ||
-            state.operationCount !== plan.operationCount ||
-            state.constantOperationCount !== plan.constantOperationCount ||
-            state.exclusiveOrOperationCount !==
-                plan.exclusiveOrOperationCount ||
-            state.conjunctionCount !== plan.conjunctionCount ||
-            state.negationOperationCount !== plan.negationOperationCount ||
-            state.outputBitCount !== plan.outputBitCount ||
-            state.chunks.length !== plan.ranges.length ||
-            !chunksMatch ||
-            state.manifestBody.byteLength === 0 ||
-            state.manifestIdentity.byteLength !== identityByteLength ||
-            state.manifestSignature.byteLength !==
-                actionSignatureCarrierByteLength ||
-            boundIdentity === undefined ||
-            !bytesEqual(boundIdentity, state.manifestIdentity) ||
-            !bytesEqual(state.targetIdentity, verified.targetIdentity)
-        ) {
-            throw new DurableStateError(
-                'Conflict',
-                'The retained tally activation does not match the finalized target and plan.',
-            );
-        }
-        const encodedManifest = this.tallyActivationRuntime.encodeManifest(
-            this.activationContext(verified, topCount),
-            action.participantPosition,
-            state.chunks,
-        );
-        if (
-            !bytesEqual(encodedManifest.body, state.manifestBody) ||
-            !bytesEqual(encodedManifest.identity, state.manifestIdentity)
-        ) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The retained activation manifest is not the canonical descriptor encoding.',
-            );
-        }
-        if (state.phase === unsignedActivationPhase) {
-            if (!isZero(state.manifestSignature)) {
-                throw new DurableStateError(
-                    'CorruptState',
-                    'Unsigned retained activation contains a signature.',
-                );
-            }
-            return;
-        }
-        const manifest = this.tallyActivationRuntime.verifyManifest(
-            actionKeySetBodies,
-            state.manifestBody,
-            state.manifestSignature,
-        );
-        if (
-            manifest.participantPosition !== action.participantPosition ||
-            manifest.topCount !== topCount ||
-            manifest.sourceSubmissionBitmap !==
-                verified.sourceSubmissionBitmap ||
-            !bytesEqual(manifest.targetIdentity, verified.targetIdentity) ||
-            manifest.chunks.length !== state.chunks.length ||
-            manifest.chunks.some((chunk, index) => {
-                const retained = state.chunks[index];
-                return (
-                    retained === undefined ||
-                    chunk.firstOperation !== retained.firstOperation ||
-                    chunk.operationEnd !== retained.operationEnd ||
-                    chunk.includesTerminalRekey !==
-                        retained.includesTerminalRekey ||
-                    chunk.byteLength !== retained.byteLength ||
-                    !bytesEqual(chunk.identity, retained.identity)
-                );
-            })
-        ) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The signed retained activation manifest is inconsistent.',
-            );
-        }
-    }
-
-    private validateEvaluationState(
-        state: EvaluationState,
-        verified: VerifiedTallyContext,
-        topCount: number,
-        activationRosterDigest: Uint8Array,
-        rangeCount: number,
-    ): void {
-        const authorshipBound = 1 << completionProfileParticipantCount;
-        const commonInvalid =
-            state.generation < 1n ||
-            state.targetIdentity.byteLength !== identityByteLength ||
-            !bytesEqual(state.targetIdentity, verified.targetIdentity) ||
-            state.topCount !== topCount ||
-            state.sourceSubmissionBitmap !== verified.sourceSubmissionBitmap ||
-            state.activationRosterDigest.byteLength !== 32 ||
-            !bytesEqual(state.activationRosterDigest, activationRosterDigest) ||
-            state.nextRangeIndex > rangeCount ||
-            state.acceptedBallotAuthorshipBitmap >= authorshipBound;
-        const pendingInvalid =
-            state.status === pendingEvaluationStatus &&
-            (state.nextRangeIndex >= rangeCount ||
-                state.checkpoint.byteLength === 0 ||
-                state.acceptedBallotAuthorshipBitmap !== 0 ||
-                state.orderedOptionPositions.length !== 0);
-        const noResultInvalid =
-            state.status === noResultEvaluationStatus &&
-            (state.nextRangeIndex !== rangeCount ||
-                state.checkpoint.byteLength !== 0 ||
-                state.orderedOptionPositions.length !== 0);
-        const resultInvalid =
-            state.status === resultEvaluationStatus &&
-            (state.nextRangeIndex !== rangeCount ||
-                state.checkpoint.byteLength !== 0 ||
-                state.orderedOptionPositions.length !== topCount ||
-                new Set(state.orderedOptionPositions).size !== topCount ||
-                state.orderedOptionPositions.some(
-                    (position) =>
-                        position < 0 ||
-                        position >= completionProfileParticipantCount,
-                ));
-        if (
-            commonInvalid ||
-            pendingInvalid ||
-            noResultInvalid ||
-            resultInvalid
-        ) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The retained tally evaluation state is inconsistent.',
-            );
-        }
-    }
-
     private validateFinalizedNoResultState(
-        state: EvaluationState,
+        state: NoResultState,
         verified: VerifiedTallyContext,
     ): void {
         if (
@@ -4567,13 +3054,7 @@ class PrivatePreparationWorkerRuntime {
             !bytesEqual(state.targetIdentity, verified.targetIdentity) ||
             state.topCount !== verified.topCount ||
             state.sourceSubmissionBitmap !== 0 ||
-            state.activationRosterDigest.byteLength !== 32 ||
-            !isZero(state.activationRosterDigest) ||
-            state.nextRangeIndex !== 0 ||
-            state.status !== noResultEvaluationStatus ||
-            state.acceptedBallotAuthorshipBitmap !== 0 ||
-            state.orderedOptionPositions.length !== 0 ||
-            state.checkpoint.byteLength !== 0
+            state.acceptedBallotAuthorshipBitmap !== 0
         ) {
             throw new DurableStateError(
                 'CorruptState',
@@ -4617,60 +3098,25 @@ class PrivatePreparationWorkerRuntime {
         );
     }
 
-    private async replaceActivationState(
+    private async insertNoResultState(
         action: PrivatePreparationActionContext,
         loadedAction: LoadedActionState,
-        loadedActivation: LoadedActivationState,
-        replacementState: ActivationState,
+        state: NoResultState,
     ): Promise<void> {
-        const plaintext = encodeActivationState(replacementState);
-        const context = encodeLocalRecordContext(
-            terminalLocalContext(
-                this.configuration,
-                action,
-                loadedAction.state.actionKeySetRosterIdentity,
-                replacementState.generation,
-                activationStateKind,
-            ),
-        );
-        let replacement: ProtectedRecord;
-        try {
-            replacement = await createProtectedRecord(
-                loadedActivation.record.id,
-                context,
-                plaintext,
-                loadedAction.rootKey,
-            );
-        } finally {
-            plaintext.fill(0);
-            context.fill(0);
-        }
-        await this.durableState.replaceExact(
-            'activations',
-            loadedActivation.record,
-            replacement,
-        );
-    }
-
-    private async insertEvaluationState(
-        action: PrivatePreparationActionContext,
-        loadedAction: LoadedActionState,
-        state: EvaluationState,
-    ): Promise<void> {
-        const plaintext = encodeEvaluationState(state);
+        const plaintext = encodeNoResultState(state);
         const context = encodeLocalRecordContext(
             terminalLocalContext(
                 this.configuration,
                 action,
                 loadedAction.state.actionKeySetRosterIdentity,
                 state.generation,
-                evaluationStateKind,
+                noResultStateKind,
             ),
         );
         let record: ProtectedRecord;
         try {
             record = await createProtectedRecord(
-                evaluationIdentifier(this.configuration, action),
+                noResultIdentifier(this.configuration, action),
                 context,
                 plaintext,
                 loadedAction.rootKey,
@@ -4680,41 +3126,6 @@ class PrivatePreparationWorkerRuntime {
             context.fill(0);
         }
         await this.durableState.putIfAbsent('evaluations', record);
-    }
-
-    private async replaceEvaluationState(
-        action: PrivatePreparationActionContext,
-        loadedAction: LoadedActionState,
-        loadedEvaluation: LoadedEvaluationState,
-        state: EvaluationState,
-    ): Promise<void> {
-        const plaintext = encodeEvaluationState(state);
-        const context = encodeLocalRecordContext(
-            terminalLocalContext(
-                this.configuration,
-                action,
-                loadedAction.state.actionKeySetRosterIdentity,
-                state.generation,
-                evaluationStateKind,
-            ),
-        );
-        let replacement: ProtectedRecord;
-        try {
-            replacement = await createProtectedRecord(
-                loadedEvaluation.record.id,
-                context,
-                plaintext,
-                loadedAction.rootKey,
-            );
-        } finally {
-            plaintext.fill(0);
-            context.fill(0);
-        }
-        await this.durableState.replaceExact(
-            'evaluations',
-            loadedEvaluation.record,
-            replacement,
-        );
     }
 
     private async verifyCompletePreparationForSource(
@@ -4814,7 +3225,6 @@ class PrivatePreparationWorkerRuntime {
                 actionKeySetBodies,
                 preparationParents,
                 loadedPreparation.state.contributionOpenings,
-                loadedPreparation.state.affineCoefficients,
                 remotePlaintexts,
             );
             for (
@@ -4832,8 +3242,6 @@ class PrivatePreparationWorkerRuntime {
                     !bytesEqual(expectedIdentity, verifiedIdentity)
                 ) {
                     verified.heldSubsetKeys.fill(0);
-                    verified.heldAffineEvaluations.fill(0);
-                    verified.localAffineConstants.fill(0);
                     throw new DurableStateError(
                         'Conflict',
                         'The certified preparation parent does not match the retained private delivery.',
@@ -4898,12 +3306,6 @@ class PrivatePreparationWorkerRuntime {
             sourceBodyIdentity: encodedSource.identity,
             sourceSignature: new Uint8Array(actionSignatureCarrierByteLength),
             heldSubsetKeys: Uint8Array.from(verifiedPreparation.heldSubsetKeys),
-            heldAffineEvaluations: Uint8Array.from(
-                verifiedPreparation.heldAffineEvaluations,
-            ),
-            localAffineConstants: Uint8Array.from(
-                verifiedPreparation.localAffineConstants,
-            ),
         };
         try {
             this.validateSourceState(
@@ -5141,10 +3543,6 @@ class PrivatePreparationWorkerRuntime {
             state.sourceSignature.byteLength !==
                 actionSignatureCarrierByteLength ||
             state.heldSubsetKeys.byteLength !== heldSubsetKeyVectorByteLength ||
-            state.heldAffineEvaluations.byteLength !==
-                heldAffineEvaluationVectorByteLength ||
-            state.localAffineConstants.byteLength !==
-                localAffineConstantVectorByteLength ||
             state.scoreEncodings.byteLength !== sourceScoreEncodingCount ||
             state.scoreEncodings.some((score) => score > 0x0f) ||
             (state.declaration === 'abstain' && !isZero(state.scoreEncodings))
@@ -5270,27 +3668,6 @@ class PrivatePreparationWorkerRuntime {
         const contributionOpenings = randomBytes(
             preparationContributionOpeningVectorByteLength,
         );
-        const affineCoefficients = randomBytes(
-            preparationAffineCoefficientByteLength,
-        );
-        const affineConstantOffset =
-            preparationLowAffineCoefficientCount *
-            preparationAffineModuleValueByteLength;
-        while (
-            isZero(
-                affineCoefficients.subarray(
-                    affineConstantOffset,
-                    affineConstantOffset +
-                        preparationAffineModuleValueByteLength,
-                ),
-            )
-        ) {
-            const replacementConstant = randomBytes(
-                preparationAffineModuleValueByteLength,
-            );
-            affineCoefficients.set(replacementConstant, affineConstantOffset);
-            replacementConstant.fill(0);
-        }
         const materialContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
@@ -5303,7 +3680,6 @@ class PrivatePreparationWorkerRuntime {
         const material = this.preparationMaterialRuntime.generate(
             materialContext,
             contributionOpenings,
-            affineCoefficients,
         );
         const privateBodies: Uint8Array[] = [];
         const privateBodyIdentities: Uint8Array[] = [];
@@ -5370,7 +3746,6 @@ class PrivatePreparationWorkerRuntime {
                 privateBodyIdentities,
                 privateBodies,
                 contributionOpenings,
-                affineCoefficients,
             };
             this.validatePreparationState(
                 action,
@@ -5496,7 +3871,6 @@ class PrivatePreparationWorkerRuntime {
                 plaintext.fill(0);
             }
             contributionOpenings.fill(0);
-            affineCoefficients.fill(0);
         }
     }
 
@@ -5618,7 +3992,6 @@ class PrivatePreparationWorkerRuntime {
         const material = this.preparationMaterialRuntime.generate(
             materialContext,
             state.contributionOpenings,
-            state.affineCoefficients,
         );
         try {
             const parent = this.preparationParentRuntime.encode({
@@ -6099,16 +4472,16 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    private async loadActivationState(
+    private async loadNoResultState(
         action: PrivatePreparationActionContext,
         rosterIdentity: Uint8Array,
         record: ProtectedRecord,
-    ): Promise<LoadedActivationState> {
+    ): Promise<LoadedNoResultState> {
         const rootKey = await this.durableState.readRoot();
         if (rootKey === undefined) {
             throw new DurableStateError(
                 'StateLost',
-                'The browser-local root is absent for retained activation state.',
+                'The browser-local root is absent for retained no-result state.',
             );
         }
         const localContext = decodeLocalRecordContext(record.context);
@@ -6120,7 +4493,7 @@ class PrivatePreparationWorkerRuntime {
                 expectedContext,
                 rootKey,
             );
-            const state = decodeActivationState(plaintext);
+            const state = decodeNoResultState(plaintext);
             try {
                 assertTerminalLocalContext(
                     state.generation,
@@ -6128,55 +4501,13 @@ class PrivatePreparationWorkerRuntime {
                     this.configuration,
                     action,
                     rosterIdentity,
-                    activationStateKind,
+                    noResultStateKind,
                 );
-                return { record, state };
             } catch (error: unknown) {
-                zeroActivationState(state);
+                zeroNoResultState(state);
                 throw error;
             }
-        } finally {
-            expectedContext.fill(0);
-            plaintext?.fill(0);
-        }
-    }
-
-    private async loadEvaluationState(
-        action: PrivatePreparationActionContext,
-        rosterIdentity: Uint8Array,
-        record: ProtectedRecord,
-    ): Promise<LoadedEvaluationState> {
-        const rootKey = await this.durableState.readRoot();
-        if (rootKey === undefined) {
-            throw new DurableStateError(
-                'StateLost',
-                'The browser-local root is absent for retained tally evaluation.',
-            );
-        }
-        const localContext = decodeLocalRecordContext(record.context);
-        const expectedContext = encodeLocalRecordContext(localContext);
-        let plaintext: Uint8Array | undefined;
-        try {
-            plaintext = await openProtectedRecord(
-                record,
-                expectedContext,
-                rootKey,
-            );
-            const state = decodeEvaluationState(plaintext);
-            try {
-                assertTerminalLocalContext(
-                    state.generation,
-                    localContext,
-                    this.configuration,
-                    action,
-                    rosterIdentity,
-                    evaluationStateKind,
-                );
-                return { record, state };
-            } catch (error: unknown) {
-                zeroEvaluationState(state);
-                throw error;
-            }
+            return { record, state };
         } finally {
             expectedContext.fill(0);
             plaintext?.fill(0);
@@ -6365,17 +4696,6 @@ const responseTransferables = (
             result.finalitySignature.buffer,
         ];
     }
-    if ('manifestBody' in result) {
-        return [
-            result.targetIdentity.buffer,
-            ...result.chunks.map((chunk) => chunk.identity.buffer),
-            result.manifestBody.buffer,
-            result.manifestSignature.buffer,
-        ];
-    }
-    if ('chunk' in result) {
-        return [result.chunk.buffer];
-    }
     return [];
 };
 
@@ -6483,39 +4803,11 @@ export const installPrivatePreparationWorker = (
                                     request.input,
                                 ),
                             };
-                        } else if (
-                            request.operation === 'create-tally-activation'
-                        ) {
-                            response = {
-                                requestId: request.requestId,
-                                ok: true,
-                                result: await runtime.createTallyActivation(
-                                    request.input,
-                                ),
-                            };
                         } else if (request.operation === 'finalize-no-result') {
                             response = {
                                 requestId: request.requestId,
                                 ok: true,
                                 result: await runtime.finalizeNoResult(
-                                    request.input,
-                                ),
-                            };
-                        } else if (
-                            request.operation === 'read-tally-activation-chunk'
-                        ) {
-                            response = {
-                                requestId: request.requestId,
-                                ok: true,
-                                result: await runtime.readTallyActivationChunk(
-                                    request.input,
-                                ),
-                            };
-                        } else if (request.operation === 'advance-tally') {
-                            response = {
-                                requestId: request.requestId,
-                                ok: true,
-                                result: await runtime.advanceTally(
                                     request.input,
                                 ),
                             };

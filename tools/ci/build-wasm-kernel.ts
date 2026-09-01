@@ -15,14 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { maximumFoundationWasmMemoryByteLength } from '#packages/wasm/src/foundation-contract.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
-const cargoTargetDirectory = path.join(repositoryRoot, 'target', 'wasm-kernel');
-const scratchRoot = path.join(
-    repositoryRoot,
-    'temp',
-    'build-scratch',
-    'wasm-kernel-builds',
-);
-const outputFilePath = path.join(
+const defaultOutputFilePath = path.join(
     repositoryRoot,
     'packages',
     'wasm',
@@ -58,7 +51,7 @@ const run = (
     }
 };
 
-const cargoEnvironment = (): NodeJS.ProcessEnv => {
+const cargoEnvironment = (cargoTargetDirectory: string): NodeJS.ProcessEnv => {
     if ((process.env.CARGO_ENCODED_RUSTFLAGS?.length ?? 0) > 0) {
         throw new Error(
             'CARGO_ENCODED_RUSTFLAGS must be unset for the deterministic WASM build.',
@@ -89,7 +82,31 @@ const cargoEnvironment = (): NodeJS.ProcessEnv => {
     };
 };
 
-const buildWasmKernel = async (): Promise<void> => {
+export type WasmKernelBuildOptions = Readonly<{
+    includeConstruction?: boolean;
+    outputFilePath?: string;
+}>;
+
+export const buildWasmKernel = async (
+    options: WasmKernelBuildOptions = {},
+): Promise<Readonly<{ hash: string; outputFilePath: string }>> => {
+    const includeConstruction = options.includeConstruction ?? true;
+    const outputFilePath = options.outputFilePath ?? defaultOutputFilePath;
+    const variantName = includeConstruction
+        ? 'construction'
+        : 'foundation-only';
+    const cargoTargetDirectory = path.join(
+        repositoryRoot,
+        'target',
+        `wasm-kernel-${variantName}`,
+    );
+    const scratchRoot = path.join(
+        repositoryRoot,
+        'temp',
+        'build-scratch',
+        'wasm-kernel-builds',
+        variantName,
+    );
     await Promise.all([
         mkdir(path.dirname(outputFilePath), { recursive: true }),
         mkdir(scratchRoot, { recursive: true }),
@@ -102,20 +119,18 @@ const buildWasmKernel = async (): Promise<void> => {
     const optimizedFilePath = path.join(scratchDirectory, 'kernel.wasm');
 
     try {
-        run(
-            'cargo',
-            [
-                'build',
-                '--locked',
-                '--package',
-                'sealed-lattice-kernel',
-                '--lib',
-                '--target',
-                'wasm32-unknown-unknown',
-                '--release',
-            ],
-            cargoEnvironment(),
-        );
+        const cargoArguments = [
+            'build',
+            '--locked',
+            '--package',
+            'sealed-lattice-kernel',
+            '--lib',
+            '--target',
+            'wasm32-unknown-unknown',
+            '--release',
+        ];
+        if (!includeConstruction) cargoArguments.push('--no-default-features');
+        run('cargo', cargoArguments, cargoEnvironment(cargoTargetDirectory));
         await copyFile(
             path.join(
                 cargoTargetDirectory,
@@ -137,8 +152,9 @@ const buildWasmKernel = async (): Promise<void> => {
             .digest('hex');
         await rename(optimizedFilePath, outputFilePath);
         console.log(
-            `Foundation kernel built at ${path.relative(repositoryRoot, outputFilePath)} (${hash}); deterministic WASM stack ${stackByteLength} bytes.`,
+            `${includeConstruction ? 'Internal construction' : 'Public foundation-only'} kernel built at ${path.relative(repositoryRoot, outputFilePath)} (${hash}); deterministic WASM stack ${stackByteLength} bytes.`,
         );
+        return { hash, outputFilePath };
     } finally {
         await rm(scratchDirectory, { recursive: true, force: true });
     }

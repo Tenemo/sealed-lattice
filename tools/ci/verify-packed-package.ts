@@ -190,6 +190,36 @@ const requireSelfContainedBundle = async (
     }
 };
 
+const requireFoundationOnlyKernel = async (
+    packageDirectoryPath: string,
+): Promise<void> => {
+    const kernel = new WebAssembly.Module(
+        await readFile(
+            path.join(
+                packageDirectoryPath,
+                'dist',
+                'sealed-lattice-kernel.wasm',
+            ),
+        ),
+    );
+    const exportNames = WebAssembly.Module.exports(kernel)
+        .map((entry) => entry.name)
+        .sort();
+    const expectedExportNames = [
+        '__data_end',
+        '__heap_base',
+        'memory',
+        'sealed_lattice_allocate',
+        'sealed_lattice_deallocate',
+        'sealed_lattice_foundation_command_with_length',
+    ].sort();
+    if (JSON.stringify(exportNames) !== JSON.stringify(expectedExportNames)) {
+        throw new Error(
+            `Published WebAssembly exports differ from the foundation-only inventory: ${exportNames.join(', ')}.`,
+        );
+    }
+};
+
 const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
     await mkdir(consumerDirectoryPath);
     await Promise.all([
@@ -261,6 +291,7 @@ const verifyPackedPackage = async (
         await mkdir(packDirectory);
         await stagePublicPackage(packageDirectory);
         await requireSelfContainedBundle(packageDirectory);
+        await requireFoundationOnlyKernel(packageDirectory);
         await runPackageManager(
             runLog,
             resolvePackageManagerRunner(),

@@ -4,20 +4,36 @@ use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
     hash_foundation_tuple_512,
 };
+use crate::tally_circuit::{
+    BooleanOperation, TallyCircuitProfile, bit_width_for_maximum_value,
+    compiler::compile_tally_circuit,
+};
 
 use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
 use super::source::{SOURCE_ORDINAL, SourceContext, SourceDeclaration, verify_source_carrier};
 
 pub const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
-pub const FINALITY_TARGET_BODY_BYTE_LENGTH: usize = 560;
+pub const COMPLETION_PROFILE_OPTION_COUNT: u16 = 10;
+pub const FINALITY_TARGET_BODY_BYTE_LENGTH: usize = 1_058;
 pub const OUTPUT_ORDINAL: u64 = 0;
 pub const INDEPENDENT_HONEST_LOCK_LOSS_COUNT: u16 = 1;
 
 const FINALITY_TARGET_SCHEMA_IDENTIFIER: u16 = 0x0209;
-const FINALITY_TARGET_SCHEMA_VERSION: u16 = 2;
+const FINALITY_TARGET_SCHEMA_VERSION: u16 = 3;
 const FINALITY_TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/finality-target/v1";
 const SOURCE_INVENTORY_ROOT_DOMAIN: &str = "sealed-lattice/construction/source-inventory-root/v1";
+const TALLY_COMPILER_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/tally-compiler-identity/v1";
+const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/tally-circuit-identity/v1";
+const TALLY_OUTPUT_SCHEMA_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/tally-output-schema-identity/v1";
+const SOURCE_SELECTION_POLICY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/source-selection-policy-identity/v1";
+const ACTIVATION_POLICY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/activation-policy-identity/v1";
+const FINALITY_POLICY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/finality-policy-identity/v1";
 const MINIMUM_PARTICIPANT_COUNT: u16 = 3;
 const MAXIMUM_PARTICIPANT_COUNT: u16 = 20;
 
@@ -89,6 +105,7 @@ pub struct FinalityDerivationContext {
     pub runtime_identity: Hash512,
     pub candidate_build_identity: Hash512,
     pub action_proposal_identity: Hash512,
+    pub action_definition_identity: Hash512,
     pub action_key_set_roster_identity: Hash512,
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
@@ -102,13 +119,21 @@ pub struct FinalityTargetContext {
     pub runtime_identity: Hash512,
     pub candidate_build_identity: Hash512,
     pub action_proposal_identity: Hash512,
+    pub action_definition_identity: Hash512,
     pub action_key_set_roster_identity: Hash512,
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
     pub verified_preparation_root: Hash512,
+    pub compiler_identity: Hash512,
+    pub circuit_identity: Hash512,
+    pub option_count: u16,
+    pub output_schema_identity: Hash512,
     pub source_inventory_root: Hash512,
     pub source_submission_bitmap: u16,
+    pub source_selection_policy_identity: Hash512,
+    pub activation_policy_identity: Hash512,
     pub top_count: u16,
+    pub finality_policy_identity: Hash512,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +151,25 @@ impl FinalityTarget {
         if context.source_submission_bitmap & !admitted_bitmap != 0 {
             return Err(FinalityError::UnsupportedSourceInventory);
         }
-        if context.top_count == 0 || context.top_count > COMPLETION_PROFILE_PARTICIPANT_COUNT {
+        if context.option_count != COMPLETION_PROFILE_OPTION_COUNT
+            || context.top_count == 0
+            || context.top_count > context.option_count
+        {
+            return Err(FinalityError::WrongContext);
+        }
+        let semantic_bindings = derive_semantic_bindings(
+            context.participant_count,
+            context.option_count,
+            context.top_count,
+        )?;
+        if context.compiler_identity != semantic_bindings.compiler_identity
+            || context.circuit_identity != semantic_bindings.circuit_identity
+            || context.output_schema_identity != semantic_bindings.output_schema_identity
+            || context.source_selection_policy_identity
+                != semantic_bindings.source_selection_policy_identity
+            || context.activation_policy_identity != semantic_bindings.activation_policy_identity
+            || context.finality_policy_identity != semantic_bindings.finality_policy_identity
+        {
             return Err(FinalityError::WrongContext);
         }
         let target_kind = if context.source_submission_bitmap == 0 {
@@ -151,15 +194,23 @@ impl FinalityTarget {
                 CanonicalItem::hash512(self.context.runtime_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.candidate_build_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.action_proposal_identity.into_bytes()),
+                CanonicalItem::hash512(self.context.action_definition_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.action_key_set_roster_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.context.preparation_attempt),
                 CanonicalItem::hash512(self.context.predecessor_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.verified_preparation_root.into_bytes()),
+                CanonicalItem::hash512(self.context.compiler_identity.into_bytes()),
+                CanonicalItem::hash512(self.context.circuit_identity.into_bytes()),
+                CanonicalItem::unsigned16(self.context.option_count),
+                CanonicalItem::unsigned16(self.context.top_count),
+                CanonicalItem::hash512(self.context.output_schema_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.source_inventory_root.into_bytes()),
                 CanonicalItem::unsigned16(self.context.source_submission_bitmap),
-                CanonicalItem::unsigned16(self.context.top_count),
+                CanonicalItem::hash512(self.context.source_selection_policy_identity.into_bytes()),
+                CanonicalItem::hash512(self.context.activation_policy_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.target_kind as u16),
                 CanonicalItem::unsigned64(self.output_ordinal),
+                CanonicalItem::hash512(self.context.finality_policy_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.quorum),
             ],
         )
@@ -179,7 +230,7 @@ impl FinalityTarget {
             .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
         if tuple.schema_identifier != FINALITY_TARGET_SCHEMA_IDENTIFIER
             || tuple.schema_version != FINALITY_TARGET_SCHEMA_VERSION
-            || tuple.items.len() != 14
+            || tuple.items.len() != 22
         {
             return Err(FinalityError::WrongSchema);
         }
@@ -188,17 +239,25 @@ impl FinalityTarget {
             runtime_identity: read_hash512(&tuple.items[1])?,
             candidate_build_identity: read_hash512(&tuple.items[2])?,
             action_proposal_identity: read_hash512(&tuple.items[3])?,
-            action_key_set_roster_identity: read_hash512(&tuple.items[4])?,
-            preparation_attempt: read_unsigned16(&tuple.items[5])?,
-            predecessor_identity: read_hash512(&tuple.items[6])?,
-            verified_preparation_root: read_hash512(&tuple.items[7])?,
-            source_inventory_root: read_hash512(&tuple.items[8])?,
-            source_submission_bitmap: read_unsigned16(&tuple.items[9])?,
-            top_count: read_unsigned16(&tuple.items[10])?,
+            action_definition_identity: read_hash512(&tuple.items[4])?,
+            action_key_set_roster_identity: read_hash512(&tuple.items[5])?,
+            preparation_attempt: read_unsigned16(&tuple.items[6])?,
+            predecessor_identity: read_hash512(&tuple.items[7])?,
+            verified_preparation_root: read_hash512(&tuple.items[8])?,
+            compiler_identity: read_hash512(&tuple.items[9])?,
+            circuit_identity: read_hash512(&tuple.items[10])?,
+            option_count: read_unsigned16(&tuple.items[11])?,
+            top_count: read_unsigned16(&tuple.items[12])?,
+            output_schema_identity: read_hash512(&tuple.items[13])?,
+            source_inventory_root: read_hash512(&tuple.items[14])?,
+            source_submission_bitmap: read_unsigned16(&tuple.items[15])?,
+            source_selection_policy_identity: read_hash512(&tuple.items[16])?,
+            activation_policy_identity: read_hash512(&tuple.items[17])?,
+            finality_policy_identity: read_hash512(&tuple.items[20])?,
         };
-        let target_kind = FinalityTargetKind::from_u16(read_unsigned16(&tuple.items[11])?)?;
-        let output_ordinal = read_unsigned64(&tuple.items[12])?;
-        let quorum = read_unsigned16(&tuple.items[13])?;
+        let target_kind = FinalityTargetKind::from_u16(read_unsigned16(&tuple.items[18])?)?;
+        let output_ordinal = read_unsigned64(&tuple.items[19])?;
+        let quorum = read_unsigned16(&tuple.items[21])?;
         let target = Self::new(context)?;
         if target.target_kind != target_kind
             || output_ordinal != OUTPUT_ORDINAL
@@ -248,6 +307,11 @@ pub fn derive_finality_target(
     source_signatures: &[Vec<u8>],
 ) -> Result<VerifiedFinalityTarget, FinalityError> {
     validate_completion_profile(context.participant_count)?;
+    let semantic_bindings = derive_semantic_bindings(
+        context.participant_count,
+        COMPLETION_PROFILE_OPTION_COUNT,
+        context.top_count,
+    )?;
     if action_key_sets.len() != usize::from(context.participant_count)
         || source_declarations.len() != usize::from(context.participant_count)
         || source_bodies.len() != usize::from(context.participant_count)
@@ -317,13 +381,21 @@ pub fn derive_finality_target(
         runtime_identity: context.runtime_identity,
         candidate_build_identity: context.candidate_build_identity,
         action_proposal_identity: context.action_proposal_identity,
+        action_definition_identity: context.action_definition_identity,
         action_key_set_roster_identity: context.action_key_set_roster_identity,
         preparation_attempt: context.preparation_attempt,
         predecessor_identity: context.predecessor_identity,
         verified_preparation_root: context.verified_preparation_root,
+        compiler_identity: semantic_bindings.compiler_identity,
+        circuit_identity: semantic_bindings.circuit_identity,
+        option_count: COMPLETION_PROFILE_OPTION_COUNT,
+        output_schema_identity: semantic_bindings.output_schema_identity,
         source_inventory_root,
         source_submission_bitmap,
+        source_selection_policy_identity: semantic_bindings.source_selection_policy_identity,
+        activation_policy_identity: semantic_bindings.activation_policy_identity,
         top_count: context.top_count,
+        finality_policy_identity: semantic_bindings.finality_policy_identity,
     })?;
     let target_body = target.encode()?;
     let target_identity = target.body_identity()?;
@@ -353,22 +425,32 @@ pub fn encode_finality_signature_carrier(
     .map_err(|_| FinalityError::InvalidCanonicalEncoding)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedFinalityCapability {
+    pub target: FinalityTarget,
+    pub target_identity: Hash512,
+}
+
 pub fn verify_finality_certificate(
-    participant_count: u16,
+    target: &FinalityTarget,
     action_key_sets: &[ActionKeySet],
-    target_identity: Hash512,
     signatures: &[(u16, Vec<u8>)],
-) -> Result<u16, FinalityError> {
+) -> Result<VerifiedFinalityCapability, FinalityError> {
+    let participant_count = target.context().participant_count;
     validate_completion_profile(participant_count)?;
     if action_key_sets.len() != usize::from(participant_count)
         || signatures.len() > usize::from(participant_count)
+        || action_key_set_roster_identity(action_key_sets)
+            .map_err(|_| FinalityError::WrongContext)?
+            != target.context().action_key_set_roster_identity
     {
-        return Err(FinalityError::WrongItemTypeOrLength);
+        return Err(FinalityError::WrongContext);
     }
     let quorum = direct_finality_quorum(participant_count)?;
     if signatures.len() < usize::from(quorum) {
         return Err(FinalityError::InsufficientSignatures);
     }
+    let target_identity = target.body_identity()?;
     let mut signer_bitmap = 0_u16;
     for (signer_position, signature_bytes) in signatures {
         validate_position(participant_count, *signer_position)?;
@@ -376,7 +458,7 @@ pub fn verify_finality_certificate(
         if signer_bitmap & signer_mask != 0 {
             return Err(FinalityError::DuplicateSignature);
         }
-        verify_finality_signature(
+        verify_finality_signature_for_identity(
             participant_count,
             action_key_sets,
             *signer_position,
@@ -385,21 +467,44 @@ pub fn verify_finality_certificate(
         )?;
         signer_bitmap |= signer_mask;
     }
-    Ok(signer_bitmap)
+    Ok(VerifiedFinalityCapability {
+        target: target.clone(),
+        target_identity,
+    })
 }
 
 pub fn verify_finality_signature(
+    target: &FinalityTarget,
+    action_key_sets: &[ActionKeySet],
+    signer_position: u16,
+    signature_bytes: &[u8],
+) -> Result<(), FinalityError> {
+    let participant_count = target.context().participant_count;
+    validate_completion_profile(participant_count)?;
+    validate_position(participant_count, signer_position)?;
+    if action_key_sets.len() != usize::from(participant_count)
+        || action_key_set_roster_identity(action_key_sets)
+            .map_err(|_| FinalityError::WrongContext)?
+            != target.context().action_key_set_roster_identity
+    {
+        return Err(FinalityError::WrongContext);
+    }
+    verify_finality_signature_for_identity(
+        participant_count,
+        action_key_sets,
+        signer_position,
+        target.body_identity()?,
+        signature_bytes,
+    )
+}
+
+fn verify_finality_signature_for_identity(
     participant_count: u16,
     action_key_sets: &[ActionKeySet],
     signer_position: u16,
     target_identity: Hash512,
     signature_bytes: &[u8],
 ) -> Result<(), FinalityError> {
-    validate_completion_profile(participant_count)?;
-    validate_position(participant_count, signer_position)?;
-    if action_key_sets.len() != usize::from(participant_count) {
-        return Err(FinalityError::WrongItemTypeOrLength);
-    }
     let carrier = ActionSignatureCarrier::decode(participant_count, signature_bytes)
         .map_err(|_| FinalityError::InvalidSignature)?;
     let key_set = action_key_sets
@@ -416,6 +521,163 @@ pub fn verify_finality_signature(
             verification_key,
         )
         .map_err(|_| FinalityError::InvalidSignature)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SemanticBindings {
+    compiler_identity: Hash512,
+    circuit_identity: Hash512,
+    output_schema_identity: Hash512,
+    source_selection_policy_identity: Hash512,
+    activation_policy_identity: Hash512,
+    finality_policy_identity: Hash512,
+}
+
+fn derive_semantic_bindings(
+    participant_count: u16,
+    option_count: u16,
+    top_count: u16,
+) -> Result<SemanticBindings, FinalityError> {
+    validate_completion_profile(participant_count)?;
+    if option_count != COMPLETION_PROFILE_OPTION_COUNT || !(1..=option_count).contains(&top_count) {
+        return Err(FinalityError::WrongContext);
+    }
+    let compiler_identity = hash_foundation_tuple_512(
+        TALLY_COMPILER_IDENTITY_DOMAIN,
+        &[CanonicalItem::unsigned16(1)],
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
+    let profile = TallyCircuitProfile::new(participant_count, option_count, top_count)
+        .map_err(|_| FinalityError::WrongContext)?;
+    let circuit = compile_tally_circuit(profile).map_err(|_| FinalityError::WrongContext)?;
+    let mut circuit_bytes = Vec::new();
+    circuit_bytes.extend_from_slice(
+        &u64::try_from(circuit.input_bit_count())
+            .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
+            .to_le_bytes(),
+    );
+    circuit_bytes.extend_from_slice(
+        &u64::try_from(circuit.operations().len())
+            .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
+            .to_le_bytes(),
+    );
+    for operation in circuit.operations() {
+        match operation {
+            BooleanOperation::Constant(value) => {
+                circuit_bytes.push(1);
+                circuit_bytes.push(u8::from(*value));
+            }
+            BooleanOperation::ExclusiveOr {
+                left_wire,
+                right_wire,
+            } => {
+                circuit_bytes.push(2);
+                circuit_bytes.extend_from_slice(&left_wire.to_le_bytes());
+                circuit_bytes.extend_from_slice(&right_wire.to_le_bytes());
+            }
+            BooleanOperation::Conjunction {
+                left_wire,
+                right_wire,
+            } => {
+                circuit_bytes.push(3);
+                circuit_bytes.extend_from_slice(&left_wire.to_le_bytes());
+                circuit_bytes.extend_from_slice(&right_wire.to_le_bytes());
+            }
+            BooleanOperation::Negation { input_wire } => {
+                circuit_bytes.push(4);
+                circuit_bytes.extend_from_slice(&input_wire.to_le_bytes());
+            }
+        }
+    }
+    let output_wires = circuit.output_wires();
+    circuit_bytes.extend_from_slice(
+        &u64::try_from(output_wires.len())
+            .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
+            .to_le_bytes(),
+    );
+    for output_wire in output_wires {
+        circuit_bytes.extend_from_slice(&output_wire.to_le_bytes());
+    }
+    let circuit_identity = hash_foundation_tuple_512(
+        TALLY_CIRCUIT_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::hash512(compiler_identity.into_bytes()),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(option_count),
+            CanonicalItem::unsigned16(top_count),
+            CanonicalItem::variable_bytes(circuit_bytes)
+                .map_err(|_| FinalityError::InvalidCanonicalEncoding)?,
+        ],
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
+    let option_position_bit_width =
+        bit_width_for_maximum_value(usize::from(option_count - 1)).max(1);
+    let output_bit_count = usize::from(participant_count)
+        .checked_add(1)
+        .and_then(|value| {
+            value.checked_add(usize::from(top_count).checked_mul(option_position_bit_width)?)
+        })
+        .ok_or(FinalityError::InvalidCanonicalEncoding)?;
+    let output_schema_identity = hash_foundation_tuple_512(
+        TALLY_OUTPUT_SCHEMA_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(option_count),
+            CanonicalItem::unsigned16(top_count),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(
+                u16::try_from(option_position_bit_width)
+                    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?,
+            ),
+            CanonicalItem::unsigned16(
+                u16::try_from(output_bit_count)
+                    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?,
+            ),
+            CanonicalItem::unsigned64(OUTPUT_ORDINAL),
+        ],
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
+    let source_selection_policy_identity = hash_foundation_tuple_512(
+        SOURCE_SELECTION_POLICY_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(1),
+        ],
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
+    let activation_policy_identity = hash_foundation_tuple_512(
+        ACTIVATION_POLICY_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(0),
+            CanonicalItem::unsigned64(OUTPUT_ORDINAL),
+        ],
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
+    let finality_policy_identity = hash_foundation_tuple_512(
+        FINALITY_POLICY_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(static_fault_bound(participant_count)?),
+            CanonicalItem::unsigned16(INDEPENDENT_HONEST_LOCK_LOSS_COUNT),
+            CanonicalItem::unsigned16(direct_finality_quorum(participant_count)?),
+        ],
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
+    Ok(SemanticBindings {
+        compiler_identity,
+        circuit_identity,
+        output_schema_identity,
+        source_selection_policy_identity,
+        activation_policy_identity,
+        finality_policy_identity,
+    })
 }
 
 pub fn static_fault_bound(participant_count: u16) -> Result<u16, FinalityError> {
@@ -498,18 +760,32 @@ mod tests {
     }
 
     fn target(submission_bitmap: u16) -> FinalityTarget {
+        let semantic_bindings = derive_semantic_bindings(
+            COMPLETION_PROFILE_PARTICIPANT_COUNT,
+            COMPLETION_PROFILE_OPTION_COUNT,
+            1,
+        )
+        .expect("semantic bindings");
         FinalityTarget::new(FinalityTargetContext {
             participant_count: COMPLETION_PROFILE_PARTICIPANT_COUNT,
             runtime_identity: hash(1),
             candidate_build_identity: hash(2),
             action_proposal_identity: hash(3),
+            action_definition_identity: hash(8),
             action_key_set_roster_identity: hash(4),
             preparation_attempt: 7,
             predecessor_identity: hash(5),
             verified_preparation_root: hash(6),
+            compiler_identity: semantic_bindings.compiler_identity,
+            circuit_identity: semantic_bindings.circuit_identity,
+            option_count: COMPLETION_PROFILE_OPTION_COUNT,
+            output_schema_identity: semantic_bindings.output_schema_identity,
             source_inventory_root: hash(7),
             source_submission_bitmap: submission_bitmap,
+            source_selection_policy_identity: semantic_bindings.source_selection_policy_identity,
+            activation_policy_identity: semantic_bindings.activation_policy_identity,
             top_count: 1,
+            finality_policy_identity: semantic_bindings.finality_policy_identity,
         })
         .expect("valid finality target")
     }
@@ -591,8 +867,21 @@ mod tests {
     fn target_binds_every_admitted_top_count() {
         let mut identities = Vec::new();
         for top_count in 1..=COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            let semantic_bindings = derive_semantic_bindings(
+                COMPLETION_PROFILE_PARTICIPANT_COUNT,
+                COMPLETION_PROFILE_OPTION_COUNT,
+                top_count,
+            )
+            .expect("semantic bindings");
             let candidate = FinalityTarget::new(FinalityTargetContext {
                 top_count,
+                compiler_identity: semantic_bindings.compiler_identity,
+                circuit_identity: semantic_bindings.circuit_identity,
+                output_schema_identity: semantic_bindings.output_schema_identity,
+                source_selection_policy_identity: semantic_bindings
+                    .source_selection_policy_identity,
+                activation_policy_identity: semantic_bindings.activation_policy_identity,
+                finality_policy_identity: semantic_bindings.finality_policy_identity,
                 ..target(1).context()
             })
             .expect("admitted top count");
@@ -615,6 +904,64 @@ mod tests {
                     ..target(1).context()
                 }),
                 Err(FinalityError::WrongContext)
+            );
+        }
+    }
+
+    #[test]
+    fn target_recomputes_fixed_semantic_bindings_and_binds_external_identities() {
+        let baseline = target(1);
+        for candidate in [
+            FinalityTargetContext {
+                compiler_identity: hash(0xa1),
+                ..baseline.context()
+            },
+            FinalityTargetContext {
+                circuit_identity: hash(0xa2),
+                ..baseline.context()
+            },
+            FinalityTargetContext {
+                output_schema_identity: hash(0xa3),
+                ..baseline.context()
+            },
+            FinalityTargetContext {
+                source_selection_policy_identity: hash(0xa4),
+                ..baseline.context()
+            },
+            FinalityTargetContext {
+                activation_policy_identity: hash(0xa5),
+                ..baseline.context()
+            },
+            FinalityTargetContext {
+                finality_policy_identity: hash(0xa6),
+                ..baseline.context()
+            },
+            FinalityTargetContext {
+                option_count: COMPLETION_PROFILE_OPTION_COUNT - 1,
+                ..baseline.context()
+            },
+        ] {
+            assert_eq!(
+                FinalityTarget::new(candidate),
+                Err(FinalityError::WrongContext)
+            );
+        }
+
+        for changed in [
+            FinalityTarget::new(FinalityTargetContext {
+                candidate_build_identity: hash(0xb1),
+                ..baseline.context()
+            })
+            .expect("changed build remains a valid distinct target"),
+            FinalityTarget::new(FinalityTargetContext {
+                action_definition_identity: hash(0xb2),
+                ..baseline.context()
+            })
+            .expect("changed action definition remains a valid distinct target"),
+        ] {
+            assert_ne!(
+                changed.body_identity().expect("changed identity"),
+                baseline.body_identity().expect("baseline identity")
             );
         }
     }

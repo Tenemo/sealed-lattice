@@ -2,7 +2,9 @@
 
 mod encoding;
 mod foundation;
+#[cfg(feature = "construction")]
 mod protocol;
+#[cfg(feature = "construction")]
 pub(crate) mod tally_circuit;
 
 use core::{ptr, slice};
@@ -22,6 +24,7 @@ unsafe fn command_output(pointer: *const u8, length: usize) -> Vec<u8> {
     encoding::run_foundation_command(input)
 }
 
+#[cfg(feature = "construction")]
 unsafe fn construction_command_output(pointer: *const u8, length: usize) -> Vec<u8> {
     if length == 0 || pointer.is_null() {
         return encoding::run_construction_command(&[]);
@@ -79,6 +82,7 @@ pub unsafe extern "C" fn sealed_lattice_foundation_command_with_length(
 /// `pointer` must be null when `length` is zero or identify `length` readable
 /// bytes in this module's linear memory. `output_length_pointer` must be null
 /// or identify one writable `usize` value in the same memory.
+#[cfg(feature = "construction")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_construction_command_with_length(
     pointer: *const u8,

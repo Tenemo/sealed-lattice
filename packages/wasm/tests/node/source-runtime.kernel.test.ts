@@ -21,7 +21,6 @@ import {
 } from '../../src/pair-encryption-runtime.js';
 import {
     openPreparationMaterialRuntime,
-    preparationAffineCoefficientByteLength,
     preparationContributionOpeningVectorByteLength,
     type GeneratedPreparationMaterial,
 } from '../../src/preparation-material-runtime.js';
@@ -35,11 +34,6 @@ import {
     type PreparationParentCarrier,
     type SourcePreparationContext,
 } from '../../src/source-runtime.js';
-import {
-    openTallyActivationRuntime,
-    type ActivationChunkDescriptor,
-    type SignedActivationManifest,
-} from '../../src/tally-activation-runtime.js';
 
 const kernelUrl = new URL(
     '../../dist/sealed-lattice-kernel.wasm',
@@ -72,11 +66,12 @@ describe('source fixation scalar WASM runtime', () => {
         const parentRuntime = openPreparationParentRuntime(kernel);
         const sourceRuntime = openSourceRuntime(kernel);
         const finalityRuntime = openFinalityRuntime(kernel);
-        const tallyActivationRuntime = openTallyActivationRuntime(kernel);
         const actionProposalIdentity = deterministicBytes(64, 0x1001n);
         const predecessorIdentity = deterministicBytes(64, 0x1002n);
         const actionKeySetBodies: Uint8Array[] = [];
         const signatureSecretKeys: Uint8Array[][] = [];
+        const signatureVerificationKeysByParticipant: Uint8Array[][] = [];
+        const pairEncryptionKeysByParticipant: Uint8Array[][] = [];
 
         for (
             let participantPosition = 0;
@@ -96,6 +91,9 @@ describe('source fixation scalar WASM runtime', () => {
                 (secretKey) =>
                     signatureRuntime.deriveVerificationKey(secretKey),
             );
+            signatureVerificationKeysByParticipant.push(
+                signatureVerificationKeys,
+            );
             const pairEncryptionKeys = Array.from(
                 { length: participantCount - 1 },
                 (_, pairIndex) =>
@@ -107,6 +105,7 @@ describe('source fixation scalar WASM runtime', () => {
                         ),
                     ).encryptionKey,
             );
+            pairEncryptionKeysByParticipant.push(pairEncryptionKeys);
             actionKeySetBodies.push(
                 keySetRuntime.encode({
                     participantCount,
@@ -134,7 +133,6 @@ describe('source fixation scalar WASM runtime', () => {
             predecessorIdentity,
         };
         const contributionOpenings: Uint8Array[] = [];
-        const affineCoefficients: Uint8Array[] = [];
         const materials: GeneratedPreparationMaterial[] = [];
         const parents: PreparationParentCarrier[] = [];
         const parentIdentities: Uint8Array[] = [];
@@ -148,16 +146,10 @@ describe('source fixation scalar WASM runtime', () => {
                 preparationContributionOpeningVectorByteLength,
                 0x8000n + BigInt(senderPosition),
             );
-            const affine = deterministicBytes(
-                preparationAffineCoefficientByteLength,
-                0x9000n + BigInt(senderPosition),
-            );
             contributionOpenings.push(openings);
-            affineCoefficients.push(affine);
             const material = materialRuntime.generate(
                 { ...sourcePreparationContext, senderPosition },
                 openings,
-                affine,
             );
             materials.push(material);
             const parent = parentRuntime.encode({
@@ -227,7 +219,6 @@ describe('source fixation scalar WASM runtime', () => {
             actionKeySetBodies,
             parents,
             contributionOpenings[0] ?? new Uint8Array(),
-            affineCoefficients[0] ?? new Uint8Array(),
             remotePlaintextsFor(0),
         );
         expect(sourcePreparation.root).toHaveLength(64);
@@ -245,7 +236,6 @@ describe('source fixation scalar WASM runtime', () => {
         expect(sourcePreparation.heldSubsetKeys).toHaveLength(
             heldSubsetKeyVectorByteLength,
         );
-        const verifiedPreparations = [sourcePreparation];
         const zeroScores = new Uint8Array(10);
         const submittedScores = Uint8Array.of(1, 10, 3, 9, 5, 8, 7, 6, 4, 2);
         const correctionZero = sourceRuntime.deriveHonestCorrection(
@@ -311,11 +301,9 @@ describe('source fixation scalar WASM runtime', () => {
             actionKeySetBodies,
             parents,
             contributionOpenings[abstainingPosition] ?? new Uint8Array(),
-            affineCoefficients[abstainingPosition] ?? new Uint8Array(),
             remotePlaintextsFor(abstainingPosition),
         );
         expect(abstainingPreparation.root).toEqual(sourcePreparation.root);
-        verifiedPreparations.push(abstainingPreparation);
         const abstainingContext = {
             ...sourcePreparationContext,
             verifiedPreparationRoot: abstainingPreparation.root,
@@ -372,11 +360,9 @@ describe('source fixation scalar WASM runtime', () => {
                 actionKeySetBodies,
                 parents,
                 contributionOpenings[position] ?? new Uint8Array(),
-                affineCoefficients[position] ?? new Uint8Array(),
                 remotePlaintextsFor(position),
             );
             expect(preparation.root).toEqual(sourcePreparation.root);
-            verifiedPreparations.push(preparation);
             const sourceContext = {
                 ...sourcePreparationContext,
                 verifiedPreparationRoot: preparation.root,
@@ -403,6 +389,7 @@ describe('source fixation scalar WASM runtime', () => {
             runtimeIdentity: deterministicBytes(64, 0xb001n),
             candidateBuildIdentity: deterministicBytes(64, 0xb002n),
             actionProposalIdentity,
+            actionDefinitionIdentity: deterministicBytes(64, 0xb003n),
             actionKeySetRosterIdentity,
             preparationAttempt: sourcePreparationContext.preparationAttempt,
             predecessorIdentity,
@@ -464,7 +451,7 @@ describe('source fixation scalar WASM runtime', () => {
         const finalitySignatures: FinalitySignatureCarrier[] = [];
         for (
             let signerPosition = 0;
-            signerPosition < completionProfileFinalityQuorum;
+            signerPosition < participantCount;
             signerPosition += 1
         ) {
             const finalitySecretKey = signatureSecretKeys[signerPosition]?.[2];
@@ -483,14 +470,12 @@ describe('source fixation scalar WASM runtime', () => {
                 ),
             });
         }
-        expect(
-            finalityRuntime.verifyCertificate(
-                target.targetBody,
-                actionKeySetBodies,
-                finalitySignatures,
-            ),
-        ).toEqual({
-            signerBitmap: 0xff,
+        const firstCertificate = finalityRuntime.verifyCertificate(
+            target.targetBody,
+            actionKeySetBodies,
+            finalitySignatures.slice(0, completionProfileFinalityQuorum),
+        );
+        expect(firstCertificate).toMatchObject({
             quorum: completionProfileFinalityQuorum,
             targetKind: 'computation',
             sourceSubmissionBitmap: 1,
@@ -499,197 +484,43 @@ describe('source fixation scalar WASM runtime', () => {
         });
         finalityRuntime.verifySignature(
             0,
-            target.targetIdentity,
+            target.targetBody,
             actionKeySetBodies,
             finalitySignatures[0]?.signature ?? new Uint8Array(),
         );
 
-        const activationContext = {
-            targetIdentity: target.targetIdentity,
-            topCount: 1,
-            sourceSubmissionBitmap: 1,
-            sourceCorrections: [
-                submittedCorrection,
-                ...Array.from(
-                    { length: participantCount - 1 },
-                    () => undefined,
-                ),
-            ],
-        } as const;
-        const activationPlan = tallyActivationRuntime.plan(1);
-        expect(activationPlan.conjunctionCount).toBe(2_098);
-        expect(activationPlan.outputBitCount).toBe(15);
-        const activationChunksByRange: Uint8Array[][] = [];
-        const activationDescriptors = Array.from(
-            { length: participantCount },
-            () => [] as ActivationChunkDescriptor[],
-        );
-        for (const range of activationPlan.ranges) {
-            const chunks = verifiedPreparations.map(
-                (preparation, participantPosition) => {
-                    const chunk = tallyActivationRuntime.generateChunk(
-                        activationContext,
-                        {
-                            participantPosition,
-                            activationSeed: deterministicBytes(
-                                32,
-                                0xc000n + BigInt(participantPosition),
-                            ),
-                            heldSubsetKeys: preparation.heldSubsetKeys,
-                            heldAffineEvaluations:
-                                preparation.heldAffineEvaluations,
-                            localAffineConstants:
-                                preparation.localAffineConstants,
-                        },
-                        range,
-                    );
-                    activationDescriptors[participantPosition]?.push({
-                        ...range,
-                        byteLength: chunk.byteLength,
-                        identity: tallyActivationRuntime.identifyChunk(chunk),
-                    });
-                    return chunk;
-                },
-            );
-            activationChunksByRange.push(chunks);
-        }
-        const signedActivationManifests: SignedActivationManifest[] =
-            activationDescriptors.map((descriptors, participantPosition) => {
-                const encoded = tallyActivationRuntime.encodeManifest(
-                    activationContext,
-                    participantPosition,
-                    descriptors,
-                );
-                const activationSecretKey =
-                    signatureSecretKeys[participantPosition]?.[3];
-                if (activationSecretKey === undefined) {
-                    throw new Error('test activation key is absent');
-                }
-                const signature = tallyActivationRuntime.encodeSignature(
-                    participantPosition,
-                    encoded.identity,
-                    signatureRuntime.signBodyIdentity(
-                        activationSecretKey,
-                        encoded.identity,
-                    ),
-                );
-                expect(
-                    tallyActivationRuntime.verifyManifest(
-                        actionKeySetBodies,
-                        encoded.body,
-                        signature,
-                    ),
-                ).toMatchObject({
-                    targetIdentity: target.targetIdentity,
-                    topCount: 1,
-                    sourceSubmissionBitmap: 1,
-                    participantPosition,
-                    chunks: descriptors,
-                });
-                return { body: encoded.body, signature };
-            });
-        const firstChunks = activationChunksByRange[0];
-        const firstRange = activationPlan.ranges[0];
-        if (firstChunks === undefined || firstRange === undefined) {
-            throw new Error('test activation plan is empty');
-        }
-        const corruptedFirstChunks = firstChunks.map((chunk) =>
-            Uint8Array.from(chunk),
-        );
-        const corruptedFirstChunk = corruptedFirstChunks[0];
-        if (corruptedFirstChunk === undefined) {
-            throw new Error('test activation chunk is absent');
-        }
-        corruptedFirstChunk[corruptedFirstChunk.byteLength - 1] ^= 1;
-        expect(() =>
-            tallyActivationRuntime.advance(
-                activationContext,
-                undefined,
-                firstRange,
-                actionKeySetBodies,
-                signedActivationManifests,
-                corruptedFirstChunks,
-            ),
-        ).toThrow(ConstructionKernelCommandError);
+        expect(finalitySignatures).toHaveLength(participantCount);
 
-        let activationCheckpoint: Uint8Array | undefined;
-        let activationTerminal:
-            | ReturnType<typeof tallyActivationRuntime.advance>
-            | undefined;
-        let checkpointBeforeTerminal: Uint8Array | undefined;
-        let maximumCheckpointByteLength = 0;
-        for (const [rangeIndex, range] of activationPlan.ranges.entries()) {
-            const chunks = activationChunksByRange[rangeIndex];
-            if (chunks === undefined) {
-                throw new Error('test activation chunk range is absent');
-            }
-            checkpointBeforeTerminal = activationCheckpoint;
-            const advance = tallyActivationRuntime.advance(
-                activationContext,
-                activationCheckpoint,
-                range,
-                actionKeySetBodies,
-                signedActivationManifests,
-                chunks,
-            );
-            if (advance.kind === 'pending') {
-                maximumCheckpointByteLength = Math.max(
-                    maximumCheckpointByteLength,
-                    advance.checkpoint.byteLength,
-                );
-                activationCheckpoint = Uint8Array.from(advance.checkpoint);
-            } else {
-                activationTerminal = advance;
-            }
-        }
-        expect(maximumCheckpointByteLength).toBeGreaterThan(0);
-        expect(maximumCheckpointByteLength).toBeLessThan(3_000_000);
-        expect(activationTerminal).toEqual({
-            kind: 'result',
-            acceptedBallotAuthorshipBitmap: 1,
-            orderedOptionPositions: [1],
-        });
-        const lastRange =
-            activationPlan.ranges[activationPlan.ranges.length - 1];
-        const lastChunks =
-            activationChunksByRange[activationChunksByRange.length - 1];
-        if (
-            lastRange === undefined ||
-            lastChunks === undefined ||
-            checkpointBeforeTerminal === undefined
-        ) {
-            throw new Error('test terminal activation range is absent');
-        }
         expect(
-            tallyActivationRuntime.advance(
-                activationContext,
-                checkpointBeforeTerminal,
-                lastRange,
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
                 actionKeySetBodies,
-                signedActivationManifests,
-                lastChunks,
+                finalitySignatures
+                    .slice(0, completionProfileFinalityQuorum)
+                    .reverse(),
             ),
-        ).toEqual(activationTerminal);
-        const secondRange = activationPlan.ranges[1];
-        const secondChunks = activationChunksByRange[1];
-        if (secondRange === undefined || secondChunks === undefined) {
-            throw new Error('test second activation range is absent');
-        }
-        expect(() =>
-            tallyActivationRuntime.advance(
-                activationContext,
-                undefined,
-                secondRange,
+        ).toEqual(firstCertificate);
+        expect(
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
                 actionKeySetBodies,
-                signedActivationManifests,
-                secondChunks,
+                finalitySignatures.slice(
+                    participantCount - completionProfileFinalityQuorum,
+                ),
             ),
-        ).toThrow(ConstructionKernelCommandError);
+        ).toEqual(firstCertificate);
+        expect(
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
+                actionKeySetBodies,
+                finalitySignatures.slice(0, completionProfileFinalityQuorum),
+            ),
+        ).toEqual(firstCertificate);
 
         expect(() =>
             finalityRuntime.verifySignature(
                 1,
-                target.targetIdentity,
+                target.targetBody,
                 actionKeySetBodies,
                 finalitySignatures[0]?.signature ?? new Uint8Array(),
             ),
@@ -723,6 +554,57 @@ describe('source fixation scalar WASM runtime', () => {
                 finalitySignatures,
             ),
         ).toThrow(ConstructionKernelCommandError);
+
+        const conflictingTarget = finalityRuntime.deriveTarget(
+            { ...finalityContext, topCount: 2 },
+            actionKeySetBodies,
+            sources,
+        );
+        expect(() =>
+            finalityRuntime.verifyCertificate(
+                conflictingTarget.targetBody,
+                actionKeySetBodies,
+                finalitySignatures.slice(0, completionProfileFinalityQuorum),
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
+        const unrelatedActionKeySetBodies = actionKeySetBodies.map(
+            (_body, participantPosition) =>
+                keySetRuntime.encode({
+                    participantCount,
+                    proposalIdentity: actionProposalIdentity,
+                    rosterPosition: participantPosition,
+                    nonce: deterministicBytes(
+                        32,
+                        0xc000n + BigInt(participantPosition),
+                    ),
+                    actionSignatureVerificationKeys:
+                        signatureVerificationKeysByParticipant[
+                            participantPosition
+                        ] ?? [],
+                    pairEncryptionKeys:
+                        pairEncryptionKeysByParticipant[participantPosition] ??
+                        [],
+                }).body,
+        );
+        expect(() =>
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
+                unrelatedActionKeySetBodies,
+                finalitySignatures.slice(0, completionProfileFinalityQuorum),
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
+        const malformedCircuitTarget = Uint8Array.from(target.targetBody);
+        malformedCircuitTarget[620] ^= 1;
+        expect(() =>
+            finalityRuntime.verifyCertificate(
+                malformedCircuitTarget,
+                actionKeySetBodies,
+                finalitySignatures.slice(0, completionProfileFinalityQuorum),
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
         const sourceZeroAbstention = sourceRuntime.encodeBody(
             submittedContext,
             'abstain',

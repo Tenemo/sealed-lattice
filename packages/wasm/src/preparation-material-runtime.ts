@@ -13,12 +13,9 @@ const preparationParentBodyByteLength = 8_502;
 
 const preparationContributionOpeningByteLength = 80;
 const preparationContributionCount = 120;
-export const preparationAffineModuleValueByteLength = 48;
-export const preparationLowAffineCoefficientCount = 10;
 export const preparationContributionOpeningVectorByteLength =
     preparationContributionOpeningByteLength * preparationContributionCount;
-export const preparationAffineCoefficientByteLength = 672;
-export const preparationPlaintextByteLength = 6_836;
+export const preparationPlaintextByteLength = 6_734;
 export const preparationSubsetCommitmentVectorByteLength =
     preparationContributionCount * identityByteLength;
 
@@ -40,7 +37,6 @@ export type PreparationMaterialRuntime = Readonly<{
     generate(
         context: PreparationMaterialContextInput,
         contributionOpenings: Uint8Array,
-        affineCoefficients: Uint8Array,
     ): GeneratedPreparationMaterial;
     verifyPlaintext(
         context: PreparationMaterialContextInput,
@@ -103,22 +99,16 @@ const writeContext = (
 export const openPreparationMaterialRuntime = (
     kernel: ConstructionKernelCommandRuntime,
 ): PreparationMaterialRuntime => ({
-    generate: (context, contributionOpenings, affineCoefficients) => {
+    generate: (context, contributionOpenings) => {
         requireExactConstructionBytes(
             contributionOpenings,
             preparationContributionOpeningVectorByteLength,
             'contributionOpenings',
         );
-        requireExactConstructionBytes(
-            affineCoefficients,
-            preparationAffineCoefficientByteLength,
-            'affineCoefficients',
-        );
         const request = new ConstructionCommandWriter();
         request.writeU8(generatePreparationMaterialCommand);
         writeContext(request, context);
         request.writeBytes(contributionOpenings);
-        request.writeBytes(affineCoefficients);
         return executeConstructionCommand(kernel, request, (reader) => {
             const subsetCommitments = Uint8Array.from(
                 reader.readFixed(preparationSubsetCommitmentVectorByteLength),
