@@ -17,6 +17,6 @@
         "build": "del-cli dist && tsc --project tsconfig.json && pnpm run build:wasm"
     },
     "devDependencies": {
-        "vitest": "^4.1.4"
+        "vitest": "^4.1.11"
     }
 }

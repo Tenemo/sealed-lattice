@@ -222,4 +222,20 @@ export default defineConfig(
             'vitest/no-disabled-tests': 'error',
         },
     },
+    {
+        files: [
+            'packages/sdk/tests/node/election-foundation-public-api.test.ts',
+        ],
+        rules: {
+            'import-x/extensions': [
+                'error',
+                'ignorePackages',
+                {
+                    js: 'always',
+                    mjs: 'always',
+                    ts: 'never',
+                },
+            ],
+        },
+    },
 );

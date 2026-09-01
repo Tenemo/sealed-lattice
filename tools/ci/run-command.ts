@@ -34,20 +34,20 @@ type CapturedCommandResult = {
     readonly terminationSignal: NodeJS.Signals | null;
 };
 
-export type CommandStartEvent = {
+type CommandStartEvent = {
     readonly invocation: CommandInvocation;
     readonly logFiles?: CommandLogFiles;
     readonly processIdentifier?: number;
     readonly startedAtMilliseconds: number;
 };
 
-export type CommandOutputEvent = {
+type CommandOutputEvent = {
     readonly chunk: string;
     readonly invocation: CommandInvocation;
     readonly streamName: 'stderr' | 'stdout';
 };
 
-export type CommandExitEvent = {
+type CommandExitEvent = {
     readonly durationMilliseconds: number;
     readonly error?: Error;
     readonly exitCode: number;

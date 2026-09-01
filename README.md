@@ -91,7 +91,7 @@ console.log(manifest.manifestHash, manifest.canonicalBytes);
 
 ## Development
 
-The repository uses Node.js 24.14.1 and pnpm 10.33.0.
+The repository uses Node.js 24.14.1 and pnpm 11.25.0.
 
 ```bash
 pnpm install --frozen-lockfile

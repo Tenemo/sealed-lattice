@@ -37,7 +37,7 @@ export type SourcePreparationContext = Readonly<{
     predecessorIdentity: Uint8Array;
 }>;
 
-export type SourceContext = SourcePreparationContext &
+type SourceContext = SourcePreparationContext &
     Readonly<{
         verifiedPreparationRoot: Uint8Array;
         senderPosition: number;
@@ -54,12 +54,12 @@ export type VerifiedCompletePreparation = Readonly<{
     heldSubsetKeys: Uint8Array;
 }>;
 
-export type EncodedSourceBody = Readonly<{
+type EncodedSourceBody = Readonly<{
     body: Uint8Array;
     identity: Uint8Array;
 }>;
 
-export type VerifiedSource = Readonly<{
+type VerifiedSource = Readonly<{
     senderPosition: number;
     declaration: SourceDeclaration;
     correction: Uint8Array | undefined;

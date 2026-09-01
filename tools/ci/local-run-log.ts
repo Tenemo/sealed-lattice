@@ -18,7 +18,7 @@ export type CommandLogFiles = {
     readonly commandId: string;
 };
 
-export type LocalRunEventInput = {
+type LocalRunEventInput = {
     readonly commandId?: string;
     readonly details?: Readonly<Record<string, unknown>>;
     readonly eventType: string;

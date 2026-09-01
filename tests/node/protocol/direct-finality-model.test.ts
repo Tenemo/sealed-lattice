@@ -25,9 +25,7 @@ type FinalitySignerState = Readonly<{
 }>;
 
 type SigningCut =
-    | 'before-persist'
-    | 'after-persist-before-publish'
-    | 'after-publish';
+    'before-persist' | 'after-persist-before-publish' | 'after-publish';
 
 const independentlyToleratedHonestStateFailures = 1;
 

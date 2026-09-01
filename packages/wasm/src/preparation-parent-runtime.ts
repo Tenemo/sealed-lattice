@@ -28,7 +28,7 @@ export const preparationParentBodyByteLength = (
 
 export const actionSignatureCarrierByteLength = 6_388;
 
-export type PreparationParentInput = Readonly<{
+type PreparationParentInput = Readonly<{
     participantCount: number;
     actionProposalIdentity: Uint8Array;
     actionKeySetRosterIdentity: Uint8Array;
@@ -39,14 +39,14 @@ export type PreparationParentInput = Readonly<{
     privateBodyIdentities: readonly Uint8Array[];
 }>;
 
-export type VerifiedPrivatePreparationCarrier = Readonly<{
+type VerifiedPrivatePreparationCarrier = Readonly<{
     senderPosition: number;
     recipientPosition: number;
     parentIdentity: Uint8Array;
     bodyIdentity: Uint8Array;
 }>;
 
-export type PrivatePreparationCarrierContextInput = Omit<
+type PrivatePreparationCarrierContextInput = Omit<
     PrivatePreparationContextInput,
     'senderPosition'
 >;

@@ -31,7 +31,7 @@ export type PrivatePreparationContextInput = Readonly<{
     recipientPosition: number;
 }>;
 
-export type SealedPrivatePreparationBody = Readonly<{
+type SealedPrivatePreparationBody = Readonly<{
     body: Uint8Array;
     identity: Uint8Array;
 }>;

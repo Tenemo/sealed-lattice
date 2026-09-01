@@ -141,7 +141,7 @@ export type TallyEvaluationProgress = Readonly<{
     resources: KernelResourceMeasurement;
 }>;
 
-export type PrivatePreparationWorkerSuccess = Readonly<{
+type PrivatePreparationWorkerSuccess = Readonly<{
     requestId: number;
     ok: true;
     result:
@@ -172,5 +172,4 @@ export type PrivatePreparationWorkerFailure = Readonly<{
 }>;
 
 export type PrivatePreparationWorkerResponse =
-    | PrivatePreparationWorkerFailure
-    | PrivatePreparationWorkerSuccess;
+    PrivatePreparationWorkerFailure | PrivatePreparationWorkerSuccess;

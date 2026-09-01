@@ -20,7 +20,7 @@ const nestedTupleListHeaderByteLength = 6;
 const tupleHeaderByteLength = 8;
 const tupleItemHeaderByteLength = 6;
 
-export type ActionKeySetInput = Readonly<{
+type ActionKeySetInput = Readonly<{
     participantCount: number;
     proposalIdentity: Uint8Array;
     rosterPosition: number;
@@ -29,7 +29,7 @@ export type ActionKeySetInput = Readonly<{
     pairEncryptionKeys: readonly Uint8Array[];
 }>;
 
-export type EncodedActionKeySet = Readonly<{
+type EncodedActionKeySet = Readonly<{
     body: Uint8Array;
     identity: Uint8Array;
 }>;

@@ -34,7 +34,7 @@
     },
     "devDependencies": {
         "@sealed-lattice/wasm": "workspace:*",
-        "vitest": "^4.1.4"
+        "vitest": "^4.1.11"
     },
     "keywords": [
         "cryptography",
