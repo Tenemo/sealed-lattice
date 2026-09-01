@@ -6,7 +6,9 @@ import type {
     PrivatePreparationWorkerRequest,
     PrivatePreparationWorkerResponse,
     PublishedPreparationPackage,
+    PublishedSourcePackage,
     RegisteredActionKeys,
+    SourcePublicationChoice,
 } from './private-preparation-worker-protocol.js';
 
 type PendingRequest = Readonly<{
@@ -52,6 +54,12 @@ const collectRequestTransferables = (
         collect(request.input.parentBody);
         collect(request.input.parentSignature);
         collect(request.input.privateBody);
+    }
+    if (request.operation === 'create-source-package') {
+        for (const parent of request.input.preparationParents) {
+            collect(parent.body);
+            collect(parent.signature);
+        }
     }
     return transferables;
 };
@@ -186,6 +194,31 @@ export class PrivatePreparationWorkerClient {
                 parentBody: copyBytes(parentBody),
                 parentSignature: copyBytes(parentSignature),
                 privateBody: copyBytes(privateBody),
+            },
+        });
+    }
+
+    createSourcePackage(
+        context: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        preparationAttempt: number,
+        preparationParents: readonly Readonly<{
+            body: Uint8Array;
+            signature: Uint8Array;
+        }>[],
+        choice: SourcePublicationChoice,
+    ): Promise<PublishedSourcePackage> {
+        return this.send({
+            operation: 'create-source-package',
+            input: {
+                ...copyActionContext(context),
+                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
+                preparationAttempt,
+                preparationParents: preparationParents.map((parent) => ({
+                    body: copyBytes(parent.body),
+                    signature: copyBytes(parent.signature),
+                })),
+                choice: { ...choice },
             },
         });
     }

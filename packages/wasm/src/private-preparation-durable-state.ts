@@ -1,14 +1,16 @@
-const databaseVersion = 1;
+const databaseVersion = 2;
 const rootStoreName = 'root';
 const actionStoreName = 'actions';
 const preparationStoreName = 'preparations';
 const slotStoreName = 'slots';
+const sourceStoreName = 'sources';
 const rootRecordIdentifier = 'browser-local-hmac-root-v1';
 
 type ProtectedStoreName =
     | typeof actionStoreName
     | typeof preparationStoreName
-    | typeof slotStoreName;
+    | typeof slotStoreName
+    | typeof sourceStoreName;
 
 export type ProtectedRecord = Readonly<{
     id: string;
@@ -101,6 +103,7 @@ const openDatabase = (name: string): Promise<IDBDatabase> =>
                 actionStoreName,
                 preparationStoreName,
                 slotStoreName,
+                sourceStoreName,
             ]) {
                 if (!database.objectStoreNames.contains(storeName)) {
                     database.createObjectStore(storeName, { keyPath: 'id' });
@@ -324,15 +327,24 @@ export class PrivatePreparationDurableState {
 
     async countProtectedRecords(): Promise<number> {
         const transaction = this.#database.transaction(
-            [actionStoreName, preparationStoreName, slotStoreName],
+            [
+                actionStoreName,
+                preparationStoreName,
+                slotStoreName,
+                sourceStoreName,
+            ],
             'readonly',
         );
         const counts = await Promise.all(
-            [actionStoreName, preparationStoreName, slotStoreName].map(
-                (storeName) =>
-                    requestResult<number>(
-                        transaction.objectStore(storeName).count(),
-                    ),
+            [
+                actionStoreName,
+                preparationStoreName,
+                slotStoreName,
+                sourceStoreName,
+            ].map((storeName) =>
+                requestResult<number>(
+                    transaction.objectStore(storeName).count(),
+                ),
             ),
         );
         await transactionCompletion(transaction);
@@ -350,6 +362,7 @@ export class PrivatePreparationDurableState {
                 actionStoreName,
                 preparationStoreName,
                 slotStoreName,
+                sourceStoreName,
             ],
             'readwrite',
             { durability: 'strict' },
@@ -364,11 +377,15 @@ export class PrivatePreparationDurableState {
             actionStore.get(action.id),
         );
         const stateCounts = await Promise.all(
-            [actionStoreName, preparationStoreName, slotStoreName].map(
-                (storeName) =>
-                    requestResult<number>(
-                        transaction.objectStore(storeName).count(),
-                    ),
+            [
+                actionStoreName,
+                preparationStoreName,
+                slotStoreName,
+                sourceStoreName,
+            ].map((storeName) =>
+                requestResult<number>(
+                    transaction.objectStore(storeName).count(),
+                ),
             ),
         );
         if (

@@ -4,6 +4,7 @@ use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
     hash_foundation_tuple_512,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use super::preparation_parent::{
     PreparationParent, SUBSET_COMMITMENT_BYTE_LENGTH, SUBSET_COMMITMENT_COUNT,
@@ -66,7 +67,7 @@ impl fmt::Display for PreparationPlaintextError {
 
 impl std::error::Error for PreparationPlaintextError {}
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 struct ContributionOpening {
     seed: [u8; CONTRIBUTION_SEED_BYTE_LENGTH],
     salt: [u8; CONTRIBUTION_SALT_BYTE_LENGTH],
@@ -93,7 +94,7 @@ impl ContributionOpening {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Zeroize)]
 pub struct PreparationPlaintext {
     openings: [ContributionOpening; PAIR_OPENING_COUNT],
     affine_a_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
@@ -187,6 +188,19 @@ pub struct GeneratedPreparationMaterial {
     pub recipient_plaintexts: Vec<Vec<u8>>,
 }
 
+#[derive(Zeroize)]
+pub struct HeldSubsetKey {
+    pub family: u16,
+    pub subset: u16,
+    pub key: [u8; CONTRIBUTION_SEED_BYTE_LENGTH],
+}
+
+impl Drop for HeldSubsetKey {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreparationMaterialContext {
     pub action_proposal_identity: Hash512,
@@ -207,18 +221,22 @@ pub fn generate_preparation_material(
     {
         return Err(PreparationPlaintextError::WrongItemTypeOrLength);
     }
-    let openings = opening_bytes
-        .chunks_exact(CONTRIBUTION_OPENING_BYTE_LENGTH)
-        .map(ContributionOpening::decode)
-        .collect::<Result<Vec<_>, _>>()?;
-    let affine_coefficients = affine_coefficient_bytes
-        .chunks_exact(AFFINE_MODULE_VALUE_BYTE_LENGTH)
-        .map(|bytes| {
-            bytes
-                .try_into()
-                .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)
-        })
-        .collect::<Result<Vec<[u8; AFFINE_MODULE_VALUE_BYTE_LENGTH]>, _>>()?;
+    let openings = Zeroizing::new(
+        opening_bytes
+            .chunks_exact(CONTRIBUTION_OPENING_BYTE_LENGTH)
+            .map(ContributionOpening::decode)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    let affine_coefficients = Zeroizing::new(
+        affine_coefficient_bytes
+            .chunks_exact(AFFINE_MODULE_VALUE_BYTE_LENGTH)
+            .map(|bytes| {
+                bytes
+                    .try_into()
+                    .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)
+            })
+            .collect::<Result<Vec<[u8; AFFINE_MODULE_VALUE_BYTE_LENGTH]>, _>>()?,
+    );
     if affine_coefficients[LOW_COEFFICIENT_COUNT]
         .iter()
         .all(|byte| *byte == 0)
@@ -232,7 +250,7 @@ pub fn generate_preparation_material(
     }
     let subset_commitments = sender_slots
         .iter()
-        .zip(&openings)
+        .zip(openings.iter())
         .enumerate()
         .map(|(ordinal, ((family, subset), opening))| {
             contribution_commitment(
@@ -259,7 +277,7 @@ pub fn generate_preparation_material(
         }
         let pair_openings = sender_slots
             .iter()
-            .zip(&openings)
+            .zip(openings.iter())
             .filter_map(|((_family, subset), opening)| {
                 subset_contains(*subset, recipient_position).then_some(*opening)
             })
@@ -284,6 +302,108 @@ pub fn generate_preparation_material(
         subset_commitments,
         recipient_plaintexts,
     })
+}
+
+pub fn verify_local_preparation_material(
+    parent: &PreparationParent,
+    expected_context: &PreparationMaterialContext,
+    opening_bytes: &[u8],
+    affine_coefficient_bytes: &[u8],
+) -> Result<(), PreparationPlaintextError> {
+    if parent.participant_count() != COMPLETION_PROFILE_PARTICIPANT_COUNT
+        || parent.action_proposal_identity() != expected_context.action_proposal_identity
+        || parent.action_key_set_roster_identity()
+            != expected_context.action_key_set_roster_identity
+        || parent.preparation_attempt() != expected_context.preparation_attempt
+        || parent.predecessor_identity() != expected_context.predecessor_identity
+        || parent.sender_position() != expected_context.sender_position
+    {
+        return Err(PreparationPlaintextError::WrongContext);
+    }
+    let mut material =
+        generate_preparation_material(expected_context, opening_bytes, affine_coefficient_bytes)?;
+    let matches = material
+        .subset_commitments
+        .iter()
+        .enumerate()
+        .all(|(index, commitment)| parent.subset_commitment(index) == Some(commitment));
+    for plaintext in &mut material.recipient_plaintexts {
+        plaintext.zeroize();
+    }
+    if !matches {
+        return Err(PreparationPlaintextError::WrongCommitment);
+    }
+    Ok(())
+}
+
+pub fn derive_held_subset_keys(
+    participant_position: u16,
+    own_opening_bytes: &[u8],
+    remote_plaintext_bytes: &[Vec<u8>],
+) -> Result<Vec<HeldSubsetKey>, PreparationPlaintextError> {
+    validate_position(participant_position)?;
+    if own_opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
+        || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
+    {
+        return Err(PreparationPlaintextError::WrongItemTypeOrLength);
+    }
+    let own_openings = Zeroizing::new(
+        own_opening_bytes
+            .chunks_exact(CONTRIBUTION_OPENING_BYTE_LENGTH)
+            .map(ContributionOpening::decode)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    let remote_plaintexts = Zeroizing::new(
+        remote_plaintext_bytes
+            .iter()
+            .map(|bytes| PreparationPlaintext::decode(bytes))
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    let local_slots = sender_subset_slots(participant_position);
+    if local_slots.len() != SUBSET_COMMITMENT_COUNT || own_openings.len() != local_slots.len() {
+        return Err(PreparationPlaintextError::WrongItemTypeOrLength);
+    }
+
+    let mut held_keys = Vec::with_capacity(local_slots.len());
+    for (local_slot_index, (family, subset)) in local_slots.into_iter().enumerate() {
+        let mut key = own_openings[local_slot_index].seed;
+        for sender_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            if sender_position == participant_position || !subset_contains(subset, sender_position)
+            {
+                continue;
+            }
+            let remote_index = if sender_position < participant_position {
+                usize::from(sender_position)
+            } else {
+                usize::from(sender_position - 1)
+            };
+            let plaintext = remote_plaintexts
+                .get(remote_index)
+                .ok_or(PreparationPlaintextError::WrongItemTypeOrLength)?;
+            let pair_opening_index = sender_subset_slots(sender_position)
+                .into_iter()
+                .filter(|(_sender_family, sender_subset)| {
+                    subset_contains(*sender_subset, participant_position)
+                })
+                .position(|(sender_family, sender_subset)| {
+                    sender_family == family && sender_subset == subset
+                })
+                .ok_or(PreparationPlaintextError::WrongContext)?;
+            let opening = plaintext
+                .openings
+                .get(pair_opening_index)
+                .ok_or(PreparationPlaintextError::WrongItemTypeOrLength)?;
+            for (key_byte, seed_byte) in key.iter_mut().zip(opening.seed) {
+                *key_byte ^= seed_byte;
+            }
+        }
+        held_keys.push(HeldSubsetKey {
+            family,
+            subset,
+            key,
+        });
+    }
+    Ok(held_keys)
 }
 
 pub fn verify_preparation_plaintext(
@@ -384,7 +504,7 @@ fn contribution_commitment(
     .into_bytes())
 }
 
-fn sender_subset_slots(sender_position: u16) -> Vec<(u16, u16)> {
+pub(super) fn sender_subset_slots(sender_position: u16) -> Vec<(u16, u16)> {
     [LOW_SUBSET_SIZE, STATUS_SUBSET_SIZE]
         .into_iter()
         .flat_map(|family| {

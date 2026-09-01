@@ -25,7 +25,12 @@ use crate::protocol::preparation_plaintext::{
 use crate::protocol::private_preparation_body::{
     PrivatePreparationBody, PrivatePreparationContext,
 };
-use zeroize::Zeroize;
+use crate::protocol::source::{
+    SOURCE_ORDINAL, SourceBody, SourceContext, SourceDeclaration, decode_held_subset_keys,
+    derive_honest_source_correction, encode_held_subset_keys, verify_complete_preparation,
+    verify_source_carrier,
+};
+use zeroize::{Zeroize, Zeroizing};
 
 const DERIVE_ACTION_SIGNATURE_VERIFICATION_KEY_FRAGMENT: u8 = 1;
 const SIGN_ACTION_BODY_IDENTITY_FRAGMENT: u8 = 2;
@@ -44,6 +49,11 @@ const VERIFY_PRIVATE_PREPARATION_CARRIER: u8 = 14;
 const GENERATE_PREPARATION_MATERIAL: u8 = 15;
 const VERIFY_PREPARATION_PLAINTEXT: u8 = 16;
 const RESOLVE_PAIR_ENCRYPTION_KEY: u8 = 17;
+const VERIFY_COMPLETE_PREPARATION: u8 = 18;
+const DERIVE_HONEST_SOURCE_CORRECTION: u8 = 19;
+const ENCODE_SOURCE_BODY: u8 = 20;
+const ENCODE_SOURCE_SIGNATURE_CARRIER: u8 = 21;
+const VERIFY_SOURCE_CARRIER: u8 = 22;
 
 pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     let mut reader = BinaryReader::new(input);
@@ -65,6 +75,11 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
         GENERATE_PREPARATION_MATERIAL => generate_preparation(&mut reader),
         VERIFY_PREPARATION_PLAINTEXT => verify_preparation_plaintext_command(&mut reader),
         RESOLVE_PAIR_ENCRYPTION_KEY => resolve_pair_encryption_key(&mut reader),
+        VERIFY_COMPLETE_PREPARATION => verify_complete_preparation_command(&mut reader),
+        DERIVE_HONEST_SOURCE_CORRECTION => derive_source_correction_command(&mut reader),
+        ENCODE_SOURCE_BODY => encode_source_body(&mut reader),
+        ENCODE_SOURCE_SIGNATURE_CARRIER => encode_source_signature_carrier(&mut reader),
+        VERIFY_SOURCE_CARRIER => verify_source(&mut reader),
         command => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidEnum,
             format!("unsupported construction command: {command}"),
@@ -72,6 +87,182 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     }?;
     reader.finish()?;
     Ok(payload)
+}
+
+fn verify_complete_preparation_command(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let participant_count = reader.read_u16()?;
+    let action_proposal_identity = read_hash512(reader)?;
+    let action_key_set_roster_identity = read_hash512(reader)?;
+    let preparation_attempt = reader.read_u16()?;
+    let predecessor_identity = read_hash512(reader)?;
+    let local_position = reader.read_u16()?;
+    let action_key_sets = (0..participant_count)
+        .map(|_| {
+            ActionKeySet::decode(participant_count, reader.read_bytes()?)
+                .map_err(construction_error)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut parent_bodies = Vec::with_capacity(usize::from(participant_count));
+    let mut parent_signatures = Vec::with_capacity(usize::from(participant_count));
+    for _ in 0..participant_count {
+        parent_bodies.push(reader.read_bytes()?.to_vec());
+        parent_signatures.push(reader.read_bytes()?.to_vec());
+    }
+    let own_opening_bytes = reader.read_bytes()?;
+    let own_affine_coefficient_bytes = reader.read_bytes()?;
+    let remote_plaintext_bytes = Zeroizing::new(
+        (0..participant_count.saturating_sub(1))
+            .map(|_| Ok(reader.read_bytes()?.to_vec()))
+            .collect::<CanonicalResult<Vec<_>>>()?,
+    );
+    let context = PreparationMaterialContext {
+        action_proposal_identity,
+        action_key_set_roster_identity,
+        preparation_attempt,
+        predecessor_identity,
+        sender_position: local_position,
+    };
+    let verified = verify_complete_preparation(
+        &context,
+        local_position,
+        &action_key_sets,
+        &parent_bodies,
+        &parent_signatures,
+        own_opening_bytes,
+        own_affine_coefficient_bytes,
+        &remote_plaintext_bytes,
+    )
+    .map_err(construction_error)?;
+    let mut held_subset_key_bytes =
+        encode_held_subset_keys(local_position, &verified.held_subset_keys)
+            .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_fixed(verified.root.as_bytes())?;
+    for parent_identity in &verified.parent_identities {
+        response.write_fixed(parent_identity.as_bytes())?;
+    }
+    response.write_bytes(&held_subset_key_bytes)?;
+    held_subset_key_bytes.zeroize();
+    Ok(response.into_bytes())
+}
+
+fn derive_source_correction_command(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let source_position = reader.read_u16()?;
+    let input_bit = reader.read_u8()?;
+    let held_subset_keys = decode_held_subset_keys(source_position, reader.read_bytes()?)
+        .map_err(construction_error)?;
+    let correction = derive_honest_source_correction(source_position, input_bit, &held_subset_keys)
+        .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_u8(correction)?;
+    Ok(response.into_bytes())
+}
+
+fn encode_source_body(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let participant_count = reader.read_u16()?;
+    let action_proposal_identity = read_hash512(reader)?;
+    let action_key_set_roster_identity = read_hash512(reader)?;
+    let preparation_attempt = reader.read_u16()?;
+    let predecessor_identity = read_hash512(reader)?;
+    let verified_preparation_root = read_hash512(reader)?;
+    let sender_position = reader.read_u16()?;
+    let declaration = match reader.read_u16()? {
+        1 => SourceDeclaration::Abstain,
+        2 => SourceDeclaration::Submit,
+        value => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidEnum,
+                format!("unsupported source declaration: {value}"),
+            ));
+        }
+    };
+    let correction_bytes = reader.read_bytes()?;
+    let correction = match declaration {
+        SourceDeclaration::Abstain if correction_bytes.is_empty() => None,
+        SourceDeclaration::Submit if correction_bytes.len() == 1 => Some(correction_bytes[0]),
+        _ => return Err(malformed_construction_length()),
+    };
+    let body = SourceBody::new(
+        SourceContext {
+            participant_count,
+            action_proposal_identity,
+            action_key_set_roster_identity,
+            preparation_attempt,
+            predecessor_identity,
+            verified_preparation_root,
+            sender_position,
+            source_ordinal: SOURCE_ORDINAL,
+        },
+        declaration,
+        correction,
+    )
+    .map_err(construction_error)?;
+    let encoded = body.encode().map_err(construction_error)?;
+    let identity = body.body_identity().map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_bytes(&encoded)?;
+    response.write_fixed(identity.as_bytes())?;
+    Ok(response.into_bytes())
+}
+
+fn encode_source_signature_carrier(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let participant_count = reader.read_u16()?;
+    let signer_position = reader.read_u16()?;
+    let body_identity = read_hash512(reader)?;
+    let carrier = ActionSignatureCarrier::new(
+        participant_count,
+        signer_position,
+        ActionSignaturePurpose::Source,
+        body_identity,
+        reader.read_bytes()?,
+    )
+    .map_err(construction_error)?;
+    bytes_response(&carrier.encode().map_err(construction_error)?)
+}
+
+fn verify_source(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let participant_count = reader.read_u16()?;
+    let expected_context = SourceContext {
+        participant_count,
+        action_proposal_identity: read_hash512(reader)?,
+        action_key_set_roster_identity: read_hash512(reader)?,
+        preparation_attempt: reader.read_u16()?,
+        predecessor_identity: read_hash512(reader)?,
+        verified_preparation_root: read_hash512(reader)?,
+        sender_position: reader.read_u16()?,
+        source_ordinal: SOURCE_ORDINAL,
+    };
+    let expected_declaration = match reader.read_u16()? {
+        1 => SourceDeclaration::Abstain,
+        2 => SourceDeclaration::Submit,
+        value => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidEnum,
+                format!("unsupported source declaration: {value}"),
+            ));
+        }
+    };
+    let action_key_sets = (0..participant_count)
+        .map(|_| {
+            ActionKeySet::decode(participant_count, reader.read_bytes()?)
+                .map_err(construction_error)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let verified = verify_source_carrier(
+        expected_context,
+        Some(expected_declaration),
+        &action_key_sets,
+        reader.read_bytes()?,
+        reader.read_bytes()?,
+    )
+    .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_u16(verified.sender_position)?;
+    response.write_u16(verified.declaration as u16)?;
+    response.write_u8(verified.correction.unwrap_or(0xff))?;
+    response.write_fixed(verified.body_identity.as_bytes())?;
+    response.write_fixed(verified.verified_preparation_root.as_bytes())?;
+    Ok(response.into_bytes())
 }
 
 fn resolve_pair_encryption_key(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {

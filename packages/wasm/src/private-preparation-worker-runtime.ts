@@ -60,8 +60,20 @@ import type {
     PrivatePreparationWorkerResponse,
     PrivatePreparationConsumption,
     PublishedPreparationPackage,
+    PublishedSourcePackage,
     RegisteredActionKeys,
+    SourcePublicationChoice,
 } from './private-preparation-worker-protocol.js';
+import {
+    abstentionSourceBodyByteLength,
+    heldSubsetKeyVectorByteLength,
+    openSourceRuntime,
+    submittedSourceBodyByteLength,
+    type PreparationParentCarrier,
+    type SourceDeclaration,
+    type SourceRuntime,
+    type VerifiedCompletePreparation,
+} from './source-runtime.js';
 
 const completionProfileParticipantCount = 10;
 const signaturePurposeCount = 4;
@@ -75,6 +87,7 @@ const noPeerPosition = 0xffff;
 const actionStateKind = 1;
 const preparationStateKind = 2;
 const privatePreparationSlotStateKind = 3;
+const sourceStateKind = 4;
 const registeredActionPhase = 1;
 const confirmedRosterPhase = 2;
 const unsignedPreparationPhase = 1;
@@ -82,12 +95,17 @@ const publishedPreparationPhase = 2;
 const consumedPrivatePreparationPhase = 1;
 const resolvedPrivatePreparationPhase = 2;
 const burnedPrivatePreparationPhase = 3;
+const unsignedSourcePhase = 1;
+const publishedSourcePhase = 2;
 const privatePreparationOperationOrdinal = 1n;
+const sourceOperationOrdinal = 0n;
+const privateInputParticipantPosition = 0;
 
 type WorkerConfiguration = Readonly<{
     runtimeIdentity: Uint8Array;
     candidateBuildIdentity: Uint8Array;
     afterDurableConsume?: () => Promise<void> | void;
+    afterDurableSourceBind?: () => Promise<void> | void;
 }>;
 
 type LocalRecordContext = Readonly<{
@@ -160,6 +178,24 @@ type PrivatePreparationSlotState = {
 type LoadedPrivatePreparationSlotState = Readonly<{
     record: ProtectedRecord;
     state: PrivatePreparationSlotState;
+}>;
+
+type SourceState = {
+    phase: typeof publishedSourcePhase | typeof unsignedSourcePhase;
+    generation: bigint;
+    preparationAttempt: number;
+    verifiedPreparationRoot: Uint8Array;
+    declaration: SourceDeclaration;
+    inputBit: 0 | 1;
+    sourceBody: Uint8Array;
+    sourceBodyIdentity: Uint8Array;
+    sourceSignature: Uint8Array;
+    heldSubsetKeys: Uint8Array;
+};
+
+type LoadedSourceState = Readonly<{
+    record: ProtectedRecord;
+    state: SourceState;
 }>;
 
 class FixedWriter {
@@ -354,6 +390,49 @@ const copyActionKeySetBodies = (
     );
 };
 
+const copyPreparationParents = (
+    parents: readonly PreparationParentCarrier[],
+): PreparationParentCarrier[] => {
+    if (parents.length !== completionProfileParticipantCount) {
+        throw new TypeError(
+            'preparationParents must contain the complete roster.',
+        );
+    }
+    return parents.map((parent, position) => ({
+        body: Uint8Array.from(
+            requireBytes(
+                parent.body,
+                preparationParentBodyByteLength(
+                    completionProfileParticipantCount,
+                ),
+                `preparationParents[${String(position)}].body`,
+            ),
+        ),
+        signature: Uint8Array.from(
+            requireBytes(
+                parent.signature,
+                actionSignatureCarrierByteLength,
+                `preparationParents[${String(position)}].signature`,
+            ),
+        ),
+    }));
+};
+
+const copySourcePublicationChoice = (
+    choice: SourcePublicationChoice,
+): SourcePublicationChoice => {
+    if (choice.declaration === 'abstain') {
+        return { declaration: 'abstain' };
+    }
+    if (
+        choice.declaration !== 'submit' ||
+        (choice.inputBit !== 0 && choice.inputBit !== 1)
+    ) {
+        throw new TypeError('The source publication choice is invalid.');
+    }
+    return { declaration: 'submit', inputBit: choice.inputBit };
+};
+
 const randomBytes = (length: number): Uint8Array => {
     const output = new Uint8Array(length);
     for (let offset = 0; offset < output.byteLength; offset += 65_536) {
@@ -394,6 +473,14 @@ const privatePreparationSlotIdentifier = (
         action.participantPosition,
     )}.${String(senderPosition)}`;
 
+const sourceIdentifier = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): string =>
+    `source.${bytesToHex(configuration.runtimeIdentity)}.${bytesToHex(
+        action.actionProposalIdentity,
+    )}.${String(action.participantPosition)}`;
+
 const remotePositions = (localPosition: number): number[] =>
     Array.from(
         { length: completionProfileParticipantCount },
@@ -412,6 +499,13 @@ const copyPublishedPreparationPackage = (
     parentBody: Uint8Array.from(state.parentBody),
     parentSignature: Uint8Array.from(state.parentSignature),
     privateBodies: state.privateBodies.map((body) => Uint8Array.from(body)),
+});
+
+const copyPublishedSourcePackage = (
+    state: SourceState,
+): PublishedSourcePackage => ({
+    sourceBody: Uint8Array.from(state.sourceBody),
+    sourceSignature: Uint8Array.from(state.sourceSignature),
 });
 
 const encodeLocalRecordContext = (context: LocalRecordContext): Uint8Array => {
@@ -658,6 +752,144 @@ const zeroPreparationState = (state: PreparationState): void => {
     state.affineCoefficients.fill(0);
 };
 
+const sourceStateByteLength =
+    1 +
+    1 +
+    8 +
+    2 +
+    identityByteLength +
+    1 +
+    1 +
+    submittedSourceBodyByteLength +
+    identityByteLength +
+    actionSignatureCarrierByteLength +
+    heldSubsetKeyVectorByteLength;
+
+const encodeSourceState = (state: SourceState): Uint8Array => {
+    const expectedBodyByteLength =
+        state.declaration === 'submit'
+            ? submittedSourceBodyByteLength
+            : abstentionSourceBodyByteLength;
+    if (
+        state.sourceBody.byteLength !== expectedBodyByteLength ||
+        (state.declaration === 'abstain' && state.inputBit !== 0)
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained source choice and body length are inconsistent.',
+        );
+    }
+    const writer = new FixedWriter(sourceStateByteLength);
+    writer.writeU8(1);
+    writer.writeU8(state.phase);
+    writer.writeU64(state.generation);
+    writer.writeU16(state.preparationAttempt);
+    writer.writeFixed(state.verifiedPreparationRoot);
+    writer.writeU8(state.declaration === 'submit' ? 2 : 1);
+    writer.writeU8(state.inputBit);
+    const paddedBody = new Uint8Array(submittedSourceBodyByteLength);
+    paddedBody.set(state.sourceBody);
+    writer.writeFixed(paddedBody);
+    paddedBody.fill(0);
+    writer.writeFixed(state.sourceBodyIdentity);
+    writer.writeFixed(state.sourceSignature);
+    writer.writeFixed(state.heldSubsetKeys);
+    return writer.finish();
+};
+
+const decodeSourceState = (bytes: Uint8Array): SourceState => {
+    if (bytes.byteLength !== sourceStateByteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained source has the wrong byte length.',
+        );
+    }
+    const reader = new FixedReader(bytes);
+    if (reader.readU8() !== 1) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained source has the wrong version.',
+        );
+    }
+    const phase = reader.readU8();
+    if (phase !== unsignedSourcePhase && phase !== publishedSourcePhase) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained source has an invalid phase.',
+        );
+    }
+    const generation = reader.readU64();
+    const preparationAttempt = reader.readU16();
+    const verifiedPreparationRoot = reader.readFixed(identityByteLength);
+    const declarationCode = reader.readU8();
+    const declaration: SourceDeclaration =
+        declarationCode === 1
+            ? 'abstain'
+            : declarationCode === 2
+              ? 'submit'
+              : (() => {
+                    throw new DurableStateError(
+                        'CorruptState',
+                        'The retained source has an invalid declaration.',
+                    );
+                })();
+    const inputBit = reader.readU8();
+    if (
+        (inputBit !== 0 && inputBit !== 1) ||
+        (declaration === 'abstain' && inputBit !== 0)
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained source has an invalid private input.',
+        );
+    }
+    const paddedBody = reader.readFixed(submittedSourceBodyByteLength);
+    const sourceBodyByteLength =
+        declaration === 'submit'
+            ? submittedSourceBodyByteLength
+            : abstentionSourceBodyByteLength;
+    if (!isZero(paddedBody.subarray(sourceBodyByteLength))) {
+        paddedBody.fill(0);
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained source has noncanonical body padding.',
+        );
+    }
+    const sourceBody = Uint8Array.from(
+        paddedBody.subarray(0, sourceBodyByteLength),
+    );
+    paddedBody.fill(0);
+    const state: SourceState = {
+        phase,
+        generation,
+        preparationAttempt,
+        verifiedPreparationRoot,
+        declaration,
+        inputBit,
+        sourceBody,
+        sourceBodyIdentity: reader.readFixed(identityByteLength),
+        sourceSignature: reader.readFixed(actionSignatureCarrierByteLength),
+        heldSubsetKeys: reader.readFixed(heldSubsetKeyVectorByteLength),
+    };
+    reader.finish();
+    if (state.phase === unsignedSourcePhase && !isZero(state.sourceSignature)) {
+        zeroSourceState(state);
+        throw new DurableStateError(
+            'CorruptState',
+            'The unsigned source contains a signature.',
+        );
+    }
+    return state;
+};
+
+const zeroSourceState = (state: SourceState): void => {
+    state.verifiedPreparationRoot.fill(0);
+    state.sourceBody.fill(0);
+    state.sourceBodyIdentity.fill(0);
+    state.sourceSignature.fill(0);
+    state.heldSubsetKeys.fill(0);
+};
+
 const privatePreparationSlotStateByteLength =
     1 + 1 + 8 + 2 + 2 + 3 * identityByteLength + preparationPlaintextByteLength;
 
@@ -770,6 +1002,24 @@ const preparationLocalContext = (
     operationOrdinal: BigInt(preparationAttempt),
 });
 
+const sourceLocalContext = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+    rosterIdentity: Uint8Array,
+    generation: bigint,
+): LocalRecordContext => ({
+    runtimeIdentity: configuration.runtimeIdentity,
+    candidateBuildIdentity: configuration.candidateBuildIdentity,
+    actionProposalIdentity: action.actionProposalIdentity,
+    actionKeySetRosterIdentity: rosterIdentity,
+    predecessorIdentity: action.predecessorIdentity,
+    participantPosition: action.participantPosition,
+    objectKind: sourceStateKind,
+    generation,
+    peerPosition: noPeerPosition,
+    operationOrdinal: sourceOperationOrdinal,
+});
+
 const privatePreparationSlotLocalContext = (
     configuration: WorkerConfiguration,
     action: PrivatePreparationActionContext,
@@ -853,6 +1103,7 @@ class PrivatePreparationWorkerRuntime {
         private readonly preparationMaterialRuntime: PreparationMaterialRuntime,
         private readonly preparationParentRuntime: PreparationParentRuntime,
         private readonly privatePreparationBodyRuntime: PrivatePreparationBodyRuntime,
+        private readonly sourceRuntime: SourceRuntime,
     ) {}
 
     static async create(
@@ -860,6 +1111,7 @@ class PrivatePreparationWorkerRuntime {
         persistentStorageRequired: boolean,
         unpinnedKernelAllowed: boolean,
         afterDurableConsume?: () => Promise<void> | void,
+        afterDurableSourceBind?: () => Promise<void> | void,
     ): Promise<PrivatePreparationWorkerRuntime> {
         const runtimeIdentity = Uint8Array.from(
             requireBytes(
@@ -903,7 +1155,12 @@ class PrivatePreparationWorkerRuntime {
             ),
         ]);
         return new PrivatePreparationWorkerRuntime(
-            { runtimeIdentity, candidateBuildIdentity, afterDurableConsume },
+            {
+                runtimeIdentity,
+                candidateBuildIdentity,
+                afterDurableConsume,
+                afterDurableSourceBind,
+            },
             durableState,
             openActionKeySetRuntime(kernel),
             openActionSignatureRuntime(kernel),
@@ -911,6 +1168,7 @@ class PrivatePreparationWorkerRuntime {
             openPreparationMaterialRuntime(kernel),
             openPreparationParentRuntime(kernel),
             openPrivatePreparationBodyRuntime(kernel),
+            openSourceRuntime(kernel),
         );
     }
 
@@ -1493,6 +1751,668 @@ class PrivatePreparationWorkerRuntime {
                 privateBody.fill(0);
             }
         });
+    }
+
+    async createSourcePackage(
+        input: PrivatePreparationActionContext & {
+            actionKeySetBodies: readonly Uint8Array[];
+            preparationAttempt: number;
+            preparationParents: readonly PreparationParentCarrier[];
+            choice: SourcePublicationChoice;
+        },
+    ): Promise<PublishedSourcePackage> {
+        const action = copyActionContext(input);
+        const actionKeySetBodies = copyActionKeySetBodies(
+            input.actionKeySetBodies,
+        );
+        const preparationAttempt = requireUnsigned16(
+            input.preparationAttempt,
+            'preparationAttempt',
+        );
+        const preparationParents = copyPreparationParents(
+            input.preparationParents,
+        );
+        const choice = copySourcePublicationChoice(input.choice);
+        if (
+            choice.declaration === 'submit' &&
+            action.participantPosition !== privateInputParticipantPosition
+        ) {
+            throw new TypeError(
+                'Only the designated private-input participant may submit in this vertical.',
+            );
+        }
+        return this.durableState.exclusive(async () => {
+            const actionRecord = await this.durableState.readProtected(
+                'actions',
+                actionIdentifier(this.configuration, action),
+            );
+            if (actionRecord === undefined) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Action keys are absent for source publication.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            try {
+                this.verifyConfirmedActionRoster(
+                    action,
+                    loadedAction.state,
+                    actionKeySetBodies,
+                );
+                const verifiedPreparation =
+                    await this.verifyCompletePreparationForSource(
+                        action,
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        preparationParents,
+                        loadedAction,
+                    );
+                try {
+                    const identifier = sourceIdentifier(
+                        this.configuration,
+                        action,
+                    );
+                    const existing = await this.durableState.readProtected(
+                        'sources',
+                        identifier,
+                    );
+                    const boundSourceIdentity =
+                        loadedAction.state.signatureBodyIdentities[1];
+                    if (boundSourceIdentity === undefined) {
+                        throw new DurableStateError(
+                            'CorruptState',
+                            'The source-signature slot is absent.',
+                        );
+                    }
+                    if (existing !== undefined) {
+                        if (isZero(boundSourceIdentity)) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'Retained source state exists without its action-level signature binding.',
+                            );
+                        }
+                        const loadedSource = await this.loadSourceState(
+                            action,
+                            loadedAction.state.actionKeySetRosterIdentity,
+                            existing,
+                        );
+                        try {
+                            const expectedInputBit =
+                                choice.declaration === 'submit'
+                                    ? choice.inputBit
+                                    : 0;
+                            if (
+                                loadedSource.state.preparationAttempt !==
+                                    preparationAttempt ||
+                                loadedSource.state.declaration !==
+                                    choice.declaration ||
+                                loadedSource.state.inputBit !==
+                                    expectedInputBit ||
+                                !bytesEqual(
+                                    loadedSource.state.sourceBodyIdentity,
+                                    boundSourceIdentity,
+                                ) ||
+                                !bytesEqual(
+                                    loadedSource.state.verifiedPreparationRoot,
+                                    verifiedPreparation.root,
+                                ) ||
+                                !bytesEqual(
+                                    loadedSource.state.heldSubsetKeys,
+                                    verifiedPreparation.heldSubsetKeys,
+                                )
+                            ) {
+                                throw new DurableStateError(
+                                    'Conflict',
+                                    'The action is already bound to another source choice or preparation.',
+                                );
+                            }
+                            this.validateSourceState(
+                                action,
+                                actionKeySetBodies,
+                                loadedAction.state,
+                                loadedSource.state,
+                            );
+                            if (
+                                loadedSource.state.phase ===
+                                publishedSourcePhase
+                            ) {
+                                return copyPublishedSourcePackage(
+                                    loadedSource.state,
+                                );
+                            }
+                            return await this.publishRetainedSource(
+                                action,
+                                actionKeySetBodies,
+                                loadedAction,
+                                loadedSource,
+                            );
+                        } finally {
+                            zeroSourceState(loadedSource.state);
+                        }
+                    }
+                    if (!isZero(boundSourceIdentity)) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'The source-signature slot is consumed but its retained source is absent.',
+                        );
+                    }
+                    return await this.createAndPublishSource(
+                        action,
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        choice,
+                        verifiedPreparation,
+                        loadedAction,
+                    );
+                } finally {
+                    verifiedPreparation.heldSubsetKeys.fill(0);
+                }
+            } finally {
+                zeroActionState(loadedAction.state);
+            }
+        });
+    }
+
+    private async verifyCompletePreparationForSource(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        preparationAttempt: number,
+        preparationParents: readonly PreparationParentCarrier[],
+        loadedAction: LoadedActionState,
+    ): Promise<VerifiedCompletePreparation> {
+        const preparationRecord = await this.durableState.readProtected(
+            'preparations',
+            preparationIdentifier(this.configuration, action),
+        );
+        if (preparationRecord === undefined) {
+            throw new Error(
+                'The local preparation package is unavailable for source publication.',
+            );
+        }
+        const loadedPreparation = await this.loadPreparationState(
+            action,
+            loadedAction.state.actionKeySetRosterIdentity,
+            preparationRecord,
+        );
+        const loadedSlots: LoadedPrivatePreparationSlotState[] = [];
+        const remotePlaintexts: Uint8Array[] = [];
+        try {
+            if (
+                loadedPreparation.state.phase !== publishedPreparationPhase ||
+                loadedPreparation.state.preparationAttempt !==
+                    preparationAttempt
+            ) {
+                throw new Error(
+                    'The local preparation is not the required published attempt.',
+                );
+            }
+            this.validatePreparationState(
+                action,
+                actionKeySetBodies,
+                loadedAction.state,
+                loadedPreparation.state,
+            );
+            const expectedParentIdentities: Uint8Array[] = Array.from(
+                { length: completionProfileParticipantCount },
+                () => new Uint8Array(identityByteLength),
+            );
+            expectedParentIdentities[action.participantPosition] =
+                Uint8Array.from(loadedPreparation.state.parentIdentity);
+            for (const senderPosition of remotePositions(
+                action.participantPosition,
+            )) {
+                const slotRecord = await this.durableState.readProtected(
+                    'slots',
+                    privatePreparationSlotIdentifier(
+                        this.configuration,
+                        action,
+                        senderPosition,
+                    ),
+                );
+                if (slotRecord === undefined) {
+                    throw new Error(
+                        'A required private preparation delivery has not been consumed.',
+                    );
+                }
+                const loadedSlot = await this.loadPrivatePreparationSlot(
+                    action,
+                    loadedAction.state.actionKeySetRosterIdentity,
+                    senderPosition,
+                    slotRecord,
+                );
+                loadedSlots.push(loadedSlot);
+                if (
+                    loadedSlot.state.phase !==
+                        resolvedPrivatePreparationPhase ||
+                    loadedSlot.state.preparationAttempt !== preparationAttempt
+                ) {
+                    throw new Error(
+                        'A required private preparation delivery is not positively resolved.',
+                    );
+                }
+                expectedParentIdentities[senderPosition] = Uint8Array.from(
+                    loadedSlot.state.parentIdentity,
+                );
+                remotePlaintexts.push(
+                    Uint8Array.from(loadedSlot.state.plaintext),
+                );
+            }
+            const verified = this.sourceRuntime.verifyCompletePreparation(
+                {
+                    participantCount: completionProfileParticipantCount,
+                    actionProposalIdentity: action.actionProposalIdentity,
+                    actionKeySetRosterIdentity:
+                        loadedAction.state.actionKeySetRosterIdentity,
+                    preparationAttempt,
+                    predecessorIdentity: action.predecessorIdentity,
+                },
+                action.participantPosition,
+                actionKeySetBodies,
+                preparationParents,
+                loadedPreparation.state.contributionOpenings,
+                loadedPreparation.state.affineCoefficients,
+                remotePlaintexts,
+            );
+            for (
+                let position = 0;
+                position < completionProfileParticipantCount;
+                position += 1
+            ) {
+                const expectedIdentity = expectedParentIdentities[position];
+                const verifiedIdentity = verified.parentIdentities.subarray(
+                    position * identityByteLength,
+                    (position + 1) * identityByteLength,
+                );
+                if (
+                    expectedIdentity === undefined ||
+                    !bytesEqual(expectedIdentity, verifiedIdentity)
+                ) {
+                    verified.heldSubsetKeys.fill(0);
+                    throw new DurableStateError(
+                        'Conflict',
+                        'The certified preparation parent does not match the retained private delivery.',
+                    );
+                }
+            }
+            return verified;
+        } finally {
+            zeroPreparationState(loadedPreparation.state);
+            for (const loadedSlot of loadedSlots) {
+                zeroPrivatePreparationSlotState(loadedSlot.state);
+            }
+            for (const plaintext of remotePlaintexts) {
+                plaintext.fill(0);
+            }
+        }
+    }
+
+    private async createAndPublishSource(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        preparationAttempt: number,
+        choice: SourcePublicationChoice,
+        verifiedPreparation: VerifiedCompletePreparation,
+        loadedAction: LoadedActionState,
+    ): Promise<PublishedSourcePackage> {
+        const declaration = choice.declaration;
+        const inputBit = declaration === 'submit' ? choice.inputBit : 0;
+        const correction =
+            declaration === 'submit'
+                ? this.sourceRuntime.deriveHonestCorrection(
+                      action.participantPosition,
+                      inputBit,
+                      verifiedPreparation.heldSubsetKeys,
+                  )
+                : undefined;
+        const encodedSource = this.sourceRuntime.encodeBody(
+            {
+                participantCount: completionProfileParticipantCount,
+                actionProposalIdentity: action.actionProposalIdentity,
+                actionKeySetRosterIdentity:
+                    loadedAction.state.actionKeySetRosterIdentity,
+                preparationAttempt,
+                predecessorIdentity: action.predecessorIdentity,
+                verifiedPreparationRoot: verifiedPreparation.root,
+                senderPosition: action.participantPosition,
+            },
+            declaration,
+            correction,
+        );
+        const state: SourceState = {
+            phase: unsignedSourcePhase,
+            generation: 1n,
+            preparationAttempt,
+            verifiedPreparationRoot: Uint8Array.from(verifiedPreparation.root),
+            declaration,
+            inputBit,
+            sourceBody: encodedSource.body,
+            sourceBodyIdentity: encodedSource.identity,
+            sourceSignature: new Uint8Array(actionSignatureCarrierByteLength),
+            heldSubsetKeys: Uint8Array.from(verifiedPreparation.heldSubsetKeys),
+        };
+        try {
+            this.validateSourceState(
+                action,
+                actionKeySetBodies,
+                loadedAction.state,
+                state,
+            );
+            const sourcePlaintext = encodeSourceState(state);
+            const sourceContext = encodeLocalRecordContext(
+                sourceLocalContext(
+                    this.configuration,
+                    action,
+                    loadedAction.state.actionKeySetRosterIdentity,
+                    state.generation,
+                ),
+            );
+            let sourceRecord: ProtectedRecord;
+            try {
+                sourceRecord = await createProtectedRecord(
+                    sourceIdentifier(this.configuration, action),
+                    sourceContext,
+                    sourcePlaintext,
+                    loadedAction.rootKey,
+                );
+            } finally {
+                sourcePlaintext.fill(0);
+                sourceContext.fill(0);
+            }
+            const replacementActionState: ActionState = {
+                ...loadedAction.state,
+                generation: loadedAction.state.generation + 1n,
+                signatureBodyIdentities:
+                    loadedAction.state.signatureBodyIdentities.map(
+                        (identity, index) =>
+                            index === 1
+                                ? Uint8Array.from(state.sourceBodyIdentity)
+                                : Uint8Array.from(identity),
+                    ),
+            };
+            const actionPlaintext = encodeActionState(replacementActionState);
+            const actionContext = encodeLocalRecordContext(
+                actionLocalContext(
+                    this.configuration,
+                    action,
+                    replacementActionState.actionKeySetRosterIdentity,
+                    replacementActionState.generation,
+                ),
+            );
+            let actionRecord: ProtectedRecord;
+            try {
+                actionRecord = await createProtectedRecord(
+                    actionIdentifier(this.configuration, action),
+                    actionContext,
+                    actionPlaintext,
+                    loadedAction.rootKey,
+                );
+            } finally {
+                actionPlaintext.fill(0);
+                actionContext.fill(0);
+            }
+            await this.durableState.replaceExactAndPutIfAbsent(
+                'actions',
+                loadedAction.record,
+                actionRecord,
+                'sources',
+                sourceRecord,
+            );
+            await this.configuration.afterDurableSourceBind?.();
+            const [retainedActionRecord, retainedSourceRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'sources',
+                        sourceIdentifier(this.configuration, action),
+                    ),
+                ]);
+            if (
+                retainedActionRecord === undefined ||
+                retainedSourceRecord === undefined
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The atomic source binding disappeared after persistence.',
+                );
+            }
+            const reboundAction = await this.loadActionState(
+                action,
+                retainedActionRecord,
+            );
+            const retainedSource = await this.loadSourceState(
+                action,
+                reboundAction.state.actionKeySetRosterIdentity,
+                retainedSourceRecord,
+            );
+            try {
+                if (
+                    !bytesEqual(
+                        reboundAction.state.signatureBodyIdentities[1] ??
+                            new Uint8Array(),
+                        retainedSource.state.sourceBodyIdentity,
+                    )
+                ) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The durable source binding is inconsistent.',
+                    );
+                }
+                return await this.publishRetainedSource(
+                    action,
+                    actionKeySetBodies,
+                    reboundAction,
+                    retainedSource,
+                );
+            } finally {
+                zeroActionState(reboundAction.state);
+                zeroSourceState(retainedSource.state);
+            }
+        } finally {
+            zeroSourceState(state);
+        }
+    }
+
+    private async publishRetainedSource(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        loadedAction: LoadedActionState,
+        loadedSource: LoadedSourceState,
+    ): Promise<PublishedSourcePackage> {
+        if (loadedSource.state.phase !== unsignedSourcePhase) {
+            throw new DurableStateError(
+                'Conflict',
+                'The retained source is already published.',
+            );
+        }
+        this.validateSourceState(
+            action,
+            actionKeySetBodies,
+            loadedAction.state,
+            loadedSource.state,
+        );
+        const secretKey = loadedAction.state.signatureSecretKeys[1];
+        if (secretKey === undefined) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The source signing key is absent.',
+            );
+        }
+        const signature = this.actionSignatureRuntime.signBodyIdentity(
+            secretKey,
+            loadedSource.state.sourceBodyIdentity,
+        );
+        let signatureCarrier: Uint8Array;
+        try {
+            signatureCarrier = this.sourceRuntime.encodeSignature(
+                action.participantPosition,
+                loadedSource.state.sourceBodyIdentity,
+                signature,
+            );
+        } finally {
+            signature.fill(0);
+        }
+        const replacementState: SourceState = {
+            ...loadedSource.state,
+            phase: publishedSourcePhase,
+            generation: loadedSource.state.generation + 1n,
+            sourceSignature: signatureCarrier,
+        };
+        const plaintext = encodeSourceState(replacementState);
+        const context = encodeLocalRecordContext(
+            sourceLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.actionKeySetRosterIdentity,
+                replacementState.generation,
+            ),
+        );
+        let replacement: ProtectedRecord;
+        try {
+            replacement = await createProtectedRecord(
+                loadedSource.record.id,
+                context,
+                plaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        await this.durableState.replaceExact(
+            'sources',
+            loadedSource.record,
+            replacement,
+        );
+        const retained = await this.durableState.readProtected(
+            'sources',
+            loadedSource.record.id,
+        );
+        if (retained === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The published source disappeared after persistence.',
+            );
+        }
+        const reloaded = await this.loadSourceState(
+            action,
+            loadedAction.state.actionKeySetRosterIdentity,
+            retained,
+        );
+        try {
+            this.validateSourceState(
+                action,
+                actionKeySetBodies,
+                loadedAction.state,
+                reloaded.state,
+            );
+            return copyPublishedSourcePackage(reloaded.state);
+        } finally {
+            zeroSourceState(reloaded.state);
+        }
+    }
+
+    private validateSourceState(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        actionState: ActionState,
+        state: SourceState,
+    ): void {
+        if (
+            state.verifiedPreparationRoot.byteLength !== identityByteLength ||
+            state.sourceBodyIdentity.byteLength !== identityByteLength ||
+            state.sourceSignature.byteLength !==
+                actionSignatureCarrierByteLength ||
+            state.heldSubsetKeys.byteLength !== heldSubsetKeyVectorByteLength ||
+            (state.inputBit !== 0 && state.inputBit !== 1) ||
+            (state.declaration === 'abstain' && state.inputBit !== 0) ||
+            (state.declaration === 'submit' &&
+                action.participantPosition !== privateInputParticipantPosition)
+        ) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The retained source state has invalid dimensions or semantics.',
+            );
+        }
+        const correction =
+            state.declaration === 'submit'
+                ? this.sourceRuntime.deriveHonestCorrection(
+                      action.participantPosition,
+                      state.inputBit,
+                      state.heldSubsetKeys,
+                  )
+                : undefined;
+        const sourceContext = {
+            participantCount: completionProfileParticipantCount,
+            actionProposalIdentity: action.actionProposalIdentity,
+            actionKeySetRosterIdentity: actionState.actionKeySetRosterIdentity,
+            preparationAttempt: state.preparationAttempt,
+            predecessorIdentity: action.predecessorIdentity,
+            verifiedPreparationRoot: state.verifiedPreparationRoot,
+            senderPosition: action.participantPosition,
+        } as const;
+        const encoded = this.sourceRuntime.encodeBody(
+            sourceContext,
+            state.declaration,
+            correction,
+        );
+        if (
+            !bytesEqual(encoded.body, state.sourceBody) ||
+            !bytesEqual(encoded.identity, state.sourceBodyIdentity)
+        ) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The retained source body does not match its fixed private input.',
+            );
+        }
+        const boundIdentity = actionState.signatureBodyIdentities[1];
+        if (
+            boundIdentity === undefined ||
+            (!isZero(boundIdentity) &&
+                !bytesEqual(boundIdentity, state.sourceBodyIdentity)) ||
+            (state.phase === publishedSourcePhase && isZero(boundIdentity))
+        ) {
+            throw new DurableStateError(
+                'StateLost',
+                'The retained source does not match its action-level one-shot binding.',
+            );
+        }
+        if (state.phase === unsignedSourcePhase) {
+            if (!isZero(state.sourceSignature)) {
+                throw new DurableStateError(
+                    'CorruptState',
+                    'The unsigned source contains a signature carrier.',
+                );
+            }
+            return;
+        }
+        const verified = this.sourceRuntime.verify(
+            sourceContext,
+            state.declaration,
+            actionKeySetBodies,
+            state.sourceBody,
+            state.sourceSignature,
+        );
+        if (
+            verified.senderPosition !== action.participantPosition ||
+            verified.declaration !== state.declaration ||
+            verified.correction !== correction ||
+            !bytesEqual(verified.bodyIdentity, state.sourceBodyIdentity) ||
+            !bytesEqual(
+                verified.verifiedPreparationRoot,
+                state.verifiedPreparationRoot,
+            )
+        ) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The retained signed source failed semantic verification.',
+            );
+        }
     }
 
     private verifyConfirmedActionRoster(
@@ -2319,6 +3239,69 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
+    private async loadSourceState(
+        action: PrivatePreparationActionContext,
+        rosterIdentity: Uint8Array,
+        record: ProtectedRecord,
+    ): Promise<LoadedSourceState> {
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for retained source state.',
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        const expectedContext = encodeLocalRecordContext(localContext);
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await openProtectedRecord(
+                record,
+                expectedContext,
+                rootKey,
+            );
+            const state = decodeSourceState(plaintext);
+            if (
+                state.generation !== localContext.generation ||
+                localContext.operationOrdinal !== sourceOperationOrdinal ||
+                localContext.objectKind !== sourceStateKind ||
+                localContext.peerPosition !== noPeerPosition ||
+                localContext.participantPosition !==
+                    action.participantPosition ||
+                !bytesEqual(
+                    localContext.runtimeIdentity,
+                    this.configuration.runtimeIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.candidateBuildIdentity,
+                    this.configuration.candidateBuildIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.actionProposalIdentity,
+                    action.actionProposalIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.actionKeySetRosterIdentity,
+                    rosterIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.predecessorIdentity,
+                    action.predecessorIdentity,
+                )
+            ) {
+                zeroSourceState(state);
+                throw new DurableStateError(
+                    'StateLost',
+                    'The retained source does not match its authenticated context.',
+                );
+            }
+            return { record, state };
+        } finally {
+            expectedContext.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+
     private async loadActionState(
         action: PrivatePreparationActionContext,
         record: ProtectedRecord,
@@ -2371,6 +3354,7 @@ type WorkerInstallationOptions = Readonly<{
     persistentStorageRequired: boolean;
     unpinnedKernelAllowed: boolean;
     afterDurableConsume?: () => Promise<void> | void;
+    afterDurableSourceBind?: () => Promise<void> | void;
 }>;
 
 const failureResponse = (
@@ -2427,6 +3411,9 @@ const responseTransferables = (
             ...result.privateBodies.map((body) => body.buffer),
         ];
     }
+    if ('sourceBody' in result) {
+        return [result.sourceBody.buffer, result.sourceSignature.buffer];
+    }
     return [];
 };
 
@@ -2461,6 +3448,7 @@ export const installPrivatePreparationWorker = (
                             options.persistentStorageRequired,
                             options.unpinnedKernelAllowed,
                             options.afterDurableConsume,
+                            options.afterDurableSourceBind,
                         );
                         await runtimePromise;
                         response = {
@@ -2510,6 +3498,16 @@ export const installPrivatePreparationWorker = (
                                 requestId: request.requestId,
                                 ok: true,
                                 result: await runtime.consumePrivatePreparation(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation === 'create-source-package'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.createSourcePackage(
                                     request.input,
                                 ),
                             };

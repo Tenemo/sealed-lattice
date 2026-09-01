@@ -1,4 +1,5 @@
 import type { FoundationKernelLoaderOptions } from './foundation-kernel/kernel-runtime.js';
+import type { PreparationParentCarrier } from './source-runtime.js';
 
 export type PrivatePreparationWorkerInitialization = Readonly<{
     databaseName: string;
@@ -13,6 +14,10 @@ export type PrivatePreparationActionContext = Readonly<{
     predecessorIdentity: Uint8Array;
     participantPosition: number;
 }>;
+
+export type SourcePublicationChoice =
+    | Readonly<{ declaration: 'abstain' }>
+    | Readonly<{ declaration: 'submit'; inputBit: 0 | 1 }>;
 
 export type PrivatePreparationWorkerRequest =
     | Readonly<{
@@ -50,6 +55,16 @@ export type PrivatePreparationWorkerRequest =
               parentSignature: Uint8Array;
               privateBody: Uint8Array;
           };
+      }>
+    | Readonly<{
+          requestId: number;
+          operation: 'create-source-package';
+          input: PrivatePreparationActionContext & {
+              actionKeySetBodies: readonly Uint8Array[];
+              preparationAttempt: number;
+              preparationParents: readonly PreparationParentCarrier[];
+              choice: SourcePublicationChoice;
+          };
       }>;
 
 export type RegisteredActionKeys = Readonly<{
@@ -72,6 +87,11 @@ export type PrivatePreparationConsumption = Readonly<{
     status: 'already-resolved' | 'burned' | 'resolved';
 }>;
 
+export type PublishedSourcePackage = Readonly<{
+    sourceBody: Uint8Array;
+    sourceSignature: Uint8Array;
+}>;
+
 export type PrivatePreparationWorkerSuccess = Readonly<{
     requestId: number;
     ok: true;
@@ -79,6 +99,7 @@ export type PrivatePreparationWorkerSuccess = Readonly<{
         | ConfirmedActionKeyRoster
         | PrivatePreparationConsumption
         | PublishedPreparationPackage
+        | PublishedSourcePackage
         | RegisteredActionKeys
         | Readonly<{ initialized: true }>;
 }>;

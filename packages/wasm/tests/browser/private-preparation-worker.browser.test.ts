@@ -5,7 +5,12 @@ import type {
     PrivatePreparationActionContext,
     PrivatePreparationWorkerRequest,
     PrivatePreparationWorkerResponse,
+    PublishedPreparationPackage,
 } from '../../src/private-preparation-worker-protocol.js';
+import {
+    abstentionSourceBodyByteLength,
+    submittedSourceBodyByteLength,
+} from '../../src/source-runtime.js';
 
 const participantCount = 10;
 const preparationAttempt = 7;
@@ -23,6 +28,10 @@ const ordinaryWorkerUrl = new URL(
 );
 const crashWorkerUrl = new URL(
     './fixtures/private-preparation-crash-worker.ts',
+    import.meta.url,
+);
+const sourceCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-source-crash-worker.ts',
     import.meta.url,
 );
 
@@ -346,6 +355,270 @@ describe('private preparation worker in Chromium', () => {
                 status: 'burned',
             });
             closeClient(recoveredRecipient);
+        },
+    );
+
+    it(
+        'binds one source only after the complete preparation and resumes the same source after a crash',
+        { timeout: 300_000 },
+        async () => {
+            const runIdentity = crypto.randomUUID();
+            const actionKeySetBodies: Uint8Array[] = [];
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                const registration = await client.registerActionKeys(
+                    actionContext(participantPosition),
+                );
+                actionKeySetBodies.push(registration.actionKeySetBody);
+                closeClient(client);
+            }
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                await client.confirmActionKeyRoster(
+                    actionContext(participantPosition),
+                    actionKeySetBodies,
+                );
+                closeClient(client);
+            }
+
+            const preparationPackages: PublishedPreparationPackage[] = [];
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                preparationPackages.push(
+                    await client.createPreparationPackage(
+                        actionContext(participantPosition),
+                        actionKeySetBodies,
+                        preparationAttempt,
+                    ),
+                );
+                closeClient(client);
+            }
+            const preparationParents = preparationPackages.map((entry) => ({
+                body: entry.parentBody,
+                signature: entry.parentSignature,
+            }));
+
+            for (
+                let recipientPosition = 0;
+                recipientPosition < participantCount;
+                recipientPosition += 1
+            ) {
+                const client = await openClient(runIdentity, recipientPosition);
+                for (
+                    let senderPosition = 0;
+                    senderPosition < participantCount;
+                    senderPosition += 1
+                ) {
+                    if (senderPosition === recipientPosition) {
+                        continue;
+                    }
+                    const senderPackage = preparationPackages[senderPosition];
+                    const privateBody =
+                        senderPackage?.privateBodies[
+                            remoteBodyIndex(senderPosition, recipientPosition)
+                        ];
+                    if (
+                        senderPackage === undefined ||
+                        privateBody === undefined
+                    ) {
+                        throw new Error(
+                            'The complete preparation fixture is incomplete.',
+                        );
+                    }
+                    await expect(
+                        client.consumePrivatePreparation(
+                            actionContext(recipientPosition),
+                            actionKeySetBodies,
+                            preparationAttempt,
+                            senderPackage.parentBody,
+                            senderPackage.parentSignature,
+                            privateBody,
+                        ),
+                    ).resolves.toEqual({
+                        senderPosition,
+                        status: 'resolved',
+                    });
+                }
+                closeClient(client);
+            }
+
+            const sourcePosition = 0;
+            const crashWorker = new Worker(sourceCrashWorkerUrl, {
+                type: 'module',
+            });
+            await rawRequest(crashWorker, {
+                requestId: 1,
+                operation: 'initialize',
+                input: {
+                    databaseName: databaseName(runIdentity, sourcePosition),
+                    kernelUrl: kernelUrl.toString(),
+                    kernelOptions: { allowUnpinnedKernel: true },
+                    runtimeIdentity,
+                    candidateBuildIdentity,
+                },
+            });
+            const sourceBoundary = new Promise<void>((resolve) => {
+                crashWorker.addEventListener(
+                    'message',
+                    (event: MessageEvent<unknown>) => {
+                        const data = event.data;
+                        if (
+                            typeof data === 'object' &&
+                            data !== null &&
+                            'testBoundary' in data &&
+                            data.testBoundary === 'source-durably-bound'
+                        ) {
+                            resolve();
+                        }
+                    },
+                );
+            });
+            crashWorker.postMessage({
+                requestId: 2,
+                operation: 'create-source-package',
+                input: {
+                    ...actionContext(sourcePosition),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    preparationParents,
+                    choice: { declaration: 'submit', inputBit: 1 },
+                },
+            } satisfies PrivatePreparationWorkerRequest);
+            await sourceBoundary;
+            crashWorker.terminate();
+
+            const recoveredSource = await openClient(
+                runIdentity,
+                sourcePosition,
+            );
+            const submitted = await recoveredSource.createSourcePackage(
+                actionContext(sourcePosition),
+                actionKeySetBodies,
+                preparationAttempt,
+                preparationParents,
+                { declaration: 'submit', inputBit: 1 },
+            );
+            expect(submitted.sourceBody).toHaveLength(
+                submittedSourceBodyByteLength,
+            );
+            await expect(
+                recoveredSource.createSourcePackage(
+                    actionContext(sourcePosition),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    preparationParents,
+                    { declaration: 'submit', inputBit: 1 },
+                ),
+            ).resolves.toEqual(submitted);
+            await expect(
+                recoveredSource.createSourcePackage(
+                    actionContext(sourcePosition),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    preparationParents,
+                    { declaration: 'submit', inputBit: 0 },
+                ),
+            ).rejects.toThrow();
+            closeClient(recoveredSource);
+
+            const restoredSource = await openClient(
+                runIdentity,
+                sourcePosition,
+            );
+            await expect(
+                restoredSource.createSourcePackage(
+                    actionContext(sourcePosition),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    preparationParents,
+                    { declaration: 'submit', inputBit: 1 },
+                ),
+            ).resolves.toEqual(submitted);
+            closeClient(restoredSource);
+
+            const abstainingPosition = 1;
+            const abstainingSource = await openClient(
+                runIdentity,
+                abstainingPosition,
+            );
+            const abstention = await abstainingSource.createSourcePackage(
+                actionContext(abstainingPosition),
+                actionKeySetBodies,
+                preparationAttempt,
+                preparationParents,
+                { declaration: 'abstain' },
+            );
+            expect(abstention.sourceBody).toHaveLength(
+                abstentionSourceBodyByteLength,
+            );
+            closeClient(abstainingSource);
+
+            const malformedPosition = 2;
+            const malformedSource = await openClient(
+                runIdentity,
+                malformedPosition,
+            );
+            const mutatedParents = preparationParents.map((parent) => ({
+                body: Uint8Array.from(parent.body),
+                signature: Uint8Array.from(parent.signature),
+            }));
+            const mutatedParent = mutatedParents[3];
+            if (mutatedParent === undefined) {
+                throw new Error('The mutation fixture omitted a parent.');
+            }
+            mutatedParent.body[mutatedParent.body.byteLength - 1] ^= 1;
+            await expect(
+                malformedSource.createSourcePackage(
+                    actionContext(malformedPosition),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    mutatedParents,
+                    { declaration: 'abstain' },
+                ),
+            ).rejects.toThrow();
+            await expect(
+                malformedSource.createSourcePackage(
+                    actionContext(malformedPosition),
+                    actionKeySetBodies,
+                    preparationAttempt + 1,
+                    preparationParents,
+                    { declaration: 'abstain' },
+                ),
+            ).rejects.toThrow();
+            const recoveredAbstention =
+                await malformedSource.createSourcePackage(
+                    actionContext(malformedPosition),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    preparationParents,
+                    { declaration: 'abstain' },
+                );
+            expect(recoveredAbstention.sourceBody).toHaveLength(
+                abstentionSourceBodyByteLength,
+            );
+            expect(recoveredAbstention.sourceSignature).toHaveLength(6_388);
+            closeClient(malformedSource);
         },
     );
 });

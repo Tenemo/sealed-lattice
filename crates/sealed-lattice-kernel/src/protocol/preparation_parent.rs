@@ -47,7 +47,7 @@ impl ActionSignaturePurpose {
         }
     }
 
-    const fn key_index(self) -> usize {
+    pub(super) const fn key_index(self) -> usize {
         self as usize - 1
     }
 }
@@ -164,7 +164,7 @@ impl ActionSignatureCarrier {
         Ok(carrier)
     }
 
-    fn verify(
+    pub(super) fn verify(
         &self,
         expected_signer: u16,
         expected_purpose: ActionSignaturePurpose,
@@ -188,6 +188,65 @@ impl ActionSignatureCarrier {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifiedPreparationParent {
+    pub sender_position: u16,
+    pub parent_identity: Hash512,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_preparation_parent_carrier(
+    participant_count: u16,
+    expected_action_proposal_identity: Hash512,
+    expected_action_key_set_roster_identity: Hash512,
+    expected_preparation_attempt: u16,
+    expected_predecessor_identity: Hash512,
+    expected_sender_position: u16,
+    action_key_sets: &[ActionKeySet],
+    parent_bytes: &[u8],
+    signature_bytes: &[u8],
+) -> Result<VerifiedPreparationParent, PreparationParentError> {
+    validate_position(participant_count, expected_sender_position)?;
+    if action_key_sets.len() != usize::from(participant_count)
+        || action_key_set_roster_identity(action_key_sets)
+            .map_err(|_| PreparationParentError::WrongContext)?
+            != expected_action_key_set_roster_identity
+        || action_key_sets
+            .first()
+            .is_none_or(|key_set| key_set.proposal_identity() != expected_action_proposal_identity)
+    {
+        return Err(PreparationParentError::WrongContext);
+    }
+
+    let parent = PreparationParent::decode(participant_count, parent_bytes)?;
+    if parent.action_proposal_identity != expected_action_proposal_identity
+        || parent.action_key_set_roster_identity != expected_action_key_set_roster_identity
+        || parent.preparation_attempt != expected_preparation_attempt
+        || parent.predecessor_identity != expected_predecessor_identity
+        || parent.sender_position != expected_sender_position
+    {
+        return Err(PreparationParentError::WrongContext);
+    }
+    let parent_identity = parent.body_identity()?;
+    let signature = ActionSignatureCarrier::decode(participant_count, signature_bytes)?;
+    let sender_key_set = action_key_sets
+        .get(usize::from(expected_sender_position))
+        .ok_or(PreparationParentError::WrongParticipantPosition)?;
+    let verification_key = sender_key_set
+        .action_signature_verification_key(ActionSignaturePurpose::Preparation.key_index())
+        .ok_or(PreparationParentError::WrongSignaturePurpose)?;
+    signature.verify(
+        expected_sender_position,
+        ActionSignaturePurpose::Preparation,
+        parent_identity,
+        verification_key,
+    )?;
+    Ok(VerifiedPreparationParent {
+        sender_position: expected_sender_position,
+        parent_identity,
+    })
 }
 
 #[derive(Clone, PartialEq, Eq)]
