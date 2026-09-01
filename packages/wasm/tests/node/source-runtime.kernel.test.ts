@@ -6,6 +6,14 @@ import {
     openActionSignatureRuntime,
 } from '../../src/action-signature-runtime.js';
 import { ConstructionKernelCommandError } from '../../src/construction-kernel-command-runtime.js';
+import {
+    completionProfileFinalityQuorum,
+    finalityTargetBodyByteLength,
+    openFinalityRuntime,
+    sourceBodyIdentityVectorByteLength,
+    type FinalitySignatureCarrier,
+    type SourceCarrier,
+} from '../../src/finality-runtime.js';
 import { instantiateConstructionKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
 import {
     openPairEncryptionRuntime,
@@ -27,6 +35,11 @@ import {
     type PreparationParentCarrier,
     type SourcePreparationContext,
 } from '../../src/source-runtime.js';
+import {
+    openTallyActivationRuntime,
+    type ActivationChunkDescriptor,
+    type SignedActivationManifest,
+} from '../../src/tally-activation-runtime.js';
 
 const kernelUrl = new URL(
     '../../dist/sealed-lattice-kernel.wasm',
@@ -58,6 +71,8 @@ describe('source fixation scalar WASM runtime', () => {
         const materialRuntime = openPreparationMaterialRuntime(kernel);
         const parentRuntime = openPreparationParentRuntime(kernel);
         const sourceRuntime = openSourceRuntime(kernel);
+        const finalityRuntime = openFinalityRuntime(kernel);
+        const tallyActivationRuntime = openTallyActivationRuntime(kernel);
         const actionProposalIdentity = deterministicBytes(64, 0x1001n);
         const predecessorIdentity = deterministicBytes(64, 0x1002n);
         const actionKeySetBodies: Uint8Array[] = [];
@@ -230,17 +245,25 @@ describe('source fixation scalar WASM runtime', () => {
         expect(sourcePreparation.heldSubsetKeys).toHaveLength(
             heldSubsetKeyVectorByteLength,
         );
+        const verifiedPreparations = [sourcePreparation];
+        const zeroScores = new Uint8Array(10);
+        const submittedScores = Uint8Array.of(1, 10, 3, 9, 5, 8, 7, 6, 4, 2);
         const correctionZero = sourceRuntime.deriveHonestCorrection(
             0,
-            0,
+            zeroScores,
             sourcePreparation.heldSubsetKeys,
         );
-        const correctionOne = sourceRuntime.deriveHonestCorrection(
+        const submittedCorrection = sourceRuntime.deriveHonestCorrection(
             0,
-            1,
+            submittedScores,
             sourcePreparation.heldSubsetKeys,
         );
-        expect(correctionZero ^ correctionOne).toBe(0b11);
+        expect(
+            Uint8Array.from(
+                correctionZero,
+                (value, index) => value ^ (submittedCorrection[index] ?? 0),
+            ),
+        ).toEqual(Uint8Array.of(0xa1, 0x93, 0x85, 0x67, 0x24));
 
         const submittedContext = {
             ...sourcePreparationContext,
@@ -250,7 +273,7 @@ describe('source fixation scalar WASM runtime', () => {
         const submitted = sourceRuntime.encodeBody(
             submittedContext,
             'submit',
-            correctionOne,
+            submittedCorrection,
         );
         expect(submitted.body).toHaveLength(submittedSourceBodyByteLength);
         const sourceSecretKey = signatureSecretKeys[0]?.[1];
@@ -276,7 +299,7 @@ describe('source fixation scalar WASM runtime', () => {
         ).toEqual({
             senderPosition: 0,
             declaration: 'submit',
-            correction: correctionOne,
+            correction: submittedCorrection,
             bodyIdentity: submitted.identity,
             verifiedPreparationRoot: sourcePreparation.root,
         });
@@ -292,6 +315,7 @@ describe('source fixation scalar WASM runtime', () => {
             remotePlaintextsFor(abstainingPosition),
         );
         expect(abstainingPreparation.root).toEqual(sourcePreparation.root);
+        verifiedPreparations.push(abstainingPreparation);
         const abstainingContext = {
             ...sourcePreparationContext,
             verifiedPreparationRoot: abstainingPreparation.root,
@@ -329,10 +353,403 @@ describe('source fixation scalar WASM runtime', () => {
             correction: undefined,
         });
 
+        const sources: SourceCarrier[] = [
+            {
+                declaration: 'submit',
+                body: submitted.body,
+                signature: submittedSignature,
+            },
+            {
+                declaration: 'abstain',
+                body: abstention.body,
+                signature: abstentionSignature,
+            },
+        ];
+        for (let position = 2; position < participantCount; position += 1) {
+            const preparation = sourceRuntime.verifyCompletePreparation(
+                sourcePreparationContext,
+                position,
+                actionKeySetBodies,
+                parents,
+                contributionOpenings[position] ?? new Uint8Array(),
+                affineCoefficients[position] ?? new Uint8Array(),
+                remotePlaintextsFor(position),
+            );
+            expect(preparation.root).toEqual(sourcePreparation.root);
+            verifiedPreparations.push(preparation);
+            const sourceContext = {
+                ...sourcePreparationContext,
+                verifiedPreparationRoot: preparation.root,
+                senderPosition: position,
+            } as const;
+            const body = sourceRuntime.encodeBody(sourceContext, 'abstain');
+            const secretKey = signatureSecretKeys[position]?.[1];
+            if (secretKey === undefined) {
+                throw new Error('test source key is absent');
+            }
+            sources.push({
+                declaration: 'abstain',
+                body: body.body,
+                signature: sourceRuntime.encodeSignature(
+                    position,
+                    body.identity,
+                    signatureRuntime.signBodyIdentity(secretKey, body.identity),
+                ),
+            });
+        }
+
+        const finalityContext = {
+            participantCount,
+            runtimeIdentity: deterministicBytes(64, 0xb001n),
+            candidateBuildIdentity: deterministicBytes(64, 0xb002n),
+            actionProposalIdentity,
+            actionKeySetRosterIdentity,
+            preparationAttempt: sourcePreparationContext.preparationAttempt,
+            predecessorIdentity,
+            verifiedPreparationRoot: sourcePreparation.root,
+        } as const;
+        const target = finalityRuntime.deriveTarget(
+            finalityContext,
+            actionKeySetBodies,
+            sources,
+        );
+        expect(target.targetBody).toHaveLength(finalityTargetBodyByteLength);
+        expect(target.sourceBodyIdentities).toHaveLength(
+            sourceBodyIdentityVectorByteLength,
+        );
+        expect(target.sourceSubmissionBitmap).toBe(1);
+        expect(target.targetKind).toBe('computation');
+        expect(target.quorum).toBe(completionProfileFinalityQuorum);
+        expect(
+            finalityRuntime.deriveTarget(
+                finalityContext,
+                actionKeySetBodies,
+                sources,
+            ),
+        ).toEqual(target);
+
+        const finalitySignatures: FinalitySignatureCarrier[] = [];
+        for (
+            let signerPosition = 0;
+            signerPosition < completionProfileFinalityQuorum;
+            signerPosition += 1
+        ) {
+            const finalitySecretKey = signatureSecretKeys[signerPosition]?.[2];
+            if (finalitySecretKey === undefined) {
+                throw new Error('test finality key is absent');
+            }
+            finalitySignatures.push({
+                signerPosition,
+                signature: finalityRuntime.encodeSignature(
+                    signerPosition,
+                    target.targetIdentity,
+                    signatureRuntime.signBodyIdentity(
+                        finalitySecretKey,
+                        target.targetIdentity,
+                    ),
+                ),
+            });
+        }
+        expect(
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
+                actionKeySetBodies,
+                finalitySignatures,
+            ),
+        ).toEqual({
+            signerBitmap: 0xff,
+            quorum: completionProfileFinalityQuorum,
+            targetKind: 'computation',
+            sourceSubmissionBitmap: 1,
+            targetIdentity: target.targetIdentity,
+        });
+        finalityRuntime.verifySignature(
+            0,
+            target.targetIdentity,
+            actionKeySetBodies,
+            finalitySignatures[0]?.signature ?? new Uint8Array(),
+        );
+
+        const activationContext = {
+            targetIdentity: target.targetIdentity,
+            topCount: 1,
+            sourceSubmissionBitmap: 1,
+            sourceCorrections: [
+                submittedCorrection,
+                ...Array.from(
+                    { length: participantCount - 1 },
+                    () => undefined,
+                ),
+            ],
+        } as const;
+        const activationPlan = tallyActivationRuntime.plan(1);
+        expect(activationPlan.conjunctionCount).toBe(2_098);
+        expect(activationPlan.outputBitCount).toBe(15);
+        const activationChunksByRange: Uint8Array[][] = [];
+        const activationDescriptors = Array.from(
+            { length: participantCount },
+            () => [] as ActivationChunkDescriptor[],
+        );
+        for (const range of activationPlan.ranges) {
+            const chunks = verifiedPreparations.map(
+                (preparation, participantPosition) => {
+                    const chunk = tallyActivationRuntime.generateChunk(
+                        activationContext,
+                        {
+                            participantPosition,
+                            activationSeed: deterministicBytes(
+                                32,
+                                0xc000n + BigInt(participantPosition),
+                            ),
+                            heldSubsetKeys: preparation.heldSubsetKeys,
+                            heldAffineEvaluations:
+                                preparation.heldAffineEvaluations,
+                            localAffineConstants:
+                                preparation.localAffineConstants,
+                        },
+                        range,
+                    );
+                    activationDescriptors[participantPosition]?.push({
+                        ...range,
+                        byteLength: chunk.byteLength,
+                        identity: tallyActivationRuntime.identifyChunk(chunk),
+                    });
+                    return chunk;
+                },
+            );
+            activationChunksByRange.push(chunks);
+        }
+        const signedActivationManifests: SignedActivationManifest[] =
+            activationDescriptors.map((descriptors, participantPosition) => {
+                const encoded = tallyActivationRuntime.encodeManifest(
+                    activationContext,
+                    participantPosition,
+                    descriptors,
+                );
+                const activationSecretKey =
+                    signatureSecretKeys[participantPosition]?.[3];
+                if (activationSecretKey === undefined) {
+                    throw new Error('test activation key is absent');
+                }
+                const signature = tallyActivationRuntime.encodeSignature(
+                    participantPosition,
+                    encoded.identity,
+                    signatureRuntime.signBodyIdentity(
+                        activationSecretKey,
+                        encoded.identity,
+                    ),
+                );
+                expect(
+                    tallyActivationRuntime.verifyManifest(
+                        actionKeySetBodies,
+                        encoded.body,
+                        signature,
+                    ),
+                ).toMatchObject({
+                    targetIdentity: target.targetIdentity,
+                    topCount: 1,
+                    sourceSubmissionBitmap: 1,
+                    participantPosition,
+                    chunks: descriptors,
+                });
+                return { body: encoded.body, signature };
+            });
+        const firstChunks = activationChunksByRange[0];
+        const firstRange = activationPlan.ranges[0];
+        if (firstChunks === undefined || firstRange === undefined) {
+            throw new Error('test activation plan is empty');
+        }
+        const corruptedFirstChunks = firstChunks.map((chunk) =>
+            Uint8Array.from(chunk),
+        );
+        const corruptedFirstChunk = corruptedFirstChunks[0];
+        if (corruptedFirstChunk === undefined) {
+            throw new Error('test activation chunk is absent');
+        }
+        corruptedFirstChunk[corruptedFirstChunk.byteLength - 1] ^= 1;
+        expect(() =>
+            tallyActivationRuntime.advance(
+                activationContext,
+                undefined,
+                firstRange,
+                actionKeySetBodies,
+                signedActivationManifests,
+                corruptedFirstChunks,
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
+        let activationCheckpoint: Uint8Array | undefined;
+        let activationTerminal:
+            | ReturnType<typeof tallyActivationRuntime.advance>
+            | undefined;
+        let checkpointBeforeTerminal: Uint8Array | undefined;
+        let maximumCheckpointByteLength = 0;
+        for (const [rangeIndex, range] of activationPlan.ranges.entries()) {
+            const chunks = activationChunksByRange[rangeIndex];
+            if (chunks === undefined) {
+                throw new Error('test activation chunk range is absent');
+            }
+            checkpointBeforeTerminal = activationCheckpoint;
+            const advance = tallyActivationRuntime.advance(
+                activationContext,
+                activationCheckpoint,
+                range,
+                actionKeySetBodies,
+                signedActivationManifests,
+                chunks,
+            );
+            if (advance.kind === 'pending') {
+                maximumCheckpointByteLength = Math.max(
+                    maximumCheckpointByteLength,
+                    advance.checkpoint.byteLength,
+                );
+                activationCheckpoint = Uint8Array.from(advance.checkpoint);
+            } else {
+                activationTerminal = advance;
+            }
+        }
+        expect(maximumCheckpointByteLength).toBeGreaterThan(0);
+        expect(maximumCheckpointByteLength).toBeLessThan(3_000_000);
+        expect(activationTerminal).toEqual({
+            kind: 'result',
+            acceptedBallotAuthorshipBitmap: 1,
+            orderedOptionPositions: [1],
+        });
+        const lastRange =
+            activationPlan.ranges[activationPlan.ranges.length - 1];
+        const lastChunks =
+            activationChunksByRange[activationChunksByRange.length - 1];
+        if (
+            lastRange === undefined ||
+            lastChunks === undefined ||
+            checkpointBeforeTerminal === undefined
+        ) {
+            throw new Error('test terminal activation range is absent');
+        }
+        expect(
+            tallyActivationRuntime.advance(
+                activationContext,
+                checkpointBeforeTerminal,
+                lastRange,
+                actionKeySetBodies,
+                signedActivationManifests,
+                lastChunks,
+            ),
+        ).toEqual(activationTerminal);
+        const secondRange = activationPlan.ranges[1];
+        const secondChunks = activationChunksByRange[1];
+        if (secondRange === undefined || secondChunks === undefined) {
+            throw new Error('test second activation range is absent');
+        }
+        expect(() =>
+            tallyActivationRuntime.advance(
+                activationContext,
+                undefined,
+                secondRange,
+                actionKeySetBodies,
+                signedActivationManifests,
+                secondChunks,
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
+        expect(() =>
+            finalityRuntime.verifySignature(
+                1,
+                target.targetIdentity,
+                actionKeySetBodies,
+                finalitySignatures[0]?.signature ?? new Uint8Array(),
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+        expect(() =>
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
+                actionKeySetBodies,
+                finalitySignatures.slice(0, 7),
+            ),
+        ).toThrow(RangeError);
+        expect(() =>
+            finalityRuntime.verifyCertificate(
+                target.targetBody,
+                actionKeySetBodies,
+                [
+                    ...finalitySignatures.slice(0, 7),
+                    finalitySignatures[0] ?? {
+                        signerPosition: 0,
+                        signature: new Uint8Array(),
+                    },
+                ],
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+        const mutatedTargetBody = Uint8Array.from(target.targetBody);
+        mutatedTargetBody[mutatedTargetBody.byteLength - 1] ^= 1;
+        expect(() =>
+            finalityRuntime.verifyCertificate(
+                mutatedTargetBody,
+                actionKeySetBodies,
+                finalitySignatures,
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+        const sourceZeroAbstention = sourceRuntime.encodeBody(
+            submittedContext,
+            'abstain',
+        );
+        const allAbstainSources = sources.map((source) => ({ ...source }));
+        allAbstainSources[0] = {
+            declaration: 'abstain',
+            body: sourceZeroAbstention.body,
+            signature: sourceRuntime.encodeSignature(
+                0,
+                sourceZeroAbstention.identity,
+                signatureRuntime.signBodyIdentity(
+                    sourceSecretKey,
+                    sourceZeroAbstention.identity,
+                ),
+            ),
+        };
+        const noResultTarget = finalityRuntime.deriveTarget(
+            finalityContext,
+            actionKeySetBodies,
+            allAbstainSources,
+        );
+        expect(noResultTarget.targetKind).toBe('no-result');
+        expect(noResultTarget.sourceSubmissionBitmap).toBe(0);
+
+        const secondSubmissionCorrection = sourceRuntime.deriveHonestCorrection(
+            abstainingPosition,
+            Uint8Array.of(10, 9, 8, 7, 6, 5, 4, 3, 2, 1),
+            abstainingPreparation.heldSubsetKeys,
+        );
+        const secondSubmission = sourceRuntime.encodeBody(
+            abstainingContext,
+            'submit',
+            secondSubmissionCorrection,
+        );
+        const twoSubmissionSources = sources.map((source) => ({ ...source }));
+        twoSubmissionSources[1] = {
+            declaration: 'submit',
+            body: secondSubmission.body,
+            signature: sourceRuntime.encodeSignature(
+                1,
+                secondSubmission.identity,
+                signatureRuntime.signBodyIdentity(
+                    abstainingSourceSecretKey,
+                    secondSubmission.identity,
+                ),
+            ),
+        };
+        expect(
+            finalityRuntime.deriveTarget(
+                finalityContext,
+                actionKeySetBodies,
+                twoSubmissionSources,
+            ).sourceSubmissionBitmap,
+        ).toBe(0b11);
+
+        const corruptCorrection = Uint8Array.of(1, 0, 0, 0, 0);
         const corruptVariant = sourceRuntime.encodeBody(
             submittedContext,
             'submit',
-            0b01,
+            corruptCorrection,
         );
         const corruptSignature = sourceRuntime.encodeSignature(
             0,
@@ -350,7 +767,7 @@ describe('source fixation scalar WASM runtime', () => {
                 corruptVariant.body,
                 corruptSignature,
             ).correction,
-        ).toBe(0b01);
+        ).toEqual(corruptCorrection);
 
         const mutatedBody = Uint8Array.from(submitted.body);
         mutatedBody[mutatedBody.byteLength - 1] ^= 1;
@@ -377,7 +794,11 @@ describe('source fixation scalar WASM runtime', () => {
             ),
         ).toThrow(ConstructionKernelCommandError);
         expect(() =>
-            sourceRuntime.encodeBody(submittedContext, 'submit', 4),
-        ).toThrow(RangeError);
+            sourceRuntime.encodeBody(
+                submittedContext,
+                'submit',
+                new Uint8Array(4),
+            ),
+        ).toThrow(TypeError);
     });
 });

@@ -96,7 +96,7 @@ impl<'a> BinaryReader<'a> {
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
     }
 
-    fn read_u32(&mut self) -> CanonicalResult<u32> {
+    pub fn read_u32(&mut self) -> CanonicalResult<u32> {
         let bytes = self.read_exact(4)?;
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
@@ -166,6 +166,10 @@ impl BinaryWriter {
     }
 
     pub fn write_u16(&mut self, value: u16) -> CanonicalResult<()> {
+        self.extend(&value.to_le_bytes())
+    }
+
+    pub fn write_u32(&mut self, value: u32) -> CanonicalResult<()> {
         self.extend(&value.to_le_bytes())
     }
 

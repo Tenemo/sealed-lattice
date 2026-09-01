@@ -3,7 +3,6 @@
 mod encoding;
 mod foundation;
 mod protocol;
-#[cfg(test)]
 pub(crate) mod tally_circuit;
 
 use core::{ptr, slice};

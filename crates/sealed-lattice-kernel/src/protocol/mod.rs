@@ -1,8 +1,10 @@
 pub(crate) mod action_key_set;
 pub(crate) mod action_signature;
 pub(crate) mod authenticated_record;
+pub(crate) mod finality;
 pub(crate) mod pair_encryption;
 pub(crate) mod preparation_parent;
 pub(crate) mod preparation_plaintext;
 pub(crate) mod private_preparation_body;
 pub(crate) mod source;
+pub(crate) mod tally_activation;

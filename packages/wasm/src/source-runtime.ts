@@ -21,9 +21,13 @@ const verifySourceCarrierCommand = 22;
 const completionProfileParticipantCount = 10;
 const preparationParentBodyByteLength = 8_502;
 export const heldSubsetKeyVectorByteLength = 3_840;
+export const heldAffineEvaluationVectorByteLength = 960;
+export const localAffineConstantVectorByteLength = 96;
 export const preparationParentIdentityVectorByteLength = 640;
 export const abstentionSourceBodyByteLength = 326;
-export const submittedSourceBodyByteLength = 333;
+export const submittedSourceBodyByteLength = 337;
+export const sourceScoreEncodingCount = 10;
+export const sourceCorrectionByteLength = 5;
 const identityByteLength = 64;
 
 export type SourceDeclaration = 'abstain' | 'submit';
@@ -51,6 +55,8 @@ export type VerifiedCompletePreparation = Readonly<{
     root: Uint8Array;
     parentIdentities: Uint8Array;
     heldSubsetKeys: Uint8Array;
+    heldAffineEvaluations: Uint8Array;
+    localAffineConstants: Uint8Array;
 }>;
 
 export type EncodedSourceBody = Readonly<{
@@ -61,7 +67,7 @@ export type EncodedSourceBody = Readonly<{
 export type VerifiedSource = Readonly<{
     senderPosition: number;
     declaration: SourceDeclaration;
-    correction: number | undefined;
+    correction: Uint8Array | undefined;
     bodyIdentity: Uint8Array;
     verifiedPreparationRoot: Uint8Array;
 }>;
@@ -78,13 +84,13 @@ export type SourceRuntime = Readonly<{
     ): VerifiedCompletePreparation;
     deriveHonestCorrection(
         sourcePosition: number,
-        inputBit: number,
+        scoreEncodings: Uint8Array,
         heldSubsetKeys: Uint8Array,
-    ): number;
+    ): Uint8Array;
     encodeBody(
         context: SourceContext,
         declaration: SourceDeclaration,
-        correction?: number,
+        correction?: Uint8Array,
     ): EncodedSourceBody;
     encodeSignature(
         signerPosition: number,
@@ -271,13 +277,37 @@ export const openSourceRuntime = (
                 heldSubsetKeyVectorByteLength,
                 'heldSubsetKeys',
             );
-            return { root, parentIdentities, heldSubsetKeys };
+            const heldAffineEvaluations = Uint8Array.from(reader.readBytes());
+            requireExactConstructionBytes(
+                heldAffineEvaluations,
+                heldAffineEvaluationVectorByteLength,
+                'heldAffineEvaluations',
+            );
+            const localAffineConstants = Uint8Array.from(
+                reader.readFixed(localAffineConstantVectorByteLength),
+            );
+            return {
+                root,
+                parentIdentities,
+                heldSubsetKeys,
+                heldAffineEvaluations,
+                localAffineConstants,
+            };
         });
     },
-    deriveHonestCorrection: (sourcePosition, inputBit, heldSubsetKeys) => {
+    deriveHonestCorrection: (
+        sourcePosition,
+        scoreEncodings,
+        heldSubsetKeys,
+    ) => {
         requirePosition(sourcePosition, 'sourcePosition');
-        if (inputBit !== 0 && inputBit !== 1) {
-            throw new RangeError('inputBit must be zero or one.');
+        requireExactConstructionBytes(
+            scoreEncodings,
+            sourceScoreEncodingCount,
+            'scoreEncodings',
+        );
+        if (scoreEncodings.some((score) => score > 0x0f)) {
+            throw new RangeError('Every score encoding must fit four bits.');
         }
         requireExactConstructionBytes(
             heldSubsetKeys,
@@ -287,16 +317,12 @@ export const openSourceRuntime = (
         const request = new ConstructionCommandWriter();
         request.writeU8(deriveHonestSourceCorrectionCommand);
         request.writeU16(sourcePosition);
-        request.writeU8(inputBit);
+        request.writeBytes(scoreEncodings);
         request.writeBytes(heldSubsetKeys);
         return executeConstructionCommand(kernel, request, (reader) => {
-            const correction = reader.readU8();
-            if (correction > 0b11) {
-                throw new Error(
-                    'The construction kernel returned a noncanonical source correction.',
-                );
-            }
-            return correction;
+            return Uint8Array.from(
+                reader.readFixed(sourceCorrectionByteLength),
+            );
         });
     },
     encodeBody: (context, declaration, correction) => {
@@ -309,14 +335,17 @@ export const openSourceRuntime = (
         requirePosition(context.senderPosition, 'senderPosition');
         if (
             (declaration === 'abstain' && correction !== undefined) ||
-            (declaration === 'submit' &&
-                (!Number.isSafeInteger(correction) ||
-                    correction === undefined ||
-                    correction < 0 ||
-                    correction > 0b11))
+            (declaration === 'submit' && correction === undefined)
         ) {
             throw new RangeError(
                 'The source declaration and correction are inconsistent.',
+            );
+        }
+        if (correction !== undefined) {
+            requireExactConstructionBytes(
+                correction,
+                sourceCorrectionByteLength,
+                'sourceCorrection',
             );
         }
         const request = new ConstructionCommandWriter();
@@ -326,11 +355,7 @@ export const openSourceRuntime = (
         request.writeFixed(context.verifiedPreparationRoot);
         request.writeU16(context.senderPosition);
         request.writeU16(declarationCode(declaration));
-        request.writeBytes(
-            correction === undefined
-                ? new Uint8Array()
-                : Uint8Array.of(correction),
-        );
+        request.writeBytes(correction ?? new Uint8Array());
         return executeConstructionCommand(kernel, request, (reader) => {
             const body = Uint8Array.from(reader.readBytes());
             const expectedLength =
@@ -410,15 +435,14 @@ export const openSourceRuntime = (
         return executeConstructionCommand(kernel, request, (reader) => {
             const senderPosition = reader.readU16();
             const declaration = declarationFromCode(reader.readU16());
-            const correctionByte = reader.readU8();
+            const correctionBytes = Uint8Array.from(
+                reader.readFixed(sourceCorrectionByteLength),
+            );
             const correction =
-                correctionByte === 0xff ? undefined : correctionByte;
+                declaration === 'submit' ? correctionBytes : undefined;
             if (
                 senderPosition !== context.senderPosition ||
-                declaration !== expectedDeclaration ||
-                (declaration === 'submit' &&
-                    (correction === undefined || correction > 0b11)) ||
-                (declaration === 'abstain' && correction !== undefined)
+                declaration !== expectedDeclaration
             ) {
                 throw new Error(
                     'The construction kernel returned inconsistent source metadata.',

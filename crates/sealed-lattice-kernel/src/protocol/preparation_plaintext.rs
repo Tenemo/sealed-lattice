@@ -195,6 +195,19 @@ pub struct HeldSubsetKey {
     pub key: [u8; CONTRIBUTION_SEED_BYTE_LENGTH],
 }
 
+#[derive(Zeroize)]
+pub struct HeldAffineEvaluation {
+    pub receiver_position: u16,
+    pub affine_a_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
+    pub affine_b_evaluation: [u8; AFFINE_MODULE_VALUE_BYTE_LENGTH],
+}
+
+impl Drop for HeldAffineEvaluation {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 impl Drop for HeldSubsetKey {
     fn drop(&mut self) {
         self.zeroize();
@@ -404,6 +417,76 @@ pub fn derive_held_subset_keys(
         });
     }
     Ok(held_keys)
+}
+
+pub fn derive_held_affine_evaluations(
+    participant_position: u16,
+    own_affine_coefficient_bytes: &[u8],
+    remote_plaintext_bytes: &[Vec<u8>],
+) -> Result<Vec<HeldAffineEvaluation>, PreparationPlaintextError> {
+    validate_position(participant_position)?;
+    if own_affine_coefficient_bytes.len() != AFFINE_COEFFICIENT_BYTE_LENGTH
+        || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
+    {
+        return Err(PreparationPlaintextError::WrongItemTypeOrLength);
+    }
+    let own_coefficients = Zeroizing::new(
+        own_affine_coefficient_bytes
+            .chunks_exact(AFFINE_MODULE_VALUE_BYTE_LENGTH)
+            .map(|bytes| {
+                bytes
+                    .try_into()
+                    .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)
+            })
+            .collect::<Result<Vec<[u8; AFFINE_MODULE_VALUE_BYTE_LENGTH]>, _>>()?,
+    );
+    if own_coefficients[LOW_COEFFICIENT_COUNT]
+        .iter()
+        .all(|byte| *byte == 0)
+    {
+        return Err(PreparationPlaintextError::InvalidAffineMask);
+    }
+    let remote_plaintexts = Zeroizing::new(
+        remote_plaintext_bytes
+            .iter()
+            .map(|bytes| PreparationPlaintext::decode(bytes))
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    let local_point = u8::try_from(participant_position + 1)
+        .map_err(|_| PreparationPlaintextError::WrongParticipantPosition)?;
+    let local_affine_a_evaluation =
+        evaluate_module_polynomial(&own_coefficients[..LOW_COEFFICIENT_COUNT], local_point);
+    let local_affine_b_evaluation = evaluate_module_polynomial(
+        &own_coefficients[LOW_COEFFICIENT_COUNT..LOW_COEFFICIENT_COUNT + STATUS_COEFFICIENT_COUNT],
+        local_point,
+    );
+
+    let mut held_evaluations =
+        Vec::with_capacity(usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT));
+    for receiver_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+        if receiver_position == participant_position {
+            held_evaluations.push(HeldAffineEvaluation {
+                receiver_position,
+                affine_a_evaluation: local_affine_a_evaluation,
+                affine_b_evaluation: local_affine_b_evaluation,
+            });
+            continue;
+        }
+        let remote_index = if receiver_position < participant_position {
+            usize::from(receiver_position)
+        } else {
+            usize::from(receiver_position - 1)
+        };
+        let plaintext = remote_plaintexts
+            .get(remote_index)
+            .ok_or(PreparationPlaintextError::WrongItemTypeOrLength)?;
+        held_evaluations.push(HeldAffineEvaluation {
+            receiver_position,
+            affine_a_evaluation: plaintext.affine_a_evaluation,
+            affine_b_evaluation: plaintext.affine_b_evaluation,
+        });
+    }
+    Ok(held_evaluations)
 }
 
 pub fn verify_preparation_plaintext(

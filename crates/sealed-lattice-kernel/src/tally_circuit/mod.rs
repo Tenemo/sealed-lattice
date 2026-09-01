@@ -1,7 +1,9 @@
 //! Development-only deterministic tally compiler and independent evaluator.
 
-mod compiler;
-mod direct_evaluator;
+pub(crate) mod compiler;
+#[cfg(test)]
+pub(crate) mod direct_evaluator;
+#[cfg(test)]
 mod interpreter;
 #[cfg(test)]
 mod tests;
@@ -52,6 +54,21 @@ impl TallyCircuitProfile {
             top_count,
         })
     }
+
+    #[cfg(test)]
+    pub(crate) const fn participant_count(self) -> u16 {
+        self.participant_count
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn option_count(self) -> u16 {
+        self.option_count
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn top_count(self) -> u16 {
+        self.top_count
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,17 +98,80 @@ pub(crate) struct CompiledTallyCircuit {
     ordered_option_position_wires: Vec<Vec<WireIndex>>,
 }
 
+impl CompiledTallyCircuit {
+    #[cfg(test)]
+    pub(crate) const fn profile(&self) -> TallyCircuitProfile {
+        self.profile
+    }
+
+    pub(crate) const fn input_bit_count(&self) -> usize {
+        self.input_bit_count
+    }
+
+    pub(crate) fn operations(&self) -> &[BooleanOperation] {
+        &self.operations
+    }
+
+    pub(crate) fn output_wires(&self) -> Vec<WireIndex> {
+        let output_bit_count = self
+            .participant_selected_wires
+            .len()
+            .saturating_add(1)
+            .saturating_add(
+                self.ordered_option_position_wires
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>(),
+            );
+        let mut output_wires = Vec::with_capacity(output_bit_count);
+        output_wires.extend_from_slice(&self.participant_selected_wires);
+        output_wires.push(self.nonempty_output_wire);
+        output_wires.extend(
+            self.ordered_option_position_wires
+                .iter()
+                .flat_map(|position_wires| position_wires.iter().copied()),
+        );
+        output_wires
+    }
+
+    pub(crate) fn wire_count(&self) -> usize {
+        self.input_bit_count.saturating_add(self.operations.len())
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyEvaluationInput {
     participant_ballots: Vec<TallyBallotInput>,
 }
 
+#[cfg(test)]
+impl TallyEvaluationInput {
+    pub(crate) fn new(participant_ballots: Vec<TallyBallotInput>) -> Self {
+        Self {
+            participant_ballots,
+        }
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyBallotInput {
     is_present: bool,
     score_encodings: Vec<u8>,
 }
 
+#[cfg(test)]
+impl TallyBallotInput {
+    pub(crate) fn new(is_present: bool, score_encodings: Vec<u8>) -> Self {
+        Self {
+            is_present,
+            score_encodings,
+        }
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyEvaluationOutcome {
     accepted_ballot_authorship: Vec<bool>,
@@ -99,6 +179,7 @@ pub(crate) struct TallyEvaluationOutcome {
     has_selected_ballot: bool,
 }
 
+#[cfg(test)]
 impl TallyEvaluationOutcome {
     /// Returns the only tally value that may advance toward release.
     ///
@@ -107,6 +188,10 @@ impl TallyEvaluationOutcome {
     pub(crate) fn accepted_ordered_option_positions(&self) -> Option<&[u16]> {
         self.has_selected_ballot
             .then_some(self.ordered_option_positions.as_slice())
+    }
+
+    pub(crate) fn accepted_ballot_authorship(&self) -> &[bool] {
+        &self.accepted_ballot_authorship
     }
 }
 
@@ -124,20 +209,24 @@ pub(crate) enum TallyCircuitError {
     },
     ArithmeticOverflow,
     WireIndexOverflow,
+    #[cfg(test)]
     InputParticipantCountMismatch {
         expected: usize,
         actual: usize,
     },
+    #[cfg(test)]
     InputOptionCountMismatch {
         participant_position: usize,
         expected: usize,
         actual: usize,
     },
+    #[cfg(test)]
     ScoreEncodingOutOfRange {
         participant_position: usize,
         option_position: usize,
         score_encoding: u8,
     },
+    #[cfg(test)]
     InputBitCountMismatch {
         expected: usize,
         actual: usize,
@@ -168,10 +257,12 @@ impl fmt::Display for TallyCircuitError {
             ),
             Self::ArithmeticOverflow => formatter.write_str("tally circuit arithmetic overflow"),
             Self::WireIndexOverflow => formatter.write_str("tally circuit wire index overflow"),
+            #[cfg(test)]
             Self::InputParticipantCountMismatch { expected, actual } => write!(
                 formatter,
                 "expected {expected} participant inputs, received {actual}"
             ),
+            #[cfg(test)]
             Self::InputOptionCountMismatch {
                 participant_position,
                 expected,
@@ -180,6 +271,7 @@ impl fmt::Display for TallyCircuitError {
                 formatter,
                 "participant {participant_position} has {actual} score encodings; expected {expected}"
             ),
+            #[cfg(test)]
             Self::ScoreEncodingOutOfRange {
                 participant_position,
                 option_position,
@@ -188,6 +280,7 @@ impl fmt::Display for TallyCircuitError {
                 formatter,
                 "score encoding {score_encoding} at participant {participant_position}, option {option_position} exceeds the circuit input width"
             ),
+            #[cfg(test)]
             Self::InputBitCountMismatch { expected, actual } => write!(
                 formatter,
                 "expected {expected} circuit input bits, received {actual}"

@@ -66,7 +66,10 @@ import type {
 } from './private-preparation-worker-protocol.js';
 import {
     abstentionSourceBodyByteLength,
+    heldAffineEvaluationVectorByteLength,
     heldSubsetKeyVectorByteLength,
+    localAffineConstantVectorByteLength,
+    sourceScoreEncodingCount,
     openSourceRuntime,
     submittedSourceBodyByteLength,
     type PreparationParentCarrier,
@@ -99,7 +102,6 @@ const unsignedSourcePhase = 1;
 const publishedSourcePhase = 2;
 const privatePreparationOperationOrdinal = 1n;
 const sourceOperationOrdinal = 0n;
-const privateInputParticipantPosition = 0;
 
 type WorkerConfiguration = Readonly<{
     runtimeIdentity: Uint8Array;
@@ -186,11 +188,13 @@ type SourceState = {
     preparationAttempt: number;
     verifiedPreparationRoot: Uint8Array;
     declaration: SourceDeclaration;
-    inputBit: 0 | 1;
+    scoreEncodings: Uint8Array;
     sourceBody: Uint8Array;
     sourceBodyIdentity: Uint8Array;
     sourceSignature: Uint8Array;
     heldSubsetKeys: Uint8Array;
+    heldAffineEvaluations: Uint8Array;
+    localAffineConstants: Uint8Array;
 };
 
 type LoadedSourceState = Readonly<{
@@ -424,13 +428,18 @@ const copySourcePublicationChoice = (
     if (choice.declaration === 'abstain') {
         return { declaration: 'abstain' };
     }
-    if (
-        choice.declaration !== 'submit' ||
-        (choice.inputBit !== 0 && choice.inputBit !== 1)
-    ) {
+    if (choice.declaration !== 'submit') {
         throw new TypeError('The source publication choice is invalid.');
     }
-    return { declaration: 'submit', inputBit: choice.inputBit };
+    const scoreEncodings = Uint8Array.from(choice.scoreEncodings);
+    if (
+        scoreEncodings.byteLength !== sourceScoreEncodingCount ||
+        scoreEncodings.some((score) => score > 0x0f)
+    ) {
+        scoreEncodings.fill(0);
+        throw new TypeError('The source score encodings are invalid.');
+    }
+    return { declaration: 'submit', scoreEncodings };
 };
 
 const randomBytes = (length: number): Uint8Array => {
@@ -759,11 +768,13 @@ const sourceStateByteLength =
     2 +
     identityByteLength +
     1 +
-    1 +
+    sourceScoreEncodingCount +
     submittedSourceBodyByteLength +
     identityByteLength +
     actionSignatureCarrierByteLength +
-    heldSubsetKeyVectorByteLength;
+    heldSubsetKeyVectorByteLength +
+    heldAffineEvaluationVectorByteLength +
+    localAffineConstantVectorByteLength;
 
 const encodeSourceState = (state: SourceState): Uint8Array => {
     const expectedBodyByteLength =
@@ -772,7 +783,9 @@ const encodeSourceState = (state: SourceState): Uint8Array => {
             : abstentionSourceBodyByteLength;
     if (
         state.sourceBody.byteLength !== expectedBodyByteLength ||
-        (state.declaration === 'abstain' && state.inputBit !== 0)
+        (state.declaration === 'abstain' && !isZero(state.scoreEncodings)) ||
+        state.scoreEncodings.byteLength !== sourceScoreEncodingCount ||
+        state.scoreEncodings.some((score) => score > 0x0f)
     ) {
         throw new DurableStateError(
             'CorruptState',
@@ -780,13 +793,13 @@ const encodeSourceState = (state: SourceState): Uint8Array => {
         );
     }
     const writer = new FixedWriter(sourceStateByteLength);
-    writer.writeU8(1);
+    writer.writeU8(3);
     writer.writeU8(state.phase);
     writer.writeU64(state.generation);
     writer.writeU16(state.preparationAttempt);
     writer.writeFixed(state.verifiedPreparationRoot);
     writer.writeU8(state.declaration === 'submit' ? 2 : 1);
-    writer.writeU8(state.inputBit);
+    writer.writeFixed(state.scoreEncodings);
     const paddedBody = new Uint8Array(submittedSourceBodyByteLength);
     paddedBody.set(state.sourceBody);
     writer.writeFixed(paddedBody);
@@ -794,6 +807,8 @@ const encodeSourceState = (state: SourceState): Uint8Array => {
     writer.writeFixed(state.sourceBodyIdentity);
     writer.writeFixed(state.sourceSignature);
     writer.writeFixed(state.heldSubsetKeys);
+    writer.writeFixed(state.heldAffineEvaluations);
+    writer.writeFixed(state.localAffineConstants);
     return writer.finish();
 };
 
@@ -805,7 +820,7 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 1) {
+    if (reader.readU8() !== 3) {
         throw new DurableStateError(
             'CorruptState',
             'The retained source has the wrong version.',
@@ -833,10 +848,10 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
                         'The retained source has an invalid declaration.',
                     );
                 })();
-    const inputBit = reader.readU8();
+    const scoreEncodings = reader.readFixed(sourceScoreEncodingCount);
     if (
-        (inputBit !== 0 && inputBit !== 1) ||
-        (declaration === 'abstain' && inputBit !== 0)
+        scoreEncodings.some((score) => score > 0x0f) ||
+        (declaration === 'abstain' && !isZero(scoreEncodings))
     ) {
         throw new DurableStateError(
             'CorruptState',
@@ -865,11 +880,17 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
         preparationAttempt,
         verifiedPreparationRoot,
         declaration,
-        inputBit,
+        scoreEncodings,
         sourceBody,
         sourceBodyIdentity: reader.readFixed(identityByteLength),
         sourceSignature: reader.readFixed(actionSignatureCarrierByteLength),
         heldSubsetKeys: reader.readFixed(heldSubsetKeyVectorByteLength),
+        heldAffineEvaluations: reader.readFixed(
+            heldAffineEvaluationVectorByteLength,
+        ),
+        localAffineConstants: reader.readFixed(
+            localAffineConstantVectorByteLength,
+        ),
     };
     reader.finish();
     if (state.phase === unsignedSourcePhase && !isZero(state.sourceSignature)) {
@@ -884,10 +905,13 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
 
 const zeroSourceState = (state: SourceState): void => {
     state.verifiedPreparationRoot.fill(0);
+    state.scoreEncodings.fill(0);
     state.sourceBody.fill(0);
     state.sourceBodyIdentity.fill(0);
     state.sourceSignature.fill(0);
     state.heldSubsetKeys.fill(0);
+    state.heldAffineEvaluations.fill(0);
+    state.localAffineConstants.fill(0);
 };
 
 const privatePreparationSlotStateByteLength =
@@ -1773,14 +1797,6 @@ class PrivatePreparationWorkerRuntime {
             input.preparationParents,
         );
         const choice = copySourcePublicationChoice(input.choice);
-        if (
-            choice.declaration === 'submit' &&
-            action.participantPosition !== privateInputParticipantPosition
-        ) {
-            throw new TypeError(
-                'Only the designated private-input participant may submit in this vertical.',
-            );
-        }
         return this.durableState.exclusive(async () => {
             const actionRecord = await this.durableState.readProtected(
                 'actions',
@@ -1840,17 +1856,19 @@ class PrivatePreparationWorkerRuntime {
                             existing,
                         );
                         try {
-                            const expectedInputBit =
+                            const expectedScoreEncodings =
                                 choice.declaration === 'submit'
-                                    ? choice.inputBit
-                                    : 0;
+                                    ? choice.scoreEncodings
+                                    : new Uint8Array(sourceScoreEncodingCount);
                             if (
                                 loadedSource.state.preparationAttempt !==
                                     preparationAttempt ||
                                 loadedSource.state.declaration !==
                                     choice.declaration ||
-                                loadedSource.state.inputBit !==
-                                    expectedInputBit ||
+                                !bytesEqual(
+                                    loadedSource.state.scoreEncodings,
+                                    expectedScoreEncodings,
+                                ) ||
                                 !bytesEqual(
                                     loadedSource.state.sourceBodyIdentity,
                                     boundSourceIdentity,
@@ -1862,6 +1880,14 @@ class PrivatePreparationWorkerRuntime {
                                 !bytesEqual(
                                     loadedSource.state.heldSubsetKeys,
                                     verifiedPreparation.heldSubsetKeys,
+                                ) ||
+                                !bytesEqual(
+                                    loadedSource.state.heldAffineEvaluations,
+                                    verifiedPreparation.heldAffineEvaluations,
+                                ) ||
+                                !bytesEqual(
+                                    loadedSource.state.localAffineConstants,
+                                    verifiedPreparation.localAffineConstants,
                                 )
                             ) {
                                 throw new DurableStateError(
@@ -1909,6 +1935,8 @@ class PrivatePreparationWorkerRuntime {
                     );
                 } finally {
                     verifiedPreparation.heldSubsetKeys.fill(0);
+                    verifiedPreparation.heldAffineEvaluations.fill(0);
+                    verifiedPreparation.localAffineConstants.fill(0);
                 }
             } finally {
                 zeroActionState(loadedAction.state);
@@ -2031,6 +2059,8 @@ class PrivatePreparationWorkerRuntime {
                     !bytesEqual(expectedIdentity, verifiedIdentity)
                 ) {
                     verified.heldSubsetKeys.fill(0);
+                    verified.heldAffineEvaluations.fill(0);
+                    verified.localAffineConstants.fill(0);
                     throw new DurableStateError(
                         'Conflict',
                         'The certified preparation parent does not match the retained private delivery.',
@@ -2058,12 +2088,15 @@ class PrivatePreparationWorkerRuntime {
         loadedAction: LoadedActionState,
     ): Promise<PublishedSourcePackage> {
         const declaration = choice.declaration;
-        const inputBit = declaration === 'submit' ? choice.inputBit : 0;
+        const scoreEncodings =
+            declaration === 'submit'
+                ? Uint8Array.from(choice.scoreEncodings)
+                : new Uint8Array(sourceScoreEncodingCount);
         const correction =
             declaration === 'submit'
                 ? this.sourceRuntime.deriveHonestCorrection(
                       action.participantPosition,
-                      inputBit,
+                      scoreEncodings,
                       verifiedPreparation.heldSubsetKeys,
                   )
                 : undefined;
@@ -2087,11 +2120,17 @@ class PrivatePreparationWorkerRuntime {
             preparationAttempt,
             verifiedPreparationRoot: Uint8Array.from(verifiedPreparation.root),
             declaration,
-            inputBit,
+            scoreEncodings,
             sourceBody: encodedSource.body,
             sourceBodyIdentity: encodedSource.identity,
             sourceSignature: new Uint8Array(actionSignatureCarrierByteLength),
             heldSubsetKeys: Uint8Array.from(verifiedPreparation.heldSubsetKeys),
+            heldAffineEvaluations: Uint8Array.from(
+                verifiedPreparation.heldAffineEvaluations,
+            ),
+            localAffineConstants: Uint8Array.from(
+                verifiedPreparation.localAffineConstants,
+            ),
         };
         try {
             this.validateSourceState(
@@ -2329,10 +2368,13 @@ class PrivatePreparationWorkerRuntime {
             state.sourceSignature.byteLength !==
                 actionSignatureCarrierByteLength ||
             state.heldSubsetKeys.byteLength !== heldSubsetKeyVectorByteLength ||
-            (state.inputBit !== 0 && state.inputBit !== 1) ||
-            (state.declaration === 'abstain' && state.inputBit !== 0) ||
-            (state.declaration === 'submit' &&
-                action.participantPosition !== privateInputParticipantPosition)
+            state.heldAffineEvaluations.byteLength !==
+                heldAffineEvaluationVectorByteLength ||
+            state.localAffineConstants.byteLength !==
+                localAffineConstantVectorByteLength ||
+            state.scoreEncodings.byteLength !== sourceScoreEncodingCount ||
+            state.scoreEncodings.some((score) => score > 0x0f) ||
+            (state.declaration === 'abstain' && !isZero(state.scoreEncodings))
         ) {
             throw new DurableStateError(
                 'CorruptState',
@@ -2343,7 +2385,7 @@ class PrivatePreparationWorkerRuntime {
             state.declaration === 'submit'
                 ? this.sourceRuntime.deriveHonestCorrection(
                       action.participantPosition,
-                      state.inputBit,
+                      state.scoreEncodings,
                       state.heldSubsetKeys,
                   )
                 : undefined;
@@ -2401,7 +2443,10 @@ class PrivatePreparationWorkerRuntime {
         if (
             verified.senderPosition !== action.participantPosition ||
             verified.declaration !== state.declaration ||
-            verified.correction !== correction ||
+            (correction === undefined
+                ? verified.correction !== undefined
+                : verified.correction === undefined ||
+                  !bytesEqual(verified.correction, correction)) ||
             !bytesEqual(verified.bodyIdentity, state.sourceBodyIdentity) ||
             !bytesEqual(
                 verified.verifiedPreparationRoot,

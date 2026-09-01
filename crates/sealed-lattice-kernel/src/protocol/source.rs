@@ -15,17 +15,26 @@ use super::preparation_parent::{
     verify_preparation_parent_carrier,
 };
 use super::preparation_plaintext::{
-    AFFINE_COEFFICIENT_BYTE_LENGTH, CONTRIBUTION_OPENING_BYTE_LENGTH, HeldSubsetKey,
-    PreparationMaterialContext, derive_held_subset_keys, sender_subset_slots,
-    verify_local_preparation_material, verify_preparation_plaintext,
+    AFFINE_COEFFICIENT_BYTE_LENGTH, AFFINE_MODULE_VALUE_BYTE_LENGTH,
+    CONTRIBUTION_OPENING_BYTE_LENGTH, HeldAffineEvaluation, HeldSubsetKey,
+    PreparationMaterialContext, derive_held_affine_evaluations, derive_held_subset_keys,
+    sender_subset_slots, verify_local_preparation_material, verify_preparation_plaintext,
 };
 
 pub const ABSTENTION_SOURCE_BODY_BYTE_LENGTH: usize = 326;
-pub const SUBMITTED_SOURCE_BODY_BYTE_LENGTH: usize = 333;
+pub const SUBMITTED_SOURCE_BODY_BYTE_LENGTH: usize = 337;
 pub const HELD_SUBSET_KEY_COUNT: usize = 120;
 pub const HELD_SUBSET_KEY_BYTE_LENGTH: usize = 32;
 pub const HELD_SUBSET_KEY_VECTOR_BYTE_LENGTH: usize =
     HELD_SUBSET_KEY_COUNT * HELD_SUBSET_KEY_BYTE_LENGTH;
+pub const HELD_AFFINE_EVALUATION_COUNT: usize = 10;
+pub const HELD_AFFINE_EVALUATION_VECTOR_BYTE_LENGTH: usize =
+    HELD_AFFINE_EVALUATION_COUNT * 2 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
+pub const LOCAL_AFFINE_CONSTANT_VECTOR_BYTE_LENGTH: usize = 2 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
+pub const SCORE_ENCODING_COUNT: usize = 10;
+pub const SCORE_BIT_WIDTH: usize = 4;
+pub const SOURCE_BIT_COUNT: usize = SCORE_ENCODING_COUNT * SCORE_BIT_WIDTH;
+pub const SOURCE_CORRECTION_BYTE_LENGTH: usize = SOURCE_BIT_COUNT.div_ceil(8);
 pub const SOURCE_ORDINAL: u64 = 0;
 
 const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
@@ -78,7 +87,9 @@ impl fmt::Display for SourceError {
             }
             Self::InvalidCanonicalEncoding => "source body is not canonically encoded",
             Self::InvalidSignature => "source signature is invalid",
-            Self::NoncanonicalCorrection => "source correction is not a canonical two-bit value",
+            Self::NoncanonicalCorrection => {
+                "source score encodings or correction vector are not canonical"
+            }
             Self::WrongContext => "source or preparation has the wrong context",
             Self::WrongDeclaration => "source declaration is invalid",
             Self::WrongItemTypeOrLength => "source field has the wrong type or length",
@@ -110,14 +121,14 @@ pub struct SourceContext {
 pub struct SourceBody {
     context: SourceContext,
     declaration: SourceDeclaration,
-    correction: Option<u8>,
+    correction: Option<[u8; SOURCE_CORRECTION_BYTE_LENGTH]>,
 }
 
 impl SourceBody {
     pub fn new(
         context: SourceContext,
         declaration: SourceDeclaration,
-        correction: Option<u8>,
+        correction: Option<[u8; SOURCE_CORRECTION_BYTE_LENGTH]>,
     ) -> Result<Self, SourceError> {
         validate_position(context.participant_count, context.sender_position)?;
         if context.source_ordinal != SOURCE_ORDINAL {
@@ -125,10 +136,7 @@ impl SourceBody {
         }
         match (declaration, correction) {
             (SourceDeclaration::Abstain, None) => {}
-            (SourceDeclaration::Submit, Some(value)) if value <= 0b11 => {}
-            (SourceDeclaration::Submit, Some(_)) => {
-                return Err(SourceError::NoncanonicalCorrection);
-            }
+            (SourceDeclaration::Submit, Some(_)) => {}
             _ => return Err(SourceError::WrongDeclaration),
         }
         Ok(Self {
@@ -151,7 +159,7 @@ impl SourceBody {
         ];
         if let Some(correction) = self.correction {
             items.push(
-                CanonicalItem::fixed_bytes([correction])
+                CanonicalItem::fixed_bytes(correction)
                     .map_err(|_| SourceError::InvalidCanonicalEncoding)?,
             );
         }
@@ -200,10 +208,14 @@ impl SourceBody {
                     return Err(SourceError::WrongDeclaration);
                 }
                 let bytes = read_raw_bytes(&tuple.items[8])?;
-                if bytes.len() != 1 {
+                if bytes.len() != SOURCE_CORRECTION_BYTE_LENGTH {
                     return Err(SourceError::WrongItemTypeOrLength);
                 }
-                Some(bytes[0])
+                Some(
+                    bytes
+                        .try_into()
+                        .map_err(|_| SourceError::WrongItemTypeOrLength)?,
+                )
             }
         };
         let body = Self::new(
@@ -240,13 +252,21 @@ pub struct VerifiedCompletePreparation {
     pub root: Hash512,
     pub parent_identities: Vec<Hash512>,
     pub held_subset_keys: Vec<HeldSubsetKey>,
+    pub held_affine_evaluations: Vec<HeldAffineEvaluation>,
+    pub local_affine_constants: [u8; LOCAL_AFFINE_CONSTANT_VECTOR_BYTE_LENGTH],
+}
+
+impl Drop for VerifiedCompletePreparation {
+    fn drop(&mut self) {
+        self.local_affine_constants.zeroize();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifiedSource {
     pub sender_position: u16,
     pub declaration: SourceDeclaration,
-    pub correction: Option<u8>,
+    pub correction: Option<[u8; SOURCE_CORRECTION_BYTE_LENGTH]>,
     pub body_identity: Hash512,
     pub verified_preparation_root: Hash512,
 }
@@ -367,10 +387,26 @@ pub fn verify_complete_preparation(
     let held_subset_keys =
         derive_held_subset_keys(local_position, own_opening_bytes, remote_plaintext_bytes)
             .map_err(|_| SourceError::WrongSubsetKeyVector)?;
+    let held_affine_evaluations = derive_held_affine_evaluations(
+        local_position,
+        own_affine_coefficient_bytes,
+        remote_plaintext_bytes,
+    )
+    .map_err(|_| SourceError::WrongContext)?;
+    let mut local_affine_constants = [0_u8; LOCAL_AFFINE_CONSTANT_VECTOR_BYTE_LENGTH];
+    local_affine_constants[..AFFINE_MODULE_VALUE_BYTE_LENGTH]
+        .copy_from_slice(&own_affine_coefficient_bytes[..AFFINE_MODULE_VALUE_BYTE_LENGTH]);
+    let affine_b_constant_start = 10 * AFFINE_MODULE_VALUE_BYTE_LENGTH;
+    local_affine_constants[AFFINE_MODULE_VALUE_BYTE_LENGTH..].copy_from_slice(
+        &own_affine_coefficient_bytes
+            [affine_b_constant_start..affine_b_constant_start + AFFINE_MODULE_VALUE_BYTE_LENGTH],
+    );
     Ok(VerifiedCompletePreparation {
         root,
         parent_identities,
         held_subset_keys,
+        held_affine_evaluations,
+        local_affine_constants,
     })
 }
 
@@ -415,20 +451,70 @@ pub fn decode_held_subset_keys(
         .collect()
 }
 
+pub fn encode_held_affine_evaluations(
+    held_affine_evaluations: &[HeldAffineEvaluation],
+) -> Result<Vec<u8>, SourceError> {
+    if held_affine_evaluations.len() != HELD_AFFINE_EVALUATION_COUNT
+        || held_affine_evaluations
+            .iter()
+            .enumerate()
+            .any(|(position, evaluation)| usize::from(evaluation.receiver_position) != position)
+    {
+        return Err(SourceError::WrongItemTypeOrLength);
+    }
+    Ok(held_affine_evaluations
+        .iter()
+        .flat_map(|evaluation| {
+            evaluation
+                .affine_a_evaluation
+                .into_iter()
+                .chain(evaluation.affine_b_evaluation)
+        })
+        .collect())
+}
+
+pub fn decode_held_affine_evaluations(
+    bytes: &[u8],
+) -> Result<Vec<HeldAffineEvaluation>, SourceError> {
+    if bytes.len() != HELD_AFFINE_EVALUATION_VECTOR_BYTE_LENGTH {
+        return Err(SourceError::WrongItemTypeOrLength);
+    }
+    bytes
+        .chunks_exact(2 * AFFINE_MODULE_VALUE_BYTE_LENGTH)
+        .enumerate()
+        .map(|(position, bytes)| {
+            Ok(HeldAffineEvaluation {
+                receiver_position: u16::try_from(position)
+                    .map_err(|_| SourceError::WrongItemTypeOrLength)?,
+                affine_a_evaluation: bytes[..AFFINE_MODULE_VALUE_BYTE_LENGTH]
+                    .try_into()
+                    .map_err(|_| SourceError::WrongItemTypeOrLength)?,
+                affine_b_evaluation: bytes[AFFINE_MODULE_VALUE_BYTE_LENGTH..]
+                    .try_into()
+                    .map_err(|_| SourceError::WrongItemTypeOrLength)?,
+            })
+        })
+        .collect()
+}
+
 pub fn derive_honest_source_correction(
     source_position: u16,
-    input_bit: u8,
+    score_encodings: &[u8],
     held_subset_keys: &[HeldSubsetKey],
-) -> Result<u8, SourceError> {
+) -> Result<[u8; SOURCE_CORRECTION_BYTE_LENGTH], SourceError> {
     validate_position(COMPLETION_PROFILE_PARTICIPANT_COUNT, source_position)?;
-    if input_bit > 1 {
+    if score_encodings.len() != SCORE_ENCODING_COUNT
+        || score_encodings
+            .iter()
+            .any(|score| *score >= (1 << SCORE_BIT_WIDTH))
+    {
         return Err(SourceError::NoncanonicalCorrection);
     }
     let expected_slots = sender_subset_slots(source_position);
     if held_subset_keys.len() != expected_slots.len() {
         return Err(SourceError::WrongSubsetKeyVector);
     }
-    let mut source_mask = [0_u8; 2];
+    let mut source_mask = [0_u8; SOURCE_CORRECTION_BYTE_LENGTH];
     let mut source_key_count = 0_usize;
     for (held_key, (expected_family, expected_subset)) in
         held_subset_keys.iter().zip(expected_slots)
@@ -444,24 +530,49 @@ pub fn derive_honest_source_correction(
         }
         source_key_count += 1;
         let source_rank = (held_key.subset & ((1_u16 << source_position) - 1)).count_ones();
-        let mut address = Block::<Aes256>::default();
-        address[0] = SOURCE_STREAM_ADDRESS_VERSION;
-        address[1] = SOURCE_STREAM_FAMILY;
         let cipher =
             Aes256::new_from_slice(&held_key.key).map_err(|_| SourceError::WrongSubsetKeyVector)?;
-        cipher.encrypt_block(&mut address);
-        for (source_bit_ordinal, mask) in source_mask.iter_mut().enumerate() {
-            let bit_offset = 2 * usize::try_from(source_rank)
-                .map_err(|_| SourceError::WrongSubsetKeyVector)?
-                + source_bit_ordinal;
-            *mask ^= (address[bit_offset / 8] >> (bit_offset % 8)) & 1;
+        let source_rank =
+            usize::try_from(source_rank).map_err(|_| SourceError::WrongSubsetKeyVector)?;
+        let source_start_bit = source_rank
+            .checked_mul(SOURCE_BIT_COUNT)
+            .ok_or(SourceError::WrongSubsetKeyVector)?;
+        let source_end_bit = source_start_bit
+            .checked_add(SOURCE_BIT_COUNT)
+            .ok_or(SourceError::WrongSubsetKeyVector)?;
+        for block_index in source_start_bit / 128..=(source_end_bit - 1) / 128 {
+            let mut address = Block::<Aes256>::default();
+            address[0] = SOURCE_STREAM_ADDRESS_VERSION;
+            address[1] = SOURCE_STREAM_FAMILY;
+            address[2..6].copy_from_slice(
+                &u32::try_from(block_index)
+                    .map_err(|_| SourceError::WrongSubsetKeyVector)?
+                    .to_le_bytes(),
+            );
+            cipher.encrypt_block(&mut address);
+            let block_start_bit = block_index * 128;
+            let overlap_start = source_start_bit.max(block_start_bit);
+            let overlap_end = source_end_bit.min(block_start_bit + 128);
+            for linear_bit in overlap_start..overlap_end {
+                let source_bit_ordinal = linear_bit - source_start_bit;
+                let bit_offset = linear_bit - block_start_bit;
+                source_mask[source_bit_ordinal / 8] ^=
+                    ((address[bit_offset / 8] >> (bit_offset % 8)) & 1) << (source_bit_ordinal % 8);
+            }
+            address.zeroize();
         }
-        address.zeroize();
     }
     if source_key_count != 84 {
         return Err(SourceError::WrongSubsetKeyVector);
     }
-    Ok((input_bit ^ source_mask[0]) | ((input_bit ^ source_mask[1]) << 1))
+    for (score_position, score) in score_encodings.iter().copied().enumerate() {
+        for bit_position in 0..SCORE_BIT_WIDTH {
+            let source_bit_ordinal = score_position * SCORE_BIT_WIDTH + bit_position;
+            source_mask[source_bit_ordinal / 8] ^=
+                ((score >> bit_position) & 1) << (source_bit_ordinal % 8);
+        }
+    }
+    Ok(source_mask)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -600,7 +711,7 @@ mod tests {
             ),
             (
                 SourceDeclaration::Submit,
-                Some(0b10),
+                Some([0x12, 0x34, 0x56, 0x78, 0x9a]),
                 SUBMITTED_SOURCE_BODY_BYTE_LENGTH,
             ),
         ] {
@@ -616,21 +727,25 @@ mod tests {
     }
 
     #[test]
-    fn source_body_refuses_noncanonical_correction_and_mutation() {
+    fn source_body_refuses_wrong_variant_and_mutation() {
         assert!(matches!(
-            SourceBody::new(context(), SourceDeclaration::Submit, Some(4)),
-            Err(SourceError::NoncanonicalCorrection)
+            SourceBody::new(context(), SourceDeclaration::Abstain, Some([0; 5])),
+            Err(SourceError::WrongDeclaration)
         ));
-        let mut encoded = SourceBody::new(context(), SourceDeclaration::Submit, Some(0b01))
-            .expect("constructs")
-            .encode()
-            .expect("encodes");
-        *encoded.last_mut().expect("correction byte exists") = 0x80;
+        let mut encoded = SourceBody::new(
+            context(),
+            SourceDeclaration::Submit,
+            Some([0x01, 0x23, 0x45, 0x67, 0x89]),
+        )
+        .expect("constructs")
+        .encode()
+        .expect("encodes");
+        encoded.pop();
         assert!(SourceBody::decode(COMPLETION_PROFILE_PARTICIPANT_COUNT, &encoded).is_err());
     }
 
     #[test]
-    fn source_correction_uses_both_rank_separated_bits() {
+    fn source_correction_covers_every_score_bit_and_rank() {
         let slots = sender_subset_slots(0);
         let keys = slots
             .iter()
@@ -641,10 +756,32 @@ mod tests {
                 key: [u8::try_from(index).expect("index fits"); 32],
             })
             .collect::<Vec<_>>();
-        let zero = derive_honest_source_correction(0, 0, &keys).expect("derives");
-        let one = derive_honest_source_correction(0, 1, &keys).expect("derives");
-        assert_eq!(zero ^ one, 0b11);
-        assert!(zero <= 0b11);
-        assert!(one <= 0b11);
+        let zero = derive_honest_source_correction(0, &[0; 10], &keys).expect("derives");
+        for score_position in 0..SCORE_ENCODING_COUNT {
+            for bit_position in 0..SCORE_BIT_WIDTH {
+                let mut scores = [0_u8; SCORE_ENCODING_COUNT];
+                scores[score_position] = 1 << bit_position;
+                let changed = derive_honest_source_correction(0, &scores, &keys)
+                    .expect("derives changed score");
+                let bit_ordinal = score_position * SCORE_BIT_WIDTH + bit_position;
+                let mut difference = [0_u8; SOURCE_CORRECTION_BYTE_LENGTH];
+                for (output, (left, right)) in
+                    difference.iter_mut().zip(zero.iter().zip(changed.iter()))
+                {
+                    *output = left ^ right;
+                }
+                assert_eq!(difference[bit_ordinal / 8], 1 << (bit_ordinal % 8));
+                difference[bit_ordinal / 8] = 0;
+                assert_eq!(difference, [0; SOURCE_CORRECTION_BYTE_LENGTH]);
+            }
+        }
+        assert!(matches!(
+            derive_honest_source_correction(0, &[0; 9], &keys),
+            Err(SourceError::NoncanonicalCorrection)
+        ));
+        assert!(matches!(
+            derive_honest_source_correction(0, &[16; 10], &keys),
+            Err(SourceError::NoncanonicalCorrection)
+        ));
     }
 }

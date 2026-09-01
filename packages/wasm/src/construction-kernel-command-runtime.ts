@@ -46,6 +46,12 @@ export class ConstructionCommandWriter {
         this.#write(bytes);
     }
 
+    writeU32(value: number): void {
+        const bytes = new Uint8Array(4);
+        new DataView(bytes.buffer).setUint32(0, value, true);
+        this.#write(bytes);
+    }
+
     writeFixed(bytes: Uint8Array): void {
         this.#write(bytes);
     }
@@ -84,6 +90,15 @@ class ConstructionCommandReader {
             bytes.byteOffset,
             bytes.byteLength,
         ).getUint16(0, true);
+    }
+
+    readU32(): number {
+        const bytes = this.readFixed(4);
+        return new DataView(
+            bytes.buffer,
+            bytes.byteOffset,
+            bytes.byteLength,
+        ).getUint32(0, true);
     }
 
     readFixed(length: number): Uint8Array {

@@ -1,16 +1,18 @@
-const databaseVersion = 2;
+const databaseVersion = 3;
 const rootStoreName = 'root';
 const actionStoreName = 'actions';
 const preparationStoreName = 'preparations';
 const slotStoreName = 'slots';
 const sourceStoreName = 'sources';
+const finalityStoreName = 'finalities';
 const rootRecordIdentifier = 'browser-local-hmac-root-v1';
 
 type ProtectedStoreName =
     | typeof actionStoreName
     | typeof preparationStoreName
     | typeof slotStoreName
-    | typeof sourceStoreName;
+    | typeof sourceStoreName
+    | typeof finalityStoreName;
 
 export type ProtectedRecord = Readonly<{
     id: string;
@@ -104,6 +106,7 @@ const openDatabase = (name: string): Promise<IDBDatabase> =>
                 preparationStoreName,
                 slotStoreName,
                 sourceStoreName,
+                finalityStoreName,
             ]) {
                 if (!database.objectStoreNames.contains(storeName)) {
                     database.createObjectStore(storeName, { keyPath: 'id' });
@@ -332,6 +335,7 @@ export class PrivatePreparationDurableState {
                 preparationStoreName,
                 slotStoreName,
                 sourceStoreName,
+                finalityStoreName,
             ],
             'readonly',
         );
@@ -341,6 +345,7 @@ export class PrivatePreparationDurableState {
                 preparationStoreName,
                 slotStoreName,
                 sourceStoreName,
+                finalityStoreName,
             ].map((storeName) =>
                 requestResult<number>(
                     transaction.objectStore(storeName).count(),
@@ -363,6 +368,7 @@ export class PrivatePreparationDurableState {
                 preparationStoreName,
                 slotStoreName,
                 sourceStoreName,
+                finalityStoreName,
             ],
             'readwrite',
             { durability: 'strict' },
@@ -382,6 +388,7 @@ export class PrivatePreparationDurableState {
                 preparationStoreName,
                 slotStoreName,
                 sourceStoreName,
+                finalityStoreName,
             ].map((storeName) =>
                 requestResult<number>(
                     transaction.objectStore(storeName).count(),

@@ -363,6 +363,18 @@ describe('private preparation worker in Chromium', () => {
         { timeout: 300_000 },
         async () => {
             const runIdentity = crypto.randomUUID();
+            const submittedScores = Uint8Array.of(
+                1,
+                10,
+                3,
+                9,
+                5,
+                8,
+                7,
+                6,
+                4,
+                2,
+            );
             const actionKeySetBodies: Uint8Array[] = [];
             for (
                 let participantPosition = 0;
@@ -502,7 +514,10 @@ describe('private preparation worker in Chromium', () => {
                     actionKeySetBodies,
                     preparationAttempt,
                     preparationParents,
-                    choice: { declaration: 'submit', inputBit: 1 },
+                    choice: {
+                        declaration: 'submit',
+                        scoreEncodings: submittedScores,
+                    },
                 },
             } satisfies PrivatePreparationWorkerRequest);
             await sourceBoundary;
@@ -517,7 +532,10 @@ describe('private preparation worker in Chromium', () => {
                 actionKeySetBodies,
                 preparationAttempt,
                 preparationParents,
-                { declaration: 'submit', inputBit: 1 },
+                {
+                    declaration: 'submit',
+                    scoreEncodings: submittedScores,
+                },
             );
             expect(submitted.sourceBody).toHaveLength(
                 submittedSourceBodyByteLength,
@@ -528,7 +546,10 @@ describe('private preparation worker in Chromium', () => {
                     actionKeySetBodies,
                     preparationAttempt,
                     preparationParents,
-                    { declaration: 'submit', inputBit: 1 },
+                    {
+                        declaration: 'submit',
+                        scoreEncodings: submittedScores,
+                    },
                 ),
             ).resolves.toEqual(submitted);
             await expect(
@@ -537,7 +558,10 @@ describe('private preparation worker in Chromium', () => {
                     actionKeySetBodies,
                     preparationAttempt,
                     preparationParents,
-                    { declaration: 'submit', inputBit: 0 },
+                    {
+                        declaration: 'submit',
+                        scoreEncodings: new Uint8Array(10),
+                    },
                 ),
             ).rejects.toThrow();
             closeClient(recoveredSource);
@@ -552,7 +576,10 @@ describe('private preparation worker in Chromium', () => {
                     actionKeySetBodies,
                     preparationAttempt,
                     preparationParents,
-                    { declaration: 'submit', inputBit: 1 },
+                    {
+                        declaration: 'submit',
+                        scoreEncodings: submittedScores,
+                    },
                 ),
             ).resolves.toEqual(submitted);
             closeClient(restoredSource);

@@ -26,9 +26,7 @@ pub const MAXIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 20;
 pub(crate) const PROTOTYPE_OPTION_COUNT: u16 = 10;
 pub(crate) const FOUNDATION_PROTOCOL_NAME: &str = "sealed-lattice";
 pub(crate) const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
-#[cfg(test)]
 pub(crate) const FOUNDATION_MINIMUM_SCORE: u16 = 1;
-#[cfg(test)]
 pub(crate) const FOUNDATION_MAXIMUM_SCORE: u16 = 10;
 pub(crate) const MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH: usize = 128;
 pub(crate) const MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;

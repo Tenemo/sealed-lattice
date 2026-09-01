@@ -17,7 +17,7 @@ export type PrivatePreparationActionContext = Readonly<{
 
 export type SourcePublicationChoice =
     | Readonly<{ declaration: 'abstain' }>
-    | Readonly<{ declaration: 'submit'; inputBit: 0 | 1 }>;
+    | Readonly<{ declaration: 'submit'; scoreEncodings: Uint8Array }>;
 
 export type PrivatePreparationWorkerRequest =
     | Readonly<{
