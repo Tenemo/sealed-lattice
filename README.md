@@ -42,9 +42,9 @@ Every required participant operation must retain a scalar-capable, single-worker
 
 The complete protocol is not implemented. The public package covers poll validation, canonical foundation objects and verifiers, typed refusals, and reproducible Rust/WebAssembly packaging. A standalone development-only tally compiler and evaluator remain in Rust tests.
 
-No preparation or evaluation construction satisfies the full security model. There is no end-to-end capability chain, active cryptographic suite, complete browser ceremony, or supported-phone qualification. See the [open security issues](SECURITY.md#open-security-issues).
+No preparation or evaluation construction is implemented or cryptographically admitted. An internal conditional paper proof now covers one reduced one-bit/one-AND fragment, but its direct primitive assumptions and emitted Rust, WebAssembly, worker, storage, and verifier correspondence remain unproved. There is no end-to-end capability chain, active cryptographic suite, complete browser ceremony, or supported-phone qualification. See the [open security issues](SECURITY.md#open-security-issues).
 
-A test-only randomized direct-check reference flow was removed after a cross-fork attack showed that complementary honest responses could reveal a protected source. The next finality-before-activation direction remains theorem research only: no candidate protocol, visit count, resource estimate, or experimental primitive is part of the public package or evidence of security.
+A test-only randomized direct-check reference flow was removed because complementary responses under one pad would reveal a protected source and it lacked a complete security theorem. A later exact-history audit found that its removed accepted-opening verifier did not itself make the two opposite responses reachable; this correction does not restore or validate that route. The next finality-before-activation direction remains unimplemented research: no candidate protocol, visit count, resource estimate, or experimental primitive is part of the public package or evidence of security.
 
 ## Install
 
