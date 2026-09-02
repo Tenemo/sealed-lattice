@@ -3483,6 +3483,158 @@ mod tests {
     }
 
     #[test]
+    fn maximum_width_preparation_and_stream_census_matches_the_independent_ledger() {
+        let choose = |element_count: usize, selection_count: usize| {
+            let reduced_selection = selection_count.min(element_count - selection_count);
+            (0..reduced_selection).fold(1_usize, |value, offset| {
+                value * (element_count - offset) / (offset + 1)
+            })
+        };
+        let packed_read_count = |item_count: usize, item_bit_width: usize| {
+            (0..item_count)
+                .map(|ordinal| {
+                    let first_bit = ordinal * item_bit_width;
+                    let final_bit = first_bit + item_bit_width - 1;
+                    final_bit / 128 - first_bit / 128 + 1
+                })
+                .sum::<usize>()
+        };
+        let packed_block_count =
+            |item_count: usize, item_bit_width: usize| (item_count * item_bit_width).div_ceil(128);
+
+        let plan = PaddedTallyPlan::compile(COMPLETION_PROFILE_OPTION_COUNT)
+            .expect("maximum-width tally plan compiles");
+        let participant_count = usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT);
+        let low_subset_size = 7_usize;
+        let terminal_subset_size = 8_usize;
+        let low_subset_count = choose(participant_count, low_subset_size);
+        let terminal_subset_count = choose(participant_count, terminal_subset_size);
+        let low_slots_per_sender = choose(participant_count - 1, low_subset_size - 1);
+        let terminal_slots_per_sender = choose(participant_count - 1, terminal_subset_size - 1);
+        let low_slots_per_sender_recipient = choose(participant_count - 2, low_subset_size - 2);
+        let terminal_slots_per_sender_recipient =
+            choose(participant_count - 2, terminal_subset_size - 2);
+        let openings_per_remote_plaintext =
+            low_slots_per_sender_recipient + terminal_slots_per_sender_recipient;
+        let remote_pair_count = participant_count * (participant_count - 1);
+
+        assert_eq!(low_subset_count, 120);
+        assert_eq!(terminal_subset_count, 45);
+        assert_eq!(low_subset_count + terminal_subset_count, 165);
+        assert_eq!(
+            participant_count * (low_slots_per_sender + terminal_slots_per_sender),
+            1_200
+        );
+        assert_eq!(remote_pair_count * openings_per_remote_plaintext, 7_560);
+        assert_eq!(participant_count * participant_count, 100);
+
+        let distinct_subkey_count = low_subset_count
+            + low_subset_count
+            + terminal_subset_count
+            + low_subset_count * low_subset_size
+            + low_subset_count * low_subset_size
+            + participant_count * participant_count;
+        assert_eq!(distinct_subkey_count, 2_065);
+
+        let source_subkey_calls = participant_count * low_slots_per_sender
+            + participant_count
+                * (low_slots_per_sender + (participant_count - 1) * low_slots_per_sender_recipient);
+        let subkey_calls_per_chunk = participant_count
+            * (2 * low_slots_per_sender
+                + terminal_slots_per_sender
+                + low_slots_per_sender
+                + (participant_count - 1) * low_slots_per_sender_recipient
+                + 2 * participant_count);
+        assert_eq!(source_subkey_calls, 6_720);
+        assert_eq!(subkey_calls_per_chunk, 8_120);
+        assert_eq!(
+            source_subkey_calls + plan.descriptors.len() * subkey_calls_per_chunk,
+            534_520
+        );
+
+        let conjunction_count = plan.conjunction_count;
+        let output_count = plan.output_wires.len();
+        let source_blocks_per_subset = (0..low_subset_size)
+            .map(|rank| {
+                let first_bit = rank * 40;
+                let final_bit = first_bit + 39;
+                final_bit / 128 - first_bit / 128 + 1
+            })
+            .sum::<usize>();
+        let distinct_matched_low_blocks =
+            low_subset_count * packed_block_count(conjunction_count, 1);
+        let distinct_matched_high_blocks =
+            low_subset_count * packed_block_count(conjunction_count, 12);
+        let distinct_terminal_blocks = terminal_subset_count * packed_block_count(output_count, 4);
+        let distinct_source_blocks = low_subset_count * source_blocks_per_subset;
+        let distinct_receiver_b_blocks = low_subset_count * low_subset_size * conjunction_count * 3;
+        let distinct_pairwise_p_blocks =
+            participant_count * participant_count * 4 * conjunction_count * 3;
+        assert_eq!(
+            distinct_matched_low_blocks
+                + distinct_matched_high_blocks
+                + distinct_terminal_blocks
+                + distinct_source_blocks
+                + distinct_receiver_b_blocks
+                + distinct_pairwise_p_blocks,
+            11_056_050
+        );
+
+        let scalar_matched_low_blocks =
+            participant_count * low_slots_per_sender * packed_read_count(conjunction_count, 1);
+        let scalar_matched_high_blocks =
+            participant_count * low_slots_per_sender * packed_read_count(conjunction_count, 12);
+        let scalar_terminal_blocks =
+            participant_count * terminal_slots_per_sender * packed_read_count(output_count, 4);
+        let scalar_source_blocks = distinct_source_blocks * (1 + low_subset_size);
+        let scalar_receiver_b_blocks = participant_count
+            * (2 * low_slots_per_sender + (participant_count - 1) * low_slots_per_sender_recipient)
+            * conjunction_count
+            * 3;
+        let scalar_pairwise_p_blocks =
+            participant_count * 2 * participant_count * 4 * conjunction_count * 3;
+        assert_eq!(
+            scalar_matched_low_blocks
+                + scalar_matched_high_blocks
+                + scalar_terminal_blocks
+                + scalar_source_blocks
+                + scalar_receiver_b_blocks
+                + scalar_pairwise_p_blocks,
+            71_981_280
+        );
+
+        let maximum_query_count = (1_u128 << 80) - 1;
+        let minimum_honest_kmac_calls = 11_955_720_u128 + 534_520 + 360;
+        let selected_evaluation_kmac_calls = 3_596_140_u128;
+        let maximum_verified_inventory_count =
+            (maximum_query_count - minimum_honest_kmac_calls) / selected_evaluation_kmac_calls;
+        let remaining_query_count =
+            (maximum_query_count - minimum_honest_kmac_calls) % selected_evaluation_kmac_calls;
+        let wrong_key_target_count = maximum_verified_inventory_count * 29_620;
+        assert_eq!(maximum_verified_inventory_count, 336_173_180_024_868_098);
+        assert_eq!(remaining_query_count, 273_855);
+        assert_eq!(wrong_key_target_count, 9_957_449_592_336_593_062_760);
+
+        let operation_key_count = 2_951_920_u128;
+        let operation_key_collision_numerator = operation_key_count * (operation_key_count - 1) / 2;
+        let local_record_seal_count = 2_920_u128;
+        let local_record_collision_numerator =
+            local_record_seal_count * (local_record_seal_count - 1) / 2;
+        let aggregate_finite_numerator_at_denominator_352 = (operation_key_collision_numerator
+            << 32)
+            + (29_620_u128 << 32)
+            + (wrong_key_target_count << 32)
+            + (45_u128 << 96)
+            + local_record_collision_numerator;
+        assert_eq!(operation_key_collision_numerator, 4_356_914_367_240);
+        assert_eq!(local_record_collision_numerator, 4_261_740);
+        assert_eq!(
+            aggregate_finite_numerator_at_denominator_352,
+            46_332_187_682_508_899_466_309_422_614_380
+        );
+    }
+
+    #[test]
     fn every_completion_mask_coordinate_has_the_required_matched_codeword() {
         let context = evaluation_context();
         let inventories = (0..COMPLETION_PROFILE_PARTICIPANT_COUNT)

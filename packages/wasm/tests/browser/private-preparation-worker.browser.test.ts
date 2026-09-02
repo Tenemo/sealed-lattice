@@ -30,6 +30,10 @@ import {
     submittedSourceBodyByteLength,
 } from '../../src/source-runtime.js';
 
+import {
+    localRecordContextKey,
+    parseIndependentLocalRecordContext,
+} from '#tests/local-record-context-model.js';
 import { resolveManualEvidenceCase } from '#tests/manual-evidence-registry.js';
 import {
     compileIndependentPaddedTallyModel,
@@ -371,6 +375,7 @@ const protectedRecordByteLength = (record: unknown): number => {
     ) {
         throw new Error('The protected record measurement is malformed.');
     }
+    parseIndependentLocalRecordContext(new Uint8Array(record.context));
     return (
         new TextEncoder().encode(record.id).byteLength +
         record.context.byteLength +
@@ -395,6 +400,7 @@ const measureProtectedDatabase = async (
     Readonly<{
         byteLength: number;
         recordCount: number;
+        contextKeys: readonly string[];
     }>
 > => {
     const database = await openDatabase(name);
@@ -426,11 +432,23 @@ const measureProtectedDatabase = async (
         await transactionCompletion(transaction);
         let byteLength = 0;
         let recordCount = 0;
+        const contextKeys: string[] = [];
         for (const record of records.flat()) {
             byteLength += protectedRecordByteLength(record);
             recordCount += 1;
+            if (
+                typeof record !== 'object' ||
+                record === null ||
+                !('context' in record) ||
+                !(record.context instanceof ArrayBuffer)
+            ) {
+                throw new Error('The protected record context is malformed.');
+            }
+            contextKeys.push(
+                localRecordContextKey(new Uint8Array(record.context)),
+            );
         }
-        return { byteLength, recordCount };
+        return { byteLength, recordCount, contextKeys };
     } finally {
         database.close();
     }
@@ -1703,6 +1721,11 @@ const expectCompletePaddedTallyCeremony = async (
         (sum, measurement) => sum + measurement.recordCount,
         0,
     );
+    const protectedRecordContextKeys = protectedDatabaseMeasurements.flatMap(
+        (measurement) => measurement.contextKeys,
+    );
+    expect(protectedRecordCount).toBe(150);
+    expect(new Set(protectedRecordContextKeys).size).toBe(protectedRecordCount);
     const preparationUploadByteLength = preparationPackages.reduce(
         (sum, preparationPackage) =>
             sum +
@@ -2847,6 +2870,25 @@ describe('private preparation worker in Chromium', () => {
                 acceptedBallotAuthorshipBitmap: 0,
             });
             closeClient(restoredResultClient);
+            const measurements = await Promise.all(
+                Array.from(
+                    { length: participantCount },
+                    (_, participantPosition) =>
+                        measureProtectedDatabase(
+                            databaseName(runIdentity, participantPosition),
+                        ),
+                ),
+            );
+            const contextKeys = measurements.flatMap(
+                (measurement) => measurement.contextKeys,
+            );
+            expect(
+                measurements.reduce(
+                    (sum, measurement) => sum + measurement.recordCount,
+                    0,
+                ),
+            ).toBe(131);
+            expect(new Set(contextKeys).size).toBe(131);
         },
     );
 
