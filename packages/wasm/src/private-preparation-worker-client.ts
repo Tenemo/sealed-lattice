@@ -10,6 +10,7 @@ import type {
     PrivatePreparationWorkerResponse,
     PublishedFinalityPackage,
     PublishedPreparationPackage,
+    PublishedReducedActivationPackage,
     PublishedSourcePackage,
     SourcePublicationChoice,
     TallyEvaluationProgress,
@@ -96,6 +97,22 @@ const collectRequestTransferables = (
         if (request.input.choice.declaration === 'submit') {
             collect(request.input.choice.scoreEncodings);
         }
+    }
+    if (request.operation === 'create-reduced-activation-package') {
+        for (const parent of request.input.preparationParents) {
+            collect(parent.body);
+            collect(parent.signature);
+        }
+        for (const source of request.input.sources) {
+            collect(source.body);
+            collect(source.signature);
+        }
+        for (const signature of request.input.finalitySignatures) {
+            collect(signature.signature);
+        }
+        collect(request.input.initialWireValues);
+        collect(request.input.gateMaskShares);
+        collect(request.input.terminalMaskShares);
     }
     if (
         request.operation === 'create-finality-signature' ||
@@ -296,6 +313,42 @@ export class PrivatePreparationWorkerClient {
                 sources: copySources(sources),
                 finalitySignatures: copyFinalitySignatures(finalitySignatures),
                 topCount,
+            },
+        });
+    }
+
+    createReducedActivationPackage(
+        context: PrivatePreparationActionContext,
+        canonicalRosterBytes: Uint8Array,
+        preparationAttempt: number,
+        preparationParents: readonly Readonly<{
+            body: Uint8Array;
+            signature: Uint8Array;
+        }>[],
+        sources: readonly SourceCarrier[],
+        finalitySignatures: readonly FinalitySignatureCarrier[],
+        topCount: number,
+        initialWireValues: Uint8Array,
+        gateMaskShares: Uint8Array,
+        terminalMaskShares: Uint8Array,
+    ): Promise<PublishedReducedActivationPackage> {
+        return this.send({
+            operation: 'create-reduced-activation-package',
+            input: {
+                ...copyActionContext(context),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
+                preparationAttempt,
+                preparationParents: preparationParents.map((parent) => ({
+                    body: copyBytes(parent.body),
+                    signature: copyBytes(parent.signature),
+                })),
+                sources: copySources(sources),
+                finalitySignatures: copyFinalitySignatures(finalitySignatures),
+                topCount,
+                initialWireValues: copyBytes(initialWireValues),
+                gateMaskShares: copyBytes(gateMaskShares),
+                terminalMaskShares: copyBytes(terminalMaskShares),
             },
         });
     }

@@ -17,6 +17,7 @@ import type {
     PrivatePreparationWorkerResponse,
     PublishedFinalityPackage,
     PublishedPreparationPackage,
+    PublishedReducedActivationPackage,
     PublishedSourcePackage,
 } from '../../src/private-preparation-worker-protocol.js';
 import { openRosterRuntime } from '../../src/roster-runtime.js';
@@ -46,6 +47,18 @@ const crashWorkerUrl = new URL(
 );
 const sourceCrashWorkerUrl = new URL(
     './fixtures/private-preparation-source-crash-worker.ts',
+    import.meta.url,
+);
+const activationAllocationCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-activation-allocation-crash-worker.ts',
+    import.meta.url,
+);
+const activationBodyCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-activation-body-crash-worker.ts',
+    import.meta.url,
+);
+const activationPublicationCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-activation-publication-crash-worker.ts',
     import.meta.url,
 );
 
@@ -78,6 +91,87 @@ const deleteDatabase = (name: string): Promise<void> =>
             reject(new Error(`Test database ${name} remained open.`)),
         );
     });
+
+const openDatabase = (name: string): Promise<IDBDatabase> =>
+    new Promise((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.addEventListener('success', () => resolve(request.result));
+        request.addEventListener('error', () =>
+            reject(new Error(`Failed to open test database ${name}.`)),
+        );
+    });
+
+const transactionCompletion = (transaction: IDBTransaction): Promise<void> =>
+    new Promise((resolve, reject) => {
+        transaction.addEventListener('complete', () => resolve());
+        transaction.addEventListener('abort', () =>
+            reject(new Error('The test database transaction was aborted.')),
+        );
+        transaction.addEventListener('error', () =>
+            reject(new Error('The test database transaction failed.')),
+        );
+    });
+
+const readRawActivationRecord = async (
+    name: string,
+    identifier: string,
+): Promise<unknown> => {
+    const database = await openDatabase(name);
+    try {
+        const transaction = database.transaction('activations', 'readonly');
+        const request = transaction.objectStore('activations').get(identifier);
+        const result = await new Promise<unknown>((resolve, reject) => {
+            request.addEventListener('success', () => resolve(request.result));
+            request.addEventListener('error', () =>
+                reject(new Error('Failed to read raw activation state.')),
+            );
+        });
+        await transactionCompletion(transaction);
+        return result;
+    } finally {
+        database.close();
+    }
+};
+
+const restoreRawActivationRecord = async (
+    name: string,
+    record: unknown,
+): Promise<void> => {
+    const database = await openDatabase(name);
+    try {
+        const transaction = database.transaction('activations', 'readwrite', {
+            durability: 'strict',
+        });
+        transaction.objectStore('activations').put(record);
+        await transactionCompletion(transaction);
+    } finally {
+        database.close();
+    }
+};
+
+const deleteRawActivationRecord = async (
+    name: string,
+    identifier: string,
+): Promise<void> => {
+    const database = await openDatabase(name);
+    try {
+        const transaction = database.transaction('activations', 'readwrite', {
+            durability: 'strict',
+        });
+        transaction.objectStore('activations').delete(identifier);
+        await transactionCompletion(transaction);
+    } finally {
+        database.close();
+    }
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const activationIdentifier = (participantPosition: number): string =>
+    `reduced-activation.${bytesToHex(runtimeIdentity)}.${bytesToHex(
+        actionProposalIdentity,
+    )}.${String(participantPosition)}`;
 
 const openClient = async (
     runIdentity: string,
@@ -289,6 +383,75 @@ const rawRequest = <Result>(
         worker.addEventListener('message', onMessage);
         worker.postMessage(request);
     });
+
+type ReducedActivationRequestInput = Extract<
+    PrivatePreparationWorkerRequest,
+    { operation: 'create-reduced-activation-package' }
+>['input'];
+
+const crashReducedActivationAtBoundary = async (
+    runIdentity: string,
+    participantPosition: number,
+    workerUrl: URL,
+    boundaryName: string,
+    input: ReducedActivationRequestInput,
+): Promise<void> => {
+    const worker = new Worker(workerUrl, { type: 'module' });
+    try {
+        await rawRequest(worker, {
+            requestId: 1,
+            operation: 'initialize',
+            input: {
+                databaseName: databaseName(runIdentity, participantPosition),
+                kernelUrl: kernelUrl.toString(),
+                kernelOptions: { allowUnpinnedKernel: true },
+                runtimeIdentity,
+                candidateBuildIdentity,
+            },
+        });
+        const boundary = new Promise<void>((resolve, reject) => {
+            worker.addEventListener(
+                'message',
+                (event: MessageEvent<unknown>) => {
+                    const data = event.data;
+                    if (
+                        typeof data === 'object' &&
+                        data !== null &&
+                        'testBoundary' in data &&
+                        data.testBoundary === boundaryName
+                    ) {
+                        resolve();
+                        return;
+                    }
+                    if (
+                        typeof data === 'object' &&
+                        data !== null &&
+                        'requestId' in data &&
+                        data.requestId === 2
+                    ) {
+                        const description =
+                            'error' in data
+                                ? JSON.stringify(data.error)
+                                : 'the operation returned before its crash hook';
+                        reject(
+                            new Error(
+                                `${boundaryName} was not reached: ${description}`,
+                            ),
+                        );
+                    }
+                },
+            );
+        });
+        worker.postMessage({
+            requestId: 2,
+            operation: 'create-reduced-activation-package',
+            input,
+        } satisfies PrivatePreparationWorkerRequest);
+        await boundary;
+    } finally {
+        worker.terminate();
+    }
+};
 
 afterEach(async () => {
     for (const client of openClients) {
@@ -872,6 +1035,257 @@ describe('private preparation worker in Chromium', () => {
                 ),
             ).rejects.toThrow();
             closeClient(conflictingFinality);
+
+            const activationPosition = 0;
+            const finalitySignatures = finalityPackages
+                .slice(0, 8)
+                .map((finality, signerPosition) => ({
+                    signerPosition,
+                    signature: finality.finalitySignature,
+                }));
+            const initialWireValues = Uint8Array.of(1, 2, 3, 4);
+            const gateMaskShares = Uint8Array.from(
+                { length: 14 },
+                (_, index) => index % 16,
+            );
+            const terminalMaskShares = Uint8Array.of(5, 6, 7);
+            const activationInput: ReducedActivationRequestInput = {
+                ...actionContext(activationPosition),
+                canonicalRosterBytes,
+                preparationAttempt,
+                preparationParents,
+                sources: sourceCarriers,
+                finalitySignatures,
+                topCount,
+                initialWireValues,
+                gateMaskShares,
+                terminalMaskShares,
+            };
+            await crashReducedActivationAtBoundary(
+                runIdentity,
+                activationPosition,
+                activationAllocationCrashWorkerUrl,
+                'activation-durably-allocated',
+                activationInput,
+            );
+            await crashReducedActivationAtBoundary(
+                runIdentity,
+                activationPosition,
+                activationBodyCrashWorkerUrl,
+                'activation-body-durably-bound',
+                activationInput,
+            );
+            const retainedUnsignedBody = await readRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                activationIdentifier(activationPosition),
+            );
+            if (retainedUnsignedBody === undefined) {
+                throw new Error(
+                    'The body crash boundary omitted retained activation state.',
+                );
+            }
+            await crashReducedActivationAtBoundary(
+                runIdentity,
+                activationPosition,
+                activationPublicationCrashWorkerUrl,
+                'activation-durably-published',
+                activationInput,
+            );
+
+            const activationClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            const activation: PublishedReducedActivationPackage =
+                await activationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                );
+            expect(activation.chunk).toHaveLength(69_099);
+            expect(activation.chunkIdentity).toHaveLength(64);
+            expect(activation.manifest).toHaveLength(254);
+            expect(activation.manifestIdentity).toHaveLength(64);
+            expect(activation.activationSignature).toHaveLength(
+                actionSignatureCarrierByteLength,
+            );
+            await expect(
+                activationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).resolves.toEqual(activation);
+
+            const alternatePreparationParents = preparationParents.map(
+                (parent) => ({
+                    body: Uint8Array.from(parent.body),
+                    signature: Uint8Array.from(parent.signature),
+                }),
+            );
+            const alternatePreparationParent = alternatePreparationParents[4];
+            if (alternatePreparationParent === undefined) {
+                throw new Error('The activation preparation fixture is empty.');
+            }
+            alternatePreparationParent.body[
+                alternatePreparationParent.body.byteLength - 1
+            ] ^= 1;
+            await expect(
+                activationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    alternatePreparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).rejects.toThrow();
+
+            const alternateGateMaskShares = Uint8Array.from(gateMaskShares);
+            alternateGateMaskShares[0] =
+                ((alternateGateMaskShares[0] ?? 0) + 1) % 16;
+            await expect(
+                activationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    alternateGateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            await expect(
+                activationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures.slice(0, 7),
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).rejects.toThrow();
+            const corruptFinalitySignatures = finalitySignatures.map(
+                (entry) => ({
+                    signerPosition: entry.signerPosition,
+                    signature: Uint8Array.from(entry.signature),
+                }),
+            );
+            const corruptSignature = corruptFinalitySignatures[3];
+            if (corruptSignature === undefined) {
+                throw new Error('The finality corruption fixture is empty.');
+            }
+            corruptSignature.signature[
+                corruptSignature.signature.byteLength - 1
+            ] ^= 1;
+            await expect(
+                activationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    corruptFinalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).rejects.toThrow();
+            closeClient(activationClient);
+
+            const restoredActivationClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            await expect(
+                restoredActivationClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).resolves.toEqual(activation);
+            closeClient(restoredActivationClient);
+
+            await restoreRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                retainedUnsignedBody,
+            );
+            const rollbackClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            await expect(
+                rollbackClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            closeClient(rollbackClient);
+
+            await deleteRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                activationIdentifier(activationPosition),
+            );
+            const stateLossClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            await expect(
+                stateLossClient.createReducedActivationPackage(
+                    actionContext(activationPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    initialWireValues,
+                    gateMaskShares,
+                    terminalMaskShares,
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            closeClient(stateLossClient);
 
             const computationResultClient = await openClient(runIdentity, 0);
             await expect(

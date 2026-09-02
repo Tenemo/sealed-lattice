@@ -19,6 +19,17 @@ import {
     type KernelResourceMeasurement,
 } from './foundation-kernel/kernel-runtime.js';
 import {
+    openPaddedContinuationRuntime,
+    paddedContinuationAllocationNonceByteLength,
+    paddedContinuationChunkByteLength,
+    paddedContinuationLabelByteLength,
+    paddedContinuationLabelEntropyByteLength,
+    paddedContinuationLabelPairEntropyByteLength,
+    paddedContinuationManifestByteLength,
+    reviewedReducedPaddedContinuationPlan,
+    type PaddedContinuationRuntime,
+} from './padded-continuation-runtime.js';
+import {
     pairDecryptionKeyByteLength,
     pairEncryptionRandomnessByteLength,
 } from './pair-encryption-runtime.js';
@@ -58,6 +69,7 @@ import type {
     PrivatePreparationConsumption,
     PublishedFinalityPackage,
     PublishedPreparationPackage,
+    PublishedReducedActivationPackage,
     PublishedSourcePackage,
     SourcePublicationChoice,
     TallyEvaluationProgress,
@@ -94,6 +106,7 @@ const sourceStateKind = 4;
 const finalityStateKind = 5;
 // Object kinds 6 and 7 are reserved for rejected tally-activation records.
 const noResultStateKind = 8;
+const reducedActivationStateKind = 9;
 const rosterBoundActionPhase = 1;
 const unsignedPreparationPhase = 1;
 const publishedPreparationPhase = 2;
@@ -104,6 +117,11 @@ const unsignedSourcePhase = 1;
 const publishedSourcePhase = 2;
 const unsignedFinalityPhase = 1;
 const publishedFinalityPhase = 2;
+const allocatedReducedActivationPhase = 1;
+const retainedReducedActivationBodyPhase = 2;
+const publishedReducedActivationPhase = 3;
+const unpublishedActivationLocalPhase = 0;
+const publishedActivationLocalPhase = 1;
 const privatePreparationOperationOrdinal = 1n;
 const sourceOperationOrdinal = 0n;
 
@@ -112,6 +130,9 @@ type WorkerConfiguration = Readonly<{
     candidateBuildIdentity: Uint8Array;
     afterDurableConsume?: () => Promise<void> | void;
     afterDurableSourceBind?: () => Promise<void> | void;
+    afterDurableActivationAllocate?: () => Promise<void> | void;
+    afterDurableActivationBodyBind?: () => Promise<void> | void;
+    afterDurableActivationPublish?: () => Promise<void> | void;
 }>;
 
 type LocalRecordContext = Readonly<{
@@ -140,6 +161,9 @@ type ActionState = {
     participantPosition: number;
     canonicalRosterBytes: Uint8Array;
     signatureBodyIdentities: Uint8Array[];
+    activationPublicationPhase:
+        | typeof publishedActivationLocalPhase
+        | typeof unpublishedActivationLocalPhase;
     signingSecretKey: Uint8Array;
     mailboxDecapsulationKey: Uint8Array;
 };
@@ -224,6 +248,43 @@ type LoadedFinalityState = Readonly<{
     state: FinalityState;
 }>;
 
+type ReducedActivationCommonState = {
+    generation: bigint;
+    preparationAttempt: number;
+    verifiedPreparationRoot: Uint8Array;
+    targetIdentity: Uint8Array;
+    sourceBodyIdentities: Uint8Array;
+    topCount: number;
+    initialWireValues: Uint8Array;
+    gateMaskShares: Uint8Array;
+    terminalMaskShares: Uint8Array;
+};
+
+type AllocatedReducedActivationState = ReducedActivationCommonState & {
+    phase: typeof allocatedReducedActivationPhase;
+    allocationNonce: Uint8Array;
+    labelEntropy: Uint8Array;
+};
+
+type RetainedReducedActivationState = ReducedActivationCommonState & {
+    phase:
+        | typeof publishedReducedActivationPhase
+        | typeof retainedReducedActivationBodyPhase;
+    chunk: Uint8Array;
+    chunkIdentity: Uint8Array;
+    manifest: Uint8Array;
+    manifestIdentity: Uint8Array;
+    activationSignature: Uint8Array;
+};
+
+type ReducedActivationState =
+    AllocatedReducedActivationState | RetainedReducedActivationState;
+
+type LoadedReducedActivationState = Readonly<{
+    record: ProtectedRecord;
+    state: ReducedActivationState;
+}>;
+
 type NoResultState = {
     generation: bigint;
     targetIdentity: Uint8Array;
@@ -246,6 +307,26 @@ type VerifiedTallyContext = Readonly<{
     topCount: number;
     targetKind: 'computation' | 'no-result';
 }>;
+
+type CompletePreparationEvidence = Readonly<{
+    verified: VerifiedCompletePreparation;
+    contributionOpenings: Uint8Array;
+    pairwiseMasters: Uint8Array;
+    remotePlaintexts: readonly Uint8Array[];
+}>;
+
+const zeroCompletePreparationEvidence = (
+    evidence: CompletePreparationEvidence,
+): void => {
+    evidence.verified.heldSubsetKeys.fill(0);
+    evidence.verified.parentIdentities.fill(0);
+    evidence.verified.root.fill(0);
+    evidence.contributionOpenings.fill(0);
+    evidence.pairwiseMasters.fill(0);
+    for (const plaintext of evidence.remotePlaintexts) {
+        plaintext.fill(0);
+    }
+};
 
 const zeroVerifiedTallyContext = (context: VerifiedTallyContext): void => {
     context.verifiedPreparationRoot.fill(0);
@@ -557,6 +638,39 @@ const randomBytes = (length: number): Uint8Array => {
     return output;
 };
 
+const randomPaddedContinuationLabelEntropy = (): Uint8Array => {
+    const entropy = randomBytes(reducedActivationLabelEntropyByteLength);
+    if (
+        entropy.byteLength % paddedContinuationLabelPairEntropyByteLength !==
+        0
+    ) {
+        entropy.fill(0);
+        throw new Error('The padded label-entropy shape is inconsistent.');
+    }
+    for (
+        let offset = 0;
+        offset < entropy.byteLength;
+        offset += paddedContinuationLabelPairEntropyByteLength
+    ) {
+        const colorOffset = offset + 2 * paddedContinuationLabelByteLength;
+        entropy[colorOffset] = (entropy[colorOffset] ?? 0) & 1;
+        const first = entropy.subarray(
+            offset,
+            offset + paddedContinuationLabelByteLength,
+        );
+        const second = entropy.subarray(
+            offset + paddedContinuationLabelByteLength,
+            colorOffset,
+        );
+        while (bytesEqual(first, second)) {
+            const replacement = randomBytes(paddedContinuationLabelByteLength);
+            second.set(replacement);
+            replacement.fill(0);
+        }
+    }
+    return entropy;
+};
+
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
@@ -603,6 +717,16 @@ const finalityIdentifier = (
         action.actionProposalIdentity,
     )}.${String(action.participantPosition)}`;
 
+const reducedActivationIdentifier = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): string =>
+    `reduced-activation.${bytesToHex(
+        configuration.runtimeIdentity,
+    )}.${bytesToHex(action.actionProposalIdentity)}.${String(
+        action.participantPosition,
+    )}`;
+
 const noResultIdentifier = (
     configuration: WorkerConfiguration,
     action: PrivatePreparationActionContext,
@@ -642,6 +766,24 @@ const copyPublishedFinalityPackage = (
     targetKind: state.targetKind,
     finalitySignature: Uint8Array.from(state.finalitySignature),
 });
+
+const copyPublishedReducedActivationPackage = (
+    state: RetainedReducedActivationState,
+): PublishedReducedActivationPackage => {
+    if (state.phase !== publishedReducedActivationPhase) {
+        throw new DurableStateError(
+            'CorruptState',
+            'An unpublished reduced activation cannot leave the worker.',
+        );
+    }
+    return {
+        chunk: Uint8Array.from(state.chunk),
+        chunkIdentity: Uint8Array.from(state.chunkIdentity),
+        manifest: Uint8Array.from(state.manifest),
+        manifestIdentity: Uint8Array.from(state.manifestIdentity),
+        activationSignature: Uint8Array.from(state.activationSignature),
+    };
+};
 
 const copyTallyEvaluationProgress = (
     state: NoResultState,
@@ -712,12 +854,13 @@ const actionStateByteLength =
     6 * identityByteLength +
     completionRosterByteLength +
     signaturePurposeCount * identityByteLength +
+    1 +
     actionSignatureSecretKeyByteLength +
     pairDecryptionKeyByteLength;
 
 const encodeActionState = (state: ActionState): Uint8Array => {
     const writer = new FixedWriter(actionStateByteLength);
-    writer.writeU8(4);
+    writer.writeU8(5);
     writer.writeU8(state.phase);
     writer.writeU16(state.participantPosition);
     writer.writeU64(state.generation);
@@ -731,6 +874,7 @@ const encodeActionState = (state: ActionState): Uint8Array => {
     for (const bodyIdentity of state.signatureBodyIdentities) {
         writer.writeFixed(bodyIdentity);
     }
+    writer.writeU8(state.activationPublicationPhase);
     writer.writeFixed(state.signingSecretKey);
     writer.writeFixed(state.mailboxDecapsulationKey);
     return writer.finish();
@@ -744,7 +888,7 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 4) {
+    if (reader.readU8() !== 5) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has the wrong version.',
@@ -772,10 +916,23 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
             { length: signaturePurposeCount },
             () => reader.readFixed(identityByteLength),
         ),
+        activationPublicationPhase: reader.readU8() as
+            | typeof publishedActivationLocalPhase
+            | typeof unpublishedActivationLocalPhase,
         signingSecretKey: reader.readFixed(actionSignatureSecretKeyByteLength),
         mailboxDecapsulationKey: reader.readFixed(pairDecryptionKeyByteLength),
     };
     reader.finish();
+    if (
+        state.activationPublicationPhase !== unpublishedActivationLocalPhase &&
+        state.activationPublicationPhase !== publishedActivationLocalPhase
+    ) {
+        zeroActionState(state);
+        throw new DurableStateError(
+            'CorruptState',
+            'The action state has an invalid activation-publication phase.',
+        );
+    }
     return state;
 };
 
@@ -1124,6 +1281,215 @@ const zeroFinalityState = (state: FinalityState): void => {
     state.finalitySignature.fill(0);
 };
 
+const reducedInitialWireValueCount =
+    reviewedReducedPaddedContinuationPlan.inputWireCount;
+const reducedGateMaskShareCount =
+    reviewedReducedPaddedContinuationPlan.gates.length * 2;
+const reducedTerminalMaskShareCount =
+    reviewedReducedPaddedContinuationPlan.outputWires.length;
+const reducedActivationLabelEntropyByteLength =
+    paddedContinuationLabelEntropyByteLength(
+        reviewedReducedPaddedContinuationPlan,
+    );
+const reducedActivationChunkByteLength = paddedContinuationChunkByteLength(
+    reviewedReducedPaddedContinuationPlan,
+);
+const reducedActivationCommonStateByteLength =
+    1 +
+    1 +
+    8 +
+    2 +
+    2 * identityByteLength +
+    sourceBodyIdentityVectorByteLength +
+    2 +
+    reducedInitialWireValueCount +
+    reducedGateMaskShareCount +
+    reducedTerminalMaskShareCount;
+const allocatedReducedActivationStateByteLength =
+    reducedActivationCommonStateByteLength +
+    paddedContinuationAllocationNonceByteLength +
+    reducedActivationLabelEntropyByteLength;
+const retainedReducedActivationStateByteLength =
+    reducedActivationCommonStateByteLength +
+    reducedActivationChunkByteLength +
+    identityByteLength +
+    paddedContinuationManifestByteLength +
+    identityByteLength +
+    actionSignatureCarrierByteLength;
+
+const validateReducedActivationCommonState = (
+    state: ReducedActivationCommonState,
+): void => {
+    if (
+        state.initialWireValues.byteLength !== reducedInitialWireValueCount ||
+        state.gateMaskShares.byteLength !== reducedGateMaskShareCount ||
+        state.terminalMaskShares.byteLength !== reducedTerminalMaskShareCount ||
+        state.initialWireValues.some((value) => value > 0x0f) ||
+        state.gateMaskShares.some((value) => value > 0x0f) ||
+        state.terminalMaskShares.some((value) => value > 0x0f) ||
+        state.sourceBodyIdentities.byteLength !==
+            sourceBodyIdentityVectorByteLength ||
+        state.topCount < 1 ||
+        state.topCount > completionProfileParticipantCount
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained reduced activation has invalid common fields.',
+        );
+    }
+};
+
+const writeReducedActivationCommonState = (
+    writer: FixedWriter,
+    state: ReducedActivationState,
+): void => {
+    validateReducedActivationCommonState(state);
+    writer.writeU8(1);
+    writer.writeU8(state.phase);
+    writer.writeU64(state.generation);
+    writer.writeU16(state.preparationAttempt);
+    writer.writeFixed(state.verifiedPreparationRoot);
+    writer.writeFixed(state.targetIdentity);
+    writer.writeFixed(state.sourceBodyIdentities);
+    writer.writeU16(state.topCount);
+    writer.writeFixed(state.initialWireValues);
+    writer.writeFixed(state.gateMaskShares);
+    writer.writeFixed(state.terminalMaskShares);
+};
+
+const encodeReducedActivationState = (
+    state: ReducedActivationState,
+): Uint8Array => {
+    if (state.phase === allocatedReducedActivationPhase) {
+        const writer = new FixedWriter(
+            allocatedReducedActivationStateByteLength,
+        );
+        writeReducedActivationCommonState(writer, state);
+        writer.writeFixed(state.allocationNonce);
+        writer.writeFixed(state.labelEntropy);
+        return writer.finish();
+    }
+    const writer = new FixedWriter(retainedReducedActivationStateByteLength);
+    writeReducedActivationCommonState(writer, state);
+    writer.writeFixed(state.chunk);
+    writer.writeFixed(state.chunkIdentity);
+    writer.writeFixed(state.manifest);
+    writer.writeFixed(state.manifestIdentity);
+    writer.writeFixed(state.activationSignature);
+    return writer.finish();
+};
+
+const decodeReducedActivationState = (
+    bytes: Uint8Array,
+): ReducedActivationState => {
+    if (bytes.byteLength < 2 || bytes[0] !== 1) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained reduced activation has the wrong version.',
+        );
+    }
+    const phase = bytes[1];
+    const expectedByteLength =
+        phase === allocatedReducedActivationPhase
+            ? allocatedReducedActivationStateByteLength
+            : phase === retainedReducedActivationBodyPhase ||
+                phase === publishedReducedActivationPhase
+              ? retainedReducedActivationStateByteLength
+              : 0;
+    if (expectedByteLength === 0 || bytes.byteLength !== expectedByteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained reduced activation has an invalid phase or byte length.',
+        );
+    }
+    const reader = new FixedReader(bytes);
+    reader.readU8();
+    reader.readU8();
+    const common = {
+        generation: reader.readU64(),
+        preparationAttempt: reader.readU16(),
+        verifiedPreparationRoot: reader.readFixed(identityByteLength),
+        targetIdentity: reader.readFixed(identityByteLength),
+        sourceBodyIdentities: reader.readFixed(
+            sourceBodyIdentityVectorByteLength,
+        ),
+        topCount: reader.readU16(),
+        initialWireValues: reader.readFixed(reducedInitialWireValueCount),
+        gateMaskShares: reader.readFixed(reducedGateMaskShareCount),
+        terminalMaskShares: reader.readFixed(reducedTerminalMaskShareCount),
+    };
+    const state: ReducedActivationState =
+        phase === allocatedReducedActivationPhase
+            ? {
+                  ...common,
+                  phase: allocatedReducedActivationPhase,
+                  allocationNonce: reader.readFixed(
+                      paddedContinuationAllocationNonceByteLength,
+                  ),
+                  labelEntropy: reader.readFixed(
+                      reducedActivationLabelEntropyByteLength,
+                  ),
+              }
+            : {
+                  ...common,
+                  phase:
+                      phase === retainedReducedActivationBodyPhase
+                          ? retainedReducedActivationBodyPhase
+                          : publishedReducedActivationPhase,
+                  chunk: reader.readFixed(reducedActivationChunkByteLength),
+                  chunkIdentity: reader.readFixed(identityByteLength),
+                  manifest: reader.readFixed(
+                      paddedContinuationManifestByteLength,
+                  ),
+                  manifestIdentity: reader.readFixed(identityByteLength),
+                  activationSignature: reader.readFixed(
+                      actionSignatureCarrierByteLength,
+                  ),
+              };
+    reader.finish();
+    validateReducedActivationCommonState(state);
+    if (
+        state.phase === retainedReducedActivationBodyPhase &&
+        !isZero(state.activationSignature)
+    ) {
+        zeroReducedActivationState(state);
+        throw new DurableStateError(
+            'CorruptState',
+            'The unsigned retained activation contains a signature.',
+        );
+    }
+    if (
+        state.phase === publishedReducedActivationPhase &&
+        isZero(state.activationSignature)
+    ) {
+        zeroReducedActivationState(state);
+        throw new DurableStateError(
+            'CorruptState',
+            'The published retained activation omits its signature.',
+        );
+    }
+    return state;
+};
+
+const zeroReducedActivationState = (state: ReducedActivationState): void => {
+    state.verifiedPreparationRoot.fill(0);
+    state.targetIdentity.fill(0);
+    state.sourceBodyIdentities.fill(0);
+    state.initialWireValues.fill(0);
+    state.gateMaskShares.fill(0);
+    state.terminalMaskShares.fill(0);
+    if (state.phase === allocatedReducedActivationPhase) {
+        state.allocationNonce.fill(0);
+        state.labelEntropy.fill(0);
+        return;
+    }
+    state.chunk.fill(0);
+    state.chunkIdentity.fill(0);
+    state.manifest.fill(0);
+    state.manifestIdentity.fill(0);
+    state.activationSignature.fill(0);
+};
+
 const noResultStateByteLength = 1 + 8 + identityByteLength + 2 + 2 + 2;
 
 const encodeNoResultState = (state: NoResultState): Uint8Array => {
@@ -1456,6 +1822,7 @@ class PrivatePreparationWorkerRuntime {
         private readonly finalityRuntime: ReturnType<
             typeof openFinalityRuntime
         >,
+        private readonly paddedContinuationRuntime: PaddedContinuationRuntime,
         private readonly preparationMaterialRuntime: PreparationMaterialRuntime,
         private readonly preparationParentRuntime: PreparationParentRuntime,
         private readonly privatePreparationBodyRuntime: PrivatePreparationBodyRuntime,
@@ -1469,6 +1836,9 @@ class PrivatePreparationWorkerRuntime {
         unpinnedKernelAllowed: boolean,
         afterDurableConsume?: () => Promise<void> | void,
         afterDurableSourceBind?: () => Promise<void> | void,
+        afterDurableActivationAllocate?: () => Promise<void> | void,
+        afterDurableActivationBodyBind?: () => Promise<void> | void,
+        afterDurableActivationPublish?: () => Promise<void> | void,
     ): Promise<PrivatePreparationWorkerRuntime> {
         const runtimeIdentity = Uint8Array.from(
             requireBytes(
@@ -1517,11 +1887,15 @@ class PrivatePreparationWorkerRuntime {
                 candidateBuildIdentity,
                 afterDurableConsume,
                 afterDurableSourceBind,
+                afterDurableActivationAllocate,
+                afterDurableActivationBodyBind,
+                afterDurableActivationPublish,
             },
             durableState,
             kernel,
             openActionSignatureRuntime(kernel),
             openFinalityRuntime(kernel),
+            openPaddedContinuationRuntime(kernel),
             openPreparationMaterialRuntime(kernel),
             openPreparationParentRuntime(kernel),
             openPrivatePreparationBodyRuntime(kernel),
@@ -1602,6 +1976,7 @@ class PrivatePreparationWorkerRuntime {
                 { length: signaturePurposeCount },
                 () => new Uint8Array(identityByteLength),
             ),
+            activationPublicationPhase: unpublishedActivationLocalPhase,
             signingSecretKey: Uint8Array.from(signingSecretKey),
             mailboxDecapsulationKey: Uint8Array.from(mailboxDecapsulationKey),
         };
@@ -2542,6 +2917,566 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
+    async createReducedActivationPackage(
+        input: PrivatePreparationActionContext & {
+            canonicalRosterBytes: Uint8Array;
+            preparationAttempt: number;
+            preparationParents: readonly PreparationParentCarrier[];
+            sources: readonly SourceCarrier[];
+            finalitySignatures: readonly FinalitySignatureCarrier[];
+            topCount: number;
+            initialWireValues: Uint8Array;
+            gateMaskShares: Uint8Array;
+            terminalMaskShares: Uint8Array;
+        },
+    ): Promise<PublishedReducedActivationPackage> {
+        const action = copyActionContext(input);
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
+        );
+        const preparationAttempt = requireUnsigned16(
+            input.preparationAttempt,
+            'preparationAttempt',
+        );
+        const preparationParents = copyPreparationParents(
+            input.preparationParents,
+        );
+        const sources = copySourceCarriers(input.sources);
+        const finalitySignatures = copyFinalitySignatures(
+            input.finalitySignatures,
+        );
+        const topCount = requireUnsigned16(input.topCount, 'topCount');
+        if (topCount < 1 || topCount > completionProfileParticipantCount) {
+            throw new TypeError('topCount is outside the completion profile.');
+        }
+        const initialWireValues = Uint8Array.from(
+            requireBytes(
+                input.initialWireValues,
+                reducedInitialWireValueCount,
+                'initialWireValues',
+            ),
+        );
+        const gateMaskShares = Uint8Array.from(
+            requireBytes(
+                input.gateMaskShares,
+                reducedGateMaskShareCount,
+                'gateMaskShares',
+            ),
+        );
+        const terminalMaskShares = Uint8Array.from(
+            requireBytes(
+                input.terminalMaskShares,
+                reducedTerminalMaskShareCount,
+                'terminalMaskShares',
+            ),
+        );
+        try {
+            return await this.durableState.exclusive(async () => {
+                const [actionRecord, sourceRecord, finalityRecord] =
+                    await Promise.all([
+                        this.durableState.readProtected(
+                            'actions',
+                            actionIdentifier(this.configuration, action),
+                        ),
+                        this.durableState.readProtected(
+                            'sources',
+                            sourceIdentifier(this.configuration, action),
+                        ),
+                        this.durableState.readProtected(
+                            'finalities',
+                            finalityIdentifier(this.configuration, action),
+                        ),
+                    ]);
+                if (
+                    actionRecord === undefined ||
+                    sourceRecord === undefined ||
+                    finalityRecord === undefined
+                ) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'Published source and finality state are required before activation.',
+                    );
+                }
+                const loadedAction = await this.loadActionState(
+                    action,
+                    actionRecord,
+                );
+                const loadedSource = await this.loadSourceState(
+                    action,
+                    loadedAction.state.rosterIdentity,
+                    sourceRecord,
+                );
+                const loadedFinality = await this.loadFinalityState(
+                    action,
+                    loadedAction.state.rosterIdentity,
+                    finalityRecord,
+                );
+                try {
+                    this.verifyRosterBoundAction(
+                        action,
+                        loadedAction.state,
+                        canonicalRosterBytes,
+                    );
+                    this.validateSourceState(
+                        action,
+                        canonicalRosterBytes,
+                        loadedAction.state,
+                        loadedSource.state,
+                    );
+                    if (
+                        loadedSource.state.phase !== publishedSourcePhase ||
+                        loadedSource.state.preparationAttempt !==
+                            preparationAttempt
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The retained source is not the activation preparation attempt.',
+                        );
+                    }
+                    const verified = this.deriveVerifiedTallyContext(
+                        action,
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sources,
+                        topCount,
+                        loadedAction.state,
+                        loadedSource.state,
+                    );
+                    try {
+                        this.verifyComputationCertificate(
+                            verified,
+                            canonicalRosterBytes,
+                            finalitySignatures,
+                        );
+                        this.validateFinalityState(
+                            action,
+                            canonicalRosterBytes,
+                            loadedAction.state,
+                            loadedFinality.state,
+                            verified,
+                        );
+                        if (
+                            loadedFinality.state.phase !==
+                            publishedFinalityPhase
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The local finality signature is not published.',
+                            );
+                        }
+                        const replayEvidence =
+                            await this.loadCompletePreparationEvidence(
+                                action,
+                                canonicalRosterBytes,
+                                preparationAttempt,
+                                preparationParents,
+                                loadedAction,
+                            );
+                        try {
+                            if (
+                                !bytesEqual(
+                                    replayEvidence.verified.root,
+                                    verified.verifiedPreparationRoot,
+                                )
+                            ) {
+                                throw new DurableStateError(
+                                    'Conflict',
+                                    'The activation preparation does not match the finalized source root.',
+                                );
+                            }
+                        } finally {
+                            zeroCompletePreparationEvidence(replayEvidence);
+                        }
+                        const identifier = reducedActivationIdentifier(
+                            this.configuration,
+                            action,
+                        );
+                        let activationRecord =
+                            await this.durableState.readProtected(
+                                'activations',
+                                identifier,
+                            );
+                        const boundIdentity =
+                            loadedAction.state.signatureBodyIdentities[3];
+                        if (boundIdentity === undefined) {
+                            throw new DurableStateError(
+                                'CorruptState',
+                                'The activation-signature slot is absent.',
+                            );
+                        }
+                        if (activationRecord === undefined) {
+                            if (!isZero(boundIdentity)) {
+                                throw new DurableStateError(
+                                    'StateLost',
+                                    'The activation-signature slot is consumed but its body state is absent.',
+                                );
+                            }
+                            const state: AllocatedReducedActivationState = {
+                                phase: allocatedReducedActivationPhase,
+                                generation: 1n,
+                                preparationAttempt,
+                                verifiedPreparationRoot: Uint8Array.from(
+                                    verified.verifiedPreparationRoot,
+                                ),
+                                targetIdentity: Uint8Array.from(
+                                    verified.targetIdentity,
+                                ),
+                                sourceBodyIdentities: Uint8Array.from(
+                                    verified.sourceBodyIdentities,
+                                ),
+                                topCount: verified.topCount,
+                                initialWireValues:
+                                    Uint8Array.from(initialWireValues),
+                                gateMaskShares: Uint8Array.from(gateMaskShares),
+                                terminalMaskShares:
+                                    Uint8Array.from(terminalMaskShares),
+                                allocationNonce: randomBytes(
+                                    paddedContinuationAllocationNonceByteLength,
+                                ),
+                                labelEntropy:
+                                    randomPaddedContinuationLabelEntropy(),
+                            };
+                            try {
+                                activationRecord =
+                                    await this.insertReducedActivationState(
+                                        action,
+                                        loadedAction,
+                                        state,
+                                    );
+                            } finally {
+                                zeroReducedActivationState(state);
+                            }
+                            await this.configuration.afterDurableActivationAllocate?.();
+                        }
+                        const loadedActivation =
+                            await this.loadReducedActivationState(
+                                action,
+                                loadedAction.state.rosterIdentity,
+                                activationRecord,
+                            );
+                        try {
+                            this.validateReducedActivationState(
+                                loadedActivation.state,
+                                verified,
+                                preparationAttempt,
+                                initialWireValues,
+                                gateMaskShares,
+                                terminalMaskShares,
+                                boundIdentity,
+                                loadedAction.state.activationPublicationPhase,
+                            );
+                            return await this.continueReducedActivation(
+                                action,
+                                canonicalRosterBytes,
+                                preparationParents,
+                                finalitySignatures,
+                                loadedAction,
+                                loadedActivation,
+                                verified,
+                            );
+                        } finally {
+                            zeroReducedActivationState(loadedActivation.state);
+                        }
+                    } finally {
+                        zeroVerifiedTallyContext(verified);
+                    }
+                } finally {
+                    zeroFinalityState(loadedFinality.state);
+                    zeroSourceState(loadedSource.state);
+                    zeroActionState(loadedAction.state);
+                }
+            });
+        } finally {
+            initialWireValues.fill(0);
+            gateMaskShares.fill(0);
+            terminalMaskShares.fill(0);
+        }
+    }
+
+    private async continueReducedActivation(
+        action: PrivatePreparationActionContext,
+        canonicalRosterBytes: Uint8Array,
+        preparationParents: readonly PreparationParentCarrier[],
+        finalitySignatures: readonly FinalitySignatureCarrier[],
+        loadedAction: LoadedActionState,
+        loadedActivation: LoadedReducedActivationState,
+        verified: VerifiedTallyContext,
+    ): Promise<PublishedReducedActivationPackage> {
+        if (loadedActivation.state.phase === publishedReducedActivationPhase) {
+            return copyPublishedReducedActivationPackage(
+                loadedActivation.state,
+            );
+        }
+        if (
+            loadedActivation.state.phase === retainedReducedActivationBodyPhase
+        ) {
+            return this.publishRetainedReducedActivation(
+                action,
+                loadedAction,
+                loadedActivation,
+                verified,
+            );
+        }
+        const allocatedState = loadedActivation.state;
+        if (allocatedState.phase !== allocatedReducedActivationPhase) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The reduced activation has an unsupported durable phase.',
+            );
+        }
+        const evidence = await this.loadCompletePreparationEvidence(
+            action,
+            canonicalRosterBytes,
+            allocatedState.preparationAttempt,
+            preparationParents,
+            loadedAction,
+        );
+        try {
+            if (
+                !bytesEqual(
+                    evidence.verified.root,
+                    allocatedState.verifiedPreparationRoot,
+                )
+            ) {
+                throw new DurableStateError(
+                    'Conflict',
+                    'The retained activation does not match the complete preparation.',
+                );
+            }
+            const generated =
+                this.paddedContinuationRuntime.generateParticipant(
+                    {
+                        targetBody: verified.targetBody,
+                        canonicalRosterBytes,
+                        signatures: finalitySignatures,
+                    },
+                    reviewedReducedPaddedContinuationPlan,
+                    {
+                        participantPosition: action.participantPosition,
+                        initialWireValues: allocatedState.initialWireValues,
+                        gateMaskShares: allocatedState.gateMaskShares,
+                        terminalMaskShares: allocatedState.terminalMaskShares,
+                        allocationNonce: allocatedState.allocationNonce,
+                        labelEntropy: allocatedState.labelEntropy,
+                        preparationParents,
+                        ownContributionOpenings: evidence.contributionOpenings,
+                        ownPairwiseMasters: evidence.pairwiseMasters,
+                        remotePlaintexts: evidence.remotePlaintexts,
+                    },
+                );
+            const replacementState: RetainedReducedActivationState = {
+                phase: retainedReducedActivationBodyPhase,
+                generation: allocatedState.generation + 1n,
+                preparationAttempt: allocatedState.preparationAttempt,
+                verifiedPreparationRoot: Uint8Array.from(
+                    allocatedState.verifiedPreparationRoot,
+                ),
+                targetIdentity: Uint8Array.from(allocatedState.targetIdentity),
+                sourceBodyIdentities: Uint8Array.from(
+                    allocatedState.sourceBodyIdentities,
+                ),
+                topCount: allocatedState.topCount,
+                initialWireValues: Uint8Array.from(
+                    allocatedState.initialWireValues,
+                ),
+                gateMaskShares: Uint8Array.from(allocatedState.gateMaskShares),
+                terminalMaskShares: Uint8Array.from(
+                    allocatedState.terminalMaskShares,
+                ),
+                chunk: generated.chunk,
+                chunkIdentity: generated.chunkIdentity,
+                manifest: generated.manifest,
+                manifestIdentity: generated.manifestIdentity,
+                activationSignature: new Uint8Array(
+                    actionSignatureCarrierByteLength,
+                ),
+            };
+            try {
+                await this.bindReducedActivationBody(
+                    action,
+                    loadedAction,
+                    loadedActivation,
+                    replacementState,
+                );
+                await this.configuration.afterDurableActivationBodyBind?.();
+                const [retainedActionRecord, retainedActivationRecord] =
+                    await Promise.all([
+                        this.durableState.readProtected(
+                            'actions',
+                            actionIdentifier(this.configuration, action),
+                        ),
+                        this.durableState.readProtected(
+                            'activations',
+                            loadedActivation.record.id,
+                        ),
+                    ]);
+                if (
+                    retainedActionRecord === undefined ||
+                    retainedActivationRecord === undefined
+                ) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The bound activation body disappeared after persistence.',
+                    );
+                }
+                const reboundAction = await this.loadActionState(
+                    action,
+                    retainedActionRecord,
+                );
+                const retainedActivation =
+                    await this.loadReducedActivationState(
+                        action,
+                        reboundAction.state.rosterIdentity,
+                        retainedActivationRecord,
+                    );
+                try {
+                    this.validateReducedActivationState(
+                        retainedActivation.state,
+                        verified,
+                        replacementState.preparationAttempt,
+                        replacementState.initialWireValues,
+                        replacementState.gateMaskShares,
+                        replacementState.terminalMaskShares,
+                        reboundAction.state.signatureBodyIdentities[3] ??
+                            new Uint8Array(),
+                        reboundAction.state.activationPublicationPhase,
+                    );
+                    return await this.publishRetainedReducedActivation(
+                        action,
+                        reboundAction,
+                        retainedActivation,
+                        verified,
+                    );
+                } finally {
+                    zeroReducedActivationState(retainedActivation.state);
+                    zeroActionState(reboundAction.state);
+                }
+            } finally {
+                zeroReducedActivationState(replacementState);
+            }
+        } finally {
+            zeroCompletePreparationEvidence(evidence);
+        }
+    }
+
+    private async publishRetainedReducedActivation(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        loadedActivation: LoadedReducedActivationState,
+        verified: VerifiedTallyContext,
+    ): Promise<PublishedReducedActivationPackage> {
+        if (
+            loadedActivation.state.phase !== retainedReducedActivationBodyPhase
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'Only a retained unsigned activation body can be published.',
+            );
+        }
+        const boundIdentity =
+            loadedAction.state.signatureBodyIdentities[3] ?? new Uint8Array();
+        this.validateReducedActivationState(
+            loadedActivation.state,
+            verified,
+            loadedActivation.state.preparationAttempt,
+            loadedActivation.state.initialWireValues,
+            loadedActivation.state.gateMaskShares,
+            loadedActivation.state.terminalMaskShares,
+            boundIdentity,
+            loadedAction.state.activationPublicationPhase,
+        );
+        const signingRandomness = randomBytes(
+            actionSignatureSigningRandomnessByteLength,
+        );
+        const signature = this.actionSignatureRuntime.signBodyIdentity(
+            loadedAction.state.signingSecretKey,
+            action.participantPosition,
+            'activation',
+            loadedActivation.state.manifestIdentity,
+            signingRandomness,
+        );
+        let signatureCarrier: Uint8Array;
+        try {
+            signatureCarrier =
+                this.paddedContinuationRuntime.encodeActivationSignature(
+                    action.participantPosition,
+                    loadedActivation.state.manifestIdentity,
+                    signature,
+                );
+        } finally {
+            signature.fill(0);
+            signingRandomness.fill(0);
+        }
+        const replacementState: RetainedReducedActivationState = {
+            ...loadedActivation.state,
+            phase: publishedReducedActivationPhase,
+            generation: loadedActivation.state.generation + 1n,
+            activationSignature: signatureCarrier,
+        };
+        try {
+            await this.replaceReducedActivationState(
+                action,
+                loadedAction,
+                loadedActivation,
+                replacementState,
+            );
+            await this.configuration.afterDurableActivationPublish?.();
+            const [retainedActionRecord, retainedActivationRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        loadedAction.record.id,
+                    ),
+                    this.durableState.readProtected(
+                        'activations',
+                        loadedActivation.record.id,
+                    ),
+                ]);
+            if (
+                retainedActionRecord === undefined ||
+                retainedActivationRecord === undefined
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The published activation journal disappeared after persistence.',
+                );
+            }
+            const reboundAction = await this.loadActionState(
+                action,
+                retainedActionRecord,
+            );
+            const reloaded = await this.loadReducedActivationState(
+                action,
+                reboundAction.state.rosterIdentity,
+                retainedActivationRecord,
+            );
+            try {
+                this.validateReducedActivationState(
+                    reloaded.state,
+                    verified,
+                    replacementState.preparationAttempt,
+                    replacementState.initialWireValues,
+                    replacementState.gateMaskShares,
+                    replacementState.terminalMaskShares,
+                    boundIdentity,
+                    reboundAction.state.activationPublicationPhase,
+                );
+                if (reloaded.state.phase !== publishedReducedActivationPhase) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The activation publication did not reach its durable terminal phase.',
+                    );
+                }
+                return copyPublishedReducedActivationPackage(reloaded.state);
+            } finally {
+                zeroReducedActivationState(reloaded.state);
+                zeroActionState(reboundAction.state);
+            }
+        } finally {
+            zeroReducedActivationState(replacementState);
+        }
+    }
+
     async finalizeNoResult(
         input: PrivatePreparationActionContext & {
             canonicalRosterBytes: Uint8Array;
@@ -2833,6 +3768,31 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
+    private verifyComputationCertificate(
+        verified: VerifiedTallyContext,
+        canonicalRosterBytes: Uint8Array,
+        finalitySignatures: readonly FinalitySignatureCarrier[],
+    ): void {
+        const certificate = this.finalityRuntime.verifyCertificate(
+            verified.targetBody,
+            canonicalRosterBytes,
+            finalitySignatures,
+        );
+        if (
+            verified.targetKind !== 'computation' ||
+            certificate.targetKind !== 'computation' ||
+            verified.sourceSubmissionBitmap === 0 ||
+            certificate.sourceSubmissionBitmap !==
+                verified.sourceSubmissionBitmap ||
+            certificate.topCount !== verified.topCount ||
+            !bytesEqual(certificate.targetIdentity, verified.targetIdentity)
+        ) {
+            throw new Error(
+                'Activation requires the exact finalized nonempty source inventory.',
+            );
+        }
+    }
+
     private validateFinalityState(
         action: PrivatePreparationActionContext,
         canonicalRosterBytes: Uint8Array,
@@ -2890,6 +3850,105 @@ class PrivatePreparationWorkerRuntime {
         );
     }
 
+    private validateReducedActivationState(
+        state: ReducedActivationState,
+        verified: VerifiedTallyContext,
+        preparationAttempt: number,
+        initialWireValues: Uint8Array,
+        gateMaskShares: Uint8Array,
+        terminalMaskShares: Uint8Array,
+        boundIdentity: Uint8Array,
+        activationPublicationPhase: ActionState['activationPublicationPhase'],
+    ): void {
+        validateReducedActivationCommonState(state);
+        const expectedGeneration =
+            state.phase === allocatedReducedActivationPhase
+                ? 1n
+                : state.phase === retainedReducedActivationBodyPhase
+                  ? 2n
+                  : 3n;
+        if (
+            verified.targetKind !== 'computation' ||
+            verified.sourceSubmissionBitmap === 0 ||
+            state.generation !== expectedGeneration ||
+            state.preparationAttempt !== preparationAttempt ||
+            !bytesEqual(
+                state.verifiedPreparationRoot,
+                verified.verifiedPreparationRoot,
+            ) ||
+            !bytesEqual(state.targetIdentity, verified.targetIdentity) ||
+            !bytesEqual(
+                state.sourceBodyIdentities,
+                verified.sourceBodyIdentities,
+            ) ||
+            state.topCount !== verified.topCount ||
+            !bytesEqual(state.initialWireValues, initialWireValues) ||
+            !bytesEqual(state.gateMaskShares, gateMaskShares) ||
+            !bytesEqual(state.terminalMaskShares, terminalMaskShares)
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The retained reduced activation does not match the verified request.',
+            );
+        }
+        if (state.phase === allocatedReducedActivationPhase) {
+            if (
+                !isZero(boundIdentity) ||
+                activationPublicationPhase !==
+                    unpublishedActivationLocalPhase ||
+                state.allocationNonce.byteLength !==
+                    paddedContinuationAllocationNonceByteLength ||
+                state.labelEntropy.byteLength !==
+                    reducedActivationLabelEntropyByteLength
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The activation allocation and signature slot are inconsistent.',
+                );
+            }
+            return;
+        }
+        if (
+            isZero(boundIdentity) ||
+            !bytesEqual(boundIdentity, state.manifestIdentity) ||
+            state.chunk.byteLength !== reducedActivationChunkByteLength ||
+            state.chunkIdentity.byteLength !== identityByteLength ||
+            state.manifest.byteLength !==
+                paddedContinuationManifestByteLength ||
+            state.manifestIdentity.byteLength !== identityByteLength ||
+            state.activationSignature.byteLength !==
+                actionSignatureCarrierByteLength
+        ) {
+            throw new DurableStateError(
+                'StateLost',
+                'The retained activation body and signature slot are inconsistent.',
+            );
+        }
+        if (
+            (state.phase === retainedReducedActivationBodyPhase &&
+                activationPublicationPhase !==
+                    unpublishedActivationLocalPhase) ||
+            (state.phase === publishedReducedActivationPhase &&
+                activationPublicationPhase !== publishedActivationLocalPhase)
+        ) {
+            throw new DurableStateError(
+                'StateLost',
+                'The activation body and action publication journal disagree.',
+            );
+        }
+        if (
+            (state.phase === retainedReducedActivationBodyPhase &&
+                !isZero(state.activationSignature)) ||
+            (state.phase === publishedReducedActivationPhase &&
+                isZero(state.activationSignature))
+        ) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The retained activation signature phase is inconsistent.',
+            );
+        }
+    }
+
     private validateFinalizedNoResultState(
         state: NoResultState,
         verified: VerifiedTallyContext,
@@ -2909,6 +3968,182 @@ class PrivatePreparationWorkerRuntime {
                 'The retained finalized no-result state is inconsistent.',
             );
         }
+    }
+
+    private async insertReducedActivationState(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        state: AllocatedReducedActivationState,
+    ): Promise<ProtectedRecord> {
+        const plaintext = encodeReducedActivationState(state);
+        const context = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.rosterIdentity,
+                state.generation,
+                reducedActivationStateKind,
+            ),
+        );
+        let record: ProtectedRecord;
+        try {
+            record = await createProtectedRecord(
+                reducedActivationIdentifier(this.configuration, action),
+                context,
+                plaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        await this.durableState.putIfAbsent('activations', record);
+        return record;
+    }
+
+    private async bindReducedActivationBody(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        loadedActivation: LoadedReducedActivationState,
+        replacementState: RetainedReducedActivationState,
+    ): Promise<void> {
+        const activationPlaintext =
+            encodeReducedActivationState(replacementState);
+        const activationContext = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.rosterIdentity,
+                replacementState.generation,
+                reducedActivationStateKind,
+            ),
+        );
+        let activationRecord: ProtectedRecord;
+        try {
+            activationRecord = await createProtectedRecord(
+                loadedActivation.record.id,
+                activationContext,
+                activationPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            activationPlaintext.fill(0);
+            activationContext.fill(0);
+        }
+        const replacementActionState: ActionState = {
+            ...loadedAction.state,
+            generation: loadedAction.state.generation + 1n,
+            signatureBodyIdentities:
+                loadedAction.state.signatureBodyIdentities.map(
+                    (identity, index) =>
+                        index === 3
+                            ? Uint8Array.from(replacementState.manifestIdentity)
+                            : Uint8Array.from(identity),
+                ),
+        };
+        const actionPlaintext = encodeActionState(replacementActionState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                replacementActionState.rosterIdentity,
+                replacementActionState.generation,
+            ),
+        );
+        let actionRecord: ProtectedRecord;
+        try {
+            actionRecord = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        await this.durableState.replaceTwoExact(
+            'actions',
+            loadedAction.record,
+            actionRecord,
+            'activations',
+            loadedActivation.record,
+            activationRecord,
+        );
+    }
+
+    private async replaceReducedActivationState(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        loadedActivation: LoadedReducedActivationState,
+        replacementState: RetainedReducedActivationState,
+    ): Promise<void> {
+        if (
+            replacementState.phase !== publishedReducedActivationPhase ||
+            loadedAction.state.activationPublicationPhase !==
+                unpublishedActivationLocalPhase
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The activation publication journal is already consumed.',
+            );
+        }
+        const plaintext = encodeReducedActivationState(replacementState);
+        const context = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.rosterIdentity,
+                replacementState.generation,
+                reducedActivationStateKind,
+            ),
+        );
+        let replacement: ProtectedRecord;
+        try {
+            replacement = await createProtectedRecord(
+                loadedActivation.record.id,
+                context,
+                plaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        const replacementActionState: ActionState = {
+            ...loadedAction.state,
+            generation: loadedAction.state.generation + 1n,
+            activationPublicationPhase: publishedActivationLocalPhase,
+        };
+        const actionPlaintext = encodeActionState(replacementActionState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                replacementActionState.rosterIdentity,
+                replacementActionState.generation,
+            ),
+        );
+        let actionReplacement: ProtectedRecord;
+        try {
+            actionReplacement = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        await this.durableState.replaceTwoExact(
+            'actions',
+            loadedAction.record,
+            actionReplacement,
+            'activations',
+            loadedActivation.record,
+            replacement,
+        );
     }
 
     private async replaceFinalityState(
@@ -2976,13 +4211,13 @@ class PrivatePreparationWorkerRuntime {
         await this.durableState.putIfAbsent('evaluations', record);
     }
 
-    private async verifyCompletePreparationForSource(
+    private async loadCompletePreparationEvidence(
         action: PrivatePreparationActionContext,
         canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         preparationParents: readonly PreparationParentCarrier[],
         loadedAction: LoadedActionState,
-    ): Promise<VerifiedCompletePreparation> {
+    ): Promise<CompletePreparationEvidence> {
         const preparationRecord = await this.durableState.readProtected(
             'preparations',
             preparationIdentifier(this.configuration, action),
@@ -3096,7 +4331,18 @@ class PrivatePreparationWorkerRuntime {
                     );
                 }
             }
-            return verified;
+            return {
+                verified,
+                contributionOpenings: Uint8Array.from(
+                    loadedPreparation.state.contributionOpenings,
+                ),
+                pairwiseMasters: Uint8Array.from(
+                    loadedPreparation.state.pairwiseMasters,
+                ),
+                remotePlaintexts: remotePlaintexts.map((plaintext) =>
+                    Uint8Array.from(plaintext),
+                ),
+            };
         } finally {
             zeroPreparationState(loadedPreparation.state);
             for (const loadedSlot of loadedSlots) {
@@ -3106,6 +4352,28 @@ class PrivatePreparationWorkerRuntime {
                 plaintext.fill(0);
             }
         }
+    }
+
+    private async verifyCompletePreparationForSource(
+        action: PrivatePreparationActionContext,
+        canonicalRosterBytes: Uint8Array,
+        preparationAttempt: number,
+        preparationParents: readonly PreparationParentCarrier[],
+        loadedAction: LoadedActionState,
+    ): Promise<VerifiedCompletePreparation> {
+        const evidence = await this.loadCompletePreparationEvidence(
+            action,
+            canonicalRosterBytes,
+            preparationAttempt,
+            preparationParents,
+            loadedAction,
+        );
+        evidence.contributionOpenings.fill(0);
+        evidence.pairwiseMasters.fill(0);
+        for (const plaintext of evidence.remotePlaintexts) {
+            plaintext.fill(0);
+        }
+        return evidence.verified;
     }
 
     private async createAndPublishSource(
@@ -4291,6 +5559,48 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
+    private async loadReducedActivationState(
+        action: PrivatePreparationActionContext,
+        rosterIdentity: Uint8Array,
+        record: ProtectedRecord,
+    ): Promise<LoadedReducedActivationState> {
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for retained activation state.',
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        const expectedContext = encodeLocalRecordContext(localContext);
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await openProtectedRecord(
+                record,
+                expectedContext,
+                rootKey,
+            );
+            const state = decodeReducedActivationState(plaintext);
+            try {
+                assertTerminalLocalContext(
+                    state.generation,
+                    localContext,
+                    this.configuration,
+                    action,
+                    rosterIdentity,
+                    reducedActivationStateKind,
+                );
+                return { record, state };
+            } catch (error: unknown) {
+                zeroReducedActivationState(state);
+                throw error;
+            }
+        } finally {
+            expectedContext.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+
     private async loadNoResultState(
         action: PrivatePreparationActionContext,
         rosterIdentity: Uint8Array,
@@ -4446,6 +5756,9 @@ type WorkerInstallationOptions = Readonly<{
     unpinnedKernelAllowed: boolean;
     afterDurableConsume?: () => Promise<void> | void;
     afterDurableSourceBind?: () => Promise<void> | void;
+    afterDurableActivationAllocate?: () => Promise<void> | void;
+    afterDurableActivationBodyBind?: () => Promise<void> | void;
+    afterDurableActivationPublish?: () => Promise<void> | void;
 }>;
 
 const failureResponse = (
@@ -4503,6 +5816,15 @@ const responseTransferables = (
             result.finalitySignature.buffer,
         ];
     }
+    if ('chunk' in result) {
+        return [
+            result.chunk.buffer,
+            result.chunkIdentity.buffer,
+            result.manifest.buffer,
+            result.manifestIdentity.buffer,
+            result.activationSignature.buffer,
+        ];
+    }
     return [];
 };
 
@@ -4538,6 +5860,9 @@ export const installPrivatePreparationWorker = (
                             options.unpinnedKernelAllowed,
                             options.afterDurableConsume,
                             options.afterDurableSourceBind,
+                            options.afterDurableActivationAllocate,
+                            options.afterDurableActivationBodyBind,
+                            options.afterDurableActivationPublish,
                         );
                         await runtimePromise;
                         response = {
@@ -4597,6 +5922,17 @@ export const installPrivatePreparationWorker = (
                                 requestId: request.requestId,
                                 ok: true,
                                 result: await runtime.finalizeNoResult(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation ===
+                            'create-reduced-activation-package'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.createReducedActivationPackage(
                                     request.input,
                                 ),
                             };

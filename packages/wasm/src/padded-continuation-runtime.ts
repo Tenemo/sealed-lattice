@@ -25,11 +25,14 @@ const evaluateBatchCommand = 40;
 
 const completionProfileParticipantCount = 10;
 const identityByteLength = 64;
-const labelByteLength = 40;
+export const paddedContinuationLabelByteLength = 40;
+const labelByteLength = paddedContinuationLabelByteLength;
 const moduleValueByteLength = 40;
 const tokenByteLength = labelByteLength + 1;
-const tokenPairEntropyByteLength = 2 * labelByteLength + 1;
-const allocationNonceByteLength = 32;
+export const paddedContinuationLabelPairEntropyByteLength =
+    2 * labelByteLength + 1;
+const tokenPairEntropyByteLength = paddedContinuationLabelPairEntropyByteLength;
+export const paddedContinuationAllocationNonceByteLength = 32;
 const fieldBitWidth = 4;
 const localMultiplicationRowCount = 35 * 4;
 const paddedTranslationRowCountPerGarbler =
@@ -46,9 +49,9 @@ const terminalPayloadByteLength =
     fieldBitWidth * 4 * tokenByteLength + fieldBitWidth * tokenByteLength + 1;
 const preparationParentBodyByteLength = 8_502;
 const chunkHeaderByteLength = 250;
-const manifestByteLength = 254;
+export const paddedContinuationManifestByteLength = 254;
 
-const reviewedReducedPlan: JointContinuationPlan = {
+export const reviewedReducedPaddedContinuationPlan: JointContinuationPlan = {
     inputWireCount: 4,
     gates: [
         { leftWire: 0, rightWire: 1 },
@@ -132,11 +135,14 @@ const requirePosition = (position: number, name: string): void => {
 const validateReviewedReducedPlan = (plan: JointContinuationPlan): void => {
     requireUnsigned16(plan.inputWireCount, 'inputWireCount');
     if (
-        plan.inputWireCount !== reviewedReducedPlan.inputWireCount ||
-        plan.gates.length !== reviewedReducedPlan.gates.length ||
-        plan.outputWires.length !== reviewedReducedPlan.outputWires.length ||
+        plan.inputWireCount !==
+            reviewedReducedPaddedContinuationPlan.inputWireCount ||
+        plan.gates.length !==
+            reviewedReducedPaddedContinuationPlan.gates.length ||
+        plan.outputWires.length !==
+            reviewedReducedPaddedContinuationPlan.outputWires.length ||
         plan.gates.some((gate, index) => {
-            const expected = reviewedReducedPlan.gates[index];
+            const expected = reviewedReducedPaddedContinuationPlan.gates[index];
             return (
                 expected === undefined ||
                 gate.leftWire !== expected.leftWire ||
@@ -144,7 +150,9 @@ const validateReviewedReducedPlan = (plan: JointContinuationPlan): void => {
             );
         }) ||
         plan.outputWires.some(
-            (wire, index) => wire !== reviewedReducedPlan.outputWires[index],
+            (wire, index) =>
+                wire !==
+                reviewedReducedPaddedContinuationPlan.outputWires[index],
         )
     ) {
         throw new RangeError(
@@ -269,7 +277,7 @@ export const openPaddedContinuationRuntime = (
         );
         requireExactConstructionBytes(
             input.allocationNonce,
-            allocationNonceByteLength,
+            paddedContinuationAllocationNonceByteLength,
             'allocationNonce',
         );
         requireExactConstructionBytes(
@@ -354,7 +362,7 @@ export const openPaddedContinuationRuntime = (
             const manifest = Uint8Array.from(reader.readBytes());
             requireExactConstructionBytes(
                 manifest,
-                manifestByteLength,
+                paddedContinuationManifestByteLength,
                 'paddedContinuationManifest',
             );
             const manifestIdentity = Uint8Array.from(
@@ -413,7 +421,7 @@ export const openPaddedContinuationRuntime = (
         for (const manifest of manifests) {
             requireExactConstructionBytes(
                 manifest,
-                manifestByteLength,
+                paddedContinuationManifestByteLength,
                 'paddedContinuationManifest',
             );
             request.writeBytes(manifest);

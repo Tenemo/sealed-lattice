@@ -87,6 +87,21 @@ export type PrivatePreparationWorkerRequest =
       }>
     | Readonly<{
           requestId: number;
+          operation: 'create-reduced-activation-package';
+          input: PrivatePreparationActionContext & {
+              canonicalRosterBytes: Uint8Array;
+              preparationAttempt: number;
+              preparationParents: readonly PreparationParentCarrier[];
+              sources: readonly SourceCarrier[];
+              finalitySignatures: readonly FinalitySignatureCarrier[];
+              topCount: number;
+              initialWireValues: Uint8Array;
+              gateMaskShares: Uint8Array;
+              terminalMaskShares: Uint8Array;
+          };
+      }>
+    | Readonly<{
+          requestId: number;
           operation: 'read-tally-result';
           input: PrivatePreparationActionContext;
       }>;
@@ -116,6 +131,14 @@ export type PublishedFinalityPackage = Readonly<{
     finalitySignature: Uint8Array;
 }>;
 
+export type PublishedReducedActivationPackage = Readonly<{
+    chunk: Uint8Array;
+    chunkIdentity: Uint8Array;
+    manifest: Uint8Array;
+    manifestIdentity: Uint8Array;
+    activationSignature: Uint8Array;
+}>;
+
 export type TallyEvaluationProgress = Readonly<{
     kind: 'no-result';
     acceptedBallotAuthorshipBitmap: number;
@@ -130,6 +153,7 @@ type PrivatePreparationWorkerSuccess = Readonly<{
         | PublishedPreparationPackage
         | PublishedFinalityPackage
         | PublishedSourcePackage
+        | PublishedReducedActivationPackage
         | TallyEvaluationProgress
         | Readonly<{ initialized: true }>;
 }>;

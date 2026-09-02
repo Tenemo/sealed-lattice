@@ -561,6 +561,57 @@ export class PrivatePreparationDurableState {
         insertionStore.put(cloneProtectedRecord(insertion));
         await completion;
     }
+
+    async replaceTwoExact(
+        firstStoreName: ProtectedStoreName,
+        firstExpected: ProtectedRecord,
+        firstReplacement: ProtectedRecord,
+        secondStoreName: ProtectedStoreName,
+        secondExpected: ProtectedRecord,
+        secondReplacement: ProtectedRecord,
+    ): Promise<void> {
+        if (
+            firstExpected.id !== firstReplacement.id ||
+            secondExpected.id !== secondReplacement.id ||
+            (firstStoreName === secondStoreName &&
+                firstExpected.id === secondExpected.id)
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The atomic durable replacements have conflicting identities.',
+            );
+        }
+        const transaction = this.#database.transaction(
+            [firstStoreName, secondStoreName],
+            'readwrite',
+            { durability: 'strict' },
+        );
+        const completion = transactionCompletion(transaction);
+        const firstStore = transaction.objectStore(firstStoreName);
+        const secondStore = transaction.objectStore(secondStoreName);
+        const [existingFirst, existingSecond] = await Promise.all([
+            unknownRequestResult(firstStore.get(firstExpected.id)),
+            unknownRequestResult(secondStore.get(secondExpected.id)),
+        ]);
+        if (
+            existingFirst === undefined ||
+            !isProtectedRecord(existingFirst) ||
+            !protectedRecordsEqual(existingFirst, firstExpected) ||
+            existingSecond === undefined ||
+            !isProtectedRecord(existingSecond) ||
+            !protectedRecordsEqual(existingSecond, secondExpected)
+        ) {
+            transaction.abort();
+            await completion.catch(() => undefined);
+            throw new DurableStateError(
+                'Conflict',
+                'An atomic durable predecessor changed before replacement.',
+            );
+        }
+        firstStore.put(cloneProtectedRecord(firstReplacement));
+        secondStore.put(cloneProtectedRecord(secondReplacement));
+        await completion;
+    }
 }
 
 export const createProtectedRecord = async (
