@@ -1018,9 +1018,11 @@ const expectCompletePaddedTallyCeremony = async (
                 labelEntropyByteLength:
                     initialization.plan.labelEntropyByteLength,
                 manifestByteLength: initialization.plan.manifestByteLength,
+                maximumLiveWireCount: initialization.plan.maximumLiveWireCount,
                 chunks: initialization.plan.chunks.map((chunk) => ({
                     chunkByteLength: chunk.chunkByteLength,
                     labelEntropyByteLength: chunk.labelEntropyByteLength,
+                    liveWireCountAfterChunk: chunk.liveWireCountAfterChunk,
                 })),
             }).toEqual({
                 participantCount,
@@ -1041,10 +1043,18 @@ const expectCompletePaddedTallyCeremony = async (
                 labelEntropyByteLength: independentModel.labelEntropyByteLength,
                 manifestByteLength:
                     176 + 78 * independentModel.descriptors.length,
-                chunks: independentModel.descriptors.map((descriptor) => ({
-                    chunkByteLength: descriptor.chunkByteLength,
-                    labelEntropyByteLength: descriptor.labelEntropyByteLength,
-                })),
+                maximumLiveWireCount: independentModel.maximumLiveWireCount,
+                chunks: independentModel.descriptors.map(
+                    (descriptor, chunkIndex) => ({
+                        chunkByteLength: descriptor.chunkByteLength,
+                        labelEntropyByteLength:
+                            descriptor.labelEntropyByteLength,
+                        liveWireCountAfterChunk:
+                            independentModel.liveWireCountsAfterChunks[
+                                chunkIndex
+                            ],
+                    }),
+                ),
             });
             for (
                 let chunkOrdinal = 0;
@@ -1809,13 +1819,14 @@ const expectCompletePaddedTallyCeremony = async (
         acceptedTerminal.resources.maximumResponseByteLength +
         acceptedTerminal.resources.wasmMemoryByteLength;
     const generationKmacCallCountPerParticipant =
-        362 * plan.conjunctionCount +
-        32 * plan.linearCount +
-        32 * plan.outputCount;
+        independentModel.kmacCensus.generationCallCount / participantCount;
+    if (!Number.isSafeInteger(generationKmacCallCountPerParticipant)) {
+        throw new Error(
+            'The independent KMAC generation census is not participant symmetric.',
+        );
+    }
     const evaluationKmacCallCount =
-        1_110 * plan.conjunctionCount +
-        80 * plan.linearCount +
-        80 * plan.outputCount;
+        independentModel.kmacCensus.selectedEvaluationCallCount;
     const storageAfter = await navigator.storage.estimate();
     const visitCounts = visitCountsByRunIdentity.get(runIdentity);
     expect(visitCounts).toBeDefined();
@@ -1852,6 +1863,7 @@ const expectCompletePaddedTallyCeremony = async (
                 emittedUploadByteLength,
                 evaluationKmacCallCount,
                 generationKmacCallCountPerParticipant,
+                kmacAssumptionCensus: independentModel.kmacCensus,
                 maximumActivationRecordByteLength,
                 maximumChunkSetByteLength,
                 maximumEvaluationRecordByteLength,

@@ -59,7 +59,7 @@ describe('full padded tally scalar WASM runtime', () => {
             expect(plan.inputWireCount).toBe(410);
             expect(plan.constantCount).toBe(2);
             expect(plan.outputCount).toBe(10 + 1 + 4 * topCount);
-            expect(plan.maximumLiveWireCount).toBe(417);
+            expect(plan.maximumLiveWireCount).toBe(415);
             expect(
                 plan.chunks[plan.chunks.length - 1]?.liveWireCountAfterChunk,
             ).toBe(0);

@@ -6,16 +6,54 @@ const manifestDescriptorByteLength = 78;
 const completionParticipantCount = 10;
 const completionOptionCount = 10;
 const scoreBitWidth = 4;
-const tokenByteLength = 41;
-const initialWirePayloadByteLength = 4 * tokenByteLength;
-const constantPayloadByteLength = 4 * tokenByteLength;
-const linearPayloadByteLength = 4 * 4 * tokenByteLength;
-const conjunctionPayloadByteLength = 9_390;
-const terminalPayloadByteLength = 821;
+const admittedLabelByteLength = 40;
 const maximumChunkByteLength = 480_000;
 const maximumChunkPayloadByteLength =
     maximumChunkByteLength - chunkHeaderByteLength;
-const labelPairEntropyByteLength = 81;
+
+type IndependentEncodingLengths = Readonly<{
+    labelByteLength: number;
+    tokenByteLength: number;
+    initialWirePayloadByteLength: number;
+    constantPayloadByteLength: number;
+    linearPayloadByteLength: number;
+    conjunctionPayloadByteLength: number;
+    terminalPayloadByteLength: number;
+    labelPairEntropyByteLength: number;
+}>;
+
+const independentEncodingLengths = (
+    labelByteLength: number,
+): IndependentEncodingLengths => {
+    if (!Number.isSafeInteger(labelByteLength) || labelByteLength < 1) {
+        throw new RangeError(
+            'The label byte length must be a positive integer.',
+        );
+    }
+    const tokenByteLength = labelByteLength + 1;
+    return {
+        labelByteLength,
+        tokenByteLength,
+        initialWirePayloadByteLength: 4 * tokenByteLength,
+        constantPayloadByteLength: 4 * tokenByteLength,
+        linearPayloadByteLength: 4 * 4 * tokenByteLength,
+        conjunctionPayloadByteLength:
+            140 * tokenByteLength +
+            4 * tokenByteLength +
+            1 +
+            80 * labelByteLength +
+            2 * (tokenByteLength + labelByteLength) +
+            3 * tokenByteLength,
+        terminalPayloadByteLength: 20 * tokenByteLength + 1,
+        labelPairEntropyByteLength: 2 * labelByteLength + 1,
+    };
+};
+
+const admittedEncodingLengths = independentEncodingLengths(
+    admittedLabelByteLength,
+);
+const tokenByteLength = admittedEncodingLengths.tokenByteLength;
+const linearPayloadByteLength = admittedEncodingLengths.linearPayloadByteLength;
 
 type IndependentBooleanOperation =
     | Readonly<{ kind: 'constant'; value: boolean }>
@@ -38,6 +76,67 @@ type IndependentChunkDescriptor = Readonly<{
     labelEntropyByteLength: number;
 }>;
 
+type IndependentPaddedTallyKmacCensus = Readonly<{
+    labelKeyCount: number;
+    continuationKeyCount: number;
+    keyCount: number;
+    labelOutputCount: number;
+    continuationOutputCount: number;
+    generationCallCount: number;
+    selectedEvaluationCallCount: number;
+    unavailableLabelReplacementCount: number;
+    counterfactualContinuationReplacementCount: number;
+    hiddenReplacementCount: number;
+    maximumLabelFanOut: number;
+    labelFanOutDistribution: readonly (readonly [number, number])[];
+}>;
+
+export type IndependentPaddedTallyWidthProjection = Readonly<{
+    labelByteLength: number;
+    tokenByteLength: number;
+    initialWirePayloadByteLength: number;
+    constantPayloadByteLength: number;
+    linearPayloadByteLength: number;
+    conjunctionPayloadByteLength: number;
+    terminalPayloadByteLength: number;
+    labelPairEntropyByteLength: number;
+    logicalPayloadByteLength: number;
+    participantChunkCorpusByteLength: number;
+    completeChunkCorpusByteLength: number;
+    participantLabelEntropyByteLength: number;
+    completeLabelEntropyByteLength: number;
+    manifestByteLength: number;
+    chunkCount: number;
+    chunkByteLengths: readonly number[];
+    chunkLabelEntropyByteLengths: readonly number[];
+    maximumChunkByteLength: number;
+    maximumChunkLabelEntropyByteLength: number;
+    maximumLiveWireCount: number;
+    liveWireCountsAfterChunks: readonly number[];
+    maximumGenerationCheckpointByteLength: number;
+    maximumEvaluationCheckpointByteLength: number;
+    maximumChunkGenerationRequestByteLength: number;
+    maximumChunkEvaluationRequestByteLength: number;
+    maximumChunkGenerationResponseByteLength: number;
+    maximumChunkEvaluationResponseByteLength: number;
+}>;
+
+export type IndependentPaddedTallyKmacTheoremScreen = Readonly<{
+    rateBitLength: number;
+    capacityBitLength: number;
+    keyBitLength: number;
+    keyPrefixBitOffsetModuloRate: number;
+    derivedKeySecurityBitLength: number;
+    paddedKeyPrefixBlockCount: number;
+    constructionEffectiveBlockBudget: number;
+    quantumPrimitiveQueryBudget: number;
+    challengedKeyCount: number;
+    singleKeyAdvantageUpperBound: number;
+    completeHybridAdvantageUpperBound: number;
+    singleKeySecurityBitLength: number;
+    completeHybridSecurityBitLength: number;
+}>;
+
 export type IndependentPaddedTallyModel = Readonly<{
     topCount: number;
     inputWireCount: number;
@@ -50,18 +149,22 @@ export type IndependentPaddedTallyModel = Readonly<{
     logicalPayloadByteLength: number;
     labelEntropyByteLength: number;
     descriptors: readonly IndependentChunkDescriptor[];
+    maximumLiveWireCount: number;
+    liveWireCountsAfterChunks: readonly number[];
+    kmacCensus: IndependentPaddedTallyKmacCensus;
 }>;
 
 const operationPayloadByteLength = (
     operation: IndependentBooleanOperation,
+    encodingLengths = admittedEncodingLengths,
 ): number => {
     switch (operation.kind) {
         case 'constant':
-            return constantPayloadByteLength;
+            return encodingLengths.constantPayloadByteLength;
         case 'linear':
-            return linearPayloadByteLength;
+            return encodingLengths.linearPayloadByteLength;
         case 'conjunction':
-            return conjunctionPayloadByteLength;
+            return encodingLengths.conjunctionPayloadByteLength;
         case 'negation':
             return 0;
     }
@@ -187,6 +290,232 @@ class IndependentBooleanCircuitBuilder {
         }
     }
 }
+
+type IndependentFieldPairIdentifiers = readonly [
+    number,
+    number,
+    number,
+    number,
+];
+
+class IndependentLabelFanOutCensus {
+    readonly outputCountPerLabel: number[] = [];
+
+    newPair(): number {
+        const identifier = this.outputCountPerLabel.length;
+        this.outputCountPerLabel.push(0);
+        return identifier;
+    }
+
+    newFieldPairs(): IndependentFieldPairIdentifiers {
+        return [this.newPair(), this.newPair(), this.newPair(), this.newPair()];
+    }
+
+    appendLocalGate(left: number, right: number, output?: number): number {
+        this.addOutputs(left, 2);
+        this.addOutputs(right, 2);
+        return output ?? this.newPair();
+    }
+
+    addOutputs(pair: number, count: number): void {
+        const current = this.outputCountPerLabel[pair];
+        if (current === undefined) {
+            throw new Error('The independent KMAC census has an invalid pair.');
+        }
+        this.outputCountPerLabel[pair] = current + count;
+    }
+
+    multiplyFields(
+        left: IndependentFieldPairIdentifiers,
+        right: IndependentFieldPairIdentifiers,
+    ): IndependentFieldPairIdentifiers {
+        const products: number[] = [];
+        for (let position = 0; position < 16; position += 1) {
+            products.push(
+                this.appendLocalGate(
+                    requireArrayItem(
+                        left,
+                        Math.floor(position / 4),
+                        'left field pair',
+                    ),
+                    requireArrayItem(right, position % 4, 'right field pair'),
+                ),
+            );
+        }
+        const product = (index: number): number =>
+            requireArrayItem(products, index, 'field product pair');
+        const c0 = product(0);
+        const c1 = this.appendLocalGate(product(1), product(4));
+        const c2 = this.appendLocalGate(
+            this.appendLocalGate(product(2), product(5)),
+            product(8),
+        );
+        const c3 = this.appendLocalGate(
+            this.appendLocalGate(product(3), product(6)),
+            this.appendLocalGate(product(9), product(12)),
+        );
+        const c4 = this.appendLocalGate(
+            this.appendLocalGate(product(7), product(10)),
+            product(13),
+        );
+        const c5 = this.appendLocalGate(product(11), product(14));
+        const c6 = product(15);
+        return [
+            this.appendLocalGate(c0, c4),
+            this.appendLocalGate(this.appendLocalGate(c1, c4), c5),
+            this.appendLocalGate(this.appendLocalGate(c2, c5), c6),
+            this.appendLocalGate(c3, c6),
+        ];
+    }
+}
+
+const compileIndependentKmacCensus = (
+    inputWireCount: number,
+    operations: readonly IndependentBooleanOperation[],
+    outputWires: readonly number[],
+): IndependentPaddedTallyKmacCensus => {
+    const census = new IndependentLabelFanOutCensus();
+    const wirePairs: Array<IndependentFieldPairIdentifiers | undefined> =
+        Array.from({ length: inputWireCount + operations.length });
+    for (let wire = 0; wire < inputWireCount; wire += 1) {
+        wirePairs[wire] = census.newFieldPairs();
+    }
+    const fieldPairs = (wire: number): IndependentFieldPairIdentifiers => {
+        const pairs = requireArrayItem(wirePairs, wire, 'wire pairs');
+        if (pairs === undefined) {
+            throw new Error('The independent KMAC census found a dead wire.');
+        }
+        return pairs;
+    };
+
+    for (const [operationIndex, operation] of operations.entries()) {
+        const outputWire = inputWireCount + operationIndex;
+        switch (operation.kind) {
+            case 'constant':
+                wirePairs[outputWire] = census.newFieldPairs();
+                break;
+            case 'linear': {
+                const left = fieldPairs(operation.leftWire);
+                const right = fieldPairs(operation.rightWire);
+                wirePairs[outputWire] = [
+                    census.appendLocalGate(left[0], right[0]),
+                    census.appendLocalGate(left[1], right[1]),
+                    census.appendLocalGate(left[2], right[2]),
+                    census.appendLocalGate(left[3], right[3]),
+                ];
+                break;
+            }
+            case 'conjunction': {
+                const product = census.multiplyFields(
+                    fieldPairs(operation.leftWire),
+                    fieldPairs(operation.rightWire),
+                );
+                const mask = census.newFieldPairs();
+                const masked = census.newFieldPairs();
+                for (let basis = 0; basis < 4; basis += 1) {
+                    const productPair = requireArrayItem(
+                        product,
+                        basis,
+                        'product pair',
+                    );
+                    const maskPair = requireArrayItem(mask, basis, 'mask pair');
+                    const maskedPair = requireArrayItem(
+                        masked,
+                        basis,
+                        'masked pair',
+                    );
+                    census.appendLocalGate(productPair, maskPair, maskedPair);
+                    census.addOutputs(maskedPair, completionParticipantCount);
+                }
+                wirePairs[outputWire] = census.newFieldPairs();
+                break;
+            }
+            case 'negation':
+                wirePairs[outputWire] = fieldPairs(operation.inputWire);
+                break;
+        }
+    }
+
+    for (const outputWire of outputWires) {
+        const input = fieldPairs(outputWire);
+        const mask = census.newFieldPairs();
+        const output = census.newFieldPairs();
+        for (let basis = 0; basis < 4; basis += 1) {
+            census.appendLocalGate(
+                requireArrayItem(input, basis, 'terminal input pair'),
+                requireArrayItem(mask, basis, 'terminal mask pair'),
+                requireArrayItem(output, basis, 'terminal output pair'),
+            );
+        }
+    }
+
+    const labelFanOutDistribution = new Map<number, number>();
+    let labelOutputCount = 0;
+    for (const outputCount of census.outputCountPerLabel) {
+        const emittedKeyCount = 2 * completionParticipantCount;
+        labelFanOutDistribution.set(
+            outputCount,
+            (labelFanOutDistribution.get(outputCount) ?? 0) + emittedKeyCount,
+        );
+        labelOutputCount += outputCount * emittedKeyCount;
+    }
+    const conjunctionCount = operations.filter(
+        (operation) => operation.kind === 'conjunction',
+    ).length;
+    const linearCount = operations.filter(
+        (operation) => operation.kind === 'linear',
+    ).length;
+    const labelKeyCount =
+        census.outputCountPerLabel.length * 2 * completionParticipantCount;
+    const continuationKeyCount =
+        conjunctionCount * 2 * completionParticipantCount;
+    const continuationOutputCount = continuationKeyCount;
+    const unavailableLabelReplacementCount = labelOutputCount / 2;
+    const counterfactualContinuationReplacementCount =
+        continuationOutputCount / 2;
+    if (
+        !Number.isSafeInteger(unavailableLabelReplacementCount) ||
+        !Number.isSafeInteger(counterfactualContinuationReplacementCount)
+    ) {
+        throw new Error('The independent KMAC census is not pair symmetric.');
+    }
+    const localMultiplicationGateCount = 35;
+    const selectedEvaluationCallCount =
+        conjunctionCount *
+            completionParticipantCount *
+            (2 * localMultiplicationGateCount +
+                4 * completionParticipantCount +
+                1) +
+        linearCount * completionParticipantCount * 4 * 2 +
+        outputWires.length * completionParticipantCount * 4 * 2;
+    const sortedDistribution = Array.from(
+        labelFanOutDistribution.entries(),
+    ).sort(([left], [right]) => left - right);
+    const maximumLabelFanOut =
+        sortedDistribution.length === 0
+            ? 0
+            : requireArrayItem(
+                  sortedDistribution,
+                  sortedDistribution.length - 1,
+                  'label fan-out bucket',
+              )[0];
+    return {
+        labelKeyCount,
+        continuationKeyCount,
+        keyCount: labelKeyCount + continuationKeyCount,
+        labelOutputCount,
+        continuationOutputCount,
+        generationCallCount: labelOutputCount + continuationOutputCount,
+        selectedEvaluationCallCount,
+        unavailableLabelReplacementCount,
+        counterfactualContinuationReplacementCount,
+        hiddenReplacementCount:
+            unavailableLabelReplacementCount +
+            counterfactualContinuationReplacementCount,
+        maximumLabelFanOut,
+        labelFanOutDistribution: sortedDistribution,
+    };
+};
 
 const appendFullAdder = (
     builder: IndependentBooleanCircuitBuilder,
@@ -407,6 +736,7 @@ const compileIndependentChunkDescriptors = (
     inputWireCount: number,
     operations: readonly IndependentBooleanOperation[],
     outputCount: number,
+    encodingLengths = admittedEncodingLengths,
 ): Readonly<{
     descriptors: readonly IndependentChunkDescriptor[];
     logicalPayloadByteLength: number;
@@ -414,24 +744,33 @@ const compileIndependentChunkDescriptors = (
 }> => {
     const operationOffsets: number[] = [];
     let logicalPayloadByteLength =
-        inputWireCount * initialWirePayloadByteLength;
+        inputWireCount * encodingLengths.initialWirePayloadByteLength;
     let labelEntropyByteLength =
-        inputWireCount * 4 * labelPairEntropyByteLength;
+        inputWireCount * 4 * encodingLengths.labelPairEntropyByteLength;
     for (const operation of operations) {
         operationOffsets.push(logicalPayloadByteLength);
-        logicalPayloadByteLength += operationPayloadByteLength(operation);
+        logicalPayloadByteLength += operationPayloadByteLength(
+            operation,
+            encodingLengths,
+        );
         labelEntropyByteLength +=
-            operationLabelPairCount(operation) * labelPairEntropyByteLength;
+            operationLabelPairCount(operation) *
+            encodingLengths.labelPairEntropyByteLength;
     }
     const terminalPayloadStart = logicalPayloadByteLength;
-    logicalPayloadByteLength += outputCount * terminalPayloadByteLength;
-    labelEntropyByteLength += outputCount * 8 * labelPairEntropyByteLength;
+    logicalPayloadByteLength +=
+        outputCount * encodingLengths.terminalPayloadByteLength;
+    labelEntropyByteLength +=
+        outputCount * 8 * encodingLengths.labelPairEntropyByteLength;
 
     const descriptors: IndependentChunkDescriptor[] = [];
     let firstOperation = 0;
     let logicalPayloadStart = 0;
     let currentPayloadByteLength =
-        inputWireCount * initialWirePayloadByteLength;
+        inputWireCount * encodingLengths.initialWirePayloadByteLength;
+    if (currentPayloadByteLength > maximumChunkPayloadByteLength) {
+        throw new Error('The independent initial payload exceeded a chunk.');
+    }
     const pushDescriptor = (
         operationEnd: number,
         logicalPayloadEnd: number,
@@ -458,12 +797,19 @@ const compileIndependentChunkDescriptors = (
             chunkByteLength:
                 chunkHeaderByteLength +
                 (logicalPayloadEnd - logicalPayloadStart),
-            labelEntropyByteLength: pairCount * labelPairEntropyByteLength,
+            labelEntropyByteLength:
+                pairCount * encodingLengths.labelPairEntropyByteLength,
         });
     };
 
     for (const [operationIndex, operation] of operations.entries()) {
-        const payloadByteLength = operationPayloadByteLength(operation);
+        const payloadByteLength = operationPayloadByteLength(
+            operation,
+            encodingLengths,
+        );
+        if (payloadByteLength > maximumChunkPayloadByteLength) {
+            throw new Error('An independent operation exceeded a chunk.');
+        }
         if (
             currentPayloadByteLength + payloadByteLength >
             maximumChunkPayloadByteLength
@@ -488,7 +834,11 @@ const compileIndependentChunkDescriptors = (
         currentPayloadByteLength += payloadByteLength;
     }
 
-    const terminalByteLength = outputCount * terminalPayloadByteLength;
+    const terminalByteLength =
+        outputCount * encodingLengths.terminalPayloadByteLength;
+    if (terminalByteLength > maximumChunkPayloadByteLength) {
+        throw new Error('The independent terminal exceeded a chunk.');
+    }
     if (
         currentPayloadByteLength + terminalByteLength >
         maximumChunkPayloadByteLength
@@ -512,6 +862,110 @@ const compileIndependentChunkDescriptors = (
         logicalPayloadByteLength,
         labelEntropyByteLength,
     };
+};
+
+const compileIndependentWireLiveness = (
+    inputWireCount: number,
+    operations: readonly IndependentBooleanOperation[],
+    outputWires: readonly number[],
+    descriptors: readonly IndependentChunkDescriptor[],
+): Readonly<{
+    maximumLiveWireCount: number;
+    liveWireCountsAfterChunks: readonly number[];
+}> => {
+    const wireCount = inputWireCount + operations.length;
+    const terminalUse = operations.length;
+    const lastWireUses: Array<number | undefined> = Array.from({
+        length: wireCount,
+    });
+    const recordUse = (wire: number, operationIndex: number): void => {
+        if (wire < 0 || wire >= inputWireCount + operationIndex) {
+            throw new Error(
+                'The independent liveness graph has a future wire.',
+            );
+        }
+        lastWireUses[wire] = operationIndex;
+    };
+    for (const [operationIndex, operation] of operations.entries()) {
+        switch (operation.kind) {
+            case 'constant':
+                break;
+            case 'linear':
+            case 'conjunction':
+                recordUse(operation.leftWire, operationIndex);
+                recordUse(operation.rightWire, operationIndex);
+                break;
+            case 'negation':
+                recordUse(operation.inputWire, operationIndex);
+                break;
+        }
+    }
+    for (const outputWire of outputWires) {
+        if (outputWire < 0 || outputWire >= wireCount) {
+            throw new Error(
+                'The independent liveness graph has an output gap.',
+            );
+        }
+        lastWireUses[outputWire] = terminalUse;
+    }
+
+    const live = lastWireUses.map(
+        (lastUse, wire) => wire < inputWireCount && lastUse !== undefined,
+    );
+    let liveCount = live.filter(Boolean).length;
+    let maximumLiveWireCount = liveCount;
+    let chunkBoundaryIndex = 0;
+    const liveWireCountsAfterChunks: number[] = [];
+    for (
+        let operationIndex = 0;
+        operationIndex < operations.length;
+        operationIndex += 1
+    ) {
+        const outputWire = inputWireCount + operationIndex;
+        const outputLastUse = lastWireUses[outputWire];
+        if (outputLastUse !== undefined && outputLastUse > operationIndex) {
+            live[outputWire] = true;
+            liveCount += 1;
+            maximumLiveWireCount = Math.max(maximumLiveWireCount, liveCount);
+        }
+        for (let wire = 0; wire < live.length; wire += 1) {
+            if (live[wire] === true && lastWireUses[wire] === operationIndex) {
+                live[wire] = false;
+                liveCount -= 1;
+            }
+        }
+        while (
+            descriptors[chunkBoundaryIndex]?.operationEnd ===
+            operationIndex + 1
+        ) {
+            liveWireCountsAfterChunks.push(
+                descriptors[chunkBoundaryIndex]?.includesTerminal === true
+                    ? 0
+                    : liveCount,
+            );
+            chunkBoundaryIndex += 1;
+        }
+    }
+    while (chunkBoundaryIndex < descriptors.length) {
+        const descriptor = requireArrayItem(
+            descriptors,
+            chunkBoundaryIndex,
+            'liveness chunk descriptor',
+        );
+        if (descriptor.operationEnd !== operations.length) {
+            throw new Error(
+                'The independent liveness graph has a boundary gap.',
+            );
+        }
+        liveWireCountsAfterChunks.push(
+            descriptor.includesTerminal ? 0 : liveCount,
+        );
+        chunkBoundaryIndex += 1;
+    }
+    if (liveWireCountsAfterChunks.length !== descriptors.length) {
+        throw new Error('The independent liveness graph is incomplete.');
+    }
+    return { maximumLiveWireCount, liveWireCountsAfterChunks };
 };
 
 export const compileIndependentPaddedTallyModel = (
@@ -712,6 +1166,12 @@ export const compileIndependentPaddedTallyModel = (
         operations,
         outputWires.length,
     );
+    const liveness = compileIndependentWireLiveness(
+        inputWireCount,
+        operations,
+        outputWires,
+        descriptorModel.descriptors,
+    );
     const count = (kind: IndependentBooleanOperation['kind']): number =>
         operations.filter((operation) => operation.kind === kind).length;
     return {
@@ -726,6 +1186,329 @@ export const compileIndependentPaddedTallyModel = (
         logicalPayloadByteLength: descriptorModel.logicalPayloadByteLength,
         labelEntropyByteLength: descriptorModel.labelEntropyByteLength,
         descriptors: descriptorModel.descriptors,
+        maximumLiveWireCount: liveness.maximumLiveWireCount,
+        liveWireCountsAfterChunks: liveness.liveWireCountsAfterChunks,
+        kmacCensus: compileIndependentKmacCensus(
+            inputWireCount,
+            operations,
+            outputWires,
+        ),
+    };
+};
+
+export const projectIndependentPaddedTallyWidth = (
+    model: IndependentPaddedTallyModel,
+    labelByteLength: number,
+): IndependentPaddedTallyWidthProjection => {
+    const encodingLengths = independentEncodingLengths(labelByteLength);
+    const descriptorModel = compileIndependentChunkDescriptors(
+        model.inputWireCount,
+        model.operations,
+        model.outputWires.length,
+        encodingLengths,
+    );
+    const chunkByteLengths = descriptorModel.descriptors.map(
+        (descriptor) => descriptor.chunkByteLength,
+    );
+    const chunkLabelEntropyByteLengths = descriptorModel.descriptors.map(
+        (descriptor) => descriptor.labelEntropyByteLength,
+    );
+    const participantChunkCorpusByteLength = chunkByteLengths.reduce(
+        (sum, byteLength) => sum + byteLength,
+        0,
+    );
+    const maximumProjectedChunkByteLength = chunkByteLengths.reduce(
+        (maximum, byteLength) => Math.max(maximum, byteLength),
+        0,
+    );
+    const maximumChunkLabelEntropyByteLength =
+        chunkLabelEntropyByteLengths.reduce(
+            (maximum, byteLength) => Math.max(maximum, byteLength),
+            0,
+        );
+    const liveness = compileIndependentWireLiveness(
+        model.inputWireCount,
+        model.operations,
+        model.outputWires,
+        descriptorModel.descriptors,
+    );
+    const generationCheckpointFixedHeaderByteLength = 4_632;
+    const evaluationCheckpointFixedHeaderByteLength = 1_236;
+    const checkpointTagByteLength = 40;
+    const generationCheckpointByteLengths = [
+        generationCheckpointFixedHeaderByteLength +
+            model.inputWireCount +
+            checkpointTagByteLength,
+    ];
+    const evaluationCheckpointBaseByteLength =
+        evaluationCheckpointFixedHeaderByteLength +
+        descriptorModel.descriptors.length *
+            completionParticipantCount *
+            identityByteLength +
+        checkpointTagByteLength;
+    const evaluationCheckpointByteLengths = [
+        evaluationCheckpointBaseByteLength,
+    ];
+    for (
+        let chunkIndex = 0;
+        chunkIndex + 1 < descriptorModel.descriptors.length;
+        chunkIndex += 1
+    ) {
+        const descriptor = requireArrayItem(
+            descriptorModel.descriptors,
+            chunkIndex,
+            'checkpoint chunk descriptor',
+        );
+        const liveWireCount = requireArrayItem(
+            liveness.liveWireCountsAfterChunks,
+            chunkIndex,
+            'checkpoint live-wire count',
+        );
+        const processedConjunctionCount = model.operations
+            .slice(0, descriptor.operationEnd)
+            .filter((operation) => operation.kind === 'conjunction').length;
+        generationCheckpointByteLengths.push(
+            generationCheckpointFixedHeaderByteLength +
+                liveWireCount *
+                    (4 + 4 * encodingLengths.labelPairEntropyByteLength) +
+                2 * processedConjunctionCount * labelByteLength +
+                (chunkIndex + 1) * identityByteLength +
+                checkpointTagByteLength,
+        );
+        evaluationCheckpointByteLengths.push(
+            evaluationCheckpointBaseByteLength +
+                liveWireCount *
+                    (4 +
+                        completionParticipantCount *
+                            4 *
+                            encodingLengths.tokenByteLength),
+        );
+    }
+    const maximumGenerationCheckpointByteLength =
+        generationCheckpointByteLengths.reduce(
+            (maximum, byteLength) => Math.max(maximum, byteLength),
+            0,
+        );
+    const maximumEvaluationCheckpointByteLength =
+        evaluationCheckpointByteLengths.reduce(
+            (maximum, byteLength) => Math.max(maximum, byteLength),
+            0,
+        );
+    let maximumChunkGenerationRequestByteLength = 0;
+    let maximumChunkEvaluationRequestByteLength = 0;
+    let maximumChunkGenerationResponseByteLength = 0;
+    let maximumChunkEvaluationResponseByteLength = 0;
+    for (const [
+        chunkIndex,
+        descriptor,
+    ] of descriptorModel.descriptors.entries()) {
+        const generationCheckpointByteLength = requireArrayItem(
+            generationCheckpointByteLengths,
+            chunkIndex,
+            'generation checkpoint length',
+        );
+        const evaluationCheckpointByteLength = requireArrayItem(
+            evaluationCheckpointByteLengths,
+            chunkIndex,
+            'evaluation checkpoint length',
+        );
+        maximumChunkGenerationRequestByteLength = Math.max(
+            maximumChunkGenerationRequestByteLength,
+            45 +
+                generationCheckpointByteLength +
+                descriptor.labelEntropyByteLength,
+        );
+        maximumChunkEvaluationRequestByteLength = Math.max(
+            maximumChunkEvaluationRequestByteLength,
+            81 +
+                evaluationCheckpointByteLength +
+                completionParticipantCount * descriptor.chunkByteLength,
+        );
+        const isFinal = chunkIndex + 1 === descriptorModel.descriptors.length;
+        maximumChunkGenerationResponseByteLength = Math.max(
+            maximumChunkGenerationResponseByteLength,
+            isFinal
+                ? 141 +
+                      descriptor.chunkByteLength +
+                      manifestHeaderByteLength +
+                      descriptorModel.descriptors.length *
+                          manifestDescriptorByteLength
+                : 77 +
+                      descriptor.chunkByteLength +
+                      requireArrayItem(
+                          generationCheckpointByteLengths,
+                          chunkIndex + 1,
+                          'next generation checkpoint length',
+                      ),
+        );
+        maximumChunkEvaluationResponseByteLength = Math.max(
+            maximumChunkEvaluationResponseByteLength,
+            isFinal
+                ? 286 + 2 * model.topCount
+                : 9 +
+                      requireArrayItem(
+                          evaluationCheckpointByteLengths,
+                          chunkIndex + 1,
+                          'next evaluation checkpoint length',
+                      ),
+        );
+    }
+    return {
+        labelByteLength,
+        tokenByteLength: encodingLengths.tokenByteLength,
+        initialWirePayloadByteLength:
+            encodingLengths.initialWirePayloadByteLength,
+        constantPayloadByteLength: encodingLengths.constantPayloadByteLength,
+        linearPayloadByteLength: encodingLengths.linearPayloadByteLength,
+        conjunctionPayloadByteLength:
+            encodingLengths.conjunctionPayloadByteLength,
+        terminalPayloadByteLength: encodingLengths.terminalPayloadByteLength,
+        labelPairEntropyByteLength: encodingLengths.labelPairEntropyByteLength,
+        logicalPayloadByteLength: descriptorModel.logicalPayloadByteLength,
+        participantChunkCorpusByteLength,
+        completeChunkCorpusByteLength:
+            participantChunkCorpusByteLength * completionParticipantCount,
+        participantLabelEntropyByteLength:
+            descriptorModel.labelEntropyByteLength,
+        completeLabelEntropyByteLength:
+            descriptorModel.labelEntropyByteLength * completionParticipantCount,
+        manifestByteLength:
+            manifestHeaderByteLength +
+            descriptorModel.descriptors.length * manifestDescriptorByteLength,
+        chunkCount: descriptorModel.descriptors.length,
+        chunkByteLengths,
+        chunkLabelEntropyByteLengths,
+        maximumChunkByteLength: maximumProjectedChunkByteLength,
+        maximumChunkLabelEntropyByteLength,
+        maximumLiveWireCount: liveness.maximumLiveWireCount,
+        liveWireCountsAfterChunks: liveness.liveWireCountsAfterChunks,
+        maximumGenerationCheckpointByteLength,
+        maximumEvaluationCheckpointByteLength,
+        maximumChunkGenerationRequestByteLength,
+        maximumChunkEvaluationRequestByteLength,
+        maximumChunkGenerationResponseByteLength,
+        maximumChunkEvaluationResponseByteLength,
+    };
+};
+
+const leftEncodeByteLength = (value: number): number => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new RangeError('The encoded integer must be nonnegative.');
+    }
+    let payloadByteLength = 1;
+    while (value >= 2 ** (8 * payloadByteLength)) {
+        payloadByteLength += 1;
+    }
+    return payloadByteLength + 1;
+};
+
+export const screenIndependentPaddedTallyPadKmac = (
+    model: IndependentPaddedTallyModel,
+    labelByteLength: number,
+    queryBudgetBitLength: number,
+): IndependentPaddedTallyKmacTheoremScreen => {
+    if (
+        !Number.isSafeInteger(queryBudgetBitLength) ||
+        queryBudgetBitLength < 0 ||
+        queryBudgetBitLength > 128
+    ) {
+        throw new RangeError('The KMAC query-budget exponent is invalid.');
+    }
+    const rateByteLength = 136;
+    const rateBitLength = 8 * rateByteLength;
+    const capacityBitLength = 512;
+    const keyBitLength = 8 * labelByteLength;
+    if (keyBitLength <= rateBitLength) {
+        throw new RangeError(
+            'The KMAC key does not satisfy the outer-keyed-sponge theorem.',
+        );
+    }
+    const functionNameByteLength = 4;
+    const customizationByteLength = 41;
+    const encodedFunctionNameByteLength =
+        leftEncodeByteLength(8 * functionNameByteLength) +
+        functionNameByteLength;
+    const encodedCustomizationByteLength =
+        leftEncodeByteLength(8 * customizationByteLength) +
+        customizationByteLength;
+    const cshakePrefixBlockCount = Math.ceil(
+        (leftEncodeByteLength(rateByteLength) +
+            encodedFunctionNameByteLength +
+            encodedCustomizationByteLength) /
+            rateByteLength,
+    );
+    const keyLengthPrefixByteLength = leftEncodeByteLength(keyBitLength);
+    const keyBytepadBlockCount = Math.ceil(
+        (leftEncodeByteLength(rateByteLength) +
+            keyLengthPrefixByteLength +
+            labelByteLength) /
+            rateByteLength,
+    );
+    const keyPrefixBitOffsetModuloRate =
+        (8 *
+            (leftEncodeByteLength(rateByteLength) +
+                keyLengthPrefixByteLength)) %
+        rateBitLength;
+    const derivedKeySecurityBitLength = Math.min(
+        keyBitLength - rateBitLength + keyPrefixBitOffsetModuloRate,
+        rateBitLength - keyPrefixBitOffsetModuloRate,
+    );
+    const paddedKeyPrefixBlockCount =
+        cshakePrefixBlockCount + keyBytepadBlockCount;
+    const constructionEffectiveBlockBudget = 2 ** queryBudgetBitLength;
+    const quantumPrimitiveQueryBudget = 2 ** queryBudgetBitLength;
+    const spongeDenominator = 2 ** capacityBitLength;
+    const keyDenominator = 2 ** derivedKeySecurityBitLength;
+    const firstTerm =
+        4 *
+        Math.sqrt(
+            (constructionEffectiveBlockBudget ** 2 *
+                quantumPrimitiveQueryBudget) /
+                spongeDenominator,
+        );
+    const secondTerm =
+        (3 * constructionEffectiveBlockBudget ** 2) / spongeDenominator;
+    const thirdTerm =
+        2 *
+        Math.sqrt(
+            (2 *
+                constructionEffectiveBlockBudget *
+                quantumPrimitiveQueryBudget ** 2) /
+                spongeDenominator,
+        );
+    const fourthTerm =
+        8 *
+        Math.sqrt(
+            (2 *
+                (quantumPrimitiveQueryBudget +
+                    constructionEffectiveBlockBudget +
+                    paddedKeyPrefixBlockCount) **
+                    2) /
+                keyDenominator,
+        );
+    const singleKeyAdvantageUpperBound =
+        firstTerm + secondTerm + thirdTerm + fourthTerm;
+    const challengedKeyCount = model.kmacCensus.keyCount;
+    const completeHybridAdvantageUpperBound = Math.min(
+        1,
+        challengedKeyCount * singleKeyAdvantageUpperBound,
+    );
+    return {
+        rateBitLength,
+        capacityBitLength,
+        keyBitLength,
+        keyPrefixBitOffsetModuloRate,
+        derivedKeySecurityBitLength,
+        paddedKeyPrefixBlockCount,
+        constructionEffectiveBlockBudget,
+        quantumPrimitiveQueryBudget,
+        challengedKeyCount,
+        singleKeyAdvantageUpperBound,
+        completeHybridAdvantageUpperBound,
+        singleKeySecurityBitLength: -Math.log2(singleKeyAdvantageUpperBound),
+        completeHybridSecurityBitLength: -Math.log2(
+            completeHybridAdvantageUpperBound,
+        ),
     };
 };
 

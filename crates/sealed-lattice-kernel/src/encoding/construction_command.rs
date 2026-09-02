@@ -1362,7 +1362,7 @@ mod tests {
             let _logical_payload_byte_length = reader.read_u32().unwrap();
             let total_entropy_byte_length = reader.read_u32().unwrap();
             let _manifest_byte_length = reader.read_u32().unwrap();
-            assert_eq!(reader.read_u32().unwrap(), 417);
+            assert_eq!(reader.read_u32().unwrap(), 415);
             let chunk_count = reader.read_u16().unwrap();
             let mut chunk_entropy_byte_length = 0_u32;
             let mut last_live_wire_count = None;

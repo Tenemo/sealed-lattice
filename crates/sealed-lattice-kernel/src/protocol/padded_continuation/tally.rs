@@ -408,7 +408,10 @@ impl PaddedTallyPlan {
             .checked_add(descriptor.operation_end)
             .ok_or(PaddedContinuationError::ArithmeticOverflow)?;
         let wires = (0..available_wire_count)
-            .filter(|wire| self.last_wire_uses[*wire] >= descriptor.operation_end)
+            .filter(|wire| {
+                self.last_wire_uses[*wire] != usize::MAX
+                    && self.last_wire_uses[*wire] >= descriptor.operation_end
+            })
             .collect::<Vec<_>>();
         if wires.len()
             != *self
@@ -483,7 +486,9 @@ fn compile_wire_liveness(
         let output_wire = input_wire_count
             .checked_add(operation_index)
             .ok_or(PaddedContinuationError::ArithmeticOverflow)?;
-        if last_wire_uses[output_wire] > operation_index {
+        if last_wire_uses[output_wire] != usize::MAX
+            && last_wire_uses[output_wire] > operation_index
+        {
             live[output_wire] = true;
             live_count += 1;
             maximum_live_wire_count = maximum_live_wire_count.max(live_count);
@@ -2695,7 +2700,9 @@ fn evaluate_one_tally_chunk(
             }
             _ => return Err(PaddedContinuationError::InvalidPlan),
         };
-        if plan.last_wire_uses[output_wire] > operation_index {
+        if plan.last_wire_uses[output_wire] != usize::MAX
+            && plan.last_wire_uses[output_wire] > operation_index
+        {
             if checkpoint
                 .active_wire_tokens
                 .last()
@@ -3345,7 +3352,27 @@ mod tests {
             (3_803, 2_962, 756, 51, 30_417_387, 11_715_354, 65),
         ];
         for top_count in 1..=10_u16 {
-            let summary = compile_padded_tally_plan_summary(top_count).expect("plan compiles");
+            let plan = PaddedTallyPlan::compile(top_count).expect("plan compiles");
+            if top_count == 1 {
+                assert_eq!(
+                    plan.output_wires,
+                    vec![
+                        581, 791, 1_001, 1_211, 1_421, 1_631, 1_841, 2_051, 2_261, 2_471, 2_538,
+                        4_905, 4_907, 4_909, 4_911,
+                    ],
+                    "independent top-one output-wire topology",
+                );
+            }
+            for chunk_ordinal in 0..plan.descriptors.len() {
+                assert!(
+                    plan.live_wires_after_chunk(chunk_ordinal)
+                        .expect("live wires compile")
+                        .into_iter()
+                        .all(|wire| plan.last_wire_uses[wire] != usize::MAX),
+                    "dead operation outputs are never checkpointed",
+                );
+            }
+            let summary = plan.summary(top_count).expect("summary compiles");
             let expected = EXPECTED[usize::from(top_count - 1)];
             assert_eq!(summary.input_wire_count, 410);
             assert_eq!(summary.constant_count, 2);
@@ -3362,7 +3389,7 @@ mod tests {
                 expected,
             );
             assert_eq!(summary.output_count, 11 + 4 * u32::from(top_count));
-            assert_eq!(summary.maximum_live_wire_count, 417);
+            assert_eq!(summary.maximum_live_wire_count, 415);
             assert_eq!(
                 summary.live_wire_counts_after_chunks.len(),
                 summary.chunk_byte_lengths.len()
