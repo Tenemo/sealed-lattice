@@ -6,12 +6,44 @@ const preCertificateSignerCount = finalityQuorum - 1;
 
 type ComputationSchedule = Readonly<{
     participantPosition: number;
+    joinOrder: readonly number[];
     preCertificateSigners: ReadonlySet<number>;
     certificateCompleter: number;
     certificateDeliveredDuringFinality: boolean;
     lastBodyPublisher: number;
     completeBodyInventoryDeliveredDuringPublication: boolean;
 }>;
+
+const joinOrdersByLastParticipant = (
+    positions: readonly number[],
+): number[][] =>
+    positions.map((lastJoiner) => [
+        ...positions.filter((position) => position !== lastJoiner),
+        lastJoiner,
+    ]);
+
+const visitsThroughPreparation = (
+    participantPosition: number,
+    joinOrder: readonly number[],
+): string[][] => {
+    if (
+        joinOrder.length !== participantCount ||
+        new Set(joinOrder).size !== participantCount ||
+        joinOrder.some(
+            (position) => position < 0 || position >= participantCount,
+        )
+    ) {
+        throw new Error('The join order must contain every participant once.');
+    }
+    const lastJoiner = joinOrder[joinOrder.length - 1];
+    const visits = [['join-poll']];
+    if (participantPosition === lastJoiner) {
+        visits[0]?.push('confirm-roster', 'publish-preparation');
+    } else {
+        visits.push(['confirm-roster', 'publish-preparation']);
+    }
+    return visits;
+};
 
 const choosePositions = (
     positions: readonly number[],
@@ -39,17 +71,18 @@ const choosePositions = (
 
 const computationVisitTrace = ({
     participantPosition,
+    joinOrder,
     preCertificateSigners,
     certificateCompleter,
     certificateDeliveredDuringFinality,
     lastBodyPublisher,
     completeBodyInventoryDeliveredDuringPublication,
 }: ComputationSchedule): string[][] => {
-    const visits = [
-        ['confirm-roster', 'publish-provisional-preparation'],
+    const visits = visitsThroughPreparation(participantPosition, joinOrder);
+    visits.push(
         ['verify-complete-preparation', 'publish-source'],
         ['verify-complete-sources', 'publish-finality'],
-    ];
+    );
     if (preCertificateSigners.has(certificateCompleter)) {
         throw new Error('The certificate completer cannot be an early signer.');
     }
@@ -57,7 +90,10 @@ const computationVisitTrace = ({
         participantPosition === certificateCompleter ||
         certificateDeliveredDuringFinality;
     if (canPublishBodyDuringFinality) {
-        visits[2]?.push('verify-finality-certificate', 'publish-body');
+        visits[visits.length - 1]?.push(
+            'verify-finality-certificate',
+            'publish-body',
+        );
     } else {
         visits.push(['verify-finality-certificate', 'publish-body']);
     }
@@ -76,15 +112,73 @@ const computationVisitTrace = ({
     return visits;
 };
 
-const allAbstainVisitCount = (
+const allAbstainVisitTrace = (
     participantPosition: number,
+    joinOrder: readonly number[],
     certificateCompleter: number,
     certificateDeliveredDuringFinality: boolean,
-): number =>
-    participantPosition === certificateCompleter ||
-    certificateDeliveredDuringFinality
-        ? 3
-        : 4;
+): string[][] => {
+    const visits = visitsThroughPreparation(participantPosition, joinOrder);
+    visits.push(
+        ['verify-complete-preparation', 'publish-source'],
+        ['verify-complete-sources', 'publish-finality'],
+    );
+    if (
+        participantPosition === certificateCompleter ||
+        certificateDeliveredDuringFinality
+    ) {
+        visits[visits.length - 1]?.push(
+            'verify-finality-certificate',
+            'retrieve-no-result',
+        );
+    } else {
+        visits.push(['verify-finality-certificate', 'retrieve-no-result']);
+    }
+    return visits;
+};
+
+const durablePublicationActions = [
+    'publish-preparation',
+    'publish-source',
+    'publish-finality',
+    'publish-body',
+] as const;
+
+const applyCompletingRecovery = (
+    ordinaryVisits: readonly (readonly string[])[],
+    crashAfter: ReadonlySet<string>,
+    transportRepairBefore: string,
+): string[][] => {
+    const recoveredVisits: string[][] = [];
+    const observedCrashActions = new Set<string>();
+    let transportRepairInserted = false;
+    for (const visit of ordinaryVisits) {
+        if (visit.includes(transportRepairBefore)) {
+            recoveredVisits.push([
+                'refetch-authentic-carrier',
+                'remain-pending',
+            ]);
+            transportRepairInserted = true;
+        }
+        recoveredVisits.push([...visit]);
+        for (const action of crashAfter) {
+            if (visit.includes(action)) {
+                recoveredVisits.push([
+                    'cold-restart',
+                    `resume-after:${action}`,
+                ]);
+                observedCrashActions.add(action);
+            }
+        }
+    }
+    if (
+        observedCrashActions.size !== crashAfter.size ||
+        !transportRepairInserted
+    ) {
+        throw new Error('The recovery schedule named an absent dependency.');
+    }
+    return recoveredVisits;
+};
 
 type RecoveryDependency = Readonly<{
     messagePresent: boolean;
@@ -109,11 +203,12 @@ const recoveryOutcome = ({
 };
 
 describe('completion-profile participant visit graph', () => {
-    it('exhausts every pre-certificate signer set and delivery ordering at five visits', () => {
+    it('exhausts every join, signer, and delivery equivalence class at six visits', () => {
         const positions = Array.from(
             { length: participantCount },
             (_unused, position) => position,
         );
+        const joinOrders = joinOrdersByLastParticipant(positions);
         const preCertificateSignerSets = choosePositions(
             positions,
             preCertificateSignerCount,
@@ -121,48 +216,67 @@ describe('completion-profile participant visit graph', () => {
         let casesChecked = 0;
         let minimumVisits = Number.POSITIVE_INFINITY;
         let maximumVisits = 0;
+        let maximumLastJoinerVisits = 0;
+        let maximumEarlierJoinerVisits = 0;
         const histogram = new Map<number, number>();
 
-        for (const signerPositions of preCertificateSignerSets) {
-            const preCertificateSigners = new Set(signerPositions);
-            const possibleCertificateCompleters = positions.filter(
-                (position) => !preCertificateSigners.has(position),
-            );
-            for (const certificateCompleter of possibleCertificateCompleters) {
-                if (preCertificateSigners.has(certificateCompleter)) {
-                    throw new Error('The eighth signer was already counted.');
-                }
-                for (const lastBodyPublisher of positions) {
-                    for (const certificateDeliveredDuringFinality of [
-                        false,
-                        true,
-                    ]) {
-                        for (const completeBodyInventoryDeliveredDuringPublication of [
+        for (const joinOrder of joinOrders) {
+            const lastJoiner = joinOrder[joinOrder.length - 1];
+            for (const signerPositions of preCertificateSignerSets) {
+                const preCertificateSigners = new Set(signerPositions);
+                const possibleCertificateCompleters = positions.filter(
+                    (position) => !preCertificateSigners.has(position),
+                );
+                for (const certificateCompleter of possibleCertificateCompleters) {
+                    if (preCertificateSigners.has(certificateCompleter)) {
+                        throw new Error(
+                            'The eighth signer was already counted.',
+                        );
+                    }
+                    for (const lastBodyPublisher of positions) {
+                        for (const certificateDeliveredDuringFinality of [
                             false,
                             true,
                         ]) {
-                            for (const participantPosition of positions) {
-                                const visitCount = computationVisitTrace({
-                                    participantPosition,
-                                    preCertificateSigners,
-                                    certificateCompleter,
-                                    certificateDeliveredDuringFinality,
-                                    lastBodyPublisher,
-                                    completeBodyInventoryDeliveredDuringPublication,
-                                }).length;
-                                minimumVisits = Math.min(
-                                    minimumVisits,
-                                    visitCount,
-                                );
-                                maximumVisits = Math.max(
-                                    maximumVisits,
-                                    visitCount,
-                                );
-                                histogram.set(
-                                    visitCount,
-                                    (histogram.get(visitCount) ?? 0) + 1,
-                                );
-                                casesChecked += 1;
+                            for (const completeBodyInventoryDeliveredDuringPublication of [
+                                false,
+                                true,
+                            ]) {
+                                for (const participantPosition of positions) {
+                                    const visitCount = computationVisitTrace({
+                                        participantPosition,
+                                        joinOrder,
+                                        preCertificateSigners,
+                                        certificateCompleter,
+                                        certificateDeliveredDuringFinality,
+                                        lastBodyPublisher,
+                                        completeBodyInventoryDeliveredDuringPublication,
+                                    }).length;
+                                    minimumVisits = Math.min(
+                                        minimumVisits,
+                                        visitCount,
+                                    );
+                                    maximumVisits = Math.max(
+                                        maximumVisits,
+                                        visitCount,
+                                    );
+                                    if (participantPosition === lastJoiner) {
+                                        maximumLastJoinerVisits = Math.max(
+                                            maximumLastJoinerVisits,
+                                            visitCount,
+                                        );
+                                    } else {
+                                        maximumEarlierJoinerVisits = Math.max(
+                                            maximumEarlierJoinerVisits,
+                                            visitCount,
+                                        );
+                                    }
+                                    histogram.set(
+                                        visitCount,
+                                        (histogram.get(visitCount) ?? 0) + 1,
+                                    );
+                                    casesChecked += 1;
+                                }
                             }
                         }
                     }
@@ -170,30 +284,98 @@ describe('completion-profile participant visit graph', () => {
             }
         }
 
+        expect(joinOrders).toHaveLength(10);
+        expect(
+            new Set(joinOrders.map((order) => order[order.length - 1])).size,
+        ).toBe(10);
         expect(preCertificateSignerSets).toHaveLength(120);
-        expect(casesChecked).toBe(144_000);
+        expect(casesChecked).toBe(1_440_000);
         expect(minimumVisits).toBe(3);
-        expect(maximumVisits).toBe(5);
-        expect([...histogram.keys()].sort()).toEqual([3, 4, 5]);
+        expect(maximumVisits).toBe(6);
+        expect(maximumLastJoinerVisits).toBe(5);
+        expect(maximumEarlierJoinerVisits).toBe(6);
+        expect([...histogram.keys()].sort()).toEqual([3, 4, 5, 6]);
     });
 
     it('counts all-abstain retrieval and bounded recovery without concurrent participants', () => {
-        const allAbstainCounts = [
-            allAbstainVisitCount(0, 7, false),
-            allAbstainVisitCount(0, 7, true),
-            allAbstainVisitCount(7, 7, false),
-            allAbstainVisitCount(7, 7, true),
-        ];
-        expect(Math.max(...allAbstainCounts)).toBe(4);
+        const positions = Array.from(
+            { length: participantCount },
+            (_unused, position) => position,
+        );
+        const joinOrders = joinOrdersByLastParticipant(positions);
+        let allAbstainMaximum = 0;
+        let allAbstainLastJoinerMaximum = 0;
+        for (const joinOrder of joinOrders) {
+            const lastJoiner = joinOrder[joinOrder.length - 1];
+            for (const participantPosition of positions) {
+                for (const certificateCompleter of positions) {
+                    for (const certificateDeliveredDuringFinality of [
+                        false,
+                        true,
+                    ]) {
+                        const visitCount = allAbstainVisitTrace(
+                            participantPosition,
+                            joinOrder,
+                            certificateCompleter,
+                            certificateDeliveredDuringFinality,
+                        ).length;
+                        allAbstainMaximum = Math.max(
+                            allAbstainMaximum,
+                            visitCount,
+                        );
+                        if (participantPosition === lastJoiner) {
+                            allAbstainLastJoinerMaximum = Math.max(
+                                allAbstainLastJoinerMaximum,
+                                visitCount,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        expect(allAbstainMaximum).toBe(5);
+        expect(allAbstainLastJoinerMaximum).toBe(4);
 
-        const ordinaryMaximum = 5;
-        const oneCrashAfterEachDurablePublication = 4;
-        const onePreverificationTransportRepair = 1;
-        expect(
-            ordinaryMaximum +
-                oneCrashAfterEachDurablePublication +
-                onePreverificationTransportRepair,
-        ).toBe(10);
+        const ordinaryMaximumTrace = computationVisitTrace({
+            participantPosition: 0,
+            joinOrder: [...positions.slice(0, 9), 9],
+            preCertificateSigners: new Set(positions.slice(0, 7)),
+            certificateCompleter: 8,
+            certificateDeliveredDuringFinality: false,
+            lastBodyPublisher: 9,
+            completeBodyInventoryDeliveredDuringPublication: false,
+        });
+        expect(ordinaryMaximumTrace).toHaveLength(6);
+        const threeCrashSelections = choosePositions(
+            durablePublicationActions.map((_action, index) => index),
+            3,
+        );
+        expect(threeCrashSelections).toHaveLength(4);
+        for (const crashSelection of threeCrashSelections) {
+            const crashAfter = new Set<string>(
+                crashSelection.map((index) => {
+                    const action = durablePublicationActions[index];
+                    if (action === undefined) {
+                        throw new Error('The crash selection is out of range.');
+                    }
+                    return action;
+                }),
+            );
+            const recoveryTrace = applyCompletingRecovery(
+                ordinaryMaximumTrace,
+                crashAfter,
+                'verify-complete-bodies',
+            );
+            expect(recoveryTrace).toHaveLength(10);
+            expect(
+                recoveryTrace.filter((visit) => visit.includes('cold-restart')),
+            ).toHaveLength(3);
+            expect(
+                recoveryTrace.filter((visit) =>
+                    visit.includes('refetch-authentic-carrier'),
+                ),
+            ).toHaveLength(1);
+        }
 
         expect(
             recoveryOutcome({
