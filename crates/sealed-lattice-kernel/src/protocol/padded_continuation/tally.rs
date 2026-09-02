@@ -3437,9 +3437,53 @@ mod tests {
             let selected_recomputation_count = 1_110 * plan.conjunction_count
                 + 80 * plan.linear_count
                 + 80 * plan.output_wires.len();
+            let continuation_target_count =
+                COMPLETION_PROFILE_PARTICIPANT_COUNT as usize * plan.conjunction_count;
+            let selected_direct_recomputation_count =
+                selected_recomputation_count - continuation_target_count;
             let hidden_replacement_count = (label_output_count + continuation_output_count) / 2;
+            let local_generation_count = COMPLETION_PROFILE_PARTICIPANT_COUNT as usize
+                * (280 * plan.conjunction_count
+                    + 32 * plan.linear_count
+                    + 32 * plan.output_wires.len());
+            let joint_generation_count =
+                COMPLETION_PROFILE_PARTICIPANT_COUNT as usize * 80 * plan.conjunction_count;
+            let local_selected_count = COMPLETION_PROFILE_PARTICIPANT_COUNT as usize
+                * (70 * plan.conjunction_count
+                    + 8 * plan.linear_count
+                    + 8 * plan.output_wires.len());
+            let joint_selected_count =
+                COMPLETION_PROFILE_PARTICIPANT_COUNT as usize * 40 * plan.conjunction_count;
+            let fixed_pad_address_byte_length =
+                2 + 2 * Hash512::BYTE_LENGTH + PADDED_ALLOCATION_NONCE_BYTE_LENGTH + 14;
+            let direct_pad_input_byte_length =
+                fixed_pad_address_byte_length + LOCAL_ROW_DOMAIN.len();
+            let continuation_pad_input_byte_length =
+                fixed_pad_address_byte_length + CONTINUATION_ROW_DOMAIN.len();
+            let generation_input_byte_length = label_output_count * direct_pad_input_byte_length
+                + continuation_output_count * continuation_pad_input_byte_length;
+            let generation_output_byte_length = local_generation_count * PADDED_TOKEN_BYTE_LENGTH
+                + joint_generation_count * PADDED_MODULE_VALUE_BYTE_LENGTH
+                + continuation_output_count * CONTINUATION_ROW_BYTE_LENGTH;
+            let selected_input_byte_length = selected_direct_recomputation_count
+                * direct_pad_input_byte_length
+                + continuation_target_count * continuation_pad_input_byte_length;
+            let selected_output_byte_length = local_selected_count * PADDED_TOKEN_BYTE_LENGTH
+                + joint_selected_count * PADDED_MODULE_VALUE_BYTE_LENGTH
+                + continuation_target_count * CONTINUATION_ROW_BYTE_LENGTH;
 
             assert_eq!(label_key_count, 20 * expected_pair_count);
+            assert_eq!(direct_pad_input_byte_length, 223);
+            assert_eq!(continuation_pad_input_byte_length, 230);
+            assert_eq!(CONTINUATION_AUTHENTICATOR_BYTE_LENGTH, 40);
+            assert_eq!(
+                local_generation_count + joint_generation_count,
+                label_output_count
+            );
+            assert_eq!(
+                local_selected_count + joint_selected_count,
+                selected_direct_recomputation_count
+            );
             assert_eq!(
                 label_output_count,
                 10 * (360 * plan.conjunction_count
@@ -3457,7 +3501,12 @@ mod tests {
                 assert_eq!(label_output_count, 11_896_480);
                 assert_eq!(continuation_output_count, 59_240);
                 assert_eq!(selected_recomputation_count, 3_596_140);
+                assert_eq!(selected_direct_recomputation_count, 3_566_520);
                 assert_eq!(hidden_replacement_count, 5_977_860);
+                assert_eq!(generation_input_byte_length, 2_666_540_240);
+                assert_eq!(generation_output_byte_length, 490_184_520);
+                assert_eq!(selected_input_byte_length, 802_146_560);
+                assert_eq!(selected_output_byte_length, 147_441_740);
                 maximum_fan_out_distribution = Some(fan_out_distribution);
             }
         }

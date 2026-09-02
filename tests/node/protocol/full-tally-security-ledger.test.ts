@@ -3,56 +3,61 @@ import { describe, expect, it } from 'vitest';
 import { compileFullTallySecurityLedger } from '#tests/full-tally-security-ledger.js';
 
 describe('independent full-tally security ledger', () => {
-    it('binds every admitted output width to a concrete query budget', () => {
+    it('keeps adversary work, honest work, and verifier attempts separate', () => {
         for (let topCount = 1; topCount <= 10; topCount += 1) {
             const ledger = compileFullTallySecurityLedger(topCount);
             expect(ledger.topCount).toBe(topCount);
-            expect(ledger.operation.continuationTargetCount).toBe(
-                ledger.operation.continuationKeyCount / 2,
+            expect(ledger.circuit.outputCount).toBe(11 + 4 * topCount);
+            expect(ledger.adversaryWork.coherentPrimitiveQueries).toEqual(
+                expect.objectContaining({
+                    symbol: 'q_A',
+                    configuredMaximum: (1n << 80n) - 1n,
+                }),
             );
+            expect(
+                ledger.adversaryWork
+                    .acceptedOnlineContinuationVerifierInvocations.symbol,
+            ).toBe('v_online');
+            expect(
+                ledger.adversaryWork.adversarialOfflineCandidateTests.symbol,
+            ).toBe('v_offline');
+            expect(
+                ledger.operation.knownKeySecondPreimage
+                    .legitimateTargetCountPerCompleteInventory,
+            ).toBe(ledger.circuit.conjunctionCount * 10);
             expect(
                 ledger.operation
-                    .wrongKeyAuthenticationTargetCountPerVerifiedInventory,
-            ).toBe(ledger.operation.continuationTargetCount);
-            expect(ledger.operation.totalKeyCount).toBe(
-                ledger.operation.directLabelKeyCount +
-                    ledger.operation.continuationKeyCount,
-            );
-            expect(
-                ledger.quantumQueryBudget.minimumHonestKmacInvocationCount,
+                    .selectedContinuationKeyCountPerCompleteInventory,
             ).toBe(
-                BigInt(ledger.operation.generationKmacInvocationCount) +
-                    BigInt(
-                        ledger.preparation.scalarDerivedSubkeyInvocationCount,
-                    ) +
-                    BigInt(
-                        ledger.foundation
-                            .mailboxKmacImplementationInvocationCount,
-                    ),
+                ledger.operation
+                    .alternativeContinuationKeyCountPerCompleteInventory,
             );
-            expect(
-                ledger.quantumQueryBudget
-                    .maximumCompleteVerificationInventoryCountBeforeOtherQueries,
-            ).toBeGreaterThan(0n);
+            expect(ledger.operation.totalContinuationKeyCount).toBe(
+                2 *
+                    ledger.operation
+                        .selectedContinuationKeyCountPerCompleteInventory,
+            );
             expect(ledger.localRecord.maximumSealsPerExactContext).toBe(1);
             expect(ledger.localRecord.maximumEncryptionsPerExactContext).toBe(
                 1,
+            );
+            expect(
+                ledger.securityStatisticalTerms.map(({ event }) => event),
+            ).not.toContain(
+                'wrong-key continuation acceptance before other queries',
             );
         }
     });
 
     it('regenerates the maximum-width emitted-interface ledger', () => {
         const ledger = compileFullTallySecurityLedger(10);
-        expect(ledger.quantumQueryBudget).toEqual({
-            bitLength: 80,
-            maximumQueryCount: (1n << 80n) - 1n,
-            minimumHonestKmacInvocationCount: 12_490_600n,
-            selectedEvaluationKmacInvocationCount: 3_596_140n,
-            maximumCompleteVerificationInventoryCountBeforeOtherQueries:
-                336_173_180_024_868_098n,
-            remainingQueryCountAtThatMaximum: 273_855n,
-            maximumWrongKeyAuthenticationTargetCountBeforeOtherQueries:
-                9_957_449_592_336_593_062_760n,
+        expect(ledger.circuit).toEqual({
+            inputWireCount: 410,
+            constantCount: 2,
+            linearCount: 3_803,
+            conjunctionCount: 2_962,
+            negationCount: 756,
+            outputCount: 51,
         });
         expect(ledger.foundation).toEqual({
             signatureKeyCount: 10,
@@ -80,19 +85,67 @@ describe('independent full-tally security ledger', () => {
             extractableCorruptSourceBitCountAtMaximumCorruption: 120,
         });
         expect(ledger.operation).toEqual({
-            directLabelKeyCount: 2_892_680,
-            continuationKeyCount: 59_240,
-            totalKeyCount: 2_951_920,
-            directLabelOutputCount: 11_896_480,
-            continuationOutputCount: 59_240,
+            directRowHiding: {
+                assumption: 'A_KMAC-DIRECT',
+                independentKeyCount: 2_892_680,
+                generatedOutputCount: 11_896_480,
+                selectedEvaluationCallCountPerCompleteInventory: 3_566_520,
+                hiddenReplacementCount: 5_948_240,
+                maximumKeyFanOut: 332,
+            },
+            alternativeKeyHiding: {
+                assumption: 'A_KMAC-ALT',
+                conditionallyFreshKeyCountPerSelectedTranscript: 29_620,
+                generatedContinuationOutputCount: 59_240,
+                hiddenReplacementCount: 29_620,
+            },
+            knownKeySecondPreimage: {
+                assumption: 'A_KMAC-2P',
+                authenticatorByteLength: 40,
+                legitimateTargetCountPerCompleteInventory: 29_620,
+                acceptedCandidateCountSymbol: 'v_online',
+                offlineCandidateCountSymbol: 'v_offline',
+            },
+            selectedContinuationKeyCountPerCompleteInventory: 29_620,
+            alternativeContinuationKeyCountPerCompleteInventory: 29_620,
+            totalContinuationKeyCount: 59_240,
+            totalOperationKeyCount: 2_951_920,
             generationKmacInvocationCount: 11_955_720,
-            selectedEvaluationKmacInvocationCount: 3_596_140,
-            hiddenLabelReplacementCount: 5_948_240,
-            hiddenContinuationReplacementCount: 29_620,
-            hiddenReplacementCount: 5_977_860,
-            maximumDirectLabelFanOut: 332,
-            continuationTargetCount: 29_620,
-            wrongKeyAuthenticationTargetCountPerVerifiedInventory: 29_620,
+            selectedEvaluationKmacInvocationCountPerCompleteInventory: 3_596_140,
+        });
+        expect(ledger.honestWork).toEqual({
+            symbol: 'sigma_honest',
+            operationGenerationKmacInvocationCount: 11_955_720,
+            operationGenerationKmacInputByteLength: 2_666_540_240,
+            operationGenerationKmacOutputByteLength: 490_184_520,
+            selectedEvaluationKmacInvocationCountPerCompleteInventory: 3_596_140,
+            selectedEvaluationKmacInputByteLengthPerCompleteInventory: 802_146_560,
+            selectedEvaluationKmacOutputByteLengthPerCompleteInventory: 147_441_740,
+            preparationKdfScalarInvocationCount: 534_520,
+            mailboxKdfScalarInvocationCount: 360,
+            preparationAesScalarInvocationCount: 71_981_280,
+            activationChunkCorpusByteLength: 304_336_370,
+            directLabelAllocationByteLength: 117_153_540,
+            localRecordAssociatedDataByteLength: 1_278_960,
+            accountingRule:
+                'This is an honest emitted-work vector, not an adversarial-query allowance or a scalar security denominator.',
+        });
+        expect(ledger.randomness).toEqual({
+            signatureKeyGenerationSeedByteLength: 320,
+            mailboxKeyGenerationSeedByteLength: 640,
+            preparationContributionAndSaltByteLength: 96_000,
+            directedPairwiseMasterByteLength: 3_200,
+            mailboxEncapsulationCoinByteLength: 2_880,
+            signatureCoinByteLength: 1_280,
+            checkpointKeyByteLength: 640,
+            allocationNonceByteLength: 320,
+            directLabelByteLength: 115_707_200,
+            directPointBitAllocationByteLength: 1_446_340,
+            directLabelAllocationByteLength: 117_153_540,
+            localRecordNonceByteLength: 35_040,
+            explicitByteDrawLength: 117_293_860,
+            nonexportableLocalRootCount: 10,
+            nonexportableLocalRootBitLength: 256,
         });
         expect(ledger.localRecord).toEqual({
             successfulSealCount: 2_920,
@@ -105,64 +158,60 @@ describe('independent full-tally security ledger', () => {
         });
     });
 
-    it('keeps statistical failures separate from direct primitive games', () => {
-        const terms = compileFullTallySecurityLedger(10).statisticalTerms;
-        expect(terms).toHaveLength(5);
-        expect(terms).toEqual([
-            expect.objectContaining({
+    it('separates security statistics from correctness failures', () => {
+        const ledger = compileFullTallySecurityLedger(10);
+        expect(ledger.securityStatisticalTerms).toEqual([
+            {
                 event: 'operation-key collision',
                 numerator: 4_356_914_367_240n,
                 denominatorBitLength: 320,
                 consequence: 'security',
-            }),
-            expect.objectContaining({
-                event: 'zero continuation difference',
-                numerator: 29_620n,
-                denominatorBitLength: 320,
-                consequence: 'pending',
-            }),
-            expect.objectContaining({
-                event: 'wrong-key continuation acceptance before other queries',
-                numerator: 9_957_449_592_336_593_062_760n,
-                denominatorBitLength: 320,
-                consequence: 'security',
-            }),
-            expect.objectContaining({
-                event: 'allocation-nonce collision',
-                numerator: 45n,
-                denominatorBitLength: 256,
-                consequence: 'pending',
-            }),
-            expect.objectContaining({
+            },
+            {
                 event: 'local-record derived-key-and-nonce collision',
                 numerator: 4_261_740n,
                 denominatorBitLength: 352,
                 consequence: 'security',
-            }),
+            },
         ]);
-        expect(terms.map(({ securityBitLength }) => securityBitLength)).toEqual(
-            [
-                expect.closeTo(278.013_556, 6),
-                expect.closeTo(305.145_716, 6),
-                expect.closeTo(246.923_734, 6),
-                expect.closeTo(250.508_147, 6),
-                expect.closeTo(329.976_989, 6),
-            ],
-        );
+        expect(ledger.correctnessFailures).toEqual([
+            {
+                event: 'zero continuation difference',
+                numerator: 29_620n,
+                denominatorBitLength: 320,
+                consequence: 'pending',
+            },
+            {
+                event: 'allocation-nonce collision',
+                numerator: 45n,
+                denominatorBitLength: 256,
+                consequence: 'pending',
+            },
+            {
+                event: 'honest ML-KEM-768 encapsulation or decapsulation correctness failure',
+                primitiveOwner: 'A_KEM correctness',
+                consequence: 'pending',
+            },
+        ]);
+        expect(ledger.computationalAdvantageTerms).toContain('A_KMAC-2P');
+        expect(ledger.environmentalAssumptions).toHaveLength(4);
     });
 
-    it('keeps exact codeword rejection out of the probability ledger', () => {
+    it('labels the random-function QROM calculation as a heuristic', () => {
         const ledger = compileFullTallySecurityLedger(10);
-        expect(ledger.aggregateFiniteFailureBound.numerator).toBe(
-            46_332_187_682_508_899_466_309_422_614_380n,
-        );
-        expect(ledger.aggregateFiniteFailureBound.denominatorBitLength).toBe(
-            352,
-        );
-        expect(
-            ledger.aggregateFiniteFailureBound.securityBitLength,
-        ).toBeCloseTo(246.808_214, 6);
-        expect(ledger.deterministicTerms).toEqual([
+        expect(ledger.randomFunctionQromHeuristic).toEqual({
+            classification: 'heuristic only; not a fixed-KMAC theorem',
+            expression: '((2*q_A+1)^2+v_online+v_offline)/2^320',
+            coherentQueryContributionNumeratorAtConfiguredMaximum:
+                ((1n << 81n) - 1n) ** 2n,
+            denominatorBitLength: 320,
+            verifierCountsAreNotBoundedByHonestWork: true,
+        });
+        expect(ledger).not.toHaveProperty('aggregateFiniteFailureBound');
+    });
+
+    it('keeps exact codeword rejection out of every probability ledger', () => {
+        expect(compileFullTallySecurityLedger(10).deterministicTerms).toEqual([
             {
                 event: 'nonzero degree-six codeword substitution with seven fixed honest coordinates',
                 acceptedFailureCount: 0,
