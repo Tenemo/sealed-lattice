@@ -171,6 +171,11 @@ impl BinaryWriter {
         self.extend(&value.to_le_bytes())
     }
 
+    #[cfg(feature = "construction")]
+    pub fn write_u32(&mut self, value: u32) -> CanonicalResult<()> {
+        self.extend(&value.to_le_bytes())
+    }
+
     pub fn write_bytes(&mut self, value: &[u8]) -> CanonicalResult<()> {
         let length = u32::try_from(value.len()).map_err(|_| {
             CanonicalError::new(

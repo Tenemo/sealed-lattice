@@ -15,8 +15,11 @@ use crate::protocol::joint_continuation::{
     generate_participant_body,
 };
 use crate::protocol::padded_continuation::{
-    PaddedParticipantGenerationInput, encode_padded_activation_signature,
-    evaluate_signed_padded_batch, generate_padded_participant,
+    PaddedParticipantGenerationInput, PaddedTallyEvaluationInitializationInput,
+    PaddedTallyGenerationInitializationInput, compile_padded_tally_plan_summary,
+    encode_padded_activation_signature, evaluate_next_padded_tally_chunk,
+    evaluate_signed_padded_batch, generate_next_padded_tally_chunk, generate_padded_participant,
+    initialize_padded_tally_evaluation, initialize_padded_tally_generation,
     padded_participant_payload_byte_length,
 };
 use crate::protocol::pair_encryption::generate_key_pair;
@@ -80,6 +83,11 @@ const GENERATE_PADDED_CONTINUATION_PARTICIPANT: u8 = 38;
 const ENCODE_PADDED_CONTINUATION_ACTIVATION_SIGNATURE: u8 = 39;
 const EVALUATE_PADDED_CONTINUATION_BATCH: u8 = 40;
 const VERIFY_ROSTER_CREDENTIALS: u8 = 41;
+const COMPILE_PADDED_TALLY_PLAN: u8 = 42;
+const INITIALIZE_PADDED_TALLY_GENERATION: u8 = 43;
+const GENERATE_NEXT_PADDED_TALLY_CHUNK: u8 = 44;
+const INITIALIZE_PADDED_TALLY_EVALUATION: u8 = 45;
+const EVALUATE_NEXT_PADDED_TALLY_CHUNK: u8 = 46;
 
 pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     let mut reader = BinaryReader::new(input);
@@ -138,6 +146,15 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
         }
         EVALUATE_PADDED_CONTINUATION_BATCH => evaluate_padded_continuation_batch(&mut reader),
         VERIFY_ROSTER_CREDENTIALS => verify_roster_credentials_command(&mut reader),
+        COMPILE_PADDED_TALLY_PLAN => compile_padded_tally_plan(&mut reader),
+        INITIALIZE_PADDED_TALLY_GENERATION => {
+            initialize_padded_tally_generation_command(&mut reader)
+        }
+        GENERATE_NEXT_PADDED_TALLY_CHUNK => generate_next_padded_tally_chunk_command(&mut reader),
+        INITIALIZE_PADDED_TALLY_EVALUATION => {
+            initialize_padded_tally_evaluation_command(&mut reader)
+        }
+        EVALUATE_NEXT_PADDED_TALLY_CHUNK => evaluate_next_padded_tally_chunk_command(&mut reader),
         command => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidEnum,
             format!("unsupported construction command: {command}"),
@@ -342,6 +359,194 @@ fn evaluate_padded_continuation_batch(reader: &mut BinaryReader<'_>) -> Canonica
     )?;
     for bit in evaluated.terminal_bits {
         response.write_u8(u8::from(bit))?;
+    }
+    Ok(response.into_bytes())
+}
+
+fn compile_padded_tally_plan(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let summary =
+        compile_padded_tally_plan_summary(reader.read_u16()?).map_err(construction_error)?;
+    if summary.chunk_byte_lengths.len() != summary.chunk_label_entropy_byte_lengths.len()
+        || summary.chunk_byte_lengths.len() != summary.live_wire_counts_after_chunks.len()
+    {
+        return Err(malformed_construction_length());
+    }
+    let mut response = BinaryWriter::new();
+    response.write_u16(summary.participant_count)?;
+    response.write_u16(summary.option_count)?;
+    response.write_u16(summary.top_count)?;
+    response.write_u32(summary.input_wire_count)?;
+    response.write_u32(summary.operation_count)?;
+    response.write_u32(summary.constant_count)?;
+    response.write_u32(summary.linear_count)?;
+    response.write_u32(summary.conjunction_count)?;
+    response.write_u32(summary.negation_count)?;
+    response.write_u32(summary.output_count)?;
+    response.write_u32(summary.wire_count)?;
+    response.write_u32(summary.logical_payload_byte_length)?;
+    response.write_u32(summary.label_entropy_byte_length)?;
+    response.write_u32(summary.manifest_byte_length)?;
+    response.write_u32(summary.maximum_live_wire_count)?;
+    response.write_u16(
+        u16::try_from(summary.chunk_byte_lengths.len())
+            .map_err(|_| malformed_construction_length())?,
+    )?;
+    for ((chunk_byte_length, entropy_byte_length), live_wire_count) in summary
+        .chunk_byte_lengths
+        .iter()
+        .zip(&summary.chunk_label_entropy_byte_lengths)
+        .zip(&summary.live_wire_counts_after_chunks)
+    {
+        response.write_u32(*chunk_byte_length)?;
+        response.write_u32(*entropy_byte_length)?;
+        response.write_u32(*live_wire_count)?;
+    }
+    Ok(response.into_bytes())
+}
+
+fn initialize_padded_tally_generation_command(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let (capability, roster) = read_verified_finality_capability(reader)?;
+    let participant_position = reader.read_u16()?;
+    let allocation_nonce = reader.read_bytes()?;
+    let checkpoint_key = reader.read_bytes()?;
+    let participant_count = capability.target.context().participant_count;
+    let mut source_bodies = Vec::with_capacity(usize::from(participant_count));
+    let mut source_signatures = Vec::with_capacity(usize::from(participant_count));
+    for _ in 0..participant_count {
+        source_bodies.push(reader.read_bytes()?.to_vec());
+        source_signatures.push(reader.read_bytes()?.to_vec());
+    }
+    let mut parent_bodies = Vec::with_capacity(usize::from(participant_count));
+    let mut parent_signatures = Vec::with_capacity(usize::from(participant_count));
+    for _ in 0..participant_count {
+        parent_bodies.push(reader.read_bytes()?.to_vec());
+        parent_signatures.push(reader.read_bytes()?.to_vec());
+    }
+    let own_opening_bytes = reader.read_bytes()?;
+    let own_pairwise_master_bytes = reader.read_bytes()?;
+    let remote_plaintext_bytes = Zeroizing::new(
+        (0..participant_count.saturating_sub(1))
+            .map(|_| Ok(reader.read_bytes()?.to_vec()))
+            .collect::<CanonicalResult<Vec<_>>>()?,
+    );
+    let target = capability.target.context();
+    let preparation_context = PreparationMaterialContext {
+        action_proposal_identity: target.action_proposal_identity,
+        roster_identity: target.roster_identity,
+        preparation_attempt: target.preparation_attempt,
+        predecessor_identity: target.predecessor_identity,
+        sender_position: participant_position,
+    };
+    let preparation = verify_complete_preparation(
+        &preparation_context,
+        participant_position,
+        &roster,
+        &parent_bodies,
+        &parent_signatures,
+        own_opening_bytes,
+        own_pairwise_master_bytes,
+        &remote_plaintext_bytes,
+    )
+    .map_err(construction_error)?;
+    let checkpoint = initialize_padded_tally_generation(
+        &capability,
+        &roster,
+        &preparation,
+        PaddedTallyGenerationInitializationInput {
+            participant_position,
+            source_bodies: &source_bodies,
+            source_signatures: &source_signatures,
+            allocation_nonce,
+            checkpoint_key,
+        },
+    )
+    .map_err(construction_error)?;
+    bytes_response(&checkpoint)
+}
+
+fn generate_next_padded_tally_chunk_command(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let generated = generate_next_padded_tally_chunk(
+        reader.read_bytes()?,
+        reader.read_bytes()?,
+        reader.read_bytes()?,
+    )
+    .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_u32(generated.chunk_ordinal)?;
+    response.write_bytes(&generated.chunk)?;
+    response.write_fixed(generated.chunk_identity.as_bytes())?;
+    match (
+        generated.next_checkpoint,
+        generated.manifest,
+        generated.manifest_identity,
+    ) {
+        (Some(checkpoint), None, None) => {
+            response.write_u8(1)?;
+            response.write_bytes(&checkpoint)?;
+        }
+        (None, Some(manifest), Some(manifest_identity)) => {
+            response.write_u8(2)?;
+            response.write_bytes(&manifest)?;
+            response.write_fixed(manifest_identity.as_bytes())?;
+        }
+        _ => return Err(malformed_construction_length()),
+    }
+    Ok(response.into_bytes())
+}
+
+fn initialize_padded_tally_evaluation_command(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let (capability, roster) = read_verified_finality_capability(reader)?;
+    let checkpoint_key = reader.read_bytes()?;
+    let participant_count = capability.target.context().participant_count;
+    let mut manifests = Vec::with_capacity(usize::from(participant_count));
+    let mut signatures = Vec::with_capacity(usize::from(participant_count));
+    for _ in 0..participant_count {
+        manifests.push(reader.read_bytes()?.to_vec());
+        signatures.push(reader.read_bytes()?.to_vec());
+    }
+    let checkpoint = initialize_padded_tally_evaluation(
+        &capability,
+        &roster,
+        PaddedTallyEvaluationInitializationInput {
+            manifests: &manifests,
+            signatures: &signatures,
+            checkpoint_key,
+        },
+    )
+    .map_err(construction_error)?;
+    bytes_response(&checkpoint)
+}
+
+fn evaluate_next_padded_tally_chunk_command(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let checkpoint_key = reader.read_bytes()?;
+    let checkpoint = reader.read_bytes()?;
+    let chunks = (0..COMPLETION_PROFILE_PARTICIPANT_COUNT)
+        .map(|_| Ok(reader.read_bytes()?.to_vec()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let evaluated = evaluate_next_padded_tally_chunk(checkpoint_key, checkpoint, &chunks)
+        .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_u32(evaluated.chunk_ordinal)?;
+    match (evaluated.next_checkpoint, evaluated.evaluated) {
+        (Some(next_checkpoint), None) => {
+            response.write_u8(1)?;
+            response.write_bytes(&next_checkpoint)?;
+        }
+        (None, Some(terminal)) => {
+            response.write_u8(2)?;
+            response.write_fixed(terminal.batch_identity.as_bytes())?;
+            response.write_bytes(&terminal.terminal_body)?;
+            response.write_fixed(terminal.terminal_identity.as_bytes())?;
+        }
+        _ => return Err(malformed_construction_length()),
     }
     Ok(response.into_bytes())
 }
@@ -1129,6 +1334,51 @@ mod tests {
         {
             let response = run_construction_command(&[command]);
             assert_eq!(response[0], 1, "command {command} must stay rejected");
+        }
+    }
+
+    #[test]
+    fn padded_tally_plan_command_derives_every_admitted_result_width() {
+        for top_count in 1..=COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            let mut request = vec![COMPILE_PADDED_TALLY_PLAN];
+            request.extend_from_slice(&top_count.to_le_bytes());
+            let response = run_construction_command(&request);
+            assert_eq!(response[0], 0, "topCount {top_count} must compile");
+            let mut reader = BinaryReader::new(&response[1..]);
+            assert_eq!(
+                reader.read_u16().unwrap(),
+                COMPLETION_PROFILE_PARTICIPANT_COUNT
+            );
+            assert_eq!(reader.read_u16().unwrap(), 10);
+            assert_eq!(reader.read_u16().unwrap(), top_count);
+            assert_eq!(reader.read_u32().unwrap(), 410);
+            let _operation_count = reader.read_u32().unwrap();
+            assert_eq!(reader.read_u32().unwrap(), 2);
+            let _linear_count = reader.read_u32().unwrap();
+            let _conjunction_count = reader.read_u32().unwrap();
+            let _negation_count = reader.read_u32().unwrap();
+            assert_eq!(reader.read_u32().unwrap(), 11 + 4 * u32::from(top_count));
+            let _wire_count = reader.read_u32().unwrap();
+            let _logical_payload_byte_length = reader.read_u32().unwrap();
+            let total_entropy_byte_length = reader.read_u32().unwrap();
+            let _manifest_byte_length = reader.read_u32().unwrap();
+            assert_eq!(reader.read_u32().unwrap(), 417);
+            let chunk_count = reader.read_u16().unwrap();
+            let mut chunk_entropy_byte_length = 0_u32;
+            let mut last_live_wire_count = None;
+            for _ in 0..chunk_count {
+                assert!(reader.read_u32().unwrap() <= 480_000);
+                chunk_entropy_byte_length += reader.read_u32().unwrap();
+                last_live_wire_count = Some(reader.read_u32().unwrap());
+            }
+            assert_eq!(chunk_entropy_byte_length, total_entropy_byte_length);
+            assert_eq!(last_live_wire_count, Some(0));
+            reader.finish().unwrap();
+        }
+        for rejected_top_count in [0_u16, 11] {
+            let mut request = vec![COMPILE_PADDED_TALLY_PLAN];
+            request.extend_from_slice(&rejected_top_count.to_le_bytes());
+            assert_eq!(run_construction_command(&request)[0], 1);
         }
     }
 }

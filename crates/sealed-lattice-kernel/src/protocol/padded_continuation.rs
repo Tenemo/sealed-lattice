@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 use aes::Aes256;
 use aes::cipher::{Block, BlockEncrypt, KeyInit};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::foundation::{CanonicalItem, Hash512, Roster, hash_foundation_tuple_512, kmac256};
 
@@ -15,6 +15,15 @@ use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
 use super::preparation_plaintext::{HeldSubsetKey, PairwiseMasterInventory};
 use super::roster::{require_roster_identity, signing_verification_key};
 use super::source::VerifiedCompletePreparation;
+
+mod tally;
+
+pub use tally::{
+    PaddedTallyEvaluationInitializationInput, PaddedTallyGenerationInitializationInput,
+    compile_padded_tally_plan_summary, evaluate_next_padded_tally_chunk,
+    generate_next_padded_tally_chunk, initialize_padded_tally_evaluation,
+    initialize_padded_tally_generation,
+};
 
 pub const PADDED_LABEL_BYTE_LENGTH: usize = 40;
 pub const PADDED_MODULE_VALUE_BYTE_LENGTH: usize = 40;
@@ -74,11 +83,16 @@ const LOCAL_ROW_DOMAIN: &[u8] = b"sealed-lattice/padded-continuation/local-row/v
 const JOINT_ROW_DOMAIN: &[u8] = b"sealed-lattice/padded-continuation/joint-row/v1";
 const CONTINUATION_ROW_DOMAIN: &[u8] = b"sealed-lattice/padded-continuation/continuation-row/v1";
 const OPERATION_KIND_LOCAL_MULTIPLICATION: u8 = 1;
+const OPERATION_KIND_LINEAR_XOR: u8 = 2;
 const OPERATION_KIND_TERMINAL_XOR: u8 = 3;
 const ABSENT_U16: u16 = u16::MAX;
 const ABSENT_U8: u8 = u8::MAX;
 const SUBSET_FAMILY_SIZE_SEVEN: u16 = 7;
+const SUBSET_FAMILY_SIZE_EIGHT: u16 = 8;
 const DERIVED_STREAM_ADDRESS_VERSION: u8 = 2;
+const DERIVED_STREAM_FAMILY_MATCHED_LOW: u8 = 2;
+const DERIVED_STREAM_FAMILY_MATCHED_HIGH_ZERO: u8 = 3;
+const DERIVED_STREAM_FAMILY_TERMINAL_ZERO: u8 = 4;
 const DERIVED_STREAM_FAMILY_JOINT_B: u8 = 5;
 const DERIVED_STREAM_FAMILY_JOINT_PAD: u8 = 6;
 
@@ -581,13 +595,13 @@ fn continuation_row_pad(
     output
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 struct ReceiverGateMaterial {
     affine_b_evaluation: ModuleValue,
     basis_pads: [ModuleValue; FIELD_BIT_WIDTH],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 struct GateMaterial {
     own_affine_a_constant: ModuleValue,
     own_affine_b_constant: ModuleValue,
@@ -676,9 +690,17 @@ fn derived_module_value(
     stream_address: DerivedStreamAddress,
 ) -> Result<ModuleValue, PaddedContinuationError> {
     let mut subkey = derived_subkey(master, context, stream_address.scope);
-    let cipher = Aes256::new_from_slice(&subkey)
-        .map_err(|_| PaddedContinuationError::InvalidGateMaterial)?;
+    let output = derived_module_value_from_subkey(&subkey, stream_address);
     subkey.zeroize();
+    output
+}
+
+fn derived_module_value_from_subkey(
+    subkey: &[u8; 32],
+    stream_address: DerivedStreamAddress,
+) -> Result<ModuleValue, PaddedContinuationError> {
+    let cipher =
+        Aes256::new_from_slice(subkey).map_err(|_| PaddedContinuationError::InvalidGateMaterial)?;
     let mut output = [0_u8; PADDED_MODULE_VALUE_BYTE_LENGTH];
     for block_index in 0..3_u8 {
         let mut address_block = Block::<Aes256>::default();
@@ -826,11 +848,30 @@ fn derive_gate_material(
     pairwise_masters: &PairwiseMasterInventory,
     gate_count: usize,
 ) -> Result<Vec<GateMaterial>, PaddedContinuationError> {
+    let gate_ordinals = (0..gate_count)
+        .map(|gate_index| {
+            u32::try_from(gate_index).map_err(|_| PaddedContinuationError::ArithmeticOverflow)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    derive_gate_material_for_ordinals(
+        context,
+        participant_position,
+        held_subset_keys,
+        pairwise_masters,
+        &gate_ordinals,
+    )
+}
+
+fn derive_gate_material_for_ordinals(
+    context: &EvaluationContext,
+    participant_position: u16,
+    held_subset_keys: &[HeldSubsetKey],
+    pairwise_masters: &PairwiseMasterInventory,
+    gate_ordinals: &[u32],
+) -> Result<Vec<GateMaterial>, PaddedContinuationError> {
     validate_position(participant_position)?;
-    let mut material = Vec::with_capacity(gate_count);
-    for gate_index in 0..gate_count {
-        let gate_ordinal =
-            u32::try_from(gate_index).map_err(|_| PaddedContinuationError::ArithmeticOverflow)?;
+    let mut material = Vec::with_capacity(gate_ordinals.len());
+    for gate_ordinal in gate_ordinals.iter().copied() {
         let own_affine_b_constant = derive_b_value(
             context,
             held_subset_keys,
@@ -896,7 +937,7 @@ fn derive_gate_material(
         });
     }
     validate_operation_fresh_gate_material(&material)?;
-    if material.len() != gate_count {
+    if material.len() != gate_ordinals.len() {
         return Err(PaddedContinuationError::InvalidGateMaterial);
     }
     Ok(material)
@@ -1909,6 +1950,26 @@ fn evaluate_gate_payload_from_chunk<'a>(
     right: FieldTokens,
 ) -> Result<EvaluatedGate<'a>, PaddedContinuationError> {
     let bytes = chunk.gate_bytes(plan, gate_index)?;
+    evaluate_gate_payload(
+        bytes,
+        context,
+        &chunk.allocation_nonce,
+        chunk.participant_position,
+        gate_index,
+        left,
+        right,
+    )
+}
+
+fn evaluate_gate_payload<'a>(
+    bytes: &'a [u8],
+    context: &EvaluationContext,
+    allocation_nonce: &[u8; PADDED_ALLOCATION_NONCE_BYTE_LENGTH],
+    participant_position: u16,
+    gate_index: usize,
+    left: FieldTokens,
+    right: FieldTokens,
+) -> Result<EvaluatedGate<'a>, PaddedContinuationError> {
     let mut reader = ByteReader::new(bytes);
     let local_rows =
         reader.read_exact(LOCAL_MULTIPLICATION_ROW_COUNT * PADDED_TOKEN_BYTE_LENGTH)?;
@@ -1934,8 +1995,8 @@ fn evaluate_gate_payload_from_chunk<'a>(
     let (masked_tokens, consumed_gate_count) = {
         let mut builder = EvaluationGarblingBuilder {
             context,
-            allocation_nonce: &chunk.allocation_nonce,
-            participant_position: chunk.participant_position,
+            allocation_nonce,
+            participant_position,
             major_ordinal: gate_index as u32,
             kind: OPERATION_KIND_LOCAL_MULTIPLICATION,
             next_gate_ordinal: 0,
@@ -2076,6 +2137,24 @@ fn evaluate_terminal_payload_from_chunk(
     input: FieldTokens,
 ) -> Result<Gf16, PaddedContinuationError> {
     let bytes = chunk.terminal_bytes(plan, output_index)?;
+    evaluate_terminal_payload(
+        bytes,
+        context,
+        &chunk.allocation_nonce,
+        chunk.participant_position,
+        output_index,
+        input,
+    )
+}
+
+fn evaluate_terminal_payload(
+    bytes: &[u8],
+    context: &EvaluationContext,
+    allocation_nonce: &[u8; PADDED_ALLOCATION_NONCE_BYTE_LENGTH],
+    participant_position: u16,
+    output_index: usize,
+    input: FieldTokens,
+) -> Result<Gf16, PaddedContinuationError> {
     let mut reader = ByteReader::new(bytes);
     let mut rows = Vec::with_capacity(FIELD_BIT_WIDTH);
     for _ in 0..FIELD_BIT_WIDTH {
@@ -2099,8 +2178,8 @@ fn evaluate_terminal_payload_from_chunk(
     for basis in 0..FIELD_BIT_WIDTH {
         output[basis] = evaluate_binary_gate(
             context,
-            &chunk.allocation_nonce,
-            chunk.participant_position,
+            allocation_nonce,
+            participant_position,
             OPERATION_KIND_TERMINAL_XOR,
             output_index as u32,
             basis as u16,

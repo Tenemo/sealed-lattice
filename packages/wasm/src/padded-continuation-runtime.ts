@@ -25,14 +25,13 @@ const evaluateBatchCommand = 40;
 
 const completionProfileParticipantCount = 10;
 const identityByteLength = 64;
-export const paddedContinuationLabelByteLength = 40;
+const paddedContinuationLabelByteLength = 40;
 const labelByteLength = paddedContinuationLabelByteLength;
 const moduleValueByteLength = 40;
 const tokenByteLength = labelByteLength + 1;
-export const paddedContinuationLabelPairEntropyByteLength =
-    2 * labelByteLength + 1;
+const paddedContinuationLabelPairEntropyByteLength = 2 * labelByteLength + 1;
 const tokenPairEntropyByteLength = paddedContinuationLabelPairEntropyByteLength;
-export const paddedContinuationAllocationNonceByteLength = 32;
+const paddedContinuationAllocationNonceByteLength = 32;
 const fieldBitWidth = 4;
 const localMultiplicationRowCount = 35 * 4;
 const paddedTranslationRowCountPerGarbler =
@@ -49,9 +48,9 @@ const terminalPayloadByteLength =
     fieldBitWidth * 4 * tokenByteLength + fieldBitWidth * tokenByteLength + 1;
 const preparationParentBodyByteLength = 8_502;
 const chunkHeaderByteLength = 250;
-export const paddedContinuationManifestByteLength = 254;
+const paddedContinuationManifestByteLength = 254;
 
-export const reviewedReducedPaddedContinuationPlan: JointContinuationPlan = {
+const reviewedReducedPaddedContinuationPlan: JointContinuationPlan = {
     inputWireCount: 4,
     gates: [
         { leftWire: 0, rightWire: 1 },

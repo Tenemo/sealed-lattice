@@ -19,16 +19,41 @@ import {
     type KernelResourceMeasurement,
 } from './foundation-kernel/kernel-runtime.js';
 import {
-    openPaddedContinuationRuntime,
-    paddedContinuationAllocationNonceByteLength,
-    paddedContinuationChunkByteLength,
-    paddedContinuationLabelByteLength,
-    paddedContinuationLabelEntropyByteLength,
-    paddedContinuationLabelPairEntropyByteLength,
-    paddedContinuationManifestByteLength,
-    reviewedReducedPaddedContinuationPlan,
-    type PaddedContinuationRuntime,
-} from './padded-continuation-runtime.js';
+    drawPaddedTallyIndependentBytes,
+    drawPaddedTallyLabelEntropy,
+    openPaddedTallyRuntime,
+    paddedTallyAllocationNonceByteLength,
+    paddedTallyCheckpointKeyByteLength,
+    type PaddedTallyEvaluationCheckpoint,
+    type PaddedTallyGenerationCheckpoint,
+    type PaddedTallyPlan,
+    type PaddedTallyRuntime,
+} from './padded-tally-runtime.js';
+import {
+    allocatedPaddedTallyGenerationPhase,
+    completedPaddedTallyEvaluationPhase,
+    completedPaddedTallyGenerationPhase,
+    decodePaddedTallyEvaluationState,
+    decodePaddedTallyGenerationState,
+    encodePaddedTallyEvaluationState,
+    encodePaddedTallyGenerationState,
+    initializedPaddedTallyEvaluationPhase,
+    paddedTallyEvaluationStateKind,
+    paddedTallyGenerationStateKind,
+    pendingPaddedTallyEvaluationPhase,
+    retainedPaddedTallyChunkPhase,
+    validatePaddedTallyEvaluationState,
+    validatePaddedTallyGenerationState,
+    zeroPaddedTallyEvaluationState,
+    zeroPaddedTallyGenerationState,
+    type AllocatedPaddedTallyGenerationState,
+    type CompletedPaddedTallyEvaluationState,
+    type CompletedPaddedTallyGenerationState,
+    type PaddedTallyEvaluationState,
+    type PaddedTallyGenerationState,
+    type PendingPaddedTallyEvaluationState,
+    type RetainedPaddedTallyChunkState,
+} from './padded-tally-worker-state.js';
 import {
     pairDecryptionKeyByteLength,
     pairEncryptionRandomnessByteLength,
@@ -67,9 +92,11 @@ import type {
     PrivatePreparationWorkerRequest,
     PrivatePreparationWorkerResponse,
     PrivatePreparationConsumption,
+    PaddedTallyEvaluationStep,
+    PaddedTallyWorkerInitialization,
     PublishedFinalityPackage,
+    PublishedPaddedTallyChunk,
     PublishedPreparationPackage,
-    PublishedReducedActivationPackage,
     PublishedSourcePackage,
     SourcePublicationChoice,
     TallyEvaluationProgress,
@@ -104,9 +131,8 @@ const preparationStateKind = 2;
 const privatePreparationSlotStateKind = 3;
 const sourceStateKind = 4;
 const finalityStateKind = 5;
-// Object kinds 6 and 7 are reserved for rejected tally-activation records.
+// Object kinds 6, 7, and 9 are reserved for rejected tally-activation records.
 const noResultStateKind = 8;
-const reducedActivationStateKind = 9;
 const rosterBoundActionPhase = 1;
 const unsignedPreparationPhase = 1;
 const publishedPreparationPhase = 2;
@@ -117,9 +143,6 @@ const unsignedSourcePhase = 1;
 const publishedSourcePhase = 2;
 const unsignedFinalityPhase = 1;
 const publishedFinalityPhase = 2;
-const allocatedReducedActivationPhase = 1;
-const retainedReducedActivationBodyPhase = 2;
-const publishedReducedActivationPhase = 3;
 const unpublishedActivationLocalPhase = 0;
 const publishedActivationLocalPhase = 1;
 const privatePreparationOperationOrdinal = 1n;
@@ -130,9 +153,12 @@ type WorkerConfiguration = Readonly<{
     candidateBuildIdentity: Uint8Array;
     afterDurableConsume?: () => Promise<void> | void;
     afterDurableSourceBind?: () => Promise<void> | void;
-    afterDurableActivationAllocate?: () => Promise<void> | void;
-    afterDurableActivationBodyBind?: () => Promise<void> | void;
-    afterDurableActivationPublish?: () => Promise<void> | void;
+    afterDurableTallyGenerationInitialize?: () => Promise<void> | void;
+    afterDurableTallyChunkPersist?: () => Promise<void> | void;
+    afterDurableTallyActivationPublish?: () => Promise<void> | void;
+    afterDurableTallyEvaluationInitialize?: () => Promise<void> | void;
+    afterDurableTallyEvaluationStep?: () => Promise<void> | void;
+    afterDurableTallyTerminalPersist?: () => Promise<void> | void;
 }>;
 
 type LocalRecordContext = Readonly<{
@@ -164,6 +190,8 @@ type ActionState = {
     activationPublicationPhase:
         | typeof publishedActivationLocalPhase
         | typeof unpublishedActivationLocalPhase;
+    activationJournalGeneration: bigint;
+    evaluationJournalGeneration: bigint;
     signingSecretKey: Uint8Array;
     mailboxDecapsulationKey: Uint8Array;
 };
@@ -248,41 +276,14 @@ type LoadedFinalityState = Readonly<{
     state: FinalityState;
 }>;
 
-type ReducedActivationCommonState = {
-    generation: bigint;
-    preparationAttempt: number;
-    verifiedPreparationRoot: Uint8Array;
-    targetIdentity: Uint8Array;
-    sourceBodyIdentities: Uint8Array;
-    topCount: number;
-    initialWireValues: Uint8Array;
-    gateMaskShares: Uint8Array;
-    terminalMaskShares: Uint8Array;
-};
-
-type AllocatedReducedActivationState = ReducedActivationCommonState & {
-    phase: typeof allocatedReducedActivationPhase;
-    allocationNonce: Uint8Array;
-    labelEntropy: Uint8Array;
-};
-
-type RetainedReducedActivationState = ReducedActivationCommonState & {
-    phase:
-        | typeof publishedReducedActivationPhase
-        | typeof retainedReducedActivationBodyPhase;
-    chunk: Uint8Array;
-    chunkIdentity: Uint8Array;
-    manifest: Uint8Array;
-    manifestIdentity: Uint8Array;
-    activationSignature: Uint8Array;
-};
-
-type ReducedActivationState =
-    AllocatedReducedActivationState | RetainedReducedActivationState;
-
-type LoadedReducedActivationState = Readonly<{
+type LoadedPaddedTallyGenerationState = Readonly<{
     record: ProtectedRecord;
-    state: ReducedActivationState;
+    state: PaddedTallyGenerationState;
+}>;
+
+type LoadedPaddedTallyEvaluationState = Readonly<{
+    record: ProtectedRecord;
+    state: PaddedTallyEvaluationState;
 }>;
 
 type NoResultState = {
@@ -638,37 +639,78 @@ const randomBytes = (length: number): Uint8Array => {
     return output;
 };
 
-const randomPaddedContinuationLabelEntropy = (): Uint8Array => {
-    const entropy = randomBytes(reducedActivationLabelEntropyByteLength);
+const randomNonzeroPaddedTallyCheckpointKey = (): Uint8Array => {
+    let checkpointKey: Uint8Array;
+    do {
+        checkpointKey = drawPaddedTallyIndependentBytes(
+            paddedTallyCheckpointKeyByteLength,
+        );
+    } while (isZero(checkpointKey));
+    return checkpointKey;
+};
+
+const requireChunkOrdinal = (value: unknown): number => {
     if (
-        entropy.byteLength % paddedContinuationLabelPairEntropyByteLength !==
-        0
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0 ||
+        value > 0xffff_ffff
     ) {
-        entropy.fill(0);
-        throw new Error('The padded label-entropy shape is inconsistent.');
+        throw new TypeError(
+            'expectedChunkOrdinal must be an unsigned 32-bit integer.',
+        );
     }
-    for (
-        let offset = 0;
-        offset < entropy.byteLength;
-        offset += paddedContinuationLabelPairEntropyByteLength
-    ) {
-        const colorOffset = offset + 2 * paddedContinuationLabelByteLength;
-        entropy[colorOffset] = (entropy[colorOffset] ?? 0) & 1;
-        const first = entropy.subarray(
-            offset,
-            offset + paddedContinuationLabelByteLength,
-        );
-        const second = entropy.subarray(
-            offset + paddedContinuationLabelByteLength,
-            colorOffset,
-        );
-        while (bytesEqual(first, second)) {
-            const replacement = randomBytes(paddedContinuationLabelByteLength);
-            second.set(replacement);
-            replacement.fill(0);
+    return value;
+};
+
+const digestByteInventory = async (
+    domain: string,
+    inventory: readonly Uint8Array[],
+): Promise<Uint8Array> => {
+    const domainBytes = new TextEncoder().encode(domain);
+    const itemDigests: Uint8Array[] = [];
+    for (const item of inventory) {
+        const itemCopy = Uint8Array.from(item);
+        try {
+            itemDigests.push(
+                new Uint8Array(
+                    await crypto.subtle.digest('SHA-256', itemCopy.buffer),
+                ),
+            );
+        } finally {
+            itemCopy.fill(0);
         }
     }
-    return entropy;
+    const frame = new Uint8Array(
+        2 + domainBytes.byteLength + 2 + inventory.length * (2 + 4 + 32),
+    );
+    const view = new DataView(frame.buffer);
+    let offset = 0;
+    view.setUint16(offset, domainBytes.byteLength, true);
+    offset += 2;
+    frame.set(domainBytes, offset);
+    offset += domainBytes.byteLength;
+    view.setUint16(offset, inventory.length, true);
+    offset += 2;
+    for (const [position, item] of inventory.entries()) {
+        const digest = itemDigests[position];
+        if (digest === undefined) {
+            frame.fill(0);
+            throw new Error('The local replay digest inventory is incomplete.');
+        }
+        view.setUint16(offset, position, true);
+        offset += 2;
+        view.setUint32(offset, item.byteLength, true);
+        offset += 4;
+        frame.set(digest, offset);
+        offset += digest.byteLength;
+    }
+    try {
+        return new Uint8Array(await crypto.subtle.digest('SHA-256', frame));
+    } finally {
+        frame.fill(0);
+        for (const digest of itemDigests) digest.fill(0);
+    }
 };
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -717,11 +759,21 @@ const finalityIdentifier = (
         action.actionProposalIdentity,
     )}.${String(action.participantPosition)}`;
 
-const reducedActivationIdentifier = (
+const paddedTallyGenerationIdentifier = (
     configuration: WorkerConfiguration,
     action: PrivatePreparationActionContext,
 ): string =>
-    `reduced-activation.${bytesToHex(
+    `padded-tally-generation.${bytesToHex(
+        configuration.runtimeIdentity,
+    )}.${bytesToHex(action.actionProposalIdentity)}.${String(
+        action.participantPosition,
+    )}`;
+
+const paddedTallyEvaluationIdentifier = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): string =>
+    `padded-tally-evaluation.${bytesToHex(
         configuration.runtimeIdentity,
     )}.${bytesToHex(action.actionProposalIdentity)}.${String(
         action.participantPosition,
@@ -767,32 +819,68 @@ const copyPublishedFinalityPackage = (
     finalitySignature: Uint8Array.from(state.finalitySignature),
 });
 
-const copyPublishedReducedActivationPackage = (
-    state: RetainedReducedActivationState,
-): PublishedReducedActivationPackage => {
-    if (state.phase !== publishedReducedActivationPhase) {
-        throw new DurableStateError(
-            'CorruptState',
-            'An unpublished reduced activation cannot leave the worker.',
-        );
-    }
-    return {
-        chunk: Uint8Array.from(state.chunk),
-        chunkIdentity: Uint8Array.from(state.chunkIdentity),
-        manifest: Uint8Array.from(state.manifest),
-        manifestIdentity: Uint8Array.from(state.manifestIdentity),
-        activationSignature: Uint8Array.from(state.activationSignature),
-    };
-};
+const copyPublishedPaddedTallyChunk = (
+    state: CompletedPaddedTallyGenerationState | RetainedPaddedTallyChunkState,
+): PublishedPaddedTallyChunk =>
+    state.phase === retainedPaddedTallyChunkPhase
+        ? {
+              status: 'pending',
+              chunkOrdinal: state.chunkOrdinal,
+              chunk: Uint8Array.from(state.chunk),
+              chunkIdentity: Uint8Array.from(state.chunkIdentity),
+          }
+        : {
+              status: 'complete',
+              chunkOrdinal: state.chunkOrdinal,
+              chunk: Uint8Array.from(state.chunk),
+              chunkIdentity: Uint8Array.from(state.chunkIdentity),
+              manifest: Uint8Array.from(state.manifest),
+              manifestIdentity: Uint8Array.from(state.manifestIdentity),
+              activationSignature: Uint8Array.from(state.activationSignature),
+          };
 
 const copyTallyEvaluationProgress = (
     state: NoResultState,
     resources: KernelResourceMeasurement,
 ): TallyEvaluationProgress => ({
     kind: 'no-result',
+    terminalPath: 'source-empty',
     acceptedBallotAuthorshipBitmap: state.acceptedBallotAuthorshipBitmap,
     resources,
 });
+
+const acceptedBallotAuthorshipBitmap = (
+    authorship: readonly boolean[],
+): number =>
+    authorship.reduce(
+        (bitmap, accepted, position) =>
+            accepted ? bitmap | (1 << position) : bitmap,
+        0,
+    );
+
+const copyCompletedPaddedTallyEvaluation = (
+    state: CompletedPaddedTallyEvaluationState,
+    resources: KernelResourceMeasurement,
+): TallyEvaluationProgress => {
+    const common = {
+        acceptedBallotAuthorshipBitmap: state.acceptedBallotAuthorshipBitmap,
+        batchIdentity: Uint8Array.from(state.batchIdentity),
+        terminalBody: Uint8Array.from(state.terminalBody),
+        terminalIdentity: Uint8Array.from(state.terminalIdentity),
+        resources,
+    };
+    return state.orderedOptionPositions === undefined
+        ? {
+              kind: 'no-result',
+              terminalPath: 'evaluated',
+              ...common,
+          }
+        : {
+              kind: 'result',
+              ...common,
+              orderedOptionPositions: Array.from(state.orderedOptionPositions),
+          };
+};
 
 const encodeLocalRecordContext = (context: LocalRecordContext): Uint8Array => {
     const writer = new FixedWriter(localContextByteLength);
@@ -855,12 +943,14 @@ const actionStateByteLength =
     completionRosterByteLength +
     signaturePurposeCount * identityByteLength +
     1 +
+    8 +
+    8 +
     actionSignatureSecretKeyByteLength +
     pairDecryptionKeyByteLength;
 
 const encodeActionState = (state: ActionState): Uint8Array => {
     const writer = new FixedWriter(actionStateByteLength);
-    writer.writeU8(5);
+    writer.writeU8(6);
     writer.writeU8(state.phase);
     writer.writeU16(state.participantPosition);
     writer.writeU64(state.generation);
@@ -875,6 +965,8 @@ const encodeActionState = (state: ActionState): Uint8Array => {
         writer.writeFixed(bodyIdentity);
     }
     writer.writeU8(state.activationPublicationPhase);
+    writer.writeU64(state.activationJournalGeneration);
+    writer.writeU64(state.evaluationJournalGeneration);
     writer.writeFixed(state.signingSecretKey);
     writer.writeFixed(state.mailboxDecapsulationKey);
     return writer.finish();
@@ -888,7 +980,7 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 5) {
+    if (reader.readU8() !== 6) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has the wrong version.',
@@ -919,6 +1011,8 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         activationPublicationPhase: reader.readU8() as
             | typeof publishedActivationLocalPhase
             | typeof unpublishedActivationLocalPhase,
+        activationJournalGeneration: reader.readU64(),
+        evaluationJournalGeneration: reader.readU64(),
         signingSecretKey: reader.readFixed(actionSignatureSecretKeyByteLength),
         mailboxDecapsulationKey: reader.readFixed(pairDecryptionKeyByteLength),
     };
@@ -1281,215 +1375,6 @@ const zeroFinalityState = (state: FinalityState): void => {
     state.finalitySignature.fill(0);
 };
 
-const reducedInitialWireValueCount =
-    reviewedReducedPaddedContinuationPlan.inputWireCount;
-const reducedGateMaskShareCount =
-    reviewedReducedPaddedContinuationPlan.gates.length * 2;
-const reducedTerminalMaskShareCount =
-    reviewedReducedPaddedContinuationPlan.outputWires.length;
-const reducedActivationLabelEntropyByteLength =
-    paddedContinuationLabelEntropyByteLength(
-        reviewedReducedPaddedContinuationPlan,
-    );
-const reducedActivationChunkByteLength = paddedContinuationChunkByteLength(
-    reviewedReducedPaddedContinuationPlan,
-);
-const reducedActivationCommonStateByteLength =
-    1 +
-    1 +
-    8 +
-    2 +
-    2 * identityByteLength +
-    sourceBodyIdentityVectorByteLength +
-    2 +
-    reducedInitialWireValueCount +
-    reducedGateMaskShareCount +
-    reducedTerminalMaskShareCount;
-const allocatedReducedActivationStateByteLength =
-    reducedActivationCommonStateByteLength +
-    paddedContinuationAllocationNonceByteLength +
-    reducedActivationLabelEntropyByteLength;
-const retainedReducedActivationStateByteLength =
-    reducedActivationCommonStateByteLength +
-    reducedActivationChunkByteLength +
-    identityByteLength +
-    paddedContinuationManifestByteLength +
-    identityByteLength +
-    actionSignatureCarrierByteLength;
-
-const validateReducedActivationCommonState = (
-    state: ReducedActivationCommonState,
-): void => {
-    if (
-        state.initialWireValues.byteLength !== reducedInitialWireValueCount ||
-        state.gateMaskShares.byteLength !== reducedGateMaskShareCount ||
-        state.terminalMaskShares.byteLength !== reducedTerminalMaskShareCount ||
-        state.initialWireValues.some((value) => value > 0x0f) ||
-        state.gateMaskShares.some((value) => value > 0x0f) ||
-        state.terminalMaskShares.some((value) => value > 0x0f) ||
-        state.sourceBodyIdentities.byteLength !==
-            sourceBodyIdentityVectorByteLength ||
-        state.topCount < 1 ||
-        state.topCount > completionProfileParticipantCount
-    ) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained reduced activation has invalid common fields.',
-        );
-    }
-};
-
-const writeReducedActivationCommonState = (
-    writer: FixedWriter,
-    state: ReducedActivationState,
-): void => {
-    validateReducedActivationCommonState(state);
-    writer.writeU8(1);
-    writer.writeU8(state.phase);
-    writer.writeU64(state.generation);
-    writer.writeU16(state.preparationAttempt);
-    writer.writeFixed(state.verifiedPreparationRoot);
-    writer.writeFixed(state.targetIdentity);
-    writer.writeFixed(state.sourceBodyIdentities);
-    writer.writeU16(state.topCount);
-    writer.writeFixed(state.initialWireValues);
-    writer.writeFixed(state.gateMaskShares);
-    writer.writeFixed(state.terminalMaskShares);
-};
-
-const encodeReducedActivationState = (
-    state: ReducedActivationState,
-): Uint8Array => {
-    if (state.phase === allocatedReducedActivationPhase) {
-        const writer = new FixedWriter(
-            allocatedReducedActivationStateByteLength,
-        );
-        writeReducedActivationCommonState(writer, state);
-        writer.writeFixed(state.allocationNonce);
-        writer.writeFixed(state.labelEntropy);
-        return writer.finish();
-    }
-    const writer = new FixedWriter(retainedReducedActivationStateByteLength);
-    writeReducedActivationCommonState(writer, state);
-    writer.writeFixed(state.chunk);
-    writer.writeFixed(state.chunkIdentity);
-    writer.writeFixed(state.manifest);
-    writer.writeFixed(state.manifestIdentity);
-    writer.writeFixed(state.activationSignature);
-    return writer.finish();
-};
-
-const decodeReducedActivationState = (
-    bytes: Uint8Array,
-): ReducedActivationState => {
-    if (bytes.byteLength < 2 || bytes[0] !== 1) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained reduced activation has the wrong version.',
-        );
-    }
-    const phase = bytes[1];
-    const expectedByteLength =
-        phase === allocatedReducedActivationPhase
-            ? allocatedReducedActivationStateByteLength
-            : phase === retainedReducedActivationBodyPhase ||
-                phase === publishedReducedActivationPhase
-              ? retainedReducedActivationStateByteLength
-              : 0;
-    if (expectedByteLength === 0 || bytes.byteLength !== expectedByteLength) {
-        throw new DurableStateError(
-            'CorruptState',
-            'The retained reduced activation has an invalid phase or byte length.',
-        );
-    }
-    const reader = new FixedReader(bytes);
-    reader.readU8();
-    reader.readU8();
-    const common = {
-        generation: reader.readU64(),
-        preparationAttempt: reader.readU16(),
-        verifiedPreparationRoot: reader.readFixed(identityByteLength),
-        targetIdentity: reader.readFixed(identityByteLength),
-        sourceBodyIdentities: reader.readFixed(
-            sourceBodyIdentityVectorByteLength,
-        ),
-        topCount: reader.readU16(),
-        initialWireValues: reader.readFixed(reducedInitialWireValueCount),
-        gateMaskShares: reader.readFixed(reducedGateMaskShareCount),
-        terminalMaskShares: reader.readFixed(reducedTerminalMaskShareCount),
-    };
-    const state: ReducedActivationState =
-        phase === allocatedReducedActivationPhase
-            ? {
-                  ...common,
-                  phase: allocatedReducedActivationPhase,
-                  allocationNonce: reader.readFixed(
-                      paddedContinuationAllocationNonceByteLength,
-                  ),
-                  labelEntropy: reader.readFixed(
-                      reducedActivationLabelEntropyByteLength,
-                  ),
-              }
-            : {
-                  ...common,
-                  phase:
-                      phase === retainedReducedActivationBodyPhase
-                          ? retainedReducedActivationBodyPhase
-                          : publishedReducedActivationPhase,
-                  chunk: reader.readFixed(reducedActivationChunkByteLength),
-                  chunkIdentity: reader.readFixed(identityByteLength),
-                  manifest: reader.readFixed(
-                      paddedContinuationManifestByteLength,
-                  ),
-                  manifestIdentity: reader.readFixed(identityByteLength),
-                  activationSignature: reader.readFixed(
-                      actionSignatureCarrierByteLength,
-                  ),
-              };
-    reader.finish();
-    validateReducedActivationCommonState(state);
-    if (
-        state.phase === retainedReducedActivationBodyPhase &&
-        !isZero(state.activationSignature)
-    ) {
-        zeroReducedActivationState(state);
-        throw new DurableStateError(
-            'CorruptState',
-            'The unsigned retained activation contains a signature.',
-        );
-    }
-    if (
-        state.phase === publishedReducedActivationPhase &&
-        isZero(state.activationSignature)
-    ) {
-        zeroReducedActivationState(state);
-        throw new DurableStateError(
-            'CorruptState',
-            'The published retained activation omits its signature.',
-        );
-    }
-    return state;
-};
-
-const zeroReducedActivationState = (state: ReducedActivationState): void => {
-    state.verifiedPreparationRoot.fill(0);
-    state.targetIdentity.fill(0);
-    state.sourceBodyIdentities.fill(0);
-    state.initialWireValues.fill(0);
-    state.gateMaskShares.fill(0);
-    state.terminalMaskShares.fill(0);
-    if (state.phase === allocatedReducedActivationPhase) {
-        state.allocationNonce.fill(0);
-        state.labelEntropy.fill(0);
-        return;
-    }
-    state.chunk.fill(0);
-    state.chunkIdentity.fill(0);
-    state.manifest.fill(0);
-    state.manifestIdentity.fill(0);
-    state.activationSignature.fill(0);
-};
-
 const noResultStateByteLength = 1 + 8 + identityByteLength + 2 + 2 + 2;
 
 const encodeNoResultState = (state: NoResultState): Uint8Array => {
@@ -1822,7 +1707,7 @@ class PrivatePreparationWorkerRuntime {
         private readonly finalityRuntime: ReturnType<
             typeof openFinalityRuntime
         >,
-        private readonly paddedContinuationRuntime: PaddedContinuationRuntime,
+        private readonly paddedTallyRuntime: PaddedTallyRuntime,
         private readonly preparationMaterialRuntime: PreparationMaterialRuntime,
         private readonly preparationParentRuntime: PreparationParentRuntime,
         private readonly privatePreparationBodyRuntime: PrivatePreparationBodyRuntime,
@@ -1836,9 +1721,12 @@ class PrivatePreparationWorkerRuntime {
         unpinnedKernelAllowed: boolean,
         afterDurableConsume?: () => Promise<void> | void,
         afterDurableSourceBind?: () => Promise<void> | void,
-        afterDurableActivationAllocate?: () => Promise<void> | void,
-        afterDurableActivationBodyBind?: () => Promise<void> | void,
-        afterDurableActivationPublish?: () => Promise<void> | void,
+        afterDurableTallyGenerationInitialize?: () => Promise<void> | void,
+        afterDurableTallyChunkPersist?: () => Promise<void> | void,
+        afterDurableTallyActivationPublish?: () => Promise<void> | void,
+        afterDurableTallyEvaluationInitialize?: () => Promise<void> | void,
+        afterDurableTallyEvaluationStep?: () => Promise<void> | void,
+        afterDurableTallyTerminalPersist?: () => Promise<void> | void,
     ): Promise<PrivatePreparationWorkerRuntime> {
         const runtimeIdentity = Uint8Array.from(
             requireBytes(
@@ -1887,15 +1775,18 @@ class PrivatePreparationWorkerRuntime {
                 candidateBuildIdentity,
                 afterDurableConsume,
                 afterDurableSourceBind,
-                afterDurableActivationAllocate,
-                afterDurableActivationBodyBind,
-                afterDurableActivationPublish,
+                afterDurableTallyGenerationInitialize,
+                afterDurableTallyChunkPersist,
+                afterDurableTallyActivationPublish,
+                afterDurableTallyEvaluationInitialize,
+                afterDurableTallyEvaluationStep,
+                afterDurableTallyTerminalPersist,
             },
             durableState,
             kernel,
             openActionSignatureRuntime(kernel),
             openFinalityRuntime(kernel),
-            openPaddedContinuationRuntime(kernel),
+            openPaddedTallyRuntime(kernel),
             openPreparationMaterialRuntime(kernel),
             openPreparationParentRuntime(kernel),
             openPrivatePreparationBodyRuntime(kernel),
@@ -1977,6 +1868,8 @@ class PrivatePreparationWorkerRuntime {
                 () => new Uint8Array(identityByteLength),
             ),
             activationPublicationPhase: unpublishedActivationLocalPhase,
+            activationJournalGeneration: 0n,
+            evaluationJournalGeneration: 0n,
             signingSecretKey: Uint8Array.from(signingSecretKey),
             mailboxDecapsulationKey: Uint8Array.from(mailboxDecapsulationKey),
         };
@@ -2917,7 +2810,7 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    async createReducedActivationPackage(
+    async initializePaddedTallyGeneration(
         input: PrivatePreparationActionContext & {
             canonicalRosterBytes: Uint8Array;
             preparationAttempt: number;
@@ -2925,11 +2818,8 @@ class PrivatePreparationWorkerRuntime {
             sources: readonly SourceCarrier[];
             finalitySignatures: readonly FinalitySignatureCarrier[];
             topCount: number;
-            initialWireValues: Uint8Array;
-            gateMaskShares: Uint8Array;
-            terminalMaskShares: Uint8Array;
         },
-    ): Promise<PublishedReducedActivationPackage> {
+    ): Promise<PaddedTallyWorkerInitialization> {
         const action = copyActionContext(input);
         const canonicalRosterBytes = copyCanonicalRosterBytes(
             input.canonicalRosterBytes,
@@ -2949,62 +2839,599 @@ class PrivatePreparationWorkerRuntime {
         if (topCount < 1 || topCount > completionProfileParticipantCount) {
             throw new TypeError('topCount is outside the completion profile.');
         }
-        const initialWireValues = Uint8Array.from(
-            requireBytes(
-                input.initialWireValues,
-                reducedInitialWireValueCount,
-                'initialWireValues',
-            ),
+        const plan = this.paddedTallyRuntime.compilePlan(topCount);
+        return this.durableState.exclusive(async () => {
+            const [actionRecord, sourceRecord, finalityRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'sources',
+                        sourceIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'finalities',
+                        finalityIdentifier(this.configuration, action),
+                    ),
+                ]);
+            if (
+                actionRecord === undefined ||
+                sourceRecord === undefined ||
+                finalityRecord === undefined
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Published source and finality state are required before tally generation.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            const loadedSource = await this.loadSourceState(
+                action,
+                loadedAction.state.rosterIdentity,
+                sourceRecord,
+            );
+            const loadedFinality = await this.loadFinalityState(
+                action,
+                loadedAction.state.rosterIdentity,
+                finalityRecord,
+            );
+            try {
+                this.verifyRosterBoundAction(
+                    action,
+                    loadedAction.state,
+                    canonicalRosterBytes,
+                );
+                this.validateSourceState(
+                    action,
+                    canonicalRosterBytes,
+                    loadedAction.state,
+                    loadedSource.state,
+                );
+                if (
+                    loadedSource.state.phase !== publishedSourcePhase ||
+                    loadedSource.state.preparationAttempt !== preparationAttempt
+                ) {
+                    throw new DurableStateError(
+                        'Conflict',
+                        'The retained source is not the tally preparation attempt.',
+                    );
+                }
+                const verified = this.deriveVerifiedTallyContext(
+                    action,
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sources,
+                    topCount,
+                    loadedAction.state,
+                    loadedSource.state,
+                );
+                try {
+                    this.verifyComputationCertificate(
+                        verified,
+                        canonicalRosterBytes,
+                        finalitySignatures,
+                    );
+                    this.validateFinalityState(
+                        action,
+                        canonicalRosterBytes,
+                        loadedAction.state,
+                        loadedFinality.state,
+                        verified,
+                    );
+                    if (loadedFinality.state.phase !== publishedFinalityPhase) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The local finality signature is not published.',
+                        );
+                    }
+                    const evidence = await this.loadCompletePreparationEvidence(
+                        action,
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        preparationParents,
+                        loadedAction,
+                    );
+                    try {
+                        if (
+                            !bytesEqual(
+                                evidence.verified.root,
+                                verified.verifiedPreparationRoot,
+                            )
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The tally preparation does not match the finalized source root.',
+                            );
+                        }
+                        const identifier = paddedTallyGenerationIdentifier(
+                            this.configuration,
+                            action,
+                        );
+                        const existing = await this.durableState.readProtected(
+                            'activations',
+                            identifier,
+                        );
+                        if (existing !== undefined) {
+                            const loadedGeneration =
+                                await this.loadPaddedTallyGenerationState(
+                                    action,
+                                    loadedAction.state.rosterIdentity,
+                                    existing,
+                                    plan,
+                                );
+                            try {
+                                this.validatePaddedTallyGenerationBinding(
+                                    loadedGeneration.state,
+                                    loadedAction.state,
+                                    loadedFinality.state,
+                                    verified,
+                                    plan,
+                                );
+                                return {
+                                    status: 'already-initialized',
+                                    plan,
+                                    resources:
+                                        this.constructionKernelRuntime.measureResources(),
+                                };
+                            } finally {
+                                zeroPaddedTallyGenerationState(
+                                    loadedGeneration.state,
+                                );
+                            }
+                        }
+                        const boundIdentity =
+                            loadedAction.state.signatureBodyIdentities[3];
+                        if (
+                            boundIdentity === undefined ||
+                            !isZero(boundIdentity) ||
+                            loadedAction.state.activationJournalGeneration !==
+                                0n ||
+                            loadedAction.state.activationPublicationPhase !==
+                                unpublishedActivationLocalPhase
+                        ) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'The activation journal is consumed but tally generation state is absent.',
+                            );
+                        }
+                        const checkpointKey =
+                            randomNonzeroPaddedTallyCheckpointKey();
+                        const allocationNonce = drawPaddedTallyIndependentBytes(
+                            paddedTallyAllocationNonceByteLength,
+                        );
+                        let checkpoint: PaddedTallyGenerationCheckpoint;
+                        try {
+                            checkpoint =
+                                this.paddedTallyRuntime.initializeGeneration(
+                                    {
+                                        targetBody: verified.targetBody,
+                                        canonicalRosterBytes,
+                                        signatures: finalitySignatures,
+                                    },
+                                    action.participantPosition,
+                                    allocationNonce,
+                                    checkpointKey,
+                                    sources,
+                                    {
+                                        parents: preparationParents,
+                                        ownContributionOpenings:
+                                            evidence.contributionOpenings,
+                                        ownPairwiseMasters:
+                                            evidence.pairwiseMasters,
+                                        remotePlaintexts:
+                                            evidence.remotePlaintexts,
+                                    },
+                                );
+                        } catch (error) {
+                            checkpointKey.fill(0);
+                            allocationNonce.fill(0);
+                            throw error;
+                        }
+                        const state: AllocatedPaddedTallyGenerationState = {
+                            phase: allocatedPaddedTallyGenerationPhase,
+                            generation: 1n,
+                            preparationAttempt,
+                            verifiedPreparationRoot: Uint8Array.from(
+                                verified.verifiedPreparationRoot,
+                            ),
+                            targetIdentity: Uint8Array.from(
+                                verified.targetIdentity,
+                            ),
+                            sourceBodyIdentities: Uint8Array.from(
+                                verified.sourceBodyIdentities,
+                            ),
+                            topCount,
+                            chunkCount: plan.chunks.length,
+                            allocationNonce,
+                            checkpointKey,
+                            checkpoint,
+                        };
+                        try {
+                            await this.insertPaddedTallyGenerationState(
+                                action,
+                                loadedAction,
+                                state,
+                                plan,
+                            );
+                            await this.configuration.afterDurableTallyGenerationInitialize?.();
+                            return {
+                                status: 'initialized',
+                                plan,
+                                resources:
+                                    this.constructionKernelRuntime.measureResources(),
+                            };
+                        } finally {
+                            zeroPaddedTallyGenerationState(state);
+                        }
+                    } finally {
+                        zeroCompletePreparationEvidence(evidence);
+                    }
+                } finally {
+                    zeroVerifiedTallyContext(verified);
+                }
+            } finally {
+                zeroFinalityState(loadedFinality.state);
+                zeroSourceState(loadedSource.state);
+                zeroActionState(loadedAction.state);
+            }
+        });
+    }
+
+    async createPaddedTallyChunk(
+        input: PrivatePreparationActionContext & {
+            expectedChunkOrdinal: number;
+        },
+    ): Promise<PublishedPaddedTallyChunk> {
+        const action = copyActionContext(input);
+        const expectedChunkOrdinal = requireChunkOrdinal(
+            input.expectedChunkOrdinal,
         );
-        const gateMaskShares = Uint8Array.from(
-            requireBytes(
-                input.gateMaskShares,
-                reducedGateMaskShareCount,
-                'gateMaskShares',
-            ),
+        return this.durableState.exclusive(async () => {
+            const [actionRecord, finalityRecord, generationRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'finalities',
+                        finalityIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'activations',
+                        paddedTallyGenerationIdentifier(
+                            this.configuration,
+                            action,
+                        ),
+                    ),
+                ]);
+            if (
+                actionRecord === undefined ||
+                finalityRecord === undefined ||
+                generationRecord === undefined
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Initialized tally generation state is unavailable.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            const loadedFinality = await this.loadFinalityState(
+                action,
+                loadedAction.state.rosterIdentity,
+                finalityRecord,
+            );
+            const plan = this.paddedTallyRuntime.compilePlan(
+                loadedFinality.state.topCount,
+            );
+            const loadedGeneration = await this.loadPaddedTallyGenerationState(
+                action,
+                loadedAction.state.rosterIdentity,
+                generationRecord,
+                plan,
+            );
+            try {
+                this.validatePaddedTallyGenerationLocalBinding(
+                    loadedGeneration.state,
+                    loadedAction.state,
+                    loadedFinality.state,
+                    plan,
+                );
+                if (
+                    loadedGeneration.state.phase ===
+                    completedPaddedTallyGenerationPhase
+                ) {
+                    if (
+                        expectedChunkOrdinal !==
+                        loadedGeneration.state.chunkOrdinal
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The completed tally generation refuses another ordinal.',
+                        );
+                    }
+                    return copyPublishedPaddedTallyChunk(
+                        loadedGeneration.state,
+                    );
+                }
+                if (
+                    loadedGeneration.state.phase ===
+                    retainedPaddedTallyChunkPhase
+                ) {
+                    if (
+                        expectedChunkOrdinal ===
+                        loadedGeneration.state.chunkOrdinal
+                    ) {
+                        return copyPublishedPaddedTallyChunk(
+                            loadedGeneration.state,
+                        );
+                    }
+                    if (
+                        expectedChunkOrdinal !==
+                        loadedGeneration.state.chunkOrdinal + 1
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The tally generation refuses rollback or skipped ordinals.',
+                        );
+                    }
+                } else if (expectedChunkOrdinal !== 0) {
+                    throw new DurableStateError(
+                        'Conflict',
+                        'The tally generation must begin at ordinal zero.',
+                    );
+                }
+                const checkpointKey = loadedGeneration.state.checkpointKey;
+                const checkpoint =
+                    loadedGeneration.state.phase ===
+                    allocatedPaddedTallyGenerationPhase
+                        ? loadedGeneration.state.checkpoint
+                        : loadedGeneration.state.nextCheckpoint;
+                const chunkPlan = plan.chunks[expectedChunkOrdinal];
+                if (chunkPlan === undefined) {
+                    throw new DurableStateError(
+                        'Conflict',
+                        'The requested tally chunk ordinal is outside the plan.',
+                    );
+                }
+                const labelEntropy = drawPaddedTallyLabelEntropy(
+                    chunkPlan.labelEntropyByteLength,
+                );
+                let generated: ReturnType<
+                    PaddedTallyRuntime['generateNextChunk']
+                >;
+                try {
+                    generated = this.paddedTallyRuntime.generateNextChunk(
+                        plan,
+                        expectedChunkOrdinal,
+                        checkpointKey,
+                        checkpoint as PaddedTallyGenerationCheckpoint,
+                        labelEntropy,
+                    );
+                } finally {
+                    labelEntropy.fill(0);
+                }
+                const common = {
+                    generation: BigInt(expectedChunkOrdinal) + 2n,
+                    preparationAttempt:
+                        loadedGeneration.state.preparationAttempt,
+                    verifiedPreparationRoot: Uint8Array.from(
+                        loadedGeneration.state.verifiedPreparationRoot,
+                    ),
+                    targetIdentity: Uint8Array.from(
+                        loadedGeneration.state.targetIdentity,
+                    ),
+                    sourceBodyIdentities: Uint8Array.from(
+                        loadedGeneration.state.sourceBodyIdentities,
+                    ),
+                    topCount: loadedGeneration.state.topCount,
+                    chunkCount: loadedGeneration.state.chunkCount,
+                    allocationNonce: Uint8Array.from(
+                        loadedGeneration.state.allocationNonce,
+                    ),
+                    chunkOrdinal: expectedChunkOrdinal,
+                    chunk: generated.chunk,
+                    chunkIdentity: generated.chunkIdentity,
+                };
+                let replacementState: PaddedTallyGenerationState;
+                if (generated.status === 'pending') {
+                    replacementState = {
+                        ...common,
+                        phase: retainedPaddedTallyChunkPhase,
+                        checkpointKey: Uint8Array.from(checkpointKey),
+                        nextCheckpoint: generated.nextCheckpoint,
+                    };
+                } else {
+                    const signingRandomness = randomBytes(
+                        actionSignatureSigningRandomnessByteLength,
+                    );
+                    let signature: Uint8Array | undefined;
+                    try {
+                        signature =
+                            this.actionSignatureRuntime.signBodyIdentity(
+                                loadedAction.state.signingSecretKey,
+                                action.participantPosition,
+                                'activation',
+                                generated.manifestIdentity,
+                                signingRandomness,
+                            );
+                        replacementState = {
+                            ...common,
+                            phase: completedPaddedTallyGenerationPhase,
+                            manifest: generated.manifest,
+                            manifestIdentity: generated.manifestIdentity,
+                            activationSignature:
+                                this.paddedTallyRuntime.encodeActivationSignature(
+                                    action.participantPosition,
+                                    generated.manifestIdentity,
+                                    signature,
+                                ),
+                        };
+                    } finally {
+                        signingRandomness.fill(0);
+                        signature?.fill(0);
+                    }
+                }
+                try {
+                    if (
+                        replacementState.phase ===
+                        completedPaddedTallyGenerationPhase
+                    ) {
+                        await this.completePaddedTallyGenerationState(
+                            action,
+                            loadedAction,
+                            loadedGeneration,
+                            replacementState,
+                            plan,
+                        );
+                        await this.configuration.afterDurableTallyActivationPublish?.();
+                    } else {
+                        await this.replacePaddedTallyGenerationState(
+                            action,
+                            loadedAction,
+                            loadedGeneration,
+                            replacementState,
+                            plan,
+                        );
+                        await this.configuration.afterDurableTallyChunkPersist?.();
+                    }
+                    const [retainedActionRecord, retained] = await Promise.all([
+                        this.durableState.readProtected(
+                            'actions',
+                            loadedAction.record.id,
+                        ),
+                        this.durableState.readProtected(
+                            'activations',
+                            loadedGeneration.record.id,
+                        ),
+                    ]);
+                    if (
+                        retainedActionRecord === undefined ||
+                        retained === undefined
+                    ) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'The persisted tally chunk disappeared.',
+                        );
+                    }
+                    const reboundAction = await this.loadActionState(
+                        action,
+                        retainedActionRecord,
+                    );
+                    const reloaded = await this.loadPaddedTallyGenerationState(
+                        action,
+                        reboundAction.state.rosterIdentity,
+                        retained,
+                        plan,
+                    );
+                    try {
+                        if (
+                            reloaded.state.phase ===
+                            allocatedPaddedTallyGenerationPhase
+                        ) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'The tally generation did not advance durably.',
+                            );
+                        }
+                        this.validatePaddedTallyGenerationLocalBinding(
+                            reloaded.state,
+                            reboundAction.state,
+                            loadedFinality.state,
+                            plan,
+                        );
+                        return copyPublishedPaddedTallyChunk(reloaded.state);
+                    } finally {
+                        zeroPaddedTallyGenerationState(reloaded.state);
+                        zeroActionState(reboundAction.state);
+                    }
+                } finally {
+                    zeroPaddedTallyGenerationState(replacementState);
+                }
+            } finally {
+                zeroPaddedTallyGenerationState(loadedGeneration.state);
+                zeroFinalityState(loadedFinality.state);
+                zeroActionState(loadedAction.state);
+            }
+        });
+    }
+
+    async initializePaddedTallyEvaluation(
+        input: PrivatePreparationActionContext & {
+            canonicalRosterBytes: Uint8Array;
+            finalitySignatures: readonly FinalitySignatureCarrier[];
+            manifests: readonly Uint8Array[];
+            activationSignatures: readonly Uint8Array[];
+        },
+    ): Promise<PaddedTallyWorkerInitialization> {
+        const action = copyActionContext(input);
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
         );
-        const terminalMaskShares = Uint8Array.from(
-            requireBytes(
-                input.terminalMaskShares,
-                reducedTerminalMaskShareCount,
-                'terminalMaskShares',
-            ),
+        const finalitySignatures = copyFinalitySignatures(
+            input.finalitySignatures,
+        );
+        if (
+            input.manifests.length !== completionProfileParticipantCount ||
+            input.activationSignatures.length !==
+                completionProfileParticipantCount
+        ) {
+            throw new TypeError(
+                'The activation inventory must contain the complete roster.',
+            );
+        }
+        const manifests = input.manifests.map((manifest) =>
+            Uint8Array.from(manifest),
+        );
+        const activationSignatures = input.activationSignatures.map(
+            (signature, position) =>
+                Uint8Array.from(
+                    requireBytes(
+                        signature,
+                        actionSignatureCarrierByteLength,
+                        `activationSignatures[${String(position)}]`,
+                    ),
+                ),
+        );
+        const activationInventoryDigest = await digestByteInventory(
+            'sealed-lattice/local/padded-tally-activation-inventory/v1',
+            manifests.flatMap((manifest, position) => [
+                manifest,
+                activationSignatures[position] ?? new Uint8Array(),
+            ]),
         );
         try {
             return await this.durableState.exclusive(async () => {
-                const [actionRecord, sourceRecord, finalityRecord] =
-                    await Promise.all([
-                        this.durableState.readProtected(
-                            'actions',
-                            actionIdentifier(this.configuration, action),
-                        ),
-                        this.durableState.readProtected(
-                            'sources',
-                            sourceIdentifier(this.configuration, action),
-                        ),
-                        this.durableState.readProtected(
-                            'finalities',
-                            finalityIdentifier(this.configuration, action),
-                        ),
-                    ]);
+                const [actionRecord, finalityRecord] = await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'finalities',
+                        finalityIdentifier(this.configuration, action),
+                    ),
+                ]);
                 if (
                     actionRecord === undefined ||
-                    sourceRecord === undefined ||
                     finalityRecord === undefined
                 ) {
                     throw new DurableStateError(
                         'StateLost',
-                        'Published source and finality state are required before activation.',
+                        'Published local finality state is required before tally evaluation.',
                     );
                 }
                 const loadedAction = await this.loadActionState(
                     action,
                     actionRecord,
-                );
-                const loadedSource = await this.loadSourceState(
-                    action,
-                    loadedAction.state.rosterIdentity,
-                    sourceRecord,
                 );
                 const loadedFinality = await this.loadFinalityState(
                     action,
@@ -3017,463 +3444,500 @@ class PrivatePreparationWorkerRuntime {
                         loadedAction.state,
                         canonicalRosterBytes,
                     );
-                    this.validateSourceState(
-                        action,
+                    this.verifyRetainedComputationCertificate(
+                        loadedFinality.state,
                         canonicalRosterBytes,
-                        loadedAction.state,
-                        loadedSource.state,
+                        finalitySignatures,
                     );
-                    if (
-                        loadedSource.state.phase !== publishedSourcePhase ||
-                        loadedSource.state.preparationAttempt !==
-                            preparationAttempt
-                    ) {
+                    const plan = this.paddedTallyRuntime.compilePlan(
+                        loadedFinality.state.topCount,
+                    );
+                    const localGenerationRecord =
+                        await this.durableState.readProtected(
+                            'activations',
+                            paddedTallyGenerationIdentifier(
+                                this.configuration,
+                                action,
+                            ),
+                        );
+                    if (localGenerationRecord === undefined) {
                         throw new DurableStateError(
-                            'Conflict',
-                            'The retained source is not the activation preparation attempt.',
+                            'StateLost',
+                            'The local completed tally generation is absent.',
                         );
                     }
-                    const verified = this.deriveVerifiedTallyContext(
-                        action,
-                        canonicalRosterBytes,
-                        preparationAttempt,
-                        sources,
-                        topCount,
-                        loadedAction.state,
-                        loadedSource.state,
-                    );
-                    try {
-                        this.verifyComputationCertificate(
-                            verified,
-                            canonicalRosterBytes,
-                            finalitySignatures,
-                        );
-                        this.validateFinalityState(
+                    const localGeneration =
+                        await this.loadPaddedTallyGenerationState(
                             action,
-                            canonicalRosterBytes,
+                            loadedAction.state.rosterIdentity,
+                            localGenerationRecord,
+                            plan,
+                        );
+                    try {
+                        this.validatePaddedTallyGenerationLocalBinding(
+                            localGeneration.state,
                             loadedAction.state,
                             loadedFinality.state,
-                            verified,
+                            plan,
                         );
+                        const localManifest =
+                            manifests[action.participantPosition];
+                        const localSignature =
+                            activationSignatures[action.participantPosition];
                         if (
-                            loadedFinality.state.phase !==
-                            publishedFinalityPhase
+                            localGeneration.state.phase !==
+                                completedPaddedTallyGenerationPhase ||
+                            localManifest === undefined ||
+                            localSignature === undefined ||
+                            !bytesEqual(
+                                localManifest,
+                                localGeneration.state.manifest,
+                            ) ||
+                            !bytesEqual(
+                                localSignature,
+                                localGeneration.state.activationSignature,
+                            )
                         ) {
                             throw new DurableStateError(
                                 'Conflict',
-                                'The local finality signature is not published.',
+                                'The activation inventory omits the retained local activation.',
                             );
-                        }
-                        const replayEvidence =
-                            await this.loadCompletePreparationEvidence(
-                                action,
-                                canonicalRosterBytes,
-                                preparationAttempt,
-                                preparationParents,
-                                loadedAction,
-                            );
-                        try {
-                            if (
-                                !bytesEqual(
-                                    replayEvidence.verified.root,
-                                    verified.verifiedPreparationRoot,
-                                )
-                            ) {
-                                throw new DurableStateError(
-                                    'Conflict',
-                                    'The activation preparation does not match the finalized source root.',
-                                );
-                            }
-                        } finally {
-                            zeroCompletePreparationEvidence(replayEvidence);
-                        }
-                        const identifier = reducedActivationIdentifier(
-                            this.configuration,
-                            action,
-                        );
-                        let activationRecord =
-                            await this.durableState.readProtected(
-                                'activations',
-                                identifier,
-                            );
-                        const boundIdentity =
-                            loadedAction.state.signatureBodyIdentities[3];
-                        if (boundIdentity === undefined) {
-                            throw new DurableStateError(
-                                'CorruptState',
-                                'The activation-signature slot is absent.',
-                            );
-                        }
-                        if (activationRecord === undefined) {
-                            if (!isZero(boundIdentity)) {
-                                throw new DurableStateError(
-                                    'StateLost',
-                                    'The activation-signature slot is consumed but its body state is absent.',
-                                );
-                            }
-                            const state: AllocatedReducedActivationState = {
-                                phase: allocatedReducedActivationPhase,
-                                generation: 1n,
-                                preparationAttempt,
-                                verifiedPreparationRoot: Uint8Array.from(
-                                    verified.verifiedPreparationRoot,
-                                ),
-                                targetIdentity: Uint8Array.from(
-                                    verified.targetIdentity,
-                                ),
-                                sourceBodyIdentities: Uint8Array.from(
-                                    verified.sourceBodyIdentities,
-                                ),
-                                topCount: verified.topCount,
-                                initialWireValues:
-                                    Uint8Array.from(initialWireValues),
-                                gateMaskShares: Uint8Array.from(gateMaskShares),
-                                terminalMaskShares:
-                                    Uint8Array.from(terminalMaskShares),
-                                allocationNonce: randomBytes(
-                                    paddedContinuationAllocationNonceByteLength,
-                                ),
-                                labelEntropy:
-                                    randomPaddedContinuationLabelEntropy(),
-                            };
-                            try {
-                                activationRecord =
-                                    await this.insertReducedActivationState(
-                                        action,
-                                        loadedAction,
-                                        state,
-                                    );
-                            } finally {
-                                zeroReducedActivationState(state);
-                            }
-                            await this.configuration.afterDurableActivationAllocate?.();
-                        }
-                        const loadedActivation =
-                            await this.loadReducedActivationState(
-                                action,
-                                loadedAction.state.rosterIdentity,
-                                activationRecord,
-                            );
-                        try {
-                            this.validateReducedActivationState(
-                                loadedActivation.state,
-                                verified,
-                                preparationAttempt,
-                                initialWireValues,
-                                gateMaskShares,
-                                terminalMaskShares,
-                                boundIdentity,
-                                loadedAction.state.activationPublicationPhase,
-                            );
-                            return await this.continueReducedActivation(
-                                action,
-                                canonicalRosterBytes,
-                                preparationParents,
-                                finalitySignatures,
-                                loadedAction,
-                                loadedActivation,
-                                verified,
-                            );
-                        } finally {
-                            zeroReducedActivationState(loadedActivation.state);
                         }
                     } finally {
-                        zeroVerifiedTallyContext(verified);
+                        zeroPaddedTallyGenerationState(localGeneration.state);
+                    }
+                    const identifier = paddedTallyEvaluationIdentifier(
+                        this.configuration,
+                        action,
+                    );
+                    const existing = await this.durableState.readProtected(
+                        'evaluations',
+                        identifier,
+                    );
+                    if (existing !== undefined) {
+                        const loadedEvaluation =
+                            await this.loadPaddedTallyEvaluationState(
+                                action,
+                                loadedAction.state.rosterIdentity,
+                                existing,
+                                plan,
+                            );
+                        try {
+                            this.validatePaddedTallyEvaluationBinding(
+                                loadedEvaluation.state,
+                                loadedAction.state,
+                                loadedFinality.state,
+                                activationInventoryDigest,
+                                plan,
+                            );
+                            return {
+                                status: 'already-initialized',
+                                plan,
+                                resources:
+                                    this.constructionKernelRuntime.measureResources(),
+                            };
+                        } finally {
+                            zeroPaddedTallyEvaluationState(
+                                loadedEvaluation.state,
+                            );
+                        }
+                    }
+                    const boundIdentity =
+                        loadedAction.state.signatureBodyIdentities[3];
+                    if (
+                        boundIdentity === undefined ||
+                        isZero(boundIdentity) ||
+                        loadedAction.state.activationPublicationPhase !==
+                            publishedActivationLocalPhase ||
+                        loadedAction.state.evaluationJournalGeneration !== 0n
+                    ) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'The local activation must be durably published before evaluation.',
+                        );
+                    }
+                    const checkpointKey =
+                        randomNonzeroPaddedTallyCheckpointKey();
+                    let checkpoint: PaddedTallyEvaluationCheckpoint;
+                    try {
+                        checkpoint =
+                            this.paddedTallyRuntime.initializeEvaluation(
+                                {
+                                    targetBody: loadedFinality.state.targetBody,
+                                    canonicalRosterBytes,
+                                    signatures: finalitySignatures,
+                                },
+                                checkpointKey,
+                                manifests,
+                                activationSignatures,
+                                plan,
+                            );
+                    } catch (error) {
+                        checkpointKey.fill(0);
+                        throw error;
+                    }
+                    const state = {
+                        phase: initializedPaddedTallyEvaluationPhase,
+                        generation: 1n,
+                        targetIdentity: Uint8Array.from(
+                            loadedFinality.state.targetIdentity,
+                        ),
+                        topCount: loadedFinality.state.topCount,
+                        chunkCount: plan.chunks.length,
+                        activationInventoryDigest: Uint8Array.from(
+                            activationInventoryDigest,
+                        ),
+                        checkpointKey,
+                        checkpoint,
+                    } as const;
+                    try {
+                        await this.insertPaddedTallyEvaluationState(
+                            action,
+                            loadedAction,
+                            state,
+                            plan,
+                        );
+                        await this.configuration.afterDurableTallyEvaluationInitialize?.();
+                        return {
+                            status: 'initialized',
+                            plan,
+                            resources:
+                                this.constructionKernelRuntime.measureResources(),
+                        };
+                    } finally {
+                        zeroPaddedTallyEvaluationState(state);
                     }
                 } finally {
                     zeroFinalityState(loadedFinality.state);
-                    zeroSourceState(loadedSource.state);
                     zeroActionState(loadedAction.state);
                 }
             });
         } finally {
-            initialWireValues.fill(0);
-            gateMaskShares.fill(0);
-            terminalMaskShares.fill(0);
+            activationInventoryDigest.fill(0);
         }
     }
 
-    private async continueReducedActivation(
-        action: PrivatePreparationActionContext,
-        canonicalRosterBytes: Uint8Array,
-        preparationParents: readonly PreparationParentCarrier[],
-        finalitySignatures: readonly FinalitySignatureCarrier[],
-        loadedAction: LoadedActionState,
-        loadedActivation: LoadedReducedActivationState,
-        verified: VerifiedTallyContext,
-    ): Promise<PublishedReducedActivationPackage> {
-        if (loadedActivation.state.phase === publishedReducedActivationPhase) {
-            return copyPublishedReducedActivationPackage(
-                loadedActivation.state,
+    async evaluatePaddedTallyChunk(
+        input: PrivatePreparationActionContext & {
+            expectedChunkOrdinal: number;
+            chunks: readonly Uint8Array[];
+        },
+    ): Promise<PaddedTallyEvaluationStep> {
+        const action = copyActionContext(input);
+        const expectedChunkOrdinal = requireChunkOrdinal(
+            input.expectedChunkOrdinal,
+        );
+        if (input.chunks.length !== completionProfileParticipantCount) {
+            throw new TypeError(
+                'chunks must contain the complete participant roster.',
             );
         }
-        if (
-            loadedActivation.state.phase === retainedReducedActivationBodyPhase
-        ) {
-            return this.publishRetainedReducedActivation(
-                action,
-                loadedAction,
-                loadedActivation,
-                verified,
-            );
-        }
-        const allocatedState = loadedActivation.state;
-        if (allocatedState.phase !== allocatedReducedActivationPhase) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The reduced activation has an unsupported durable phase.',
-            );
-        }
-        const evidence = await this.loadCompletePreparationEvidence(
-            action,
-            canonicalRosterBytes,
-            allocatedState.preparationAttempt,
-            preparationParents,
-            loadedAction,
+        const chunks = input.chunks.map((chunk) => Uint8Array.from(chunk));
+        const chunkSetDigest = await digestByteInventory(
+            'sealed-lattice/local/padded-tally-chunk-set/v1',
+            chunks,
         );
         try {
-            if (
-                !bytesEqual(
-                    evidence.verified.root,
-                    allocatedState.verifiedPreparationRoot,
-                )
-            ) {
-                throw new DurableStateError(
-                    'Conflict',
-                    'The retained activation does not match the complete preparation.',
-                );
-            }
-            const generated =
-                this.paddedContinuationRuntime.generateParticipant(
-                    {
-                        targetBody: verified.targetBody,
-                        canonicalRosterBytes,
-                        signatures: finalitySignatures,
-                    },
-                    reviewedReducedPaddedContinuationPlan,
-                    {
-                        participantPosition: action.participantPosition,
-                        initialWireValues: allocatedState.initialWireValues,
-                        gateMaskShares: allocatedState.gateMaskShares,
-                        terminalMaskShares: allocatedState.terminalMaskShares,
-                        allocationNonce: allocatedState.allocationNonce,
-                        labelEntropy: allocatedState.labelEntropy,
-                        preparationParents,
-                        ownContributionOpenings: evidence.contributionOpenings,
-                        ownPairwiseMasters: evidence.pairwiseMasters,
-                        remotePlaintexts: evidence.remotePlaintexts,
-                    },
-                );
-            const replacementState: RetainedReducedActivationState = {
-                phase: retainedReducedActivationBodyPhase,
-                generation: allocatedState.generation + 1n,
-                preparationAttempt: allocatedState.preparationAttempt,
-                verifiedPreparationRoot: Uint8Array.from(
-                    allocatedState.verifiedPreparationRoot,
-                ),
-                targetIdentity: Uint8Array.from(allocatedState.targetIdentity),
-                sourceBodyIdentities: Uint8Array.from(
-                    allocatedState.sourceBodyIdentities,
-                ),
-                topCount: allocatedState.topCount,
-                initialWireValues: Uint8Array.from(
-                    allocatedState.initialWireValues,
-                ),
-                gateMaskShares: Uint8Array.from(allocatedState.gateMaskShares),
-                terminalMaskShares: Uint8Array.from(
-                    allocatedState.terminalMaskShares,
-                ),
-                chunk: generated.chunk,
-                chunkIdentity: generated.chunkIdentity,
-                manifest: generated.manifest,
-                manifestIdentity: generated.manifestIdentity,
-                activationSignature: new Uint8Array(
-                    actionSignatureCarrierByteLength,
-                ),
-            };
-            try {
-                await this.bindReducedActivationBody(
-                    action,
-                    loadedAction,
-                    loadedActivation,
-                    replacementState,
-                );
-                await this.configuration.afterDurableActivationBodyBind?.();
-                const [retainedActionRecord, retainedActivationRecord] =
+            return await this.durableState.exclusive(async () => {
+                const [actionRecord, finalityRecord, evaluationRecord] =
                     await Promise.all([
                         this.durableState.readProtected(
                             'actions',
                             actionIdentifier(this.configuration, action),
                         ),
                         this.durableState.readProtected(
-                            'activations',
-                            loadedActivation.record.id,
+                            'finalities',
+                            finalityIdentifier(this.configuration, action),
+                        ),
+                        this.durableState.readProtected(
+                            'evaluations',
+                            paddedTallyEvaluationIdentifier(
+                                this.configuration,
+                                action,
+                            ),
                         ),
                     ]);
                 if (
-                    retainedActionRecord === undefined ||
-                    retainedActivationRecord === undefined
+                    actionRecord === undefined ||
+                    finalityRecord === undefined ||
+                    evaluationRecord === undefined
                 ) {
                     throw new DurableStateError(
                         'StateLost',
-                        'The bound activation body disappeared after persistence.',
+                        'Initialized tally evaluation state is unavailable.',
                     );
                 }
-                const reboundAction = await this.loadActionState(
+                const loadedAction = await this.loadActionState(
                     action,
-                    retainedActionRecord,
+                    actionRecord,
                 );
-                const retainedActivation =
-                    await this.loadReducedActivationState(
+                const loadedFinality = await this.loadFinalityState(
+                    action,
+                    loadedAction.state.rosterIdentity,
+                    finalityRecord,
+                );
+                const plan = this.paddedTallyRuntime.compilePlan(
+                    loadedFinality.state.topCount,
+                );
+                const loadedEvaluation =
+                    await this.loadPaddedTallyEvaluationState(
                         action,
-                        reboundAction.state.rosterIdentity,
-                        retainedActivationRecord,
+                        loadedAction.state.rosterIdentity,
+                        evaluationRecord,
+                        plan,
                     );
                 try {
-                    this.validateReducedActivationState(
-                        retainedActivation.state,
-                        verified,
-                        replacementState.preparationAttempt,
-                        replacementState.initialWireValues,
-                        replacementState.gateMaskShares,
-                        replacementState.terminalMaskShares,
-                        reboundAction.state.signatureBodyIdentities[3] ??
-                            new Uint8Array(),
-                        reboundAction.state.activationPublicationPhase,
+                    this.validatePaddedTallyEvaluationLocalBinding(
+                        loadedEvaluation.state,
+                        loadedAction.state,
+                        loadedFinality.state,
+                        plan,
                     );
-                    return await this.publishRetainedReducedActivation(
-                        action,
-                        reboundAction,
-                        retainedActivation,
-                        verified,
+                    if (
+                        loadedEvaluation.state.phase ===
+                        completedPaddedTallyEvaluationPhase
+                    ) {
+                        if (
+                            expectedChunkOrdinal !==
+                                loadedEvaluation.state.lastChunkOrdinal ||
+                            !bytesEqual(
+                                chunkSetDigest,
+                                loadedEvaluation.state.lastChunkSetDigest,
+                            )
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The completed tally evaluation refuses alternate replay.',
+                            );
+                        }
+                        return copyCompletedPaddedTallyEvaluation(
+                            loadedEvaluation.state,
+                            this.constructionKernelRuntime.measureResources(),
+                        );
+                    }
+                    if (
+                        loadedEvaluation.state.phase ===
+                        pendingPaddedTallyEvaluationPhase
+                    ) {
+                        if (
+                            expectedChunkOrdinal ===
+                            loadedEvaluation.state.lastChunkOrdinal
+                        ) {
+                            if (
+                                !bytesEqual(
+                                    chunkSetDigest,
+                                    loadedEvaluation.state.lastChunkSetDigest,
+                                )
+                            ) {
+                                throw new DurableStateError(
+                                    'Conflict',
+                                    'The tally evaluation refuses alternate chunk replay.',
+                                );
+                            }
+                            return {
+                                kind: 'pending',
+                                chunkOrdinal: expectedChunkOrdinal,
+                                nextChunkOrdinal: expectedChunkOrdinal + 1,
+                                resources:
+                                    this.constructionKernelRuntime.measureResources(),
+                            };
+                        }
+                        if (
+                            expectedChunkOrdinal !==
+                            loadedEvaluation.state.lastChunkOrdinal + 1
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The tally evaluation refuses rollback or skipped ordinals.',
+                            );
+                        }
+                    } else if (expectedChunkOrdinal !== 0) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The tally evaluation must begin at ordinal zero.',
+                        );
+                    }
+                    const chunkPlan = plan.chunks[expectedChunkOrdinal];
+                    if (
+                        chunkPlan === undefined ||
+                        chunks.some(
+                            (chunk) =>
+                                chunk.byteLength !== chunkPlan.chunkByteLength,
+                        )
+                    ) {
+                        throw new TypeError(
+                            'The tally chunks do not match the expected plan ordinal.',
+                        );
+                    }
+                    const checkpointKey = loadedEvaluation.state.checkpointKey;
+                    const evaluated = this.paddedTallyRuntime.evaluateNextChunk(
+                        plan,
+                        expectedChunkOrdinal,
+                        checkpointKey,
+                        loadedEvaluation.state
+                            .checkpoint as PaddedTallyEvaluationCheckpoint,
+                        chunks,
                     );
+                    let replacementState: PaddedTallyEvaluationState;
+                    if (evaluated.status === 'pending') {
+                        const pendingState: PendingPaddedTallyEvaluationState =
+                            {
+                                phase: pendingPaddedTallyEvaluationPhase,
+                                generation: BigInt(expectedChunkOrdinal) + 2n,
+                                targetIdentity: Uint8Array.from(
+                                    loadedEvaluation.state.targetIdentity,
+                                ),
+                                topCount: loadedEvaluation.state.topCount,
+                                chunkCount: loadedEvaluation.state.chunkCount,
+                                activationInventoryDigest: Uint8Array.from(
+                                    loadedEvaluation.state
+                                        .activationInventoryDigest,
+                                ),
+                                lastChunkOrdinal: expectedChunkOrdinal,
+                                lastChunkSetDigest:
+                                    Uint8Array.from(chunkSetDigest),
+                                checkpointKey: Uint8Array.from(checkpointKey),
+                                checkpoint: evaluated.nextCheckpoint,
+                            };
+                        replacementState = pendingState;
+                    } else {
+                        const terminal = evaluated.terminal;
+                        const completedState: CompletedPaddedTallyEvaluationState =
+                            {
+                                phase: completedPaddedTallyEvaluationPhase,
+                                generation: BigInt(expectedChunkOrdinal) + 2n,
+                                targetIdentity: Uint8Array.from(
+                                    loadedEvaluation.state.targetIdentity,
+                                ),
+                                topCount: loadedEvaluation.state.topCount,
+                                chunkCount: loadedEvaluation.state.chunkCount,
+                                activationInventoryDigest: Uint8Array.from(
+                                    loadedEvaluation.state
+                                        .activationInventoryDigest,
+                                ),
+                                lastChunkOrdinal: expectedChunkOrdinal,
+                                lastChunkSetDigest:
+                                    Uint8Array.from(chunkSetDigest),
+                                batchIdentity: Uint8Array.from(
+                                    terminal.batchIdentity,
+                                ),
+                                terminalBody: Uint8Array.from(terminal.body),
+                                terminalIdentity: Uint8Array.from(
+                                    terminal.bodyIdentity,
+                                ),
+                                outputSchemaIdentity: Uint8Array.from(
+                                    terminal.outputSchemaIdentity,
+                                ),
+                                acceptedBallotAuthorshipBitmap:
+                                    acceptedBallotAuthorshipBitmap(
+                                        terminal.acceptedBallotAuthorship,
+                                    ),
+                                orderedOptionPositions:
+                                    terminal.orderedOptionPositions ===
+                                    undefined
+                                        ? undefined
+                                        : Array.from(
+                                              terminal.orderedOptionPositions,
+                                          ),
+                            };
+                        replacementState = completedState;
+                    }
+                    try {
+                        await this.replacePaddedTallyEvaluationState(
+                            action,
+                            loadedAction,
+                            loadedEvaluation,
+                            replacementState,
+                            plan,
+                        );
+                        if (
+                            replacementState.phase ===
+                            completedPaddedTallyEvaluationPhase
+                        ) {
+                            await this.configuration.afterDurableTallyTerminalPersist?.();
+                        } else {
+                            await this.configuration.afterDurableTallyEvaluationStep?.();
+                        }
+                        const [retainedActionRecord, retained] =
+                            await Promise.all([
+                                this.durableState.readProtected(
+                                    'actions',
+                                    loadedAction.record.id,
+                                ),
+                                this.durableState.readProtected(
+                                    'evaluations',
+                                    loadedEvaluation.record.id,
+                                ),
+                            ]);
+                        if (
+                            retainedActionRecord === undefined ||
+                            retained === undefined
+                        ) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'The persisted tally evaluation disappeared.',
+                            );
+                        }
+                        const reboundAction = await this.loadActionState(
+                            action,
+                            retainedActionRecord,
+                        );
+                        const reloaded =
+                            await this.loadPaddedTallyEvaluationState(
+                                action,
+                                reboundAction.state.rosterIdentity,
+                                retained,
+                                plan,
+                            );
+                        try {
+                            this.validatePaddedTallyEvaluationLocalBinding(
+                                reloaded.state,
+                                reboundAction.state,
+                                loadedFinality.state,
+                                plan,
+                            );
+                            if (
+                                reloaded.state.phase ===
+                                completedPaddedTallyEvaluationPhase
+                            ) {
+                                return copyCompletedPaddedTallyEvaluation(
+                                    reloaded.state,
+                                    this.constructionKernelRuntime.measureResources(),
+                                );
+                            }
+                            if (
+                                reloaded.state.phase !==
+                                    pendingPaddedTallyEvaluationPhase ||
+                                reloaded.state.lastChunkOrdinal !==
+                                    expectedChunkOrdinal
+                            ) {
+                                throw new DurableStateError(
+                                    'StateLost',
+                                    'The tally evaluation did not advance durably.',
+                                );
+                            }
+                            return {
+                                kind: 'pending',
+                                chunkOrdinal: expectedChunkOrdinal,
+                                nextChunkOrdinal: expectedChunkOrdinal + 1,
+                                resources:
+                                    this.constructionKernelRuntime.measureResources(),
+                            };
+                        } finally {
+                            zeroPaddedTallyEvaluationState(reloaded.state);
+                            zeroActionState(reboundAction.state);
+                        }
+                    } finally {
+                        zeroPaddedTallyEvaluationState(replacementState);
+                    }
                 } finally {
-                    zeroReducedActivationState(retainedActivation.state);
-                    zeroActionState(reboundAction.state);
+                    zeroPaddedTallyEvaluationState(loadedEvaluation.state);
+                    zeroFinalityState(loadedFinality.state);
+                    zeroActionState(loadedAction.state);
                 }
-            } finally {
-                zeroReducedActivationState(replacementState);
-            }
+            });
         } finally {
-            zeroCompletePreparationEvidence(evidence);
-        }
-    }
-
-    private async publishRetainedReducedActivation(
-        action: PrivatePreparationActionContext,
-        loadedAction: LoadedActionState,
-        loadedActivation: LoadedReducedActivationState,
-        verified: VerifiedTallyContext,
-    ): Promise<PublishedReducedActivationPackage> {
-        if (
-            loadedActivation.state.phase !== retainedReducedActivationBodyPhase
-        ) {
-            throw new DurableStateError(
-                'Conflict',
-                'Only a retained unsigned activation body can be published.',
-            );
-        }
-        const boundIdentity =
-            loadedAction.state.signatureBodyIdentities[3] ?? new Uint8Array();
-        this.validateReducedActivationState(
-            loadedActivation.state,
-            verified,
-            loadedActivation.state.preparationAttempt,
-            loadedActivation.state.initialWireValues,
-            loadedActivation.state.gateMaskShares,
-            loadedActivation.state.terminalMaskShares,
-            boundIdentity,
-            loadedAction.state.activationPublicationPhase,
-        );
-        const signingRandomness = randomBytes(
-            actionSignatureSigningRandomnessByteLength,
-        );
-        const signature = this.actionSignatureRuntime.signBodyIdentity(
-            loadedAction.state.signingSecretKey,
-            action.participantPosition,
-            'activation',
-            loadedActivation.state.manifestIdentity,
-            signingRandomness,
-        );
-        let signatureCarrier: Uint8Array;
-        try {
-            signatureCarrier =
-                this.paddedContinuationRuntime.encodeActivationSignature(
-                    action.participantPosition,
-                    loadedActivation.state.manifestIdentity,
-                    signature,
-                );
-        } finally {
-            signature.fill(0);
-            signingRandomness.fill(0);
-        }
-        const replacementState: RetainedReducedActivationState = {
-            ...loadedActivation.state,
-            phase: publishedReducedActivationPhase,
-            generation: loadedActivation.state.generation + 1n,
-            activationSignature: signatureCarrier,
-        };
-        try {
-            await this.replaceReducedActivationState(
-                action,
-                loadedAction,
-                loadedActivation,
-                replacementState,
-            );
-            await this.configuration.afterDurableActivationPublish?.();
-            const [retainedActionRecord, retainedActivationRecord] =
-                await Promise.all([
-                    this.durableState.readProtected(
-                        'actions',
-                        loadedAction.record.id,
-                    ),
-                    this.durableState.readProtected(
-                        'activations',
-                        loadedActivation.record.id,
-                    ),
-                ]);
-            if (
-                retainedActionRecord === undefined ||
-                retainedActivationRecord === undefined
-            ) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'The published activation journal disappeared after persistence.',
-                );
-            }
-            const reboundAction = await this.loadActionState(
-                action,
-                retainedActionRecord,
-            );
-            const reloaded = await this.loadReducedActivationState(
-                action,
-                reboundAction.state.rosterIdentity,
-                retainedActivationRecord,
-            );
-            try {
-                this.validateReducedActivationState(
-                    reloaded.state,
-                    verified,
-                    replacementState.preparationAttempt,
-                    replacementState.initialWireValues,
-                    replacementState.gateMaskShares,
-                    replacementState.terminalMaskShares,
-                    boundIdentity,
-                    reboundAction.state.activationPublicationPhase,
-                );
-                if (reloaded.state.phase !== publishedReducedActivationPhase) {
-                    throw new DurableStateError(
-                        'StateLost',
-                        'The activation publication did not reach its durable terminal phase.',
-                    );
-                }
-                return copyPublishedReducedActivationPackage(reloaded.state);
-            } finally {
-                zeroReducedActivationState(reloaded.state);
-                zeroActionState(reboundAction.state);
-            }
-        } finally {
-            zeroReducedActivationState(replacementState);
+            chunkSetDigest.fill(0);
         }
     }
 
@@ -3580,6 +4044,7 @@ class PrivatePreparationWorkerRuntime {
                             this.validateFinalizedNoResultState(
                                 loadedNoResult.state,
                                 verified,
+                                loadedAction.state.evaluationJournalGeneration,
                             );
                             return copyTallyEvaluationProgress(
                                 loadedNoResult.state,
@@ -3608,25 +4073,39 @@ class PrivatePreparationWorkerRuntime {
                     } finally {
                         zeroNoResultState(state);
                     }
-                    const retained = await this.durableState.readProtected(
-                        'evaluations',
-                        identifier,
-                    );
-                    if (retained === undefined) {
+                    const [retainedActionRecord, retained] = await Promise.all([
+                        this.durableState.readProtected(
+                            'actions',
+                            actionIdentifier(this.configuration, action),
+                        ),
+                        this.durableState.readProtected(
+                            'evaluations',
+                            identifier,
+                        ),
+                    ]);
+                    if (
+                        retainedActionRecord === undefined ||
+                        retained === undefined
+                    ) {
                         throw new DurableStateError(
                             'StateLost',
                             'The durable no-result terminal disappeared after persistence.',
                         );
                     }
+                    const reboundAction = await this.loadActionState(
+                        action,
+                        retainedActionRecord,
+                    );
                     const reloaded = await this.loadNoResultState(
                         action,
-                        loadedAction.state.rosterIdentity,
+                        reboundAction.state.rosterIdentity,
                         retained,
                     );
                     try {
                         this.validateFinalizedNoResultState(
                             reloaded.state,
                             verified,
+                            reboundAction.state.evaluationJournalGeneration,
                         );
                         return copyTallyEvaluationProgress(
                             reloaded.state,
@@ -3634,6 +4113,7 @@ class PrivatePreparationWorkerRuntime {
                         );
                     } finally {
                         zeroNoResultState(reloaded.state);
+                        zeroActionState(reboundAction.state);
                     }
                 } finally {
                     zeroVerifiedTallyContext(verified);
@@ -3665,6 +4145,67 @@ class PrivatePreparationWorkerRuntime {
                 actionRecord,
             );
             try {
+                const evaluationRecord = await this.durableState.readProtected(
+                    'evaluations',
+                    paddedTallyEvaluationIdentifier(this.configuration, action),
+                );
+                if (evaluationRecord !== undefined) {
+                    const finalityRecord =
+                        await this.durableState.readProtected(
+                            'finalities',
+                            finalityIdentifier(this.configuration, action),
+                        );
+                    if (finalityRecord === undefined) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'Finality state is absent for retained tally evaluation.',
+                        );
+                    }
+                    const loadedFinality = await this.loadFinalityState(
+                        action,
+                        loadedAction.state.rosterIdentity,
+                        finalityRecord,
+                    );
+                    try {
+                        const plan = this.paddedTallyRuntime.compilePlan(
+                            loadedFinality.state.topCount,
+                        );
+                        const loadedEvaluation =
+                            await this.loadPaddedTallyEvaluationState(
+                                action,
+                                loadedAction.state.rosterIdentity,
+                                evaluationRecord,
+                                plan,
+                            );
+                        try {
+                            this.validatePaddedTallyEvaluationLocalBinding(
+                                loadedEvaluation.state,
+                                loadedAction.state,
+                                loadedFinality.state,
+                                plan,
+                            );
+                            if (
+                                loadedEvaluation.state.phase !==
+                                completedPaddedTallyEvaluationPhase
+                            ) {
+                                throw new DurableStateError(
+                                    'Conflict',
+                                    'The tally evaluation is still pending.',
+                                );
+                            }
+                            return copyCompletedPaddedTallyEvaluation(
+                                loadedEvaluation.state,
+                                this.constructionKernelRuntime.measureResources(),
+                            );
+                        } finally {
+                            zeroPaddedTallyEvaluationState(
+                                loadedEvaluation.state,
+                            );
+                        }
+                    } finally {
+                        zeroFinalityState(loadedFinality.state);
+                    }
+                }
                 const noResultRecord = await this.durableState.readProtected(
                     'evaluations',
                     noResultIdentifier(this.configuration, action),
@@ -3676,6 +4217,15 @@ class PrivatePreparationWorkerRuntime {
                         noResultRecord,
                     );
                     try {
+                        if (
+                            loadedNoResult.state.generation !==
+                            loadedAction.state.evaluationJournalGeneration
+                        ) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'The no-result terminal and action journal disagree.',
+                            );
+                        }
                         return copyTallyEvaluationProgress(
                             loadedNoResult.state,
                             this.constructionKernelRuntime.measureResources(),
@@ -3686,7 +4236,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 throw new DurableStateError(
                     'StateLost',
-                    'No certificate-verified durable no-result terminal is available.',
+                    'No certificate-verified durable tally terminal is available.',
                 );
             } finally {
                 zeroActionState(loadedAction.state);
@@ -3850,28 +4400,105 @@ class PrivatePreparationWorkerRuntime {
         );
     }
 
-    private validateReducedActivationState(
-        state: ReducedActivationState,
-        verified: VerifiedTallyContext,
-        preparationAttempt: number,
-        initialWireValues: Uint8Array,
-        gateMaskShares: Uint8Array,
-        terminalMaskShares: Uint8Array,
-        boundIdentity: Uint8Array,
-        activationPublicationPhase: ActionState['activationPublicationPhase'],
+    private verifyRetainedComputationCertificate(
+        state: FinalityState,
+        canonicalRosterBytes: Uint8Array,
+        finalitySignatures: readonly FinalitySignatureCarrier[],
     ): void {
-        validateReducedActivationCommonState(state);
-        const expectedGeneration =
-            state.phase === allocatedReducedActivationPhase
-                ? 1n
-                : state.phase === retainedReducedActivationBodyPhase
-                  ? 2n
-                  : 3n;
+        const certificate = this.finalityRuntime.verifyCertificate(
+            state.targetBody,
+            canonicalRosterBytes,
+            finalitySignatures,
+        );
+        if (
+            state.phase !== publishedFinalityPhase ||
+            state.targetKind !== 'computation' ||
+            state.sourceSubmissionBitmap === 0 ||
+            certificate.targetKind !== 'computation' ||
+            certificate.sourceSubmissionBitmap !==
+                state.sourceSubmissionBitmap ||
+            certificate.topCount !== state.topCount ||
+            !bytesEqual(certificate.targetIdentity, state.targetIdentity)
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The retained computation finality does not match its certificate.',
+            );
+        }
+    }
+
+    private validatePaddedTallyGenerationLocalBinding(
+        state: PaddedTallyGenerationState,
+        actionState: ActionState,
+        finalityState: FinalityState,
+        plan: PaddedTallyPlan,
+    ): void {
+        validatePaddedTallyGenerationState(state, plan);
+        const boundIdentity = actionState.signatureBodyIdentities[3];
+        if (
+            finalityState.phase !== publishedFinalityPhase ||
+            finalityState.targetKind !== 'computation' ||
+            finalityState.sourceSubmissionBitmap === 0 ||
+            state.preparationAttempt !== finalityState.preparationAttempt ||
+            !bytesEqual(
+                state.verifiedPreparationRoot,
+                finalityState.verifiedPreparationRoot,
+            ) ||
+            !bytesEqual(state.targetIdentity, finalityState.targetIdentity) ||
+            !bytesEqual(
+                state.sourceBodyIdentities,
+                finalityState.sourceBodyIdentities,
+            ) ||
+            state.topCount !== finalityState.topCount ||
+            state.generation !== actionState.activationJournalGeneration ||
+            boundIdentity === undefined
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The retained tally generation does not match local finality.',
+            );
+        }
+        if (state.phase === completedPaddedTallyGenerationPhase) {
+            if (
+                actionState.activationPublicationPhase !==
+                    publishedActivationLocalPhase ||
+                !bytesEqual(boundIdentity, state.manifestIdentity)
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The completed tally and activation journal disagree.',
+                );
+            }
+            return;
+        }
+        if (
+            actionState.activationPublicationPhase !==
+                unpublishedActivationLocalPhase ||
+            !isZero(boundIdentity)
+        ) {
+            throw new DurableStateError(
+                'StateLost',
+                'The pending tally and activation journal disagree.',
+            );
+        }
+    }
+
+    private validatePaddedTallyGenerationBinding(
+        state: PaddedTallyGenerationState,
+        actionState: ActionState,
+        finalityState: FinalityState,
+        verified: VerifiedTallyContext,
+        plan: PaddedTallyPlan,
+    ): void {
+        this.validatePaddedTallyGenerationLocalBinding(
+            state,
+            actionState,
+            finalityState,
+            plan,
+        );
         if (
             verified.targetKind !== 'computation' ||
             verified.sourceSubmissionBitmap === 0 ||
-            state.generation !== expectedGeneration ||
-            state.preparationAttempt !== preparationAttempt ||
             !bytesEqual(
                 state.verifiedPreparationRoot,
                 verified.verifiedPreparationRoot,
@@ -3881,70 +4508,64 @@ class PrivatePreparationWorkerRuntime {
                 state.sourceBodyIdentities,
                 verified.sourceBodyIdentities,
             ) ||
-            state.topCount !== verified.topCount ||
-            !bytesEqual(state.initialWireValues, initialWireValues) ||
-            !bytesEqual(state.gateMaskShares, gateMaskShares) ||
-            !bytesEqual(state.terminalMaskShares, terminalMaskShares)
+            state.topCount !== verified.topCount
         ) {
             throw new DurableStateError(
                 'Conflict',
-                'The retained reduced activation does not match the verified request.',
+                'The retained tally generation does not match the verified request.',
             );
         }
-        if (state.phase === allocatedReducedActivationPhase) {
-            if (
-                !isZero(boundIdentity) ||
-                activationPublicationPhase !==
-                    unpublishedActivationLocalPhase ||
-                state.allocationNonce.byteLength !==
-                    paddedContinuationAllocationNonceByteLength ||
-                state.labelEntropy.byteLength !==
-                    reducedActivationLabelEntropyByteLength
-            ) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'The activation allocation and signature slot are inconsistent.',
-                );
-            }
-            return;
-        }
+    }
+
+    private validatePaddedTallyEvaluationLocalBinding(
+        state: PaddedTallyEvaluationState,
+        actionState: ActionState,
+        finalityState: FinalityState,
+        plan: PaddedTallyPlan,
+    ): void {
+        validatePaddedTallyEvaluationState(state, plan);
+        const boundIdentity = actionState.signatureBodyIdentities[3];
         if (
+            finalityState.phase !== publishedFinalityPhase ||
+            finalityState.targetKind !== 'computation' ||
+            finalityState.sourceSubmissionBitmap === 0 ||
+            !bytesEqual(state.targetIdentity, finalityState.targetIdentity) ||
+            state.topCount !== finalityState.topCount ||
+            state.generation !== actionState.evaluationJournalGeneration ||
+            boundIdentity === undefined ||
             isZero(boundIdentity) ||
-            !bytesEqual(boundIdentity, state.manifestIdentity) ||
-            state.chunk.byteLength !== reducedActivationChunkByteLength ||
-            state.chunkIdentity.byteLength !== identityByteLength ||
-            state.manifest.byteLength !==
-                paddedContinuationManifestByteLength ||
-            state.manifestIdentity.byteLength !== identityByteLength ||
-            state.activationSignature.byteLength !==
-                actionSignatureCarrierByteLength
+            actionState.activationPublicationPhase !==
+                publishedActivationLocalPhase
         ) {
             throw new DurableStateError(
-                'StateLost',
-                'The retained activation body and signature slot are inconsistent.',
+                'Conflict',
+                'The retained tally evaluation does not match local finality and activation.',
             );
         }
+    }
+
+    private validatePaddedTallyEvaluationBinding(
+        state: PaddedTallyEvaluationState,
+        actionState: ActionState,
+        finalityState: FinalityState,
+        activationInventoryDigest: Uint8Array,
+        plan: PaddedTallyPlan,
+    ): void {
+        this.validatePaddedTallyEvaluationLocalBinding(
+            state,
+            actionState,
+            finalityState,
+            plan,
+        );
         if (
-            (state.phase === retainedReducedActivationBodyPhase &&
-                activationPublicationPhase !==
-                    unpublishedActivationLocalPhase) ||
-            (state.phase === publishedReducedActivationPhase &&
-                activationPublicationPhase !== publishedActivationLocalPhase)
+            !bytesEqual(
+                state.activationInventoryDigest,
+                activationInventoryDigest,
+            )
         ) {
             throw new DurableStateError(
-                'StateLost',
-                'The activation body and action publication journal disagree.',
-            );
-        }
-        if (
-            (state.phase === retainedReducedActivationBodyPhase &&
-                !isZero(state.activationSignature)) ||
-            (state.phase === publishedReducedActivationPhase &&
-                isZero(state.activationSignature))
-        ) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The retained activation signature phase is inconsistent.',
+                'Conflict',
+                'The retained tally evaluation has another activation inventory.',
             );
         }
     }
@@ -3952,6 +4573,7 @@ class PrivatePreparationWorkerRuntime {
     private validateFinalizedNoResultState(
         state: NoResultState,
         verified: VerifiedTallyContext,
+        evaluationJournalGeneration?: bigint,
     ): void {
         if (
             verified.targetKind !== 'no-result' ||
@@ -3961,7 +4583,9 @@ class PrivatePreparationWorkerRuntime {
             !bytesEqual(state.targetIdentity, verified.targetIdentity) ||
             state.topCount !== verified.topCount ||
             state.sourceSubmissionBitmap !== 0 ||
-            state.acceptedBallotAuthorshipBitmap !== 0
+            state.acceptedBallotAuthorshipBitmap !== 0 ||
+            (evaluationJournalGeneration !== undefined &&
+                state.generation !== evaluationJournalGeneration)
         ) {
             throw new DurableStateError(
                 'CorruptState',
@@ -3970,25 +4594,26 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    private async insertReducedActivationState(
+    private async insertPaddedTallyGenerationState(
         action: PrivatePreparationActionContext,
         loadedAction: LoadedActionState,
-        state: AllocatedReducedActivationState,
-    ): Promise<ProtectedRecord> {
-        const plaintext = encodeReducedActivationState(state);
+        state: AllocatedPaddedTallyGenerationState,
+        plan: PaddedTallyPlan,
+    ): Promise<void> {
+        const plaintext = encodePaddedTallyGenerationState(state, plan);
         const context = encodeLocalRecordContext(
             terminalLocalContext(
                 this.configuration,
                 action,
                 loadedAction.state.rosterIdentity,
                 state.generation,
-                reducedActivationStateKind,
+                paddedTallyGenerationStateKind,
             ),
         );
         let record: ProtectedRecord;
         try {
             record = await createProtectedRecord(
-                reducedActivationIdentifier(this.configuration, action),
+                paddedTallyGenerationIdentifier(this.configuration, action),
                 context,
                 plaintext,
                 loadedAction.rootKey,
@@ -3997,62 +4622,29 @@ class PrivatePreparationWorkerRuntime {
             plaintext.fill(0);
             context.fill(0);
         }
-        await this.durableState.putIfAbsent('activations', record);
-        return record;
-    }
-
-    private async bindReducedActivationBody(
-        action: PrivatePreparationActionContext,
-        loadedAction: LoadedActionState,
-        loadedActivation: LoadedReducedActivationState,
-        replacementState: RetainedReducedActivationState,
-    ): Promise<void> {
-        const activationPlaintext =
-            encodeReducedActivationState(replacementState);
-        const activationContext = encodeLocalRecordContext(
-            terminalLocalContext(
-                this.configuration,
-                action,
-                loadedAction.state.rosterIdentity,
-                replacementState.generation,
-                reducedActivationStateKind,
-            ),
-        );
-        let activationRecord: ProtectedRecord;
-        try {
-            activationRecord = await createProtectedRecord(
-                loadedActivation.record.id,
-                activationContext,
-                activationPlaintext,
-                loadedAction.rootKey,
+        if (loadedAction.state.activationJournalGeneration !== 0n) {
+            throw new DurableStateError(
+                'Conflict',
+                'The tally generation journal is already consumed.',
             );
-        } finally {
-            activationPlaintext.fill(0);
-            activationContext.fill(0);
         }
-        const replacementActionState: ActionState = {
+        const actionReplacementState: ActionState = {
             ...loadedAction.state,
             generation: loadedAction.state.generation + 1n,
-            signatureBodyIdentities:
-                loadedAction.state.signatureBodyIdentities.map(
-                    (identity, index) =>
-                        index === 3
-                            ? Uint8Array.from(replacementState.manifestIdentity)
-                            : Uint8Array.from(identity),
-                ),
+            activationJournalGeneration: state.generation,
         };
-        const actionPlaintext = encodeActionState(replacementActionState);
+        const actionPlaintext = encodeActionState(actionReplacementState);
         const actionContext = encodeLocalRecordContext(
             actionLocalContext(
                 this.configuration,
                 action,
-                replacementActionState.rosterIdentity,
-                replacementActionState.generation,
+                actionReplacementState.rosterIdentity,
+                actionReplacementState.generation,
             ),
         );
-        let actionRecord: ProtectedRecord;
+        let actionReplacement: ProtectedRecord;
         try {
-            actionRecord = await createProtectedRecord(
+            actionReplacement = await createProtectedRecord(
                 loadedAction.record.id,
                 actionContext,
                 actionPlaintext,
@@ -4062,46 +4654,36 @@ class PrivatePreparationWorkerRuntime {
             actionPlaintext.fill(0);
             actionContext.fill(0);
         }
-        await this.durableState.replaceTwoExact(
+        await this.durableState.replaceExactAndPutIfAbsent(
             'actions',
             loadedAction.record,
-            actionRecord,
+            actionReplacement,
             'activations',
-            loadedActivation.record,
-            activationRecord,
+            record,
         );
     }
 
-    private async replaceReducedActivationState(
+    private async replacePaddedTallyGenerationState(
         action: PrivatePreparationActionContext,
         loadedAction: LoadedActionState,
-        loadedActivation: LoadedReducedActivationState,
-        replacementState: RetainedReducedActivationState,
+        loadedGeneration: LoadedPaddedTallyGenerationState,
+        state: RetainedPaddedTallyChunkState,
+        plan: PaddedTallyPlan,
     ): Promise<void> {
-        if (
-            replacementState.phase !== publishedReducedActivationPhase ||
-            loadedAction.state.activationPublicationPhase !==
-                unpublishedActivationLocalPhase
-        ) {
-            throw new DurableStateError(
-                'Conflict',
-                'The activation publication journal is already consumed.',
-            );
-        }
-        const plaintext = encodeReducedActivationState(replacementState);
+        const plaintext = encodePaddedTallyGenerationState(state, plan);
         const context = encodeLocalRecordContext(
             terminalLocalContext(
                 this.configuration,
                 action,
                 loadedAction.state.rosterIdentity,
-                replacementState.generation,
-                reducedActivationStateKind,
+                state.generation,
+                paddedTallyGenerationStateKind,
             ),
         );
         let replacement: ProtectedRecord;
         try {
             replacement = await createProtectedRecord(
-                loadedActivation.record.id,
+                loadedGeneration.record.id,
                 context,
                 plaintext,
                 loadedAction.rootKey,
@@ -4110,18 +4692,18 @@ class PrivatePreparationWorkerRuntime {
             plaintext.fill(0);
             context.fill(0);
         }
-        const replacementActionState: ActionState = {
+        const actionReplacementState: ActionState = {
             ...loadedAction.state,
             generation: loadedAction.state.generation + 1n,
-            activationPublicationPhase: publishedActivationLocalPhase,
+            activationJournalGeneration: state.generation,
         };
-        const actionPlaintext = encodeActionState(replacementActionState);
+        const actionPlaintext = encodeActionState(actionReplacementState);
         const actionContext = encodeLocalRecordContext(
             actionLocalContext(
                 this.configuration,
                 action,
-                replacementActionState.rosterIdentity,
-                replacementActionState.generation,
+                actionReplacementState.rosterIdentity,
+                actionReplacementState.generation,
             ),
         );
         let actionReplacement: ProtectedRecord;
@@ -4141,7 +4723,241 @@ class PrivatePreparationWorkerRuntime {
             loadedAction.record,
             actionReplacement,
             'activations',
-            loadedActivation.record,
+            loadedGeneration.record,
+            replacement,
+        );
+    }
+
+    private async completePaddedTallyGenerationState(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        loadedGeneration: LoadedPaddedTallyGenerationState,
+        state: CompletedPaddedTallyGenerationState,
+        plan: PaddedTallyPlan,
+    ): Promise<void> {
+        const boundIdentity = loadedAction.state.signatureBodyIdentities[3];
+        if (
+            boundIdentity === undefined ||
+            !isZero(boundIdentity) ||
+            loadedAction.state.activationPublicationPhase !==
+                unpublishedActivationLocalPhase
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The activation publication journal is already consumed.',
+            );
+        }
+        const generationPlaintext = encodePaddedTallyGenerationState(
+            state,
+            plan,
+        );
+        const generationContext = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.rosterIdentity,
+                state.generation,
+                paddedTallyGenerationStateKind,
+            ),
+        );
+        let generationReplacement: ProtectedRecord;
+        try {
+            generationReplacement = await createProtectedRecord(
+                loadedGeneration.record.id,
+                generationContext,
+                generationPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            generationPlaintext.fill(0);
+            generationContext.fill(0);
+        }
+        const actionReplacementState: ActionState = {
+            ...loadedAction.state,
+            generation: loadedAction.state.generation + 1n,
+            signatureBodyIdentities:
+                loadedAction.state.signatureBodyIdentities.map(
+                    (identity, index) =>
+                        index === 3
+                            ? Uint8Array.from(state.manifestIdentity)
+                            : Uint8Array.from(identity),
+                ),
+            activationPublicationPhase: publishedActivationLocalPhase,
+            activationJournalGeneration: state.generation,
+        };
+        const actionPlaintext = encodeActionState(actionReplacementState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                actionReplacementState.rosterIdentity,
+                actionReplacementState.generation,
+            ),
+        );
+        let actionReplacement: ProtectedRecord;
+        try {
+            actionReplacement = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        await this.durableState.replaceTwoExact(
+            'actions',
+            loadedAction.record,
+            actionReplacement,
+            'activations',
+            loadedGeneration.record,
+            generationReplacement,
+        );
+    }
+
+    private async insertPaddedTallyEvaluationState(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        state: PaddedTallyEvaluationState,
+        plan: PaddedTallyPlan,
+    ): Promise<void> {
+        if (state.phase !== initializedPaddedTallyEvaluationPhase) {
+            throw new DurableStateError(
+                'Conflict',
+                'Only initialized tally evaluation state can be inserted.',
+            );
+        }
+        const plaintext = encodePaddedTallyEvaluationState(state, plan);
+        const context = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.rosterIdentity,
+                state.generation,
+                paddedTallyEvaluationStateKind,
+            ),
+        );
+        let record: ProtectedRecord;
+        try {
+            record = await createProtectedRecord(
+                paddedTallyEvaluationIdentifier(this.configuration, action),
+                context,
+                plaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        if (loadedAction.state.evaluationJournalGeneration !== 0n) {
+            throw new DurableStateError(
+                'Conflict',
+                'The tally evaluation journal is already consumed.',
+            );
+        }
+        const actionReplacementState: ActionState = {
+            ...loadedAction.state,
+            generation: loadedAction.state.generation + 1n,
+            evaluationJournalGeneration: state.generation,
+        };
+        const actionPlaintext = encodeActionState(actionReplacementState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                actionReplacementState.rosterIdentity,
+                actionReplacementState.generation,
+            ),
+        );
+        let actionReplacement: ProtectedRecord;
+        try {
+            actionReplacement = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        await this.durableState.replaceExactAndPutIfAbsent(
+            'actions',
+            loadedAction.record,
+            actionReplacement,
+            'evaluations',
+            record,
+        );
+    }
+
+    private async replacePaddedTallyEvaluationState(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        loadedEvaluation: LoadedPaddedTallyEvaluationState,
+        state: PaddedTallyEvaluationState,
+        plan: PaddedTallyPlan,
+    ): Promise<void> {
+        if (state.phase === initializedPaddedTallyEvaluationPhase) {
+            throw new DurableStateError(
+                'Conflict',
+                'The tally evaluation replacement did not advance.',
+            );
+        }
+        const plaintext = encodePaddedTallyEvaluationState(state, plan);
+        const context = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.rosterIdentity,
+                state.generation,
+                paddedTallyEvaluationStateKind,
+            ),
+        );
+        let replacement: ProtectedRecord;
+        try {
+            replacement = await createProtectedRecord(
+                loadedEvaluation.record.id,
+                context,
+                plaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        const actionReplacementState: ActionState = {
+            ...loadedAction.state,
+            generation: loadedAction.state.generation + 1n,
+            evaluationJournalGeneration: state.generation,
+        };
+        const actionPlaintext = encodeActionState(actionReplacementState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                actionReplacementState.rosterIdentity,
+                actionReplacementState.generation,
+            ),
+        );
+        let actionReplacement: ProtectedRecord;
+        try {
+            actionReplacement = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        await this.durableState.replaceTwoExact(
+            'actions',
+            loadedAction.record,
+            actionReplacement,
+            'evaluations',
+            loadedEvaluation.record,
             replacement,
         );
     }
@@ -4208,7 +5024,45 @@ class PrivatePreparationWorkerRuntime {
             plaintext.fill(0);
             context.fill(0);
         }
-        await this.durableState.putIfAbsent('evaluations', record);
+        if (loadedAction.state.evaluationJournalGeneration !== 0n) {
+            throw new DurableStateError(
+                'Conflict',
+                'The tally terminal journal is already consumed.',
+            );
+        }
+        const actionReplacementState: ActionState = {
+            ...loadedAction.state,
+            generation: loadedAction.state.generation + 1n,
+            evaluationJournalGeneration: state.generation,
+        };
+        const actionPlaintext = encodeActionState(actionReplacementState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                actionReplacementState.rosterIdentity,
+                actionReplacementState.generation,
+            ),
+        );
+        let actionReplacement: ProtectedRecord;
+        try {
+            actionReplacement = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        await this.durableState.replaceExactAndPutIfAbsent(
+            'actions',
+            loadedAction.record,
+            actionReplacement,
+            'evaluations',
+            record,
+        );
     }
 
     private async loadCompletePreparationEvidence(
@@ -5559,16 +6413,17 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    private async loadReducedActivationState(
+    private async loadPaddedTallyGenerationState(
         action: PrivatePreparationActionContext,
         rosterIdentity: Uint8Array,
         record: ProtectedRecord,
-    ): Promise<LoadedReducedActivationState> {
+        plan: PaddedTallyPlan,
+    ): Promise<LoadedPaddedTallyGenerationState> {
         const rootKey = await this.durableState.readRoot();
         if (rootKey === undefined) {
             throw new DurableStateError(
                 'StateLost',
-                'The browser-local root is absent for retained activation state.',
+                'The browser-local root is absent for retained tally generation state.',
             );
         }
         const localContext = decodeLocalRecordContext(record.context);
@@ -5580,7 +6435,7 @@ class PrivatePreparationWorkerRuntime {
                 expectedContext,
                 rootKey,
             );
-            const state = decodeReducedActivationState(plaintext);
+            const state = decodePaddedTallyGenerationState(plaintext, plan);
             try {
                 assertTerminalLocalContext(
                     state.generation,
@@ -5588,11 +6443,54 @@ class PrivatePreparationWorkerRuntime {
                     this.configuration,
                     action,
                     rosterIdentity,
-                    reducedActivationStateKind,
+                    paddedTallyGenerationStateKind,
                 );
                 return { record, state };
-            } catch (error: unknown) {
-                zeroReducedActivationState(state);
+            } catch (error) {
+                zeroPaddedTallyGenerationState(state);
+                throw error;
+            }
+        } finally {
+            expectedContext.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+
+    private async loadPaddedTallyEvaluationState(
+        action: PrivatePreparationActionContext,
+        rosterIdentity: Uint8Array,
+        record: ProtectedRecord,
+        plan: PaddedTallyPlan,
+    ): Promise<LoadedPaddedTallyEvaluationState> {
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for retained tally evaluation state.',
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        const expectedContext = encodeLocalRecordContext(localContext);
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await openProtectedRecord(
+                record,
+                expectedContext,
+                rootKey,
+            );
+            const state = decodePaddedTallyEvaluationState(plaintext, plan);
+            try {
+                assertTerminalLocalContext(
+                    state.generation,
+                    localContext,
+                    this.configuration,
+                    action,
+                    rosterIdentity,
+                    paddedTallyEvaluationStateKind,
+                );
+                return { record, state };
+            } catch (error) {
+                zeroPaddedTallyEvaluationState(state);
                 throw error;
             }
         } finally {
@@ -5756,9 +6654,12 @@ type WorkerInstallationOptions = Readonly<{
     unpinnedKernelAllowed: boolean;
     afterDurableConsume?: () => Promise<void> | void;
     afterDurableSourceBind?: () => Promise<void> | void;
-    afterDurableActivationAllocate?: () => Promise<void> | void;
-    afterDurableActivationBodyBind?: () => Promise<void> | void;
-    afterDurableActivationPublish?: () => Promise<void> | void;
+    afterDurableTallyGenerationInitialize?: () => Promise<void> | void;
+    afterDurableTallyChunkPersist?: () => Promise<void> | void;
+    afterDurableTallyActivationPublish?: () => Promise<void> | void;
+    afterDurableTallyEvaluationInitialize?: () => Promise<void> | void;
+    afterDurableTallyEvaluationStep?: () => Promise<void> | void;
+    afterDurableTallyTerminalPersist?: () => Promise<void> | void;
 }>;
 
 const failureResponse = (
@@ -5817,12 +6718,24 @@ const responseTransferables = (
         ];
     }
     if ('chunk' in result) {
-        return [
+        const transferables = [
             result.chunk.buffer,
             result.chunkIdentity.buffer,
-            result.manifest.buffer,
-            result.manifestIdentity.buffer,
-            result.activationSignature.buffer,
+        ];
+        if (result.status === 'complete') {
+            transferables.push(
+                result.manifest.buffer,
+                result.manifestIdentity.buffer,
+                result.activationSignature.buffer,
+            );
+        }
+        return transferables;
+    }
+    if ('batchIdentity' in result) {
+        return [
+            result.batchIdentity.buffer,
+            result.terminalBody.buffer,
+            result.terminalIdentity.buffer,
         ];
     }
     return [];
@@ -5860,9 +6773,12 @@ export const installPrivatePreparationWorker = (
                             options.unpinnedKernelAllowed,
                             options.afterDurableConsume,
                             options.afterDurableSourceBind,
-                            options.afterDurableActivationAllocate,
-                            options.afterDurableActivationBodyBind,
-                            options.afterDurableActivationPublish,
+                            options.afterDurableTallyGenerationInitialize,
+                            options.afterDurableTallyChunkPersist,
+                            options.afterDurableTallyActivationPublish,
+                            options.afterDurableTallyEvaluationInitialize,
+                            options.afterDurableTallyEvaluationStep,
+                            options.afterDurableTallyTerminalPersist,
                         );
                         await runtimePromise;
                         response = {
@@ -5927,12 +6843,43 @@ export const installPrivatePreparationWorker = (
                             };
                         } else if (
                             request.operation ===
-                            'create-reduced-activation-package'
+                            'initialize-padded-tally-generation'
                         ) {
                             response = {
                                 requestId: request.requestId,
                                 ok: true,
-                                result: await runtime.createReducedActivationPackage(
+                                result: await runtime.initializePaddedTallyGeneration(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation === 'create-padded-tally-chunk'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.createPaddedTallyChunk(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation ===
+                            'initialize-padded-tally-evaluation'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.initializePaddedTallyEvaluation(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation === 'evaluate-padded-tally-chunk'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.evaluatePaddedTallyChunk(
                                     request.input,
                                 ),
                             };

@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -15,16 +17,26 @@ import type {
     PrivatePreparationActionContext,
     PrivatePreparationWorkerRequest,
     PrivatePreparationWorkerResponse,
+    PaddedTallyEvaluationStep,
     PublishedFinalityPackage,
+    PublishedPaddedTallyChunk,
     PublishedPreparationPackage,
-    PublishedReducedActivationPackage,
     PublishedSourcePackage,
+    TallyEvaluationProgress,
 } from '../../src/private-preparation-worker-protocol.js';
 import { openRosterRuntime } from '../../src/roster-runtime.js';
 import {
     abstentionSourceBodyByteLength,
     submittedSourceBodyByteLength,
 } from '../../src/source-runtime.js';
+
+import { resolveManualEvidenceCase } from '#tests/manual-evidence-registry.js';
+import {
+    parsePaddedTallyChunk,
+    parsePaddedTallyManifest,
+    parsePaddedTallyTerminal,
+    type ParsedPaddedTallyChunk,
+} from '#tests/padded-tally-transcript-model.js';
 
 const participantCount = 10;
 const preparationAttempt = 7;
@@ -33,6 +45,16 @@ const candidateBuildIdentity = new Uint8Array(64).fill(0x22);
 const actionProposalIdentity = new Uint8Array(64).fill(0x33);
 const actionDefinitionIdentity = new Uint8Array(64).fill(0x34);
 const predecessorIdentity = new Uint8Array(64).fill(0x44);
+const manualEvidenceEnvironment = import.meta.env;
+const topCountOneEvidenceCase = resolveManualEvidenceCase(
+    'padded-tally-top-count-1',
+);
+const topCountTenEvidenceCase = resolveManualEvidenceCase(
+    'padded-tally-top-count-10',
+);
+const emptyUsableBallotEvidenceCase = resolveManualEvidenceCase(
+    'padded-tally-empty-usable-ballots',
+);
 const kernelUrl = new URL(
     '/packages/wasm/dist/sealed-lattice-kernel.wasm',
     window.location.origin,
@@ -49,21 +71,40 @@ const sourceCrashWorkerUrl = new URL(
     './fixtures/private-preparation-source-crash-worker.ts',
     import.meta.url,
 );
-const activationAllocationCrashWorkerUrl = new URL(
-    './fixtures/private-preparation-activation-allocation-crash-worker.ts',
+const tallyGenerationInitializationCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-tally-generation-initialization-crash-worker.ts',
     import.meta.url,
 );
-const activationBodyCrashWorkerUrl = new URL(
-    './fixtures/private-preparation-activation-body-crash-worker.ts',
+const tallyChunkCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-tally-chunk-crash-worker.ts',
     import.meta.url,
 );
-const activationPublicationCrashWorkerUrl = new URL(
-    './fixtures/private-preparation-activation-publication-crash-worker.ts',
+const tallyPublicationCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-tally-publication-crash-worker.ts',
     import.meta.url,
 );
-
+const tallyEvaluationInitializationCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-tally-evaluation-initialization-crash-worker.ts',
+    import.meta.url,
+);
+const tallyEvaluationStepCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-tally-evaluation-step-crash-worker.ts',
+    import.meta.url,
+);
+const tallyTerminalCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-tally-terminal-crash-worker.ts',
+    import.meta.url,
+);
 const openClients = new Set<PrivatePreparationWorkerClient>();
 const databaseNames = new Set<string>();
+const visitCountsByRunIdentity = new Map<string, number[]>();
+const visitStartsByClient = new Map<
+    PrivatePreparationWorkerClient,
+    Readonly<{ runIdentity: string; startedAtMilliseconds: number }>
+>();
+const longestVisitMillisecondsByRunIdentity = new Map<string, number>();
+const relayReadByteLengthByDatabase = new Map<string, number>();
+const relayWriteByteLengthByDatabase = new Map<string, number>();
 
 const actionContext = (
     participantPosition: number,
@@ -112,18 +153,133 @@ const transactionCompletion = (transaction: IDBTransaction): Promise<void> =>
         );
     });
 
-const readRawActivationRecord = async (
+const relayChunkStoreName = 'chunks';
+
+const openRelayDatabase = (name: string): Promise<IDBDatabase> =>
+    new Promise((resolve, reject) => {
+        const request = indexedDB.open(name, 1);
+        request.addEventListener('upgradeneeded', () => {
+            if (
+                !request.result.objectStoreNames.contains(relayChunkStoreName)
+            ) {
+                request.result.createObjectStore(relayChunkStoreName, {
+                    keyPath: 'id',
+                });
+            }
+        });
+        request.addEventListener('success', () => resolve(request.result));
+        request.addEventListener('error', () =>
+            reject(new Error(`Failed to open relay database ${name}.`)),
+        );
+    });
+
+const relayChunkIdentifier = (
+    chunkOrdinal: number,
+    participantPosition: number,
+): string => `${String(chunkOrdinal)}.${String(participantPosition)}`;
+
+const persistRelayChunk = async (
     name: string,
+    chunkOrdinal: number,
+    participantPosition: number,
+    chunk: Uint8Array,
+): Promise<void> => {
+    const database = await openRelayDatabase(name);
+    try {
+        const transaction = database.transaction(
+            relayChunkStoreName,
+            'readwrite',
+            { durability: 'strict' },
+        );
+        transaction.objectStore(relayChunkStoreName).put({
+            id: relayChunkIdentifier(chunkOrdinal, participantPosition),
+            bytes: Uint8Array.from(chunk),
+        });
+        await transactionCompletion(transaction);
+        relayWriteByteLengthByDatabase.set(
+            name,
+            (relayWriteByteLengthByDatabase.get(name) ?? 0) + chunk.byteLength,
+        );
+    } finally {
+        database.close();
+    }
+};
+
+const readRelayChunkSet = async (
+    name: string,
+    chunkOrdinal: number,
+): Promise<Uint8Array[]> => {
+    const database = await openRelayDatabase(name);
+    try {
+        const transaction = database.transaction(
+            relayChunkStoreName,
+            'readonly',
+        );
+        const requests = Array.from(
+            { length: participantCount },
+            (_, participantPosition) =>
+                transaction
+                    .objectStore(relayChunkStoreName)
+                    .get(
+                        relayChunkIdentifier(chunkOrdinal, participantPosition),
+                    ),
+        );
+        const records = await Promise.all(
+            requests.map(
+                (request) =>
+                    new Promise<unknown>((resolve, reject) => {
+                        request.addEventListener('success', () =>
+                            resolve(request.result),
+                        );
+                        request.addEventListener('error', () =>
+                            reject(
+                                new Error(
+                                    'Failed to read a retained relay chunk.',
+                                ),
+                            ),
+                        );
+                    }),
+            ),
+        );
+        await transactionCompletion(transaction);
+        const chunks = records.map((record, participantPosition) => {
+            if (
+                typeof record !== 'object' ||
+                record === null ||
+                !('id' in record) ||
+                record.id !==
+                    relayChunkIdentifier(chunkOrdinal, participantPosition) ||
+                !('bytes' in record) ||
+                !(record.bytes instanceof Uint8Array)
+            ) {
+                throw new Error('The retained relay chunk is malformed.');
+            }
+            return Uint8Array.from(record.bytes);
+        });
+        relayReadByteLengthByDatabase.set(
+            name,
+            (relayReadByteLengthByDatabase.get(name) ?? 0) +
+                chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
+        );
+        return chunks;
+    } finally {
+        database.close();
+    }
+};
+
+const readRawStateRecord = async (
+    name: string,
+    storeName: 'activations' | 'evaluations',
     identifier: string,
 ): Promise<unknown> => {
     const database = await openDatabase(name);
     try {
-        const transaction = database.transaction('activations', 'readonly');
-        const request = transaction.objectStore('activations').get(identifier);
+        const transaction = database.transaction(storeName, 'readonly');
+        const request = transaction.objectStore(storeName).get(identifier);
         const result = await new Promise<unknown>((resolve, reject) => {
             request.addEventListener('success', () => resolve(request.result));
             request.addEventListener('error', () =>
-                reject(new Error('Failed to read raw activation state.')),
+                reject(new Error(`Failed to read raw ${storeName} state.`)),
             );
         });
         await transactionCompletion(transaction);
@@ -133,33 +289,145 @@ const readRawActivationRecord = async (
     }
 };
 
-const restoreRawActivationRecord = async (
+const restoreRawStateRecord = async (
     name: string,
+    storeName: 'activations' | 'evaluations',
     record: unknown,
 ): Promise<void> => {
     const database = await openDatabase(name);
     try {
-        const transaction = database.transaction('activations', 'readwrite', {
+        const transaction = database.transaction(storeName, 'readwrite', {
             durability: 'strict',
         });
-        transaction.objectStore('activations').put(record);
+        transaction.objectStore(storeName).put(record);
         await transactionCompletion(transaction);
     } finally {
         database.close();
     }
 };
 
-const deleteRawActivationRecord = async (
+const deleteRawStateRecord = async (
     name: string,
+    storeName: 'activations' | 'evaluations',
     identifier: string,
 ): Promise<void> => {
     const database = await openDatabase(name);
     try {
-        const transaction = database.transaction('activations', 'readwrite', {
+        const transaction = database.transaction(storeName, 'readwrite', {
             durability: 'strict',
         });
-        transaction.objectStore('activations').delete(identifier);
+        transaction.objectStore(storeName).delete(identifier);
         await transactionCompletion(transaction);
+    } finally {
+        database.close();
+    }
+};
+
+const readRawActivationRecord = (
+    name: string,
+    identifier: string,
+): Promise<unknown> => readRawStateRecord(name, 'activations', identifier);
+
+const restoreRawActivationRecord = (
+    name: string,
+    record: unknown,
+): Promise<void> => restoreRawStateRecord(name, 'activations', record);
+
+const deleteRawActivationRecord = (
+    name: string,
+    identifier: string,
+): Promise<void> => deleteRawStateRecord(name, 'activations', identifier);
+
+const readRawEvaluationRecord = (
+    name: string,
+    identifier: string,
+): Promise<unknown> => readRawStateRecord(name, 'evaluations', identifier);
+
+const restoreRawEvaluationRecord = (
+    name: string,
+    record: unknown,
+): Promise<void> => restoreRawStateRecord(name, 'evaluations', record);
+
+const deleteRawEvaluationRecord = (
+    name: string,
+    identifier: string,
+): Promise<void> => deleteRawStateRecord(name, 'evaluations', identifier);
+
+const protectedRecordByteLength = (record: unknown): number => {
+    if (
+        typeof record !== 'object' ||
+        record === null ||
+        !('id' in record) ||
+        typeof record.id !== 'string' ||
+        !('context' in record) ||
+        !(record.context instanceof ArrayBuffer) ||
+        !('nonce' in record) ||
+        !(record.nonce instanceof ArrayBuffer) ||
+        !('ciphertext' in record) ||
+        !(record.ciphertext instanceof ArrayBuffer)
+    ) {
+        throw new Error('The protected record measurement is malformed.');
+    }
+    return (
+        new TextEncoder().encode(record.id).byteLength +
+        record.context.byteLength +
+        record.nonce.byteLength +
+        record.ciphertext.byteLength
+    );
+};
+
+const protectedStoreNames = [
+    'actions',
+    'preparations',
+    'slots',
+    'sources',
+    'finalities',
+    'activations',
+    'evaluations',
+] as const;
+
+const measureProtectedDatabase = async (
+    name: string,
+): Promise<
+    Readonly<{
+        byteLength: number;
+        recordCount: number;
+    }>
+> => {
+    const database = await openDatabase(name);
+    try {
+        const transaction = database.transaction(
+            protectedStoreNames,
+            'readonly',
+        );
+        const records = await Promise.all(
+            protectedStoreNames.map(
+                (storeName) =>
+                    new Promise<unknown[]>((resolve, reject) => {
+                        const request = transaction
+                            .objectStore(storeName)
+                            .getAll();
+                        request.addEventListener('success', () =>
+                            resolve(request.result as unknown[]),
+                        );
+                        request.addEventListener('error', () =>
+                            reject(
+                                new Error(
+                                    'Failed to measure protected records.',
+                                ),
+                            ),
+                        );
+                    }),
+            ),
+        );
+        await transactionCompletion(transaction);
+        let byteLength = 0;
+        let recordCount = 0;
+        for (const record of records.flat()) {
+            byteLength += protectedRecordByteLength(record);
+            recordCount += 1;
+        }
+        return { byteLength, recordCount };
     } finally {
         database.close();
     }
@@ -169,14 +437,33 @@ const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const activationIdentifier = (participantPosition: number): string =>
-    `reduced-activation.${bytesToHex(runtimeIdentity)}.${bytesToHex(
+    `padded-tally-generation.${bytesToHex(runtimeIdentity)}.${bytesToHex(
         actionProposalIdentity,
     )}.${String(participantPosition)}`;
+
+const evaluationIdentifier = (participantPosition: number): string =>
+    `padded-tally-evaluation.${bytesToHex(runtimeIdentity)}.${bytesToHex(
+        actionProposalIdentity,
+    )}.${String(participantPosition)}`;
+
+const recordVisit = (
+    runIdentity: string,
+    participantPosition: number,
+): void => {
+    const visitCounts =
+        visitCountsByRunIdentity.get(runIdentity) ??
+        Array.from({ length: participantCount }, () => 0);
+    visitCounts[participantPosition] =
+        (visitCounts[participantPosition] ?? 0) + 1;
+    visitCountsByRunIdentity.set(runIdentity, visitCounts);
+};
 
 const openClient = async (
     runIdentity: string,
     participantPosition: number,
 ): Promise<PrivatePreparationWorkerClient> => {
+    const startedAtMilliseconds = performance.now();
+    recordVisit(runIdentity, participantPosition);
     const name = databaseName(runIdentity, participantPosition);
     databaseNames.add(name);
     const client = await PrivatePreparationWorkerClient.create(
@@ -190,10 +477,23 @@ const openClient = async (
         },
     );
     openClients.add(client);
+    visitStartsByClient.set(client, { runIdentity, startedAtMilliseconds });
     return client;
 };
 
 const closeClient = (client: PrivatePreparationWorkerClient): void => {
+    const visit = visitStartsByClient.get(client);
+    if (visit !== undefined) {
+        longestVisitMillisecondsByRunIdentity.set(
+            visit.runIdentity,
+            Math.max(
+                longestVisitMillisecondsByRunIdentity.get(visit.runIdentity) ??
+                    0,
+                performance.now() - visit.startedAtMilliseconds,
+            ),
+        );
+        visitStartsByClient.delete(client);
+    }
     client.close();
     openClients.delete(client);
 };
@@ -291,8 +591,19 @@ const remoteBodyIndex = (
         ? recipientPosition
         : recipientPosition - 1;
 
+type CompletePreparationContinuation = (input: {
+    canonicalRosterBytes: Uint8Array;
+    client: PrivatePreparationWorkerClient;
+    participantPosition: number;
+    preparationParents: readonly Readonly<{
+        body: Uint8Array;
+        signature: Uint8Array;
+    }>[];
+}) => Promise<void>;
+
 const createCompletePreparation = async (
     runIdentity: string,
+    afterPrivateConsumption?: CompletePreparationContinuation,
 ): Promise<
     Readonly<{
         canonicalRosterBytes: Uint8Array;
@@ -347,6 +658,12 @@ const createCompletePreparation = async (
                 throw new Error('A preparation delivery did not resolve.');
             }
         }
+        await afterPrivateConsumption?.({
+            canonicalRosterBytes,
+            client,
+            participantPosition: recipientPosition,
+            preparationParents,
+        });
         closeClient(client);
     }
     return {
@@ -384,18 +701,20 @@ const rawRequest = <Result>(
         worker.postMessage(request);
     });
 
-type ReducedActivationRequestInput = Extract<
+type TallyGenerationInitializationInput = Extract<
     PrivatePreparationWorkerRequest,
-    { operation: 'create-reduced-activation-package' }
+    { operation: 'initialize-padded-tally-generation' }
 >['input'];
 
-const crashReducedActivationAtBoundary = async (
+const crashWorkerAtBoundary = async (
     runIdentity: string,
     participantPosition: number,
     workerUrl: URL,
     boundaryName: string,
-    input: ReducedActivationRequestInput,
+    request: PrivatePreparationWorkerRequest,
 ): Promise<void> => {
+    const startedAtMilliseconds = performance.now();
+    recordVisit(runIdentity, participantPosition);
     const worker = new Worker(workerUrl, { type: 'module' });
     try {
         await rawRequest(worker, {
@@ -442,26 +761,1072 @@ const crashReducedActivationAtBoundary = async (
                 },
             );
         });
-        worker.postMessage({
-            requestId: 2,
-            operation: 'create-reduced-activation-package',
-            input,
-        } satisfies PrivatePreparationWorkerRequest);
+        worker.postMessage(request);
         await boundary;
     } finally {
         worker.terminate();
+        longestVisitMillisecondsByRunIdentity.set(
+            runIdentity,
+            Math.max(
+                longestVisitMillisecondsByRunIdentity.get(runIdentity) ?? 0,
+                performance.now() - startedAtMilliseconds,
+            ),
+        );
     }
 };
 
+type CeremonyBallot = Readonly<{
+    declaration: 'abstain' | 'submit';
+    scoreEncodings: Uint8Array;
+}>;
+
+type CompleteCeremonyMode = 'empty-usable-ballots' | 'result';
+
+const ceremonyBallots = (mode: CompleteCeremonyMode): CeremonyBallot[] =>
+    Array.from({ length: participantCount }, (_, participantPosition) => {
+        if (mode === 'empty-usable-ballots') {
+            return {
+                declaration: 'submit' as const,
+                scoreEncodings: new Uint8Array(participantCount).fill(
+                    participantPosition % 2 === 0 ? 0 : 15,
+                ),
+            };
+        }
+        if (participantPosition >= 8) {
+            return {
+                declaration: 'abstain' as const,
+                scoreEncodings: new Uint8Array(participantCount),
+            };
+        }
+        if (participantPosition === 6) {
+            return {
+                declaration: 'submit' as const,
+                scoreEncodings: new Uint8Array(participantCount),
+            };
+        }
+        if (participantPosition === 7) {
+            return {
+                declaration: 'submit' as const,
+                scoreEncodings: new Uint8Array(participantCount).fill(15),
+            };
+        }
+        return {
+            declaration: 'submit' as const,
+            scoreEncodings: Uint8Array.from(
+                { length: participantCount },
+                (_optionIndex, optionPosition) =>
+                    ((optionPosition + 3 * participantPosition) %
+                        participantCount) +
+                    1,
+            ),
+        };
+    });
+
+const evaluateCeremonyBallotsDirectly = (
+    ballots: readonly CeremonyBallot[],
+    topCount: number,
+): Readonly<{
+    acceptedBallotAuthorshipBitmap: number;
+    orderedOptionPositions: readonly number[] | undefined;
+}> => {
+    const aggregateScores = Array.from({ length: participantCount }, () => 0);
+    let acceptedBallotAuthorshipBitmap = 0;
+    for (const [participantPosition, ballot] of ballots.entries()) {
+        const accepted =
+            ballot.declaration === 'submit' &&
+            ballot.scoreEncodings.every((score) => score >= 1 && score <= 10);
+        if (!accepted) continue;
+        acceptedBallotAuthorshipBitmap |= 1 << participantPosition;
+        for (const [optionPosition, score] of ballot.scoreEncodings.entries()) {
+            aggregateScores[optionPosition] =
+                (aggregateScores[optionPosition] ?? 0) + score;
+        }
+    }
+    const orderedOptionPositions =
+        acceptedBallotAuthorshipBitmap === 0
+            ? undefined
+            : Array.from(
+                  { length: participantCount },
+                  (_, position) => position,
+              )
+                  .sort(
+                      (left, right) =>
+                          (aggregateScores[right] ?? 0) -
+                              (aggregateScores[left] ?? 0) || left - right,
+                  )
+                  .slice(0, topCount);
+    return {
+        acceptedBallotAuthorshipBitmap,
+        orderedOptionPositions,
+    };
+};
+
+const expectCompletePaddedTallyCeremony = async (
+    topCount: number,
+    mode: CompleteCeremonyMode = 'result',
+): Promise<void> => {
+    const repairPath = topCount === 1 && mode === 'result';
+    const runIdentity = crypto.randomUUID();
+    const relayDatabaseName = `sealed-lattice-relay-${runIdentity}`;
+    databaseNames.add(relayDatabaseName);
+    const storageBefore = await navigator.storage.estimate();
+    let maximumActivationRecordByteLength = 0;
+    let maximumEvaluationRecordByteLength = 0;
+    const ballots = ceremonyBallots(mode);
+    const sourcePackages: PublishedSourcePackage[] = [];
+    const { canonicalRosterBytes, preparationPackages, preparationParents } =
+        await createCompletePreparation(
+            runIdentity,
+            async ({
+                canonicalRosterBytes: callbackRosterBytes,
+                client,
+                participantPosition,
+                preparationParents: callbackPreparationParents,
+            }) => {
+                const ballot = ballots[participantPosition];
+                if (ballot === undefined) {
+                    throw new Error(
+                        'The ceremony ballot fixture is incomplete.',
+                    );
+                }
+                sourcePackages.push(
+                    await client.createSourcePackage(
+                        actionContext(participantPosition),
+                        callbackRosterBytes,
+                        preparationAttempt,
+                        callbackPreparationParents,
+                        ballot.declaration === 'abstain'
+                            ? { declaration: 'abstain' }
+                            : {
+                                  declaration: 'submit',
+                                  scoreEncodings: ballot.scoreEncodings,
+                              },
+                    ),
+                );
+            },
+        );
+    const sources = sourcePackages.map((source, participantPosition) => ({
+        declaration:
+            ballots[participantPosition]?.declaration ?? ('abstain' as const),
+        body: source.sourceBody,
+        signature: source.sourceSignature,
+    }));
+    const finalities: PublishedFinalityPackage[] = [];
+    for (
+        let participantPosition = 0;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const client = await openClient(runIdentity, participantPosition);
+        try {
+            finalities.push(
+                await client.createFinalitySignature(
+                    actionContext(participantPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sources,
+                    topCount,
+                ),
+            );
+        } finally {
+            closeClient(client);
+        }
+    }
+    const expectedSourceSubmissionBitmap = ballots.reduce(
+        (bitmap, ballot, participantPosition) =>
+            ballot.declaration === 'submit'
+                ? bitmap | (1 << participantPosition)
+                : bitmap,
+        0,
+    );
+    expect(
+        finalities.every(
+            (finality) =>
+                finality.targetKind === 'computation' &&
+                finality.topCount === topCount &&
+                finality.sourceSubmissionBitmap ===
+                    expectedSourceSubmissionBitmap,
+        ),
+    ).toBe(true);
+    const finalitySignatures = finalities
+        .slice(0, 8)
+        .map((finality, signerPosition) => ({
+            signerPosition,
+            signature: finality.finalitySignature,
+        }));
+    const pendingManifests: Array<Uint8Array | undefined> = Array.from(
+        { length: participantCount },
+        () => undefined,
+    );
+    const pendingActivationSignatures: Array<Uint8Array | undefined> =
+        Array.from({ length: participantCount }, () => undefined);
+    const parsedChunksByParticipant: ParsedPaddedTallyChunk[][] = Array.from(
+        { length: participantCount },
+        () => [],
+    );
+    const chunkIdentitiesByParticipant: Uint8Array[][] = Array.from(
+        { length: participantCount },
+        () => [],
+    );
+    let canonicalTargetIdentity: Uint8Array | undefined;
+    let canonicalCircuitIdentity: Uint8Array | undefined;
+    let plan:
+        | Awaited<
+              ReturnType<
+                  PrivatePreparationWorkerClient['initializePaddedTallyGeneration']
+              >
+          >['plan']
+        | undefined;
+    for (
+        let participantPosition = 0;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const client = await openClient(runIdentity, participantPosition);
+        try {
+            const initialization = await client.initializePaddedTallyGeneration(
+                actionContext(participantPosition),
+                canonicalRosterBytes,
+                preparationAttempt,
+                preparationParents,
+                sources,
+                finalitySignatures,
+                topCount,
+            );
+            plan ??= initialization.plan;
+            expect(initialization.plan).toEqual(plan);
+            for (
+                let chunkOrdinal = 0;
+                chunkOrdinal < initialization.plan.chunks.length;
+                chunkOrdinal += 1
+            ) {
+                const generated = await client.createPaddedTallyChunk(
+                    actionContext(participantPosition),
+                    chunkOrdinal,
+                );
+                if (participantPosition === 0) {
+                    const retainedActivation = await readRawActivationRecord(
+                        databaseName(runIdentity, participantPosition),
+                        activationIdentifier(participantPosition),
+                    );
+                    if (retainedActivation === undefined) {
+                        throw new Error(
+                            'The activation resource checkpoint is absent.',
+                        );
+                    }
+                    maximumActivationRecordByteLength = Math.max(
+                        maximumActivationRecordByteLength,
+                        protectedRecordByteLength(retainedActivation),
+                    );
+                }
+                expect(generated.chunkOrdinal).toBe(chunkOrdinal);
+                const parsedChunk = parsePaddedTallyChunk(generated.chunk);
+                const parsedParticipantChunks =
+                    parsedChunksByParticipant[participantPosition];
+                const participantChunkIdentities =
+                    chunkIdentitiesByParticipant[participantPosition];
+                if (
+                    parsedParticipantChunks === undefined ||
+                    participantChunkIdentities === undefined
+                ) {
+                    throw new Error(
+                        'The independent transcript inventory is incomplete.',
+                    );
+                }
+                canonicalTargetIdentity ??= parsedChunk.targetIdentity;
+                canonicalCircuitIdentity ??= parsedChunk.circuitIdentity;
+                expect(parsedChunk.targetIdentity).toEqual(
+                    canonicalTargetIdentity,
+                );
+                expect(parsedChunk.circuitIdentity).toEqual(
+                    canonicalCircuitIdentity,
+                );
+                expect(parsedChunk.participantCount).toBe(participantCount);
+                expect(parsedChunk.participantPosition).toBe(
+                    participantPosition,
+                );
+                expect(parsedChunk.topCount).toBe(topCount);
+                expect(parsedChunk.chunkOrdinal).toBe(chunkOrdinal);
+                expect(generated.chunk).toHaveLength(
+                    initialization.plan.chunks[chunkOrdinal]?.chunkByteLength,
+                );
+                expect(parsedChunk.includesInitial).toBe(chunkOrdinal === 0);
+                expect(parsedChunk.includesTerminal).toBe(
+                    chunkOrdinal + 1 === initialization.plan.chunks.length,
+                );
+                const previousParsedChunk =
+                    parsedParticipantChunks[parsedParticipantChunks.length - 1];
+                const previousChunkIdentity =
+                    participantChunkIdentities[
+                        participantChunkIdentities.length - 1
+                    ];
+                expect(parsedChunk.firstOperation).toBe(
+                    previousParsedChunk?.operationEnd ?? 0,
+                );
+                expect(parsedChunk.previousChunkIdentity).toEqual(
+                    previousChunkIdentity ?? new Uint8Array(64),
+                );
+                expect(parsedChunk.allocationNonce).toEqual(
+                    parsedParticipantChunks[0]?.allocationNonce ??
+                        parsedChunk.allocationNonce,
+                );
+                parsedParticipantChunks.push(parsedChunk);
+                participantChunkIdentities.push(generated.chunkIdentity);
+                await persistRelayChunk(
+                    relayDatabaseName,
+                    chunkOrdinal,
+                    participantPosition,
+                    generated.chunk,
+                );
+                if (generated.status === 'complete') {
+                    expect(chunkOrdinal + 1).toBe(
+                        initialization.plan.chunks.length,
+                    );
+                    pendingManifests[participantPosition] = generated.manifest;
+                    pendingActivationSignatures[participantPosition] =
+                        generated.activationSignature;
+                    const parsedManifest = parsePaddedTallyManifest(
+                        generated.manifest,
+                    );
+                    expect(parsedManifest.targetIdentity).toEqual(
+                        canonicalTargetIdentity,
+                    );
+                    expect(parsedManifest.circuitIdentity).toEqual(
+                        canonicalCircuitIdentity,
+                    );
+                    expect(parsedManifest.participantCount).toBe(
+                        participantCount,
+                    );
+                    expect(parsedManifest.participantPosition).toBe(
+                        participantPosition,
+                    );
+                    expect(parsedManifest.topCount).toBe(topCount);
+                    expect(parsedManifest.allocationNonce).toEqual(
+                        parsedParticipantChunks[0]?.allocationNonce,
+                    );
+                    expect(parsedManifest.descriptors).toHaveLength(
+                        initialization.plan.chunks.length,
+                    );
+                    for (const [
+                        descriptorOrdinal,
+                        descriptor,
+                    ] of parsedManifest.descriptors.entries()) {
+                        const parsed =
+                            parsedParticipantChunks[descriptorOrdinal];
+                        const identity =
+                            participantChunkIdentities[descriptorOrdinal];
+                        if (parsed === undefined || identity === undefined) {
+                            throw new Error(
+                                'The independent descriptor inventory is incomplete.',
+                            );
+                        }
+                        expect(descriptor).toEqual({
+                            firstOperation: parsed.firstOperation,
+                            operationEnd: parsed.operationEnd,
+                            includesInitial: parsed.includesInitial,
+                            includesTerminal: parsed.includesTerminal,
+                            chunkByteLength:
+                                initialization.plan.chunks[descriptorOrdinal]
+                                    ?.chunkByteLength,
+                            chunkIdentity: identity,
+                        });
+                    }
+                } else {
+                    expect(chunkOrdinal + 1).toBeLessThan(
+                        initialization.plan.chunks.length,
+                    );
+                }
+            }
+        } finally {
+            closeClient(client);
+        }
+    }
+    if (
+        plan === undefined ||
+        pendingManifests.some((manifest) => manifest === undefined) ||
+        pendingActivationSignatures.some((signature) => signature === undefined)
+    ) {
+        throw new Error('The complete activation inventory is absent.');
+    }
+    const manifests = pendingManifests.map((manifest) => {
+        if (manifest === undefined) {
+            throw new Error('A complete participant manifest is absent.');
+        }
+        return manifest;
+    });
+    const activationSignatures = pendingActivationSignatures.map(
+        (signature) => {
+            if (signature === undefined) {
+                throw new Error(
+                    'A complete participant activation signature is absent.',
+                );
+            }
+            return signature;
+        },
+    );
+    type EvaluatedTallyTerminal = Extract<
+        TallyEvaluationProgress,
+        { batchIdentity: Uint8Array }
+    >;
+    let acceptedTerminal: EvaluatedTallyTerminal | undefined;
+    const direct = evaluateCeremonyBallotsDirectly(ballots, topCount);
+    const acceptTerminal = (
+        terminal: PaddedTallyEvaluationStep,
+    ): EvaluatedTallyTerminal => {
+        if (terminal.kind === 'pending' || !('batchIdentity' in terminal)) {
+            throw new Error(
+                'The complete ceremony did not return an evaluated terminal.',
+            );
+        }
+        expect(terminal.acceptedBallotAuthorshipBitmap).toBe(
+            direct.acceptedBallotAuthorshipBitmap,
+        );
+        if (direct.orderedOptionPositions === undefined) {
+            if (
+                terminal.kind !== 'no-result' ||
+                terminal.terminalPath !== 'evaluated'
+            ) {
+                throw new Error(
+                    'The empty usable-ballot circuit returned the wrong terminal.',
+                );
+            }
+        } else {
+            if (terminal.kind !== 'result') {
+                throw new Error(
+                    'The usable-ballot circuit did not return a result.',
+                );
+            }
+            expect(terminal.orderedOptionPositions).toEqual(
+                direct.orderedOptionPositions,
+            );
+        }
+        return terminal;
+    };
+    const assertSameTerminal = (
+        restored: TallyEvaluationProgress,
+        expected: EvaluatedTallyTerminal,
+    ): void => {
+        if (!('batchIdentity' in restored) || restored.kind !== expected.kind) {
+            throw new Error('The restored terminal changed evaluated kind.');
+        }
+        expect(restored.acceptedBallotAuthorshipBitmap).toBe(
+            expected.acceptedBallotAuthorshipBitmap,
+        );
+        if (expected.kind === 'result') {
+            if (restored.kind !== 'result') {
+                throw new Error('The restored result changed kind.');
+            }
+            expect(restored.orderedOptionPositions).toEqual(
+                expected.orderedOptionPositions,
+            );
+        } else if (
+            restored.kind !== 'no-result' ||
+            restored.terminalPath !== 'evaluated'
+        ) {
+            throw new Error('The restored no-result changed path.');
+        }
+        expect(restored.batchIdentity).toEqual(expected.batchIdentity);
+        expect(restored.terminalBody).toEqual(expected.terminalBody);
+        expect(restored.terminalIdentity).toEqual(expected.terminalIdentity);
+    };
+    if (repairPath) {
+        await crashWorkerAtBoundary(
+            runIdentity,
+            0,
+            tallyEvaluationInitializationCrashWorkerUrl,
+            'tally-evaluation-durably-initialized',
+            {
+                requestId: 2,
+                operation: 'initialize-padded-tally-evaluation',
+                input: {
+                    ...actionContext(0),
+                    canonicalRosterBytes,
+                    finalitySignatures,
+                    manifests,
+                    activationSignatures,
+                },
+            },
+        );
+        const firstChunks = await readRelayChunkSet(relayDatabaseName, 0);
+        await crashWorkerAtBoundary(
+            runIdentity,
+            0,
+            tallyEvaluationStepCrashWorkerUrl,
+            'tally-evaluation-step-durably-persisted',
+            {
+                requestId: 2,
+                operation: 'evaluate-padded-tally-chunk',
+                input: {
+                    ...actionContext(0),
+                    expectedChunkOrdinal: 0,
+                    chunks: firstChunks,
+                },
+            },
+        );
+        const replayedFirstChunks = await readRelayChunkSet(
+            relayDatabaseName,
+            0,
+        );
+        const evaluator = await openClient(runIdentity, 0);
+        try {
+            const initialization =
+                await evaluator.initializePaddedTallyEvaluation(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    finalitySignatures,
+                    manifests,
+                    activationSignatures,
+                );
+            expect(initialization.status).toBe('already-initialized');
+            expect(initialization.plan).toEqual(plan);
+            const firstReplay = await evaluator.evaluatePaddedTallyChunk(
+                actionContext(0),
+                0,
+                replayedFirstChunks,
+            );
+            expect(firstReplay.kind).toBe('pending');
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    replayedFirstChunks.slice(0, 9),
+                ),
+            ).rejects.toThrow();
+            const alternateFirstChunks = replayedFirstChunks.map((chunk) =>
+                Uint8Array.from(chunk),
+            );
+            const alternateFirstChunk = alternateFirstChunks[4];
+            if (alternateFirstChunk === undefined) {
+                throw new Error('The replay corruption fixture is absent.');
+            }
+            alternateFirstChunk[250] ^= 1;
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    alternateFirstChunks,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            const evaluationRecordAfterFirst = await readRawEvaluationRecord(
+                databaseName(runIdentity, 0),
+                evaluationIdentifier(0),
+            );
+            if (evaluationRecordAfterFirst === undefined) {
+                throw new Error('The first evaluation checkpoint is absent.');
+            }
+            const secondChunks = await readRelayChunkSet(relayDatabaseName, 1);
+            const second = await evaluator.evaluatePaddedTallyChunk(
+                actionContext(0),
+                1,
+                secondChunks,
+            );
+            expect(second.kind).toBe('pending');
+            const evaluationRecordAfterSecond = await readRawEvaluationRecord(
+                databaseName(runIdentity, 0),
+                evaluationIdentifier(0),
+            );
+            if (evaluationRecordAfterSecond === undefined) {
+                throw new Error('The second evaluation checkpoint is absent.');
+            }
+            await restoreRawEvaluationRecord(
+                databaseName(runIdentity, 0),
+                evaluationRecordAfterFirst,
+            );
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    1,
+                    secondChunks,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            await restoreRawEvaluationRecord(
+                databaseName(runIdentity, 0),
+                evaluationRecordAfterSecond,
+            );
+            for (
+                let chunkOrdinal = 2;
+                chunkOrdinal < plan.chunks.length - 1;
+                chunkOrdinal += 1
+            ) {
+                const pending = await evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    chunkOrdinal,
+                    await readRelayChunkSet(relayDatabaseName, chunkOrdinal),
+                );
+                expect(pending.kind).toBe('pending');
+            }
+        } finally {
+            closeClient(evaluator);
+        }
+        const lastChunkOrdinal = plan.chunks.length - 1;
+        const lastChunks = await readRelayChunkSet(
+            relayDatabaseName,
+            lastChunkOrdinal,
+        );
+        await crashWorkerAtBoundary(
+            runIdentity,
+            0,
+            tallyTerminalCrashWorkerUrl,
+            'tally-terminal-durably-persisted',
+            {
+                requestId: 2,
+                operation: 'evaluate-padded-tally-chunk',
+                input: {
+                    ...actionContext(0),
+                    expectedChunkOrdinal: lastChunkOrdinal,
+                    chunks: lastChunks,
+                },
+            },
+        );
+        const terminalRecord = await readRawEvaluationRecord(
+            databaseName(runIdentity, 0),
+            evaluationIdentifier(0),
+        );
+        if (terminalRecord === undefined) {
+            throw new Error('The crash-restored terminal is absent.');
+        }
+        const replayedLastChunks = await readRelayChunkSet(
+            relayDatabaseName,
+            lastChunkOrdinal,
+        );
+        const restoredEvaluator = await openClient(runIdentity, 0);
+        try {
+            acceptedTerminal = acceptTerminal(
+                await restoredEvaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    lastChunkOrdinal,
+                    replayedLastChunks,
+                ),
+            );
+            const alternateLastChunks = replayedLastChunks.map((chunk) =>
+                Uint8Array.from(chunk),
+            );
+            const alternateLastChunk = alternateLastChunks[6];
+            if (alternateLastChunk === undefined) {
+                throw new Error('The terminal replay fixture is absent.');
+            }
+            alternateLastChunk[250] ^= 1;
+            await expect(
+                restoredEvaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    lastChunkOrdinal,
+                    alternateLastChunks,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            assertSameTerminal(
+                await restoredEvaluator.readTallyResult(actionContext(0)),
+                acceptedTerminal,
+            );
+            await deleteRawEvaluationRecord(
+                databaseName(runIdentity, 0),
+                evaluationIdentifier(0),
+            );
+            await expect(
+                restoredEvaluator.readTallyResult(actionContext(0)),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            await restoreRawEvaluationRecord(
+                databaseName(runIdentity, 0),
+                terminalRecord,
+            );
+            assertSameTerminal(
+                await restoredEvaluator.readTallyResult(actionContext(0)),
+                acceptedTerminal,
+            );
+        } finally {
+            closeClient(restoredEvaluator);
+        }
+    } else {
+        const evaluator = await openClient(runIdentity, 0);
+        try {
+            const corruptManifests = manifests.map((manifest) =>
+                Uint8Array.from(manifest),
+            );
+            const corruptManifest = corruptManifests[2];
+            if (corruptManifest === undefined) {
+                throw new Error('The manifest corruption fixture is absent.');
+            }
+            corruptManifest[corruptManifest.byteLength - 1] ^= 1;
+            await expect(
+                evaluator.initializePaddedTallyEvaluation(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    finalitySignatures,
+                    corruptManifests,
+                    activationSignatures,
+                ),
+            ).rejects.toThrow();
+            const initialization =
+                await evaluator.initializePaddedTallyEvaluation(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    finalitySignatures,
+                    manifests,
+                    activationSignatures,
+                );
+            expect(initialization.plan).toEqual(plan);
+            for (
+                let chunkOrdinal = 0;
+                chunkOrdinal < plan.chunks.length;
+                chunkOrdinal += 1
+            ) {
+                const chunks = await readRelayChunkSet(
+                    relayDatabaseName,
+                    chunkOrdinal,
+                );
+                if (chunkOrdinal === 0) {
+                    await expect(
+                        evaluator.evaluatePaddedTallyChunk(
+                            actionContext(0),
+                            chunkOrdinal,
+                            chunks.slice(0, 9),
+                        ),
+                    ).rejects.toThrow();
+                    const maliciousChunks = chunks.map((chunk) =>
+                        Uint8Array.from(chunk),
+                    );
+                    for (const participantPosition of [0, 1, 2]) {
+                        const maliciousChunk =
+                            maliciousChunks[participantPosition];
+                        if (maliciousChunk === undefined) {
+                            throw new Error(
+                                'The three-party corruption fixture is incomplete.',
+                            );
+                        }
+                        maliciousChunk[250] ^= 1;
+                    }
+                    await expect(
+                        evaluator.evaluatePaddedTallyChunk(
+                            actionContext(0),
+                            chunkOrdinal,
+                            maliciousChunks,
+                        ),
+                    ).rejects.toThrow();
+                }
+                const evaluated = await evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    chunkOrdinal,
+                    chunks,
+                );
+                await expect(
+                    evaluator.evaluatePaddedTallyChunk(
+                        actionContext(0),
+                        chunkOrdinal,
+                        chunks,
+                    ),
+                ).resolves.toEqual(evaluated);
+                if (chunkOrdinal + 1 === plan.chunks.length) {
+                    acceptedTerminal = acceptTerminal(evaluated);
+                }
+            }
+            if (acceptedTerminal === undefined) {
+                throw new Error('The accepted terminal fixture is absent.');
+            }
+            assertSameTerminal(
+                await evaluator.readTallyResult(actionContext(0)),
+                acceptedTerminal,
+            );
+        } finally {
+            closeClient(evaluator);
+        }
+    }
+    if (acceptedTerminal === undefined) {
+        throw new Error('The accepted terminal fixture is absent.');
+    }
+    for (
+        let participantPosition = 1;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const evaluator = await openClient(runIdentity, participantPosition);
+        try {
+            const initialization =
+                await evaluator.initializePaddedTallyEvaluation(
+                    actionContext(participantPosition),
+                    canonicalRosterBytes,
+                    finalitySignatures,
+                    manifests,
+                    activationSignatures,
+                );
+            expect(initialization.plan).toEqual(plan);
+            let participantTerminal: PaddedTallyEvaluationStep | undefined;
+            for (
+                let chunkOrdinal = 0;
+                chunkOrdinal < plan.chunks.length;
+                chunkOrdinal += 1
+            ) {
+                const progress = await evaluator.evaluatePaddedTallyChunk(
+                    actionContext(participantPosition),
+                    chunkOrdinal,
+                    await readRelayChunkSet(relayDatabaseName, chunkOrdinal),
+                );
+                if (participantPosition === 1) {
+                    const retainedEvaluation = await readRawEvaluationRecord(
+                        databaseName(runIdentity, participantPosition),
+                        evaluationIdentifier(participantPosition),
+                    );
+                    if (retainedEvaluation === undefined) {
+                        throw new Error(
+                            'The evaluation resource checkpoint is absent.',
+                        );
+                    }
+                    maximumEvaluationRecordByteLength = Math.max(
+                        maximumEvaluationRecordByteLength,
+                        protectedRecordByteLength(retainedEvaluation),
+                    );
+                }
+                if (chunkOrdinal + 1 === plan.chunks.length) {
+                    participantTerminal = progress;
+                } else {
+                    expect(progress.kind).toBe('pending');
+                }
+            }
+            if (participantTerminal === undefined) {
+                throw new Error(
+                    'A sequential participant omitted result retrieval.',
+                );
+            }
+            assertSameTerminal(
+                acceptTerminal(participantTerminal),
+                acceptedTerminal,
+            );
+            assertSameTerminal(
+                await evaluator.readTallyResult(
+                    actionContext(participantPosition),
+                ),
+                acceptedTerminal,
+            );
+        } finally {
+            closeClient(evaluator);
+        }
+    }
+    if (canonicalTargetIdentity === undefined) {
+        throw new Error('The independent target identity is absent.');
+    }
+    const parsedTerminal = parsePaddedTallyTerminal(
+        acceptedTerminal.terminalBody,
+    );
+    expect(parsedTerminal.targetIdentity).toEqual(canonicalTargetIdentity);
+    expect(parsedTerminal.topCount).toBe(topCount);
+    expect(parsedTerminal.kind).toBe(acceptedTerminal.kind);
+    expect(
+        parsedTerminal.acceptedBallotAuthorship.reduce(
+            (bitmap, accepted, participantPosition) =>
+                accepted ? bitmap | (1 << participantPosition) : bitmap,
+            0,
+        ),
+    ).toBe(acceptedTerminal.acceptedBallotAuthorshipBitmap);
+    expect(parsedTerminal.orderedOptionPositions).toEqual(
+        direct.orderedOptionPositions,
+    );
+    const protectedDatabaseMeasurements = await Promise.all(
+        Array.from({ length: participantCount }, (_, participantPosition) =>
+            measureProtectedDatabase(
+                databaseName(runIdentity, participantPosition),
+            ),
+        ),
+    );
+    const totalProtectedRecordByteLength = protectedDatabaseMeasurements.reduce(
+        (sum, measurement) => sum + measurement.byteLength,
+        0,
+    );
+    const protectedRecordCount = protectedDatabaseMeasurements.reduce(
+        (sum, measurement) => sum + measurement.recordCount,
+        0,
+    );
+    const preparationUploadByteLength = preparationPackages.reduce(
+        (sum, preparationPackage) =>
+            sum +
+            preparationPackage.parentBody.byteLength +
+            preparationPackage.parentSignature.byteLength +
+            preparationPackage.privateBodies.reduce(
+                (privateSum, body) => privateSum + body.byteLength,
+                0,
+            ),
+        0,
+    );
+    const preparationParentInventoryByteLength = preparationParents.reduce(
+        (sum, parent) =>
+            sum + parent.body.byteLength + parent.signature.byteLength,
+        0,
+    );
+    const sourceInventoryByteLength = sourcePackages.reduce(
+        (sum, source) =>
+            sum +
+            source.sourceBody.byteLength +
+            source.sourceSignature.byteLength,
+        0,
+    );
+    const finalityTargetBody = finalities[0]?.targetBody;
+    if (finalityTargetBody === undefined) {
+        throw new Error('The resource ledger omitted the finality target.');
+    }
+    const finalitySignatureInventoryByteLength = finalities.reduce(
+        (sum, finality) => sum + finality.finalitySignature.byteLength,
+        0,
+    );
+    const emittedFinalityUploadByteLength = finalities.reduce(
+        (sum, finality) =>
+            sum +
+            finality.targetBody.byteLength +
+            finality.finalitySignature.byteLength,
+        0,
+    );
+    const quorumFinalityInventoryByteLength = finalitySignatures.reduce(
+        (sum, signature) => sum + signature.signature.byteLength,
+        0,
+    );
+    const activationInventoryByteLength =
+        manifests.reduce((sum, manifest) => sum + manifest.byteLength, 0) +
+        activationSignatures.reduce(
+            (sum, signature) => sum + signature.byteLength,
+            0,
+        );
+    const activationChunkCorpusByteLength =
+        participantCount *
+        plan.chunks.reduce(
+            (sum, chunkPlan) => sum + chunkPlan.chunkByteLength,
+            0,
+        );
+    const activationUploadByteLength =
+        activationChunkCorpusByteLength + activationInventoryByteLength;
+    const emittedUploadByteLength =
+        preparationUploadByteLength +
+        sourceInventoryByteLength +
+        emittedFinalityUploadByteLength +
+        activationUploadByteLength +
+        acceptedTerminal.terminalBody.byteLength;
+    const deduplicatedPublicCorpusByteLength =
+        preparationUploadByteLength +
+        sourceInventoryByteLength +
+        finalityTargetBody.byteLength +
+        finalitySignatureInventoryByteLength +
+        activationUploadByteLength +
+        acceptedTerminal.terminalBody.byteLength;
+    const maximumPrivatePreparationRecipientByteLength = Math.max(
+        ...Array.from({ length: participantCount }, (_, recipientPosition) =>
+            preparationPackages.reduce(
+                (sum, preparationPackage, senderPosition) =>
+                    senderPosition === recipientPosition
+                        ? sum
+                        : sum +
+                          preparationPackage.parentBody.byteLength +
+                          preparationPackage.parentSignature.byteLength +
+                          (preparationPackage.privateBodies[
+                              remoteBodyIndex(senderPosition, recipientPosition)
+                          ]?.byteLength ?? 0),
+                0,
+            ),
+        ),
+    );
+    const activationVerificationInventoryByteLength =
+        canonicalRosterBytes.byteLength +
+        quorumFinalityInventoryByteLength +
+        activationInventoryByteLength;
+    const cleanVerifiedDownloadByteLength =
+        5 * canonicalRosterBytes.byteLength +
+        maximumPrivatePreparationRecipientByteLength +
+        2 * preparationParentInventoryByteLength +
+        2 * sourceInventoryByteLength +
+        2 * quorumFinalityInventoryByteLength +
+        activationInventoryByteLength +
+        activationChunkCorpusByteLength;
+    const relayWriteByteLength =
+        relayWriteByteLengthByDatabase.get(relayDatabaseName) ?? 0;
+    const relayReadByteLength =
+        relayReadByteLengthByDatabase.get(relayDatabaseName) ?? 0;
+    expect(relayWriteByteLength).toBe(activationChunkCorpusByteLength);
+    const baselineRelayReadByteLength =
+        participantCount * activationChunkCorpusByteLength;
+    const relayRefetchByteLength =
+        relayReadByteLength - baselineRelayReadByteLength;
+    expect(relayRefetchByteLength).toBeGreaterThanOrEqual(0);
+    const maximumChunkSetByteLength =
+        participantCount *
+        Math.max(...plan.chunks.map((chunk) => chunk.chunkByteLength));
+    const accountedJavaScriptWasmOverlapByteLength =
+        maximumChunkSetByteLength +
+        acceptedTerminal.resources.maximumRequestByteLength +
+        acceptedTerminal.resources.maximumResponseByteLength +
+        acceptedTerminal.resources.wasmMemoryByteLength;
+    const generationKmacCallCountPerParticipant =
+        362 * plan.conjunctionCount +
+        32 * plan.linearCount +
+        32 * plan.outputCount;
+    const evaluationKmacCallCount =
+        1_110 * plan.conjunctionCount +
+        80 * plan.linearCount +
+        80 * plan.outputCount;
+    const storageAfter = await navigator.storage.estimate();
+    const visitCounts = visitCountsByRunIdentity.get(runIdentity);
+    expect(visitCounts).toBeDefined();
+    expect(Math.max(...(visitCounts ?? []))).toBeLessThanOrEqual(10);
+    if (repairPath) {
+        expect(visitCounts?.[0]).toBe(9);
+        expect(visitCounts?.slice(1)).toEqual(
+            Array.from({ length: participantCount - 1 }, () => 5),
+        );
+    } else {
+        expect(visitCounts).toEqual(
+            Array.from({ length: participantCount }, () => 5),
+        );
+    }
+    console.info(
+        JSON.stringify({
+            evidence: 'complete-padded-tally-ceremony',
+            path: repairPath ? 'repair' : 'ordinary',
+            terminalKind: acceptedTerminal.kind,
+            topCount,
+            chunkCount: plan.chunks.length,
+            logicalPayloadByteLength: plan.logicalPayloadByteLength,
+            labelEntropyByteLength: plan.labelEntropyByteLength,
+            manifestByteLength: plan.manifestByteLength,
+            visits: visitCounts,
+            longestForegroundIntervalMilliseconds:
+                longestVisitMillisecondsByRunIdentity.get(runIdentity) ?? null,
+            resourcesFromEmittedObjects: {
+                activationChunkCorpusByteLength,
+                activationInventoryByteLength,
+                accountedJavaScriptWasmOverlapByteLength,
+                cleanVerifiedDownloadByteLength,
+                deduplicatedPublicCorpusByteLength,
+                emittedUploadByteLength,
+                evaluationKmacCallCount,
+                generationKmacCallCountPerParticipant,
+                maximumActivationRecordByteLength,
+                maximumChunkSetByteLength,
+                maximumEvaluationRecordByteLength,
+                maximumPrivatePreparationRecipientByteLength,
+                protectedRecordByteLength: totalProtectedRecordByteLength,
+                protectedRecordCount,
+                relayReadByteLength,
+                relayRefetchByteLength,
+                relayWriteByteLength,
+                repairVerifiedDownloadByteLength:
+                    cleanVerifiedDownloadByteLength +
+                    activationVerificationInventoryByteLength +
+                    relayRefetchByteLength,
+            },
+            storageUsageBefore: storageBefore.usage ?? null,
+            storageUsageAfter: storageAfter.usage ?? null,
+            kernelResources: acceptedTerminal.resources,
+        }),
+    );
+};
+
 afterEach(async () => {
-    for (const client of openClients) {
-        client.close();
+    for (const client of [...openClients]) {
+        closeClient(client);
     }
     openClients.clear();
     for (const name of databaseNames) {
         await deleteDatabase(name);
     }
     databaseNames.clear();
+    visitCountsByRunIdentity.clear();
+    visitStartsByClient.clear();
+    longestVisitMillisecondsByRunIdentity.clear();
+    relayReadByteLengthByDatabase.clear();
+    relayWriteByteLengthByDatabase.clear();
 });
 
 describe('private preparation worker in Chromium', () => {
@@ -1043,13 +2408,7 @@ describe('private preparation worker in Chromium', () => {
                     signerPosition,
                     signature: finality.finalitySignature,
                 }));
-            const initialWireValues = Uint8Array.of(1, 2, 3, 4);
-            const gateMaskShares = Uint8Array.from(
-                { length: 14 },
-                (_, index) => index % 16,
-            );
-            const terminalMaskShares = Uint8Array.of(5, 6, 7);
-            const activationInput: ReducedActivationRequestInput = {
+            const activationInput: TallyGenerationInitializationInput = {
                 ...actionContext(activationPosition),
                 canonicalRosterBytes,
                 preparationAttempt,
@@ -1057,47 +2416,33 @@ describe('private preparation worker in Chromium', () => {
                 sources: sourceCarriers,
                 finalitySignatures,
                 topCount,
-                initialWireValues,
-                gateMaskShares,
-                terminalMaskShares,
             };
-            await crashReducedActivationAtBoundary(
+            await crashWorkerAtBoundary(
                 runIdentity,
                 activationPosition,
-                activationAllocationCrashWorkerUrl,
-                'activation-durably-allocated',
-                activationInput,
+                tallyGenerationInitializationCrashWorkerUrl,
+                'tally-generation-durably-initialized',
+                {
+                    requestId: 2,
+                    operation: 'initialize-padded-tally-generation',
+                    input: activationInput,
+                },
             );
-            await crashReducedActivationAtBoundary(
-                runIdentity,
-                activationPosition,
-                activationBodyCrashWorkerUrl,
-                'activation-body-durably-bound',
-                activationInput,
-            );
-            const retainedUnsignedBody = await readRawActivationRecord(
+            const allocatedGenerationRecord = await readRawActivationRecord(
                 databaseName(runIdentity, activationPosition),
                 activationIdentifier(activationPosition),
             );
-            if (retainedUnsignedBody === undefined) {
+            if (allocatedGenerationRecord === undefined) {
                 throw new Error(
-                    'The body crash boundary omitted retained activation state.',
+                    'The generation initialization crash omitted its durable checkpoint.',
                 );
             }
-            await crashReducedActivationAtBoundary(
-                runIdentity,
-                activationPosition,
-                activationPublicationCrashWorkerUrl,
-                'activation-durably-published',
-                activationInput,
-            );
-
             const activationClient = await openClient(
                 runIdentity,
                 activationPosition,
             );
-            const activation: PublishedReducedActivationPackage =
-                await activationClient.createReducedActivationPackage(
+            const initialization =
+                await activationClient.initializePaddedTallyGeneration(
                     actionContext(activationPosition),
                     canonicalRosterBytes,
                     preparationAttempt,
@@ -1105,79 +2450,20 @@ describe('private preparation worker in Chromium', () => {
                     sourceCarriers,
                     finalitySignatures,
                     topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
                 );
-            expect(activation.chunk).toHaveLength(69_099);
-            expect(activation.chunkIdentity).toHaveLength(64);
-            expect(activation.manifest).toHaveLength(254);
-            expect(activation.manifestIdentity).toHaveLength(64);
-            expect(activation.activationSignature).toHaveLength(
-                actionSignatureCarrierByteLength,
-            );
+            expect(initialization.status).toBe('already-initialized');
+            expect(initialization.plan.topCount).toBe(topCount);
+            expect(initialization.plan.inputWireCount).toBe(410);
+            expect(initialization.plan.outputCount).toBe(15);
+            expect(initialization.plan.chunks).toHaveLength(45);
             await expect(
-                activationClient.createReducedActivationPackage(
+                activationClient.createPaddedTallyChunk(
                     actionContext(activationPosition),
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    preparationParents,
-                    sourceCarriers,
-                    finalitySignatures,
-                    topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
-                ),
-            ).resolves.toEqual(activation);
-
-            const alternatePreparationParents = preparationParents.map(
-                (parent) => ({
-                    body: Uint8Array.from(parent.body),
-                    signature: Uint8Array.from(parent.signature),
-                }),
-            );
-            const alternatePreparationParent = alternatePreparationParents[4];
-            if (alternatePreparationParent === undefined) {
-                throw new Error('The activation preparation fixture is empty.');
-            }
-            alternatePreparationParent.body[
-                alternatePreparationParent.body.byteLength - 1
-            ] ^= 1;
-            await expect(
-                activationClient.createReducedActivationPackage(
-                    actionContext(activationPosition),
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    alternatePreparationParents,
-                    sourceCarriers,
-                    finalitySignatures,
-                    topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
-                ),
-            ).rejects.toThrow();
-
-            const alternateGateMaskShares = Uint8Array.from(gateMaskShares);
-            alternateGateMaskShares[0] =
-                ((alternateGateMaskShares[0] ?? 0) + 1) % 16;
-            await expect(
-                activationClient.createReducedActivationPackage(
-                    actionContext(activationPosition),
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    preparationParents,
-                    sourceCarriers,
-                    finalitySignatures,
-                    topCount,
-                    initialWireValues,
-                    alternateGateMaskShares,
-                    terminalMaskShares,
+                    1,
                 ),
             ).rejects.toMatchObject({ name: 'Conflict' });
             await expect(
-                activationClient.createReducedActivationPackage(
+                activationClient.initializePaddedTallyGeneration(
                     actionContext(activationPosition),
                     canonicalRosterBytes,
                     preparationAttempt,
@@ -1185,83 +2471,175 @@ describe('private preparation worker in Chromium', () => {
                     sourceCarriers,
                     finalitySignatures.slice(0, 7),
                     topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
-                ),
-            ).rejects.toThrow();
-            const corruptFinalitySignatures = finalitySignatures.map(
-                (entry) => ({
-                    signerPosition: entry.signerPosition,
-                    signature: Uint8Array.from(entry.signature),
-                }),
-            );
-            const corruptSignature = corruptFinalitySignatures[3];
-            if (corruptSignature === undefined) {
-                throw new Error('The finality corruption fixture is empty.');
-            }
-            corruptSignature.signature[
-                corruptSignature.signature.byteLength - 1
-            ] ^= 1;
-            await expect(
-                activationClient.createReducedActivationPackage(
-                    actionContext(activationPosition),
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    preparationParents,
-                    sourceCarriers,
-                    corruptFinalitySignatures,
-                    topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
                 ),
             ).rejects.toThrow();
             closeClient(activationClient);
 
-            const restoredActivationClient = await openClient(
+            await crashWorkerAtBoundary(
+                runIdentity,
+                activationPosition,
+                tallyChunkCrashWorkerUrl,
+                'tally-chunk-durably-persisted',
+                {
+                    requestId: 2,
+                    operation: 'create-padded-tally-chunk',
+                    input: {
+                        ...actionContext(activationPosition),
+                        expectedChunkOrdinal: 0,
+                    },
+                },
+            );
+            const persistedChunkRecord = await readRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                activationIdentifier(activationPosition),
+            );
+            if (persistedChunkRecord === undefined) {
+                throw new Error(
+                    'The chunk crash boundary omitted retained chunk state.',
+                );
+            }
+            const restoredChunkClient = await openClient(
                 runIdentity,
                 activationPosition,
             );
-            await expect(
-                restoredActivationClient.createReducedActivationPackage(
+            const chunk: PublishedPaddedTallyChunk =
+                await restoredChunkClient.createPaddedTallyChunk(
                     actionContext(activationPosition),
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    preparationParents,
-                    sourceCarriers,
-                    finalitySignatures,
-                    topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
+                    0,
+                );
+            expect(chunk.status).toBe('pending');
+            expect(chunk.chunkOrdinal).toBe(0);
+            expect(chunk.chunk).toHaveLength(
+                initialization.plan.chunks[0]?.chunkByteLength,
+            );
+            expect(chunk.chunkIdentity).toHaveLength(64);
+            await expect(
+                restoredChunkClient.createPaddedTallyChunk(
+                    actionContext(activationPosition),
+                    0,
                 ),
-            ).resolves.toEqual(activation);
-            closeClient(restoredActivationClient);
+            ).resolves.toEqual(chunk);
+            await expect(
+                restoredChunkClient.createPaddedTallyChunk(
+                    actionContext(activationPosition),
+                    2,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            closeClient(restoredChunkClient);
 
             await restoreRawActivationRecord(
                 databaseName(runIdentity, activationPosition),
-                retainedUnsignedBody,
+                allocatedGenerationRecord,
             );
             const rollbackClient = await openClient(
                 runIdentity,
                 activationPosition,
             );
             await expect(
-                rollbackClient.createReducedActivationPackage(
+                rollbackClient.createPaddedTallyChunk(
                     actionContext(activationPosition),
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    preparationParents,
-                    sourceCarriers,
-                    finalitySignatures,
-                    topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
+                    0,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'Conflict' });
             closeClient(rollbackClient);
+            await restoreRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                persistedChunkRecord,
+            );
+
+            const lastChunkOrdinal = initialization.plan.chunks.length - 1;
+            const publicationPreparationClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            for (
+                let chunkOrdinal = 1;
+                chunkOrdinal < lastChunkOrdinal;
+                chunkOrdinal += 1
+            ) {
+                const pending =
+                    await publicationPreparationClient.createPaddedTallyChunk(
+                        actionContext(activationPosition),
+                        chunkOrdinal,
+                    );
+                expect(pending.status).toBe('pending');
+            }
+            closeClient(publicationPreparationClient);
+            const prePublicationRecord = await readRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                activationIdentifier(activationPosition),
+            );
+            if (prePublicationRecord === undefined) {
+                throw new Error(
+                    'The pre-publication tally checkpoint is absent.',
+                );
+            }
+            await crashWorkerAtBoundary(
+                runIdentity,
+                activationPosition,
+                tallyPublicationCrashWorkerUrl,
+                'tally-activation-durably-published',
+                {
+                    requestId: 2,
+                    operation: 'create-padded-tally-chunk',
+                    input: {
+                        ...actionContext(activationPosition),
+                        expectedChunkOrdinal: lastChunkOrdinal,
+                    },
+                },
+            );
+            const publishedGenerationRecord = await readRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                activationIdentifier(activationPosition),
+            );
+            if (publishedGenerationRecord === undefined) {
+                throw new Error(
+                    'The publication crash omitted the completed activation.',
+                );
+            }
+            const publishedActivationClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            const published =
+                await publishedActivationClient.createPaddedTallyChunk(
+                    actionContext(activationPosition),
+                    lastChunkOrdinal,
+                );
+            if (published.status !== 'complete') {
+                throw new Error(
+                    'The crash-restored activation remained incomplete.',
+                );
+            }
+            expect(published.manifest).toHaveLength(
+                initialization.plan.manifestByteLength,
+            );
+            await expect(
+                publishedActivationClient.createPaddedTallyChunk(
+                    actionContext(activationPosition),
+                    lastChunkOrdinal,
+                ),
+            ).resolves.toEqual(published);
+            closeClient(publishedActivationClient);
+            await restoreRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                prePublicationRecord,
+            );
+            const publicationRollbackClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            await expect(
+                publicationRollbackClient.createPaddedTallyChunk(
+                    actionContext(activationPosition),
+                    lastChunkOrdinal,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            closeClient(publicationRollbackClient);
+            await restoreRawActivationRecord(
+                databaseName(runIdentity, activationPosition),
+                publishedGenerationRecord,
+            );
 
             await deleteRawActivationRecord(
                 databaseName(runIdentity, activationPosition),
@@ -1272,7 +2650,7 @@ describe('private preparation worker in Chromium', () => {
                 activationPosition,
             );
             await expect(
-                stateLossClient.createReducedActivationPackage(
+                stateLossClient.initializePaddedTallyGeneration(
                     actionContext(activationPosition),
                     canonicalRosterBytes,
                     preparationAttempt,
@@ -1280,9 +2658,6 @@ describe('private preparation worker in Chromium', () => {
                     sourceCarriers,
                     finalitySignatures,
                     topCount,
-                    initialWireValues,
-                    gateMaskShares,
-                    terminalMaskShares,
                 ),
             ).rejects.toMatchObject({ name: 'StateLost' });
             closeClient(stateLossClient);
@@ -1401,5 +2776,32 @@ describe('private preparation worker in Chromium', () => {
             });
             closeClient(restoredResultClient);
         },
+    );
+
+    it.skipIf(
+        manualEvidenceEnvironment[
+            topCountOneEvidenceCase.browserEnvironmentVariable
+        ] !== '1',
+    )(topCountOneEvidenceCase.testName, { timeout: 3_600_000 }, async () =>
+        expectCompletePaddedTallyCeremony(1),
+    );
+
+    it.skipIf(
+        manualEvidenceEnvironment[
+            topCountTenEvidenceCase.browserEnvironmentVariable
+        ] !== '1',
+    )(topCountTenEvidenceCase.testName, { timeout: 7_200_000 }, async () =>
+        expectCompletePaddedTallyCeremony(10),
+    );
+
+    it.skipIf(
+        manualEvidenceEnvironment[
+            emptyUsableBallotEvidenceCase.browserEnvironmentVariable
+        ] !== '1',
+    )(
+        emptyUsableBallotEvidenceCase.testName,
+        { timeout: 3_600_000 },
+        async () =>
+            expectCompletePaddedTallyCeremony(1, 'empty-usable-ballots'),
     );
 });

@@ -6,6 +6,7 @@ import type {
     FoundationKernelLoaderOptions,
     KernelResourceMeasurement,
 } from './foundation-kernel/kernel-runtime.js';
+import type { PaddedTallyPlan } from './padded-tally-runtime.js';
 import type { PreparationParentCarrier } from './source-runtime.js';
 
 export type PrivatePreparationWorkerInitialization = Readonly<{
@@ -87,7 +88,7 @@ export type PrivatePreparationWorkerRequest =
       }>
     | Readonly<{
           requestId: number;
-          operation: 'create-reduced-activation-package';
+          operation: 'initialize-padded-tally-generation';
           input: PrivatePreparationActionContext & {
               canonicalRosterBytes: Uint8Array;
               preparationAttempt: number;
@@ -95,9 +96,31 @@ export type PrivatePreparationWorkerRequest =
               sources: readonly SourceCarrier[];
               finalitySignatures: readonly FinalitySignatureCarrier[];
               topCount: number;
-              initialWireValues: Uint8Array;
-              gateMaskShares: Uint8Array;
-              terminalMaskShares: Uint8Array;
+          };
+      }>
+    | Readonly<{
+          requestId: number;
+          operation: 'create-padded-tally-chunk';
+          input: PrivatePreparationActionContext & {
+              expectedChunkOrdinal: number;
+          };
+      }>
+    | Readonly<{
+          requestId: number;
+          operation: 'initialize-padded-tally-evaluation';
+          input: PrivatePreparationActionContext & {
+              canonicalRosterBytes: Uint8Array;
+              finalitySignatures: readonly FinalitySignatureCarrier[];
+              manifests: readonly Uint8Array[];
+              activationSignatures: readonly Uint8Array[];
+          };
+      }>
+    | Readonly<{
+          requestId: number;
+          operation: 'evaluate-padded-tally-chunk';
+          input: PrivatePreparationActionContext & {
+              expectedChunkOrdinal: number;
+              chunks: readonly Uint8Array[];
           };
       }>
     | Readonly<{
@@ -131,19 +154,61 @@ export type PublishedFinalityPackage = Readonly<{
     finalitySignature: Uint8Array;
 }>;
 
-export type PublishedReducedActivationPackage = Readonly<{
-    chunk: Uint8Array;
-    chunkIdentity: Uint8Array;
-    manifest: Uint8Array;
-    manifestIdentity: Uint8Array;
-    activationSignature: Uint8Array;
-}>;
-
-export type TallyEvaluationProgress = Readonly<{
-    kind: 'no-result';
-    acceptedBallotAuthorshipBitmap: number;
+export type PaddedTallyWorkerInitialization = Readonly<{
+    status: 'already-initialized' | 'initialized';
+    plan: PaddedTallyPlan;
     resources: KernelResourceMeasurement;
 }>;
+
+export type PublishedPaddedTallyChunk = Readonly<{
+    chunkOrdinal: number;
+    chunk: Uint8Array;
+    chunkIdentity: Uint8Array;
+}> &
+    (
+        | Readonly<{ status: 'pending' }>
+        | Readonly<{
+              status: 'complete';
+              manifest: Uint8Array;
+              manifestIdentity: Uint8Array;
+              activationSignature: Uint8Array;
+          }>
+    );
+
+export type TallyEvaluationProgress =
+    | Readonly<{
+          kind: 'no-result';
+          terminalPath: 'source-empty';
+          acceptedBallotAuthorshipBitmap: number;
+          resources: KernelResourceMeasurement;
+      }>
+    | Readonly<{
+          kind: 'no-result';
+          terminalPath: 'evaluated';
+          acceptedBallotAuthorshipBitmap: number;
+          batchIdentity: Uint8Array;
+          terminalBody: Uint8Array;
+          terminalIdentity: Uint8Array;
+          resources: KernelResourceMeasurement;
+      }>
+    | Readonly<{
+          kind: 'result';
+          acceptedBallotAuthorshipBitmap: number;
+          orderedOptionPositions: readonly number[];
+          batchIdentity: Uint8Array;
+          terminalBody: Uint8Array;
+          terminalIdentity: Uint8Array;
+          resources: KernelResourceMeasurement;
+      }>;
+
+export type PaddedTallyEvaluationStep =
+    | Readonly<{
+          kind: 'pending';
+          chunkOrdinal: number;
+          nextChunkOrdinal: number;
+          resources: KernelResourceMeasurement;
+      }>
+    | TallyEvaluationProgress;
 
 type PrivatePreparationWorkerSuccess = Readonly<{
     requestId: number;
@@ -152,8 +217,10 @@ type PrivatePreparationWorkerSuccess = Readonly<{
         | PrivatePreparationConsumption
         | PublishedPreparationPackage
         | PublishedFinalityPackage
+        | PublishedPaddedTallyChunk
         | PublishedSourcePackage
-        | PublishedReducedActivationPackage
+        | PaddedTallyEvaluationStep
+        | PaddedTallyWorkerInitialization
         | TallyEvaluationProgress
         | Readonly<{ initialized: true }>;
 }>;

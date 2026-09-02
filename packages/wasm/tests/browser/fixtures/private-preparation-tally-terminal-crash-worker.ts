@@ -7,9 +7,9 @@ const workerScope = globalThis as unknown as DedicatedWorkerGlobalScope;
 installPrivatePreparationWorker(workerScope, {
     persistentStorageRequired: false,
     unpinnedKernelAllowed: true,
-    afterDurableActivationAllocate: () => {
+    afterDurableTallyTerminalPersist: () => {
         workerScope.postMessage({
-            testBoundary: 'activation-durably-allocated',
+            testBoundary: 'tally-terminal-durably-persisted',
         });
         return new Promise<void>(() => undefined);
     },

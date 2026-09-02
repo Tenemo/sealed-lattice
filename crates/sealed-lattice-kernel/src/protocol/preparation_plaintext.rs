@@ -21,6 +21,8 @@ pub const PAIRWISE_MASTER_BYTE_LENGTH: usize = 32;
 pub const PAIRWISE_MASTER_COUNT: usize = COMPLETION_PROFILE_PARTICIPANT_COUNT as usize;
 pub const PAIRWISE_MASTER_VECTOR_BYTE_LENGTH: usize =
     PAIRWISE_MASTER_COUNT * PAIRWISE_MASTER_BYTE_LENGTH;
+pub(super) const PAIRWISE_MASTER_INVENTORY_BYTE_LENGTH: usize =
+    (2 * PAIRWISE_MASTER_COUNT - 1) * PAIRWISE_MASTER_BYTE_LENGTH;
 pub const PREPARATION_PLAINTEXT_BYTE_LENGTH: usize =
     8 + 6 + PAIR_OPENING_BYTE_LENGTH + PAIRWISE_MASTER_BYTE_LENGTH;
 
@@ -212,6 +214,54 @@ impl PairwiseMasterInventory {
             usize::from(sender_position.checked_sub(1)?)
         };
         self.remote_incoming.get(remote_index)
+    }
+
+    pub(super) fn encode_position_ordered(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(PAIRWISE_MASTER_INVENTORY_BYTE_LENGTH);
+        for master in &self.outgoing {
+            bytes.extend_from_slice(master);
+        }
+        for master in &self.remote_incoming {
+            bytes.extend_from_slice(master);
+        }
+        bytes
+    }
+
+    pub(super) fn decode_position_ordered(
+        participant_position: u16,
+        bytes: &[u8],
+    ) -> Result<Self, PreparationPlaintextError> {
+        validate_position(participant_position)?;
+        if bytes.len() != PAIRWISE_MASTER_INVENTORY_BYTE_LENGTH {
+            return Err(PreparationPlaintextError::WrongItemTypeOrLength);
+        }
+        let mut chunks = bytes.chunks_exact(PAIRWISE_MASTER_BYTE_LENGTH);
+        let mut outgoing = [[0_u8; PAIRWISE_MASTER_BYTE_LENGTH]; PAIRWISE_MASTER_COUNT];
+        for master in &mut outgoing {
+            *master = chunks
+                .next()
+                .ok_or(PreparationPlaintextError::WrongItemTypeOrLength)?
+                .try_into()
+                .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
+        }
+        let mut remote_incoming = [[0_u8; PAIRWISE_MASTER_BYTE_LENGTH]; PAIRWISE_MASTER_COUNT - 1];
+        for master in &mut remote_incoming {
+            *master = chunks
+                .next()
+                .ok_or(PreparationPlaintextError::WrongItemTypeOrLength)?
+                .try_into()
+                .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
+        }
+        if !chunks.remainder().is_empty() {
+            outgoing.zeroize();
+            remote_incoming.zeroize();
+            return Err(PreparationPlaintextError::WrongItemTypeOrLength);
+        }
+        Ok(Self {
+            participant_position,
+            outgoing,
+            remote_incoming,
+        })
     }
 }
 

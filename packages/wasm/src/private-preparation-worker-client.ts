@@ -8,9 +8,11 @@ import type {
     PrivatePreparationWorkerInitialization,
     PrivatePreparationWorkerRequest,
     PrivatePreparationWorkerResponse,
+    PaddedTallyEvaluationStep,
+    PaddedTallyWorkerInitialization,
     PublishedFinalityPackage,
+    PublishedPaddedTallyChunk,
     PublishedPreparationPackage,
-    PublishedReducedActivationPackage,
     PublishedSourcePackage,
     SourcePublicationChoice,
     TallyEvaluationProgress,
@@ -98,7 +100,7 @@ const collectRequestTransferables = (
             collect(request.input.choice.scoreEncodings);
         }
     }
-    if (request.operation === 'create-reduced-activation-package') {
+    if (request.operation === 'initialize-padded-tally-generation') {
         for (const parent of request.input.preparationParents) {
             collect(parent.body);
             collect(parent.signature);
@@ -110,9 +112,18 @@ const collectRequestTransferables = (
         for (const signature of request.input.finalitySignatures) {
             collect(signature.signature);
         }
-        collect(request.input.initialWireValues);
-        collect(request.input.gateMaskShares);
-        collect(request.input.terminalMaskShares);
+    }
+    if (request.operation === 'initialize-padded-tally-evaluation') {
+        for (const signature of request.input.finalitySignatures) {
+            collect(signature.signature);
+        }
+        for (const manifest of request.input.manifests) collect(manifest);
+        for (const signature of request.input.activationSignatures) {
+            collect(signature);
+        }
+    }
+    if (request.operation === 'evaluate-padded-tally-chunk') {
+        for (const chunk of request.input.chunks) collect(chunk);
     }
     if (
         request.operation === 'create-finality-signature' ||
@@ -317,7 +328,7 @@ export class PrivatePreparationWorkerClient {
         });
     }
 
-    createReducedActivationPackage(
+    initializePaddedTallyGeneration(
         context: PrivatePreparationActionContext,
         canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
@@ -328,12 +339,9 @@ export class PrivatePreparationWorkerClient {
         sources: readonly SourceCarrier[],
         finalitySignatures: readonly FinalitySignatureCarrier[],
         topCount: number,
-        initialWireValues: Uint8Array,
-        gateMaskShares: Uint8Array,
-        terminalMaskShares: Uint8Array,
-    ): Promise<PublishedReducedActivationPackage> {
+    ): Promise<PaddedTallyWorkerInitialization> {
         return this.send({
-            operation: 'create-reduced-activation-package',
+            operation: 'initialize-padded-tally-generation',
             input: {
                 ...copyActionContext(context),
                 canonicalRosterBytes:
@@ -346,9 +354,54 @@ export class PrivatePreparationWorkerClient {
                 sources: copySources(sources),
                 finalitySignatures: copyFinalitySignatures(finalitySignatures),
                 topCount,
-                initialWireValues: copyBytes(initialWireValues),
-                gateMaskShares: copyBytes(gateMaskShares),
-                terminalMaskShares: copyBytes(terminalMaskShares),
+            },
+        });
+    }
+
+    createPaddedTallyChunk(
+        context: PrivatePreparationActionContext,
+        expectedChunkOrdinal: number,
+    ): Promise<PublishedPaddedTallyChunk> {
+        return this.send({
+            operation: 'create-padded-tally-chunk',
+            input: {
+                ...copyActionContext(context),
+                expectedChunkOrdinal,
+            },
+        });
+    }
+
+    initializePaddedTallyEvaluation(
+        context: PrivatePreparationActionContext,
+        canonicalRosterBytes: Uint8Array,
+        finalitySignatures: readonly FinalitySignatureCarrier[],
+        manifests: readonly Uint8Array[],
+        activationSignatures: readonly Uint8Array[],
+    ): Promise<PaddedTallyWorkerInitialization> {
+        return this.send({
+            operation: 'initialize-padded-tally-evaluation',
+            input: {
+                ...copyActionContext(context),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
+                finalitySignatures: copyFinalitySignatures(finalitySignatures),
+                manifests: manifests.map(copyBytes),
+                activationSignatures: activationSignatures.map(copyBytes),
+            },
+        });
+    }
+
+    evaluatePaddedTallyChunk(
+        context: PrivatePreparationActionContext,
+        expectedChunkOrdinal: number,
+        chunks: readonly Uint8Array[],
+    ): Promise<PaddedTallyEvaluationStep> {
+        return this.send({
+            operation: 'evaluate-padded-tally-chunk',
+            input: {
+                ...copyActionContext(context),
+                expectedChunkOrdinal,
+                chunks: chunks.map(copyBytes),
             },
         });
     }

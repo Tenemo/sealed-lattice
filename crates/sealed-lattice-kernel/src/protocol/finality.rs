@@ -11,7 +11,9 @@ use crate::tally_circuit::{
 
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
 use super::roster::{require_roster_identity, signing_verification_key};
-use super::source::{SOURCE_ORDINAL, SourceContext, SourceDeclaration, verify_source_carrier};
+use super::source::{
+    SOURCE_ORDINAL, SourceContext, SourceDeclaration, VerifiedSource, verify_source_carrier,
+};
 
 pub const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 pub const COMPLETION_PROFILE_OPTION_COUNT: u16 = 10;
@@ -296,6 +298,7 @@ pub struct VerifiedFinalityTarget {
     pub target_body: Vec<u8>,
     pub target_identity: Hash512,
     pub source_body_identities: Vec<Hash512>,
+    pub verified_sources: Vec<VerifiedSource>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -322,6 +325,7 @@ pub fn derive_finality_target(
         .map_err(|_| FinalityError::WrongContext)?;
 
     let mut source_body_identities = Vec::with_capacity(usize::from(context.participant_count));
+    let mut verified_sources = Vec::with_capacity(usize::from(context.participant_count));
     let mut source_identity_bytes =
         Vec::with_capacity(usize::from(context.participant_count) * Hash512::BYTE_LENGTH);
     let mut source_submission_bitmap = 0_u16;
@@ -358,6 +362,7 @@ pub fn derive_finality_target(
         }
         source_identity_bytes.extend_from_slice(verified.body_identity.as_bytes());
         source_body_identities.push(verified.body_identity);
+        verified_sources.push(verified);
     }
 
     let source_inventory_root = hash_foundation_tuple_512(
@@ -402,6 +407,7 @@ pub fn derive_finality_target(
         target_body,
         target_identity,
         source_body_identities,
+        verified_sources,
     })
 }
 

@@ -515,6 +515,143 @@ pub fn derive_honest_source_correction(
     Ok(source_mask)
 }
 
+pub fn derive_source_coordinate_shares(
+    context: &SourceContext,
+    holder_position: u16,
+    correction: Option<&[u8; SOURCE_CORRECTION_BYTE_LENGTH]>,
+    held_subset_keys: &[HeldSubsetKey],
+) -> Result<[u8; SOURCE_BIT_COUNT], SourceError> {
+    validate_position(context.participant_count, context.sender_position)?;
+    validate_position(context.participant_count, holder_position)?;
+    if context.source_ordinal != SOURCE_ORDINAL {
+        return Err(SourceError::WrongContext);
+    }
+    let expected_slots = sender_subset_slots(holder_position);
+    if held_subset_keys.len() != expected_slots.len()
+        || held_subset_keys
+            .iter()
+            .zip(expected_slots)
+            .any(|(key, (family, subset))| key.family != family || key.subset != subset)
+    {
+        return Err(SourceError::WrongSubsetKeyVector);
+    }
+    let mut shares = [0_u8; SOURCE_BIT_COUNT];
+    let mut source_key_count = 0_usize;
+    for held_key in held_subset_keys {
+        if held_key.family != LOW_SUBSET_SIZE
+            || held_key.subset & (1_u16 << context.sender_position) == 0
+        {
+            continue;
+        }
+        if held_key.subset & (1_u16 << holder_position) == 0 {
+            return Err(SourceError::WrongSubsetKeyVector);
+        }
+        source_key_count += 1;
+        let source_rank = (held_key.subset & ((1_u16 << context.sender_position) - 1)).count_ones();
+        let mut source_subkey = derive_source_subkey(context, held_key.subset, &held_key.key);
+        let cipher = Aes256::new_from_slice(&source_subkey)
+            .map_err(|_| SourceError::WrongSubsetKeyVector)?;
+        source_subkey.zeroize();
+        let source_rank =
+            usize::try_from(source_rank).map_err(|_| SourceError::WrongSubsetKeyVector)?;
+        let source_start_bit = source_rank
+            .checked_mul(SOURCE_BIT_COUNT)
+            .ok_or(SourceError::WrongSubsetKeyVector)?;
+        let source_end_bit = source_start_bit
+            .checked_add(SOURCE_BIT_COUNT)
+            .ok_or(SourceError::WrongSubsetKeyVector)?;
+        let subset_basis = normalized_subset_basis_at_holder(held_key.subset, holder_position)?;
+        for block_index in source_start_bit / 128..=(source_end_bit - 1) / 128 {
+            let mut address = Block::<Aes256>::default();
+            address[0] = SOURCE_STREAM_ADDRESS_VERSION;
+            address[1] = SOURCE_STREAM_FAMILY;
+            address[2..6].copy_from_slice(
+                &u32::try_from(block_index)
+                    .map_err(|_| SourceError::WrongSubsetKeyVector)?
+                    .to_le_bytes(),
+            );
+            cipher.encrypt_block(&mut address);
+            let block_start_bit = block_index * 128;
+            let overlap_start = source_start_bit.max(block_start_bit);
+            let overlap_end = source_end_bit.min(block_start_bit + 128);
+            for linear_bit in overlap_start..overlap_end {
+                let source_bit_ordinal = linear_bit - source_start_bit;
+                let bit_offset = linear_bit - block_start_bit;
+                if (address[bit_offset / 8] >> (bit_offset % 8)) & 1 == 1 {
+                    shares[source_bit_ordinal] ^= subset_basis;
+                }
+            }
+            address.zeroize();
+        }
+    }
+    let expected_source_key_count = if holder_position == context.sender_position {
+        84
+    } else {
+        56
+    };
+    if source_key_count != expected_source_key_count {
+        return Err(SourceError::WrongSubsetKeyVector);
+    }
+    if let Some(correction) = correction {
+        for (source_bit_ordinal, share) in shares.iter_mut().enumerate() {
+            *share ^= (correction[source_bit_ordinal / 8] >> (source_bit_ordinal % 8)) & 1;
+        }
+    }
+    Ok(shares)
+}
+
+fn normalized_subset_basis_at_holder(subset: u16, holder_position: u16) -> Result<u8, SourceError> {
+    let admitted_mask = (1_u16 << COMPLETION_PROFILE_PARTICIPANT_COUNT) - 1;
+    if subset & !admitted_mask != 0
+        || subset.count_ones() != u32::from(LOW_SUBSET_SIZE)
+        || subset & (1_u16 << holder_position) == 0
+    {
+        return Err(SourceError::WrongSubsetKeyVector);
+    }
+    let point = (holder_position + 1) as u8;
+    let mut numerator = 1_u8;
+    let mut denominator = 1_u8;
+    for participant_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+        if subset & (1_u16 << participant_position) != 0 {
+            continue;
+        }
+        let coordinate = (participant_position + 1) as u8;
+        numerator = gf16_multiply(numerator, point ^ coordinate);
+        denominator = gf16_multiply(denominator, coordinate);
+    }
+    let inverse = gf16_inverse(denominator).ok_or(SourceError::WrongSubsetKeyVector)?;
+    Ok(gf16_multiply(numerator, inverse))
+}
+
+fn gf16_multiply(mut left: u8, mut right: u8) -> u8 {
+    let mut product = 0_u8;
+    for _ in 0..4 {
+        product ^= (0_u8.wrapping_sub(right & 1)) & left;
+        let high_bit = left >> 3;
+        left = (left << 1) & 0x0f;
+        left ^= (0_u8.wrapping_sub(high_bit)) & 0x03;
+        right >>= 1;
+    }
+    product & 0x0f
+}
+
+fn gf16_inverse(value: u8) -> Option<u8> {
+    if value == 0 {
+        return None;
+    }
+    let mut result = 1_u8;
+    let mut base = value;
+    let mut exponent = 14_u8;
+    while exponent != 0 {
+        if exponent & 1 == 1 {
+            result = gf16_multiply(result, base);
+        }
+        base = gf16_multiply(base, base);
+        exponent >>= 1;
+    }
+    Some(result)
+}
+
 fn derive_source_subkey(
     context: &SourceContext,
     subset: u16,
@@ -766,6 +903,86 @@ mod tests {
             derive_honest_source_correction(&changed_context, &[0; 10], &keys)
                 .expect("changed context derives"),
         );
+    }
+
+    #[test]
+    fn source_coordinate_derivation_reconstructs_every_corrected_score_bit() {
+        let score_encodings = [1_u8, 10, 2, 9, 3, 8, 4, 7, 5, 6];
+        for dealer_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            let source_context = SourceContext {
+                sender_position: dealer_position,
+                ..context()
+            };
+            let held_keys = |holder_position| {
+                sender_subset_slots(holder_position)
+                    .into_iter()
+                    .map(|(family, subset)| HeldSubsetKey {
+                        family,
+                        subset,
+                        key: core::array::from_fn(|index| {
+                            (u32::from(family) * 17 + u32::from(subset) * 31 + index as u32 * 13)
+                                as u8
+                        }),
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let correction = derive_honest_source_correction(
+                &source_context,
+                &score_encodings,
+                &held_keys(dealer_position),
+            )
+            .expect("dealer correction derives");
+            let shares = (0..COMPLETION_PROFILE_PARTICIPANT_COUNT)
+                .map(|holder_position| {
+                    derive_source_coordinate_shares(
+                        &source_context,
+                        holder_position,
+                        Some(&correction),
+                        &held_keys(holder_position),
+                    )
+                    .expect("holder coordinates derive")
+                })
+                .collect::<Vec<_>>();
+            for source_bit_ordinal in 0..SOURCE_BIT_COUNT {
+                let expected = (score_encodings[source_bit_ordinal / SCORE_BIT_WIDTH]
+                    >> (source_bit_ordinal % SCORE_BIT_WIDTH))
+                    & 1;
+                let known = core::array::from_fn::<_, 4, _>(|position| {
+                    shares[position][source_bit_ordinal]
+                });
+                assert_eq!(interpolate_four(&known, 0), expected);
+                for holder_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+                    assert_eq!(
+                        interpolate_four(&known, (holder_position + 1) as u8),
+                        shares[usize::from(holder_position)][source_bit_ordinal],
+                    );
+                }
+            }
+        }
+    }
+
+    fn interpolate_four(values: &[u8; 4], target: u8) -> u8 {
+        (0..4).fold(0_u8, |result, position| {
+            let point = (position + 1) as u8;
+            let mut numerator = 1_u8;
+            let mut denominator = 1_u8;
+            for other_position in 0..4 {
+                if other_position == position {
+                    continue;
+                }
+                let other_point = (other_position + 1) as u8;
+                numerator = gf16_multiply(numerator, target ^ other_point);
+                denominator = gf16_multiply(denominator, point ^ other_point);
+            }
+            result
+                ^ gf16_multiply(
+                    values[position],
+                    gf16_multiply(
+                        numerator,
+                        gf16_inverse(denominator).expect("distinct interpolation points"),
+                    ),
+                )
+        })
     }
 
     #[test]
