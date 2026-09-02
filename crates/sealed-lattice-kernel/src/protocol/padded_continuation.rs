@@ -10,8 +10,6 @@ use crate::foundation::{CanonicalItem, Hash512, Roster, hash_foundation_tuple_51
 use super::finality::{
     COMPLETION_PROFILE_PARTICIPANT_COUNT, FinalityTargetKind, VerifiedFinalityCapability,
 };
-#[cfg(test)]
-use super::joint_continuation::{JointContinuationGate, JointContinuationPlan};
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
 use super::preparation_plaintext::HeldSubsetKey;
 #[cfg(test)]
@@ -213,90 +211,60 @@ impl Gf16 {
 }
 
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PlanGate {
+    left_wire: u16,
+    right_wire: u16,
+}
+
+#[cfg(test)]
 #[derive(Clone)]
 struct PlanView {
     input_wire_count: u16,
-    gates: Vec<JointContinuationGate>,
+    gates: Vec<PlanGate>,
     output_wires: Vec<u16>,
 }
 
 #[cfg(test)]
-fn reviewed_reduced_plan() -> Result<JointContinuationPlan, PaddedContinuationError> {
-    JointContinuationPlan::new(
-        4,
-        vec![
-            JointContinuationGate {
+fn reviewed_reduced_plan() -> PlanView {
+    PlanView {
+        input_wire_count: 4,
+        gates: vec![
+            PlanGate {
                 left_wire: 0,
                 right_wire: 1,
             },
-            JointContinuationGate {
+            PlanGate {
                 left_wire: 2,
                 right_wire: 3,
             },
-            JointContinuationGate {
+            PlanGate {
                 left_wire: 4,
                 right_wire: 2,
             },
-            JointContinuationGate {
+            PlanGate {
                 left_wire: 4,
                 right_wire: 3,
             },
-            JointContinuationGate {
+            PlanGate {
                 left_wire: 6,
                 right_wire: 7,
             },
-            JointContinuationGate {
+            PlanGate {
                 left_wire: 5,
                 right_wire: 0,
             },
-            JointContinuationGate {
+            PlanGate {
                 left_wire: 8,
                 right_wire: 9,
             },
         ],
-        vec![4, 7, 10],
-    )
-    .map_err(|_| PaddedContinuationError::InvalidPlan)
+        output_wires: vec![4, 7, 10],
+    }
 }
 
 #[cfg(test)]
-fn plan_view(plan: &JointContinuationPlan) -> Result<PlanView, PaddedContinuationError> {
-    if plan != &reviewed_reduced_plan()? {
-        return Err(PaddedContinuationError::InvalidPlan);
-    }
-    let bytes = plan
-        .encode()
-        .map_err(|_| PaddedContinuationError::InvalidPlan)?;
-    let mut reader = ByteReader::new(&bytes);
-    let _magic = reader.read_array::<4>()?;
-    let _version = reader.read_u16()?;
-    let input_wire_count = reader.read_u16()?;
-    let gate_count = usize::from(reader.read_u16()?);
-    let mut gates = Vec::with_capacity(gate_count);
-    for _ in 0..gate_count {
-        gates.push(JointContinuationGate {
-            left_wire: reader.read_u16()?,
-            right_wire: reader.read_u16()?,
-        });
-    }
-    let output_count = usize::from(reader.read_u16()?);
-    let mut output_wires = Vec::with_capacity(output_count);
-    for _ in 0..output_count {
-        output_wires.push(reader.read_u16()?);
-    }
-    reader.finish()?;
-    Ok(PlanView {
-        input_wire_count,
-        gates,
-        output_wires,
-    })
-}
-
-#[cfg(test)]
-pub fn padded_label_entropy_byte_length(
-    plan: &JointContinuationPlan,
-) -> Result<usize, PaddedContinuationError> {
-    let plan = plan_view(plan)?;
+fn padded_label_entropy_byte_length(plan: &PlanView) -> Result<usize, PaddedContinuationError> {
     let pair_count = usize::from(plan.input_wire_count)
         .checked_mul(FIELD_BIT_WIDTH)
         .and_then(|count| {
@@ -322,10 +290,9 @@ pub fn padded_label_entropy_byte_length(
 }
 
 #[cfg(test)]
-pub fn padded_participant_payload_byte_length(
-    plan: &JointContinuationPlan,
+fn padded_participant_payload_byte_length(
+    plan: &PlanView,
 ) -> Result<usize, PaddedContinuationError> {
-    let plan = plan_view(plan)?;
     let initial_length = usize::from(plan.input_wire_count)
         .checked_mul(FIELD_BIT_WIDTH * PADDED_TOKEN_BYTE_LENGTH)
         .ok_or(PaddedContinuationError::ArithmeticOverflow)?;
@@ -1004,21 +971,20 @@ pub struct GeneratedPaddedParticipant {
 #[cfg(test)]
 fn generate_participant_for_context(
     context: &EvaluationContext,
-    plan: &JointContinuationPlan,
-    plan_view: &PlanView,
+    plan: &PlanView,
     input: PaddedParticipantGenerationInput<'_>,
     gate_material: &[GateMaterial],
 ) -> Result<GeneratedPaddedParticipant, PaddedContinuationError> {
     validate_position(input.participant_position)?;
-    if input.initial_wire_values.len() != usize::from(plan_view.input_wire_count)
+    if input.initial_wire_values.len() != usize::from(plan.input_wire_count)
         || input.initial_wire_values.iter().any(|value| *value > 0x0f)
-        || input.gate_mask_shares.len() != plan_view.gates.len() * 2
+        || input.gate_mask_shares.len() != plan.gates.len() * 2
         || input.gate_mask_shares.iter().any(|value| *value > 0x0f)
-        || input.terminal_mask_shares.len() != plan_view.output_wires.len()
+        || input.terminal_mask_shares.len() != plan.output_wires.len()
         || input.terminal_mask_shares.iter().any(|value| *value > 0x0f)
         || input.allocation_nonce.len() != PADDED_ALLOCATION_NONCE_BYTE_LENGTH
         || input.label_entropy.len() != padded_label_entropy_byte_length(plan)?
-        || gate_material.len() != plan_view.gates.len()
+        || gate_material.len() != plan.gates.len()
     {
         return Err(PaddedContinuationError::InvalidBody);
     }
@@ -1032,8 +998,8 @@ fn generate_participant_for_context(
     let payload_byte_length = padded_participant_payload_byte_length(plan)?;
     let mut payload = Vec::with_capacity(payload_byte_length);
 
-    let wire_count = usize::from(plan_view.input_wire_count)
-        .checked_add(plan_view.gates.len())
+    let wire_count = usize::from(plan.input_wire_count)
+        .checked_add(plan.gates.len())
         .ok_or(PaddedContinuationError::ArithmeticOverflow)?;
     let mut wire_pairs = vec![None; wire_count];
     for (wire_index, value) in input.initial_wire_values.iter().copied().enumerate() {
@@ -1044,7 +1010,7 @@ fn generate_participant_for_context(
         wire_pairs[wire_index] = Some(pairs);
     }
 
-    for (gate_index, gate) in plan_view.gates.iter().enumerate() {
+    for (gate_index, gate) in plan.gates.iter().enumerate() {
         let left = wire_pairs
             .get(usize::from(gate.left_wire))
             .and_then(|pairs| *pairs)
@@ -1066,10 +1032,10 @@ fn generate_participant_for_context(
             &gate_material[gate_index],
             &mut entropy,
         )?;
-        wire_pairs[usize::from(plan_view.input_wire_count) + gate_index] = Some(output_pairs);
+        wire_pairs[usize::from(plan.input_wire_count) + gate_index] = Some(output_pairs);
     }
 
-    for (output_index, output_wire) in plan_view.output_wires.iter().copied().enumerate() {
+    for (output_index, output_wire) in plan.output_wires.iter().copied().enumerate() {
         let input_pairs = wire_pairs
             .get(usize::from(output_wire))
             .and_then(|pairs| *pairs)
@@ -1102,7 +1068,7 @@ fn generate_participant_for_context(
     chunk.extend_from_slice(&allocation_nonce);
     chunk.extend_from_slice(&0_u32.to_le_bytes());
     chunk.extend_from_slice(&0_u32.to_le_bytes());
-    chunk.extend_from_slice(&(plan_view.gates.len() as u32).to_le_bytes());
+    chunk.extend_from_slice(&(plan.gates.len() as u32).to_le_bytes());
     chunk.push(1);
     chunk.push(1);
     chunk.extend_from_slice(&[0_u8; Hash512::BYTE_LENGTH]);
@@ -1126,7 +1092,7 @@ fn generate_participant_for_context(
     manifest.extend_from_slice(&allocation_nonce);
     manifest.extend_from_slice(&1_u32.to_le_bytes());
     manifest.extend_from_slice(&0_u32.to_le_bytes());
-    manifest.extend_from_slice(&(plan_view.gates.len() as u32).to_le_bytes());
+    manifest.extend_from_slice(&(plan.gates.len() as u32).to_le_bytes());
     manifest.push(1);
     manifest.push(1);
     manifest.extend_from_slice(
@@ -1519,8 +1485,7 @@ fn evaluate_padded_batch(
     {
         return Err(PaddedContinuationError::WrongParticipantCount);
     }
-    let plan = reviewed_reduced_plan()?;
-    let plan_view = plan_view(&plan)?;
+    let plan_view = reviewed_reduced_plan();
     let mut parsed_chunks = Vec::with_capacity(participant_count);
     let mut seen_positions = BTreeSet::new();
     let mut seen_nonces = BTreeSet::new();
@@ -2401,8 +2366,7 @@ mod tests {
 
     struct ReducedFixture {
         context: EvaluationContext,
-        plan: JointContinuationPlan,
-        plan_view: PlanView,
+        plan: PlanView,
         chunks: Vec<Vec<u8>>,
         manifests: Vec<Vec<u8>>,
         manifest_identities: Vec<Hash512>,
@@ -2414,10 +2378,7 @@ mod tests {
         expected_terminal_bits: Vec<bool>,
     }
 
-    fn deterministic_label_entropy(
-        plan: &JointContinuationPlan,
-        participant_position: usize,
-    ) -> Vec<u8> {
+    fn deterministic_label_entropy(plan: &PlanView, participant_position: usize) -> Vec<u8> {
         let length = padded_label_entropy_byte_length(plan).expect("reduced entropy length");
         let mut entropy = deterministic_bytes(length, 0x720_000 + participant_position as u64);
         for offset in (0..entropy.len()).step_by(TOKEN_PAIR_ENTROPY_BYTE_LENGTH) {
@@ -2618,8 +2579,7 @@ mod tests {
     }
 
     fn build_reduced_fixture() -> ReducedFixture {
-        let plan = reviewed_reduced_plan().expect("reduced plan");
-        let plan_view = plan_view(&plan).expect("reduced plan view");
+        let plan = reviewed_reduced_plan();
         let context = EvaluationContext {
             target_identity: Hash512::from_bytes(decode_hex::<64>(
                 "9f67e3d94c776f2ba59d87ea059d545dd43f166054f0ee716aa1d532986da34a9d3c68100bb5f9be9c36d9a06e954ba283ca7d0a570f4f8d0aafbbfcdeb9cd76",
@@ -2638,10 +2598,10 @@ mod tests {
             .map(|(wire_index, bit)| field_polynomial(bit, 3, wire_index + 1))
             .collect::<Vec<_>>();
         let mut gate_masks = (0..PARTICIPANT_COUNT)
-            .map(|_| Vec::with_capacity(plan_view.gates.len() * 2))
+            .map(|_| Vec::with_capacity(plan.gates.len() * 2))
             .collect::<Vec<_>>();
-        let mut selectors = Vec::with_capacity(plan_view.gates.len());
-        for (gate_index, gate) in plan_view.gates.iter().enumerate() {
+        let mut selectors = Vec::with_capacity(plan.gates.len());
+        for (gate_index, gate) in plan.gates.iter().enumerate() {
             let product = multiply_field_polynomials(
                 &wire_polynomials[usize::from(gate.left_wire)],
                 &wire_polynomials[usize::from(gate.right_wire)],
@@ -2672,9 +2632,9 @@ mod tests {
         }
 
         let mut terminal_masks = (0..PARTICIPANT_COUNT)
-            .map(|_| Vec::with_capacity(plan_view.output_wires.len()))
+            .map(|_| Vec::with_capacity(plan.output_wires.len()))
             .collect::<Vec<_>>();
-        for output_index in 0..plan_view.output_wires.len() {
+        for output_index in 0..plan.output_wires.len() {
             let mask = field_polynomial(0, 3, 300 + output_index);
             for (participant_position, shares) in terminal_masks.iter_mut().enumerate() {
                 shares.push(
@@ -2683,7 +2643,7 @@ mod tests {
                 );
             }
         }
-        let expected_terminal_bits = plan_view
+        let expected_terminal_bits = plan
             .output_wires
             .iter()
             .map(|wire| wire_polynomials[usize::from(*wire)][0] == Gf16::ONE)
@@ -2691,7 +2651,7 @@ mod tests {
 
         let gate_material = (0..PARTICIPANT_COUNT)
             .map(|participant_position| {
-                (0..plan_view.gates.len())
+                (0..plan.gates.len())
                     .flat_map(|gate_index| explicit_gate_material(participant_position, gate_index))
                     .collect::<Vec<_>>()
             })
@@ -2713,7 +2673,6 @@ mod tests {
             let generated = generate_participant_for_context(
                 &context,
                 &plan,
-                &plan_view,
                 PaddedParticipantGenerationInput {
                     participant_position: participant_position as u16,
                     initial_wire_values: &initial_values[participant_position],
@@ -2735,7 +2694,6 @@ mod tests {
         ReducedFixture {
             context,
             plan,
-            plan_view,
             chunks,
             manifests,
             manifest_identities,
@@ -2803,14 +2761,12 @@ mod tests {
     ) -> EvaluatedGate<'a> {
         let chunk = ParsedChunk::new(&fixture.chunks[participant_position], &fixture.context)
             .expect("chunk parses");
-        let initial = chunk
-            .initial_tokens(&fixture.plan_view)
-            .expect("initial tokens");
-        let gate = fixture.plan_view.gates[gate_index];
+        let initial = chunk.initial_tokens(&fixture.plan).expect("initial tokens");
+        let gate = fixture.plan.gates[gate_index];
         evaluate_gate_payload_from_chunk(
             &chunk,
             &fixture.context,
-            &fixture.plan_view,
+            &fixture.plan,
             gate_index,
             initial[usize::from(gate.left_wire)],
             initial[usize::from(gate.right_wire)],
@@ -3248,7 +3204,7 @@ mod tests {
                 continuation_keys.insert(second);
             }
         }
-        assert_eq!(continuation_keys.len(), 20 * fixture.plan_view.gates.len());
+        assert_eq!(continuation_keys.len(), 20 * fixture.plan.gates.len());
         assert!(
             label_keys.is_disjoint(&continuation_keys),
             "the deterministic census has no cross-family key collision"
@@ -3796,10 +3752,10 @@ mod tests {
                 "33f51b3fbf0e9587c51d196e8ecf068ad9ef45b5c90fd8c1e8c3c20449255ed9892cc7a18d52b1155698a4cd4524686edcb18fb2e7b8e5139ed865226dcff630",
             ))
         );
-        assert_eq!(fixture.plan_view.output_wires, vec![4, 7, 10]);
-        assert_eq!(fixture.plan_view.gates[2].left_wire, 4, "serial reuse");
-        assert_eq!(fixture.plan_view.gates[3].left_wire, 4, "fan-out");
-        assert_eq!(fixture.plan_view.gates[4].left_wire, 6, "reconvergence");
+        assert_eq!(fixture.plan.output_wires, vec![4, 7, 10]);
+        assert_eq!(fixture.plan.gates[2].left_wire, 4, "serial reuse");
+        assert_eq!(fixture.plan.gates[3].left_wire, 4, "fan-out");
+        assert_eq!(fixture.plan.gates[4].left_wire, 6, "reconvergence");
     }
 
     #[test]
@@ -4084,7 +4040,7 @@ mod tests {
                 selected_selector,
                 selected_key,
             );
-            let row_offset = continuation_rows_offset(&fixture.plan_view, hostile_gate_index)
+            let row_offset = continuation_rows_offset(&fixture.plan, hostile_gate_index)
                 + usize::from(selected_selector) * CONTINUATION_ROW_BYTE_LENGTH;
             for authenticator_byte in 0..CONTINUATION_AUTHENTICATOR_BYTE_LENGTH {
                 let mut mutated_ciphertext = selected_ciphertext;
@@ -4170,8 +4126,8 @@ mod tests {
             let basis = 0;
             let color = evaluated[garbler].masked_tokens[basis].color;
             let row_index = (receiver_position * FIELD_BIT_WIDTH + basis) * 2 + usize::from(color);
-            let start = joint_rows_offset(&fixture.plan_view, 0)
-                + row_index * PADDED_MODULE_VALUE_BYTE_LENGTH;
+            let start =
+                joint_rows_offset(&fixture.plan, 0) + row_index * PADDED_MODULE_VALUE_BYTE_LENGTH;
             for (byte, delta) in chunks[garbler][start..start + PADDED_MODULE_VALUE_BYTE_LENGTH]
                 .iter_mut()
                 .zip(error)
@@ -4278,7 +4234,6 @@ mod tests {
             generate_participant_for_context(
                 &fixture.context,
                 &fixture.plan,
-                &fixture.plan_view,
                 PaddedParticipantGenerationInput {
                     participant_position: 0,
                     initial_wire_values: &fixture.initial_values[0],
@@ -4320,18 +4275,18 @@ mod tests {
         let selected_key = |chunks: &[Vec<u8>]| {
             let gate_index = 0;
             let receiver_position = 0;
-            let gate = fixture.plan_view.gates[gate_index];
+            let gate = fixture.plan.gates[gate_index];
             let mut aggregate_evaluations = Vec::with_capacity(PARTICIPANT_COUNT);
             for (garbler_position, bytes) in chunks.iter().enumerate() {
                 let chunk =
                     ParsedChunk::new(bytes, &fixture.context).expect("variant chunk parses");
                 let initial = chunk
-                    .initial_tokens(&fixture.plan_view)
+                    .initial_tokens(&fixture.plan)
                     .expect("variant initial tokens");
                 let evaluated = evaluate_gate_payload_from_chunk(
                     &chunk,
                     &fixture.context,
-                    &fixture.plan_view,
+                    &fixture.plan,
                     gate_index,
                     initial[usize::from(gate.left_wire)],
                     initial[usize::from(gate.right_wire)],
@@ -4370,13 +4325,13 @@ mod tests {
             let receiver_chunk = ParsedChunk::new(&foreign_inventory.0[0], &fixture.context)
                 .expect("foreign receiver chunk parses");
             let initial = receiver_chunk
-                .initial_tokens(&fixture.plan_view)
+                .initial_tokens(&fixture.plan)
                 .expect("foreign initial tokens");
-            let gate = fixture.plan_view.gates[0];
+            let gate = fixture.plan.gates[0];
             let evaluated = evaluate_gate_payload_from_chunk(
                 &receiver_chunk,
                 &fixture.context,
-                &fixture.plan_view,
+                &fixture.plan,
                 0,
                 initial[usize::from(gate.left_wire)],
                 initial[usize::from(gate.right_wire)],
@@ -4402,7 +4357,7 @@ mod tests {
             }
         }
 
-        let continuation_offset = continuation_rows_offset(&fixture.plan_view, 0);
+        let continuation_offset = continuation_rows_offset(&fixture.plan, 0);
         let continuation_end = continuation_offset + 2 * CONTINUATION_ROW_BYTE_LENGTH;
         for (recipient, donor) in [(&variants[0], &variants[1]), (&variants[1], &variants[0])] {
             let mut chunks = fixture.chunks.clone();
@@ -4425,7 +4380,7 @@ mod tests {
         let mut degree_seven_chunks = fixture.chunks.clone();
         let mut degree_seven_error = vec![Gf16::ZERO; 8];
         degree_seven_error[7] = Gf16::ONE;
-        let masked_map_offset = gate_payload_offset(&fixture.plan_view, 0)
+        let masked_map_offset = gate_payload_offset(&fixture.plan, 0)
             + LOCAL_MULTIPLICATION_ROW_COUNT * PADDED_TOKEN_BYTE_LENGTH
             + FIELD_BIT_WIDTH * PADDED_TOKEN_BYTE_LENGTH;
 
@@ -4482,9 +4437,8 @@ mod tests {
         let mut degree_four_chunks = fixture.chunks.clone();
         let mut degree_four_error = vec![Gf16::ZERO; 5];
         degree_four_error[4] = Gf16::ONE;
-        let terminal_map_offset = terminal_payload_offset(&fixture.plan_view, 0)
-            + PADDED_TERMINAL_PAYLOAD_BYTE_LENGTH
-            - 1;
+        let terminal_map_offset =
+            terminal_payload_offset(&fixture.plan, 0) + PADDED_TERMINAL_PAYLOAD_BYTE_LENGTH - 1;
         for (participant_position, chunk) in degree_four_chunks.iter_mut().enumerate() {
             let error = evaluate_field_polynomial(
                 &degree_four_error,
@@ -4508,9 +4462,8 @@ mod tests {
     #[test]
     fn malformed_terminal_relations_refuse() {
         let fixture = build_reduced_fixture();
-        let map_offset = terminal_payload_offset(&fixture.plan_view, 0)
-            + PADDED_TERMINAL_PAYLOAD_BYTE_LENGTH
-            - 1;
+        let map_offset =
+            terminal_payload_offset(&fixture.plan, 0) + PADDED_TERMINAL_PAYLOAD_BYTE_LENGTH - 1;
 
         let mut noncanonical = fixture.chunks.clone();
         noncanonical[0][map_offset] |= 0x10;
@@ -4686,7 +4639,7 @@ mod tests {
         );
 
         let mut malformed_local = fixture.chunks.clone();
-        let first_local_rows = gate_payload_offset(&fixture.plan_view, 0);
+        let first_local_rows = gate_payload_offset(&fixture.plan, 0);
         for row in 0..4 {
             malformed_local[0]
                 [first_local_rows + row * PADDED_TOKEN_BYTE_LENGTH + PADDED_LABEL_BYTE_LENGTH] ^= 2;
@@ -4704,7 +4657,7 @@ mod tests {
         );
 
         let mut malformed_terminal = fixture.chunks.clone();
-        let first_terminal_rows = terminal_payload_offset(&fixture.plan_view, 0);
+        let first_terminal_rows = terminal_payload_offset(&fixture.plan, 0);
         for row in 0..4 {
             malformed_terminal[0][first_terminal_rows
                 + row * PADDED_TOKEN_BYTE_LENGTH
@@ -4725,7 +4678,7 @@ mod tests {
 
     #[test]
     fn cross_participant_label_collision_is_an_explicit_global_bad_event() {
-        let plan = reviewed_reduced_plan().expect("reviewed plan");
+        let plan = reviewed_reduced_plan();
         let mut first_entropy = deterministic_label_entropy(&plan, 0);
         let second_entropy = deterministic_label_entropy(&plan, 1);
         let exposed_label = second_entropy[..PADDED_LABEL_BYTE_LENGTH].to_vec();
@@ -4814,8 +4767,7 @@ mod tests {
         );
 
         let mut first_to_final_collision = fixture.gate_material[0].clone();
-        let final_gate_start =
-            (fixture.plan_view.gates.len() - 1) * PADDED_GATE_MATERIAL_BYTE_LENGTH;
+        let final_gate_start = (fixture.plan.gates.len() - 1) * PADDED_GATE_MATERIAL_BYTE_LENGTH;
         let final_gate_key = first_to_final_collision
             [final_gate_start..final_gate_start + PADDED_MODULE_VALUE_BYTE_LENGTH]
             .to_vec();
@@ -4868,7 +4820,6 @@ mod tests {
                 generate_participant_for_context(
                     &fixture.context,
                     &fixture.plan,
-                    &fixture.plan_view,
                     PaddedParticipantGenerationInput {
                         participant_position: 0,
                         initial_wire_values: &initial_values,
