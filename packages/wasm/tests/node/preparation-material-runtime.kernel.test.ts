@@ -43,7 +43,7 @@ const context: PreparationMaterialContextInput = {
 };
 
 describe('preparation material scalar WASM runtime', () => {
-    it('tombstones every rejected activation command identifier', async () => {
+    it('tombstones every rejected construction command identifier', async () => {
         const kernel = await instantiateConstructionKernelCommandRuntime(
             kernelUrl,
             { allowUnpinnedKernel: true },
@@ -54,6 +54,15 @@ describe('preparation material scalar WASM runtime', () => {
             expect(() =>
                 executeConstructionCommand(kernel, request, () => undefined),
             ).toThrowError(/rejected tally activation command is tombstoned/u);
+        }
+        for (let command = 34; command <= 40; command += 1) {
+            const request = new ConstructionCommandWriter();
+            request.writeU8(command);
+            expect(() =>
+                executeConstructionCommand(kernel, request, () => undefined),
+            ).toThrowError(
+                /rejected reduced construction command is tombstoned/u,
+            );
         }
     });
 

@@ -7,20 +7,13 @@ use sha3::{
 };
 use zeroize::Zeroize;
 
-use crate::foundation::{CanonicalItem, Hash512, Roster, hash_foundation_tuple_512};
+use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
 
-use super::finality::{
-    COMPLETION_PROFILE_PARTICIPANT_COUNT, FinalityTargetKind, VerifiedFinalityCapability,
-};
-use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
-use super::roster::{require_roster_identity, signing_verification_key};
+use super::finality::COMPLETION_PROFILE_PARTICIPANT_COUNT;
 
 pub const LABEL_BYTE_LENGTH: usize = 48;
 pub const MODULE_VALUE_BYTE_LENGTH: usize = 48;
 pub const AFFINE_ENTROPY_BYTE_LENGTH: usize = 14 * MODULE_VALUE_BYTE_LENGTH;
-pub const AFFINE_MATERIAL_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH
-    + 2 * MODULE_VALUE_BYTE_LENGTH
-    + COMPLETION_PROFILE_PARTICIPANT_COUNT as usize * 2 * MODULE_VALUE_BYTE_LENGTH;
 pub const TOKEN_BYTE_LENGTH: usize = LABEL_BYTE_LENGTH + 1;
 
 const FIELD_BIT_WIDTH: usize = 4;
@@ -72,10 +65,8 @@ pub enum JointContinuationError {
     InvalidContext,
     InvalidLabelEntropy,
     InvalidPlan,
-    InvalidSignature,
     WrongParticipantCount,
     WrongParticipantPosition,
-    WrongTargetKind,
 }
 
 impl fmt::Display for JointContinuationError {
@@ -93,12 +84,10 @@ impl fmt::Display for JointContinuationError {
             Self::InvalidContext => "joint continuation context is invalid",
             Self::InvalidLabelEntropy => "joint continuation label entropy is invalid",
             Self::InvalidPlan => "joint continuation plan is invalid",
-            Self::InvalidSignature => "joint continuation signature is invalid",
             Self::WrongParticipantCount => {
                 "joint continuation requires the ten-participant completion roster"
             }
             Self::WrongParticipantPosition => "joint continuation participant position is invalid",
-            Self::WrongTargetKind => "joint continuation requires a finalized computation target",
         })
     }
 }
@@ -451,20 +440,6 @@ pub struct GeneratedParticipantBody {
     pub affine_commitments: Vec<Hash512>,
 }
 
-pub fn generate_participant_body(
-    capability: &VerifiedFinalityCapability,
-    plan: &JointContinuationPlan,
-    input: ParticipantGenerationInput<'_>,
-) -> Result<GeneratedParticipantBody, JointContinuationError> {
-    validate_capability(capability)?;
-    validate_reviewed_reduced_plan(plan)?;
-    let context = EvaluationContext {
-        target_identity: capability.target_identity,
-        plan_identity: plan.identity()?,
-    };
-    generate_participant_body_for_context(&context, plan, input)
-}
-
 fn generate_participant_body_for_context(
     context: &EvaluationContext,
     plan: &JointContinuationPlan,
@@ -603,77 +578,10 @@ fn generate_participant_body_for_context(
     })
 }
 
-pub fn encode_activation_signature(
-    participant_position: u16,
-    body_identity: Hash512,
-    signature: &[u8],
-) -> Result<Vec<u8>, JointContinuationError> {
-    ActionSignatureCarrier::new(
-        COMPLETION_PROFILE_PARTICIPANT_COUNT,
-        participant_position,
-        ActionSignaturePurpose::Activation,
-        body_identity,
-        signature,
-    )
-    .map_err(|_| JointContinuationError::InvalidSignature)?
-    .encode()
-    .map_err(|_| JointContinuationError::InvalidSignature)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvaluatedJointContinuationBatch {
     pub batch_identity: Hash512,
     pub terminal_bits: Vec<bool>,
-}
-
-pub fn evaluate_signed_batch(
-    capability: &VerifiedFinalityCapability,
-    roster: &Roster,
-    plan: &JointContinuationPlan,
-    bodies: &[Vec<u8>],
-    signatures: &[Vec<u8>],
-) -> Result<EvaluatedJointContinuationBatch, JointContinuationError> {
-    validate_capability(capability)?;
-    validate_reviewed_reduced_plan(plan)?;
-    if bodies.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
-        || signatures.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
-    {
-        return Err(JointContinuationError::InvalidContext);
-    }
-    require_roster_identity(roster, capability.target.context().roster_identity)
-        .map_err(|_| JointContinuationError::InvalidContext)?;
-    let context = EvaluationContext {
-        target_identity: capability.target_identity,
-        plan_identity: plan.identity()?,
-    };
-    let mut body_identities = Vec::with_capacity(bodies.len());
-    for position in 0..usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT) {
-        let body_identity = hash_bytes(
-            BODY_IDENTITY_DOMAIN,
-            bodies
-                .get(position)
-                .ok_or(JointContinuationError::InvalidBody)?,
-        )?;
-        let carrier = ActionSignatureCarrier::decode(
-            COMPLETION_PROFILE_PARTICIPANT_COUNT,
-            signatures
-                .get(position)
-                .ok_or(JointContinuationError::InvalidSignature)?,
-        )
-        .map_err(|_| JointContinuationError::InvalidSignature)?;
-        let verification_key = signing_verification_key(roster, position as u16)
-            .map_err(|_| JointContinuationError::WrongParticipantPosition)?;
-        carrier
-            .verify(
-                position as u16,
-                ActionSignaturePurpose::Activation,
-                body_identity,
-                verification_key,
-            )
-            .map_err(|_| JointContinuationError::InvalidSignature)?;
-        body_identities.push(body_identity);
-    }
-    evaluate_bodies(&context, plan, bodies, &body_identities)
 }
 
 fn evaluate_bodies(
@@ -1840,26 +1748,6 @@ fn hash_bytes(domain: &str, bytes: &[u8]) -> Result<Hash512, JointContinuationEr
         ],
     )
     .map_err(|_| JointContinuationError::InvalidBody)
-}
-
-fn validate_capability(
-    capability: &VerifiedFinalityCapability,
-) -> Result<(), JointContinuationError> {
-    if capability.target.context().participant_count != COMPLETION_PROFILE_PARTICIPANT_COUNT {
-        return Err(JointContinuationError::WrongParticipantCount);
-    }
-    if capability.target.target_kind() != FinalityTargetKind::Computation {
-        return Err(JointContinuationError::WrongTargetKind);
-    }
-    if capability
-        .target
-        .body_identity()
-        .map_err(|_| JointContinuationError::InvalidContext)?
-        != capability.target_identity
-    {
-        return Err(JointContinuationError::InvalidContext);
-    }
-    Ok(())
 }
 
 fn validate_position(position: u16) -> Result<(), JointContinuationError> {

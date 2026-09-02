@@ -10,9 +10,12 @@ use crate::foundation::{CanonicalItem, Hash512, Roster, hash_foundation_tuple_51
 use super::finality::{
     COMPLETION_PROFILE_PARTICIPANT_COUNT, FinalityTargetKind, VerifiedFinalityCapability,
 };
+#[cfg(test)]
 use super::joint_continuation::{JointContinuationGate, JointContinuationPlan};
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
-use super::preparation_plaintext::{HeldSubsetKey, PairwiseMasterInventory};
+use super::preparation_plaintext::HeldSubsetKey;
+#[cfg(test)]
+use super::preparation_plaintext::PairwiseMasterInventory;
 use super::roster::{require_roster_identity, signing_verification_key};
 use super::source::VerifiedCompletePreparation;
 
@@ -51,21 +54,29 @@ pub const PADDED_GATE_PAYLOAD_BYTE_LENGTH: usize = LOCAL_MULTIPLICATION_ROW_COUN
 pub const PADDED_TERMINAL_PAYLOAD_BYTE_LENGTH: usize =
     FIELD_BIT_WIDTH * 4 * PADDED_TOKEN_BYTE_LENGTH + FIELD_BIT_WIDTH * PADDED_TOKEN_BYTE_LENGTH + 1;
 const TOKEN_PAIR_ENTROPY_BYTE_LENGTH: usize = 2 * PADDED_LABEL_BYTE_LENGTH + 1;
+#[cfg(test)]
 const REDUCED_INPUT_WIRE_COUNT: usize = 4;
+#[cfg(test)]
 const REDUCED_GATE_COUNT: usize = 7;
+#[cfg(test)]
 const REDUCED_OUTPUT_COUNT: usize = 3;
+#[cfg(test)]
 const REDUCED_INITIAL_PAYLOAD_BYTE_LENGTH: usize =
     REDUCED_INPUT_WIRE_COUNT * FIELD_BIT_WIDTH * PADDED_TOKEN_BYTE_LENGTH;
+#[cfg(test)]
 pub const PADDED_REDUCED_PAYLOAD_BYTE_LENGTH: usize = REDUCED_INITIAL_PAYLOAD_BYTE_LENGTH
     + REDUCED_GATE_COUNT * PADDED_GATE_PAYLOAD_BYTE_LENGTH
     + REDUCED_OUTPUT_COUNT * PADDED_TERMINAL_PAYLOAD_BYTE_LENGTH;
 pub const PADDED_CHUNK_HEADER_BYTE_LENGTH: usize = 250;
 pub const PADDED_MANIFEST_HEADER_BYTE_LENGTH: usize = 176;
 pub const PADDED_MANIFEST_DESCRIPTOR_BYTE_LENGTH: usize = 78;
+#[cfg(test)]
 pub const PADDED_REDUCED_CHUNK_BYTE_LENGTH: usize =
     PADDED_CHUNK_HEADER_BYTE_LENGTH + PADDED_REDUCED_PAYLOAD_BYTE_LENGTH;
+#[cfg(test)]
 pub const PADDED_REDUCED_MANIFEST_BYTE_LENGTH: usize =
     PADDED_MANIFEST_HEADER_BYTE_LENGTH + PADDED_MANIFEST_DESCRIPTOR_BYTE_LENGTH;
+#[cfg(test)]
 pub const PADDED_REDUCED_LABEL_ENTROPY_BYTE_LENGTH: usize =
     (4 * REDUCED_INPUT_WIRE_COUNT + 43 * REDUCED_GATE_COUNT + 8 * REDUCED_OUTPUT_COUNT)
         * TOKEN_PAIR_ENTROPY_BYTE_LENGTH;
@@ -201,6 +212,7 @@ impl Gf16 {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct PlanView {
     input_wire_count: u16,
@@ -208,6 +220,7 @@ struct PlanView {
     output_wires: Vec<u16>,
 }
 
+#[cfg(test)]
 fn reviewed_reduced_plan() -> Result<JointContinuationPlan, PaddedContinuationError> {
     JointContinuationPlan::new(
         4,
@@ -246,6 +259,7 @@ fn reviewed_reduced_plan() -> Result<JointContinuationPlan, PaddedContinuationEr
     .map_err(|_| PaddedContinuationError::InvalidPlan)
 }
 
+#[cfg(test)]
 fn plan_view(plan: &JointContinuationPlan) -> Result<PlanView, PaddedContinuationError> {
     if plan != &reviewed_reduced_plan()? {
         return Err(PaddedContinuationError::InvalidPlan);
@@ -278,6 +292,7 @@ fn plan_view(plan: &JointContinuationPlan) -> Result<PlanView, PaddedContinuatio
     })
 }
 
+#[cfg(test)]
 pub fn padded_label_entropy_byte_length(
     plan: &JointContinuationPlan,
 ) -> Result<usize, PaddedContinuationError> {
@@ -306,6 +321,7 @@ pub fn padded_label_entropy_byte_length(
     Ok(byte_length)
 }
 
+#[cfg(test)]
 pub fn padded_participant_payload_byte_length(
     plan: &JointContinuationPlan,
 ) -> Result<usize, PaddedContinuationError> {
@@ -684,6 +700,7 @@ fn derived_subkey(
     subkey
 }
 
+#[cfg(test)]
 fn derived_module_value(
     master: &[u8; 32],
     context: &EvaluationContext,
@@ -765,6 +782,7 @@ fn coordinate_interpolation_weight_at_zero(
     ))
 }
 
+#[cfg(test)]
 fn derive_b_value(
     context: &EvaluationContext,
     held_subset_keys: &[HeldSubsetKey],
@@ -814,6 +832,7 @@ fn derive_b_value(
     Ok(value)
 }
 
+#[cfg(test)]
 fn derive_pairwise_pad(
     context: &EvaluationContext,
     master: &[u8; 32],
@@ -841,6 +860,7 @@ fn derive_pairwise_pad(
     )
 }
 
+#[cfg(test)]
 fn derive_gate_material(
     context: &EvaluationContext,
     participant_position: u16,
@@ -862,6 +882,7 @@ fn derive_gate_material(
     )
 }
 
+#[cfg(test)]
 fn derive_gate_material_for_ordinals(
     context: &EvaluationContext,
     participant_position: u16,
@@ -961,6 +982,7 @@ fn validate_preparation_context(
     Ok(())
 }
 
+#[cfg(test)]
 pub struct PaddedParticipantGenerationInput<'a> {
     pub participant_position: u16,
     pub initial_wire_values: &'a [u8],
@@ -970,6 +992,7 @@ pub struct PaddedParticipantGenerationInput<'a> {
     pub label_entropy: &'a [u8],
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GeneratedPaddedParticipant {
     pub chunk: Vec<u8>,
@@ -978,31 +1001,7 @@ pub struct GeneratedPaddedParticipant {
     pub manifest_identity: Hash512,
 }
 
-pub fn generate_padded_participant(
-    capability: &VerifiedFinalityCapability,
-    preparation: &VerifiedCompletePreparation,
-    plan: &JointContinuationPlan,
-    input: PaddedParticipantGenerationInput<'_>,
-) -> Result<GeneratedPaddedParticipant, PaddedContinuationError> {
-    validate_capability(capability)?;
-    let plan_view = plan_view(plan)?;
-    let target = capability.target.context();
-    let context = EvaluationContext {
-        target_identity: capability.target_identity,
-        circuit_identity: target.circuit_identity,
-        top_count: target.top_count,
-    };
-    validate_preparation_context(capability, preparation, input.participant_position)?;
-    let gate_material = derive_gate_material(
-        &context,
-        input.participant_position,
-        &preparation.held_subset_keys,
-        &preparation.pairwise_masters,
-        plan_view.gates.len(),
-    )?;
-    generate_participant_for_context(&context, plan, &plan_view, input, &gate_material)
-}
-
+#[cfg(test)]
 fn generate_participant_for_context(
     context: &EvaluationContext,
     plan: &JointContinuationPlan,
@@ -1499,67 +1498,14 @@ fn evaluate_binary_gate(
     Token::decode(&plaintext)
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvaluatedPaddedBatch {
     pub batch_identity: Hash512,
     pub terminal_bits: Vec<bool>,
 }
 
-pub fn evaluate_signed_padded_batch(
-    capability: &VerifiedFinalityCapability,
-    roster: &Roster,
-    manifests: &[Vec<u8>],
-    signatures: &[Vec<u8>],
-    chunks: &[Vec<u8>],
-) -> Result<EvaluatedPaddedBatch, PaddedContinuationError> {
-    validate_capability(capability)?;
-    let participant_count = usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT);
-    if manifests.len() != participant_count
-        || signatures.len() != participant_count
-        || chunks.len() != participant_count
-    {
-        return Err(PaddedContinuationError::InvalidContext);
-    }
-    require_roster_identity(roster, capability.target.context().roster_identity)
-        .map_err(|_| PaddedContinuationError::InvalidContext)?;
-
-    let target = capability.target.context();
-    let context = EvaluationContext {
-        target_identity: capability.target_identity,
-        circuit_identity: target.circuit_identity,
-        top_count: target.top_count,
-    };
-    let mut manifest_identities = Vec::with_capacity(participant_count);
-    for participant_position in 0..participant_count {
-        let manifest_identity = hash_bytes(
-            MANIFEST_IDENTITY_DOMAIN,
-            manifests
-                .get(participant_position)
-                .ok_or(PaddedContinuationError::InvalidManifest)?,
-        )?;
-        let carrier = ActionSignatureCarrier::decode(
-            COMPLETION_PROFILE_PARTICIPANT_COUNT,
-            signatures
-                .get(participant_position)
-                .ok_or(PaddedContinuationError::InvalidSignature)?,
-        )
-        .map_err(|_| PaddedContinuationError::InvalidSignature)?;
-        let verification_key = signing_verification_key(roster, participant_position as u16)
-            .map_err(|_| PaddedContinuationError::InvalidSignature)?;
-        carrier
-            .verify(
-                participant_position as u16,
-                ActionSignaturePurpose::Activation,
-                manifest_identity,
-                verification_key,
-            )
-            .map_err(|_| PaddedContinuationError::InvalidSignature)?;
-        manifest_identities.push(manifest_identity);
-    }
-
-    evaluate_padded_batch(&context, manifests, chunks, &manifest_identities)
-}
-
+#[cfg(test)]
 fn evaluate_padded_batch(
     context: &EvaluationContext,
     manifests: &[Vec<u8>],
@@ -1750,12 +1696,14 @@ fn evaluate_padded_batch(
 }
 
 #[derive(Clone, Copy)]
+#[cfg(test)]
 struct ParsedManifest {
     participant_position: u16,
     allocation_nonce: [u8; PADDED_ALLOCATION_NONCE_BYTE_LENGTH],
     chunk_identity: Hash512,
 }
 
+#[cfg(test)]
 impl ParsedManifest {
     fn new(bytes: &[u8], context: &EvaluationContext) -> Result<Self, PaddedContinuationError> {
         if bytes.len() != PADDED_REDUCED_MANIFEST_BYTE_LENGTH {
@@ -1795,6 +1743,7 @@ impl ParsedManifest {
     }
 }
 
+#[cfg(test)]
 struct ParsedChunk<'a> {
     bytes: &'a [u8],
     participant_position: u16,
@@ -1802,6 +1751,7 @@ struct ParsedChunk<'a> {
     payload_offset: usize,
 }
 
+#[cfg(test)]
 impl<'a> ParsedChunk<'a> {
     fn new(bytes: &'a [u8], context: &EvaluationContext) -> Result<Self, PaddedContinuationError> {
         if bytes.len() != PADDED_REDUCED_CHUNK_BYTE_LENGTH {
@@ -1941,6 +1891,7 @@ impl EvaluatedGate<'_> {
     }
 }
 
+#[cfg(test)]
 fn evaluate_gate_payload_from_chunk<'a>(
     chunk: &ParsedChunk<'a>,
     context: &EvaluationContext,
@@ -2129,6 +2080,7 @@ impl EvaluationGarblingBuilder<'_, '_> {
     }
 }
 
+#[cfg(test)]
 fn evaluate_terminal_payload_from_chunk(
     chunk: &ParsedChunk<'_>,
     context: &EvaluationContext,

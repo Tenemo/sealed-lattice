@@ -1,6 +1,7 @@
 pub(crate) mod action_signature;
 pub(crate) mod authenticated_record;
 pub(crate) mod finality;
+#[cfg(test)]
 pub(crate) mod joint_continuation;
 pub(crate) mod padded_continuation;
 pub(crate) mod pair_encryption;

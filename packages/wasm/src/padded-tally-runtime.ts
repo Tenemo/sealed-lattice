@@ -30,7 +30,7 @@ const initializeGenerationCommand = 43;
 const generateNextChunkCommand = 44;
 const initializeEvaluationCommand = 45;
 const evaluateNextChunkCommand = 46;
-const encodeActivationSignatureCommand = 39;
+const encodeActivationSignatureCommand = 47;
 
 const completionProfileParticipantCount = 10;
 const completionProfileOptionCount = 10;
