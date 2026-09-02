@@ -1,13 +1,15 @@
 use core::fmt;
 
 use crate::foundation::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512, Roster,
     hash_foundation_tuple_512,
 };
 
-use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
-use super::action_signature::{KEY_BYTE_LENGTH as ACTION_SIGNATURE_BYTE_LENGTH, verify_complete};
+use super::action_signature::{
+    SIGNATURE_BYTE_LENGTH as ACTION_SIGNATURE_BYTE_LENGTH, verify as verify_action_signature,
+};
 use super::private_preparation_body::{PrivatePreparationBody, PrivatePreparationContext};
+use super::roster::{mailbox_encapsulation_key, require_roster_identity, signing_verification_key};
 
 pub const SUBSET_COMMITMENT_COUNT: usize = 120;
 pub const SUBSET_COMMITMENT_BYTE_LENGTH: usize = 64;
@@ -22,10 +24,12 @@ pub const ACTION_SIGNATURE_CARRIER_BYTE_LENGTH: usize =
 
 const ACTION_SIGNATURE_CARRIER_SCHEMA_IDENTIFIER: u16 = 0x0205;
 const PREPARATION_PARENT_SCHEMA_IDENTIFIER: u16 = 0x0206;
-const PREPARATION_SCHEMA_VERSION: u16 = 1;
+const PREPARATION_SCHEMA_VERSION: u16 = 3;
 const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 const PREPARATION_PARENT_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/construction/preparation-parent/v1";
+    "sealed-lattice/construction/preparation-parent/v2";
+const ACTION_SIGNATURE_STATEMENT_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/action-signature-statement/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -45,10 +49,6 @@ impl ActionSignaturePurpose {
             4 => Ok(Self::Activation),
             _ => Err(PreparationParentError::WrongSignaturePurpose),
         }
-    }
-
-    pub(super) const fn key_index(self) -> usize {
-        self as usize - 1
     }
 }
 
@@ -177,10 +177,15 @@ impl ActionSignatureCarrier {
         {
             return Err(PreparationParentError::WrongContext);
         }
-        if !verify_complete(
+        let statement_identity = action_signature_statement_identity(
+            expected_signer,
+            expected_purpose,
+            expected_body_identity,
+        )?;
+        if !verify_action_signature(
             &self.signature,
             verification_key,
-            self.body_identity.as_bytes(),
+            statement_identity.as_bytes(),
         )
         .map_err(|_| PreparationParentError::InvalidSignature)?
         {
@@ -188,6 +193,23 @@ impl ActionSignatureCarrier {
         }
         Ok(())
     }
+}
+
+pub fn action_signature_statement_identity(
+    signer_position: u16,
+    purpose: ActionSignaturePurpose,
+    body_identity: Hash512,
+) -> Result<Hash512, PreparationParentError> {
+    validate_position(COMPLETION_PROFILE_PARTICIPANT_COUNT, signer_position)?;
+    hash_foundation_tuple_512(
+        ACTION_SIGNATURE_STATEMENT_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::unsigned16(signer_position),
+            CanonicalItem::unsigned16(purpose as u16),
+            CanonicalItem::hash512(body_identity.into_bytes()),
+        ],
+    )
+    .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,29 +222,21 @@ pub struct VerifiedPreparationParent {
 pub fn verify_preparation_parent_carrier(
     participant_count: u16,
     expected_action_proposal_identity: Hash512,
-    expected_action_key_set_roster_identity: Hash512,
+    expected_roster_identity: Hash512,
     expected_preparation_attempt: u16,
     expected_predecessor_identity: Hash512,
     expected_sender_position: u16,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     parent_bytes: &[u8],
     signature_bytes: &[u8],
 ) -> Result<VerifiedPreparationParent, PreparationParentError> {
     validate_position(participant_count, expected_sender_position)?;
-    if action_key_sets.len() != usize::from(participant_count)
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| PreparationParentError::WrongContext)?
-            != expected_action_key_set_roster_identity
-        || action_key_sets
-            .first()
-            .is_none_or(|key_set| key_set.proposal_identity() != expected_action_proposal_identity)
-    {
-        return Err(PreparationParentError::WrongContext);
-    }
+    require_roster_identity(roster, expected_roster_identity)
+        .map_err(|_| PreparationParentError::WrongContext)?;
 
     let parent = PreparationParent::decode(participant_count, parent_bytes)?;
     if parent.action_proposal_identity != expected_action_proposal_identity
-        || parent.action_key_set_roster_identity != expected_action_key_set_roster_identity
+        || parent.roster_identity != expected_roster_identity
         || parent.preparation_attempt != expected_preparation_attempt
         || parent.predecessor_identity != expected_predecessor_identity
         || parent.sender_position != expected_sender_position
@@ -231,12 +245,8 @@ pub fn verify_preparation_parent_carrier(
     }
     let parent_identity = parent.body_identity()?;
     let signature = ActionSignatureCarrier::decode(participant_count, signature_bytes)?;
-    let sender_key_set = action_key_sets
-        .get(usize::from(expected_sender_position))
-        .ok_or(PreparationParentError::WrongParticipantPosition)?;
-    let verification_key = sender_key_set
-        .action_signature_verification_key(ActionSignaturePurpose::Preparation.key_index())
-        .ok_or(PreparationParentError::WrongSignaturePurpose)?;
+    let verification_key = signing_verification_key(roster, expected_sender_position)
+        .map_err(|_| PreparationParentError::WrongParticipantPosition)?;
     signature.verify(
         expected_sender_position,
         ActionSignaturePurpose::Preparation,
@@ -253,7 +263,7 @@ pub fn verify_preparation_parent_carrier(
 pub struct PreparationParent {
     participant_count: u16,
     action_proposal_identity: Hash512,
-    action_key_set_roster_identity: Hash512,
+    roster_identity: Hash512,
     preparation_attempt: u16,
     predecessor_identity: Hash512,
     sender_position: u16,
@@ -266,7 +276,7 @@ impl PreparationParent {
     pub fn new(
         participant_count: u16,
         action_proposal_identity: Hash512,
-        action_key_set_roster_identity: Hash512,
+        roster_identity: Hash512,
         preparation_attempt: u16,
         predecessor_identity: Hash512,
         sender_position: u16,
@@ -285,7 +295,7 @@ impl PreparationParent {
         Ok(Self {
             participant_count,
             action_proposal_identity,
-            action_key_set_roster_identity,
+            roster_identity,
             preparation_attempt,
             predecessor_identity,
             sender_position,
@@ -311,7 +321,7 @@ impl PreparationParent {
             PREPARATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::hash512(self.action_proposal_identity.into_bytes()),
-                CanonicalItem::hash512(self.action_key_set_roster_identity.into_bytes()),
+                CanonicalItem::hash512(self.roster_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.preparation_attempt),
                 CanonicalItem::hash512(self.predecessor_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.sender_position),
@@ -389,8 +399,8 @@ impl PreparationParent {
         self.action_proposal_identity
     }
 
-    pub(super) const fn action_key_set_roster_identity(&self) -> Hash512 {
-        self.action_key_set_roster_identity
+    pub(super) const fn roster_identity(&self) -> Hash512 {
+        self.roster_identity
     }
 
     pub(super) const fn preparation_attempt(&self) -> u16 {
@@ -445,30 +455,22 @@ pub struct VerifiedPrivatePreparationCarrier {
 pub fn verify_private_preparation_carrier(
     participant_count: u16,
     expected_action_proposal_identity: Hash512,
-    expected_action_key_set_roster_identity: Hash512,
+    expected_roster_identity: Hash512,
     expected_preparation_attempt: u16,
     expected_predecessor_identity: Hash512,
     recipient_position: u16,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     parent_bytes: &[u8],
     signature_bytes: &[u8],
     private_body_bytes: &[u8],
 ) -> Result<VerifiedPrivatePreparationCarrier, PreparationParentError> {
     validate_position(participant_count, recipient_position)?;
-    if action_key_sets.len() != usize::from(participant_count)
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| PreparationParentError::WrongContext)?
-            != expected_action_key_set_roster_identity
-        || action_key_sets
-            .first()
-            .is_none_or(|key_set| key_set.proposal_identity() != expected_action_proposal_identity)
-    {
-        return Err(PreparationParentError::WrongContext);
-    }
+    require_roster_identity(roster, expected_roster_identity)
+        .map_err(|_| PreparationParentError::WrongContext)?;
 
     let parent = PreparationParent::decode(participant_count, parent_bytes)?;
     if parent.action_proposal_identity != expected_action_proposal_identity
-        || parent.action_key_set_roster_identity != expected_action_key_set_roster_identity
+        || parent.roster_identity != expected_roster_identity
         || parent.preparation_attempt != expected_preparation_attempt
         || parent.predecessor_identity != expected_predecessor_identity
     {
@@ -480,12 +482,8 @@ pub fn verify_private_preparation_carrier(
     }
     let parent_identity = parent.body_identity()?;
     let signature = ActionSignatureCarrier::decode(participant_count, signature_bytes)?;
-    let sender_key_set = action_key_sets
-        .get(usize::from(sender_position))
-        .ok_or(PreparationParentError::WrongParticipantPosition)?;
-    let verification_key = sender_key_set
-        .action_signature_verification_key(ActionSignaturePurpose::Preparation.key_index())
-        .ok_or(PreparationParentError::WrongSignaturePurpose)?;
+    let verification_key = signing_verification_key(roster, sender_position)
+        .map_err(|_| PreparationParentError::WrongParticipantPosition)?;
     signature.verify(
         sender_position,
         ActionSignaturePurpose::Preparation,
@@ -493,16 +491,12 @@ pub fn verify_private_preparation_carrier(
         verification_key,
     )?;
 
-    let recipient_key_set = action_key_sets
-        .get(usize::from(recipient_position))
-        .ok_or(PreparationParentError::WrongParticipantPosition)?;
-    let pair_encryption_key = recipient_key_set
-        .pair_encryption_key_for_sender(sender_position)
-        .ok_or(PreparationParentError::WrongParticipantPosition)?;
+    let pair_encryption_key = mailbox_encapsulation_key(roster, recipient_position)
+        .map_err(|_| PreparationParentError::WrongParticipantPosition)?;
     let expected_private_context = PrivatePreparationContext::new(
         participant_count,
         expected_action_proposal_identity,
-        expected_action_key_set_roster_identity,
+        expected_roster_identity,
         expected_preparation_attempt,
         expected_predecessor_identity,
         sender_position,

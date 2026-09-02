@@ -1,5 +1,6 @@
 use super::{
-    TallyBallotInput, TallyCircuitError, TallyCircuitProfile, TallyEvaluationInput,
+    BooleanOperation, TallyBallotInput, TallyCircuitError, TallyCircuitProfile,
+    TallyEvaluationInput,
     compiler::compile_tally_circuit,
     direct_evaluator::evaluate_tally_directly,
     interpreter::{evaluate_compiled_tally_circuit, interpret_boolean_operations},
@@ -104,6 +105,31 @@ fn every_prototype_top_count_matches_the_direct_tally() {
 
 #[test]
 fn completion_profile_circuit_geometry_is_derived_for_every_top_count() {
+    const EXPECTED_GATE_COUNTS: [(usize, usize, usize); 10] = [
+        (2153, 2098, 250),
+        (2515, 2290, 364),
+        (2837, 2458, 462),
+        (3113, 2602, 546),
+        (3343, 2722, 616),
+        (3527, 2818, 672),
+        (3665, 2890, 714),
+        (3757, 2938, 742),
+        (3803, 2962, 756),
+        (3803, 2962, 756),
+    ];
+    const EXPECTED_CIRCUIT_DEPTHS: [(usize, usize); 10] = [
+        (217, 87),
+        (233, 95),
+        (249, 103),
+        (265, 111),
+        (281, 119),
+        (297, 127),
+        (313, 135),
+        (329, 143),
+        (345, 151),
+        (345, 151),
+    ];
+
     for top_count in 1..=PROTOTYPE_OPTION_COUNT {
         let circuit = compile_tally_circuit(profile(
             PROTOTYPE_PARTICIPANT_COUNT,
@@ -111,6 +137,31 @@ fn completion_profile_circuit_geometry_is_derived_for_every_top_count() {
             top_count,
         ))
         .unwrap();
+        let gate_counts = circuit.operations.iter().fold(
+            (0_usize, 0_usize, 0_usize),
+            |(exclusive_or_count, conjunction_count, negation_count), operation| match operation {
+                BooleanOperation::Constant(_) => {
+                    (exclusive_or_count, conjunction_count, negation_count)
+                }
+                BooleanOperation::ExclusiveOr { .. } => {
+                    (exclusive_or_count + 1, conjunction_count, negation_count)
+                }
+                BooleanOperation::Conjunction { .. } => {
+                    (exclusive_or_count, conjunction_count + 1, negation_count)
+                }
+                BooleanOperation::Negation { .. } => {
+                    (exclusive_or_count, conjunction_count, negation_count + 1)
+                }
+            },
+        );
+        let circuit_depths = independently_derive_circuit_depths(&circuit);
+        let output_bit_count = circuit.participant_selected_wires.len()
+            + 1
+            + circuit
+                .ordered_option_position_wires
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>();
 
         assert_eq!(circuit.input_bit_count, 410);
         assert_eq!(circuit.participant_selected_wires.len(), 10);
@@ -122,7 +173,70 @@ fn completion_profile_circuit_geometry_is_derived_for_every_top_count() {
                 .sum::<usize>(),
             usize::from(top_count) * 4
         );
+        assert_eq!(
+            gate_counts,
+            EXPECTED_GATE_COUNTS[usize::from(top_count - 1)]
+        );
+        assert_eq!(
+            circuit_depths,
+            EXPECTED_CIRCUIT_DEPTHS[usize::from(top_count - 1)]
+        );
+        assert_eq!(output_bit_count, 11 + usize::from(top_count) * 4);
     }
+}
+
+fn independently_derive_circuit_depths(circuit: &super::CompiledTallyCircuit) -> (usize, usize) {
+    let mut ordinary_depth_by_wire = vec![0_usize; circuit.input_bit_count];
+    let mut multiplicative_depth_by_wire = vec![0_usize; circuit.input_bit_count];
+
+    for operation in &circuit.operations {
+        let (ordinary_depth, multiplicative_depth) = match operation {
+            BooleanOperation::Constant(_) => (0, 0),
+            BooleanOperation::ExclusiveOr {
+                left_wire,
+                right_wire,
+            } => {
+                let left_position = usize::try_from(*left_wire).unwrap();
+                let right_position = usize::try_from(*right_wire).unwrap();
+                (
+                    ordinary_depth_by_wire[left_position]
+                        .max(ordinary_depth_by_wire[right_position])
+                        + 1,
+                    multiplicative_depth_by_wire[left_position]
+                        .max(multiplicative_depth_by_wire[right_position]),
+                )
+            }
+            BooleanOperation::Conjunction {
+                left_wire,
+                right_wire,
+            } => {
+                let left_position = usize::try_from(*left_wire).unwrap();
+                let right_position = usize::try_from(*right_wire).unwrap();
+                (
+                    ordinary_depth_by_wire[left_position]
+                        .max(ordinary_depth_by_wire[right_position])
+                        + 1,
+                    multiplicative_depth_by_wire[left_position]
+                        .max(multiplicative_depth_by_wire[right_position])
+                        + 1,
+                )
+            }
+            BooleanOperation::Negation { input_wire } => {
+                let input_position = usize::try_from(*input_wire).unwrap();
+                (
+                    ordinary_depth_by_wire[input_position] + 1,
+                    multiplicative_depth_by_wire[input_position],
+                )
+            }
+        };
+        ordinary_depth_by_wire.push(ordinary_depth);
+        multiplicative_depth_by_wire.push(multiplicative_depth);
+    }
+
+    (
+        *ordinary_depth_by_wire.iter().max().unwrap(),
+        *multiplicative_depth_by_wire.iter().max().unwrap(),
+    )
 }
 
 #[test]

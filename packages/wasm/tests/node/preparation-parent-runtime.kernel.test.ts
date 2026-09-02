@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { openActionKeySetRuntime } from '../../src/action-key-set-runtime.js';
 import {
-    actionSignatureKeyByteLength,
+    actionSignatureKeyGenerationRandomnessByteLength,
+    actionSignatureSigningRandomnessByteLength,
     openActionSignatureRuntime,
 } from '../../src/action-signature-runtime.js';
 import { ConstructionKernelCommandError } from '../../src/construction-kernel-command-runtime.js';
@@ -10,6 +10,7 @@ import { instantiateConstructionKernelCommandRuntime } from '../../src/foundatio
 import {
     openPairEncryptionRuntime,
     pairEncryptionKeyGenerationRandomnessByteLength,
+    pairEncryptionRandomnessByteLength,
     type PairEncryptionKeyPair,
 } from '../../src/pair-encryption-runtime.js';
 import {
@@ -23,6 +24,7 @@ import {
     privatePreparationPlaintextByteLength,
     type PrivatePreparationContextInput,
 } from '../../src/private-preparation-body-runtime.js';
+import { openRosterRuntime } from '../../src/roster-runtime.js';
 
 const kernelUrl = new URL(
     '../../dist/sealed-lattice-kernel.wasm',
@@ -52,11 +54,14 @@ describe('preparation parent scalar WASM runtime', () => {
         );
         const signatureRuntime = openActionSignatureRuntime(kernel);
         const pairRuntime = openPairEncryptionRuntime(kernel);
-        const keySetRuntime = openActionKeySetRuntime(kernel);
+        const rosterRuntime = openRosterRuntime(kernel);
         const bodyRuntime = openPrivatePreparationBodyRuntime(kernel);
         const parentRuntime = openPreparationParentRuntime(kernel);
         const actionProposalIdentity = pseudorandomBytes(64, 0x4a31n);
-        const actionKeySetBodies: Uint8Array[] = [];
+        const rosterPublicKeys: Array<{
+            signingVerificationKey: Uint8Array;
+            mailboxEncapsulationKey: Uint8Array;
+        }> = [];
         let senderPreparationSecretKey: Uint8Array | undefined;
         let incomingPair: PairEncryptionKeyPair | undefined;
 
@@ -65,58 +70,33 @@ describe('preparation parent scalar WASM runtime', () => {
             rosterPosition < participantCount;
             rosterPosition += 1
         ) {
-            const signatureSecretKeys = Array.from(
-                { length: 4 },
-                (_, purpose) =>
-                    pseudorandomBytes(
-                        actionSignatureKeyByteLength,
-                        0x1000n + BigInt(rosterPosition * 16 + purpose),
-                    ),
+            const signatureKeyPair = signatureRuntime.generateKeyPair(
+                pseudorandomBytes(
+                    actionSignatureKeyGenerationRandomnessByteLength,
+                    0x1000n + BigInt(rosterPosition),
+                ),
             );
-            const signatureVerificationKeys = signatureSecretKeys.map(
-                (secret) => signatureRuntime.deriveVerificationKey(secret),
-            );
-            const pairKeys = Array.from(
-                { length: participantCount - 1 },
-                (_, keyIndex) =>
-                    pairRuntime.generateKeyPair(
-                        pseudorandomBytes(
-                            pairEncryptionKeyGenerationRandomnessByteLength,
-                            0x9000n + BigInt(rosterPosition * 32 + keyIndex),
-                        ),
-                    ),
+            const mailboxKeyPair = pairRuntime.generateKeyPair(
+                pseudorandomBytes(
+                    pairEncryptionKeyGenerationRandomnessByteLength,
+                    0x9000n + BigInt(rosterPosition),
+                ),
             );
             if (rosterPosition === senderPosition) {
-                senderPreparationSecretKey = signatureSecretKeys[0];
+                senderPreparationSecretKey = signatureKeyPair.secretKey;
             }
             if (rosterPosition === recipientPosition) {
-                const senderKeyIndex =
-                    senderPosition < recipientPosition
-                        ? senderPosition
-                        : senderPosition - 1;
-                incomingPair = pairKeys[senderKeyIndex];
+                incomingPair = mailboxKeyPair;
             }
-            actionKeySetBodies.push(
-                keySetRuntime.encode({
-                    participantCount,
-                    proposalIdentity: actionProposalIdentity,
-                    rosterPosition,
-                    nonce: pseudorandomBytes(
-                        32,
-                        0xa700n + BigInt(rosterPosition),
-                    ),
-                    actionSignatureVerificationKeys: signatureVerificationKeys,
-                    pairEncryptionKeys: pairKeys.map(
-                        (pair) => pair.encryptionKey,
-                    ),
-                }).body,
-            );
+            rosterPublicKeys.push({
+                signingVerificationKey: signatureKeyPair.verificationKey,
+                mailboxEncapsulationKey: mailboxKeyPair.encryptionKey,
+            });
         }
 
-        const actionKeySetRosterIdentity = keySetRuntime.verifyCompleteRoster(
-            participantCount,
-            actionKeySetBodies,
-        );
+        const roster = rosterRuntime.encode(rosterPublicKeys);
+        const canonicalRosterBytes = roster.canonicalBytes;
+        const rosterIdentity = roster.rosterIdentity;
         expect(senderPreparationSecretKey).toBeDefined();
         expect(incomingPair).toBeDefined();
         if (
@@ -129,7 +109,7 @@ describe('preparation parent scalar WASM runtime', () => {
         const context: PrivatePreparationContextInput = {
             participantCount,
             actionProposalIdentity,
-            actionKeySetRosterIdentity,
+            rosterIdentity,
             preparationAttempt: 7,
             predecessorIdentity: pseudorandomBytes(64, 0x3311n),
             senderPosition,
@@ -138,8 +118,7 @@ describe('preparation parent scalar WASM runtime', () => {
         const privateCarrier = bodyRuntime.seal(
             context,
             incomingPair.encryptionKey,
-            pseudorandomBytes(32, 0x4711n),
-            pseudorandomBytes(896, 0x8123n),
+            pseudorandomBytes(pairEncryptionRandomnessByteLength, 0x8123n),
             pseudorandomBytes(privatePreparationPlaintextByteLength, 0x77b1n),
         );
         expect(privateCarrier.body).toHaveLength(
@@ -167,7 +146,7 @@ describe('preparation parent scalar WASM runtime', () => {
         const parent = parentRuntime.encode({
             participantCount,
             actionProposalIdentity,
-            actionKeySetRosterIdentity,
+            rosterIdentity,
             preparationAttempt: context.preparationAttempt,
             predecessorIdentity: context.predecessorIdentity,
             senderPosition,
@@ -179,7 +158,13 @@ describe('preparation parent scalar WASM runtime', () => {
         );
         const parentSignature = signatureRuntime.signBodyIdentity(
             senderPreparationSecretKey,
+            senderPosition,
+            'preparation',
             parent.identity,
+            pseudorandomBytes(
+                actionSignatureSigningRandomnessByteLength,
+                0x4711n,
+            ),
         );
         const signatureCarrier = parentRuntime.encodeSignature(
             participantCount,
@@ -192,7 +177,7 @@ describe('preparation parent scalar WASM runtime', () => {
         expect(
             parentRuntime.verifyPrivateCarrier(
                 context,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 parent.body,
                 signatureCarrier,
                 privateCarrier.body,
@@ -209,7 +194,7 @@ describe('preparation parent scalar WASM runtime', () => {
         expect(() =>
             parentRuntime.verifyPrivateCarrier(
                 context,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 parent.body,
                 mutatedSignature,
                 privateCarrier.body,
@@ -221,18 +206,15 @@ describe('preparation parent scalar WASM runtime', () => {
         expect(() =>
             parentRuntime.verifyPrivateCarrier(
                 context,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 parent.body,
                 signatureCarrier,
                 mutatedBody,
             ),
         ).toThrow(ConstructionKernelCommandError);
 
-        const reorderedRoster = [...actionKeySetBodies];
-        [reorderedRoster[0], reorderedRoster[1]] = [
-            reorderedRoster[1],
-            reorderedRoster[0],
-        ];
+        const reorderedRoster = Uint8Array.from(canonicalRosterBytes);
+        reorderedRoster[reorderedRoster.byteLength - 1] ^= 1;
         expect(() =>
             parentRuntime.verifyPrivateCarrier(
                 context,

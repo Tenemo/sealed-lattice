@@ -5,11 +5,10 @@ use aes::cipher::{Block, BlockEncrypt, KeyInit};
 use zeroize::Zeroize;
 
 use crate::foundation::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512, Roster,
     hash_foundation_tuple_512, kmac256,
 };
 
-use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
 use super::preparation_parent::{
     ActionSignatureCarrier, ActionSignaturePurpose, PreparationParent,
     verify_preparation_parent_carrier,
@@ -19,6 +18,7 @@ use super::preparation_plaintext::{
     PairwiseMasterInventory, PreparationMaterialContext, derive_held_preparation_material,
     sender_subset_slots, verify_local_preparation_material, verify_preparation_plaintext,
 };
+use super::roster::{require_roster_identity, signing_verification_key};
 
 pub const ABSTENTION_SOURCE_BODY_BYTE_LENGTH: usize = 326;
 pub const SUBMITTED_SOURCE_BODY_BYTE_LENGTH: usize = 337;
@@ -35,14 +35,14 @@ pub const SOURCE_ORDINAL: u64 = 0;
 const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 const LOW_SUBSET_SIZE: u16 = 7;
 const SOURCE_BODY_SCHEMA_IDENTIFIER: u16 = 0x0208;
-const SOURCE_BODY_SCHEMA_VERSION: u16 = 2;
-const SOURCE_BODY_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/source-body/v2";
+const SOURCE_BODY_SCHEMA_VERSION: u16 = 3;
+const SOURCE_BODY_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/source-body/v3";
 const VERIFIED_PREPARATION_ROOT_DOMAIN: &str =
-    "sealed-lattice/construction/verified-preparation-root/v1";
-const SOURCE_STREAM_ADDRESS_VERSION: u8 = 1;
+    "sealed-lattice/construction/verified-preparation-root/v2";
+const SOURCE_STREAM_ADDRESS_VERSION: u8 = 2;
 const SOURCE_STREAM_FAMILY: u8 = 1;
 const PADDED_CONTINUATION_SUBKEY_CUSTOMIZATION: &[u8] =
-    b"sealed-lattice/padded-continuation/subkey/v1";
+    b"sealed-lattice/padded-continuation/subkey/v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -106,7 +106,7 @@ impl std::error::Error for SourceError {}
 pub struct SourceContext {
     pub participant_count: u16,
     pub action_proposal_identity: Hash512,
-    pub action_key_set_roster_identity: Hash512,
+    pub roster_identity: Hash512,
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
     pub verified_preparation_root: Hash512,
@@ -146,7 +146,7 @@ impl SourceBody {
     pub fn encode(&self) -> Result<Vec<u8>, SourceError> {
         let mut items = vec![
             CanonicalItem::hash512(self.context.action_proposal_identity.into_bytes()),
-            CanonicalItem::hash512(self.context.action_key_set_roster_identity.into_bytes()),
+            CanonicalItem::hash512(self.context.roster_identity.into_bytes()),
             CanonicalItem::unsigned16(self.context.preparation_attempt),
             CanonicalItem::hash512(self.context.predecessor_identity.into_bytes()),
             CanonicalItem::hash512(self.context.verified_preparation_root.into_bytes()),
@@ -219,7 +219,7 @@ impl SourceBody {
             SourceContext {
                 participant_count,
                 action_proposal_identity: read_hash512(&tuple.items[0])?,
-                action_key_set_roster_identity: read_hash512(&tuple.items[1])?,
+                roster_identity: read_hash512(&tuple.items[1])?,
                 preparation_attempt: read_unsigned16(&tuple.items[2])?,
                 predecessor_identity: read_hash512(&tuple.items[3])?,
                 verified_preparation_root: read_hash512(&tuple.items[4])?,
@@ -266,7 +266,7 @@ pub struct VerifiedSource {
 pub fn verify_complete_preparation(
     context: &PreparationMaterialContext,
     local_position: u16,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     parent_bodies: &[Vec<u8>],
     parent_signatures: &[Vec<u8>],
     own_opening_bytes: &[u8],
@@ -275,17 +275,16 @@ pub fn verify_complete_preparation(
 ) -> Result<VerifiedCompletePreparation, SourceError> {
     validate_position(COMPLETION_PROFILE_PARTICIPANT_COUNT, local_position)?;
     if context.sender_position != local_position
-        || action_key_sets.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
         || parent_bodies.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
         || parent_signatures.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
         || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
         || own_opening_bytes.len() != HELD_SUBSET_KEY_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
         || own_pairwise_master_bytes.len() != PAIRWISE_MASTER_VECTOR_BYTE_LENGTH
-        || action_key_set_roster_identity(action_key_sets).map_err(|_| SourceError::WrongContext)?
-            != context.action_key_set_roster_identity
     {
         return Err(SourceError::WrongContext);
     }
+    require_roster_identity(roster, context.roster_identity)
+        .map_err(|_| SourceError::WrongContext)?;
 
     let mut parents = Vec::with_capacity(usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT));
     let mut parent_identities =
@@ -303,11 +302,11 @@ pub fn verify_complete_preparation(
         let verified = verify_preparation_parent_carrier(
             COMPLETION_PROFILE_PARTICIPANT_COUNT,
             context.action_proposal_identity,
-            context.action_key_set_roster_identity,
+            context.roster_identity,
             context.preparation_attempt,
             context.predecessor_identity,
             sender_position,
-            action_key_sets,
+            roster,
             parent_body,
             parent_signature,
         )
@@ -354,7 +353,7 @@ pub fn verify_complete_preparation(
             .ok_or(SourceError::WrongItemTypeOrLength)?;
         let sender_context = PreparationMaterialContext {
             action_proposal_identity: context.action_proposal_identity,
-            action_key_set_roster_identity: context.action_key_set_roster_identity,
+            roster_identity: context.roster_identity,
             preparation_attempt: context.preparation_attempt,
             predecessor_identity: context.predecessor_identity,
             sender_position,
@@ -367,7 +366,7 @@ pub fn verify_complete_preparation(
         VERIFIED_PREPARATION_ROOT_DOMAIN,
         &[
             CanonicalItem::hash512(context.action_proposal_identity.into_bytes()),
-            CanonicalItem::hash512(context.action_key_set_roster_identity.into_bytes()),
+            CanonicalItem::hash512(context.roster_identity.into_bytes()),
             CanonicalItem::unsigned16(context.preparation_attempt),
             CanonicalItem::hash512(context.predecessor_identity.into_bytes()),
             CanonicalItem::fixed_bytes(parent_identity_bytes)
@@ -523,7 +522,7 @@ fn derive_source_subkey(
 ) -> [u8; 32] {
     let mut address = Vec::with_capacity(271);
     address.extend_from_slice(context.action_proposal_identity.as_bytes());
-    address.extend_from_slice(context.action_key_set_roster_identity.as_bytes());
+    address.extend_from_slice(context.roster_identity.as_bytes());
     address.extend_from_slice(&context.preparation_attempt.to_le_bytes());
     address.extend_from_slice(context.predecessor_identity.as_bytes());
     address.extend_from_slice(context.verified_preparation_root.as_bytes());
@@ -544,7 +543,7 @@ fn derive_source_subkey(
 pub fn verify_source_carrier(
     expected_context: SourceContext,
     expected_declaration: Option<SourceDeclaration>,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     body_bytes: &[u8],
     signature_bytes: &[u8],
 ) -> Result<VerifiedSource, SourceError> {
@@ -552,15 +551,8 @@ pub fn verify_source_carrier(
         expected_context.participant_count,
         expected_context.sender_position,
     )?;
-    if action_key_sets.len() != usize::from(expected_context.participant_count)
-        || action_key_set_roster_identity(action_key_sets).map_err(|_| SourceError::WrongContext)?
-            != expected_context.action_key_set_roster_identity
-        || action_key_sets.first().is_none_or(|key_set| {
-            key_set.proposal_identity() != expected_context.action_proposal_identity
-        })
-    {
-        return Err(SourceError::WrongContext);
-    }
+    require_roster_identity(roster, expected_context.roster_identity)
+        .map_err(|_| SourceError::WrongContext)?;
     let body = SourceBody::decode(expected_context.participant_count, body_bytes)?;
     if body.context != expected_context
         || expected_declaration.is_some_and(|declaration| declaration != body.declaration)
@@ -571,12 +563,8 @@ pub fn verify_source_carrier(
     let signature =
         ActionSignatureCarrier::decode(expected_context.participant_count, signature_bytes)
             .map_err(|_| SourceError::InvalidSignature)?;
-    let sender_key_set = action_key_sets
-        .get(usize::from(expected_context.sender_position))
-        .ok_or(SourceError::WrongParticipantPosition)?;
-    let verification_key = sender_key_set
-        .action_signature_verification_key(ActionSignaturePurpose::Source.key_index())
-        .ok_or(SourceError::InvalidSignature)?;
+    let verification_key = signing_verification_key(roster, expected_context.sender_position)
+        .map_err(|_| SourceError::WrongParticipantPosition)?;
     signature
         .verify(
             expected_context.sender_position,
@@ -664,7 +652,7 @@ mod tests {
         SourceContext {
             participant_count: COMPLETION_PROFILE_PARTICIPANT_COUNT,
             action_proposal_identity: Hash512::from_bytes([0x11; 64]),
-            action_key_set_roster_identity: Hash512::from_bytes([0x22; 64]),
+            roster_identity: Hash512::from_bytes([0x22; 64]),
             preparation_attempt: 7,
             predecessor_identity: Hash512::from_bytes([0x33; 64]),
             verified_preparation_root: Hash512::from_bytes([0x44; 64]),
@@ -785,7 +773,7 @@ mod tests {
         let source_context = SourceContext {
             participant_count: COMPLETION_PROFILE_PARTICIPANT_COUNT,
             action_proposal_identity: Hash512::from_bytes([0x11; 64]),
-            action_key_set_roster_identity: Hash512::from_bytes([0x22; 64]),
+            roster_identity: Hash512::from_bytes([0x22; 64]),
             preparation_attempt: 0x3344,
             predecessor_identity: Hash512::from_bytes([0x33; 64]),
             verified_preparation_root: Hash512::from_bytes([0x44; 64]),
@@ -795,7 +783,7 @@ mod tests {
         let master = core::array::from_fn(|index| index as u8);
         assert_eq!(
             derive_source_subkey(&source_context, 0x007f, &master),
-            decode_hex::<32>("0f34d35daf1ac76d9b6d9ff9d33c373195c5c6175dcba967e8b0114353460f32",),
+            decode_hex::<32>("00d27030d682e9d6fe2ce0978a0842422da36594d80b390dc69ea2c35b690a1d",),
         );
     }
 }

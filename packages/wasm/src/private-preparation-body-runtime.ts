@@ -19,12 +19,11 @@ const identityByteLength = 64;
 export const privatePreparationPlaintextByteLength =
     preparationPlaintextByteLength;
 export const privatePreparationBodyByteLength = 8_252;
-export const privatePreparationRecordKeyByteLength = 32;
 
 export type PrivatePreparationContextInput = Readonly<{
     participantCount: number;
     actionProposalIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     preparationAttempt: number;
     predecessorIdentity: Uint8Array;
     senderPosition: number;
@@ -40,7 +39,6 @@ export type PrivatePreparationBodyRuntime = Readonly<{
     seal(
         context: PrivatePreparationContextInput,
         pairEncryptionKey: Uint8Array,
-        recordKey: Uint8Array,
         pairEncryptionRandomness: Uint8Array,
         plaintext: Uint8Array,
     ): SealedPrivatePreparationBody;
@@ -73,9 +71,9 @@ const validateContext = (context: PrivatePreparationContextInput): void => {
         'actionProposalIdentity',
     );
     requireExactConstructionBytes(
-        context.actionKeySetRosterIdentity,
+        context.rosterIdentity,
         identityByteLength,
-        'actionKeySetRosterIdentity',
+        'rosterIdentity',
     );
     requireUnsigned16(context.preparationAttempt, 'preparationAttempt');
     requireExactConstructionBytes(
@@ -103,7 +101,7 @@ const writeContext = (
     validateContext(context);
     request.writeU16(context.participantCount);
     request.writeFixed(context.actionProposalIdentity);
-    request.writeFixed(context.actionKeySetRosterIdentity);
+    request.writeFixed(context.rosterIdentity);
     request.writeU16(context.preparationAttempt);
     request.writeFixed(context.predecessorIdentity);
     request.writeU16(context.senderPosition);
@@ -122,22 +120,11 @@ const copyExactResponse = (
 export const openPrivatePreparationBodyRuntime = (
     kernel: ConstructionKernelCommandRuntime,
 ): PrivatePreparationBodyRuntime => ({
-    seal: (
-        context,
-        pairEncryptionKey,
-        recordKey,
-        pairEncryptionRandomness,
-        plaintext,
-    ) => {
+    seal: (context, pairEncryptionKey, pairEncryptionRandomness, plaintext) => {
         requireExactConstructionBytes(
             pairEncryptionKey,
             pairEncryptionKeyByteLength,
             'pairEncryptionKey',
-        );
-        requireExactConstructionBytes(
-            recordKey,
-            privatePreparationRecordKeyByteLength,
-            'recordKey',
         );
         requireExactConstructionBytes(
             pairEncryptionRandomness,
@@ -153,7 +140,6 @@ export const openPrivatePreparationBodyRuntime = (
         request.writeU8(sealPrivatePreparationBodyCommand);
         writeContext(request, context);
         request.writeBytes(pairEncryptionKey);
-        request.writeBytes(recordKey);
         request.writeBytes(pairEncryptionRandomness);
         request.writeBytes(plaintext);
         return executeConstructionCommand(kernel, request, (reader) => ({

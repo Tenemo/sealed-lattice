@@ -1,5 +1,4 @@
-import { actionKeySetBodyByteLength } from './action-key-set-runtime.js';
-import { actionSignatureKeyByteLength } from './action-signature-runtime.js';
+import { actionSignatureByteLength } from './action-signature-runtime.js';
 import {
     ConstructionCommandWriter,
     executeConstructionCommand,
@@ -10,6 +9,7 @@ import {
     privatePreparationBodyByteLength,
     type PrivatePreparationContextInput,
 } from './private-preparation-body-runtime.js';
+import { completionRosterByteLength } from './roster-runtime.js';
 
 const encodePreparationParentCommand = 12;
 const encodePreparationSignatureCarrierCommand = 13;
@@ -26,12 +26,12 @@ export const preparationParentBodyByteLength = (
     return 8_502;
 };
 
-export const actionSignatureCarrierByteLength = 6_388;
+export const actionSignatureCarrierByteLength = 3_409;
 
 type PreparationParentInput = Readonly<{
     participantCount: number;
     actionProposalIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     preparationAttempt: number;
     predecessorIdentity: Uint8Array;
     senderPosition: number;
@@ -64,7 +64,7 @@ export type PreparationParentRuntime = Readonly<{
     ): Uint8Array;
     verifyPrivateCarrier(
         context: PrivatePreparationCarrierContextInput,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         parentBody: Uint8Array,
         signatureCarrier: Uint8Array,
         privateBody: Uint8Array,
@@ -117,9 +117,9 @@ const validateExpectedContext = (
         'actionProposalIdentity',
     );
     requireExactConstructionBytes(
-        context.actionKeySetRosterIdentity,
+        context.rosterIdentity,
         identityByteLength,
-        'actionKeySetRosterIdentity',
+        'rosterIdentity',
     );
     requireUnsigned16(context.preparationAttempt, 'preparationAttempt');
     requireExactConstructionBytes(
@@ -141,7 +141,7 @@ const writeExpectedContext = (
     validateExpectedContext(context);
     request.writeU16(context.participantCount);
     request.writeFixed(context.actionProposalIdentity);
-    request.writeFixed(context.actionKeySetRosterIdentity);
+    request.writeFixed(context.rosterIdentity);
     request.writeU16(context.preparationAttempt);
     request.writeFixed(context.predecessorIdentity);
     request.writeU16(context.recipientPosition);
@@ -158,9 +158,9 @@ export const openPreparationParentRuntime = (
             'actionProposalIdentity',
         );
         requireExactConstructionBytes(
-            input.actionKeySetRosterIdentity,
+            input.rosterIdentity,
             identityByteLength,
-            'actionKeySetRosterIdentity',
+            'rosterIdentity',
         );
         requireUnsigned16(input.preparationAttempt, 'preparationAttempt');
         requireExactConstructionBytes(
@@ -198,7 +198,7 @@ export const openPreparationParentRuntime = (
         request.writeU8(encodePreparationParentCommand);
         request.writeU16(input.participantCount);
         request.writeFixed(input.actionProposalIdentity);
-        request.writeFixed(input.actionKeySetRosterIdentity);
+        request.writeFixed(input.rosterIdentity);
         request.writeU16(input.preparationAttempt);
         request.writeFixed(input.predecessorIdentity);
         request.writeU16(input.senderPosition);
@@ -232,7 +232,7 @@ export const openPreparationParentRuntime = (
         );
         requireExactConstructionBytes(
             signature,
-            actionSignatureKeyByteLength,
+            actionSignatureByteLength,
             'signature',
         );
         const request = new ConstructionCommandWriter();
@@ -253,17 +253,17 @@ export const openPreparationParentRuntime = (
     },
     verifyPrivateCarrier: (
         context,
-        actionKeySetBodies,
+        canonicalRosterBytes,
         parentBody,
         signatureCarrier,
         privateBody,
     ) => {
         validateExpectedContext(context);
-        if (actionKeySetBodies.length !== context.participantCount) {
-            throw new TypeError(
-                'actionKeySetBodies must contain the complete ordered roster.',
-            );
-        }
+        requireExactConstructionBytes(
+            canonicalRosterBytes,
+            completionRosterByteLength,
+            'canonicalRosterBytes',
+        );
         requireExactConstructionBytes(
             parentBody,
             preparationParentBodyByteLength(context.participantCount),
@@ -282,14 +282,7 @@ export const openPreparationParentRuntime = (
         const request = new ConstructionCommandWriter();
         request.writeU8(verifyPrivatePreparationCarrierCommand);
         writeExpectedContext(request, context);
-        for (const [position, keySetBody] of actionKeySetBodies.entries()) {
-            requireExactConstructionBytes(
-                keySetBody,
-                actionKeySetBodyByteLength(context.participantCount),
-                `actionKeySetBodies[${String(position)}]`,
-            );
-            request.writeBytes(keySetBody);
-        }
+        request.writeBytes(canonicalRosterBytes);
         request.writeBytes(parentBody);
         request.writeBytes(signatureCarrier);
         request.writeBytes(privateBody);

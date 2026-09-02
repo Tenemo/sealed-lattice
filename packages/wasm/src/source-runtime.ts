@@ -1,4 +1,4 @@
-import { actionKeySetBodyByteLength } from './action-key-set-runtime.js';
+import { actionSignatureByteLength } from './action-signature-runtime.js';
 import {
     ConstructionCommandWriter,
     executeConstructionCommand,
@@ -11,6 +11,7 @@ import {
     preparationPlaintextByteLength,
 } from './preparation-material-runtime.js';
 import { actionSignatureCarrierByteLength } from './preparation-parent-runtime.js';
+import { completionRosterByteLength } from './roster-runtime.js';
 
 const verifyCompletePreparationCommand = 18;
 const deriveHonestSourceCorrectionCommand = 19;
@@ -33,7 +34,7 @@ export type SourceDeclaration = 'abstain' | 'submit';
 export type SourcePreparationContext = Readonly<{
     participantCount: number;
     actionProposalIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     preparationAttempt: number;
     predecessorIdentity: Uint8Array;
 }>;
@@ -72,7 +73,7 @@ export type SourceRuntime = Readonly<{
     verifyCompletePreparation(
         context: SourcePreparationContext,
         localPosition: number,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationParents: readonly PreparationParentCarrier[],
         ownContributionOpenings: Uint8Array,
         ownPairwiseMasters: Uint8Array,
@@ -96,7 +97,7 @@ export type SourceRuntime = Readonly<{
     verify(
         context: SourceContext,
         expectedDeclaration: SourceDeclaration,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         body: Uint8Array,
         signature: Uint8Array,
     ): VerifiedSource;
@@ -151,9 +152,9 @@ const validatePreparationContext = (
         'actionProposalIdentity',
     );
     requireExactConstructionBytes(
-        context.actionKeySetRosterIdentity,
+        context.rosterIdentity,
         identityByteLength,
-        'actionKeySetRosterIdentity',
+        'rosterIdentity',
     );
     requireUnsigned16(context.preparationAttempt, 'preparationAttempt');
     requireExactConstructionBytes(
@@ -169,27 +170,17 @@ const writePreparationContext = (
 ): void => {
     validatePreparationContext(context);
     request.writeFixed(context.actionProposalIdentity);
-    request.writeFixed(context.actionKeySetRosterIdentity);
+    request.writeFixed(context.rosterIdentity);
     request.writeU16(context.preparationAttempt);
     request.writeFixed(context.predecessorIdentity);
 };
 
-const validateActionKeySetBodies = (
-    actionKeySetBodies: readonly Uint8Array[],
-): void => {
-    if (actionKeySetBodies.length !== completionProfileParticipantCount) {
-        throw new RangeError(
-            'actionKeySetBodies must contain the complete roster.',
-        );
-    }
-    for (const body of actionKeySetBodies) {
-        requireExactConstructionBytes(
-            body,
-            actionKeySetBodyByteLength(completionProfileParticipantCount),
-            'actionKeySetBody',
-        );
-    }
-};
+const validateRoster = (canonicalRosterBytes: Uint8Array): void =>
+    requireExactConstructionBytes(
+        canonicalRosterBytes,
+        completionRosterByteLength,
+        'canonicalRosterBytes',
+    );
 
 export const openSourceRuntime = (
     kernel: ConstructionKernelCommandRuntime,
@@ -197,7 +188,7 @@ export const openSourceRuntime = (
     verifyCompletePreparation: (
         context,
         localPosition,
-        actionKeySetBodies,
+        canonicalRosterBytes,
         preparationParents,
         ownContributionOpenings,
         ownPairwiseMasters,
@@ -205,7 +196,7 @@ export const openSourceRuntime = (
     ) => {
         validatePreparationContext(context);
         requirePosition(localPosition, 'localPosition');
-        validateActionKeySetBodies(actionKeySetBodies);
+        validateRoster(canonicalRosterBytes);
         if (preparationParents.length !== completionProfileParticipantCount) {
             throw new RangeError(
                 'preparationParents must contain one carrier per roster position.',
@@ -250,9 +241,7 @@ export const openSourceRuntime = (
         request.writeU16(context.participantCount);
         writePreparationContext(request, context);
         request.writeU16(localPosition);
-        for (const body of actionKeySetBodies) {
-            request.writeBytes(body);
-        }
+        request.writeBytes(canonicalRosterBytes);
         for (const parent of preparationParents) {
             request.writeBytes(parent.body);
             request.writeBytes(parent.signature);
@@ -366,7 +355,11 @@ export const openSourceRuntime = (
             identityByteLength,
             'bodyIdentity',
         );
-        requireExactConstructionBytes(signature, 6_288, 'actionSignature');
+        requireExactConstructionBytes(
+            signature,
+            actionSignatureByteLength,
+            'actionSignature',
+        );
         const request = new ConstructionCommandWriter();
         request.writeU8(encodeSourceSignatureCarrierCommand);
         request.writeU16(completionProfileParticipantCount);
@@ -386,7 +379,7 @@ export const openSourceRuntime = (
     verify: (
         context,
         expectedDeclaration,
-        actionKeySetBodies,
+        canonicalRosterBytes,
         body,
         signature,
     ) => {
@@ -397,7 +390,7 @@ export const openSourceRuntime = (
             'verifiedPreparationRoot',
         );
         requirePosition(context.senderPosition, 'senderPosition');
-        validateActionKeySetBodies(actionKeySetBodies);
+        validateRoster(canonicalRosterBytes);
         requireExactConstructionBytes(
             body,
             expectedDeclaration === 'submit'
@@ -417,9 +410,7 @@ export const openSourceRuntime = (
         request.writeFixed(context.verifiedPreparationRoot);
         request.writeU16(context.senderPosition);
         request.writeU16(declarationCode(expectedDeclaration));
-        for (const keySetBody of actionKeySetBodies) {
-            request.writeBytes(keySetBody);
-        }
+        request.writeBytes(canonicalRosterBytes);
         request.writeBytes(body);
         request.writeBytes(signature);
         return executeConstructionCommand(kernel, request, (reader) => {

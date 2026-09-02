@@ -1,41 +1,37 @@
 use core::fmt;
 
-use zeroize::Zeroize;
-
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
     hash_foundation_tuple_512,
 };
 
 use super::authenticated_record::{
-    KEY_BYTE_LENGTH as RECORD_KEY_BYTE_LENGTH, PLAINTEXT_BYTE_LENGTH, SEALED_RECORD_BYTE_LENGTH,
-    open as open_record, seal as seal_record,
+    PLAINTEXT_BYTE_LENGTH, SEALED_RECORD_BYTE_LENGTH, open as open_record, seal as seal_record,
 };
 use super::pair_encryption::{
-    CIPHERTEXT_BYTE_LENGTH as PAIR_CIPHERTEXT_BYTE_LENGTH,
     DECRYPTION_KEY_BYTE_LENGTH as PAIR_DECRYPTION_KEY_BYTE_LENGTH,
     ENCRYPTION_RANDOMNESS_BYTE_LENGTH as PAIR_ENCRYPTION_RANDOMNESS_BYTE_LENGTH,
-    decrypt as decrypt_record_key, encrypt as encrypt_record_key, validate_encryption_key,
+    KEM_CIPHERTEXT_BYTE_LENGTH, decapsulate, encapsulate, validate_encryption_key,
 };
 
 pub const PRIVATE_PREPARATION_HEADER_BYTE_LENGTH: usize = 356;
 pub const PRIVATE_PREPARATION_BODY_BYTE_LENGTH: usize = 8
     + 3 * 6
     + PRIVATE_PREPARATION_HEADER_BYTE_LENGTH
-    + PAIR_CIPHERTEXT_BYTE_LENGTH
+    + KEM_CIPHERTEXT_BYTE_LENGTH
     + SEALED_RECORD_BYTE_LENGTH;
 
 const PRIVATE_PREPARATION_HEADER_SCHEMA_IDENTIFIER: u16 = 0x0203;
 const PRIVATE_PREPARATION_BODY_SCHEMA_IDENTIFIER: u16 = 0x0204;
-const PRIVATE_PREPARATION_SCHEMA_VERSION: u16 = 1;
+const PRIVATE_PREPARATION_SCHEMA_VERSION: u16 = 3;
 const PRIVATE_PREPARATION_PHASE: u16 = 1;
 const PRIVATE_PREPARATION_PURPOSE: u16 = 1;
 const PRIVATE_PREPARATION_STREAM_ORDINAL: u64 = 0;
 const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 const PAIR_ENCRYPTION_KEY_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/construction/pair-encryption-key/v1";
+    "sealed-lattice/construction/pair-encryption-key/v3";
 const PRIVATE_PREPARATION_BODY_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/construction/private-preparation-body/v1";
+    "sealed-lattice/construction/private-preparation-body/v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivatePreparationBodyError {
@@ -78,7 +74,7 @@ impl std::error::Error for PrivatePreparationBodyError {}
 pub struct PrivatePreparationContext {
     participant_count: u16,
     action_proposal_identity: Hash512,
-    action_key_set_roster_identity: Hash512,
+    roster_identity: Hash512,
     preparation_attempt: u16,
     predecessor_identity: Hash512,
     sender_position: u16,
@@ -91,7 +87,7 @@ impl PrivatePreparationContext {
     pub fn new(
         participant_count: u16,
         action_proposal_identity: Hash512,
-        action_key_set_roster_identity: Hash512,
+        roster_identity: Hash512,
         preparation_attempt: u16,
         predecessor_identity: Hash512,
         sender_position: u16,
@@ -104,7 +100,7 @@ impl PrivatePreparationContext {
         Ok(Self {
             participant_count,
             action_proposal_identity,
-            action_key_set_roster_identity,
+            roster_identity,
             preparation_attempt,
             predecessor_identity,
             sender_position,
@@ -119,7 +115,7 @@ impl PrivatePreparationContext {
             PRIVATE_PREPARATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::hash512(self.action_proposal_identity.into_bytes()),
-                CanonicalItem::hash512(self.action_key_set_roster_identity.into_bytes()),
+                CanonicalItem::hash512(self.roster_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.preparation_attempt),
                 CanonicalItem::hash512(self.predecessor_identity.into_bytes()),
                 CanonicalItem::unsigned16(PRIVATE_PREPARATION_PHASE),
@@ -155,7 +151,7 @@ impl PrivatePreparationContext {
         let context = Self {
             participant_count,
             action_proposal_identity: read_hash512(&tuple.items[0])?,
-            action_key_set_roster_identity: read_hash512(&tuple.items[1])?,
+            roster_identity: read_hash512(&tuple.items[1])?,
             preparation_attempt: read_unsigned16(&tuple.items[2])?,
             predecessor_identity: read_hash512(&tuple.items[3])?,
             sender_position: read_unsigned16(&tuple.items[5])?,
@@ -182,7 +178,7 @@ impl PrivatePreparationContext {
 #[derive(Clone, PartialEq, Eq)]
 pub struct PrivatePreparationBody {
     pub(super) context: PrivatePreparationContext,
-    encrypted_record_key: [u8; PAIR_CIPHERTEXT_BYTE_LENGTH],
+    kem_ciphertext: [u8; KEM_CIPHERTEXT_BYTE_LENGTH],
     sealed_record: [u8; SEALED_RECORD_BYTE_LENGTH],
 }
 
@@ -190,7 +186,6 @@ impl PrivatePreparationBody {
     pub fn seal(
         context: PrivatePreparationContext,
         pair_encryption_key: &[u8],
-        record_key: &[u8],
         pair_encryption_randomness: &[u8],
         plaintext: &[u8],
     ) -> Result<Self, PrivatePreparationBodyError> {
@@ -199,23 +194,26 @@ impl PrivatePreparationBody {
         {
             return Err(PrivatePreparationBodyError::WrongContext);
         }
-        if record_key.len() != RECORD_KEY_BYTE_LENGTH
-            || pair_encryption_randomness.len() != PAIR_ENCRYPTION_RANDOMNESS_BYTE_LENGTH
+        if pair_encryption_randomness.len() != PAIR_ENCRYPTION_RANDOMNESS_BYTE_LENGTH
             || plaintext.len() != PLAINTEXT_BYTE_LENGTH
         {
             return Err(PrivatePreparationBodyError::WrongItemTypeOrLength);
         }
         let header = context.encode()?;
-        let encrypted_record_key =
-            encrypt_record_key(pair_encryption_key, record_key, pair_encryption_randomness)
-                .map_err(|_| PrivatePreparationBodyError::InvalidPairCiphertext)?;
-        let sealed_record = seal_record(record_key, &header, plaintext)
-            .map_err(|_| PrivatePreparationBodyError::AuthenticationFailed)?
-            .try_into()
-            .map_err(|_| PrivatePreparationBodyError::WrongItemTypeOrLength)?;
+        let encapsulation = encapsulate(pair_encryption_key, pair_encryption_randomness, &header)
+            .map_err(|_| PrivatePreparationBodyError::InvalidPairCiphertext)?;
+        let sealed_record = seal_record(
+            &encapsulation.material.aead_key,
+            &encapsulation.material.nonce,
+            &header,
+            plaintext,
+        )
+        .map_err(|_| PrivatePreparationBodyError::AuthenticationFailed)?
+        .try_into()
+        .map_err(|_| PrivatePreparationBodyError::WrongItemTypeOrLength)?;
         Ok(Self {
             context,
-            encrypted_record_key,
+            kem_ciphertext: encapsulation.ciphertext,
             sealed_record,
         })
     }
@@ -227,7 +225,7 @@ impl PrivatePreparationBody {
             vec![
                 CanonicalItem::nested_tuple(&self.context.canonical_tuple())
                     .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)?,
-                CanonicalItem::fixed_bytes(self.encrypted_record_key)
+                CanonicalItem::fixed_bytes(self.kem_ciphertext)
                     .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)?,
                 CanonicalItem::fixed_bytes(self.sealed_record)
                     .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)?,
@@ -265,7 +263,7 @@ impl PrivatePreparationBody {
                 participant_count,
                 tuple.items[0].canonical_bytes(),
             )?,
-            encrypted_record_key: read_raw_fixed_bytes(&tuple.items[1])?,
+            kem_ciphertext: read_raw_fixed_bytes(&tuple.items[1])?,
             sealed_record: read_raw_fixed_bytes(&tuple.items[2])?,
         };
         if body.encode()?.as_slice() != bytes {
@@ -286,20 +284,31 @@ impl PrivatePreparationBody {
     pub fn open(
         &self,
         expected_context: PrivatePreparationContext,
+        pair_encryption_key: &[u8],
         pair_decryption_key: &[u8],
     ) -> Result<Vec<u8>, PrivatePreparationBodyError> {
         if self.context != expected_context
+            || pair_encryption_key_identity(pair_encryption_key)?
+                != expected_context.pair_encryption_key_identity
             || pair_decryption_key.len() != PAIR_DECRYPTION_KEY_BYTE_LENGTH
         {
             return Err(PrivatePreparationBodyError::WrongContext);
         }
-        let mut record_key = decrypt_record_key(pair_decryption_key, &self.encrypted_record_key)
-            .map_err(|_| PrivatePreparationBodyError::InvalidPairCiphertext)?;
+        let material = decapsulate(
+            pair_encryption_key,
+            pair_decryption_key,
+            &self.kem_ciphertext,
+            &self.context.encode()?,
+        )
+        .map_err(|_| PrivatePreparationBodyError::InvalidPairCiphertext)?;
         let header = self.context.encode()?;
-        let result = open_record(&record_key, &header, &self.sealed_record)
-            .map_err(|_| PrivatePreparationBodyError::AuthenticationFailed);
-        record_key.zeroize();
-        result
+        open_record(
+            &material.aead_key,
+            &material.nonce,
+            &header,
+            &self.sealed_record,
+        )
+        .map_err(|_| PrivatePreparationBodyError::AuthenticationFailed)
     }
 }
 
@@ -415,7 +424,6 @@ mod tests {
     fn fixture() -> (
         PrivatePreparationContext,
         super::super::pair_encryption::PairEncryptionKeyPair,
-        [u8; RECORD_KEY_BYTE_LENGTH],
         [u8; PAIR_ENCRYPTION_RANDOMNESS_BYTE_LENGTH],
         Vec<u8>,
     ) {
@@ -439,7 +447,6 @@ mod tests {
         (
             context,
             pair,
-            [0x47; RECORD_KEY_BYTE_LENGTH],
             pseudorandom_bytes::<PAIR_ENCRYPTION_RANDOMNESS_BYTE_LENGTH>(0x8123),
             plaintext,
         )
@@ -447,23 +454,18 @@ mod tests {
 
     #[test]
     fn exact_body_round_trip_and_identity() {
-        let (context, pair, record_key, randomness, plaintext) = fixture();
-        let body = PrivatePreparationBody::seal(
-            context,
-            &pair.encryption_key,
-            &record_key,
-            &randomness,
-            &plaintext,
-        )
-        .expect("private preparation body seals");
+        let (context, pair, randomness, plaintext) = fixture();
+        let body =
+            PrivatePreparationBody::seal(context, &pair.encryption_key, &randomness, &plaintext)
+                .expect("private preparation body seals");
         assert_eq!(context.encode().expect("header encodes").len(), 356);
         let encoded = body.encode().expect("body encodes");
-        assert_eq!(encoded.len(), PRIVATE_PREPARATION_BODY_BYTE_LENGTH);
+        assert_eq!(encoded.len(), 8_252);
         let decoded = PrivatePreparationBody::decode(10, &encoded).expect("body decodes");
         assert_eq!(decoded.context, context);
         assert_eq!(
             decoded
-                .open(context, &pair.decryption_key)
+                .open(context, &pair.encryption_key, &pair.decryption_key)
                 .expect("body opens"),
             plaintext
         );
@@ -472,19 +474,14 @@ mod tests {
 
     #[test]
     fn wrong_context_and_mutations_refuse() {
-        let (context, pair, record_key, randomness, plaintext) = fixture();
-        let body = PrivatePreparationBody::seal(
-            context,
-            &pair.encryption_key,
-            &record_key,
-            &randomness,
-            &plaintext,
-        )
-        .expect("private preparation body seals");
+        let (context, pair, randomness, plaintext) = fixture();
+        let body =
+            PrivatePreparationBody::seal(context, &pair.encryption_key, &randomness, &plaintext)
+                .expect("private preparation body seals");
         let mut wrong_context = context;
         wrong_context.preparation_attempt += 1;
         assert_eq!(
-            body.open(wrong_context, &pair.decryption_key),
+            body.open(wrong_context, &pair.encryption_key, &pair.decryption_key),
             Err(PrivatePreparationBodyError::WrongContext)
         );
 
@@ -493,21 +490,21 @@ mod tests {
         assert!(PrivatePreparationBody::decode(10, &wrong_schema).is_err());
 
         let original_identity = body.body_identity().expect("identity hashes");
-        let mut pair_ciphertext_mutation = body.encode().expect("body encodes");
-        pair_ciphertext_mutation[376] ^= 1;
-        let pair_ciphertext_mutation =
-            PrivatePreparationBody::decode(10, &pair_ciphertext_mutation)
-                .expect("ciphertext mutation remains canonical");
+        let mut kem_ciphertext_mutation = body.encode().expect("body encodes");
+        kem_ciphertext_mutation[376] ^= 1;
+        let kem_ciphertext_mutation = PrivatePreparationBody::decode(10, &kem_ciphertext_mutation)
+            .expect("ciphertext mutation remains canonical");
         assert_ne!(
-            pair_ciphertext_mutation
+            kem_ciphertext_mutation
                 .body_identity()
                 .expect("mutated identity hashes"),
             original_identity
         );
-        match pair_ciphertext_mutation.open(context, &pair.decryption_key) {
-            Ok(candidate) => assert_eq!(candidate, plaintext),
-            Err(error) => assert_eq!(error, PrivatePreparationBodyError::AuthenticationFailed),
-        }
+        assert!(matches!(
+            kem_ciphertext_mutation.open(context, &pair.encryption_key, &pair.decryption_key,),
+            Err(PrivatePreparationBodyError::InvalidPairCiphertext)
+                | Err(PrivatePreparationBodyError::AuthenticationFailed)
+        ));
 
         let mut record_mutation = body.encode().expect("body encodes");
         record_mutation[PRIVATE_PREPARATION_BODY_BYTE_LENGTH - 1] ^= 1;
@@ -520,26 +517,26 @@ mod tests {
             original_identity
         );
         assert_eq!(
-            record_mutation.open(context, &pair.decryption_key),
+            record_mutation.open(context, &pair.encryption_key, &pair.decryption_key),
             Err(PrivatePreparationBodyError::AuthenticationFailed)
         );
 
         let mut mutated = body.clone();
         mutated.sealed_record[0] ^= 1;
         assert_eq!(
-            mutated.open(context, &pair.decryption_key),
+            mutated.open(context, &pair.encryption_key, &pair.decryption_key),
             Err(PrivatePreparationBodyError::AuthenticationFailed)
         );
     }
 
     #[test]
     fn invalid_pair_and_participant_relations_refuse() {
-        let (context, pair, record_key, randomness, plaintext) = fixture();
+        let (context, pair, randomness, plaintext) = fixture();
         assert_eq!(
             PrivatePreparationContext::new(
                 9,
                 context.action_proposal_identity,
-                context.action_key_set_roster_identity,
+                context.roster_identity,
                 context.preparation_attempt,
                 context.predecessor_identity,
                 2,
@@ -552,7 +549,7 @@ mod tests {
             PrivatePreparationContext::new(
                 10,
                 context.action_proposal_identity,
-                context.action_key_set_roster_identity,
+                context.roster_identity,
                 context.preparation_attempt,
                 context.predecessor_identity,
                 2,
@@ -569,7 +566,6 @@ mod tests {
             PrivatePreparationBody::seal(
                 context,
                 &other_pair.encryption_key,
-                &record_key,
                 &randomness,
                 &plaintext,
             ),

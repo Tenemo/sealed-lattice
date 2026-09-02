@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { ConstructionKernelCommandError } from '../../src/construction-kernel-command-runtime.js';
 import {
-    createPairEncryptionRuntimeLoader,
-    pairCiphertextByteLength,
+    ConstructionCommandWriter,
+    ConstructionKernelCommandError,
+    executeConstructionCommand,
+} from '../../src/construction-kernel-command-runtime.js';
+import { instantiateConstructionKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
+import {
+    openPairEncryptionRuntime,
     pairDecryptionKeyByteLength,
     pairEncryptionKeyByteLength,
     pairEncryptionKeyGenerationRandomnessByteLength,
-    pairEncryptionRandomnessByteLength,
-    pairMessageByteLength,
 } from '../../src/pair-encryption-runtime.js';
 
 const kernelUrl = new URL(
@@ -28,74 +30,39 @@ const pseudorandomBytes = (length: number, seed: bigint): Uint8Array => {
     });
 };
 
-describe('pair encryption scalar WASM runtime', () => {
-    it('generates the explicit-matrix key, encrypts, and decrypts deterministically', async () => {
-        const runtime = await createPairEncryptionRuntimeLoader(kernelUrl, {
-            allowUnpinnedKernel: true,
-        })();
-        const keyRandomness = pseudorandomBytes(
+describe('mailbox ML-KEM scalar WASM runtime', () => {
+    it('generates exact ML-KEM-768 key bytes', async () => {
+        const kernel = await instantiateConstructionKernelCommandRuntime(
+            kernelUrl,
+            { allowUnpinnedKernel: true },
+        );
+        const runtime = openPairEncryptionRuntime(kernel);
+        const randomness = pseudorandomBytes(
             pairEncryptionKeyGenerationRandomnessByteLength,
             0x5a17n,
         );
-        const encryptionRandomness = pseudorandomBytes(
-            pairEncryptionRandomnessByteLength,
-            0x9123n,
-        );
-        const message = Uint8Array.from(
-            { length: pairMessageByteLength },
-            (_unused, index) => index,
-        );
 
-        const keyPair = runtime.generateKeyPair(keyRandomness);
+        const keyPair = runtime.generateKeyPair(randomness);
         expect(keyPair.encryptionKey).toHaveLength(pairEncryptionKeyByteLength);
         expect(keyPair.decryptionKey).toHaveLength(pairDecryptionKeyByteLength);
-        const ciphertext = runtime.encrypt(
-            keyPair.encryptionKey,
-            message,
-            encryptionRandomness,
-        );
-        expect(ciphertext).toHaveLength(pairCiphertextByteLength);
-        expect(runtime.decrypt(keyPair.decryptionKey, ciphertext)).toEqual(
-            message,
-        );
-        expect(
-            runtime.encrypt(
-                keyPair.encryptionKey,
-                message,
-                encryptionRandomness,
-            ),
-        ).toEqual(ciphertext);
-
-        const malformedEncryptionKey = Uint8Array.from(keyPair.encryptionKey);
-        malformedEncryptionKey.subarray(0, 3).fill(0xff);
-        expect(() =>
-            runtime.encrypt(
-                malformedEncryptionKey,
-                message,
-                encryptionRandomness,
-            ),
-        ).toThrowError(ConstructionKernelCommandError);
-    });
-
-    it('rejects every wrong-width input before crossing WASM', async () => {
-        const runtime = await createPairEncryptionRuntimeLoader(kernelUrl, {
-            allowUnpinnedKernel: true,
-        })();
+        expect(runtime.generateKeyPair(randomness)).toEqual(keyPair);
         expect(() => runtime.generateKeyPair(new Uint8Array(1))).toThrow(
-            /6912-byte/u,
+            /64-byte/u,
         );
-        expect(() =>
-            runtime.encrypt(
-                new Uint8Array(pairEncryptionKeyByteLength),
-                new Uint8Array(pairMessageByteLength - 1),
-                new Uint8Array(pairEncryptionRandomnessByteLength),
-            ),
-        ).toThrow(/32-byte/u);
-        expect(() =>
-            runtime.decrypt(
-                new Uint8Array(pairDecryptionKeyByteLength),
-                new Uint8Array(pairCiphertextByteLength - 1),
-            ),
-        ).toThrow(/1088-byte/u);
     });
+
+    it.each([5, 6])(
+        'keeps rejected generic mailbox command %s tombstoned',
+        async (command) => {
+            const kernel = await instantiateConstructionKernelCommandRuntime(
+                kernelUrl,
+                { allowUnpinnedKernel: true },
+            );
+            const request = new ConstructionCommandWriter();
+            request.writeU8(command);
+            expect(() =>
+                executeConstructionCommand(kernel, request, () => undefined),
+            ).toThrowError(ConstructionKernelCommandError);
+        },
+    );
 });

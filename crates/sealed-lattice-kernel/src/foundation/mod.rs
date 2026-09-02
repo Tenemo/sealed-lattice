@@ -24,6 +24,8 @@ pub(crate) use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
 };
 pub(crate) use refusal::RefusalReason;
+#[cfg(any(feature = "construction", test))]
+pub(crate) use schemas::RosterEntry;
 #[cfg(feature = "construction")]
 pub(crate) use schemas::{
     FOUNDATION_MAXIMUM_SCORE, FOUNDATION_MINIMUM_SCORE, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
@@ -38,5 +40,5 @@ pub(crate) use schemas::{
     Roster,
 };
 #[cfg(test)]
-pub(crate) use schemas::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, RosterEntry};
+pub(crate) use schemas::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT};
 pub(crate) use text::StabilizedDisplayText;

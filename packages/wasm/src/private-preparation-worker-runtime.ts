@@ -1,12 +1,8 @@
 /// <reference lib="webworker" />
 
 import {
-    actionKeySetBodyByteLength,
-    openActionKeySetRuntime,
-    type ActionKeySetRuntime,
-} from './action-key-set-runtime.js';
-import {
-    actionSignatureKeyByteLength,
+    actionSignatureSigningRandomnessByteLength,
+    actionSignatureSecretKeyByteLength,
     openActionSignatureRuntime,
     type ActionSignatureRuntime,
 } from './action-signature-runtime.js';
@@ -23,11 +19,8 @@ import {
     type KernelResourceMeasurement,
 } from './foundation-kernel/kernel-runtime.js';
 import {
-    openPairEncryptionRuntime,
     pairDecryptionKeyByteLength,
-    pairEncryptionKeyGenerationRandomnessByteLength,
     pairEncryptionRandomnessByteLength,
-    type PairEncryptionRuntime,
 } from './pair-encryption-runtime.js';
 import {
     openPreparationMaterialRuntime,
@@ -45,7 +38,6 @@ import {
 import {
     openPrivatePreparationBodyRuntime,
     privatePreparationBodyByteLength,
-    privatePreparationRecordKeyByteLength,
     type PrivatePreparationBodyRuntime,
     type PrivatePreparationContextInput,
 } from './private-preparation-body-runtime.js';
@@ -58,7 +50,6 @@ import {
     type ProtectedRecord,
 } from './private-preparation-durable-state.js';
 import type {
-    ConfirmedActionKeyRoster,
     PrivatePreparationActionContext,
     PrivatePreparationWorkerFailure,
     PrivatePreparationWorkerInitialization,
@@ -68,10 +59,14 @@ import type {
     PublishedFinalityPackage,
     PublishedPreparationPackage,
     PublishedSourcePackage,
-    RegisteredActionKeys,
     SourcePublicationChoice,
     TallyEvaluationProgress,
 } from './private-preparation-worker-protocol.js';
+import {
+    completionRosterByteLength,
+    openRosterRuntime,
+    type RosterRuntime,
+} from './roster-runtime.js';
 import {
     abstentionSourceBodyByteLength,
     heldSubsetKeyVectorByteLength,
@@ -86,10 +81,9 @@ import {
 
 const completionProfileParticipantCount = 10;
 const signaturePurposeCount = 4;
-const pairKeyCount = completionProfileParticipantCount - 1;
 const identityByteLength = 64;
 const localContextDomainByteLength = 32;
-const localContextDomain = 'sealed-lattice/local-record/v2';
+const localContextDomain = 'sealed-lattice/local-record/v3';
 const localContextByteLength =
     localContextDomainByteLength + 6 * identityByteLength + 2 + 2 + 8 + 2 + 8;
 const noPeerPosition = 0xffff;
@@ -100,8 +94,7 @@ const sourceStateKind = 4;
 const finalityStateKind = 5;
 // Object kinds 6 and 7 are reserved for rejected tally-activation records.
 const noResultStateKind = 8;
-const registeredActionPhase = 1;
-const confirmedRosterPhase = 2;
+const rosterBoundActionPhase = 1;
 const unsignedPreparationPhase = 1;
 const publishedPreparationPhase = 2;
 const consumedPrivatePreparationPhase = 1;
@@ -126,7 +119,7 @@ type LocalRecordContext = Readonly<{
     candidateBuildIdentity: Uint8Array;
     actionProposalIdentity: Uint8Array;
     actionDefinitionIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     predecessorIdentity: Uint8Array;
     participantPosition: number;
     objectKind: number;
@@ -136,20 +129,19 @@ type LocalRecordContext = Readonly<{
 }>;
 
 type ActionState = {
-    phase: typeof confirmedRosterPhase | typeof registeredActionPhase;
+    phase: typeof rosterBoundActionPhase;
     generation: bigint;
     runtimeIdentity: Uint8Array;
     candidateBuildIdentity: Uint8Array;
     actionProposalIdentity: Uint8Array;
     actionDefinitionIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     predecessorIdentity: Uint8Array;
     participantPosition: number;
-    actionKeySetBody: Uint8Array;
-    actionKeySetIdentity: Uint8Array;
+    canonicalRosterBytes: Uint8Array;
     signatureBodyIdentities: Uint8Array[];
-    signatureSecretKeys: Uint8Array[];
-    pairDecryptionKeys: Uint8Array[];
+    signingSecretKey: Uint8Array;
+    mailboxDecapsulationKey: Uint8Array;
 };
 
 type LoadedActionState = Readonly<{
@@ -439,27 +431,10 @@ const requireUnsigned16 = (value: unknown, name: string): number => {
     return value;
 };
 
-const copyActionKeySetBodies = (
-    bodies: readonly Uint8Array[],
-): Uint8Array[] => {
-    if (bodies.length !== completionProfileParticipantCount) {
-        throw new TypeError(
-            'actionKeySetBodies must contain the complete roster.',
-        );
-    }
-    const expectedByteLength = actionKeySetBodyByteLength(
-        completionProfileParticipantCount,
+const copyCanonicalRosterBytes = (bytes: Uint8Array): Uint8Array =>
+    Uint8Array.from(
+        requireBytes(bytes, completionRosterByteLength, 'canonicalRosterBytes'),
     );
-    return bodies.map((body, position) =>
-        Uint8Array.from(
-            requireBytes(
-                body,
-                expectedByteLength,
-                `actionKeySetBodies[${String(position)}]`,
-            ),
-        ),
-    );
-};
 
 const copyPreparationParents = (
     parents: readonly PreparationParentCarrier[],
@@ -642,12 +617,6 @@ const remotePositions = (localPosition: number): number[] =>
         (_, position) => position,
     ).filter((position) => position !== localPosition);
 
-const pairDecryptionKeyIndex = (
-    localPosition: number,
-    senderPosition: number,
-): number =>
-    senderPosition < localPosition ? senderPosition : senderPosition - 1;
-
 const copyPublishedPreparationPackage = (
     state: PreparationState,
 ): PublishedPreparationPackage => ({
@@ -697,7 +666,7 @@ const encodeLocalRecordContext = (context: LocalRecordContext): Uint8Array => {
     writer.writeFixed(context.candidateBuildIdentity);
     writer.writeFixed(context.actionProposalIdentity);
     writer.writeFixed(context.actionDefinitionIdentity);
-    writer.writeFixed(context.actionKeySetRosterIdentity);
+    writer.writeFixed(context.rosterIdentity);
     writer.writeFixed(context.predecessorIdentity);
     writer.writeU16(context.participantPosition);
     writer.writeU16(context.objectKind);
@@ -723,7 +692,7 @@ const decodeLocalRecordContext = (bytes: ArrayBuffer): LocalRecordContext => {
         candidateBuildIdentity: reader.readFixed(identityByteLength),
         actionProposalIdentity: reader.readFixed(identityByteLength),
         actionDefinitionIdentity: reader.readFixed(identityByteLength),
-        actionKeySetRosterIdentity: reader.readFixed(identityByteLength),
+        rosterIdentity: reader.readFixed(identityByteLength),
         predecessorIdentity: reader.readFixed(identityByteLength),
         participantPosition: reader.readU16(),
         objectKind: reader.readU16(),
@@ -741,15 +710,14 @@ const actionStateByteLength =
     2 +
     8 +
     6 * identityByteLength +
-    actionKeySetBodyByteLength(completionProfileParticipantCount) +
-    identityByteLength +
+    completionRosterByteLength +
     signaturePurposeCount * identityByteLength +
-    signaturePurposeCount * actionSignatureKeyByteLength +
-    pairKeyCount * pairDecryptionKeyByteLength;
+    actionSignatureSecretKeyByteLength +
+    pairDecryptionKeyByteLength;
 
 const encodeActionState = (state: ActionState): Uint8Array => {
     const writer = new FixedWriter(actionStateByteLength);
-    writer.writeU8(2);
+    writer.writeU8(4);
     writer.writeU8(state.phase);
     writer.writeU16(state.participantPosition);
     writer.writeU64(state.generation);
@@ -757,19 +725,14 @@ const encodeActionState = (state: ActionState): Uint8Array => {
     writer.writeFixed(state.candidateBuildIdentity);
     writer.writeFixed(state.actionProposalIdentity);
     writer.writeFixed(state.actionDefinitionIdentity);
-    writer.writeFixed(state.actionKeySetRosterIdentity);
+    writer.writeFixed(state.rosterIdentity);
     writer.writeFixed(state.predecessorIdentity);
-    writer.writeFixed(state.actionKeySetBody);
-    writer.writeFixed(state.actionKeySetIdentity);
+    writer.writeFixed(state.canonicalRosterBytes);
     for (const bodyIdentity of state.signatureBodyIdentities) {
         writer.writeFixed(bodyIdentity);
     }
-    for (const secretKey of state.signatureSecretKeys) {
-        writer.writeFixed(secretKey);
-    }
-    for (const decryptionKey of state.pairDecryptionKeys) {
-        writer.writeFixed(decryptionKey);
-    }
+    writer.writeFixed(state.signingSecretKey);
+    writer.writeFixed(state.mailboxDecapsulationKey);
     return writer.finish();
 };
 
@@ -781,14 +744,14 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 2) {
+    if (reader.readU8() !== 4) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has the wrong version.',
         );
     }
     const phase = reader.readU8();
-    if (phase !== registeredActionPhase && phase !== confirmedRosterPhase) {
+    if (phase !== rosterBoundActionPhase) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has an invalid phase.',
@@ -802,34 +765,23 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         candidateBuildIdentity: reader.readFixed(identityByteLength),
         actionProposalIdentity: reader.readFixed(identityByteLength),
         actionDefinitionIdentity: reader.readFixed(identityByteLength),
-        actionKeySetRosterIdentity: reader.readFixed(identityByteLength),
+        rosterIdentity: reader.readFixed(identityByteLength),
         predecessorIdentity: reader.readFixed(identityByteLength),
-        actionKeySetBody: reader.readFixed(
-            actionKeySetBodyByteLength(completionProfileParticipantCount),
-        ),
-        actionKeySetIdentity: reader.readFixed(identityByteLength),
+        canonicalRosterBytes: reader.readFixed(completionRosterByteLength),
         signatureBodyIdentities: Array.from(
             { length: signaturePurposeCount },
             () => reader.readFixed(identityByteLength),
         ),
-        signatureSecretKeys: Array.from({ length: signaturePurposeCount }, () =>
-            reader.readFixed(actionSignatureKeyByteLength),
-        ),
-        pairDecryptionKeys: Array.from({ length: pairKeyCount }, () =>
-            reader.readFixed(pairDecryptionKeyByteLength),
-        ),
+        signingSecretKey: reader.readFixed(actionSignatureSecretKeyByteLength),
+        mailboxDecapsulationKey: reader.readFixed(pairDecryptionKeyByteLength),
     };
     reader.finish();
     return state;
 };
 
 const zeroActionState = (state: ActionState): void => {
-    for (const key of state.signatureSecretKeys) {
-        key.fill(0);
-    }
-    for (const key of state.pairDecryptionKeys) {
-        key.fill(0);
-    }
+    state.signingSecretKey.fill(0);
+    state.mailboxDecapsulationKey.fill(0);
 };
 
 const remoteParticipantCount = completionProfileParticipantCount - 1;
@@ -1306,7 +1258,7 @@ const actionLocalContext = (
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
     actionDefinitionIdentity: action.actionDefinitionIdentity,
-    actionKeySetRosterIdentity: rosterIdentity,
+    rosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
     objectKind: actionStateKind,
@@ -1326,7 +1278,7 @@ const preparationLocalContext = (
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
     actionDefinitionIdentity: action.actionDefinitionIdentity,
-    actionKeySetRosterIdentity: rosterIdentity,
+    rosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
     objectKind: preparationStateKind,
@@ -1345,7 +1297,7 @@ const sourceLocalContext = (
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
     actionDefinitionIdentity: action.actionDefinitionIdentity,
-    actionKeySetRosterIdentity: rosterIdentity,
+    rosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
     objectKind: sourceStateKind,
@@ -1365,7 +1317,7 @@ const terminalLocalContext = (
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
     actionDefinitionIdentity: action.actionDefinitionIdentity,
-    actionKeySetRosterIdentity: rosterIdentity,
+    rosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
     objectKind,
@@ -1404,7 +1356,7 @@ const assertTerminalLocalContext = (
             localContext.actionDefinitionIdentity,
             action.actionDefinitionIdentity,
         ) ||
-        !bytesEqual(localContext.actionKeySetRosterIdentity, rosterIdentity) ||
+        !bytesEqual(localContext.rosterIdentity, rosterIdentity) ||
         !bytesEqual(
             localContext.predecessorIdentity,
             action.predecessorIdentity,
@@ -1428,7 +1380,7 @@ const privatePreparationSlotLocalContext = (
     candidateBuildIdentity: configuration.candidateBuildIdentity,
     actionProposalIdentity: action.actionProposalIdentity,
     actionDefinitionIdentity: action.actionDefinitionIdentity,
-    actionKeySetRosterIdentity: rosterIdentity,
+    rosterIdentity: rosterIdentity,
     predecessorIdentity: action.predecessorIdentity,
     participantPosition: action.participantPosition,
     objectKind: privatePreparationSlotStateKind,
@@ -1443,8 +1395,8 @@ const assertActionStateContext = (
     configuration: WorkerConfiguration,
     action: PrivatePreparationActionContext,
 ): void => {
-    const expectedRosterIsZero = state.phase === registeredActionPhase;
     if (
+        state.phase !== rosterBoundActionPhase ||
         state.generation !== localContext.generation ||
         state.participantPosition !== action.participantPosition ||
         localContext.participantPosition !== action.participantPosition ||
@@ -1485,12 +1437,8 @@ const assertActionStateContext = (
             localContext.predecessorIdentity,
             action.predecessorIdentity,
         ) ||
-        !bytesEqual(
-            state.actionKeySetRosterIdentity,
-            localContext.actionKeySetRosterIdentity,
-        ) ||
-        (expectedRosterIsZero && !isZero(state.actionKeySetRosterIdentity)) ||
-        (!expectedRosterIsZero && isZero(state.actionKeySetRosterIdentity))
+        !bytesEqual(state.rosterIdentity, localContext.rosterIdentity) ||
+        isZero(state.rosterIdentity)
     ) {
         throw new DurableStateError(
             'StateLost',
@@ -1504,15 +1452,14 @@ class PrivatePreparationWorkerRuntime {
         private readonly configuration: WorkerConfiguration,
         private readonly durableState: PrivatePreparationDurableState,
         private readonly constructionKernelRuntime: ConstructionKernelCommandRuntime,
-        private readonly actionKeySetRuntime: ActionKeySetRuntime,
         private readonly actionSignatureRuntime: ActionSignatureRuntime,
         private readonly finalityRuntime: ReturnType<
             typeof openFinalityRuntime
         >,
-        private readonly pairEncryptionRuntime: PairEncryptionRuntime,
         private readonly preparationMaterialRuntime: PreparationMaterialRuntime,
         private readonly preparationParentRuntime: PreparationParentRuntime,
         private readonly privatePreparationBodyRuntime: PrivatePreparationBodyRuntime,
+        private readonly rosterRuntime: RosterRuntime,
         private readonly sourceRuntime: SourceRuntime,
     ) {}
 
@@ -1573,395 +1520,289 @@ class PrivatePreparationWorkerRuntime {
             },
             durableState,
             kernel,
-            openActionKeySetRuntime(kernel),
             openActionSignatureRuntime(kernel),
             openFinalityRuntime(kernel),
-            openPairEncryptionRuntime(kernel),
             openPreparationMaterialRuntime(kernel),
             openPreparationParentRuntime(kernel),
             openPrivatePreparationBodyRuntime(kernel),
+            openRosterRuntime(kernel),
             openSourceRuntime(kernel),
         );
     }
 
-    async registerActionKeys(
-        input: PrivatePreparationActionContext,
-    ): Promise<RegisteredActionKeys> {
-        const action = copyActionContext(input);
-        return this.durableState.exclusive(async () => {
-            const identifier = actionIdentifier(this.configuration, action);
-            const existing = await this.durableState.readProtected(
-                'actions',
-                identifier,
-            );
-            if (existing !== undefined) {
-                const loaded = await this.loadActionState(action, existing);
-                try {
-                    return {
-                        actionKeySetBody: Uint8Array.from(
-                            loaded.state.actionKeySetBody,
-                        ),
-                        actionKeySetIdentity: Uint8Array.from(
-                            loaded.state.actionKeySetIdentity,
-                        ),
-                    };
-                } finally {
-                    zeroActionState(loaded.state);
-                }
-            }
-
-            let rootKey = await this.durableState.readRoot();
-            const protectedRecordCount =
-                await this.durableState.countProtectedRecords();
-            if (rootKey === undefined && protectedRecordCount !== 0) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'The browser-local root is absent while protected state remains.',
-                );
-            }
-            rootKey ??= await generateBrowserLocalRootKey();
-
-            const signatureSecretKeys = Array.from(
-                { length: signaturePurposeCount },
-                () => randomBytes(actionSignatureKeyByteLength),
-            );
-            const signatureVerificationKeys = signatureSecretKeys.map((key) =>
-                this.actionSignatureRuntime.deriveVerificationKey(key),
-            );
-            const pairEncryptionKeys: Uint8Array[] = [];
-            const pairDecryptionKeys: Uint8Array[] = [];
+    private async ensureRosterBoundAction(
+        action: PrivatePreparationActionContext,
+        canonicalRosterBytes: Uint8Array,
+        signingSecretKey: Uint8Array,
+        mailboxDecapsulationKey: Uint8Array,
+    ): Promise<void> {
+        const rosterIdentity = this.rosterRuntime.verifyCredentials(
+            canonicalRosterBytes,
+            action.participantPosition,
+            signingSecretKey,
+            mailboxDecapsulationKey,
+        );
+        const identifier = actionIdentifier(this.configuration, action);
+        const existing = await this.durableState.readProtected(
+            'actions',
+            identifier,
+        );
+        if (existing !== undefined) {
+            const loaded = await this.loadActionState(action, existing);
             try {
-                for (let index = 0; index < pairKeyCount; index += 1) {
-                    const randomness = randomBytes(
-                        pairEncryptionKeyGenerationRandomnessByteLength,
-                    );
-                    try {
-                        const pair =
-                            this.pairEncryptionRuntime.generateKeyPair(
-                                randomness,
-                            );
-                        pairEncryptionKeys.push(pair.encryptionKey);
-                        pairDecryptionKeys.push(pair.decryptionKey);
-                    } finally {
-                        randomness.fill(0);
-                    }
-                }
-                const actionKeySet = this.actionKeySetRuntime.encode({
-                    participantCount: completionProfileParticipantCount,
-                    proposalIdentity: action.actionProposalIdentity,
-                    rosterPosition: action.participantPosition,
-                    nonce: randomBytes(32),
-                    actionSignatureVerificationKeys: signatureVerificationKeys,
-                    pairEncryptionKeys,
-                });
-                const state: ActionState = {
-                    phase: registeredActionPhase,
-                    generation: 1n,
-                    runtimeIdentity: this.configuration.runtimeIdentity,
-                    candidateBuildIdentity:
-                        this.configuration.candidateBuildIdentity,
-                    actionProposalIdentity: action.actionProposalIdentity,
-                    actionDefinitionIdentity: action.actionDefinitionIdentity,
-                    actionKeySetRosterIdentity: new Uint8Array(
-                        identityByteLength,
-                    ),
-                    predecessorIdentity: action.predecessorIdentity,
-                    participantPosition: action.participantPosition,
-                    actionKeySetBody: actionKeySet.body,
-                    actionKeySetIdentity: actionKeySet.identity,
-                    signatureBodyIdentities: Array.from(
-                        { length: signaturePurposeCount },
-                        () => new Uint8Array(identityByteLength),
-                    ),
-                    signatureSecretKeys,
-                    pairDecryptionKeys,
-                };
-                const plaintext = encodeActionState(state);
-                const context = encodeLocalRecordContext(
-                    actionLocalContext(
-                        this.configuration,
-                        action,
-                        state.actionKeySetRosterIdentity,
-                        state.generation,
-                    ),
-                );
-                let record: ProtectedRecord;
-                try {
-                    record = await createProtectedRecord(
-                        identifier,
-                        context,
-                        plaintext,
-                        rootKey,
-                    );
-                } finally {
-                    plaintext.fill(0);
-                    context.fill(0);
-                }
-                if ((await this.durableState.readRoot()) === undefined) {
-                    await this.durableState.initializeRootAndAction(
-                        rootKey,
-                        record,
-                    );
-                } else {
-                    await this.durableState.putIfAbsent('actions', record);
-                }
-                const retained = await this.durableState.readProtected(
-                    'actions',
-                    identifier,
-                );
-                if (retained === undefined) {
-                    throw new DurableStateError(
-                        'StateLost',
-                        'The retained action state disappeared after persistence.',
-                    );
-                }
-                const reloaded = await this.loadActionState(action, retained);
-                zeroActionState(reloaded.state);
-                return {
-                    actionKeySetBody: Uint8Array.from(actionKeySet.body),
-                    actionKeySetIdentity: Uint8Array.from(
-                        actionKeySet.identity,
-                    ),
-                };
-            } finally {
-                for (const key of signatureSecretKeys) {
-                    key.fill(0);
-                }
-                for (const key of pairDecryptionKeys) {
-                    key.fill(0);
-                }
-            }
-        });
-    }
-
-    async confirmActionKeyRoster(
-        input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
-        },
-    ): Promise<ConfirmedActionKeyRoster> {
-        const action = copyActionContext(input);
-        const bodies = copyActionKeySetBodies(input.actionKeySetBodies);
-        return this.durableState.exclusive(async () => {
-            const identifier = actionIdentifier(this.configuration, action);
-            const record = await this.durableState.readProtected(
-                'actions',
-                identifier,
-            );
-            if (record === undefined) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'Action keys are absent for roster confirmation.',
-                );
-            }
-            const loaded = await this.loadActionState(action, record);
-            try {
-                const rosterIdentity =
-                    this.actionKeySetRuntime.verifyCompleteRoster(
-                        completionProfileParticipantCount,
-                        bodies,
-                    );
-                const ownBody = bodies[action.participantPosition];
                 if (
-                    ownBody === undefined ||
-                    !bytesEqual(ownBody, loaded.state.actionKeySetBody)
+                    loaded.state.phase !== rosterBoundActionPhase ||
+                    !bytesEqual(loaded.state.rosterIdentity, rosterIdentity) ||
+                    !bytesEqual(
+                        loaded.state.canonicalRosterBytes,
+                        canonicalRosterBytes,
+                    ) ||
+                    !bytesEqual(
+                        loaded.state.signingSecretKey,
+                        signingSecretKey,
+                    ) ||
+                    !bytesEqual(
+                        loaded.state.mailboxDecapsulationKey,
+                        mailboxDecapsulationKey,
+                    )
                 ) {
                     throw new DurableStateError(
                         'Conflict',
-                        'The complete roster does not contain the retained local key set.',
+                        'The action is already bound to another roster or credential.',
                     );
                 }
-                if (loaded.state.phase === confirmedRosterPhase) {
-                    if (
-                        !bytesEqual(
-                            loaded.state.actionKeySetRosterIdentity,
-                            rosterIdentity,
-                        )
-                    ) {
-                        throw new DurableStateError(
-                            'Conflict',
-                            'The action is already bound to another key roster.',
-                        );
-                    }
-                    return {
-                        actionKeySetRosterIdentity:
-                            Uint8Array.from(rosterIdentity),
-                    };
-                }
-                const replacementState: ActionState = {
-                    ...loaded.state,
-                    phase: confirmedRosterPhase,
-                    generation: loaded.state.generation + 1n,
-                    actionKeySetRosterIdentity: Uint8Array.from(rosterIdentity),
-                };
-                const plaintext = encodeActionState(replacementState);
-                const context = encodeLocalRecordContext(
-                    actionLocalContext(
-                        this.configuration,
-                        action,
-                        rosterIdentity,
-                        replacementState.generation,
-                    ),
-                );
-                let replacement: ProtectedRecord;
-                try {
-                    replacement = await createProtectedRecord(
-                        identifier,
-                        context,
-                        plaintext,
-                        loaded.rootKey,
-                    );
-                } finally {
-                    plaintext.fill(0);
-                    context.fill(0);
-                }
-                await this.durableState.replaceExact(
-                    'actions',
-                    loaded.record,
-                    replacement,
-                );
-                const retained = await this.durableState.readProtected(
-                    'actions',
-                    identifier,
-                );
-                if (retained === undefined) {
-                    throw new DurableStateError(
-                        'StateLost',
-                        'Confirmed roster state disappeared after persistence.',
-                    );
-                }
-                const reloaded = await this.loadActionState(action, retained);
-                zeroActionState(reloaded.state);
-                return {
-                    actionKeySetRosterIdentity: Uint8Array.from(rosterIdentity),
-                };
+                return;
             } finally {
                 zeroActionState(loaded.state);
             }
-        });
+        }
+
+        let rootKey = await this.durableState.readRoot();
+        const protectedRecordCount =
+            await this.durableState.countProtectedRecords();
+        if (rootKey === undefined && protectedRecordCount !== 0) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent while protected state remains.',
+            );
+        }
+        rootKey ??= await generateBrowserLocalRootKey();
+        const state: ActionState = {
+            phase: rosterBoundActionPhase,
+            generation: 1n,
+            runtimeIdentity: this.configuration.runtimeIdentity,
+            candidateBuildIdentity: this.configuration.candidateBuildIdentity,
+            actionProposalIdentity: action.actionProposalIdentity,
+            actionDefinitionIdentity: action.actionDefinitionIdentity,
+            rosterIdentity: Uint8Array.from(rosterIdentity),
+            predecessorIdentity: action.predecessorIdentity,
+            participantPosition: action.participantPosition,
+            canonicalRosterBytes: Uint8Array.from(canonicalRosterBytes),
+            signatureBodyIdentities: Array.from(
+                { length: signaturePurposeCount },
+                () => new Uint8Array(identityByteLength),
+            ),
+            signingSecretKey: Uint8Array.from(signingSecretKey),
+            mailboxDecapsulationKey: Uint8Array.from(mailboxDecapsulationKey),
+        };
+        try {
+            const plaintext = encodeActionState(state);
+            const context = encodeLocalRecordContext(
+                actionLocalContext(
+                    this.configuration,
+                    action,
+                    rosterIdentity,
+                    state.generation,
+                ),
+            );
+            let record: ProtectedRecord;
+            try {
+                record = await createProtectedRecord(
+                    identifier,
+                    context,
+                    plaintext,
+                    rootKey,
+                );
+            } finally {
+                plaintext.fill(0);
+                context.fill(0);
+            }
+            if ((await this.durableState.readRoot()) === undefined) {
+                await this.durableState.initializeRootAndAction(
+                    rootKey,
+                    record,
+                );
+            } else {
+                await this.durableState.putIfAbsent('actions', record);
+            }
+            const retained = await this.durableState.readProtected(
+                'actions',
+                identifier,
+            );
+            if (retained === undefined) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The roster-bound action state disappeared after persistence.',
+                );
+            }
+            const reloaded = await this.loadActionState(action, retained);
+            zeroActionState(reloaded.state);
+        } finally {
+            zeroActionState(state);
+            rosterIdentity.fill(0);
+        }
     }
 
     async createPreparationPackage(
         input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
+            canonicalRosterBytes: Uint8Array;
+            signingSecretKey: Uint8Array;
+            mailboxDecapsulationKey: Uint8Array;
             preparationAttempt: number;
         },
     ): Promise<PublishedPreparationPackage> {
         const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
+        const canonicalRosterBytes = Uint8Array.from(
+            requireBytes(
+                input.canonicalRosterBytes,
+                completionRosterByteLength,
+                'canonicalRosterBytes',
+            ),
+        );
+        const signingSecretKey = Uint8Array.from(
+            requireBytes(
+                input.signingSecretKey,
+                actionSignatureSecretKeyByteLength,
+                'signingSecretKey',
+            ),
+        );
+        const mailboxDecapsulationKey = Uint8Array.from(
+            requireBytes(
+                input.mailboxDecapsulationKey,
+                pairDecryptionKeyByteLength,
+                'mailboxDecapsulationKey',
+            ),
         );
         const preparationAttempt = requireUnsigned16(
             input.preparationAttempt,
             'preparationAttempt',
         );
-        return this.durableState.exclusive(async () => {
-            const actionRecord = await this.durableState.readProtected(
-                'actions',
-                actionIdentifier(this.configuration, action),
-            );
-            if (actionRecord === undefined) {
-                throw new DurableStateError(
-                    'StateLost',
-                    'Action keys are absent for preparation publication.',
-                );
-            }
-            const loadedAction = await this.loadActionState(
-                action,
-                actionRecord,
-            );
-            try {
-                this.verifyConfirmedActionRoster(
+        return this.durableState
+            .exclusive(async () => {
+                await this.ensureRosterBoundAction(
                     action,
-                    loadedAction.state,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
+                    signingSecretKey,
+                    mailboxDecapsulationKey,
                 );
-                const identifier = preparationIdentifier(
-                    this.configuration,
-                    action,
+                const actionRecord = await this.durableState.readProtected(
+                    'actions',
+                    actionIdentifier(this.configuration, action),
                 );
-                const existing = await this.durableState.readProtected(
-                    'preparations',
-                    identifier,
-                );
-                const boundParentIdentity =
-                    loadedAction.state.signatureBodyIdentities[0];
-                if (boundParentIdentity === undefined) {
-                    throw new DurableStateError(
-                        'CorruptState',
-                        'The preparation-signature slot is absent.',
-                    );
-                }
-                if (existing !== undefined) {
-                    if (isZero(boundParentIdentity)) {
-                        throw new DurableStateError(
-                            'StateLost',
-                            'Retained preparation exists without its action-level signature binding.',
-                        );
-                    }
-                    const loadedPreparation = await this.loadPreparationState(
-                        action,
-                        loadedAction.state.actionKeySetRosterIdentity,
-                        existing,
-                    );
-                    try {
-                        if (
-                            loadedPreparation.state.preparationAttempt !==
-                                preparationAttempt ||
-                            !bytesEqual(
-                                loadedPreparation.state.parentIdentity,
-                                boundParentIdentity,
-                            )
-                        ) {
-                            throw new DurableStateError(
-                                'Conflict',
-                                'The action is already bound to another preparation.',
-                            );
-                        }
-                        this.validatePreparationState(
-                            action,
-                            actionKeySetBodies,
-                            loadedAction.state,
-                            loadedPreparation.state,
-                        );
-                        if (
-                            loadedPreparation.state.phase ===
-                            publishedPreparationPhase
-                        ) {
-                            return copyPublishedPreparationPackage(
-                                loadedPreparation.state,
-                            );
-                        }
-                        return await this.publishRetainedPreparation(
-                            action,
-                            actionKeySetBodies,
-                            loadedAction,
-                            loadedPreparation,
-                        );
-                    } finally {
-                        zeroPreparationState(loadedPreparation.state);
-                    }
-                }
-                if (!isZero(boundParentIdentity)) {
+                if (actionRecord === undefined) {
                     throw new DurableStateError(
                         'StateLost',
-                        'The preparation-signature slot is consumed but its retained package is absent.',
+                        'The roster-bound action state is absent for preparation publication.',
                     );
                 }
-                return await this.createAndPublishPreparation(
+                const loadedAction = await this.loadActionState(
                     action,
-                    actionKeySetBodies,
-                    preparationAttempt,
-                    loadedAction,
+                    actionRecord,
                 );
-            } finally {
-                zeroActionState(loadedAction.state);
-            }
-        });
+                try {
+                    this.verifyRosterBoundAction(action, loadedAction.state);
+                    const identifier = preparationIdentifier(
+                        this.configuration,
+                        action,
+                    );
+                    const existing = await this.durableState.readProtected(
+                        'preparations',
+                        identifier,
+                    );
+                    const boundParentIdentity =
+                        loadedAction.state.signatureBodyIdentities[0];
+                    if (boundParentIdentity === undefined) {
+                        throw new DurableStateError(
+                            'CorruptState',
+                            'The preparation-signature slot is absent.',
+                        );
+                    }
+                    if (existing !== undefined) {
+                        if (isZero(boundParentIdentity)) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'Retained preparation exists without its action-level signature binding.',
+                            );
+                        }
+                        const loadedPreparation =
+                            await this.loadPreparationState(
+                                action,
+                                loadedAction.state.rosterIdentity,
+                                existing,
+                            );
+                        try {
+                            if (
+                                loadedPreparation.state.preparationAttempt !==
+                                    preparationAttempt ||
+                                !bytesEqual(
+                                    loadedPreparation.state.parentIdentity,
+                                    boundParentIdentity,
+                                )
+                            ) {
+                                throw new DurableStateError(
+                                    'Conflict',
+                                    'The action is already bound to another preparation.',
+                                );
+                            }
+                            this.validatePreparationState(
+                                action,
+                                canonicalRosterBytes,
+                                loadedAction.state,
+                                loadedPreparation.state,
+                            );
+                            if (
+                                loadedPreparation.state.phase ===
+                                publishedPreparationPhase
+                            ) {
+                                return copyPublishedPreparationPackage(
+                                    loadedPreparation.state,
+                                );
+                            }
+                            return await this.publishRetainedPreparation(
+                                action,
+                                canonicalRosterBytes,
+                                loadedAction,
+                                loadedPreparation,
+                            );
+                        } finally {
+                            zeroPreparationState(loadedPreparation.state);
+                        }
+                    }
+                    if (!isZero(boundParentIdentity)) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'The preparation-signature slot is consumed but its retained package is absent.',
+                        );
+                    }
+                    return await this.createAndPublishPreparation(
+                        action,
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        loadedAction,
+                    );
+                } finally {
+                    zeroActionState(loadedAction.state);
+                }
+            })
+            .finally(() => {
+                signingSecretKey.fill(0);
+                mailboxDecapsulationKey.fill(0);
+            });
     }
 
     async consumePrivatePreparation(
         input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
+            canonicalRosterBytes: Uint8Array;
             preparationAttempt: number;
             parentBody: Uint8Array;
             parentSignature: Uint8Array;
@@ -1969,8 +1810,8 @@ class PrivatePreparationWorkerRuntime {
         },
     ): Promise<PrivatePreparationConsumption> {
         const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
         );
         const preparationAttempt = requireUnsigned16(
             input.preparationAttempt,
@@ -2013,10 +1854,10 @@ class PrivatePreparationWorkerRuntime {
                 actionRecord,
             );
             try {
-                this.verifyConfirmedActionRoster(
+                this.verifyRosterBoundAction(
                     action,
                     loadedAction.state,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                 );
                 const carrier =
                     this.preparationParentRuntime.verifyPrivateCarrier(
@@ -2024,13 +1865,12 @@ class PrivatePreparationWorkerRuntime {
                             participantCount: completionProfileParticipantCount,
                             actionProposalIdentity:
                                 action.actionProposalIdentity,
-                            actionKeySetRosterIdentity:
-                                loadedAction.state.actionKeySetRosterIdentity,
+                            rosterIdentity: loadedAction.state.rosterIdentity,
                             preparationAttempt,
                             predecessorIdentity: action.predecessorIdentity,
                             recipientPosition: action.participantPosition,
                         },
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         parentBody,
                         parentSignature,
                         privateBody,
@@ -2048,7 +1888,7 @@ class PrivatePreparationWorkerRuntime {
                 if (existing !== undefined) {
                     const loadedSlot = await this.loadPrivatePreparationSlot(
                         action,
-                        loadedAction.state.actionKeySetRosterIdentity,
+                        loadedAction.state.rosterIdentity,
                         senderPosition,
                         existing,
                     );
@@ -2077,7 +1917,7 @@ class PrivatePreparationWorkerRuntime {
                         await this.burnPrivatePreparationSlot(
                             action,
                             loadedAction.rootKey,
-                            loadedAction.state.actionKeySetRosterIdentity,
+                            loadedAction.state.rosterIdentity,
                             loadedSlot,
                         );
                         return { senderPosition, status: 'burned' };
@@ -2104,7 +1944,7 @@ class PrivatePreparationWorkerRuntime {
                     privatePreparationSlotLocalContext(
                         this.configuration,
                         action,
-                        loadedAction.state.actionKeySetRosterIdentity,
+                        loadedAction.state.rosterIdentity,
                         consumedState.generation,
                         senderPosition,
                     ),
@@ -2134,7 +1974,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 const retainedSlot = await this.loadPrivatePreparationSlot(
                     action,
-                    loadedAction.state.actionKeySetRosterIdentity,
+                    loadedAction.state.rosterIdentity,
                     senderPosition,
                     retainedRecord,
                 );
@@ -2148,7 +1988,7 @@ class PrivatePreparationWorkerRuntime {
                     await this.configuration.afterDurableConsume?.();
                     return await this.openConsumedPrivatePreparation(
                         action,
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         parentBody,
                         privateBody,
                         loadedAction,
@@ -2168,15 +2008,15 @@ class PrivatePreparationWorkerRuntime {
 
     async createSourcePackage(
         input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
+            canonicalRosterBytes: Uint8Array;
             preparationAttempt: number;
             preparationParents: readonly PreparationParentCarrier[];
             choice: SourcePublicationChoice;
         },
     ): Promise<PublishedSourcePackage> {
         const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
         );
         const preparationAttempt = requireUnsigned16(
             input.preparationAttempt,
@@ -2202,15 +2042,15 @@ class PrivatePreparationWorkerRuntime {
                 actionRecord,
             );
             try {
-                this.verifyConfirmedActionRoster(
+                this.verifyRosterBoundAction(
                     action,
                     loadedAction.state,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                 );
                 const verifiedPreparation =
                     await this.verifyCompletePreparationForSource(
                         action,
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         preparationAttempt,
                         preparationParents,
                         loadedAction,
@@ -2241,7 +2081,7 @@ class PrivatePreparationWorkerRuntime {
                         }
                         const loadedSource = await this.loadSourceState(
                             action,
-                            loadedAction.state.actionKeySetRosterIdentity,
+                            loadedAction.state.rosterIdentity,
                             existing,
                         );
                         try {
@@ -2278,7 +2118,7 @@ class PrivatePreparationWorkerRuntime {
                             }
                             this.validateSourceState(
                                 action,
-                                actionKeySetBodies,
+                                canonicalRosterBytes,
                                 loadedAction.state,
                                 loadedSource.state,
                             );
@@ -2292,7 +2132,7 @@ class PrivatePreparationWorkerRuntime {
                             }
                             return await this.publishRetainedSource(
                                 action,
-                                actionKeySetBodies,
+                                canonicalRosterBytes,
                                 loadedAction,
                                 loadedSource,
                             );
@@ -2308,7 +2148,7 @@ class PrivatePreparationWorkerRuntime {
                     }
                     return await this.createAndPublishSource(
                         action,
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         preparationAttempt,
                         choice,
                         verifiedPreparation,
@@ -2325,15 +2165,15 @@ class PrivatePreparationWorkerRuntime {
 
     async createFinalitySignature(
         input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
+            canonicalRosterBytes: Uint8Array;
             preparationAttempt: number;
             sources: readonly SourceCarrier[];
             topCount: number;
         },
     ): Promise<PublishedFinalityPackage> {
         const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
         );
         const preparationAttempt = requireUnsigned16(
             input.preparationAttempt,
@@ -2365,18 +2205,18 @@ class PrivatePreparationWorkerRuntime {
             );
             const loadedSource = await this.loadSourceState(
                 action,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 sourceRecord,
             );
             try {
-                this.verifyConfirmedActionRoster(
+                this.verifyRosterBoundAction(
                     action,
                     loadedAction.state,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                 );
                 this.validateSourceState(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     loadedAction.state,
                     loadedSource.state,
                 );
@@ -2391,7 +2231,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 const verified = this.deriveVerifiedTallyContext(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sources,
                     topCount,
@@ -2424,13 +2264,13 @@ class PrivatePreparationWorkerRuntime {
                         }
                         const loadedFinality = await this.loadFinalityState(
                             action,
-                            loadedAction.state.actionKeySetRosterIdentity,
+                            loadedAction.state.rosterIdentity,
                             existing,
                         );
                         try {
                             this.validateFinalityState(
                                 action,
-                                actionKeySetBodies,
+                                canonicalRosterBytes,
                                 loadedAction.state,
                                 loadedFinality.state,
                                 verified,
@@ -2456,7 +2296,7 @@ class PrivatePreparationWorkerRuntime {
                             }
                             return await this.publishRetainedFinality(
                                 action,
-                                actionKeySetBodies,
+                                canonicalRosterBytes,
                                 loadedAction,
                                 loadedFinality,
                                 verified,
@@ -2473,7 +2313,7 @@ class PrivatePreparationWorkerRuntime {
                     }
                     return await this.createAndPublishFinality(
                         action,
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         preparationAttempt,
                         loadedAction,
                         verified,
@@ -2490,7 +2330,7 @@ class PrivatePreparationWorkerRuntime {
 
     private async createAndPublishFinality(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         loadedAction: LoadedActionState,
         verified: VerifiedTallyContext,
@@ -2518,7 +2358,7 @@ class PrivatePreparationWorkerRuntime {
                 terminalLocalContext(
                     this.configuration,
                     action,
-                    loadedAction.state.actionKeySetRosterIdentity,
+                    loadedAction.state.rosterIdentity,
                     state.generation,
                     finalityStateKind,
                 ),
@@ -2551,7 +2391,7 @@ class PrivatePreparationWorkerRuntime {
                 actionLocalContext(
                     this.configuration,
                     action,
-                    replacementActionState.actionKeySetRosterIdentity,
+                    replacementActionState.rosterIdentity,
                     replacementActionState.generation,
                 ),
             );
@@ -2600,13 +2440,13 @@ class PrivatePreparationWorkerRuntime {
             );
             const retainedFinality = await this.loadFinalityState(
                 action,
-                reboundAction.state.actionKeySetRosterIdentity,
+                reboundAction.state.rosterIdentity,
                 retainedFinalityRecord,
             );
             try {
                 return await this.publishRetainedFinality(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     reboundAction,
                     retainedFinality,
                     verified,
@@ -2622,7 +2462,7 @@ class PrivatePreparationWorkerRuntime {
 
     private async publishRetainedFinality(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         loadedAction: LoadedActionState,
         loadedFinality: LoadedFinalityState,
         verified: VerifiedTallyContext,
@@ -2635,21 +2475,20 @@ class PrivatePreparationWorkerRuntime {
         }
         this.validateFinalityState(
             action,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             loadedAction.state,
             loadedFinality.state,
             verified,
         );
-        const secretKey = loadedAction.state.signatureSecretKeys[2];
-        if (secretKey === undefined) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The finality signing key is absent.',
-            );
-        }
+        const signingRandomness = randomBytes(
+            actionSignatureSigningRandomnessByteLength,
+        );
         const signature = this.actionSignatureRuntime.signBodyIdentity(
-            secretKey,
+            loadedAction.state.signingSecretKey,
+            action.participantPosition,
+            'finality',
             loadedFinality.state.targetIdentity,
+            signingRandomness,
         );
         let signatureCarrier: Uint8Array;
         try {
@@ -2660,6 +2499,7 @@ class PrivatePreparationWorkerRuntime {
             );
         } finally {
             signature.fill(0);
+            signingRandomness.fill(0);
         }
         const replacementState: FinalityState = {
             ...loadedFinality.state,
@@ -2685,13 +2525,13 @@ class PrivatePreparationWorkerRuntime {
         }
         const reloaded = await this.loadFinalityState(
             action,
-            loadedAction.state.actionKeySetRosterIdentity,
+            loadedAction.state.rosterIdentity,
             retained,
         );
         try {
             this.validateFinalityState(
                 action,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 loadedAction.state,
                 reloaded.state,
                 verified,
@@ -2704,7 +2544,7 @@ class PrivatePreparationWorkerRuntime {
 
     async finalizeNoResult(
         input: PrivatePreparationActionContext & {
-            actionKeySetBodies: readonly Uint8Array[];
+            canonicalRosterBytes: Uint8Array;
             preparationAttempt: number;
             sources: readonly SourceCarrier[];
             finalitySignatures: readonly FinalitySignatureCarrier[];
@@ -2712,8 +2552,8 @@ class PrivatePreparationWorkerRuntime {
         },
     ): Promise<TallyEvaluationProgress> {
         const action = copyActionContext(input);
-        const actionKeySetBodies = copyActionKeySetBodies(
-            input.actionKeySetBodies,
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
         );
         const preparationAttempt = requireUnsigned16(
             input.preparationAttempt,
@@ -2748,18 +2588,18 @@ class PrivatePreparationWorkerRuntime {
             );
             const loadedSource = await this.loadSourceState(
                 action,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 sourceRecord,
             );
             try {
-                this.verifyConfirmedActionRoster(
+                this.verifyRosterBoundAction(
                     action,
                     loadedAction.state,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                 );
                 this.validateSourceState(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     loadedAction.state,
                     loadedSource.state,
                 );
@@ -2774,7 +2614,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 const verified = this.deriveVerifiedTallyContext(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sources,
                     topCount,
@@ -2784,7 +2624,7 @@ class PrivatePreparationWorkerRuntime {
                 try {
                     this.verifyNoResultCertificate(
                         verified,
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         finalitySignatures,
                     );
                     const identifier = noResultIdentifier(
@@ -2798,7 +2638,7 @@ class PrivatePreparationWorkerRuntime {
                     if (existing !== undefined) {
                         const loadedNoResult = await this.loadNoResultState(
                             action,
-                            loadedAction.state.actionKeySetRosterIdentity,
+                            loadedAction.state.rosterIdentity,
                             existing,
                         );
                         try {
@@ -2845,7 +2685,7 @@ class PrivatePreparationWorkerRuntime {
                     }
                     const reloaded = await this.loadNoResultState(
                         action,
-                        loadedAction.state.actionKeySetRosterIdentity,
+                        loadedAction.state.rosterIdentity,
                         retained,
                     );
                     try {
@@ -2897,7 +2737,7 @@ class PrivatePreparationWorkerRuntime {
                 if (noResultRecord !== undefined) {
                     const loadedNoResult = await this.loadNoResultState(
                         action,
-                        loadedAction.state.actionKeySetRosterIdentity,
+                        loadedAction.state.rosterIdentity,
                         noResultRecord,
                     );
                     try {
@@ -2921,7 +2761,7 @@ class PrivatePreparationWorkerRuntime {
 
     private deriveVerifiedTallyContext(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         sources: readonly SourceCarrier[],
         topCount: number,
@@ -2934,7 +2774,7 @@ class PrivatePreparationWorkerRuntime {
             candidateBuildIdentity: this.configuration.candidateBuildIdentity,
             actionProposalIdentity: action.actionProposalIdentity,
             actionDefinitionIdentity: action.actionDefinitionIdentity,
-            actionKeySetRosterIdentity: actionState.actionKeySetRosterIdentity,
+            rosterIdentity: actionState.rosterIdentity,
             preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
             verifiedPreparationRoot: sourceState.verifiedPreparationRoot,
@@ -2953,7 +2793,7 @@ class PrivatePreparationWorkerRuntime {
         }
         const target = this.finalityRuntime.deriveTarget(
             derivationContext,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             sources,
         );
         return {
@@ -2971,12 +2811,12 @@ class PrivatePreparationWorkerRuntime {
 
     private verifyNoResultCertificate(
         verified: VerifiedTallyContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         finalitySignatures: readonly FinalitySignatureCarrier[],
     ): void {
         const certificate = this.finalityRuntime.verifyCertificate(
             verified.targetBody,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             finalitySignatures,
         );
         if (
@@ -2995,7 +2835,7 @@ class PrivatePreparationWorkerRuntime {
 
     private validateFinalityState(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         actionState: ActionState,
         state: FinalityState,
         verified: VerifiedTallyContext,
@@ -3045,7 +2885,7 @@ class PrivatePreparationWorkerRuntime {
         this.finalityRuntime.verifySignature(
             action.participantPosition,
             state.targetBody,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             state.finalitySignature,
         );
     }
@@ -3082,7 +2922,7 @@ class PrivatePreparationWorkerRuntime {
             terminalLocalContext(
                 this.configuration,
                 action,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 replacementState.generation,
                 finalityStateKind,
             ),
@@ -3116,7 +2956,7 @@ class PrivatePreparationWorkerRuntime {
             terminalLocalContext(
                 this.configuration,
                 action,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 state.generation,
                 noResultStateKind,
             ),
@@ -3138,7 +2978,7 @@ class PrivatePreparationWorkerRuntime {
 
     private async verifyCompletePreparationForSource(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         preparationParents: readonly PreparationParentCarrier[],
         loadedAction: LoadedActionState,
@@ -3154,7 +2994,7 @@ class PrivatePreparationWorkerRuntime {
         }
         const loadedPreparation = await this.loadPreparationState(
             action,
-            loadedAction.state.actionKeySetRosterIdentity,
+            loadedAction.state.rosterIdentity,
             preparationRecord,
         );
         const loadedSlots: LoadedPrivatePreparationSlotState[] = [];
@@ -3171,7 +3011,7 @@ class PrivatePreparationWorkerRuntime {
             }
             this.validatePreparationState(
                 action,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 loadedAction.state,
                 loadedPreparation.state,
             );
@@ -3199,7 +3039,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 const loadedSlot = await this.loadPrivatePreparationSlot(
                     action,
-                    loadedAction.state.actionKeySetRosterIdentity,
+                    loadedAction.state.rosterIdentity,
                     senderPosition,
                     slotRecord,
                 );
@@ -3224,13 +3064,12 @@ class PrivatePreparationWorkerRuntime {
                 {
                     participantCount: completionProfileParticipantCount,
                     actionProposalIdentity: action.actionProposalIdentity,
-                    actionKeySetRosterIdentity:
-                        loadedAction.state.actionKeySetRosterIdentity,
+                    rosterIdentity: loadedAction.state.rosterIdentity,
                     preparationAttempt,
                     predecessorIdentity: action.predecessorIdentity,
                 },
                 action.participantPosition,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 preparationParents,
                 loadedPreparation.state.contributionOpenings,
                 loadedPreparation.state.pairwiseMasters,
@@ -3271,7 +3110,7 @@ class PrivatePreparationWorkerRuntime {
 
     private async createAndPublishSource(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         choice: SourcePublicationChoice,
         verifiedPreparation: VerifiedCompletePreparation,
@@ -3285,8 +3124,7 @@ class PrivatePreparationWorkerRuntime {
         const sourceProtocolContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
-            actionKeySetRosterIdentity:
-                loadedAction.state.actionKeySetRosterIdentity,
+            rosterIdentity: loadedAction.state.rosterIdentity,
             preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
             verifiedPreparationRoot: verifiedPreparation.root,
@@ -3320,7 +3158,7 @@ class PrivatePreparationWorkerRuntime {
         try {
             this.validateSourceState(
                 action,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 loadedAction.state,
                 state,
             );
@@ -3329,7 +3167,7 @@ class PrivatePreparationWorkerRuntime {
                 sourceLocalContext(
                     this.configuration,
                     action,
-                    loadedAction.state.actionKeySetRosterIdentity,
+                    loadedAction.state.rosterIdentity,
                     state.generation,
                 ),
             );
@@ -3361,7 +3199,7 @@ class PrivatePreparationWorkerRuntime {
                 actionLocalContext(
                     this.configuration,
                     action,
-                    replacementActionState.actionKeySetRosterIdentity,
+                    replacementActionState.rosterIdentity,
                     replacementActionState.generation,
                 ),
             );
@@ -3411,7 +3249,7 @@ class PrivatePreparationWorkerRuntime {
             );
             const retainedSource = await this.loadSourceState(
                 action,
-                reboundAction.state.actionKeySetRosterIdentity,
+                reboundAction.state.rosterIdentity,
                 retainedSourceRecord,
             );
             try {
@@ -3429,7 +3267,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 return await this.publishRetainedSource(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     reboundAction,
                     retainedSource,
                 );
@@ -3444,7 +3282,7 @@ class PrivatePreparationWorkerRuntime {
 
     private async publishRetainedSource(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         loadedAction: LoadedActionState,
         loadedSource: LoadedSourceState,
     ): Promise<PublishedSourcePackage> {
@@ -3456,20 +3294,19 @@ class PrivatePreparationWorkerRuntime {
         }
         this.validateSourceState(
             action,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             loadedAction.state,
             loadedSource.state,
         );
-        const secretKey = loadedAction.state.signatureSecretKeys[1];
-        if (secretKey === undefined) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The source signing key is absent.',
-            );
-        }
+        const signingRandomness = randomBytes(
+            actionSignatureSigningRandomnessByteLength,
+        );
         const signature = this.actionSignatureRuntime.signBodyIdentity(
-            secretKey,
+            loadedAction.state.signingSecretKey,
+            action.participantPosition,
+            'source',
             loadedSource.state.sourceBodyIdentity,
+            signingRandomness,
         );
         let signatureCarrier: Uint8Array;
         try {
@@ -3480,6 +3317,7 @@ class PrivatePreparationWorkerRuntime {
             );
         } finally {
             signature.fill(0);
+            signingRandomness.fill(0);
         }
         const replacementState: SourceState = {
             ...loadedSource.state,
@@ -3492,7 +3330,7 @@ class PrivatePreparationWorkerRuntime {
             sourceLocalContext(
                 this.configuration,
                 action,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 replacementState.generation,
             ),
         );
@@ -3525,13 +3363,13 @@ class PrivatePreparationWorkerRuntime {
         }
         const reloaded = await this.loadSourceState(
             action,
-            loadedAction.state.actionKeySetRosterIdentity,
+            loadedAction.state.rosterIdentity,
             retained,
         );
         try {
             this.validateSourceState(
                 action,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 loadedAction.state,
                 reloaded.state,
             );
@@ -3543,7 +3381,7 @@ class PrivatePreparationWorkerRuntime {
 
     private validateSourceState(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         actionState: ActionState,
         state: SourceState,
     ): void {
@@ -3565,7 +3403,7 @@ class PrivatePreparationWorkerRuntime {
         const sourceContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
-            actionKeySetRosterIdentity: actionState.actionKeySetRosterIdentity,
+            rosterIdentity: actionState.rosterIdentity,
             preparationAttempt: state.preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
             verifiedPreparationRoot: state.verifiedPreparationRoot,
@@ -3617,7 +3455,7 @@ class PrivatePreparationWorkerRuntime {
         const verified = this.sourceRuntime.verify(
             sourceContext,
             state.declaration,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             state.sourceBody,
             state.sourceSignature,
         );
@@ -3641,37 +3479,33 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    private verifyConfirmedActionRoster(
+    private verifyRosterBoundAction(
         action: PrivatePreparationActionContext,
         state: ActionState,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array = state.canonicalRosterBytes,
     ): void {
-        if (state.phase !== confirmedRosterPhase) {
+        if (state.phase !== rosterBoundActionPhase) {
             throw new DurableStateError(
                 'Conflict',
-                'The action-key roster has not been confirmed.',
+                'The action is not bound to a frozen roster.',
             );
         }
-        const rosterIdentity = this.actionKeySetRuntime.verifyCompleteRoster(
-            completionProfileParticipantCount,
-            actionKeySetBodies,
-        );
-        const ownBody = actionKeySetBodies[action.participantPosition];
+        const rosterIdentity = this.rosterRuntime.verify(canonicalRosterBytes);
         if (
-            ownBody === undefined ||
-            !bytesEqual(ownBody, state.actionKeySetBody) ||
-            !bytesEqual(rosterIdentity, state.actionKeySetRosterIdentity)
+            action.participantPosition !== state.participantPosition ||
+            !bytesEqual(canonicalRosterBytes, state.canonicalRosterBytes) ||
+            !bytesEqual(rosterIdentity, state.rosterIdentity)
         ) {
             throw new DurableStateError(
                 'Conflict',
-                'The retained action is bound to another complete key roster.',
+                'The retained action is bound to another frozen roster.',
             );
         }
     }
 
     private async createAndPublishPreparation(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         loadedAction: LoadedActionState,
     ): Promise<PublishedPreparationPackage> {
@@ -3684,8 +3518,7 @@ class PrivatePreparationWorkerRuntime {
         const materialContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
-            actionKeySetRosterIdentity:
-                loadedAction.state.actionKeySetRosterIdentity,
+            rosterIdentity: loadedAction.state.rosterIdentity,
             preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
             senderPosition: action.participantPosition,
@@ -3709,18 +3542,13 @@ class PrivatePreparationWorkerRuntime {
                         'Generated preparation material omitted a recipient.',
                     );
                 }
-                const pairEncryptionKey =
-                    this.actionKeySetRuntime.resolvePairEncryptionKey(
-                        completionProfileParticipantCount,
-                        action.actionProposalIdentity,
-                        loadedAction.state.actionKeySetRosterIdentity,
+                const mailboxEncapsulationKey =
+                    this.rosterRuntime.resolveMailboxKey(
+                        loadedAction.state.rosterIdentity,
                         action.participantPosition,
                         recipientPosition,
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                     );
-                const recordKey = randomBytes(
-                    privatePreparationRecordKeyByteLength,
-                );
                 const pairEncryptionRandomness = randomBytes(
                     pairEncryptionRandomnessByteLength,
                 );
@@ -3730,16 +3558,14 @@ class PrivatePreparationWorkerRuntime {
                             ...materialContext,
                             recipientPosition,
                         },
-                        pairEncryptionKey,
-                        recordKey,
+                        mailboxEncapsulationKey,
                         pairEncryptionRandomness,
                         plaintext,
                     );
                     privateBodies.push(sealed.body);
                     privateBodyIdentities.push(sealed.identity);
                 } finally {
-                    pairEncryptionKey.fill(0);
-                    recordKey.fill(0);
+                    mailboxEncapsulationKey.fill(0);
                     pairEncryptionRandomness.fill(0);
                 }
             }
@@ -3764,7 +3590,7 @@ class PrivatePreparationWorkerRuntime {
             };
             this.validatePreparationState(
                 action,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 loadedAction.state,
                 state,
             );
@@ -3773,7 +3599,7 @@ class PrivatePreparationWorkerRuntime {
                 preparationLocalContext(
                     this.configuration,
                     action,
-                    loadedAction.state.actionKeySetRosterIdentity,
+                    loadedAction.state.rosterIdentity,
                     state.generation,
                     preparationAttempt,
                 ),
@@ -3806,7 +3632,7 @@ class PrivatePreparationWorkerRuntime {
                 actionLocalContext(
                     this.configuration,
                     action,
-                    replacementActionState.actionKeySetRosterIdentity,
+                    replacementActionState.rosterIdentity,
                     replacementActionState.generation,
                 ),
             );
@@ -3855,7 +3681,7 @@ class PrivatePreparationWorkerRuntime {
             );
             const retainedPreparation = await this.loadPreparationState(
                 action,
-                reboundAction.state.actionKeySetRosterIdentity,
+                reboundAction.state.rosterIdentity,
                 retainedPreparationRecord,
             );
             try {
@@ -3873,7 +3699,7 @@ class PrivatePreparationWorkerRuntime {
                 }
                 return await this.publishRetainedPreparation(
                     action,
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     reboundAction,
                     retainedPreparation,
                 );
@@ -3892,7 +3718,7 @@ class PrivatePreparationWorkerRuntime {
 
     private async publishRetainedPreparation(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         loadedAction: LoadedActionState,
         loadedPreparation: LoadedPreparationState,
     ): Promise<PublishedPreparationPackage> {
@@ -3904,20 +3730,19 @@ class PrivatePreparationWorkerRuntime {
         }
         this.validatePreparationState(
             action,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             loadedAction.state,
             loadedPreparation.state,
         );
-        const secretKey = loadedAction.state.signatureSecretKeys[0];
-        if (secretKey === undefined) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The preparation signing key is absent.',
-            );
-        }
+        const signingRandomness = randomBytes(
+            actionSignatureSigningRandomnessByteLength,
+        );
         const signature = this.actionSignatureRuntime.signBodyIdentity(
-            secretKey,
+            loadedAction.state.signingSecretKey,
+            action.participantPosition,
+            'preparation',
             loadedPreparation.state.parentIdentity,
+            signingRandomness,
         );
         let signatureCarrier: Uint8Array;
         try {
@@ -3929,6 +3754,7 @@ class PrivatePreparationWorkerRuntime {
             );
         } finally {
             signature.fill(0);
+            signingRandomness.fill(0);
         }
         const replacementState: PreparationState = {
             ...loadedPreparation.state,
@@ -3941,7 +3767,7 @@ class PrivatePreparationWorkerRuntime {
             preparationLocalContext(
                 this.configuration,
                 action,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 replacementState.generation,
                 replacementState.preparationAttempt,
             ),
@@ -3975,13 +3801,13 @@ class PrivatePreparationWorkerRuntime {
         }
         const reloaded = await this.loadPreparationState(
             action,
-            loadedAction.state.actionKeySetRosterIdentity,
+            loadedAction.state.rosterIdentity,
             retained,
         );
         try {
             this.validatePreparationState(
                 action,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 loadedAction.state,
                 reloaded.state,
             );
@@ -3993,14 +3819,14 @@ class PrivatePreparationWorkerRuntime {
 
     private validatePreparationState(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         actionState: ActionState,
         state: PreparationState,
     ): void {
         const materialContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
-            actionKeySetRosterIdentity: actionState.actionKeySetRosterIdentity,
+            rosterIdentity: actionState.rosterIdentity,
             preparationAttempt: state.preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
             senderPosition: action.participantPosition,
@@ -4058,13 +3884,12 @@ class PrivatePreparationWorkerRuntime {
                                     completionProfileParticipantCount,
                                 actionProposalIdentity:
                                     action.actionProposalIdentity,
-                                actionKeySetRosterIdentity:
-                                    actionState.actionKeySetRosterIdentity,
+                                rosterIdentity: actionState.rosterIdentity,
                                 preparationAttempt: state.preparationAttempt,
                                 predecessorIdentity: action.predecessorIdentity,
                                 recipientPosition,
                             },
-                            actionKeySetBodies,
+                            canonicalRosterBytes,
                             state.parentBody,
                             state.parentSignature,
                             privateBody,
@@ -4094,39 +3919,23 @@ class PrivatePreparationWorkerRuntime {
 
     private async openConsumedPrivatePreparation(
         action: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         parentBody: Uint8Array,
         privateBody: Uint8Array,
         loadedAction: LoadedActionState,
         loadedSlot: LoadedPrivatePreparationSlotState,
     ): Promise<PrivatePreparationConsumption> {
         const senderPosition = loadedSlot.state.senderPosition;
-        const decryptionKeyIndex = pairDecryptionKeyIndex(
-            action.participantPosition,
+        const mailboxEncapsulationKey = this.rosterRuntime.resolveMailboxKey(
+            loadedAction.state.rosterIdentity,
             senderPosition,
+            action.participantPosition,
+            canonicalRosterBytes,
         );
-        const pairDecryptionKey =
-            loadedAction.state.pairDecryptionKeys[decryptionKeyIndex];
-        if (pairDecryptionKey === undefined) {
-            throw new DurableStateError(
-                'CorruptState',
-                'The retained private-delivery key is absent.',
-            );
-        }
-        const pairEncryptionKey =
-            this.actionKeySetRuntime.resolvePairEncryptionKey(
-                completionProfileParticipantCount,
-                action.actionProposalIdentity,
-                loadedAction.state.actionKeySetRosterIdentity,
-                senderPosition,
-                action.participantPosition,
-                actionKeySetBodies,
-            );
         const privateContext: PrivatePreparationContextInput = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
-            actionKeySetRosterIdentity:
-                loadedAction.state.actionKeySetRosterIdentity,
+            rosterIdentity: loadedAction.state.rosterIdentity,
             preparationAttempt: loadedSlot.state.preparationAttempt,
             predecessorIdentity: action.predecessorIdentity,
             senderPosition,
@@ -4143,8 +3952,8 @@ class PrivatePreparationWorkerRuntime {
             capabilityIsLive = false;
             return this.privatePreparationBodyRuntime.open(
                 privateContext,
-                pairEncryptionKey,
-                pairDecryptionKey,
+                mailboxEncapsulationKey,
+                loadedAction.state.mailboxDecapsulationKey,
                 privateBody,
             );
         };
@@ -4156,8 +3965,7 @@ class PrivatePreparationWorkerRuntime {
                     {
                         participantCount: completionProfileParticipantCount,
                         actionProposalIdentity: action.actionProposalIdentity,
-                        actionKeySetRosterIdentity:
-                            loadedAction.state.actionKeySetRosterIdentity,
+                        rosterIdentity: loadedAction.state.rosterIdentity,
                         preparationAttempt: loadedSlot.state.preparationAttempt,
                         predecessorIdentity: action.predecessorIdentity,
                         senderPosition,
@@ -4176,7 +3984,7 @@ class PrivatePreparationWorkerRuntime {
             await this.replacePrivatePreparationSlot(
                 action,
                 loadedAction.rootKey,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 loadedSlot,
                 resolvedState,
             );
@@ -4185,13 +3993,13 @@ class PrivatePreparationWorkerRuntime {
             await this.burnPrivatePreparationSlot(
                 action,
                 loadedAction.rootKey,
-                loadedAction.state.actionKeySetRosterIdentity,
+                loadedAction.state.rosterIdentity,
                 loadedSlot,
             );
             throw error;
         } finally {
             capabilityIsLive = false;
-            pairEncryptionKey.fill(0);
+            mailboxEncapsulationKey.fill(0);
             plaintext?.fill(0);
         }
     }
@@ -4359,10 +4167,7 @@ class PrivatePreparationWorkerRuntime {
                     localContext.actionProposalIdentity,
                     action.actionProposalIdentity,
                 ) ||
-                !bytesEqual(
-                    localContext.actionKeySetRosterIdentity,
-                    rosterIdentity,
-                ) ||
+                !bytesEqual(localContext.rosterIdentity, rosterIdentity) ||
                 !bytesEqual(
                     localContext.predecessorIdentity,
                     action.predecessorIdentity,
@@ -4425,10 +4230,7 @@ class PrivatePreparationWorkerRuntime {
                     localContext.actionProposalIdentity,
                     action.actionProposalIdentity,
                 ) ||
-                !bytesEqual(
-                    localContext.actionKeySetRosterIdentity,
-                    rosterIdentity,
-                ) ||
+                !bytesEqual(localContext.rosterIdentity, rosterIdentity) ||
                 !bytesEqual(
                     localContext.predecessorIdentity,
                     action.predecessorIdentity,
@@ -4572,10 +4374,7 @@ class PrivatePreparationWorkerRuntime {
                     localContext.actionProposalIdentity,
                     action.actionProposalIdentity,
                 ) ||
-                !bytesEqual(
-                    localContext.actionKeySetRosterIdentity,
-                    rosterIdentity,
-                ) ||
+                !bytesEqual(localContext.rosterIdentity, rosterIdentity) ||
                 !bytesEqual(
                     localContext.predecessorIdentity,
                     action.predecessorIdentity,
@@ -4621,17 +4420,17 @@ class PrivatePreparationWorkerRuntime {
                 this.configuration,
                 action,
             );
-            const actionKeySetIdentity = this.actionKeySetRuntime.verify(
-                completionProfileParticipantCount,
-                action.actionProposalIdentity,
+            const rosterIdentity = this.rosterRuntime.verifyCredentials(
+                state.canonicalRosterBytes,
                 action.participantPosition,
-                state.actionKeySetBody,
+                state.signingSecretKey,
+                state.mailboxDecapsulationKey,
             );
-            if (!bytesEqual(actionKeySetIdentity, state.actionKeySetIdentity)) {
+            if (!bytesEqual(rosterIdentity, state.rosterIdentity)) {
                 zeroActionState(state);
                 throw new DurableStateError(
                     'CorruptState',
-                    'The retained action key-set identity is inconsistent.',
+                    'The retained action credentials do not match the frozen roster.',
                 );
             }
             return { record, rootKey, state };
@@ -4687,15 +4486,6 @@ const responseTransferables = (
         return [];
     }
     const { result } = response;
-    if ('actionKeySetBody' in result) {
-        return [
-            result.actionKeySetBody.buffer,
-            result.actionKeySetIdentity.buffer,
-        ];
-    }
-    if ('actionKeySetRosterIdentity' in result) {
-        return [result.actionKeySetRosterIdentity.buffer];
-    }
     if ('parentBody' in result) {
         return [
             result.parentBody.buffer,
@@ -4762,25 +4552,7 @@ export const installPrivatePreparationWorker = (
                             );
                         }
                         const runtime = await runtimePromise;
-                        if (request.operation === 'register-action-keys') {
-                            response = {
-                                requestId: request.requestId,
-                                ok: true,
-                                result: await runtime.registerActionKeys(
-                                    request.input,
-                                ),
-                            };
-                        } else if (
-                            request.operation === 'confirm-action-key-roster'
-                        ) {
-                            response = {
-                                requestId: request.requestId,
-                                ok: true,
-                                result: await runtime.confirmActionKeyRoster(
-                                    request.input,
-                                ),
-                            };
-                        } else if (
+                        if (
                             request.operation === 'create-preparation-package'
                         ) {
                             response = {

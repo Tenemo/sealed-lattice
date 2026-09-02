@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { ConstructionKernelCommandError } from '../../src/construction-kernel-command-runtime.js';
 import { instantiateConstructionKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
-import { openPairEncryptionRuntime } from '../../src/pair-encryption-runtime.js';
+import {
+    openPairEncryptionRuntime,
+    pairEncryptionKeyGenerationRandomnessByteLength,
+    pairEncryptionRandomnessByteLength,
+} from '../../src/pair-encryption-runtime.js';
 import {
     openPrivatePreparationBodyRuntime,
     privatePreparationBodyByteLength,
@@ -29,7 +33,7 @@ const deterministicBytes = (length: number, seed: number): Uint8Array => {
 const context = (): PrivatePreparationContextInput => ({
     participantCount: 10,
     actionProposalIdentity: new Uint8Array(64).fill(0x11),
-    actionKeySetRosterIdentity: new Uint8Array(64).fill(0x22),
+    rosterIdentity: new Uint8Array(64).fill(0x22),
     preparationAttempt: 7,
     predecessorIdentity: new Uint8Array(64).fill(0x33),
     senderPosition: 2,
@@ -45,7 +49,10 @@ describe('private preparation body runtime with the scalar WASM kernel', () => {
         const pairRuntime = openPairEncryptionRuntime(kernel);
         const runtime = openPrivatePreparationBodyRuntime(kernel);
         const pair = pairRuntime.generateKeyPair(
-            deterministicBytes(6_912, 0x91a2),
+            deterministicBytes(
+                pairEncryptionKeyGenerationRandomnessByteLength,
+                0x91a2,
+            ),
         );
         const plaintext = deterministicBytes(
             privatePreparationPlaintextByteLength,
@@ -54,8 +61,7 @@ describe('private preparation body runtime with the scalar WASM kernel', () => {
         const sealed = runtime.seal(
             context(),
             pair.encryptionKey,
-            deterministicBytes(32, 0x47),
-            deterministicBytes(896, 0x8123),
+            deterministicBytes(pairEncryptionRandomnessByteLength, 0x8123),
             plaintext,
         );
 
@@ -89,7 +95,10 @@ describe('private preparation body runtime with the scalar WASM kernel', () => {
         const pairRuntime = openPairEncryptionRuntime(kernel);
         const runtime = openPrivatePreparationBodyRuntime(kernel);
         const pair = pairRuntime.generateKeyPair(
-            deterministicBytes(6_912, 0x91a2),
+            deterministicBytes(
+                pairEncryptionKeyGenerationRandomnessByteLength,
+                0x91a2,
+            ),
         );
         const plaintext = deterministicBytes(
             privatePreparationPlaintextByteLength,
@@ -98,8 +107,7 @@ describe('private preparation body runtime with the scalar WASM kernel', () => {
         const sealed = runtime.seal(
             context(),
             pair.encryptionKey,
-            deterministicBytes(32, 0x47),
-            deterministicBytes(896, 0x8123),
+            deterministicBytes(pairEncryptionRandomnessByteLength, 0x8123),
             plaintext,
         );
 
@@ -115,7 +123,10 @@ describe('private preparation body runtime with the scalar WASM kernel', () => {
         ).toThrow(ConstructionKernelCommandError);
 
         const otherPair = pairRuntime.generateKeyPair(
-            deterministicBytes(6_912, 0x91a3),
+            deterministicBytes(
+                pairEncryptionKeyGenerationRandomnessByteLength,
+                0x91a3,
+            ),
         );
         expect(() =>
             runtime.open(

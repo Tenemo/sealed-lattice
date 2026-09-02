@@ -9,150 +9,232 @@ import {
     type FoundationKernelLoaderOptions,
 } from './foundation-kernel/kernel-runtime.js';
 
-const deriveVerificationKeyFragmentCommand = 1;
-const signBodyIdentityFragmentCommand = 2;
-const verifySignatureFragmentCommand = 3;
-const chainValueByteLength = 48;
+const generateKeyPairCommand = 1;
+const signMessageCommand = 2;
+const verifySignatureCommand = 3;
+const deriveStatementIdentityCommand = 7;
 const messageByteLength = 64;
-const chainCount = 131;
-const maximumFragmentChainCount = 17;
+const completionParticipantCount = 10;
 
-export const actionSignatureKeyByteLength = chainValueByteLength * chainCount;
+export const actionSignatureKeyGenerationRandomnessByteLength = 32;
+export const actionSignatureSigningRandomnessByteLength = 32;
+export const actionSignatureSecretKeyByteLength = 4_032;
+export const actionSignatureVerificationKeyByteLength = 1_952;
+export const actionSignatureByteLength = 3_309;
 
-const forEachFragment = (
-    input: Uint8Array,
-    operation: (firstChain: number, inputFragment: Uint8Array) => Uint8Array,
-): Uint8Array => {
-    const output = new Uint8Array(actionSignatureKeyByteLength);
-    for (
-        let firstChain = 0;
-        firstChain < chainCount;
-        firstChain += maximumFragmentChainCount
-    ) {
-        const fragmentChainCount = Math.min(
-            maximumFragmentChainCount,
-            chainCount - firstChain,
-        );
-        const start = firstChain * chainValueByteLength;
-        const end = start + fragmentChainCount * chainValueByteLength;
-        const inputFragment = Uint8Array.from(input.subarray(start, end));
-        try {
-            const outputFragment = operation(firstChain, inputFragment);
-            if (outputFragment.byteLength !== end - start) {
-                throw new Error(
-                    'The construction kernel returned the wrong fragment length.',
-                );
-            }
-            output.set(outputFragment, start);
-        } finally {
-            inputFragment.fill(0);
-        }
-    }
-    return output;
-};
+type ActionSignatureKeyPair = Readonly<{
+    secretKey: Uint8Array;
+    verificationKey: Uint8Array;
+}>;
+
+export type ActionSignaturePurpose =
+    'activation' | 'finality' | 'preparation' | 'source';
 
 export type ActionSignatureRuntime = Readonly<{
-    deriveVerificationKey(secretKey: Uint8Array): Uint8Array;
+    generateKeyPair(randomness: Uint8Array): ActionSignatureKeyPair;
+    deriveStatementIdentity(
+        signerPosition: number,
+        purpose: ActionSignaturePurpose,
+        bodyIdentity: Uint8Array,
+    ): Uint8Array;
+    signMessage(
+        secretKey: Uint8Array,
+        message: Uint8Array,
+        signingRandomness: Uint8Array,
+    ): Uint8Array;
+    verifyMessage(
+        verificationKey: Uint8Array,
+        message: Uint8Array,
+        signature: Uint8Array,
+    ): boolean;
     signBodyIdentity(
         secretKey: Uint8Array,
+        signerPosition: number,
+        purpose: ActionSignaturePurpose,
         bodyIdentity: Uint8Array,
+        signingRandomness: Uint8Array,
     ): Uint8Array;
     verifySignature(
         verificationKey: Uint8Array,
+        signerPosition: number,
+        purpose: ActionSignaturePurpose,
         bodyIdentity: Uint8Array,
         signature: Uint8Array,
     ): boolean;
 }>;
 
+const copyExactResponse = (
+    bytes: Uint8Array,
+    expectedLength: number,
+    name: string,
+): Uint8Array => {
+    requireExactConstructionBytes(bytes, expectedLength, name);
+    return Uint8Array.from(bytes);
+};
+
+const purposeCode = (purpose: ActionSignaturePurpose): number => {
+    switch (purpose) {
+        case 'preparation':
+            return 1;
+        case 'source':
+            return 2;
+        case 'finality':
+            return 3;
+        case 'activation':
+            return 4;
+    }
+};
+
 export const openActionSignatureRuntime = (
     kernel: ConstructionKernelCommandRuntime,
-): ActionSignatureRuntime => ({
-    deriveVerificationKey: (secretKey) => {
-        requireExactConstructionBytes(
-            secretKey,
-            actionSignatureKeyByteLength,
-            'secretKey',
-        );
-        return forEachFragment(secretKey, (firstChain, inputFragment) => {
-            const request = new ConstructionCommandWriter();
-            request.writeU8(deriveVerificationKeyFragmentCommand);
-            request.writeU16(firstChain);
-            request.writeBytes(inputFragment);
-            return executeConstructionCommand(kernel, request, (reader) =>
-                Uint8Array.from(reader.readBytes()),
+): ActionSignatureRuntime => {
+    const runtime: ActionSignatureRuntime = {
+        generateKeyPair: (randomness) => {
+            requireExactConstructionBytes(
+                randomness,
+                actionSignatureKeyGenerationRandomnessByteLength,
+                'randomness',
             );
-        });
-    },
-    signBodyIdentity: (secretKey, bodyIdentity) => {
-        requireExactConstructionBytes(
-            secretKey,
-            actionSignatureKeyByteLength,
-            'secretKey',
-        );
-        requireExactConstructionBytes(
-            bodyIdentity,
-            messageByteLength,
-            'bodyIdentity',
-        );
-        return forEachFragment(secretKey, (firstChain, inputFragment) => {
             const request = new ConstructionCommandWriter();
-            request.writeU8(signBodyIdentityFragmentCommand);
-            request.writeU16(firstChain);
+            request.writeU8(generateKeyPairCommand);
+            request.writeBytes(randomness);
+            return executeConstructionCommand(kernel, request, (reader) => ({
+                secretKey: copyExactResponse(
+                    reader.readBytes(),
+                    actionSignatureSecretKeyByteLength,
+                    'secretKey',
+                ),
+                verificationKey: copyExactResponse(
+                    reader.readBytes(),
+                    actionSignatureVerificationKeyByteLength,
+                    'verificationKey',
+                ),
+            }));
+        },
+        deriveStatementIdentity: (signerPosition, purpose, bodyIdentity) => {
+            if (
+                !Number.isSafeInteger(signerPosition) ||
+                signerPosition < 0 ||
+                signerPosition >= completionParticipantCount
+            ) {
+                throw new RangeError(
+                    'signerPosition is not a completion-roster position.',
+                );
+            }
+            requireExactConstructionBytes(
+                bodyIdentity,
+                messageByteLength,
+                'bodyIdentity',
+            );
+            const request = new ConstructionCommandWriter();
+            request.writeU8(deriveStatementIdentityCommand);
+            request.writeU16(completionParticipantCount);
+            request.writeU16(signerPosition);
+            request.writeU16(purposeCode(purpose));
             request.writeFixed(bodyIdentity);
-            request.writeBytes(inputFragment);
             return executeConstructionCommand(kernel, request, (reader) =>
-                Uint8Array.from(reader.readBytes()),
+                copyExactResponse(
+                    reader.readFixed(messageByteLength),
+                    messageByteLength,
+                    'statementIdentity',
+                ),
             );
-        });
-    },
-    verifySignature: (verificationKey, bodyIdentity, signature) => {
-        requireExactConstructionBytes(
+        },
+        signMessage: (secretKey, message, signingRandomness) => {
+            requireExactConstructionBytes(
+                secretKey,
+                actionSignatureSecretKeyByteLength,
+                'secretKey',
+            );
+            requireExactConstructionBytes(
+                message,
+                messageByteLength,
+                'message',
+            );
+            requireExactConstructionBytes(
+                signingRandomness,
+                actionSignatureSigningRandomnessByteLength,
+                'signingRandomness',
+            );
+            const request = new ConstructionCommandWriter();
+            request.writeU8(signMessageCommand);
+            request.writeFixed(message);
+            request.writeBytes(secretKey);
+            request.writeBytes(signingRandomness);
+            return executeConstructionCommand(kernel, request, (reader) =>
+                copyExactResponse(
+                    reader.readBytes(),
+                    actionSignatureByteLength,
+                    'signature',
+                ),
+            );
+        },
+        verifyMessage: (verificationKey, message, signature) => {
+            requireExactConstructionBytes(
+                verificationKey,
+                actionSignatureVerificationKeyByteLength,
+                'verificationKey',
+            );
+            requireExactConstructionBytes(
+                message,
+                messageByteLength,
+                'message',
+            );
+            requireExactConstructionBytes(
+                signature,
+                actionSignatureByteLength,
+                'signature',
+            );
+            const request = new ConstructionCommandWriter();
+            request.writeU8(verifySignatureCommand);
+            request.writeFixed(message);
+            request.writeBytes(signature);
+            request.writeBytes(verificationKey);
+            return executeConstructionCommand(kernel, request, (reader) => {
+                const result = reader.readU8();
+                if (result !== 0 && result !== 1) {
+                    throw new Error(
+                        'The construction kernel returned an invalid verification result.',
+                    );
+                }
+                return result === 1;
+            });
+        },
+        signBodyIdentity: (
+            secretKey,
+            signerPosition,
+            purpose,
+            bodyIdentity,
+            signingRandomness,
+        ) =>
+            runtime.signMessage(
+                secretKey,
+                runtime.deriveStatementIdentity(
+                    signerPosition,
+                    purpose,
+                    bodyIdentity,
+                ),
+                signingRandomness,
+            ),
+        verifySignature: (
             verificationKey,
-            actionSignatureKeyByteLength,
-            'verificationKey',
-        );
-        requireExactConstructionBytes(
+            signerPosition,
+            purpose,
             bodyIdentity,
-            messageByteLength,
-            'bodyIdentity',
-        );
-        requireExactConstructionBytes(
             signature,
-            actionSignatureKeyByteLength,
-            'signature',
-        );
-        let isValid = true;
-        for (
-            let firstChain = 0;
-            firstChain < chainCount;
-            firstChain += maximumFragmentChainCount
-        ) {
-            const fragmentChainCount = Math.min(
-                maximumFragmentChainCount,
-                chainCount - firstChain,
-            );
-            const start = firstChain * chainValueByteLength;
-            const end = start + fragmentChainCount * chainValueByteLength;
-            const request = new ConstructionCommandWriter();
-            request.writeU8(verifySignatureFragmentCommand);
-            request.writeU16(firstChain);
-            request.writeFixed(bodyIdentity);
-            request.writeBytes(signature.subarray(start, end));
-            request.writeBytes(verificationKey.subarray(start, end));
-            isValid =
-                executeConstructionCommand(kernel, request, (reader) => {
-                    const result = reader.readU8();
-                    if (result !== 0 && result !== 1) {
-                        throw new Error(
-                            'The construction kernel returned an invalid verification result.',
-                        );
-                    }
-                    return result === 1;
-                }) && isValid;
-        }
-        return isValid;
-    },
-});
+        ) =>
+            runtime.verifyMessage(
+                verificationKey,
+                runtime.deriveStatementIdentity(
+                    signerPosition,
+                    purpose,
+                    bodyIdentity,
+                ),
+                signature,
+            ),
+    };
+    return runtime;
+};
 
 export const createActionSignatureRuntimeLoader = (
     foundationKernelUrl: URL,

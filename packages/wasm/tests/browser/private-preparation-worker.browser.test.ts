@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+    actionSignatureKeyGenerationRandomnessByteLength,
+    openActionSignatureRuntime,
+} from '../../src/action-signature-runtime.js';
+import { instantiateConstructionKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
+import {
+    openPairEncryptionRuntime,
+    pairEncryptionKeyGenerationRandomnessByteLength,
+} from '../../src/pair-encryption-runtime.js';
+import { actionSignatureCarrierByteLength } from '../../src/preparation-parent-runtime.js';
 import { PrivatePreparationWorkerClient } from '../../src/private-preparation-worker-client.js';
 import type {
     PrivatePreparationActionContext,
@@ -9,6 +19,7 @@ import type {
     PublishedPreparationPackage,
     PublishedSourcePackage,
 } from '../../src/private-preparation-worker-protocol.js';
+import { openRosterRuntime } from '../../src/roster-runtime.js';
 import {
     abstentionSourceBodyByteLength,
     submittedSourceBodyByteLength,
@@ -93,6 +104,91 @@ const closeClient = (client: PrivatePreparationWorkerClient): void => {
     openClients.delete(client);
 };
 
+type CompletionRosterFixture = Readonly<{
+    canonicalRosterBytes: Uint8Array;
+    rosterIdentity: Uint8Array;
+    credentials: readonly Readonly<{
+        signingSecretKey: Uint8Array;
+        mailboxDecapsulationKey: Uint8Array;
+    }>[];
+}>;
+
+const createCompletionRosterFixture =
+    async (): Promise<CompletionRosterFixture> => {
+        const kernel = await instantiateConstructionKernelCommandRuntime(
+            kernelUrl,
+            {
+                allowUnpinnedKernel: true,
+            },
+        );
+        const signatureRuntime = openActionSignatureRuntime(kernel);
+        const mailboxRuntime = openPairEncryptionRuntime(kernel);
+        const rosterRuntime = openRosterRuntime(kernel);
+        const credentials: Array<{
+            signingSecretKey: Uint8Array;
+            mailboxDecapsulationKey: Uint8Array;
+        }> = [];
+        const publicKeys = Array.from({ length: participantCount }, () => {
+            const signing = signatureRuntime.generateKeyPair(
+                crypto.getRandomValues(
+                    new Uint8Array(
+                        actionSignatureKeyGenerationRandomnessByteLength,
+                    ),
+                ),
+            );
+            const mailbox = mailboxRuntime.generateKeyPair(
+                crypto.getRandomValues(
+                    new Uint8Array(
+                        pairEncryptionKeyGenerationRandomnessByteLength,
+                    ),
+                ),
+            );
+            credentials.push({
+                signingSecretKey: signing.secretKey,
+                mailboxDecapsulationKey: mailbox.decryptionKey,
+            });
+            return {
+                signingVerificationKey: signing.verificationKey,
+                mailboxEncapsulationKey: mailbox.encryptionKey,
+            };
+        });
+        const roster = rosterRuntime.encode(publicKeys);
+        return {
+            canonicalRosterBytes: roster.canonicalBytes,
+            rosterIdentity: roster.rosterIdentity,
+            credentials,
+        };
+    };
+
+const publishPreparationPackages = async (
+    runIdentity: string,
+    roster: CompletionRosterFixture,
+): Promise<PublishedPreparationPackage[]> => {
+    const packages: PublishedPreparationPackage[] = [];
+    for (
+        let participantPosition = 0;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const credential = roster.credentials[participantPosition];
+        if (credential === undefined) {
+            throw new Error('The roster fixture omitted a credential.');
+        }
+        const client = await openClient(runIdentity, participantPosition);
+        packages.push(
+            await client.createPreparationPackage(
+                actionContext(participantPosition),
+                roster.canonicalRosterBytes,
+                credential.signingSecretKey,
+                credential.mailboxDecapsulationKey,
+                preparationAttempt,
+            ),
+        );
+        closeClient(client);
+    }
+    return packages;
+};
+
 const remoteBodyIndex = (
     senderPosition: number,
     recipientPosition: number,
@@ -105,7 +201,7 @@ const createCompletePreparation = async (
     runIdentity: string,
 ): Promise<
     Readonly<{
-        actionKeySetBodies: readonly Uint8Array[];
+        canonicalRosterBytes: Uint8Array;
         preparationPackages: readonly PublishedPreparationPackage[];
         preparationParents: readonly Readonly<{
             body: Uint8Array;
@@ -113,47 +209,12 @@ const createCompletePreparation = async (
         }>[];
     }>
 > => {
-    const actionKeySetBodies: Uint8Array[] = [];
-    for (
-        let participantPosition = 0;
-        participantPosition < participantCount;
-        participantPosition += 1
-    ) {
-        const client = await openClient(runIdentity, participantPosition);
-        const registration = await client.registerActionKeys(
-            actionContext(participantPosition),
-        );
-        actionKeySetBodies.push(registration.actionKeySetBody);
-        closeClient(client);
-    }
-    for (
-        let participantPosition = 0;
-        participantPosition < participantCount;
-        participantPosition += 1
-    ) {
-        const client = await openClient(runIdentity, participantPosition);
-        await client.confirmActionKeyRoster(
-            actionContext(participantPosition),
-            actionKeySetBodies,
-        );
-        closeClient(client);
-    }
-    const preparationPackages: PublishedPreparationPackage[] = [];
-    for (
-        let participantPosition = 0;
-        participantPosition < participantCount;
-        participantPosition += 1
-    ) {
-        const client = await openClient(runIdentity, participantPosition);
-        preparationPackages.push(
-            await client.createPreparationPackage(
-                actionContext(participantPosition),
-                actionKeySetBodies,
-                preparationAttempt,
-            ),
-        );
-        closeClient(client);
-    }
+    const roster = await createCompletionRosterFixture();
+    const canonicalRosterBytes = roster.canonicalRosterBytes;
+    const preparationPackages = await publishPreparationPackages(
+        runIdentity,
+        roster,
+    );
     const preparationParents = preparationPackages.map((entry) => ({
         body: entry.parentBody,
         signature: entry.parentSignature,
@@ -182,7 +243,7 @@ const createCompletePreparation = async (
             }
             const consumption = await client.consumePrivatePreparation(
                 actionContext(recipientPosition),
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 preparationAttempt,
                 parent.parentBody,
                 parent.parentSignature,
@@ -195,7 +256,7 @@ const createCompletePreparation = async (
         closeClient(client);
     }
     return {
-        actionKeySetBodies,
+        canonicalRosterBytes,
         preparationPackages,
         preparationParents,
     };
@@ -246,59 +307,44 @@ describe('private preparation worker in Chromium', () => {
         { timeout: 300_000 },
         async () => {
             const runIdentity = crypto.randomUUID();
-            const actionKeySetBodies: Uint8Array[] = [];
-            for (
-                let participantPosition = 0;
-                participantPosition < participantCount;
-                participantPosition += 1
-            ) {
-                const client = await openClient(
-                    runIdentity,
-                    participantPosition,
-                );
-                const registration = await client.registerActionKeys(
-                    actionContext(participantPosition),
-                );
-                actionKeySetBodies.push(registration.actionKeySetBody);
-                closeClient(client);
-            }
-
-            let expectedRosterIdentity: Uint8Array | undefined;
-            for (
-                let participantPosition = 0;
-                participantPosition < participantCount;
-                participantPosition += 1
-            ) {
-                const client = await openClient(
-                    runIdentity,
-                    participantPosition,
-                );
-                const confirmation = await client.confirmActionKeyRoster(
-                    actionContext(participantPosition),
-                    actionKeySetBodies,
-                );
-                expectedRosterIdentity ??=
-                    confirmation.actionKeySetRosterIdentity;
-                expect(confirmation.actionKeySetRosterIdentity).toEqual(
-                    expectedRosterIdentity,
-                );
-                closeClient(client);
-            }
+            const roster = await createCompletionRosterFixture();
+            const canonicalRosterBytes = roster.canonicalRosterBytes;
+            expect(roster.rosterIdentity).toHaveLength(64);
+            const preparationPackages = await publishPreparationPackages(
+                runIdentity,
+                roster,
+            );
 
             const firstSenderPosition = 2;
             const firstRecipientPosition = 8;
+            const firstPackage = preparationPackages[firstSenderPosition];
+            const firstCredential = roster.credentials[firstSenderPosition];
+            const wrongCredential = roster.credentials[firstSenderPosition + 1];
+            if (
+                firstPackage === undefined ||
+                firstCredential === undefined ||
+                wrongCredential === undefined
+            ) {
+                throw new Error('The preparation fixture is incomplete.');
+            }
             const firstSender = await openClient(
                 runIdentity,
                 firstSenderPosition,
             );
-            const firstPackage = await firstSender.createPreparationPackage(
-                actionContext(firstSenderPosition),
-                actionKeySetBodies,
-                preparationAttempt,
-            );
+            await expect(
+                firstSender.createPreparationPackage(
+                    actionContext(firstSenderPosition),
+                    canonicalRosterBytes,
+                    wrongCredential.signingSecretKey,
+                    wrongCredential.mailboxDecapsulationKey,
+                    preparationAttempt,
+                ),
+            ).rejects.toThrow();
             const replayedPackage = await firstSender.createPreparationPackage(
                 actionContext(firstSenderPosition),
-                actionKeySetBodies,
+                canonicalRosterBytes,
+                firstCredential.signingSecretKey,
+                firstCredential.mailboxDecapsulationKey,
                 preparationAttempt,
             );
             expect(replayedPackage).toEqual(firstPackage);
@@ -319,7 +365,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 firstRecipient.consumePrivatePreparation(
                     actionContext(firstRecipientPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     firstPackage.parentBody,
                     firstPackage.parentSignature,
@@ -332,7 +378,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 firstRecipient.consumePrivatePreparation(
                     actionContext(firstRecipientPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     firstPackage.parentBody,
                     firstPackage.parentSignature,
@@ -347,7 +393,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 firstRecipient.consumePrivatePreparation(
                     actionContext(firstRecipientPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     firstPackage.parentBody,
                     firstPackage.parentSignature,
@@ -363,7 +409,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 restoredRecipient.consumePrivatePreparation(
                     actionContext(firstRecipientPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     firstPackage.parentBody,
                     firstPackage.parentSignature,
@@ -377,16 +423,10 @@ describe('private preparation worker in Chromium', () => {
 
             const crashSenderPosition = 3;
             const crashRecipientPosition = 9;
-            const crashSender = await openClient(
-                runIdentity,
-                crashSenderPosition,
-            );
-            const crashPackage = await crashSender.createPreparationPackage(
-                actionContext(crashSenderPosition),
-                actionKeySetBodies,
-                preparationAttempt,
-            );
-            closeClient(crashSender);
+            const crashPackage = preparationPackages[crashSenderPosition];
+            if (crashPackage === undefined) {
+                throw new Error('The crash preparation fixture is incomplete.');
+            }
             const crashPrivateBody =
                 crashPackage.privateBodies[
                     remoteBodyIndex(crashSenderPosition, crashRecipientPosition)
@@ -431,7 +471,7 @@ describe('private preparation worker in Chromium', () => {
                 operation: 'consume-private-preparation',
                 input: {
                     ...actionContext(crashRecipientPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     parentBody: crashPackage.parentBody,
                     parentSignature: crashPackage.parentSignature,
@@ -448,7 +488,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 recoveredRecipient.consumePrivatePreparation(
                     actionContext(crashRecipientPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     crashPackage.parentBody,
                     crashPackage.parentSignature,
@@ -479,57 +519,12 @@ describe('private preparation worker in Chromium', () => {
                 4,
                 2,
             );
-            const actionKeySetBodies: Uint8Array[] = [];
-            for (
-                let participantPosition = 0;
-                participantPosition < participantCount;
-                participantPosition += 1
-            ) {
-                const client = await openClient(
-                    runIdentity,
-                    participantPosition,
-                );
-                const registration = await client.registerActionKeys(
-                    actionContext(participantPosition),
-                );
-                actionKeySetBodies.push(registration.actionKeySetBody);
-                closeClient(client);
-            }
-            for (
-                let participantPosition = 0;
-                participantPosition < participantCount;
-                participantPosition += 1
-            ) {
-                const client = await openClient(
-                    runIdentity,
-                    participantPosition,
-                );
-                await client.confirmActionKeyRoster(
-                    actionContext(participantPosition),
-                    actionKeySetBodies,
-                );
-                closeClient(client);
-            }
-
-            const preparationPackages: PublishedPreparationPackage[] = [];
-            for (
-                let participantPosition = 0;
-                participantPosition < participantCount;
-                participantPosition += 1
-            ) {
-                const client = await openClient(
-                    runIdentity,
-                    participantPosition,
-                );
-                preparationPackages.push(
-                    await client.createPreparationPackage(
-                        actionContext(participantPosition),
-                        actionKeySetBodies,
-                        preparationAttempt,
-                    ),
-                );
-                closeClient(client);
-            }
+            const roster = await createCompletionRosterFixture();
+            const canonicalRosterBytes = roster.canonicalRosterBytes;
+            const preparationPackages = await publishPreparationPackages(
+                runIdentity,
+                roster,
+            );
             const preparationParents = preparationPackages.map((entry) => ({
                 body: entry.parentBody,
                 signature: entry.parentSignature,
@@ -565,7 +560,7 @@ describe('private preparation worker in Chromium', () => {
                     await expect(
                         client.consumePrivatePreparation(
                             actionContext(recipientPosition),
-                            actionKeySetBodies,
+                            canonicalRosterBytes,
                             preparationAttempt,
                             senderPackage.parentBody,
                             senderPackage.parentSignature,
@@ -615,7 +610,7 @@ describe('private preparation worker in Chromium', () => {
                 operation: 'create-source-package',
                 input: {
                     ...actionContext(sourcePosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     preparationParents,
                     choice: {
@@ -633,7 +628,7 @@ describe('private preparation worker in Chromium', () => {
             );
             const submitted = await recoveredSource.createSourcePackage(
                 actionContext(sourcePosition),
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 preparationAttempt,
                 preparationParents,
                 {
@@ -647,7 +642,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 recoveredSource.createSourcePackage(
                     actionContext(sourcePosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     preparationParents,
                     {
@@ -659,7 +654,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 recoveredSource.createSourcePackage(
                     actionContext(sourcePosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     preparationParents,
                     {
@@ -677,7 +672,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 restoredSource.createSourcePackage(
                     actionContext(sourcePosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     preparationParents,
                     {
@@ -695,7 +690,7 @@ describe('private preparation worker in Chromium', () => {
             );
             const abstention = await abstainingSource.createSourcePackage(
                 actionContext(abstainingPosition),
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 preparationAttempt,
                 preparationParents,
                 { declaration: 'abstain' },
@@ -722,7 +717,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 malformedSource.createSourcePackage(
                     actionContext(malformedPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     mutatedParents,
                     { declaration: 'abstain' },
@@ -731,7 +726,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 malformedSource.createSourcePackage(
                     actionContext(malformedPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt + 1,
                     preparationParents,
                     { declaration: 'abstain' },
@@ -740,7 +735,7 @@ describe('private preparation worker in Chromium', () => {
             const recoveredAbstention =
                 await malformedSource.createSourcePackage(
                     actionContext(malformedPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     preparationParents,
                     { declaration: 'abstain' },
@@ -748,7 +743,9 @@ describe('private preparation worker in Chromium', () => {
             expect(recoveredAbstention.sourceBody).toHaveLength(
                 abstentionSourceBodyByteLength,
             );
-            expect(recoveredAbstention.sourceSignature).toHaveLength(6_388);
+            expect(recoveredAbstention.sourceSignature).toHaveLength(
+                actionSignatureCarrierByteLength,
+            );
             closeClient(malformedSource);
 
             const sourcePackages: (PublishedSourcePackage | undefined)[] =
@@ -786,7 +783,7 @@ describe('private preparation worker in Chromium', () => {
                 sourcePackages[participantPosition] =
                     await client.createSourcePackage(
                         actionContext(participantPosition),
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         preparationAttempt,
                         preparationParents,
                         choice,
@@ -819,7 +816,7 @@ describe('private preparation worker in Chromium', () => {
                 );
                 const finality = await client.createFinalitySignature(
                     actionContext(participantPosition),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
                     topCount,
@@ -847,7 +844,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 conflictingFinality.createFinalitySignature(
                     actionContext(9),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     [...sourceCarriers].reverse(),
                     topCount,
@@ -856,7 +853,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 conflictingFinality.createFinalitySignature(
                     actionContext(9),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
                     topCount + 1,
@@ -868,7 +865,7 @@ describe('private preparation worker in Chromium', () => {
                         ...actionContext(9),
                         actionDefinitionIdentity: new Uint8Array(64).fill(0xee),
                     },
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
                     topCount,
@@ -889,7 +886,7 @@ describe('private preparation worker in Chromium', () => {
         { timeout: 300_000 },
         async () => {
             const runIdentity = crypto.randomUUID();
-            const { actionKeySetBodies, preparationParents } =
+            const { canonicalRosterBytes, preparationParents } =
                 await createCompletePreparation(runIdentity);
             const sources: PublishedSourcePackage[] = [];
             for (
@@ -904,7 +901,7 @@ describe('private preparation worker in Chromium', () => {
                 sources.push(
                     await client.createSourcePackage(
                         actionContext(participantPosition),
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         preparationAttempt,
                         preparationParents,
                         { declaration: 'abstain' },
@@ -931,7 +928,7 @@ describe('private preparation worker in Chromium', () => {
                 finalities.push(
                     await client.createFinalitySignature(
                         actionContext(participantPosition),
-                        actionKeySetBodies,
+                        canonicalRosterBytes,
                         preparationAttempt,
                         sourceCarriers,
                         topCount,
@@ -960,7 +957,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 resultClient.finalizeNoResult(
                     actionContext(0),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
                     certificate.slice(0, 7),
@@ -970,7 +967,7 @@ describe('private preparation worker in Chromium', () => {
             await expect(
                 resultClient.finalizeNoResult(
                     actionContext(0),
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
                     certificate,

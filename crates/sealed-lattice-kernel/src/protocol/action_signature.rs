@@ -1,274 +1,254 @@
 use core::fmt;
 
-use sha3::{
-    Shake256,
-    digest::{ExtendableOutput, Update, XofReader},
+use fips204::{
+    ml_dsa_65,
+    traits::{KeyGen, SerDes, Signer, Verifier},
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub const CHAIN_VALUE_BYTE_LENGTH: usize = 48;
+pub const KEY_GENERATION_RANDOMNESS_BYTE_LENGTH: usize = 32;
+pub const SIGNING_RANDOMNESS_BYTE_LENGTH: usize = 32;
+pub const SECRET_KEY_BYTE_LENGTH: usize = ml_dsa_65::SK_LEN;
+pub const VERIFICATION_KEY_BYTE_LENGTH: usize = ml_dsa_65::PK_LEN;
+pub const SIGNATURE_BYTE_LENGTH: usize = ml_dsa_65::SIG_LEN;
 pub const MESSAGE_BYTE_LENGTH: usize = 64;
-pub const MESSAGE_CHAIN_COUNT: usize = 128;
-pub const CHECKSUM_CHAIN_COUNT: usize = 3;
-pub const CHAIN_COUNT: usize = MESSAGE_CHAIN_COUNT + CHECKSUM_CHAIN_COUNT;
-pub const KEY_BYTE_LENGTH: usize = CHAIN_COUNT * CHAIN_VALUE_BYTE_LENGTH;
-pub const MAXIMUM_FRAGMENT_CHAIN_COUNT: usize = 17;
 
-const WINTERNITZ_BASE: u16 = 16;
-const MAXIMUM_CHAIN_STEP_COUNT: u8 = 15;
+const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/action-signature/v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionSignatureError {
-    EmptyFragment,
-    FragmentTooLarge,
-    InvalidFragmentLength,
-    InvalidFragmentRange,
+    InvalidKeyGenerationRandomnessLength,
+    InvalidMessageLength,
+    InvalidSecretKey,
+    InvalidSecretKeyLength,
+    InvalidSignatureLength,
+    InvalidSigningRandomnessLength,
+    InvalidVerificationKey,
+    InvalidVerificationKeyLength,
+    SigningFailed,
 }
 
 impl fmt::Display for ActionSignatureError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::EmptyFragment => "action-signature fragment must be nonempty",
-            Self::FragmentTooLarge => "action-signature fragment exceeds the scalar-work bound",
-            Self::InvalidFragmentLength => {
-                "action-signature fragment length is not a whole chain vector"
+            Self::InvalidKeyGenerationRandomnessLength => {
+                "ML-DSA-65 key-generation randomness has the wrong length"
             }
-            Self::InvalidFragmentRange => "action-signature fragment is outside the key range",
+            Self::InvalidMessageLength => "action-signature message has the wrong length",
+            Self::InvalidSecretKey => "action-signature secret key is not a valid ML-DSA-65 key",
+            Self::InvalidSecretKeyLength => "action-signature secret key has the wrong length",
+            Self::InvalidSignatureLength => "action signature has the wrong length",
+            Self::InvalidSigningRandomnessLength => {
+                "ML-DSA-65 signing randomness has the wrong length"
+            }
+            Self::InvalidVerificationKey => {
+                "action-signature verification key is not a valid ML-DSA-65 key"
+            }
+            Self::InvalidVerificationKeyLength => {
+                "action-signature verification key has the wrong length"
+            }
+            Self::SigningFailed => "ML-DSA-65 signing failed",
         })
     }
 }
 
 impl std::error::Error for ActionSignatureError {}
 
-fn fragment_chain_count(
-    first_chain: usize,
-    fragment_byte_length: usize,
-) -> Result<usize, ActionSignatureError> {
-    if fragment_byte_length == 0 {
-        return Err(ActionSignatureError::EmptyFragment);
-    }
-    if !fragment_byte_length.is_multiple_of(CHAIN_VALUE_BYTE_LENGTH) {
-        return Err(ActionSignatureError::InvalidFragmentLength);
-    }
-    let chain_count = fragment_byte_length / CHAIN_VALUE_BYTE_LENGTH;
-    if chain_count > MAXIMUM_FRAGMENT_CHAIN_COUNT {
-        return Err(ActionSignatureError::FragmentTooLarge);
-    }
-    if first_chain
-        .checked_add(chain_count)
-        .is_none_or(|end| end > CHAIN_COUNT)
-    {
-        return Err(ActionSignatureError::InvalidFragmentRange);
-    }
-    Ok(chain_count)
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct ActionSignatureKeyPair {
+    pub secret_key: [u8; SECRET_KEY_BYTE_LENGTH],
+    #[zeroize(skip)]
+    pub verification_key: [u8; VERIFICATION_KEY_BYTE_LENGTH],
 }
 
-fn chain(mut value: [u8; CHAIN_VALUE_BYTE_LENGTH], step_count: u8) -> [u8; 48] {
-    for _ in 0..step_count {
-        let mut hasher = Shake256::default();
-        hasher.update(&value);
-        let mut reader = hasher.finalize_xof();
-        reader.read(&mut value);
-    }
-    value
-}
-
-fn message_digits(message: &[u8; MESSAGE_BYTE_LENGTH]) -> [u8; CHAIN_COUNT] {
-    let mut digits = [0_u8; CHAIN_COUNT];
-    for (byte_index, byte) in message.iter().copied().enumerate() {
-        digits[2 * byte_index] = byte >> 4;
-        digits[2 * byte_index + 1] = byte & 0x0f;
-    }
-
-    let checksum = digits[..MESSAGE_CHAIN_COUNT]
-        .iter()
-        .fold(0_u16, |sum, digit| {
-            sum + (WINTERNITZ_BASE - 1 - u16::from(*digit))
-        });
-    digits[MESSAGE_CHAIN_COUNT] = ((checksum >> 8) & 0x0f) as u8;
-    digits[MESSAGE_CHAIN_COUNT + 1] = ((checksum >> 4) & 0x0f) as u8;
-    digits[MESSAGE_CHAIN_COUNT + 2] = (checksum & 0x0f) as u8;
-    digits
-}
-
-fn transform_fragment(
-    first_chain: usize,
-    input_fragment: &[u8],
-    step_count: impl Fn(usize) -> u8,
-) -> Result<Vec<u8>, ActionSignatureError> {
-    let chain_count = fragment_chain_count(first_chain, input_fragment.len())?;
-    let mut output = Vec::with_capacity(input_fragment.len());
-    for local_chain in 0..chain_count {
-        let offset = local_chain * CHAIN_VALUE_BYTE_LENGTH;
-        let mut value: [u8; CHAIN_VALUE_BYTE_LENGTH] = input_fragment
-            [offset..offset + CHAIN_VALUE_BYTE_LENGTH]
-            .try_into()
-            .map_err(|_| ActionSignatureError::InvalidFragmentLength)?;
-        let transformed = chain(value, step_count(first_chain + local_chain));
-        value.zeroize();
-        output.extend_from_slice(&transformed);
-    }
-    Ok(output)
-}
-
-pub fn derive_verification_key_fragment(
-    first_chain: usize,
-    secret_fragment: &[u8],
-) -> Result<Vec<u8>, ActionSignatureError> {
-    transform_fragment(first_chain, secret_fragment, |_| MAXIMUM_CHAIN_STEP_COUNT)
-}
-
-pub fn sign_fragment(
-    first_chain: usize,
-    secret_fragment: &[u8],
-    message: &[u8; MESSAGE_BYTE_LENGTH],
-) -> Result<Vec<u8>, ActionSignatureError> {
-    let digits = message_digits(message);
-    transform_fragment(first_chain, secret_fragment, |chain_index| {
-        digits[chain_index]
+pub fn generate_key_pair(
+    randomness: &[u8],
+) -> Result<ActionSignatureKeyPair, ActionSignatureError> {
+    let seed: &[u8; KEY_GENERATION_RANDOMNESS_BYTE_LENGTH] = randomness
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidKeyGenerationRandomnessLength)?;
+    let (verification_key, secret_key) = ml_dsa_65::KG::keygen_from_seed(seed);
+    Ok(ActionSignatureKeyPair {
+        secret_key: secret_key.into_bytes(),
+        verification_key: verification_key.into_bytes(),
     })
 }
 
-pub fn verify_fragment(
-    first_chain: usize,
-    signature_fragment: &[u8],
-    verification_key_fragment: &[u8],
-    message: &[u8; MESSAGE_BYTE_LENGTH],
-) -> Result<bool, ActionSignatureError> {
-    let chain_count = fragment_chain_count(first_chain, signature_fragment.len())?;
-    if verification_key_fragment.len() != chain_count * CHAIN_VALUE_BYTE_LENGTH {
-        return Err(ActionSignatureError::InvalidFragmentLength);
-    }
-    let digits = message_digits(message);
-    let candidate = transform_fragment(first_chain, signature_fragment, |chain_index| {
-        MAXIMUM_CHAIN_STEP_COUNT - digits[chain_index]
-    })?;
-    let mut difference = 0_u8;
-    for (left, right) in candidate.iter().zip(verification_key_fragment) {
-        difference |= left ^ right;
-    }
-    Ok(difference == 0)
+pub fn derive_verification_key(
+    secret_key: &[u8],
+) -> Result<[u8; VERIFICATION_KEY_BYTE_LENGTH], ActionSignatureError> {
+    let mut bytes: [u8; SECRET_KEY_BYTE_LENGTH] = secret_key
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidSecretKeyLength)?;
+    let parsed = ml_dsa_65::PrivateKey::try_from_bytes(bytes);
+    bytes.zeroize();
+    let parsed = parsed.map_err(|_| ActionSignatureError::InvalidSecretKey)?;
+    Ok(parsed.get_public_key().into_bytes())
 }
 
-pub fn verify_complete(
+pub fn validate_verification_key(verification_key: &[u8]) -> Result<(), ActionSignatureError> {
+    let bytes: [u8; VERIFICATION_KEY_BYTE_LENGTH] = verification_key
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidVerificationKeyLength)?;
+    let parsed = ml_dsa_65::PublicKey::try_from_bytes(bytes)
+        .map_err(|_| ActionSignatureError::InvalidVerificationKey)?;
+    if parsed.into_bytes() != bytes {
+        return Err(ActionSignatureError::InvalidVerificationKey);
+    }
+    Ok(())
+}
+
+pub fn sign(
+    secret_key: &[u8],
+    signing_randomness: &[u8],
+    message: &[u8],
+) -> Result<[u8; SIGNATURE_BYTE_LENGTH], ActionSignatureError> {
+    if message.len() != MESSAGE_BYTE_LENGTH {
+        return Err(ActionSignatureError::InvalidMessageLength);
+    }
+    let mut secret_key_bytes: [u8; SECRET_KEY_BYTE_LENGTH] = secret_key
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidSecretKeyLength)?;
+    let signing_seed: &[u8; SIGNING_RANDOMNESS_BYTE_LENGTH] = signing_randomness
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidSigningRandomnessLength)?;
+    let parsed = ml_dsa_65::PrivateKey::try_from_bytes(secret_key_bytes);
+    secret_key_bytes.zeroize();
+    let parsed = parsed.map_err(|_| ActionSignatureError::InvalidSecretKey)?;
+    parsed
+        .try_sign_with_seed(signing_seed, message, SIGNATURE_CONTEXT)
+        .map_err(|_| ActionSignatureError::SigningFailed)
+}
+
+pub fn verify(
     signature: &[u8],
     verification_key: &[u8],
-    message: &[u8; MESSAGE_BYTE_LENGTH],
+    message: &[u8],
 ) -> Result<bool, ActionSignatureError> {
-    if signature.len() != KEY_BYTE_LENGTH || verification_key.len() != KEY_BYTE_LENGTH {
-        return Err(ActionSignatureError::InvalidFragmentLength);
+    if message.len() != MESSAGE_BYTE_LENGTH {
+        return Err(ActionSignatureError::InvalidMessageLength);
     }
-    for first_chain in (0..CHAIN_COUNT).step_by(MAXIMUM_FRAGMENT_CHAIN_COUNT) {
-        let chain_count = MAXIMUM_FRAGMENT_CHAIN_COUNT.min(CHAIN_COUNT - first_chain);
-        let start = first_chain * CHAIN_VALUE_BYTE_LENGTH;
-        let end = start + chain_count * CHAIN_VALUE_BYTE_LENGTH;
-        if !verify_fragment(
-            first_chain,
-            &signature[start..end],
-            &verification_key[start..end],
-            message,
-        )? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+    let signature: &[u8; SIGNATURE_BYTE_LENGTH] = signature
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidSignatureLength)?;
+    let verification_key_bytes: [u8; VERIFICATION_KEY_BYTE_LENGTH] = verification_key
+        .try_into()
+        .map_err(|_| ActionSignatureError::InvalidVerificationKeyLength)?;
+    let verification_key = ml_dsa_65::PublicKey::try_from_bytes(verification_key_bytes)
+        .map_err(|_| ActionSignatureError::InvalidVerificationKey)?;
+    Ok(verification_key.verify(message, signature, SIGNATURE_CONTEXT))
 }
 
 #[cfg(test)]
 mod tests {
+    use sha3::{Digest, Sha3_512};
+
     use super::*;
 
-    fn deterministic_secret_key() -> Vec<u8> {
-        (0..KEY_BYTE_LENGTH)
-            .map(|index| ((index * 29 + 17) % 251) as u8)
-            .collect()
-    }
-
-    fn transform_complete(
-        input: &[u8],
-        operation: impl Fn(usize, &[u8]) -> Result<Vec<u8>, ActionSignatureError>,
-    ) -> Vec<u8> {
-        let mut output = Vec::with_capacity(KEY_BYTE_LENGTH);
-        for first_chain in (0..CHAIN_COUNT).step_by(MAXIMUM_FRAGMENT_CHAIN_COUNT) {
-            let chain_count = MAXIMUM_FRAGMENT_CHAIN_COUNT.min(CHAIN_COUNT - first_chain);
-            let start = first_chain * CHAIN_VALUE_BYTE_LENGTH;
-            let end = start + chain_count * CHAIN_VALUE_BYTE_LENGTH;
-            output.extend_from_slice(
-                &operation(first_chain, &input[start..end]).expect("fragment transforms"),
-            );
-        }
-        output
+    fn decode_hex<const BYTE_LENGTH: usize>(hex: &str) -> [u8; BYTE_LENGTH] {
+        assert_eq!(hex.len(), 2 * BYTE_LENGTH);
+        core::array::from_fn(|index| {
+            u8::from_str_radix(&hex[2 * index..2 * index + 2], 16).expect("valid hex")
+        })
     }
 
     #[test]
-    fn complete_signature_round_trip_and_mutations() {
-        let secret_key = deterministic_secret_key();
-        let message = [0x5a_u8; MESSAGE_BYTE_LENGTH];
-        let verification_key = transform_complete(&secret_key, |first_chain, fragment| {
-            derive_verification_key_fragment(first_chain, fragment)
-        });
-        let mut signature = transform_complete(&secret_key, |first_chain, fragment| {
-            sign_fragment(first_chain, fragment, &message)
-        });
+    fn matches_nist_acvp_ml_dsa_65_keygen_case_26() {
+        let seed =
+            decode_hex::<32>("70cefb9aed5b68e018b079da8284b9d5cad5499ed9c265ff73588005d85c225c");
+        let expected_verification_key_digest = decode_hex::<64>(
+            "3357389623a4b6b103258dcd53eab9316ce115c23c4cbe96d20aa4dc852e275e\
+             0f3518c550a9cc007a3ca5232d91a76e37263a043c505c7b879503c5fcc87e26",
+        );
+        let expected_secret_key_digest = decode_hex::<64>(
+            "fd032e6a5923c19c131710f71e9f952215aa3b79eb56083746540223d80d461e\
+             33058cd6e6a2d477fb9b8b40517420e924d98f86177c31fc1c9c0d64368586df",
+        );
+        let key_pair = generate_key_pair(&seed).expect("ACVP seed generates a key pair");
+        assert_eq!(
+            Sha3_512::digest(key_pair.verification_key).as_slice(),
+            expected_verification_key_digest,
+        );
+        assert_eq!(
+            Sha3_512::digest(key_pair.secret_key).as_slice(),
+            expected_secret_key_digest,
+        );
+    }
 
-        for first_chain in (0..CHAIN_COUNT).step_by(MAXIMUM_FRAGMENT_CHAIN_COUNT) {
-            let chain_count = MAXIMUM_FRAGMENT_CHAIN_COUNT.min(CHAIN_COUNT - first_chain);
-            let start = first_chain * CHAIN_VALUE_BYTE_LENGTH;
-            let end = start + chain_count * CHAIN_VALUE_BYTE_LENGTH;
-            assert!(
-                verify_fragment(
-                    first_chain,
-                    &signature[start..end],
-                    &verification_key[start..end],
+    #[test]
+    fn exact_ml_dsa_65_round_trip_and_mutations() {
+        let key_pair = generate_key_pair(&[0x23; KEY_GENERATION_RANDOMNESS_BYTE_LENGTH])
+            .expect("ML-DSA key generation succeeds");
+        assert_eq!(key_pair.secret_key.len(), 4_032);
+        assert_eq!(key_pair.verification_key.len(), 1_952);
+        assert_eq!(
+            derive_verification_key(&key_pair.secret_key)
+                .expect("verification key derives from the serialized secret"),
+            key_pair.verification_key,
+        );
+
+        let message = [0x5a; MESSAGE_BYTE_LENGTH];
+        let mut signature = sign(
+            &key_pair.secret_key,
+            &[0x91; SIGNING_RANDOMNESS_BYTE_LENGTH],
+            &message,
+        )
+        .expect("ML-DSA signing succeeds");
+        assert_eq!(signature.len(), 3_309);
+        assert!(
+            verify(&signature, &key_pair.verification_key, &message)
+                .expect("ML-DSA verification runs")
+        );
+
+        signature[1_709] ^= 1;
+        assert!(
+            !verify(&signature, &key_pair.verification_key, &message)
+                .expect("mutated signature remains structurally parseable")
+        );
+        assert!(
+            !verify(
+                &sign(
+                    &key_pair.secret_key,
+                    &[0x91; SIGNING_RANDOMNESS_BYTE_LENGTH],
                     &message,
                 )
-                .expect("valid fragment")
-            );
-        }
-
-        signature[47] ^= 1;
-        assert!(
-            !verify_fragment(
-                0,
-                &signature[..MAXIMUM_FRAGMENT_CHAIN_COUNT * CHAIN_VALUE_BYTE_LENGTH],
-                &verification_key[..MAXIMUM_FRAGMENT_CHAIN_COUNT * CHAIN_VALUE_BYTE_LENGTH],
-                &message,
+                .expect("replacement signature"),
+                &key_pair.verification_key,
+                &[0xa5; MESSAGE_BYTE_LENGTH],
             )
-            .expect("mutated fragment is structurally valid")
-        );
-
-        let different_message = [0xa5_u8; MESSAGE_BYTE_LENGTH];
-        assert!(
-            !verify_fragment(
-                0,
-                &signature[..MAXIMUM_FRAGMENT_CHAIN_COUNT * CHAIN_VALUE_BYTE_LENGTH],
-                &verification_key[..MAXIMUM_FRAGMENT_CHAIN_COUNT * CHAIN_VALUE_BYTE_LENGTH],
-                &different_message,
-            )
-            .expect("different-message fragment is structurally valid")
+            .expect("different-message verification runs")
         );
     }
 
     #[test]
-    fn fragment_bounds_fail_before_hashing() {
+    fn exact_lengths_and_key_validation_fail_closed() {
+        let key_pair = generate_key_pair(&[0x24; KEY_GENERATION_RANDOMNESS_BYTE_LENGTH])
+            .expect("ML-DSA key generation succeeds");
+        assert!(matches!(
+            generate_key_pair(&[0; KEY_GENERATION_RANDOMNESS_BYTE_LENGTH - 1]),
+            Err(ActionSignatureError::InvalidKeyGenerationRandomnessLength),
+        ));
         assert_eq!(
-            derive_verification_key_fragment(0, &[]),
-            Err(ActionSignatureError::EmptyFragment)
-        );
-        assert_eq!(
-            derive_verification_key_fragment(0, &[0_u8; CHAIN_VALUE_BYTE_LENGTH + 1]),
-            Err(ActionSignatureError::InvalidFragmentLength)
-        );
-        assert_eq!(
-            derive_verification_key_fragment(
-                0,
-                &[0_u8; (MAXIMUM_FRAGMENT_CHAIN_COUNT + 1) * CHAIN_VALUE_BYTE_LENGTH],
+            sign(
+                &key_pair.secret_key,
+                &[0; SIGNING_RANDOMNESS_BYTE_LENGTH - 1],
+                &[0; MESSAGE_BYTE_LENGTH],
             ),
-            Err(ActionSignatureError::FragmentTooLarge)
+            Err(ActionSignatureError::InvalidSigningRandomnessLength),
         );
         assert_eq!(
-            derive_verification_key_fragment(CHAIN_COUNT, &[0_u8; CHAIN_VALUE_BYTE_LENGTH],),
-            Err(ActionSignatureError::InvalidFragmentRange)
+            sign(
+                &key_pair.secret_key[..SECRET_KEY_BYTE_LENGTH - 1],
+                &[0; SIGNING_RANDOMNESS_BYTE_LENGTH],
+                &[0; MESSAGE_BYTE_LENGTH],
+            ),
+            Err(ActionSignatureError::InvalidSecretKeyLength),
+        );
+        assert_eq!(
+            validate_verification_key(
+                &key_pair.verification_key[..VERIFICATION_KEY_BYTE_LENGTH - 1]
+            ),
+            Err(ActionSignatureError::InvalidVerificationKeyLength),
         );
     }
 }

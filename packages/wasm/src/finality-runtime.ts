@@ -1,5 +1,4 @@
-import { actionKeySetBodyByteLength } from './action-key-set-runtime.js';
-import { actionSignatureKeyByteLength } from './action-signature-runtime.js';
+import { actionSignatureByteLength } from './action-signature-runtime.js';
 import {
     ConstructionCommandWriter,
     executeConstructionCommand,
@@ -7,6 +6,7 @@ import {
 } from './construction-kernel-command-runtime.js';
 import type { ConstructionKernelCommandRuntime } from './foundation-kernel/kernel-runtime.js';
 import { actionSignatureCarrierByteLength } from './preparation-parent-runtime.js';
+import { completionRosterByteLength } from './roster-runtime.js';
 import {
     abstentionSourceBodyByteLength,
     submittedSourceBodyByteLength,
@@ -32,7 +32,7 @@ type FinalityDerivationContext = Readonly<{
     candidateBuildIdentity: Uint8Array;
     actionProposalIdentity: Uint8Array;
     actionDefinitionIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     preparationAttempt: number;
     predecessorIdentity: Uint8Array;
     verifiedPreparationRoot: Uint8Array;
@@ -77,7 +77,7 @@ type VerifiedFinalityCapability = Readonly<{
 type FinalityRuntime = Readonly<{
     deriveTarget(
         context: FinalityDerivationContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         sources: readonly SourceCarrier[],
     ): DerivedFinalityTarget;
     encodeSignature(
@@ -87,13 +87,13 @@ type FinalityRuntime = Readonly<{
     ): Uint8Array;
     verifyCertificate(
         targetBody: Uint8Array,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         signatures: readonly FinalitySignatureCarrier[],
     ): VerifiedFinalityCapability;
     verifySignature(
         signerPosition: number,
         targetBody: Uint8Array,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         signature: Uint8Array,
     ): void;
 }>;
@@ -133,22 +133,12 @@ const targetKindFromCode = (value: number): FinalityTargetKind => {
     }
 };
 
-const validateActionKeySetBodies = (
-    actionKeySetBodies: readonly Uint8Array[],
-): void => {
-    if (actionKeySetBodies.length !== completionProfileParticipantCount) {
-        throw new RangeError(
-            'actionKeySetBodies must contain the complete roster.',
-        );
-    }
-    for (const body of actionKeySetBodies) {
-        requireExactConstructionBytes(
-            body,
-            actionKeySetBodyByteLength(completionProfileParticipantCount),
-            'actionKeySetBody',
-        );
-    }
-};
+const validateRoster = (canonicalRosterBytes: Uint8Array): void =>
+    requireExactConstructionBytes(
+        canonicalRosterBytes,
+        completionRosterByteLength,
+        'canonicalRosterBytes',
+    );
 
 const validateDerivationContext = (
     context: FinalityDerivationContext,
@@ -179,9 +169,9 @@ const validateDerivationContext = (
         'actionDefinitionIdentity',
     );
     requireExactConstructionBytes(
-        context.actionKeySetRosterIdentity,
+        context.rosterIdentity,
         identityByteLength,
-        'actionKeySetRosterIdentity',
+        'rosterIdentity',
     );
     requireUnsigned16(context.preparationAttempt, 'preparationAttempt');
     requireExactConstructionBytes(
@@ -208,9 +198,9 @@ const validateDerivationContext = (
 export const openFinalityRuntime = (
     kernel: ConstructionKernelCommandRuntime,
 ): FinalityRuntime => ({
-    deriveTarget: (context, actionKeySetBodies, sources) => {
+    deriveTarget: (context, canonicalRosterBytes, sources) => {
         validateDerivationContext(context);
-        validateActionKeySetBodies(actionKeySetBodies);
+        validateRoster(canonicalRosterBytes);
         if (sources.length !== completionProfileParticipantCount) {
             throw new RangeError(
                 'sources must contain one carrier per roster position.',
@@ -223,14 +213,12 @@ export const openFinalityRuntime = (
         request.writeFixed(context.candidateBuildIdentity);
         request.writeFixed(context.actionProposalIdentity);
         request.writeFixed(context.actionDefinitionIdentity);
-        request.writeFixed(context.actionKeySetRosterIdentity);
+        request.writeFixed(context.rosterIdentity);
         request.writeU16(context.preparationAttempt);
         request.writeFixed(context.predecessorIdentity);
         request.writeFixed(context.verifiedPreparationRoot);
         request.writeU16(context.topCount);
-        for (const body of actionKeySetBodies) {
-            request.writeBytes(body);
-        }
+        request.writeBytes(canonicalRosterBytes);
         for (const [position, source] of sources.entries()) {
             const expectedBodyByteLength =
                 source.declaration === 'submit'
@@ -303,7 +291,7 @@ export const openFinalityRuntime = (
         );
         requireExactConstructionBytes(
             signature,
-            actionSignatureKeyByteLength,
+            actionSignatureByteLength,
             'actionSignature',
         );
         const request = new ConstructionCommandWriter();
@@ -322,13 +310,13 @@ export const openFinalityRuntime = (
             return carrier;
         });
     },
-    verifyCertificate: (targetBody, actionKeySetBodies, signatures) => {
+    verifyCertificate: (targetBody, canonicalRosterBytes, signatures) => {
         requireExactConstructionBytes(
             targetBody,
             finalityTargetBodyByteLength,
             'finalityTargetBody',
         );
-        validateActionKeySetBodies(actionKeySetBodies);
+        validateRoster(canonicalRosterBytes);
         if (
             signatures.length < completionProfileFinalityQuorum ||
             signatures.length > completionProfileParticipantCount
@@ -341,9 +329,7 @@ export const openFinalityRuntime = (
         request.writeU8(verifyFinalityCertificateCommand);
         request.writeU16(completionProfileParticipantCount);
         request.writeBytes(targetBody);
-        for (const body of actionKeySetBodies) {
-            request.writeBytes(body);
-        }
+        request.writeBytes(canonicalRosterBytes);
         request.writeU16(signatures.length);
         for (const entry of signatures) {
             requirePosition(entry.signerPosition, 'signerPosition');
@@ -389,7 +375,7 @@ export const openFinalityRuntime = (
     verifySignature: (
         signerPosition,
         targetBody,
-        actionKeySetBodies,
+        canonicalRosterBytes,
         signature,
     ) => {
         requirePosition(signerPosition, 'signerPosition');
@@ -398,7 +384,7 @@ export const openFinalityRuntime = (
             finalityTargetBodyByteLength,
             'finalityTargetBody',
         );
-        validateActionKeySetBodies(actionKeySetBodies);
+        validateRoster(canonicalRosterBytes);
         requireExactConstructionBytes(
             signature,
             actionSignatureCarrierByteLength,
@@ -409,9 +395,7 @@ export const openFinalityRuntime = (
         request.writeU16(completionProfileParticipantCount);
         request.writeU16(signerPosition);
         request.writeBytes(targetBody);
-        for (const body of actionKeySetBodies) {
-            request.writeBytes(body);
-        }
+        request.writeBytes(canonicalRosterBytes);
         request.writeBytes(signature);
         executeConstructionCommand(kernel, request, () => undefined);
     },

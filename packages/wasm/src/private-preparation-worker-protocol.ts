@@ -35,21 +35,11 @@ export type PrivatePreparationWorkerRequest =
       }>
     | Readonly<{
           requestId: number;
-          operation: 'register-action-keys';
-          input: PrivatePreparationActionContext;
-      }>
-    | Readonly<{
-          requestId: number;
-          operation: 'confirm-action-key-roster';
-          input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
-          };
-      }>
-    | Readonly<{
-          requestId: number;
           operation: 'create-preparation-package';
           input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
+              canonicalRosterBytes: Uint8Array;
+              signingSecretKey: Uint8Array;
+              mailboxDecapsulationKey: Uint8Array;
               preparationAttempt: number;
           };
       }>
@@ -57,7 +47,7 @@ export type PrivatePreparationWorkerRequest =
           requestId: number;
           operation: 'consume-private-preparation';
           input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
+              canonicalRosterBytes: Uint8Array;
               preparationAttempt: number;
               parentBody: Uint8Array;
               parentSignature: Uint8Array;
@@ -68,7 +58,7 @@ export type PrivatePreparationWorkerRequest =
           requestId: number;
           operation: 'create-source-package';
           input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
+              canonicalRosterBytes: Uint8Array;
               preparationAttempt: number;
               preparationParents: readonly PreparationParentCarrier[];
               choice: SourcePublicationChoice;
@@ -78,7 +68,7 @@ export type PrivatePreparationWorkerRequest =
           requestId: number;
           operation: 'create-finality-signature';
           input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
+              canonicalRosterBytes: Uint8Array;
               preparationAttempt: number;
               sources: readonly SourceCarrier[];
               topCount: number;
@@ -88,7 +78,7 @@ export type PrivatePreparationWorkerRequest =
           requestId: number;
           operation: 'finalize-no-result';
           input: PrivatePreparationActionContext & {
-              actionKeySetBodies: readonly Uint8Array[];
+              canonicalRosterBytes: Uint8Array;
               preparationAttempt: number;
               sources: readonly SourceCarrier[];
               finalitySignatures: readonly FinalitySignatureCarrier[];
@@ -100,15 +90,6 @@ export type PrivatePreparationWorkerRequest =
           operation: 'read-tally-result';
           input: PrivatePreparationActionContext;
       }>;
-
-export type RegisteredActionKeys = Readonly<{
-    actionKeySetBody: Uint8Array;
-    actionKeySetIdentity: Uint8Array;
-}>;
-
-export type ConfirmedActionKeyRoster = Readonly<{
-    actionKeySetRosterIdentity: Uint8Array;
-}>;
 
 export type PublishedPreparationPackage = Readonly<{
     parentBody: Uint8Array;
@@ -145,12 +126,10 @@ type PrivatePreparationWorkerSuccess = Readonly<{
     requestId: number;
     ok: true;
     result:
-        | ConfirmedActionKeyRoster
         | PrivatePreparationConsumption
         | PublishedPreparationPackage
         | PublishedFinalityPackage
         | PublishedSourcePackage
-        | RegisteredActionKeys
         | TallyEvaluationProgress
         | Readonly<{ initialized: true }>;
 }>;

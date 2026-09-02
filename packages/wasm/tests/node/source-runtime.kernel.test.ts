@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { openActionKeySetRuntime } from '../../src/action-key-set-runtime.js';
 import {
-    actionSignatureKeyByteLength,
+    actionSignatureKeyGenerationRandomnessByteLength,
+    actionSignatureSigningRandomnessByteLength,
     openActionSignatureRuntime,
+    type ActionSignaturePurpose,
 } from '../../src/action-signature-runtime.js';
 import {
     ConstructionCommandWriter,
@@ -45,6 +46,7 @@ import {
     type GeneratedPreparationMaterial,
 } from '../../src/preparation-material-runtime.js';
 import { openPreparationParentRuntime } from '../../src/preparation-parent-runtime.js';
+import { openRosterRuntime } from '../../src/roster-runtime.js';
 import {
     abstentionSourceBodyByteLength,
     heldSubsetKeyVectorByteLength,
@@ -256,76 +258,100 @@ describe('source fixation scalar WASM runtime', () => {
             kernelUrl,
             { allowUnpinnedKernel: true },
         );
-        const signatureRuntime = openActionSignatureRuntime(kernel);
+        const rawSignatureRuntime = openActionSignatureRuntime(kernel);
+        const signatureContexts = new WeakMap<
+            Uint8Array,
+            { participantPosition: number; purpose: ActionSignaturePurpose }
+        >();
+        let signingOrdinal = 0n;
+        const signatureRuntime = {
+            generateKeyPair: rawSignatureRuntime.generateKeyPair,
+            signBodyIdentity: (
+                secretKey: Uint8Array,
+                bodyIdentity: Uint8Array,
+            ): Uint8Array => {
+                const context = signatureContexts.get(secretKey);
+                if (context === undefined) {
+                    throw new Error('test signature context is absent');
+                }
+                signingOrdinal += 1n;
+                return rawSignatureRuntime.signBodyIdentity(
+                    secretKey,
+                    context.participantPosition,
+                    context.purpose,
+                    bodyIdentity,
+                    deterministicBytes(
+                        actionSignatureSigningRandomnessByteLength,
+                        0x7_0000n + signingOrdinal,
+                    ),
+                );
+            },
+        };
         const pairRuntime = openPairEncryptionRuntime(kernel);
-        const keySetRuntime = openActionKeySetRuntime(kernel);
+        const rosterRuntime = openRosterRuntime(kernel);
         const materialRuntime = openPreparationMaterialRuntime(kernel);
         const parentRuntime = openPreparationParentRuntime(kernel);
         const sourceRuntime = openSourceRuntime(kernel);
         const finalityRuntime = openFinalityRuntime(kernel);
         const actionProposalIdentity = deterministicBytes(64, 0x1001n);
         const predecessorIdentity = deterministicBytes(64, 0x1002n);
-        const actionKeySetBodies: Uint8Array[] = [];
+        const rosterPublicKeys: Array<{
+            signingVerificationKey: Uint8Array;
+            mailboxEncapsulationKey: Uint8Array;
+        }> = [];
         const signatureSecretKeys: Uint8Array[][] = [];
-        const signatureVerificationKeysByParticipant: Uint8Array[][] = [];
-        const pairEncryptionKeysByParticipant: Uint8Array[][] = [];
+        const signaturePurposes = [
+            'preparation',
+            'source',
+            'finality',
+            'activation',
+        ] as const satisfies readonly ActionSignaturePurpose[];
 
         for (
             let participantPosition = 0;
             participantPosition < participantCount;
             participantPosition += 1
         ) {
-            const participantSignatureKeys = Array.from(
-                { length: 4 },
-                (_, purpose) =>
+            const participantSignatureKeyPair =
+                signatureRuntime.generateKeyPair(
                     deterministicBytes(
-                        actionSignatureKeyByteLength,
-                        0x2000n + BigInt(participantPosition * 16 + purpose),
+                        actionSignatureKeyGenerationRandomnessByteLength,
+                        0x2000n + BigInt(participantPosition),
                     ),
+                );
+            const participantSignatureKeys = signaturePurposes.map(
+                (purpose) => {
+                    const secretKey = Uint8Array.from(
+                        participantSignatureKeyPair.secretKey,
+                    );
+                    signatureContexts.set(secretKey, {
+                        participantPosition,
+                        purpose,
+                    });
+                    return secretKey;
+                },
             );
             signatureSecretKeys.push(participantSignatureKeys);
-            const signatureVerificationKeys = participantSignatureKeys.map(
-                (secretKey) =>
-                    signatureRuntime.deriveVerificationKey(secretKey),
+            const mailboxKeyPair = pairRuntime.generateKeyPair(
+                deterministicBytes(
+                    pairEncryptionKeyGenerationRandomnessByteLength,
+                    0x4000n + BigInt(participantPosition),
+                ),
             );
-            signatureVerificationKeysByParticipant.push(
-                signatureVerificationKeys,
-            );
-            const pairEncryptionKeys = Array.from(
-                { length: participantCount - 1 },
-                (_, pairIndex) =>
-                    pairRuntime.generateKeyPair(
-                        deterministicBytes(
-                            pairEncryptionKeyGenerationRandomnessByteLength,
-                            0x4000n +
-                                BigInt(participantPosition * 32 + pairIndex),
-                        ),
-                    ).encryptionKey,
-            );
-            pairEncryptionKeysByParticipant.push(pairEncryptionKeys);
-            actionKeySetBodies.push(
-                keySetRuntime.encode({
-                    participantCount,
-                    proposalIdentity: actionProposalIdentity,
-                    rosterPosition: participantPosition,
-                    nonce: deterministicBytes(
-                        32,
-                        0x6000n + BigInt(participantPosition),
-                    ),
-                    actionSignatureVerificationKeys: signatureVerificationKeys,
-                    pairEncryptionKeys,
-                }).body,
-            );
+            rosterPublicKeys.push({
+                signingVerificationKey:
+                    participantSignatureKeyPair.verificationKey,
+                mailboxEncapsulationKey: mailboxKeyPair.encryptionKey,
+            });
         }
 
-        const actionKeySetRosterIdentity = keySetRuntime.verifyCompleteRoster(
-            participantCount,
-            actionKeySetBodies,
-        );
+        const roster = rosterRuntime.encode(rosterPublicKeys);
+        const canonicalRosterBytes = roster.canonicalBytes;
+        const rosterIdentity = roster.rosterIdentity;
         const sourcePreparationContext: SourcePreparationContext = {
             participantCount,
             actionProposalIdentity,
-            actionKeySetRosterIdentity,
+            rosterIdentity,
             preparationAttempt: 7,
             predecessorIdentity,
         };
@@ -420,7 +446,7 @@ describe('source fixation scalar WASM runtime', () => {
         const sourcePreparation = sourceRuntime.verifyCompletePreparation(
             sourcePreparationContext,
             0,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             parents,
             contributionOpenings[0] ?? new Uint8Array(),
             pairwiseMasters[0] ?? new Uint8Array(),
@@ -487,7 +513,7 @@ describe('source fixation scalar WASM runtime', () => {
             sourceRuntime.verify(
                 submittedContext,
                 'submit',
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 submitted.body,
                 submittedSignature,
             ),
@@ -503,7 +529,7 @@ describe('source fixation scalar WASM runtime', () => {
         const abstainingPreparation = sourceRuntime.verifyCompletePreparation(
             sourcePreparationContext,
             abstainingPosition,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             parents,
             contributionOpenings[abstainingPosition] ?? new Uint8Array(),
             pairwiseMasters[abstainingPosition] ?? new Uint8Array(),
@@ -537,7 +563,7 @@ describe('source fixation scalar WASM runtime', () => {
             sourceRuntime.verify(
                 abstainingContext,
                 'abstain',
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 abstention.body,
                 abstentionSignature,
             ),
@@ -563,7 +589,7 @@ describe('source fixation scalar WASM runtime', () => {
             const preparation = sourceRuntime.verifyCompletePreparation(
                 sourcePreparationContext,
                 position,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 parents,
                 contributionOpenings[position] ?? new Uint8Array(),
                 pairwiseMasters[position] ?? new Uint8Array(),
@@ -597,7 +623,7 @@ describe('source fixation scalar WASM runtime', () => {
             candidateBuildIdentity: deterministicBytes(64, 0xb002n),
             actionProposalIdentity,
             actionDefinitionIdentity: deterministicBytes(64, 0xb003n),
-            actionKeySetRosterIdentity,
+            rosterIdentity,
             preparationAttempt: sourcePreparationContext.preparationAttempt,
             predecessorIdentity,
             verifiedPreparationRoot: sourcePreparation.root,
@@ -605,7 +631,7 @@ describe('source fixation scalar WASM runtime', () => {
         } as const;
         const target = finalityRuntime.deriveTarget(
             finalityContext,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             sources,
         );
         expect(target.targetBody).toHaveLength(finalityTargetBodyByteLength);
@@ -619,7 +645,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             finalityRuntime.deriveTarget(
                 finalityContext,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 sources,
             ),
         ).toEqual(target);
@@ -628,7 +654,7 @@ describe('source fixation scalar WASM runtime', () => {
             (_, index) =>
                 finalityRuntime.deriveTarget(
                     { ...finalityContext, topCount: index + 1 },
-                    actionKeySetBodies,
+                    canonicalRosterBytes,
                     sources,
                 ),
         );
@@ -643,14 +669,14 @@ describe('source fixation scalar WASM runtime', () => {
         expect(() =>
             finalityRuntime.deriveTarget(
                 { ...finalityContext, topCount: 0 },
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 sources,
             ),
         ).toThrow(RangeError);
         expect(() =>
             finalityRuntime.deriveTarget(
                 { ...finalityContext, topCount: participantCount + 1 },
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 sources,
             ),
         ).toThrow(RangeError);
@@ -679,7 +705,7 @@ describe('source fixation scalar WASM runtime', () => {
         }
         const firstCertificate = finalityRuntime.verifyCertificate(
             target.targetBody,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             finalitySignatures.slice(0, completionProfileFinalityQuorum),
         );
         expect(firstCertificate).toMatchObject({
@@ -692,7 +718,7 @@ describe('source fixation scalar WASM runtime', () => {
         finalityRuntime.verifySignature(
             0,
             target.targetBody,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             finalitySignatures[0]?.signature ?? new Uint8Array(),
         );
 
@@ -720,7 +746,7 @@ describe('source fixation scalar WASM runtime', () => {
         ).toBe(109_859);
         const jointContinuationCertificate = {
             targetBody: target.targetBody,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             signatures: finalitySignatures.slice(
                 0,
                 completionProfileFinalityQuorum,
@@ -942,14 +968,14 @@ describe('source fixation scalar WASM runtime', () => {
                 jointContinuationBodyIdentities[0] ?? new Uint8Array(),
             ).toString('hex'),
         ).toBe(
-            'cfa1f3582f3bbcedd07e2f2bdcc66205b7e8c7a56a35fae499b4739d70c05d74d339bfe6807460ba33c0d6acf46dd1adeefb42759d9787c41b537ed4f8963dce',
+            '760d6d9f072242110c2d1077674daa16775cc1d7e407b7dbc839ec6ec9a2228eb6d0dea3c138bc7b2538c9e826a5b9f368f2dfc6112e07082a5905d5ed036b4b',
         );
         expect(
             Buffer.from(evaluatedJointContinuation.batchIdentity).toString(
                 'hex',
             ),
         ).toBe(
-            '40753ad88d4fade4b01aa15fc0c61c5402a3c068c2c424fdbf05c573ce33b4825550bcab4c2d5ff07bea0e57138929984b45eb23f2b9572122a658c34953ce7a',
+            '678a81683e2dedbac4f34e22e70102cf107e7cc324cd749a7a2769514b8420149c169eb5c7e8505cfbbfd145161f410c0fefa3d5a9b56fc64b60c19b0a175aa2',
         );
         expect(evaluatedJointContinuation.batchIdentity).toHaveLength(64);
         expect(evaluatedJointContinuation.terminalBits).toEqual([
@@ -962,10 +988,8 @@ describe('source fixation scalar WASM runtime', () => {
             2 +
             4 +
             target.targetBody.byteLength +
-            actionKeySetBodies.reduce(
-                (length, body) => length + 4 + body.byteLength,
-                0,
-            ) +
+            4 +
+            canonicalRosterBytes.byteLength +
             2 +
             jointContinuationCertificate.signatures.reduce(
                 (length, entry) => length + 2 + 4 + entry.signature.byteLength,
@@ -981,7 +1005,7 @@ describe('source fixation scalar WASM runtime', () => {
                 (length, signature) => length + 4 + signature.byteLength,
                 0,
             );
-        expect(expectedEvaluationRequestByteLength).toBe(1_884_399);
+        expect(expectedEvaluationRequestByteLength).toBe(1_192_861);
         expect(observedEvaluationRequestByteLengths[0]).toBe(
             expectedEvaluationRequestByteLength,
         );
@@ -1038,7 +1062,7 @@ describe('source fixation scalar WASM runtime', () => {
                 activationSignatures,
             ),
         ).toEqual(evaluatedJointContinuation);
-        expect(observedEvaluationRequestByteLengths[1]).toBe(1_890_793);
+        expect(observedEvaluationRequestByteLengths[1]).toBe(1_196_276);
         expect(observedEvaluationRequestByteLengths[1]).toBeLessThanOrEqual(
             8_388_608,
         );
@@ -1072,7 +1096,7 @@ describe('source fixation scalar WASM runtime', () => {
                 activationSignatures,
             ),
         ).toEqual(evaluatedJointContinuation);
-        expect(observedEvaluationRequestByteLengths[2]).toBe(1_897_187);
+        expect(observedEvaluationRequestByteLengths[2]).toBe(1_199_691);
         expect(observedEvaluationRequestByteLengths[2]).toBeLessThanOrEqual(
             8_388_608,
         );
@@ -1644,9 +1668,7 @@ describe('source fixation scalar WASM runtime', () => {
         ): void => {
             request.writeU16(participantCount);
             request.writeBytes(certificate.targetBody);
-            for (const body of certificate.actionKeySetBodies) {
-                request.writeBytes(body);
-            }
+            request.writeBytes(certificate.canonicalRosterBytes);
             request.writeU16(certificate.signatures.length);
             for (const signature of certificate.signatures) {
                 request.writeU16(signature.signerPosition);
@@ -1913,15 +1935,12 @@ describe('source fixation scalar WASM runtime', () => {
                 'hex',
             ),
         ).toBe(
-            'd7440c5fb0738b51ade1cfc8e84b614e902af77d0a75dbda88a6c9fc13fff4e0cf5b304214bbafe4850a12fa31312b3298589d89a00758e10c7da4f84bf1956a',
+            '190b05ce0757ac589ebaed6d0a6d2100d2cbf34c78e5f95fb9394f38fc0c8ae6f5d4ec27a71fc34b06352844a9c3cc99a6f803122bd1112b78fa6751db143048',
         );
-        expect(paddedManifests[0]).toEqual(
-            Uint8Array.from(
-                Buffer.from(
-                    '534c504d0100bea6e1427b70f7d49e8165225702e2742af6c6f060597502a1de2bf74f15b805b3c708287205ad29579368960b176eee73cf1eaa925b38ac3fe0e308f5e81d066fb96c7ddb8fd1d847b8608460675c03ac902440d103fc97a23c5df76d08418514029b16ed4443549d75ff335aaeba2d4e0c28efd2b0fe28a2b4f1b870b7e1410a000000010000c4c722b87319a38e0bf5a0c7908b52a0572f230fd576ec7d71e96c624008f60100000000000000070000000101eb0d0100d7440c5fb0738b51ade1cfc8e84b614e902af77d0a75dbda88a6c9fc13fff4e0cf5b304214bbafe4850a12fa31312b3298589d89a00758e10c7da4f84bf1956a',
-                    'hex',
-                ),
-            ),
+        expect(
+            Buffer.from(paddedManifests[0] ?? new Uint8Array()).toString('hex'),
+        ).toBe(
+            '534c504d0100071b5ef9d8e86841ef2a19086325741266c030cca1f3c55a5c93f8d2daf77ee88b77d6cc6cdd9ad60778db0d2194bf0e7447b08a18de9dd94fcfadec3c5ca11b6fb96c7ddb8fd1d847b8608460675c03ac902440d103fc97a23c5df76d08418514029b16ed4443549d75ff335aaeba2d4e0c28efd2b0fe28a2b4f1b870b7e1410a000000010000c4c722b87319a38e0bf5a0c7908b52a0572f230fd576ec7d71e96c624008f60100000000000000070000000101eb0d0100190b05ce0757ac589ebaed6d0a6d2100d2cbf34c78e5f95fb9394f38fc0c8ae6f5d4ec27a71fc34b06352844a9c3cc99a6f803122bd1112b78fa6751db143048',
         );
         const firstPaddedChunk = paddedChunks[0];
         const firstPaddedManifest = paddedManifests[0];
@@ -1989,16 +2008,16 @@ describe('source fixation scalar WASM runtime', () => {
                 paddedManifestIdentities[0] ?? new Uint8Array(),
             ).toString('hex'),
         ).toBe(
-            'ce21c7d437e610c9dca8e1189cf0d114de9aef99f07e55e31f2041f83a4e8be002092a596e9ca3de906c173dec986addea33d14a95eac737f6a0f2855c9fc8b7',
+            'e036fe76fdf83f4e7812f4995f87170913e556ea4da015ad753c09438f96ac0963685c61e1355bfb6fa80553aa871bb819e55c2d6bc10a7cf325bec97054642b',
         );
         expect(Buffer.from(evaluatedPadded.batchIdentity).toString('hex')).toBe(
-            'cb4de859665a6c9ca42f37eb1366f3e368ac6fc8510013cbff68b974165b7e395160d31e17493e9194868786b0e1ae2dcc0670b8f0238c0b8e0b4ade97496607',
+            '09bf02f9ee4886dad43bf377c7e03e99be606bb848462f5f675cd5de1b4ecbca4a3fa7feed29ccca41ec10810b8687e22939ab610c050c96c15248a72298727c',
         );
         expect(evaluatedPadded.terminalBits).toEqual(
             evaluatedJointContinuation.terminalBits,
         );
         expect(evaluatedPadded.batchIdentity).toHaveLength(64);
-        expect(observedPaddedEvaluationRequestByteLengths).toEqual([1_479_379]);
+        expect(observedPaddedEvaluationRequestByteLengths).toEqual([787_841]);
         expect(
             observedPaddedEvaluationRequestByteLengths[0],
         ).toBeLessThanOrEqual(1_572_864);
@@ -2027,7 +2046,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(nineSignatureEvaluation).toEqual(evaluatedPadded);
         expect(tenSignatureEvaluation).toEqual(evaluatedPadded);
         expect(observedPaddedEvaluationRequestByteLengths).toEqual([
-            1_479_379, 1_485_773, 1_492_167,
+            787_841, 791_256, 794_671,
         ]);
         expect(
             Math.max(...observedPaddedEvaluationRequestByteLengths),
@@ -2771,7 +2790,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             finalityRuntime.verifyCertificate(
                 target.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures
                     .slice(0, completionProfileFinalityQuorum)
                     .reverse(),
@@ -2780,7 +2799,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             finalityRuntime.verifyCertificate(
                 target.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures.slice(
                     participantCount - completionProfileFinalityQuorum,
                 ),
@@ -2789,7 +2808,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             finalityRuntime.verifyCertificate(
                 target.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures.slice(0, completionProfileFinalityQuorum),
             ),
         ).toEqual(firstCertificate);
@@ -2798,21 +2817,21 @@ describe('source fixation scalar WASM runtime', () => {
             finalityRuntime.verifySignature(
                 1,
                 target.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures[0]?.signature ?? new Uint8Array(),
             ),
         ).toThrow(ConstructionKernelCommandError);
         expect(() =>
             finalityRuntime.verifyCertificate(
                 target.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures.slice(0, 7),
             ),
         ).toThrow(RangeError);
         expect(() =>
             finalityRuntime.verifyCertificate(
                 target.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 [
                     ...finalitySignatures.slice(0, 7),
                     finalitySignatures[0] ?? {
@@ -2827,47 +2846,52 @@ describe('source fixation scalar WASM runtime', () => {
         expect(() =>
             finalityRuntime.verifyCertificate(
                 mutatedTargetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures,
             ),
         ).toThrow(ConstructionKernelCommandError);
 
         const conflictingTarget = finalityRuntime.deriveTarget(
             { ...finalityContext, topCount: 2 },
-            actionKeySetBodies,
+            canonicalRosterBytes,
             sources,
         );
         expect(() =>
             finalityRuntime.verifyCertificate(
                 conflictingTarget.targetBody,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures.slice(0, completionProfileFinalityQuorum),
             ),
         ).toThrow(ConstructionKernelCommandError);
 
-        const unrelatedActionKeySetBodies = actionKeySetBodies.map(
-            (_body, participantPosition) =>
-                keySetRuntime.encode({
-                    participantCount,
-                    proposalIdentity: actionProposalIdentity,
-                    rosterPosition: participantPosition,
-                    nonce: deterministicBytes(
-                        32,
-                        0xc000n + BigInt(participantPosition),
-                    ),
-                    actionSignatureVerificationKeys:
-                        signatureVerificationKeysByParticipant[
-                            participantPosition
-                        ] ?? [],
-                    pairEncryptionKeys:
-                        pairEncryptionKeysByParticipant[participantPosition] ??
-                        [],
-                }).body,
+        const unrelatedSignatureKeyPair = rawSignatureRuntime.generateKeyPair(
+            deterministicBytes(
+                actionSignatureKeyGenerationRandomnessByteLength,
+                0xc000n,
+            ),
         );
+        const unrelatedMailboxKeyPair = pairRuntime.generateKeyPair(
+            deterministicBytes(
+                pairEncryptionKeyGenerationRandomnessByteLength,
+                0xc001n,
+            ),
+        );
+        const unrelatedRosterBytes = rosterRuntime.encode(
+            rosterPublicKeys.map((keys, participantPosition) =>
+                participantPosition === 0
+                    ? {
+                          signingVerificationKey:
+                              unrelatedSignatureKeyPair.verificationKey,
+                          mailboxEncapsulationKey:
+                              unrelatedMailboxKeyPair.encryptionKey,
+                      }
+                    : keys,
+            ),
+        ).canonicalBytes;
         expect(() =>
             finalityRuntime.verifyCertificate(
                 target.targetBody,
-                unrelatedActionKeySetBodies,
+                unrelatedRosterBytes,
                 finalitySignatures.slice(0, completionProfileFinalityQuorum),
             ),
         ).toThrow(ConstructionKernelCommandError);
@@ -2877,7 +2901,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(() =>
             finalityRuntime.verifyCertificate(
                 malformedCircuitTarget,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 finalitySignatures.slice(0, completionProfileFinalityQuorum),
             ),
         ).toThrow(ConstructionKernelCommandError);
@@ -2901,7 +2925,7 @@ describe('source fixation scalar WASM runtime', () => {
         };
         const noResultTarget = finalityRuntime.deriveTarget(
             finalityContext,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             allAbstainSources,
         );
         expect(noResultTarget.targetKind).toBe('no-result');
@@ -2930,7 +2954,7 @@ describe('source fixation scalar WASM runtime', () => {
         }
         const noResultCertificate = {
             targetBody: noResultTarget.targetBody,
-            actionKeySetBodies,
+            canonicalRosterBytes,
             signatures: noResultFinalitySignatures.slice(
                 0,
                 completionProfileFinalityQuorum,
@@ -2939,7 +2963,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             finalityRuntime.verifyCertificate(
                 noResultCertificate.targetBody,
-                noResultCertificate.actionKeySetBodies,
+                noResultCertificate.canonicalRosterBytes,
                 noResultCertificate.signatures,
             ).targetKind,
         ).toBe('no-result');
@@ -3009,7 +3033,7 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             finalityRuntime.deriveTarget(
                 finalityContext,
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 twoSubmissionSources,
             ).sourceSubmissionBitmap,
         ).toBe(0b11);
@@ -3032,7 +3056,7 @@ describe('source fixation scalar WASM runtime', () => {
             sourceRuntime.verify(
                 submittedContext,
                 'submit',
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 corruptVariant.body,
                 corruptSignature,
             ).correction,
@@ -3044,7 +3068,7 @@ describe('source fixation scalar WASM runtime', () => {
             sourceRuntime.verify(
                 submittedContext,
                 'submit',
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 mutatedBody,
                 submittedSignature,
             ),
@@ -3057,7 +3081,7 @@ describe('source fixation scalar WASM runtime', () => {
             sourceRuntime.verify(
                 wrongRoot,
                 'submit',
-                actionKeySetBodies,
+                canonicalRosterBytes,
                 submitted.body,
                 submittedSignature,
             ),

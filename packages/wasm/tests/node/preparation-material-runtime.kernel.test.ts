@@ -36,7 +36,7 @@ const deterministicBytes = (length: number, seed: bigint): Uint8Array => {
 const context: PreparationMaterialContextInput = {
     participantCount: 10,
     actionProposalIdentity: new Uint8Array(64).fill(0x11),
-    actionKeySetRosterIdentity: new Uint8Array(64).fill(0x22),
+    rosterIdentity: new Uint8Array(64).fill(0x22),
     preparationAttempt: 7,
     predecessorIdentity: new Uint8Array(64).fill(0x33),
     senderPosition: 2,

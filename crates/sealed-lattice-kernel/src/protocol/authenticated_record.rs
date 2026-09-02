@@ -12,13 +12,14 @@ pub const PLAINTEXT_BYTE_LENGTH: usize = 6_766;
 pub const TAG_BYTE_LENGTH: usize = 16;
 pub const SEALED_RECORD_BYTE_LENGTH: usize = PLAINTEXT_BYTE_LENGTH + TAG_BYTE_LENGTH;
 
-const ONE_RECORD_NONCE: [u8; 12] = [0_u8; 12];
+pub const NONCE_BYTE_LENGTH: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthenticatedRecordError {
     AuthenticationFailed,
     InvalidAssociatedDataLength,
     InvalidKeyLength,
+    InvalidNonceLength,
     InvalidPlaintextLength,
     InvalidSealedRecordLength,
 }
@@ -31,6 +32,7 @@ impl fmt::Display for AuthenticatedRecordError {
                 "private record associated data has the wrong length"
             }
             Self::InvalidKeyLength => "private record key has the wrong length",
+            Self::InvalidNonceLength => "private record nonce has the wrong length",
             Self::InvalidPlaintextLength => "private record plaintext has the wrong length",
             Self::InvalidSealedRecordLength => "private record has the wrong length",
         })
@@ -41,41 +43,50 @@ impl std::error::Error for AuthenticatedRecordError {}
 
 pub fn seal(
     key: &[u8],
+    nonce: &[u8],
     associated_data: &[u8],
     plaintext: &[u8],
 ) -> Result<Vec<u8>, AuthenticatedRecordError> {
-    require_lengths(key, associated_data)?;
+    let nonce = require_lengths(key, nonce, associated_data)?;
     if plaintext.len() != PLAINTEXT_BYTE_LENGTH {
         return Err(AuthenticatedRecordError::InvalidPlaintextLength);
     }
-    seal_with_nonce(key, &ONE_RECORD_NONCE, associated_data, plaintext)
+    seal_with_nonce(key, nonce, associated_data, plaintext)
 }
 
 pub fn open(
     key: &[u8],
+    nonce: &[u8],
     associated_data: &[u8],
     sealed_record: &[u8],
 ) -> Result<Vec<u8>, AuthenticatedRecordError> {
-    require_lengths(key, associated_data)?;
+    let nonce = require_lengths(key, nonce, associated_data)?;
     if sealed_record.len() != SEALED_RECORD_BYTE_LENGTH {
         return Err(AuthenticatedRecordError::InvalidSealedRecordLength);
     }
-    open_with_nonce(key, &ONE_RECORD_NONCE, associated_data, sealed_record)
+    open_with_nonce(key, nonce, associated_data, sealed_record)
 }
 
-fn require_lengths(key: &[u8], associated_data: &[u8]) -> Result<(), AuthenticatedRecordError> {
+fn require_lengths<'a>(
+    key: &[u8],
+    nonce: &'a [u8],
+    associated_data: &[u8],
+) -> Result<&'a [u8; NONCE_BYTE_LENGTH], AuthenticatedRecordError> {
     if key.len() != KEY_BYTE_LENGTH {
         return Err(AuthenticatedRecordError::InvalidKeyLength);
     }
+    let nonce = nonce
+        .try_into()
+        .map_err(|_| AuthenticatedRecordError::InvalidNonceLength)?;
     if associated_data.len() != ASSOCIATED_DATA_BYTE_LENGTH {
         return Err(AuthenticatedRecordError::InvalidAssociatedDataLength);
     }
-    Ok(())
+    Ok(nonce)
 }
 
 fn seal_with_nonce(
     key: &[u8],
-    nonce: &[u8; 12],
+    nonce: &[u8; NONCE_BYTE_LENGTH],
     associated_data: &[u8],
     plaintext: &[u8],
 ) -> Result<Vec<u8>, AuthenticatedRecordError> {
@@ -94,7 +105,7 @@ fn seal_with_nonce(
 
 fn open_with_nonce(
     key: &[u8],
-    nonce: &[u8; 12],
+    nonce: &[u8; NONCE_BYTE_LENGTH],
     associated_data: &[u8],
     sealed_record: &[u8],
 ) -> Result<Vec<u8>, AuthenticatedRecordError> {
@@ -162,10 +173,11 @@ mod tests {
         let plaintext = (0..PLAINTEXT_BYTE_LENGTH)
             .map(|index| ((index * 37 + 11) % 251) as u8)
             .collect::<Vec<_>>();
-        let sealed = seal(&key, &associated_data, &plaintext).expect("record seals");
+        let nonce = [0x73_u8; NONCE_BYTE_LENGTH];
+        let sealed = seal(&key, &nonce, &associated_data, &plaintext).expect("record seals");
         assert_eq!(sealed.len(), SEALED_RECORD_BYTE_LENGTH);
         assert_eq!(
-            open(&key, &associated_data, &sealed).expect("record opens"),
+            open(&key, &nonce, &associated_data, &sealed).expect("record opens"),
             plaintext
         );
 
@@ -173,7 +185,7 @@ mod tests {
             let mut mutated = sealed.clone();
             mutated[mutation_index] ^= 1;
             assert_eq!(
-                open(&key, &associated_data, &mutated),
+                open(&key, &nonce, &associated_data, &mutated),
                 Err(AuthenticatedRecordError::AuthenticationFailed)
             );
         }
@@ -181,14 +193,21 @@ mod tests {
         let mut wrong_associated_data = associated_data;
         wrong_associated_data[0] ^= 1;
         assert_eq!(
-            open(&key, &wrong_associated_data, &sealed),
+            open(&key, &nonce, &wrong_associated_data, &sealed),
             Err(AuthenticatedRecordError::AuthenticationFailed)
         );
 
         let mut wrong_key = key;
         wrong_key[31] ^= 1;
         assert_eq!(
-            open(&wrong_key, &associated_data, &sealed),
+            open(&wrong_key, &nonce, &associated_data, &sealed),
+            Err(AuthenticatedRecordError::AuthenticationFailed)
+        );
+
+        let mut wrong_nonce = nonce;
+        wrong_nonce[0] ^= 1;
+        assert_eq!(
+            open(&key, &wrong_nonce, &associated_data, &sealed),
             Err(AuthenticatedRecordError::AuthenticationFailed)
         );
     }
@@ -197,20 +216,26 @@ mod tests {
     fn exact_record_lengths_are_enforced() {
         let key = [0_u8; KEY_BYTE_LENGTH];
         let associated_data = [0_u8; ASSOCIATED_DATA_BYTE_LENGTH];
+        let nonce = [0_u8; NONCE_BYTE_LENGTH];
         let plaintext = [0_u8; PLAINTEXT_BYTE_LENGTH];
         let sealed = [0_u8; SEALED_RECORD_BYTE_LENGTH];
 
         assert_eq!(
-            seal(&key[..31], &associated_data, &plaintext),
+            seal(&key[..31], &nonce, &associated_data, &plaintext),
             Err(AuthenticatedRecordError::InvalidKeyLength)
         );
         assert_eq!(
-            seal(&key, &associated_data[..355], &plaintext),
+            seal(&key, &nonce[..11], &associated_data, &plaintext),
+            Err(AuthenticatedRecordError::InvalidNonceLength)
+        );
+        assert_eq!(
+            seal(&key, &nonce, &associated_data[..355], &plaintext),
             Err(AuthenticatedRecordError::InvalidAssociatedDataLength)
         );
         assert_eq!(
             seal(
                 &key,
+                &nonce,
                 &associated_data,
                 &plaintext[..PLAINTEXT_BYTE_LENGTH - 1]
             ),
@@ -219,6 +244,7 @@ mod tests {
         assert_eq!(
             open(
                 &key,
+                &nonce,
                 &associated_data,
                 &sealed[..SEALED_RECORD_BYTE_LENGTH - 1]
             ),

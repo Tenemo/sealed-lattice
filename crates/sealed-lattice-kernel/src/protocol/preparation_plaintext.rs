@@ -242,7 +242,7 @@ impl Drop for HeldSubsetKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreparationMaterialContext {
     pub action_proposal_identity: Hash512,
-    pub action_key_set_roster_identity: Hash512,
+    pub roster_identity: Hash512,
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
     pub sender_position: u16,
@@ -276,7 +276,7 @@ pub fn generate_preparation_material(
         .map(|(ordinal, ((family, subset), opening))| {
             contribution_commitment(
                 context.action_proposal_identity,
-                context.action_key_set_roster_identity,
+                context.roster_identity,
                 context.preparation_attempt,
                 context.predecessor_identity,
                 *family,
@@ -327,8 +327,7 @@ pub fn verify_local_preparation_material(
 ) -> Result<(), PreparationPlaintextError> {
     if parent.participant_count() != COMPLETION_PROFILE_PARTICIPANT_COUNT
         || parent.action_proposal_identity() != expected_context.action_proposal_identity
-        || parent.action_key_set_roster_identity()
-            != expected_context.action_key_set_roster_identity
+        || parent.roster_identity() != expected_context.roster_identity
         || parent.preparation_attempt() != expected_context.preparation_attempt
         || parent.predecessor_identity() != expected_context.predecessor_identity
         || parent.sender_position() != expected_context.sender_position
@@ -455,8 +454,7 @@ pub fn verify_preparation_plaintext(
     validate_position(recipient_position)?;
     if parent.participant_count() != COMPLETION_PROFILE_PARTICIPANT_COUNT
         || parent.action_proposal_identity() != expected_context.action_proposal_identity
-        || parent.action_key_set_roster_identity()
-            != expected_context.action_key_set_roster_identity
+        || parent.roster_identity() != expected_context.roster_identity
         || parent.preparation_attempt() != expected_context.preparation_attempt
         || parent.predecessor_identity() != expected_context.predecessor_identity
         || parent.sender_position() != expected_context.sender_position
@@ -480,7 +478,7 @@ pub fn verify_preparation_plaintext(
         let (family, subset) = sender_slots[sender_index];
         let commitment = contribution_commitment(
             parent.action_proposal_identity(),
-            parent.action_key_set_roster_identity(),
+            parent.roster_identity(),
             parent.preparation_attempt(),
             parent.predecessor_identity(),
             family,
@@ -511,7 +509,7 @@ pub fn verify_preparation_plaintext(
 #[allow(clippy::too_many_arguments)]
 fn contribution_commitment(
     action_proposal_identity: Hash512,
-    action_key_set_roster_identity: Hash512,
+    roster_identity: Hash512,
     preparation_attempt: u16,
     predecessor_identity: Hash512,
     family: u16,
@@ -526,7 +524,7 @@ fn contribution_commitment(
         SUBSET_CONTRIBUTION_COMMITMENT_DOMAIN,
         &[
             CanonicalItem::hash512(action_proposal_identity.into_bytes()),
-            CanonicalItem::hash512(action_key_set_roster_identity.into_bytes()),
+            CanonicalItem::hash512(roster_identity.into_bytes()),
             CanonicalItem::unsigned16(preparation_attempt),
             CanonicalItem::hash512(predecessor_identity.into_bytes()),
             CanonicalItem::unsigned16(family),
@@ -587,7 +585,7 @@ mod tests {
     fn context() -> PreparationMaterialContext {
         PreparationMaterialContext {
             action_proposal_identity: Hash512::from_bytes([0x11; 64]),
-            action_key_set_roster_identity: Hash512::from_bytes([0x22; 64]),
+            roster_identity: Hash512::from_bytes([0x22; 64]),
             preparation_attempt: 7,
             predecessor_identity: Hash512::from_bytes([0x33; 64]),
             sender_position: 2,

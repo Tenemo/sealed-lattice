@@ -23,7 +23,7 @@ export const preparationSubsetCommitmentVectorByteLength =
 export type PreparationMaterialContextInput = Readonly<{
     participantCount: number;
     actionProposalIdentity: Uint8Array;
-    actionKeySetRosterIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
     preparationAttempt: number;
     predecessorIdentity: Uint8Array;
     senderPosition: number;
@@ -73,9 +73,9 @@ const validateContext = (context: PreparationMaterialContextInput): void => {
         'actionProposalIdentity',
     );
     requireExactConstructionBytes(
-        context.actionKeySetRosterIdentity,
+        context.rosterIdentity,
         identityByteLength,
-        'actionKeySetRosterIdentity',
+        'rosterIdentity',
     );
     requireUnsigned16(context.preparationAttempt, 'preparationAttempt');
     requireExactConstructionBytes(
@@ -92,7 +92,7 @@ const writeContext = (
 ): void => {
     validateContext(context);
     request.writeFixed(context.actionProposalIdentity);
-    request.writeFixed(context.actionKeySetRosterIdentity);
+    request.writeFixed(context.rosterIdentity);
     request.writeU16(context.preparationAttempt);
     request.writeFixed(context.predecessorIdentity);
     request.writeU16(context.senderPosition);

@@ -5,15 +5,15 @@ use aes::Aes256;
 use aes::cipher::{Block, BlockEncrypt, KeyInit};
 use zeroize::Zeroize;
 
-use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512, kmac256};
+use crate::foundation::{CanonicalItem, Hash512, Roster, hash_foundation_tuple_512, kmac256};
 
-use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
 use super::finality::{
     COMPLETION_PROFILE_PARTICIPANT_COUNT, FinalityTargetKind, VerifiedFinalityCapability,
 };
 use super::joint_continuation::{JointContinuationGate, JointContinuationPlan};
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
 use super::preparation_plaintext::{HeldSubsetKey, PairwiseMasterInventory};
+use super::roster::{require_roster_identity, signing_verification_key};
 use super::source::VerifiedCompletePreparation;
 
 pub const PADDED_LABEL_BYTE_LENGTH: usize = 40;
@@ -910,8 +910,7 @@ fn validate_preparation_context(
     let target = capability.target.context();
     if preparation.root != target.verified_preparation_root
         || preparation.context.action_proposal_identity != target.action_proposal_identity
-        || preparation.context.action_key_set_roster_identity
-            != target.action_key_set_roster_identity
+        || preparation.context.roster_identity != target.roster_identity
         || preparation.context.preparation_attempt != target.preparation_attempt
         || preparation.context.predecessor_identity != target.predecessor_identity
         || preparation.context.sender_position != participant_position
@@ -1467,23 +1466,21 @@ pub struct EvaluatedPaddedBatch {
 
 pub fn evaluate_signed_padded_batch(
     capability: &VerifiedFinalityCapability,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     manifests: &[Vec<u8>],
     signatures: &[Vec<u8>],
     chunks: &[Vec<u8>],
 ) -> Result<EvaluatedPaddedBatch, PaddedContinuationError> {
     validate_capability(capability)?;
     let participant_count = usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT);
-    if action_key_sets.len() != participant_count
-        || manifests.len() != participant_count
+    if manifests.len() != participant_count
         || signatures.len() != participant_count
         || chunks.len() != participant_count
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| PaddedContinuationError::InvalidContext)?
-            != capability.target.context().action_key_set_roster_identity
     {
         return Err(PaddedContinuationError::InvalidContext);
     }
+    require_roster_identity(roster, capability.target.context().roster_identity)
+        .map_err(|_| PaddedContinuationError::InvalidContext)?;
 
     let target = capability.target.context();
     let context = EvaluationContext {
@@ -1506,14 +1503,8 @@ pub fn evaluate_signed_padded_batch(
                 .ok_or(PaddedContinuationError::InvalidSignature)?,
         )
         .map_err(|_| PaddedContinuationError::InvalidSignature)?;
-        let verification_key = action_key_sets
-            .get(participant_position)
-            .and_then(|key_set| {
-                key_set.action_signature_verification_key(
-                    ActionSignaturePurpose::Activation.key_index(),
-                )
-            })
-            .ok_or(PaddedContinuationError::InvalidSignature)?;
+        let verification_key = signing_verification_key(roster, participant_position as u16)
+            .map_err(|_| PaddedContinuationError::InvalidSignature)?;
         carrier
             .verify(
                 participant_position as u16,

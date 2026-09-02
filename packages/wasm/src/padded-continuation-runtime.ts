@@ -1,5 +1,4 @@
-import { actionKeySetBodyByteLength } from './action-key-set-runtime.js';
-import { actionSignatureKeyByteLength } from './action-signature-runtime.js';
+import { actionSignatureByteLength } from './action-signature-runtime.js';
 import {
     ConstructionCommandWriter,
     executeConstructionCommand,
@@ -18,6 +17,7 @@ import {
     preparationPlaintextByteLength,
 } from './preparation-material-runtime.js';
 import { actionSignatureCarrierByteLength } from './preparation-parent-runtime.js';
+import { completionRosterByteLength } from './roster-runtime.js';
 
 const generateParticipantCommand = 38;
 const encodeActivationSignatureCommand = 39;
@@ -64,7 +64,7 @@ const reviewedReducedPlan: JointContinuationPlan = {
 
 type PaddedContinuationFinalityCertificate = Readonly<{
     targetBody: Uint8Array;
-    actionKeySetBodies: readonly Uint8Array[];
+    canonicalRosterBytes: Uint8Array;
     signatures: readonly FinalitySignatureCarrier[];
 }>;
 
@@ -217,14 +217,11 @@ const writeCertificate = (
         finalityTargetBodyByteLength,
         'targetBody',
     );
-    if (
-        certificate.actionKeySetBodies.length !==
-        completionProfileParticipantCount
-    ) {
-        throw new RangeError(
-            'actionKeySetBodies must contain the complete roster.',
-        );
-    }
+    requireExactConstructionBytes(
+        certificate.canonicalRosterBytes,
+        completionRosterByteLength,
+        'canonicalRosterBytes',
+    );
     if (
         certificate.signatures.length < completionProfileFinalityQuorum ||
         certificate.signatures.length > completionProfileParticipantCount
@@ -235,14 +232,7 @@ const writeCertificate = (
     }
     request.writeU16(completionProfileParticipantCount);
     request.writeBytes(certificate.targetBody);
-    for (const body of certificate.actionKeySetBodies) {
-        requireExactConstructionBytes(
-            body,
-            actionKeySetBodyByteLength(completionProfileParticipantCount),
-            'actionKeySetBody',
-        );
-        request.writeBytes(body);
-    }
+    request.writeBytes(certificate.canonicalRosterBytes);
     request.writeU16(certificate.signatures.length);
     for (const entry of certificate.signatures) {
         requirePosition(entry.signerPosition, 'signerPosition');
@@ -386,7 +376,7 @@ export const openPaddedContinuationRuntime = (
         );
         requireExactConstructionBytes(
             signature,
-            actionSignatureKeyByteLength,
+            actionSignatureByteLength,
             'actionSignature',
         );
         const request = new ConstructionCommandWriter();

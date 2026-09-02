@@ -1,7 +1,7 @@
 use core::fmt;
 
 use crate::foundation::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512, Roster,
     hash_foundation_tuple_512,
 };
 use crate::tally_circuit::{
@@ -9,8 +9,8 @@ use crate::tally_circuit::{
     compiler::compile_tally_circuit,
 };
 
-use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
+use super::roster::{require_roster_identity, signing_verification_key};
 use super::source::{SOURCE_ORDINAL, SourceContext, SourceDeclaration, verify_source_carrier};
 
 pub const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
@@ -20,9 +20,9 @@ pub const OUTPUT_ORDINAL: u64 = 0;
 pub const INDEPENDENT_HONEST_LOCK_LOSS_COUNT: u16 = 1;
 
 const FINALITY_TARGET_SCHEMA_IDENTIFIER: u16 = 0x0209;
-const FINALITY_TARGET_SCHEMA_VERSION: u16 = 3;
-const FINALITY_TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/finality-target/v1";
-const SOURCE_INVENTORY_ROOT_DOMAIN: &str = "sealed-lattice/construction/source-inventory-root/v1";
+const FINALITY_TARGET_SCHEMA_VERSION: u16 = 4;
+const FINALITY_TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/finality-target/v2";
+const SOURCE_INVENTORY_ROOT_DOMAIN: &str = "sealed-lattice/construction/source-inventory-root/v2";
 const TALLY_COMPILER_IDENTITY_DOMAIN: &str =
     "sealed-lattice/construction/tally-compiler-identity/v1";
 const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/tally-circuit-identity/v1";
@@ -106,7 +106,7 @@ pub struct FinalityDerivationContext {
     pub candidate_build_identity: Hash512,
     pub action_proposal_identity: Hash512,
     pub action_definition_identity: Hash512,
-    pub action_key_set_roster_identity: Hash512,
+    pub roster_identity: Hash512,
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
     pub verified_preparation_root: Hash512,
@@ -120,7 +120,7 @@ pub struct FinalityTargetContext {
     pub candidate_build_identity: Hash512,
     pub action_proposal_identity: Hash512,
     pub action_definition_identity: Hash512,
-    pub action_key_set_roster_identity: Hash512,
+    pub roster_identity: Hash512,
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
     pub verified_preparation_root: Hash512,
@@ -195,7 +195,7 @@ impl FinalityTarget {
                 CanonicalItem::hash512(self.context.candidate_build_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.action_proposal_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.action_definition_identity.into_bytes()),
-                CanonicalItem::hash512(self.context.action_key_set_roster_identity.into_bytes()),
+                CanonicalItem::hash512(self.context.roster_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.context.preparation_attempt),
                 CanonicalItem::hash512(self.context.predecessor_identity.into_bytes()),
                 CanonicalItem::hash512(self.context.verified_preparation_root.into_bytes()),
@@ -240,7 +240,7 @@ impl FinalityTarget {
             candidate_build_identity: read_hash512(&tuple.items[2])?,
             action_proposal_identity: read_hash512(&tuple.items[3])?,
             action_definition_identity: read_hash512(&tuple.items[4])?,
-            action_key_set_roster_identity: read_hash512(&tuple.items[5])?,
+            roster_identity: read_hash512(&tuple.items[5])?,
             preparation_attempt: read_unsigned16(&tuple.items[6])?,
             predecessor_identity: read_hash512(&tuple.items[7])?,
             verified_preparation_root: read_hash512(&tuple.items[8])?,
@@ -301,7 +301,7 @@ pub struct VerifiedFinalityTarget {
 #[allow(clippy::too_many_arguments)]
 pub fn derive_finality_target(
     context: FinalityDerivationContext,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     source_declarations: &[SourceDeclaration],
     source_bodies: &[Vec<u8>],
     source_signatures: &[Vec<u8>],
@@ -312,16 +312,14 @@ pub fn derive_finality_target(
         COMPLETION_PROFILE_OPTION_COUNT,
         context.top_count,
     )?;
-    if action_key_sets.len() != usize::from(context.participant_count)
-        || source_declarations.len() != usize::from(context.participant_count)
+    if source_declarations.len() != usize::from(context.participant_count)
         || source_bodies.len() != usize::from(context.participant_count)
         || source_signatures.len() != usize::from(context.participant_count)
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| FinalityError::WrongContext)?
-            != context.action_key_set_roster_identity
     {
         return Err(FinalityError::WrongContext);
     }
+    require_roster_identity(roster, context.roster_identity)
+        .map_err(|_| FinalityError::WrongContext)?;
 
     let mut source_body_identities = Vec::with_capacity(usize::from(context.participant_count));
     let mut source_identity_bytes =
@@ -338,7 +336,7 @@ pub fn derive_finality_target(
             SourceContext {
                 participant_count: context.participant_count,
                 action_proposal_identity: context.action_proposal_identity,
-                action_key_set_roster_identity: context.action_key_set_roster_identity,
+                roster_identity: context.roster_identity,
                 preparation_attempt: context.preparation_attempt,
                 predecessor_identity: context.predecessor_identity,
                 verified_preparation_root: context.verified_preparation_root,
@@ -346,7 +344,7 @@ pub fn derive_finality_target(
                 source_ordinal: SOURCE_ORDINAL,
             },
             Some(declaration),
-            action_key_sets,
+            roster,
             source_bodies
                 .get(usize::from(sender_position))
                 .ok_or(FinalityError::WrongItemTypeOrLength)?,
@@ -366,7 +364,7 @@ pub fn derive_finality_target(
         SOURCE_INVENTORY_ROOT_DOMAIN,
         &[
             CanonicalItem::hash512(context.action_proposal_identity.into_bytes()),
-            CanonicalItem::hash512(context.action_key_set_roster_identity.into_bytes()),
+            CanonicalItem::hash512(context.roster_identity.into_bytes()),
             CanonicalItem::unsigned16(context.preparation_attempt),
             CanonicalItem::hash512(context.predecessor_identity.into_bytes()),
             CanonicalItem::hash512(context.verified_preparation_root.into_bytes()),
@@ -382,7 +380,7 @@ pub fn derive_finality_target(
         candidate_build_identity: context.candidate_build_identity,
         action_proposal_identity: context.action_proposal_identity,
         action_definition_identity: context.action_definition_identity,
-        action_key_set_roster_identity: context.action_key_set_roster_identity,
+        roster_identity: context.roster_identity,
         preparation_attempt: context.preparation_attempt,
         predecessor_identity: context.predecessor_identity,
         verified_preparation_root: context.verified_preparation_root,
@@ -433,19 +431,16 @@ pub struct VerifiedFinalityCapability {
 
 pub fn verify_finality_certificate(
     target: &FinalityTarget,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     signatures: &[(u16, Vec<u8>)],
 ) -> Result<VerifiedFinalityCapability, FinalityError> {
     let participant_count = target.context().participant_count;
     validate_completion_profile(participant_count)?;
-    if action_key_sets.len() != usize::from(participant_count)
-        || signatures.len() > usize::from(participant_count)
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| FinalityError::WrongContext)?
-            != target.context().action_key_set_roster_identity
-    {
+    if signatures.len() > usize::from(participant_count) {
         return Err(FinalityError::WrongContext);
     }
+    require_roster_identity(roster, target.context().roster_identity)
+        .map_err(|_| FinalityError::WrongContext)?;
     let quorum = direct_finality_quorum(participant_count)?;
     if signatures.len() < usize::from(quorum) {
         return Err(FinalityError::InsufficientSignatures);
@@ -460,7 +455,7 @@ pub fn verify_finality_certificate(
         }
         verify_finality_signature_for_identity(
             participant_count,
-            action_key_sets,
+            roster,
             *signer_position,
             target_identity,
             signature_bytes,
@@ -475,23 +470,18 @@ pub fn verify_finality_certificate(
 
 pub fn verify_finality_signature(
     target: &FinalityTarget,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     signer_position: u16,
     signature_bytes: &[u8],
 ) -> Result<(), FinalityError> {
     let participant_count = target.context().participant_count;
     validate_completion_profile(participant_count)?;
     validate_position(participant_count, signer_position)?;
-    if action_key_sets.len() != usize::from(participant_count)
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| FinalityError::WrongContext)?
-            != target.context().action_key_set_roster_identity
-    {
-        return Err(FinalityError::WrongContext);
-    }
+    require_roster_identity(roster, target.context().roster_identity)
+        .map_err(|_| FinalityError::WrongContext)?;
     verify_finality_signature_for_identity(
         participant_count,
-        action_key_sets,
+        roster,
         signer_position,
         target.body_identity()?,
         signature_bytes,
@@ -500,19 +490,15 @@ pub fn verify_finality_signature(
 
 fn verify_finality_signature_for_identity(
     participant_count: u16,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     signer_position: u16,
     target_identity: Hash512,
     signature_bytes: &[u8],
 ) -> Result<(), FinalityError> {
     let carrier = ActionSignatureCarrier::decode(participant_count, signature_bytes)
         .map_err(|_| FinalityError::InvalidSignature)?;
-    let key_set = action_key_sets
-        .get(usize::from(signer_position))
-        .ok_or(FinalityError::WrongParticipantPosition)?;
-    let verification_key = key_set
-        .action_signature_verification_key(ActionSignaturePurpose::Finality.key_index())
-        .ok_or(FinalityError::WrongContext)?;
+    let verification_key = signing_verification_key(roster, signer_position)
+        .map_err(|_| FinalityError::WrongParticipantPosition)?;
     carrier
         .verify(
             signer_position,
@@ -772,7 +758,7 @@ mod tests {
             candidate_build_identity: hash(2),
             action_proposal_identity: hash(3),
             action_definition_identity: hash(8),
-            action_key_set_roster_identity: hash(4),
+            roster_identity: hash(4),
             preparation_attempt: 7,
             predecessor_identity: hash(5),
             verified_preparation_root: hash(6),

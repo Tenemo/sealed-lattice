@@ -3,7 +3,6 @@ import type {
     SourceCarrier,
 } from './finality-runtime.js';
 import type {
-    ConfirmedActionKeyRoster,
     PrivatePreparationActionContext,
     PrivatePreparationConsumption,
     PrivatePreparationWorkerInitialization,
@@ -12,7 +11,6 @@ import type {
     PublishedFinalityPackage,
     PublishedPreparationPackage,
     PublishedSourcePackage,
-    RegisteredActionKeys,
     SourcePublicationChoice,
     TallyEvaluationProgress,
 } from './private-preparation-worker-protocol.js';
@@ -33,8 +31,8 @@ const copyActionContext = (
     participantPosition: context.participantPosition,
 });
 
-const copyActionKeySetBodies = (bodies: readonly Uint8Array[]): Uint8Array[] =>
-    bodies.map(copyBytes);
+const copyCanonicalRosterBytes = (bytes: Uint8Array): Uint8Array =>
+    copyBytes(bytes);
 
 const copySources = (sources: readonly SourceCarrier[]): SourceCarrier[] =>
     sources.map((source) => ({
@@ -76,11 +74,14 @@ const collectRequestTransferables = (
         return transferables;
     }
     collect(request.input.actionProposalIdentity);
+    collect(request.input.actionDefinitionIdentity);
     collect(request.input.predecessorIdentity);
-    if ('actionKeySetBodies' in request.input) {
-        for (const body of request.input.actionKeySetBodies) {
-            collect(body);
-        }
+    if ('canonicalRosterBytes' in request.input) {
+        collect(request.input.canonicalRosterBytes);
+    }
+    if (request.operation === 'create-preparation-package') {
+        collect(request.input.signingSecretKey);
+        collect(request.input.mailboxDecapsulationKey);
     }
     if (request.operation === 'consume-private-preparation') {
         collect(request.input.parentBody);
@@ -189,38 +190,21 @@ export class PrivatePreparationWorkerClient {
         this.failAll(new Error('The private-preparation worker was closed.'));
     }
 
-    registerActionKeys(
-        context: PrivatePreparationActionContext,
-    ): Promise<RegisteredActionKeys> {
-        return this.send({
-            operation: 'register-action-keys',
-            input: copyActionContext(context),
-        });
-    }
-
-    confirmActionKeyRoster(
-        context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
-    ): Promise<ConfirmedActionKeyRoster> {
-        return this.send({
-            operation: 'confirm-action-key-roster',
-            input: {
-                ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
-            },
-        });
-    }
-
     createPreparationPackage(
         context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
+        signingSecretKey: Uint8Array,
+        mailboxDecapsulationKey: Uint8Array,
         preparationAttempt: number,
     ): Promise<PublishedPreparationPackage> {
         return this.send({
             operation: 'create-preparation-package',
             input: {
                 ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
+                signingSecretKey: copyBytes(signingSecretKey),
+                mailboxDecapsulationKey: copyBytes(mailboxDecapsulationKey),
                 preparationAttempt,
             },
         });
@@ -228,7 +212,7 @@ export class PrivatePreparationWorkerClient {
 
     consumePrivatePreparation(
         context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         parentBody: Uint8Array,
         parentSignature: Uint8Array,
@@ -238,7 +222,8 @@ export class PrivatePreparationWorkerClient {
             operation: 'consume-private-preparation',
             input: {
                 ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
                 preparationAttempt,
                 parentBody: copyBytes(parentBody),
                 parentSignature: copyBytes(parentSignature),
@@ -249,7 +234,7 @@ export class PrivatePreparationWorkerClient {
 
     createSourcePackage(
         context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         preparationParents: readonly Readonly<{
             body: Uint8Array;
@@ -261,7 +246,8 @@ export class PrivatePreparationWorkerClient {
             operation: 'create-source-package',
             input: {
                 ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
                 preparationAttempt,
                 preparationParents: preparationParents.map((parent) => ({
                     body: copyBytes(parent.body),
@@ -274,7 +260,7 @@ export class PrivatePreparationWorkerClient {
 
     createFinalitySignature(
         context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         sources: readonly SourceCarrier[],
         topCount: number,
@@ -283,7 +269,8 @@ export class PrivatePreparationWorkerClient {
             operation: 'create-finality-signature',
             input: {
                 ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
                 preparationAttempt,
                 sources: copySources(sources),
                 topCount,
@@ -293,7 +280,7 @@ export class PrivatePreparationWorkerClient {
 
     finalizeNoResult(
         context: PrivatePreparationActionContext,
-        actionKeySetBodies: readonly Uint8Array[],
+        canonicalRosterBytes: Uint8Array,
         preparationAttempt: number,
         sources: readonly SourceCarrier[],
         finalitySignatures: readonly FinalitySignatureCarrier[],
@@ -303,7 +290,8 @@ export class PrivatePreparationWorkerClient {
             operation: 'finalize-no-result',
             input: {
                 ...copyActionContext(context),
-                actionKeySetBodies: copyActionKeySetBodies(actionKeySetBodies),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
                 preparationAttempt,
                 sources: copySources(sources),
                 finalitySignatures: copyFinalitySignatures(finalitySignatures),

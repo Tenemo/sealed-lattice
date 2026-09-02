@@ -7,13 +7,13 @@ use sha3::{
 };
 use zeroize::Zeroize;
 
-use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
+use crate::foundation::{CanonicalItem, Hash512, Roster, hash_foundation_tuple_512};
 
-use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
 use super::finality::{
     COMPLETION_PROFILE_PARTICIPANT_COUNT, FinalityTargetKind, VerifiedFinalityCapability,
 };
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
+use super::roster::{require_roster_identity, signing_verification_key};
 
 pub const LABEL_BYTE_LENGTH: usize = 48;
 pub const MODULE_VALUE_BYTE_LENGTH: usize = 48;
@@ -628,22 +628,20 @@ pub struct EvaluatedJointContinuationBatch {
 
 pub fn evaluate_signed_batch(
     capability: &VerifiedFinalityCapability,
-    action_key_sets: &[ActionKeySet],
+    roster: &Roster,
     plan: &JointContinuationPlan,
     bodies: &[Vec<u8>],
     signatures: &[Vec<u8>],
 ) -> Result<EvaluatedJointContinuationBatch, JointContinuationError> {
     validate_capability(capability)?;
     validate_reviewed_reduced_plan(plan)?;
-    if action_key_sets.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
-        || action_key_set_roster_identity(action_key_sets)
-            .map_err(|_| JointContinuationError::InvalidContext)?
-            != capability.target.context().action_key_set_roster_identity
-        || bodies.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
+    if bodies.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
         || signatures.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
     {
         return Err(JointContinuationError::InvalidContext);
     }
+    require_roster_identity(roster, capability.target.context().roster_identity)
+        .map_err(|_| JointContinuationError::InvalidContext)?;
     let context = EvaluationContext {
         target_identity: capability.target_identity,
         plan_identity: plan.identity()?,
@@ -663,12 +661,8 @@ pub fn evaluate_signed_batch(
                 .ok_or(JointContinuationError::InvalidSignature)?,
         )
         .map_err(|_| JointContinuationError::InvalidSignature)?;
-        let key_set = action_key_sets
-            .get(position)
-            .ok_or(JointContinuationError::WrongParticipantPosition)?;
-        let verification_key = key_set
-            .action_signature_verification_key(ActionSignaturePurpose::Activation.key_index())
-            .ok_or(JointContinuationError::InvalidSignature)?;
+        let verification_key = signing_verification_key(roster, position as u16)
+            .map_err(|_| JointContinuationError::WrongParticipantPosition)?;
         carrier
             .verify(
                 position as u16,
