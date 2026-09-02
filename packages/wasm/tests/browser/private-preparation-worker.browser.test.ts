@@ -32,9 +32,12 @@ import {
 
 import { resolveManualEvidenceCase } from '#tests/manual-evidence-registry.js';
 import {
+    compileIndependentPaddedTallyModel,
+    expectedPaddedTallyRelationInventory,
     parsePaddedTallyChunk,
     parsePaddedTallyManifest,
     parsePaddedTallyTerminal,
+    summarizePaddedTallyRelation,
     type ParsedPaddedTallyChunk,
 } from '#tests/padded-tally-transcript-model.js';
 
@@ -866,6 +869,9 @@ const expectCompletePaddedTallyCeremony = async (
     mode: CompleteCeremonyMode = 'result',
 ): Promise<void> => {
     const repairPath = topCount === 1 && mode === 'result';
+    const independentModel = compileIndependentPaddedTallyModel(topCount);
+    const expectedRelationInventory =
+        expectedPaddedTallyRelationInventory(independentModel);
     const runIdentity = crypto.randomUUID();
     const relayDatabaseName = `sealed-lattice-relay-${runIdentity}`;
     databaseNames.add(relayDatabaseName);
@@ -995,6 +1001,51 @@ const expectCompletePaddedTallyCeremony = async (
             );
             plan ??= initialization.plan;
             expect(initialization.plan).toEqual(plan);
+            expect({
+                participantCount: initialization.plan.participantCount,
+                optionCount: initialization.plan.optionCount,
+                topCount: initialization.plan.topCount,
+                inputWireCount: initialization.plan.inputWireCount,
+                operationCount: initialization.plan.operationCount,
+                constantCount: initialization.plan.constantCount,
+                linearCount: initialization.plan.linearCount,
+                conjunctionCount: initialization.plan.conjunctionCount,
+                negationCount: initialization.plan.negationCount,
+                outputCount: initialization.plan.outputCount,
+                wireCount: initialization.plan.wireCount,
+                logicalPayloadByteLength:
+                    initialization.plan.logicalPayloadByteLength,
+                labelEntropyByteLength:
+                    initialization.plan.labelEntropyByteLength,
+                manifestByteLength: initialization.plan.manifestByteLength,
+                chunks: initialization.plan.chunks.map((chunk) => ({
+                    chunkByteLength: chunk.chunkByteLength,
+                    labelEntropyByteLength: chunk.labelEntropyByteLength,
+                })),
+            }).toEqual({
+                participantCount,
+                optionCount: participantCount,
+                topCount,
+                inputWireCount: independentModel.inputWireCount,
+                operationCount: independentModel.operations.length,
+                constantCount: independentModel.constantCount,
+                linearCount: independentModel.linearCount,
+                conjunctionCount: independentModel.conjunctionCount,
+                negationCount: independentModel.negationCount,
+                outputCount: independentModel.outputWires.length,
+                wireCount:
+                    independentModel.inputWireCount +
+                    independentModel.operations.length,
+                logicalPayloadByteLength:
+                    independentModel.logicalPayloadByteLength,
+                labelEntropyByteLength: independentModel.labelEntropyByteLength,
+                manifestByteLength:
+                    176 + 78 * independentModel.descriptors.length,
+                chunks: independentModel.descriptors.map((descriptor) => ({
+                    chunkByteLength: descriptor.chunkByteLength,
+                    labelEntropyByteLength: descriptor.labelEntropyByteLength,
+                })),
+            });
             for (
                 let chunkOrdinal = 0;
                 chunkOrdinal < initialization.plan.chunks.length;
@@ -1020,7 +1071,10 @@ const expectCompletePaddedTallyCeremony = async (
                     );
                 }
                 expect(generated.chunkOrdinal).toBe(chunkOrdinal);
-                const parsedChunk = parsePaddedTallyChunk(generated.chunk);
+                const parsedChunk = parsePaddedTallyChunk(
+                    generated.chunk,
+                    independentModel,
+                );
                 const parsedParticipantChunks =
                     parsedChunksByParticipant[participantPosition];
                 const participantChunkIdentities =
@@ -1087,6 +1141,7 @@ const expectCompletePaddedTallyCeremony = async (
                         generated.activationSignature;
                     const parsedManifest = parsePaddedTallyManifest(
                         generated.manifest,
+                        independentModel,
                     );
                     expect(parsedManifest.targetIdentity).toEqual(
                         canonicalTargetIdentity,
@@ -1147,6 +1202,11 @@ const expectCompletePaddedTallyCeremony = async (
         pendingActivationSignatures.some((signature) => signature === undefined)
     ) {
         throw new Error('The complete activation inventory is absent.');
+    }
+    for (const participantChunks of parsedChunksByParticipant) {
+        expect(summarizePaddedTallyRelation(participantChunks)).toEqual(
+            expectedRelationInventory,
+        );
     }
     const manifests = pendingManifests.map((manifest) => {
         if (manifest === undefined) {
