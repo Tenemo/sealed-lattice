@@ -9,6 +9,7 @@
     "include": [
         "packages/*/tests/**/*.ts",
         "tools/**/*.ts",
+        "tools/**/*.mjs",
         "tests/**/*.ts",
         "vitest.config.ts",
         "eslint.config.js"

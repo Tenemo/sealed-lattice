@@ -37,6 +37,16 @@ type ExactDeterministicTerm = Readonly<{
     consequence: 'pending' | 'security';
 }>;
 
+export type OperationKmacHistogramEntry = Readonly<{
+    phase: 'generation' | 'selected-evaluation';
+    family: 'continuation-row' | 'joint-row' | 'local-row';
+    keyClass: 'conditionally-derived-continuation' | 'independent-label';
+    keyByteLength: number;
+    messageByteLength: number;
+    outputByteLength: number;
+    invocationCount: number;
+}>;
+
 type CorrectnessFailure =
     | Readonly<{
           event: string;
@@ -142,6 +152,7 @@ export type FullTallySecurityLedger = Readonly<{
     }>;
     honestWork: Readonly<{
         symbol: 'sigma_honest';
+        operationKmacHistogram: readonly OperationKmacHistogramEntry[];
         operationGenerationKmacInvocationCount: number;
         operationGenerationKmacInputByteLength: number;
         operationGenerationKmacOutputByteLength: number;
@@ -261,6 +272,62 @@ export const compileFullTallySecurityLedger = (
         localSelectedEvaluationCallCount * localRowPadOutputByteLength +
         jointSelectedEvaluationCallCount * jointRowPadOutputByteLength +
         continuationTargetCount * continuationRowPadOutputByteLength;
+    const operationKmacHistogram: readonly OperationKmacHistogramEntry[] = [
+        {
+            phase: 'generation',
+            family: 'local-row',
+            keyClass: 'independent-label',
+            keyByteLength: operationKeyByteLength,
+            messageByteLength: directRowPadInputByteLength,
+            outputByteLength: localRowPadOutputByteLength,
+            invocationCount: localGenerationCallCount,
+        },
+        {
+            phase: 'generation',
+            family: 'joint-row',
+            keyClass: 'independent-label',
+            keyByteLength: operationKeyByteLength,
+            messageByteLength: directRowPadInputByteLength,
+            outputByteLength: jointRowPadOutputByteLength,
+            invocationCount: jointGenerationCallCount,
+        },
+        {
+            phase: 'generation',
+            family: 'continuation-row',
+            keyClass: 'conditionally-derived-continuation',
+            keyByteLength: operationKeyByteLength,
+            messageByteLength: continuationRowPadInputByteLength,
+            outputByteLength: continuationRowPadOutputByteLength,
+            invocationCount: operation.continuationOutputCount,
+        },
+        {
+            phase: 'selected-evaluation',
+            family: 'local-row',
+            keyClass: 'independent-label',
+            keyByteLength: operationKeyByteLength,
+            messageByteLength: directRowPadInputByteLength,
+            outputByteLength: localRowPadOutputByteLength,
+            invocationCount: localSelectedEvaluationCallCount,
+        },
+        {
+            phase: 'selected-evaluation',
+            family: 'joint-row',
+            keyClass: 'independent-label',
+            keyByteLength: operationKeyByteLength,
+            messageByteLength: directRowPadInputByteLength,
+            outputByteLength: jointRowPadOutputByteLength,
+            invocationCount: jointSelectedEvaluationCallCount,
+        },
+        {
+            phase: 'selected-evaluation',
+            family: 'continuation-row',
+            keyClass: 'conditionally-derived-continuation',
+            keyByteLength: operationKeyByteLength,
+            messageByteLength: continuationRowPadInputByteLength,
+            outputByteLength: continuationRowPadOutputByteLength,
+            invocationCount: continuationTargetCount,
+        },
+    ];
 
     const directLabelAllocationByteLength =
         tally.labelEntropyByteLength * participantCount;
@@ -418,6 +485,7 @@ export const compileFullTallySecurityLedger = (
         },
         honestWork: {
             symbol: 'sigma_honest',
+            operationKmacHistogram,
             operationGenerationKmacInvocationCount:
                 operation.generationCallCount,
             operationGenerationKmacInputByteLength,

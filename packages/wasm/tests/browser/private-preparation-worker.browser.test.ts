@@ -6,7 +6,10 @@ import {
     actionSignatureKeyGenerationRandomnessByteLength,
     openActionSignatureRuntime,
 } from '../../src/action-signature-runtime.js';
-import { instantiateConstructionKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
+import {
+    instantiateConstructionKernelCommandRuntime,
+    type KernelResourceMeasurement,
+} from '../../src/foundation-kernel/kernel-runtime.js';
 import {
     openPairEncryptionRuntime,
     pairEncryptionKeyGenerationRandomnessByteLength,
@@ -30,6 +33,7 @@ import {
     submittedSourceBodyByteLength,
 } from '../../src/source-runtime.js';
 
+import { compileFullTallyResourceModel } from '#tests/full-tally-resource-model.js';
 import {
     localRecordContextKey,
     parseIndependentLocalRecordContext,
@@ -66,6 +70,23 @@ const kernelUrl = new URL(
     '/packages/wasm/dist/sealed-lattice-kernel.wasm',
     window.location.origin,
 );
+let workerKernelObjectUrlPromise: Promise<string> | undefined;
+const resolveWorkerKernelUrl = (): Promise<string> => {
+    workerKernelObjectUrlPromise ??= (async () => {
+        const response = await fetch(kernelUrl, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(
+                `Failed to preload the worker kernel: HTTP ${String(response.status)}.`,
+            );
+        }
+        return URL.createObjectURL(
+            new Blob([await response.arrayBuffer()], {
+                type: 'application/wasm',
+            }),
+        );
+    })();
+    return workerKernelObjectUrlPromise;
+};
 const ordinaryWorkerUrl = new URL(
     './fixtures/private-preparation-test-worker.ts',
     import.meta.url,
@@ -491,7 +512,7 @@ const openClient = async (
         ordinaryWorkerUrl,
         {
             databaseName: name,
-            kernelUrl: kernelUrl.toString(),
+            kernelUrl: await resolveWorkerKernelUrl(),
             kernelOptions: { allowUnpinnedKernel: true },
             runtimeIdentity,
             candidateBuildIdentity,
@@ -743,7 +764,7 @@ const crashWorkerAtBoundary = async (
             operation: 'initialize',
             input: {
                 databaseName: databaseName(runIdentity, participantPosition),
-                kernelUrl: kernelUrl.toString(),
+                kernelUrl: await resolveWorkerKernelUrl(),
                 kernelOptions: { allowUnpinnedKernel: true },
                 runtimeIdentity,
                 candidateBuildIdentity,
@@ -1257,6 +1278,29 @@ const expectCompletePaddedTallyCeremony = async (
         { batchIdentity: Uint8Array }
     >;
     let acceptedTerminal: EvaluatedTallyTerminal | undefined;
+    let kernelResources: KernelResourceMeasurement = {
+        maximumRequestByteLength: 0,
+        maximumResponseByteLength: 0,
+        wasmMemoryByteLength: 0,
+    };
+    const observeKernelResources = (
+        resources: KernelResourceMeasurement,
+    ): void => {
+        kernelResources = {
+            maximumRequestByteLength: Math.max(
+                kernelResources.maximumRequestByteLength,
+                resources.maximumRequestByteLength,
+            ),
+            maximumResponseByteLength: Math.max(
+                kernelResources.maximumResponseByteLength,
+                resources.maximumResponseByteLength,
+            ),
+            wasmMemoryByteLength: Math.max(
+                kernelResources.wasmMemoryByteLength,
+                resources.wasmMemoryByteLength,
+            ),
+        };
+    };
     const direct = evaluateCeremonyBallotsDirectly(ballots, topCount);
     const acceptTerminal = (
         terminal: PaddedTallyEvaluationStep,
@@ -1266,6 +1310,7 @@ const expectCompletePaddedTallyCeremony = async (
                 'The complete ceremony did not return an evaluated terminal.',
             );
         }
+        observeKernelResources(terminal.resources);
         expect(terminal.acceptedBallotAuthorshipBitmap).toBe(
             direct.acceptedBallotAuthorshipBitmap,
         );
@@ -1823,6 +1868,21 @@ const expectCompletePaddedTallyCeremony = async (
         2 * quorumFinalityInventoryByteLength +
         activationInventoryByteLength +
         activationChunkCorpusByteLength;
+    const independentResourceModel = compileFullTallyResourceModel(
+        topCount,
+        ballots.filter((ballot) => ballot.declaration === 'submit').length,
+    );
+    expect(independentResourceModel).toMatchObject({
+        activationChunkCorpusByteLength,
+        activationInventoryByteLength,
+        cleanVerifiedDownloadByteLength,
+        maximumPrivatePreparationRecipientByteLength,
+        preparationParentInventoryByteLength,
+        sourceInventoryByteLength,
+    });
+    expect(kernelResources.maximumRequestByteLength).toBe(
+        independentResourceModel.maximumChunkEvaluationRequestByteLength,
+    );
     const relayWriteByteLength =
         relayWriteByteLengthByDatabase.get(relayDatabaseName) ?? 0;
     const relayReadByteLength =
@@ -1838,9 +1898,9 @@ const expectCompletePaddedTallyCeremony = async (
         Math.max(...plan.chunks.map((chunk) => chunk.chunkByteLength));
     const accountedJavaScriptWasmOverlapByteLength =
         maximumChunkSetByteLength +
-        acceptedTerminal.resources.maximumRequestByteLength +
-        acceptedTerminal.resources.maximumResponseByteLength +
-        acceptedTerminal.resources.wasmMemoryByteLength;
+        kernelResources.maximumRequestByteLength +
+        kernelResources.maximumResponseByteLength +
+        kernelResources.wasmMemoryByteLength;
     const generationKmacCallCountPerParticipant =
         independentModel.kmacCensus.generationCallCount / participantCount;
     if (!Number.isSafeInteger(generationKmacCallCountPerParticipant)) {
@@ -1903,7 +1963,7 @@ const expectCompletePaddedTallyCeremony = async (
             },
             storageUsageBefore: storageBefore.usage ?? null,
             storageUsageAfter: storageAfter.usage ?? null,
-            kernelResources: acceptedTerminal.resources,
+            kernelResources,
         }),
     );
 };
@@ -1922,6 +1982,13 @@ afterEach(async () => {
     longestVisitMillisecondsByRunIdentity.clear();
     relayReadByteLengthByDatabase.clear();
     relayWriteByteLengthByDatabase.clear();
+    const workerKernelObjectUrl = await workerKernelObjectUrlPromise?.catch(
+        () => undefined,
+    );
+    workerKernelObjectUrlPromise = undefined;
+    if (workerKernelObjectUrl !== undefined) {
+        URL.revokeObjectURL(workerKernelObjectUrl);
+    }
 });
 
 describe('private preparation worker in Chromium', () => {
@@ -2067,7 +2134,7 @@ describe('private preparation worker in Chromium', () => {
                         runIdentity,
                         crashRecipientPosition,
                     ),
-                    kernelUrl: kernelUrl.toString(),
+                    kernelUrl: await resolveWorkerKernelUrl(),
                     kernelOptions: { allowUnpinnedKernel: true },
                     runtimeIdentity,
                     candidateBuildIdentity,
@@ -2206,7 +2273,7 @@ describe('private preparation worker in Chromium', () => {
                 operation: 'initialize',
                 input: {
                     databaseName: databaseName(runIdentity, sourcePosition),
-                    kernelUrl: kernelUrl.toString(),
+                    kernelUrl: await resolveWorkerKernelUrl(),
                     kernelOptions: { allowUnpinnedKernel: true },
                     runtimeIdentity,
                     candidateBuildIdentity,

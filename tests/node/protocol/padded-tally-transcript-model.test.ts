@@ -184,7 +184,7 @@ describe('independent padded-tally transcript model', () => {
             maximumGenerationCheckpointByteLength: 1_263_064,
             maximumEvaluationCheckpointByteLength: 3_399_972,
             maximumChunkGenerationRequestByteLength: 1_445_984,
-            maximumChunkEvaluationRequestByteLength: 8_184_709,
+            maximumChunkEvaluationRequestByteLength: 3_873_081,
             maximumChunkGenerationResponseByteLength: 1_742_379,
             maximumChunkEvaluationResponseByteLength: 3_399_981,
         });

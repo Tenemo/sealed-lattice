@@ -38,6 +38,7 @@ use crate::protocol::source::{
     decode_held_subset_keys, derive_honest_source_correction, encode_held_subset_keys,
     verify_complete_preparation, verify_source_carrier,
 };
+use std::cell::RefCell;
 use zeroize::{Zeroize, Zeroizing};
 
 const GENERATE_ACTION_SIGNATURE_KEY_PAIR: u8 = 1;
@@ -78,9 +79,65 @@ const INITIALIZE_PADDED_TALLY_EVALUATION: u8 = 45;
 const EVALUATE_NEXT_PADDED_TALLY_CHUNK: u8 = 46;
 const ENCODE_PADDED_TALLY_ACTIVATION_SIGNATURE: u8 = 47;
 
+struct PaddedTallyEvaluationCommandInput {
+    checkpoint_key: Vec<u8>,
+    checkpoint: Vec<u8>,
+    participant_position: u16,
+    chunk: Vec<u8>,
+}
+
+impl Drop for PaddedTallyEvaluationCommandInput {
+    fn drop(&mut self) {
+        self.checkpoint_key.zeroize();
+        self.checkpoint.zeroize();
+        self.chunk.zeroize();
+    }
+}
+
+struct PaddedTallyEvaluationCommandStream {
+    checkpoint_key: Vec<u8>,
+    checkpoint: Vec<u8>,
+    chunks: Vec<Vec<u8>>,
+}
+
+impl Drop for PaddedTallyEvaluationCommandStream {
+    fn drop(&mut self) {
+        self.checkpoint_key.zeroize();
+        self.checkpoint.zeroize();
+        self.chunks.zeroize();
+    }
+}
+
+std::thread_local! {
+    static PADDED_TALLY_EVALUATION_COMMAND_STREAM:
+        RefCell<Option<PaddedTallyEvaluationCommandStream>> = const { RefCell::new(None) };
+}
+
+fn clear_padded_tally_evaluation_command_stream() {
+    PADDED_TALLY_EVALUATION_COMMAND_STREAM.with(|stream| {
+        stream.borrow_mut().take();
+    });
+}
+
 pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     let mut reader = BinaryReader::new(input);
-    let payload = match reader.read_u8()? {
+    let command = reader.read_u8()?;
+    if command == EVALUATE_NEXT_PADDED_TALLY_CHUNK {
+        let command_input = match read_evaluate_next_padded_tally_chunk_command(&mut reader) {
+            Ok(command_input) => command_input,
+            Err(error) => {
+                clear_padded_tally_evaluation_command_stream();
+                return Err(error);
+            }
+        };
+        if let Err(error) = reader.finish() {
+            clear_padded_tally_evaluation_command_stream();
+            return Err(error);
+        }
+        return evaluate_next_padded_tally_chunk_command(command_input);
+    }
+    clear_padded_tally_evaluation_command_stream();
+    let payload = match command {
         GENERATE_ACTION_SIGNATURE_KEY_PAIR => generate_action_signature_key(&mut reader),
         SIGN_ACTION_BODY_IDENTITY => sign(&mut reader),
         VERIFY_ACTION_SIGNATURE => verify(&mut reader),
@@ -132,7 +189,6 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
         INITIALIZE_PADDED_TALLY_EVALUATION => {
             initialize_padded_tally_evaluation_command(&mut reader)
         }
-        EVALUATE_NEXT_PADDED_TALLY_CHUNK => evaluate_next_padded_tally_chunk_command(&mut reader),
         ENCODE_PADDED_TALLY_ACTIVATION_SIGNATURE => {
             encode_padded_tally_activation_signature(&mut reader)
         }
@@ -318,16 +374,73 @@ fn initialize_padded_tally_evaluation_command(
     bytes_response(&checkpoint)
 }
 
-fn evaluate_next_padded_tally_chunk_command(
+fn read_evaluate_next_padded_tally_chunk_command(
     reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<PaddedTallyEvaluationCommandInput> {
+    Ok(PaddedTallyEvaluationCommandInput {
+        checkpoint_key: reader.read_bytes()?.to_vec(),
+        checkpoint: reader.read_bytes()?.to_vec(),
+        participant_position: reader.read_u16()?,
+        chunk: reader.read_bytes()?.to_vec(),
+    })
+}
+
+fn evaluate_next_padded_tally_chunk_command(
+    mut input: PaddedTallyEvaluationCommandInput,
 ) -> CanonicalResult<Vec<u8>> {
-    let checkpoint_key = reader.read_bytes()?;
-    let checkpoint = reader.read_bytes()?;
-    let chunks = (0..COMPLETION_PROFILE_PARTICIPANT_COUNT)
-        .map(|_| Ok(reader.read_bytes()?.to_vec()))
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let evaluated = evaluate_next_padded_tally_chunk(checkpoint_key, checkpoint, &chunks)
-        .map_err(construction_error)?;
+    if input.participant_position >= COMPLETION_PROFILE_PARTICIPANT_COUNT {
+        clear_padded_tally_evaluation_command_stream();
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "padded tally evaluation participant position is invalid",
+        ));
+    }
+    let completed_stream = PADDED_TALLY_EVALUATION_COMMAND_STREAM.with(|stream| {
+        let mut stream = stream.borrow_mut();
+        if input.participant_position == 0 {
+            *stream = Some(PaddedTallyEvaluationCommandStream {
+                checkpoint_key: core::mem::take(&mut input.checkpoint_key),
+                checkpoint: core::mem::take(&mut input.checkpoint),
+                chunks: vec![core::mem::take(&mut input.chunk)],
+            });
+            return Ok(None);
+        }
+        let expected_position = stream
+            .as_ref()
+            .map(|stream| stream.chunks.len())
+            .unwrap_or_default();
+        let matching_stream = stream.as_ref().is_some_and(|stream| {
+            expected_position == usize::from(input.participant_position)
+                && stream.checkpoint_key == input.checkpoint_key
+                && stream.checkpoint == input.checkpoint
+        });
+        if !matching_stream {
+            stream.take();
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "padded tally evaluation chunk stream is missing, out of order, or rebound",
+            ));
+        }
+        stream
+            .as_mut()
+            .ok_or_else(malformed_construction_length)?
+            .chunks
+            .push(core::mem::take(&mut input.chunk));
+        if input.participant_position + 1 == COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            Ok(stream.take())
+        } else {
+            Ok(None)
+        }
+    })?;
+    let Some(stream) = completed_stream else {
+        return Ok(Vec::new());
+    };
+    let evaluated = evaluate_next_padded_tally_chunk(
+        &stream.checkpoint_key,
+        &stream.checkpoint,
+        &stream.chunks,
+    )
+    .map_err(construction_error)?;
     let mut response = BinaryWriter::new();
     response.write_u32(evaluated.chunk_ordinal)?;
     match (evaluated.next_checkpoint, evaluated.evaluated) {
@@ -1101,6 +1214,18 @@ mod tests {
     use super::*;
     use crate::encoding::run_construction_command;
 
+    fn padded_tally_evaluation_stream_request(participant_position: u16) -> Vec<u8> {
+        let mut request = vec![EVALUATE_NEXT_PADDED_TALLY_CHUNK];
+        request.extend_from_slice(&32_u32.to_le_bytes());
+        request.extend_from_slice(&[0x11; 32]);
+        request.extend_from_slice(&1_u32.to_le_bytes());
+        request.push(0x22);
+        request.extend_from_slice(&participant_position.to_le_bytes());
+        request.extend_from_slice(&1_u32.to_le_bytes());
+        request.push(0x33);
+        request
+    }
+
     #[test]
     fn action_signature_key_generation_refuses_wrong_lengths_and_trailing_bytes() {
         let mut oversized = vec![GENERATE_ACTION_SIGNATURE_KEY_PAIR];
@@ -1185,5 +1310,69 @@ mod tests {
             request.extend_from_slice(&rejected_top_count.to_le_bytes());
             assert_eq!(run_construction_command(&request)[0], 1);
         }
+    }
+
+    #[test]
+    fn padded_tally_evaluation_stream_refuses_reordering_rebinding_and_trailing_bytes() {
+        clear_padded_tally_evaluation_command_stream();
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(0)),
+            vec![0],
+            "the first participant is buffered without claiming evaluation",
+        );
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(2))[0],
+            1,
+            "a skipped participant must fail",
+        );
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(1))[0],
+            1,
+            "a failed stream must not remain resumable",
+        );
+
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(0)),
+            vec![0],
+        );
+        let mut rebound = padded_tally_evaluation_stream_request(1);
+        rebound[5] = 0x44;
+        assert_eq!(
+            run_construction_command(&rebound)[0],
+            1,
+            "a noninitial participant must not rebind the checkpoint key",
+        );
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(1))[0],
+            1,
+            "a rebound stream must be cleared",
+        );
+
+        let mut trailing = padded_tally_evaluation_stream_request(0);
+        trailing.push(0xff);
+        assert_eq!(run_construction_command(&trailing)[0], 1);
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(1))[0],
+            1,
+            "a noncanonical first command must not create a stream",
+        );
+
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(0)),
+            vec![0],
+        );
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(0)),
+            vec![0],
+            "position zero may restart an unpublished stream",
+        );
+        let mut plan_request = vec![COMPILE_PADDED_TALLY_PLAN];
+        plan_request.extend_from_slice(&1_u16.to_le_bytes());
+        assert_eq!(run_construction_command(&plan_request)[0], 0);
+        assert_eq!(
+            run_construction_command(&padded_tally_evaluation_stream_request(1))[0],
+            1,
+            "another command must clear an incomplete stream",
+        );
     }
 }

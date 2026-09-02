@@ -1320,9 +1320,7 @@ export const projectIndependentPaddedTallyWidth = (
         );
         maximumChunkEvaluationRequestByteLength = Math.max(
             maximumChunkEvaluationRequestByteLength,
-            81 +
-                evaluationCheckpointByteLength +
-                completionParticipantCount * descriptor.chunkByteLength,
+            47 + evaluationCheckpointByteLength + descriptor.chunkByteLength,
         );
         const isFinal = chunkIndex + 1 === descriptorModel.descriptors.length;
         maximumChunkGenerationResponseByteLength = Math.max(
