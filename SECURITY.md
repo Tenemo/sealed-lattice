@@ -29,7 +29,7 @@ Here, a poll is the user-facing workflow. An action is one canonical protocol ex
 
 ## Security model
 
-- The protocol protects ballot scores, not voter anonymity. The frozen roster, each signed submit-or-abstain declaration, accepted ballot authorship, and whether any selected ballot is usable are public.
+- The protocol protects ballot scores, not voter anonymity. The public information is exactly the frozen roster, each signed submit-or-abstain declaration, whether each submitted ballot was usable, whether any usable ballot exists, and the result. Honest clients submit only usable ballots, so the usability bit is constant for every honest submitter and reveals nothing about honest scores; for a corrupt submitter it attributes rejection to that participant's own signed source.
 - The host-application duties described in the [README](README.md#library-boundary) grant no protocol authority. Participants confirm and freeze the roster. Identity vetting and Sybil resistance remain outside the library, and the organizer remains an ordinary roster participant.
 - Every roster participant contributes to tally preparation. No smaller group, dealer, server, or organizer can complete it.
 - The adversary statically corrupts at most three participants and may rush, equivocate, withhold, replay, reorder, fork, or replace messages. A separate passive-exposure game covers at most three disclosed shares; the two bounds are not combined.
