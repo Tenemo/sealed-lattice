@@ -9,6 +9,7 @@ import { instantiateConstructionKernelCommandRuntime } from '../../src/foundatio
 import {
     openPreparationMaterialRuntime,
     preparationContributionOpeningVectorByteLength,
+    preparationPairwiseMasterVectorByteLength,
     preparationPlaintextByteLength,
     preparationSubsetCommitmentVectorByteLength,
     type PreparationMaterialContextInput,
@@ -68,6 +69,10 @@ describe('preparation material scalar WASM runtime', () => {
             deterministicBytes(
                 preparationContributionOpeningVectorByteLength,
                 0x5001n,
+            ),
+            deterministicBytes(
+                preparationPairwiseMasterVectorByteLength,
+                0x5002n,
             ),
         );
         expect(material.subsetCommitments).toHaveLength(

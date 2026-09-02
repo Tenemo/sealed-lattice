@@ -6,7 +6,7 @@ use zeroize::Zeroize;
 
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, Hash512,
-    hash_foundation_tuple_512,
+    hash_foundation_tuple_512, kmac256,
 };
 
 use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
@@ -15,9 +15,9 @@ use super::preparation_parent::{
     verify_preparation_parent_carrier,
 };
 use super::preparation_plaintext::{
-    CONTRIBUTION_OPENING_BYTE_LENGTH, HeldSubsetKey, PreparationMaterialContext,
-    derive_held_subset_keys, sender_subset_slots, verify_local_preparation_material,
-    verify_preparation_plaintext,
+    CONTRIBUTION_OPENING_BYTE_LENGTH, HeldSubsetKey, PAIRWISE_MASTER_VECTOR_BYTE_LENGTH,
+    PairwiseMasterInventory, PreparationMaterialContext, derive_held_preparation_material,
+    sender_subset_slots, verify_local_preparation_material, verify_preparation_plaintext,
 };
 
 pub const ABSTENTION_SOURCE_BODY_BYTE_LENGTH: usize = 326;
@@ -35,12 +35,14 @@ pub const SOURCE_ORDINAL: u64 = 0;
 const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 const LOW_SUBSET_SIZE: u16 = 7;
 const SOURCE_BODY_SCHEMA_IDENTIFIER: u16 = 0x0208;
-const SOURCE_BODY_SCHEMA_VERSION: u16 = 1;
-const SOURCE_BODY_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/source-body/v1";
+const SOURCE_BODY_SCHEMA_VERSION: u16 = 2;
+const SOURCE_BODY_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/source-body/v2";
 const VERIFIED_PREPARATION_ROOT_DOMAIN: &str =
     "sealed-lattice/construction/verified-preparation-root/v1";
 const SOURCE_STREAM_ADDRESS_VERSION: u8 = 1;
 const SOURCE_STREAM_FAMILY: u8 = 1;
+const PADDED_CONTINUATION_SUBKEY_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/padded-continuation/subkey/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -244,9 +246,11 @@ impl SourceBody {
 }
 
 pub struct VerifiedCompletePreparation {
+    pub context: PreparationMaterialContext,
     pub root: Hash512,
     pub parent_identities: Vec<Hash512>,
     pub held_subset_keys: Vec<HeldSubsetKey>,
+    pub pairwise_masters: PairwiseMasterInventory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,6 +270,7 @@ pub fn verify_complete_preparation(
     parent_bodies: &[Vec<u8>],
     parent_signatures: &[Vec<u8>],
     own_opening_bytes: &[u8],
+    own_pairwise_master_bytes: &[u8],
     remote_plaintext_bytes: &[Vec<u8>],
 ) -> Result<VerifiedCompletePreparation, SourceError> {
     validate_position(COMPLETION_PROFILE_PARTICIPANT_COUNT, local_position)?;
@@ -275,6 +280,7 @@ pub fn verify_complete_preparation(
         || parent_signatures.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
         || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
         || own_opening_bytes.len() != HELD_SUBSET_KEY_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
+        || own_pairwise_master_bytes.len() != PAIRWISE_MASTER_VECTOR_BYTE_LENGTH
         || action_key_set_roster_identity(action_key_sets).map_err(|_| SourceError::WrongContext)?
             != context.action_key_set_roster_identity
     {
@@ -323,8 +329,13 @@ pub fn verify_complete_preparation(
     let local_parent = parents
         .get(usize::from(local_position))
         .ok_or(SourceError::WrongParticipantPosition)?;
-    verify_local_preparation_material(local_parent, context, own_opening_bytes)
-        .map_err(|_| SourceError::WrongContext)?;
+    verify_local_preparation_material(
+        local_parent,
+        context,
+        own_opening_bytes,
+        own_pairwise_master_bytes,
+    )
+    .map_err(|_| SourceError::WrongContext)?;
 
     for sender_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
         if sender_position == local_position {
@@ -364,13 +375,19 @@ pub fn verify_complete_preparation(
         ],
     )
     .map_err(|_| SourceError::InvalidCanonicalEncoding)?;
-    let held_subset_keys =
-        derive_held_subset_keys(local_position, own_opening_bytes, remote_plaintext_bytes)
-            .map_err(|_| SourceError::WrongSubsetKeyVector)?;
+    let held_material = derive_held_preparation_material(
+        local_position,
+        own_opening_bytes,
+        own_pairwise_master_bytes,
+        remote_plaintext_bytes,
+    )
+    .map_err(|_| SourceError::WrongSubsetKeyVector)?;
     Ok(VerifiedCompletePreparation {
+        context: *context,
         root,
         parent_identities,
-        held_subset_keys,
+        held_subset_keys: held_material.held_subset_keys,
+        pairwise_masters: held_material.pairwise_masters,
     })
 }
 
@@ -416,11 +433,15 @@ pub fn decode_held_subset_keys(
 }
 
 pub fn derive_honest_source_correction(
-    source_position: u16,
+    context: &SourceContext,
     score_encodings: &[u8],
     held_subset_keys: &[HeldSubsetKey],
 ) -> Result<[u8; SOURCE_CORRECTION_BYTE_LENGTH], SourceError> {
-    validate_position(COMPLETION_PROFILE_PARTICIPANT_COUNT, source_position)?;
+    validate_position(context.participant_count, context.sender_position)?;
+    if context.source_ordinal != SOURCE_ORDINAL {
+        return Err(SourceError::WrongContext);
+    }
+    let source_position = context.sender_position;
     if score_encodings.len() != SCORE_ENCODING_COUNT
         || score_encodings
             .iter()
@@ -448,8 +469,10 @@ pub fn derive_honest_source_correction(
         }
         source_key_count += 1;
         let source_rank = (held_key.subset & ((1_u16 << source_position) - 1)).count_ones();
-        let cipher =
-            Aes256::new_from_slice(&held_key.key).map_err(|_| SourceError::WrongSubsetKeyVector)?;
+        let mut source_subkey = derive_source_subkey(context, held_key.subset, &held_key.key);
+        let cipher = Aes256::new_from_slice(&source_subkey)
+            .map_err(|_| SourceError::WrongSubsetKeyVector)?;
+        source_subkey.zeroize();
         let source_rank =
             usize::try_from(source_rank).map_err(|_| SourceError::WrongSubsetKeyVector)?;
         let source_start_bit = source_rank
@@ -491,6 +514,30 @@ pub fn derive_honest_source_correction(
         }
     }
     Ok(source_mask)
+}
+
+fn derive_source_subkey(
+    context: &SourceContext,
+    subset: u16,
+    subset_master: &[u8; HELD_SUBSET_KEY_BYTE_LENGTH],
+) -> [u8; 32] {
+    let mut address = Vec::with_capacity(271);
+    address.extend_from_slice(context.action_proposal_identity.as_bytes());
+    address.extend_from_slice(context.action_key_set_roster_identity.as_bytes());
+    address.extend_from_slice(&context.preparation_attempt.to_le_bytes());
+    address.extend_from_slice(context.predecessor_identity.as_bytes());
+    address.extend_from_slice(context.verified_preparation_root.as_bytes());
+    address.push(SOURCE_STREAM_FAMILY);
+    address.extend_from_slice(&subset.to_le_bytes());
+    address.extend_from_slice(&context.sender_position.to_le_bytes());
+    address.extend_from_slice(&context.source_ordinal.to_le_bytes());
+    let output = kmac256(
+        subset_master,
+        &address,
+        PADDED_CONTINUATION_SUBKEY_CUSTOMIZATION,
+    );
+    address.zeroize();
+    output
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -606,6 +653,13 @@ fn read_raw_bytes(item: &CanonicalItem) -> Result<&[u8], SourceError> {
 mod tests {
     use super::*;
 
+    fn decode_hex<const BYTE_LENGTH: usize>(hex: &str) -> [u8; BYTE_LENGTH] {
+        assert_eq!(hex.len(), 2 * BYTE_LENGTH);
+        core::array::from_fn(|index| {
+            u8::from_str_radix(&hex[2 * index..2 * index + 2], 16).expect("valid hex")
+        })
+    }
+
     fn context() -> SourceContext {
         SourceContext {
             participant_count: COMPLETION_PROFILE_PARTICIPANT_COUNT,
@@ -660,6 +714,16 @@ mod tests {
         .expect("encodes");
         encoded.pop();
         assert!(SourceBody::decode(COMPLETION_PROFILE_PARTICIPANT_COUNT, &encoded).is_err());
+
+        let mut rejected_version = SourceBody::new(context(), SourceDeclaration::Abstain, None)
+            .expect("constructs")
+            .encode()
+            .expect("encodes");
+        rejected_version[2..4].copy_from_slice(&1_u16.to_le_bytes());
+        assert_eq!(
+            SourceBody::decode(COMPLETION_PROFILE_PARTICIPANT_COUNT, &rejected_version),
+            Err(SourceError::WrongSchema),
+        );
     }
 
     #[test]
@@ -674,12 +738,14 @@ mod tests {
                 key: [u8::try_from(index).expect("index fits"); 32],
             })
             .collect::<Vec<_>>();
-        let zero = derive_honest_source_correction(0, &[0; 10], &keys).expect("derives");
+        let source_context = context();
+        let zero =
+            derive_honest_source_correction(&source_context, &[0; 10], &keys).expect("derives");
         for score_position in 0..SCORE_ENCODING_COUNT {
             for bit_position in 0..SCORE_BIT_WIDTH {
                 let mut scores = [0_u8; SCORE_ENCODING_COUNT];
                 scores[score_position] = 1 << bit_position;
-                let changed = derive_honest_source_correction(0, &scores, &keys)
+                let changed = derive_honest_source_correction(&source_context, &scores, &keys)
                     .expect("derives changed score");
                 let bit_ordinal = score_position * SCORE_BIT_WIDTH + bit_position;
                 let mut difference = [0_u8; SOURCE_CORRECTION_BYTE_LENGTH];
@@ -694,12 +760,42 @@ mod tests {
             }
         }
         assert!(matches!(
-            derive_honest_source_correction(0, &[0; 9], &keys),
+            derive_honest_source_correction(&source_context, &[0; 9], &keys),
             Err(SourceError::NoncanonicalCorrection)
         ));
         assert!(matches!(
-            derive_honest_source_correction(0, &[16; 10], &keys),
+            derive_honest_source_correction(&source_context, &[16; 10], &keys),
             Err(SourceError::NoncanonicalCorrection)
         ));
+
+        let changed_context = SourceContext {
+            verified_preparation_root: Hash512::from_bytes([0x45; 64]),
+            ..source_context
+        };
+        assert_ne!(
+            derive_honest_source_correction(&source_context, &[0; 10], &keys)
+                .expect("original context derives"),
+            derive_honest_source_correction(&changed_context, &[0; 10], &keys)
+                .expect("changed context derives"),
+        );
+    }
+
+    #[test]
+    fn source_subkey_matches_independent_kmac_vector() {
+        let source_context = SourceContext {
+            participant_count: COMPLETION_PROFILE_PARTICIPANT_COUNT,
+            action_proposal_identity: Hash512::from_bytes([0x11; 64]),
+            action_key_set_roster_identity: Hash512::from_bytes([0x22; 64]),
+            preparation_attempt: 0x3344,
+            predecessor_identity: Hash512::from_bytes([0x33; 64]),
+            verified_preparation_root: Hash512::from_bytes([0x44; 64]),
+            sender_position: 0,
+            source_ordinal: 0,
+        };
+        let master = core::array::from_fn(|index| index as u8);
+        assert_eq!(
+            derive_source_subkey(&source_context, 0x007f, &master),
+            decode_hex::<32>("0f34d35daf1ac76d9b6d9ff9d33c373195c5c6175dcba967e8b0114353460f32",),
+        );
     }
 }

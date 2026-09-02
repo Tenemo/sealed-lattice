@@ -15,7 +15,8 @@ const preparationContributionOpeningByteLength = 80;
 const preparationContributionCount = 120;
 export const preparationContributionOpeningVectorByteLength =
     preparationContributionOpeningByteLength * preparationContributionCount;
-export const preparationPlaintextByteLength = 6_734;
+export const preparationPairwiseMasterVectorByteLength = 320;
+export const preparationPlaintextByteLength = 6_766;
 export const preparationSubsetCommitmentVectorByteLength =
     preparationContributionCount * identityByteLength;
 
@@ -37,6 +38,7 @@ export type PreparationMaterialRuntime = Readonly<{
     generate(
         context: PreparationMaterialContextInput,
         contributionOpenings: Uint8Array,
+        pairwiseMasters: Uint8Array,
     ): GeneratedPreparationMaterial;
     verifyPlaintext(
         context: PreparationMaterialContextInput,
@@ -99,16 +101,22 @@ const writeContext = (
 export const openPreparationMaterialRuntime = (
     kernel: ConstructionKernelCommandRuntime,
 ): PreparationMaterialRuntime => ({
-    generate: (context, contributionOpenings) => {
+    generate: (context, contributionOpenings, pairwiseMasters) => {
         requireExactConstructionBytes(
             contributionOpenings,
             preparationContributionOpeningVectorByteLength,
             'contributionOpenings',
         );
+        requireExactConstructionBytes(
+            pairwiseMasters,
+            preparationPairwiseMasterVectorByteLength,
+            'pairwiseMasters',
+        );
         const request = new ConstructionCommandWriter();
         request.writeU8(generatePreparationMaterialCommand);
         writeContext(request, context);
         request.writeBytes(contributionOpenings);
+        request.writeBytes(pairwiseMasters);
         return executeConstructionCommand(kernel, request, (reader) => {
             const subsetCommitments = Uint8Array.from(
                 reader.readFixed(preparationSubsetCommitmentVectorByteLength),

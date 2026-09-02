@@ -32,6 +32,7 @@ import {
 import {
     openPreparationMaterialRuntime,
     preparationContributionOpeningVectorByteLength,
+    preparationPairwiseMasterVectorByteLength,
     preparationPlaintextByteLength,
     type PreparationMaterialRuntime,
 } from './preparation-material-runtime.js';
@@ -167,6 +168,7 @@ type PreparationState = {
     privateBodyIdentities: Uint8Array[];
     privateBodies: Uint8Array[];
     contributionOpenings: Uint8Array;
+    pairwiseMasters: Uint8Array;
 };
 
 type LoadedPreparationState = Readonly<{
@@ -843,11 +845,12 @@ const preparationStateByteLength =
     actionSignatureCarrierByteLength +
     remoteParticipantCount * identityByteLength +
     remoteParticipantCount * privatePreparationBodyByteLength +
-    preparationContributionOpeningVectorByteLength;
+    preparationContributionOpeningVectorByteLength +
+    preparationPairwiseMasterVectorByteLength;
 
 const encodePreparationState = (state: PreparationState): Uint8Array => {
     const writer = new FixedWriter(preparationStateByteLength);
-    writer.writeU8(2);
+    writer.writeU8(3);
     writer.writeU8(state.phase);
     writer.writeU64(state.generation);
     writer.writeU16(state.preparationAttempt);
@@ -861,6 +864,7 @@ const encodePreparationState = (state: PreparationState): Uint8Array => {
         writer.writeFixed(body);
     }
     writer.writeFixed(state.contributionOpenings);
+    writer.writeFixed(state.pairwiseMasters);
     return writer.finish();
 };
 
@@ -872,7 +876,7 @@ const decodePreparationState = (bytes: Uint8Array): PreparationState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 2) {
+    if (reader.readU8() !== 3) {
         throw new DurableStateError(
             'CorruptState',
             'The retained preparation has the wrong version.',
@@ -905,6 +909,9 @@ const decodePreparationState = (bytes: Uint8Array): PreparationState => {
         contributionOpenings: reader.readFixed(
             preparationContributionOpeningVectorByteLength,
         ),
+        pairwiseMasters: reader.readFixed(
+            preparationPairwiseMasterVectorByteLength,
+        ),
     };
     reader.finish();
     if (
@@ -921,6 +928,7 @@ const decodePreparationState = (bytes: Uint8Array): PreparationState => {
 
 const zeroPreparationState = (state: PreparationState): void => {
     state.contributionOpenings.fill(0);
+    state.pairwiseMasters.fill(0);
 };
 
 const sourceStateByteLength =
@@ -953,7 +961,7 @@ const encodeSourceState = (state: SourceState): Uint8Array => {
         );
     }
     const writer = new FixedWriter(sourceStateByteLength);
-    writer.writeU8(4);
+    writer.writeU8(5);
     writer.writeU8(state.phase);
     writer.writeU64(state.generation);
     writer.writeU16(state.preparationAttempt);
@@ -978,7 +986,7 @@ const decodeSourceState = (bytes: Uint8Array): SourceState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 4) {
+    if (reader.readU8() !== 5) {
         throw new DurableStateError(
             'CorruptState',
             'The retained source has the wrong version.',
@@ -3225,6 +3233,7 @@ class PrivatePreparationWorkerRuntime {
                 actionKeySetBodies,
                 preparationParents,
                 loadedPreparation.state.contributionOpenings,
+                loadedPreparation.state.pairwiseMasters,
                 remotePlaintexts,
             );
             for (
@@ -3273,25 +3282,26 @@ class PrivatePreparationWorkerRuntime {
             declaration === 'submit'
                 ? Uint8Array.from(choice.scoreEncodings)
                 : new Uint8Array(sourceScoreEncodingCount);
+        const sourceProtocolContext = {
+            participantCount: completionProfileParticipantCount,
+            actionProposalIdentity: action.actionProposalIdentity,
+            actionKeySetRosterIdentity:
+                loadedAction.state.actionKeySetRosterIdentity,
+            preparationAttempt,
+            predecessorIdentity: action.predecessorIdentity,
+            verifiedPreparationRoot: verifiedPreparation.root,
+            senderPosition: action.participantPosition,
+        } as const;
         const correction =
             declaration === 'submit'
                 ? this.sourceRuntime.deriveHonestCorrection(
-                      action.participantPosition,
+                      sourceProtocolContext,
                       scoreEncodings,
                       verifiedPreparation.heldSubsetKeys,
                   )
                 : undefined;
         const encodedSource = this.sourceRuntime.encodeBody(
-            {
-                participantCount: completionProfileParticipantCount,
-                actionProposalIdentity: action.actionProposalIdentity,
-                actionKeySetRosterIdentity:
-                    loadedAction.state.actionKeySetRosterIdentity,
-                preparationAttempt,
-                predecessorIdentity: action.predecessorIdentity,
-                verifiedPreparationRoot: verifiedPreparation.root,
-                senderPosition: action.participantPosition,
-            },
+            sourceProtocolContext,
             declaration,
             correction,
         );
@@ -3552,14 +3562,6 @@ class PrivatePreparationWorkerRuntime {
                 'The retained source state has invalid dimensions or semantics.',
             );
         }
-        const correction =
-            state.declaration === 'submit'
-                ? this.sourceRuntime.deriveHonestCorrection(
-                      action.participantPosition,
-                      state.scoreEncodings,
-                      state.heldSubsetKeys,
-                  )
-                : undefined;
         const sourceContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
@@ -3569,6 +3571,14 @@ class PrivatePreparationWorkerRuntime {
             verifiedPreparationRoot: state.verifiedPreparationRoot,
             senderPosition: action.participantPosition,
         } as const;
+        const correction =
+            state.declaration === 'submit'
+                ? this.sourceRuntime.deriveHonestCorrection(
+                      sourceContext,
+                      state.scoreEncodings,
+                      state.heldSubsetKeys,
+                  )
+                : undefined;
         const encoded = this.sourceRuntime.encodeBody(
             sourceContext,
             state.declaration,
@@ -3668,6 +3678,9 @@ class PrivatePreparationWorkerRuntime {
         const contributionOpenings = randomBytes(
             preparationContributionOpeningVectorByteLength,
         );
+        const pairwiseMasters = randomBytes(
+            preparationPairwiseMasterVectorByteLength,
+        );
         const materialContext = {
             participantCount: completionProfileParticipantCount,
             actionProposalIdentity: action.actionProposalIdentity,
@@ -3680,6 +3693,7 @@ class PrivatePreparationWorkerRuntime {
         const material = this.preparationMaterialRuntime.generate(
             materialContext,
             contributionOpenings,
+            pairwiseMasters,
         );
         const privateBodies: Uint8Array[] = [];
         const privateBodyIdentities: Uint8Array[] = [];
@@ -3746,6 +3760,7 @@ class PrivatePreparationWorkerRuntime {
                 privateBodyIdentities,
                 privateBodies,
                 contributionOpenings,
+                pairwiseMasters,
             };
             this.validatePreparationState(
                 action,
@@ -3871,6 +3886,7 @@ class PrivatePreparationWorkerRuntime {
                 plaintext.fill(0);
             }
             contributionOpenings.fill(0);
+            pairwiseMasters.fill(0);
         }
     }
 
@@ -3992,6 +4008,7 @@ class PrivatePreparationWorkerRuntime {
         const material = this.preparationMaterialRuntime.generate(
             materialContext,
             state.contributionOpenings,
+            state.pairwiseMasters,
         );
         try {
             const parent = this.preparationParentRuntime.encode({

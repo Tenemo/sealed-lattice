@@ -12,6 +12,11 @@ import {
 } from './finality-runtime.js';
 import type { ConstructionKernelCommandRuntime } from './foundation-kernel/kernel-runtime.js';
 import type { JointContinuationPlan } from './joint-continuation-runtime.js';
+import {
+    preparationContributionOpeningVectorByteLength,
+    preparationPairwiseMasterVectorByteLength,
+    preparationPlaintextByteLength,
+} from './preparation-material-runtime.js';
 import { actionSignatureCarrierByteLength } from './preparation-parent-runtime.js';
 
 const generateParticipantCommand = 38;
@@ -39,8 +44,7 @@ const gatePayloadByteLength =
     (fieldBitWidth - 1) * tokenByteLength;
 const terminalPayloadByteLength =
     fieldBitWidth * 4 * tokenByteLength + fieldBitWidth * tokenByteLength + 1;
-const gateMaterialByteLength =
-    (2 + completionProfileParticipantCount * 5) * moduleValueByteLength;
+const preparationParentBodyByteLength = 8_502;
 const chunkHeaderByteLength = 250;
 const manifestByteLength = 254;
 
@@ -71,7 +75,13 @@ type PaddedContinuationParticipantInput = Readonly<{
     terminalMaskShares: Uint8Array;
     allocationNonce: Uint8Array;
     labelEntropy: Uint8Array;
-    gateMaterial: Uint8Array;
+    preparationParents: readonly Readonly<{
+        body: Uint8Array;
+        signature: Uint8Array;
+    }>[];
+    ownContributionOpenings: Uint8Array;
+    ownPairwiseMasters: Uint8Array;
+    remotePlaintexts: readonly Uint8Array[];
 }>;
 
 type GeneratedPaddedContinuationParticipant = Readonly<{
@@ -186,13 +196,6 @@ export const paddedContinuationLabelEntropyByteLength = (
     );
 };
 
-export const paddedContinuationGateMaterialByteLength = (
-    plan: JointContinuationPlan,
-): number => {
-    validateReviewedReducedPlan(plan);
-    return plan.gates.length * gateMaterialByteLength;
-};
-
 export const paddedContinuationChunkByteLength = (
     plan: JointContinuationPlan,
 ): number => {
@@ -284,11 +287,51 @@ export const openPaddedContinuationRuntime = (
             paddedContinuationLabelEntropyByteLength(plan),
             'labelEntropy',
         );
+        if (
+            input.preparationParents.length !==
+            completionProfileParticipantCount
+        ) {
+            throw new RangeError(
+                'preparationParents must contain the complete roster.',
+            );
+        }
+        for (const parent of input.preparationParents) {
+            requireExactConstructionBytes(
+                parent.body,
+                preparationParentBodyByteLength,
+                'preparationParentBody',
+            );
+            requireExactConstructionBytes(
+                parent.signature,
+                actionSignatureCarrierByteLength,
+                'preparationParentSignature',
+            );
+        }
         requireExactConstructionBytes(
-            input.gateMaterial,
-            paddedContinuationGateMaterialByteLength(plan),
-            'gateMaterial',
+            input.ownContributionOpenings,
+            preparationContributionOpeningVectorByteLength,
+            'ownContributionOpenings',
         );
+        requireExactConstructionBytes(
+            input.ownPairwiseMasters,
+            preparationPairwiseMasterVectorByteLength,
+            'ownPairwiseMasters',
+        );
+        if (
+            input.remotePlaintexts.length !==
+            completionProfileParticipantCount - 1
+        ) {
+            throw new RangeError(
+                'remotePlaintexts must contain every remote sender in roster order.',
+            );
+        }
+        for (const plaintext of input.remotePlaintexts) {
+            requireExactConstructionBytes(
+                plaintext,
+                preparationPlaintextByteLength,
+                'remotePlaintext',
+            );
+        }
         const request = new ConstructionCommandWriter();
         request.writeU8(generateParticipantCommand);
         writeCertificate(request, certificate);
@@ -299,7 +342,15 @@ export const openPaddedContinuationRuntime = (
         request.writeBytes(input.terminalMaskShares);
         request.writeBytes(input.allocationNonce);
         request.writeBytes(input.labelEntropy);
-        request.writeBytes(input.gateMaterial);
+        for (const parent of input.preparationParents) {
+            request.writeBytes(parent.body);
+            request.writeBytes(parent.signature);
+        }
+        request.writeBytes(input.ownContributionOpenings);
+        request.writeBytes(input.ownPairwiseMasters);
+        for (const plaintext of input.remotePlaintexts) {
+            request.writeBytes(plaintext);
+        }
         return executeConstructionCommand(kernel, request, (reader) => {
             const chunk = Uint8Array.from(reader.readBytes());
             requireExactConstructionBytes(

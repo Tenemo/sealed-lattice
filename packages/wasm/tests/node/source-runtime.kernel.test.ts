@@ -32,7 +32,6 @@ import {
 import {
     openPaddedContinuationRuntime,
     paddedContinuationChunkByteLength,
-    paddedContinuationGateMaterialByteLength,
     paddedContinuationLabelEntropyByteLength,
 } from '../../src/padded-continuation-runtime.js';
 import {
@@ -42,6 +41,7 @@ import {
 import {
     openPreparationMaterialRuntime,
     preparationContributionOpeningVectorByteLength,
+    preparationPairwiseMasterVectorByteLength,
     type GeneratedPreparationMaterial,
 } from '../../src/preparation-material-runtime.js';
 import { openPreparationParentRuntime } from '../../src/preparation-parent-runtime.js';
@@ -167,131 +167,6 @@ const deterministicPaddedLabelEntropy = (
         }
     }
     return entropy;
-};
-
-const xorPaddedModule = (output: Uint8Array, input: Uint8Array): void => {
-    for (let byte = 0; byte < output.byteLength; byte += 1) {
-        output[byte] = (output[byte] ?? 0) ^ (input[byte] ?? 0);
-    }
-};
-
-const addScaledPaddedModule = (
-    output: Uint8Array,
-    input: Uint8Array,
-    scalar: number,
-): void => {
-    for (let byte = 0; byte < output.byteLength; byte += 1) {
-        const inputByte = input[byte] ?? 0;
-        const low = multiplyFieldValues(inputByte & 0x0f, scalar);
-        const high = multiplyFieldValues(inputByte >> 4, scalar);
-        output[byte] = (output[byte] ?? 0) ^ low ^ (high << 4);
-    }
-};
-
-const deterministicPaddedModule = (identity: bigint): Uint8Array => {
-    const encodedIdentity = new Uint8Array(8);
-    new DataView(encodedIdentity.buffer).setBigUint64(0, identity, true);
-    return Uint8Array.from(
-        createHash('shake256', { outputLength: 40 })
-            .update(encodedIdentity)
-            .digest(),
-    );
-};
-
-const paddedModulePolynomial = (
-    gateIndex: number,
-    receiverPosition: number,
-    family: number,
-    degree: number,
-): Uint8Array[] =>
-    Array.from({ length: degree + 1 }, (_unused, coefficient) =>
-        deterministicPaddedModule(
-            1n +
-                BigInt(
-                    ((gateIndex * participantCount + receiverPosition) * 3 +
-                        family) *
-                        16 +
-                        coefficient,
-                ),
-        ),
-    );
-
-const evaluatePaddedModulePolynomial = (
-    coefficients: readonly Uint8Array[],
-    point: number,
-): Uint8Array => {
-    let value = new Uint8Array(40);
-    for (const coefficient of [...coefficients].reverse()) {
-        const next = Uint8Array.from(coefficient);
-        addScaledPaddedModule(next, value, point);
-        value = next;
-    }
-    return value;
-};
-
-const explicitPaddedGateMaterial = (
-    participantPosition: number,
-    gateIndex: number,
-): Uint8Array => {
-    const ownAffineA = paddedModulePolynomial(
-        gateIndex,
-        participantPosition,
-        0,
-        9,
-    );
-    const ownAffineB = paddedModulePolynomial(
-        gateIndex,
-        participantPosition,
-        1,
-        3,
-    );
-    const chunks: Uint8Array[] = [
-        ownAffineA[0] ?? new Uint8Array(),
-        ownAffineB[0] ?? new Uint8Array(),
-    ];
-    for (
-        let receiverPosition = 0;
-        receiverPosition < participantCount;
-        receiverPosition += 1
-    ) {
-        const affineA = paddedModulePolynomial(
-            gateIndex,
-            receiverPosition,
-            0,
-            9,
-        );
-        const affineB = paddedModulePolynomial(
-            gateIndex,
-            receiverPosition,
-            1,
-            3,
-        );
-        const affineAEvaluation = evaluatePaddedModulePolynomial(
-            affineA,
-            participantPosition + 1,
-        );
-        chunks.push(
-            evaluatePaddedModulePolynomial(affineB, participantPosition + 1),
-        );
-        const finalPad = Uint8Array.from(affineAEvaluation);
-        for (let basis = 0; basis < 3; basis += 1) {
-            const pad = deterministicPaddedModule(
-                1n +
-                    (1n << 40n) +
-                    BigInt(
-                        ((gateIndex * participantCount + receiverPosition) *
-                            participantCount +
-                            participantPosition) *
-                            4 +
-                            basis,
-                    ),
-            );
-            chunks.push(pad);
-            xorPaddedModule(finalPad, pad);
-        }
-        chunks.push(finalPad);
-    }
-    return concatenateBytes(chunks);
 };
 
 const encodeJointContinuationPlanForRawCommand = (
@@ -455,6 +330,7 @@ describe('source fixation scalar WASM runtime', () => {
             predecessorIdentity,
         };
         const contributionOpenings: Uint8Array[] = [];
+        const pairwiseMasters: Uint8Array[] = [];
         const materials: GeneratedPreparationMaterial[] = [];
         const parents: PreparationParentCarrier[] = [];
         const parentIdentities: Uint8Array[] = [];
@@ -469,9 +345,15 @@ describe('source fixation scalar WASM runtime', () => {
                 0x8000n + BigInt(senderPosition),
             );
             contributionOpenings.push(openings);
+            const senderPairwiseMasters = deterministicBytes(
+                preparationPairwiseMasterVectorByteLength,
+                0x9000n + BigInt(senderPosition),
+            );
+            pairwiseMasters.push(senderPairwiseMasters);
             const material = materialRuntime.generate(
                 { ...sourcePreparationContext, senderPosition },
                 openings,
+                senderPairwiseMasters,
             );
             materials.push(material);
             const parent = parentRuntime.encode({
@@ -541,6 +423,7 @@ describe('source fixation scalar WASM runtime', () => {
             actionKeySetBodies,
             parents,
             contributionOpenings[0] ?? new Uint8Array(),
+            pairwiseMasters[0] ?? new Uint8Array(),
             remotePlaintextsFor(0),
         );
         expect(sourcePreparation.root).toHaveLength(64);
@@ -558,15 +441,20 @@ describe('source fixation scalar WASM runtime', () => {
         expect(sourcePreparation.heldSubsetKeys).toHaveLength(
             heldSubsetKeyVectorByteLength,
         );
+        const submittedContext = {
+            ...sourcePreparationContext,
+            verifiedPreparationRoot: sourcePreparation.root,
+            senderPosition: 0,
+        } as const;
         const zeroScores = new Uint8Array(10);
         const submittedScores = Uint8Array.of(1, 10, 3, 9, 5, 8, 7, 6, 4, 2);
         const correctionZero = sourceRuntime.deriveHonestCorrection(
-            0,
+            submittedContext,
             zeroScores,
             sourcePreparation.heldSubsetKeys,
         );
         const submittedCorrection = sourceRuntime.deriveHonestCorrection(
-            0,
+            submittedContext,
             submittedScores,
             sourcePreparation.heldSubsetKeys,
         );
@@ -577,11 +465,6 @@ describe('source fixation scalar WASM runtime', () => {
             ),
         ).toEqual(Uint8Array.of(0xa1, 0x93, 0x85, 0x67, 0x24));
 
-        const submittedContext = {
-            ...sourcePreparationContext,
-            verifiedPreparationRoot: sourcePreparation.root,
-            senderPosition: 0,
-        } as const;
         const submitted = sourceRuntime.encodeBody(
             submittedContext,
             'submit',
@@ -623,6 +506,7 @@ describe('source fixation scalar WASM runtime', () => {
             actionKeySetBodies,
             parents,
             contributionOpenings[abstainingPosition] ?? new Uint8Array(),
+            pairwiseMasters[abstainingPosition] ?? new Uint8Array(),
             remotePlaintextsFor(abstainingPosition),
         );
         expect(abstainingPreparation.root).toEqual(sourcePreparation.root);
@@ -682,6 +566,7 @@ describe('source fixation scalar WASM runtime', () => {
                 actionKeySetBodies,
                 parents,
                 contributionOpenings[position] ?? new Uint8Array(),
+                pairwiseMasters[position] ?? new Uint8Array(),
                 remotePlaintextsFor(position),
             );
             expect(preparation.root).toEqual(sourcePreparation.root);
@@ -1052,20 +937,20 @@ describe('source fixation scalar WASM runtime', () => {
                 jointContinuationBodies,
                 activationSignatures,
             );
-        expect(Array.from(jointContinuationBodyIdentities[0] ?? [])).toEqual([
-            42, 251, 143, 46, 2, 58, 168, 239, 23, 158, 202, 119, 17, 1, 27, 56,
-            55, 123, 203, 37, 188, 174, 90, 209, 61, 46, 200, 57, 68, 221, 194,
-            50, 43, 10, 46, 71, 37, 202, 14, 201, 10, 95, 47, 136, 125, 67, 248,
-            125, 228, 223, 143, 43, 113, 34, 54, 189, 251, 81, 26, 237, 89, 94,
-            227, 109,
-        ]);
-        expect(Array.from(evaluatedJointContinuation.batchIdentity)).toEqual([
-            128, 104, 94, 27, 82, 134, 138, 173, 200, 137, 132, 224, 102, 105,
-            97, 231, 50, 42, 165, 29, 252, 210, 222, 135, 130, 89, 25, 48, 25,
-            131, 232, 66, 206, 208, 28, 214, 221, 18, 161, 59, 30, 73, 123, 157,
-            228, 37, 0, 143, 193, 189, 176, 194, 117, 122, 183, 73, 206, 112,
-            184, 0, 218, 88, 25, 254,
-        ]);
+        expect(
+            Buffer.from(
+                jointContinuationBodyIdentities[0] ?? new Uint8Array(),
+            ).toString('hex'),
+        ).toBe(
+            'cfa1f3582f3bbcedd07e2f2bdcc66205b7e8c7a56a35fae499b4739d70c05d74d339bfe6807460ba33c0d6acf46dd1adeefb42759d9787c41b537ed4f8963dce',
+        );
+        expect(
+            Buffer.from(evaluatedJointContinuation.batchIdentity).toString(
+                'hex',
+            ),
+        ).toBe(
+            '40753ad88d4fade4b01aa15fc0c61c5402a3c068c2c424fdbf05c573ce33b4825550bcab4c2d5ff07bea0e57138929984b45eb23f2b9572122a658c34953ce7a',
+        );
         expect(evaluatedJointContinuation.batchIdentity).toHaveLength(64);
         expect(evaluatedJointContinuation.terminalBits).toEqual([
             true,
@@ -1907,9 +1792,6 @@ describe('source fixation scalar WASM runtime', () => {
         expect(
             paddedContinuationLabelEntropyByteLength(jointContinuationPlan),
         ).toBe(27_621);
-        expect(
-            paddedContinuationGateMaterialByteLength(jointContinuationPlan),
-        ).toBe(14_560);
         expect(paddedContinuationChunkByteLength(jointContinuationPlan)).toBe(
             69_099,
         );
@@ -1936,14 +1818,13 @@ describe('source fixation scalar WASM runtime', () => {
                     ),
                     0x720_000n + BigInt(participantPosition),
                 ),
-                gateMaterial: concatenateBytes(
-                    jointContinuationPlan.gates.map((_gate, gateIndex) =>
-                        explicitPaddedGateMaterial(
-                            participantPosition,
-                            gateIndex,
-                        ),
-                    ),
-                ),
+                preparationParents: parents,
+                ownContributionOpenings:
+                    contributionOpenings[participantPosition] ??
+                    new Uint8Array(),
+                ownPairwiseMasters:
+                    pairwiseMasters[participantPosition] ?? new Uint8Array(),
+                remotePlaintexts: remotePlaintextsFor(participantPosition),
             }),
         );
         const paddedChunks: Uint8Array[] = [];
@@ -2032,12 +1913,12 @@ describe('source fixation scalar WASM runtime', () => {
                 'hex',
             ),
         ).toBe(
-            'ecdb906e707e8a55c381ab1b1b81b5e14e21eba0d84ab4353f2e5b8d0e85d133c49fca3f13e14a29c3fb19bbe3d6f66bd9203b48448440bb482d8589c7b337d6',
+            'd7440c5fb0738b51ade1cfc8e84b614e902af77d0a75dbda88a6c9fc13fff4e0cf5b304214bbafe4850a12fa31312b3298589d89a00758e10c7da4f84bf1956a',
         );
         expect(paddedManifests[0]).toEqual(
             Uint8Array.from(
                 Buffer.from(
-                    '534c504d01009f67e3d94c776f2ba59d87ea059d545dd43f166054f0ee716aa1d532986da34a9d3c68100bb5f9be9c36d9a06e954ba283ca7d0a570f4f8d0aafbbfcdeb9cd766fb96c7ddb8fd1d847b8608460675c03ac902440d103fc97a23c5df76d08418514029b16ed4443549d75ff335aaeba2d4e0c28efd2b0fe28a2b4f1b870b7e1410a000000010000c4c722b87319a38e0bf5a0c7908b52a0572f230fd576ec7d71e96c624008f60100000000000000070000000101eb0d0100ecdb906e707e8a55c381ab1b1b81b5e14e21eba0d84ab4353f2e5b8d0e85d133c49fca3f13e14a29c3fb19bbe3d6f66bd9203b48448440bb482d8589c7b337d6',
+                    '534c504d0100bea6e1427b70f7d49e8165225702e2742af6c6f060597502a1de2bf74f15b805b3c708287205ad29579368960b176eee73cf1eaa925b38ac3fe0e308f5e81d066fb96c7ddb8fd1d847b8608460675c03ac902440d103fc97a23c5df76d08418514029b16ed4443549d75ff335aaeba2d4e0c28efd2b0fe28a2b4f1b870b7e1410a000000010000c4c722b87319a38e0bf5a0c7908b52a0572f230fd576ec7d71e96c624008f60100000000000000070000000101eb0d0100d7440c5fb0738b51ade1cfc8e84b614e902af77d0a75dbda88a6c9fc13fff4e0cf5b304214bbafe4850a12fa31312b3298589d89a00758e10c7da4f84bf1956a',
                     'hex',
                 ),
             ),
@@ -2108,10 +1989,10 @@ describe('source fixation scalar WASM runtime', () => {
                 paddedManifestIdentities[0] ?? new Uint8Array(),
             ).toString('hex'),
         ).toBe(
-            'c599a7052a543529ed053f77c7a146dfabe374d9feada206c5fbfa5c3d35b098a6ee0af12658ad3bf15878e6899884675de0fef4cb4cf5932db625bdeea6e821',
+            'ce21c7d437e610c9dca8e1189cf0d114de9aef99f07e55e31f2041f83a4e8be002092a596e9ca3de906c173dec986addea33d14a95eac737f6a0f2855c9fc8b7',
         );
         expect(Buffer.from(evaluatedPadded.batchIdentity).toString('hex')).toBe(
-            '33f51b3fbf0e9587c51d196e8ecf068ad9ef45b5c90fd8c1e8c3c20449255ed9892cc7a18d52b1155698a4cd4524686edcb18fb2e7b8e5139ed865226dcff630',
+            'cb4de859665a6c9ca42f37eb1366f3e368ac6fc8510013cbff68b974165b7e395160d31e17493e9194868786b0e1ae2dcc0670b8f0238c0b8e0b4ade97496607',
         );
         expect(evaluatedPadded.terminalBits).toEqual(
             evaluatedJointContinuation.terminalBits,
@@ -2231,9 +2112,19 @@ describe('source fixation scalar WASM runtime', () => {
         validPaddedGenerationOrderingRequest.writeBytes(
             paddedParticipantZero.labelEntropy,
         );
+        for (const parent of paddedParticipantZero.preparationParents) {
+            validPaddedGenerationOrderingRequest.writeBytes(parent.body);
+            validPaddedGenerationOrderingRequest.writeBytes(parent.signature);
+        }
         validPaddedGenerationOrderingRequest.writeBytes(
-            paddedParticipantZero.gateMaterial,
+            paddedParticipantZero.ownContributionOpenings,
         );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.ownPairwiseMasters,
+        );
+        for (const plaintext of paddedParticipantZero.remotePlaintexts) {
+            validPaddedGenerationOrderingRequest.writeBytes(plaintext);
+        }
         expect(() =>
             executeConstructionCommand(
                 kernel,
@@ -2565,20 +2456,6 @@ describe('source fixation scalar WASM runtime', () => {
             if (baseInput === undefined) {
                 throw new Error('test padded fork input is absent');
             }
-            const forkGateMaterial = Uint8Array.from(baseInput.gateMaterial);
-            const gateDelta = deterministicPaddedModule(
-                0x8800n + BigInt(variant),
-            );
-            const constantDelta = new Uint8Array(40);
-            addScaledPaddedModule(constantDelta, gateDelta, 4);
-            for (let byte = 0; byte < 40; byte += 1) {
-                forkGateMaterial[byte] =
-                    (forkGateMaterial[byte] ?? 0) ^ (constantDelta[byte] ?? 0);
-                const firstReceiverFirstPad = 3 * 40 + byte;
-                forkGateMaterial[firstReceiverFirstPad] =
-                    (forkGateMaterial[firstReceiverFirstPad] ?? 0) ^
-                    (gateDelta[byte] ?? 0);
-            }
             const fork = paddedContinuationRuntime.generateParticipant(
                 jointContinuationCertificate,
                 jointContinuationPlan,
@@ -2594,7 +2471,6 @@ describe('source fixation scalar WASM runtime', () => {
                         ),
                         0x740_000n + BigInt(variant),
                     ),
-                    gateMaterial: forkGateMaterial,
                 },
             );
             const forkSignature =
@@ -2660,13 +2536,10 @@ describe('source fixation scalar WASM runtime', () => {
             );
         }
 
-        const oneGateMaterialByteLength =
-            paddedContinuationGateMaterialByteLength(jointContinuationPlan) /
-            jointContinuationPlan.gates.length;
-        const invalidPaddedMaterial = Uint8Array.from(
-            paddedInputs[0]?.gateMaterial ?? new Uint8Array(),
+        const invalidOwnOpening = Uint8Array.from(
+            paddedInputs[0]?.ownContributionOpenings ?? new Uint8Array(),
         );
-        invalidPaddedMaterial.fill(0, 40, 80);
+        invalidOwnOpening[0] = (invalidOwnOpening[0] ?? 0) ^ 1;
         expect(() =>
             paddedContinuationRuntime.generateParticipant(
                 jointContinuationCertificate,
@@ -2676,11 +2549,11 @@ describe('source fixation scalar WASM runtime', () => {
                         (() => {
                             throw new Error('test padded input is absent');
                         })()),
-                    gateMaterial: invalidPaddedMaterial,
+                    ownContributionOpenings: invalidOwnOpening,
                 },
             ),
         ).toThrowError(
-            /^InvalidProtocolObject: padded continuation gate material is invalid$/,
+            /^InvalidProtocolObject: source or preparation has the wrong context$/,
         );
 
         const equalPairEntropy = Uint8Array.from(
@@ -2703,21 +2576,14 @@ describe('source fixation scalar WASM runtime', () => {
             /^InvalidProtocolObject: padded continuation label entropy is invalid$/,
         );
 
-        const crossAlternativeMaterial = Uint8Array.from(
-            paddedInputs[0]?.gateMaterial ?? new Uint8Array(),
-        );
-        const crossAlternative = crossAlternativeMaterial.slice(
-            oneGateMaterialByteLength,
-            oneGateMaterialByteLength + 40,
-        );
-        xorPaddedModule(
-            crossAlternative,
-            crossAlternativeMaterial.subarray(
-                oneGateMaterialByteLength + 40,
-                oneGateMaterialByteLength + 80,
-            ),
-        );
-        crossAlternativeMaterial.set(crossAlternative, 0);
+        const invalidRemotePlaintexts = (
+            paddedInputs[0]?.remotePlaintexts ?? []
+        ).map((plaintext) => Uint8Array.from(plaintext));
+        const invalidRemotePlaintext = invalidRemotePlaintexts[0];
+        if (invalidRemotePlaintext === undefined) {
+            throw new Error('test remote preparation plaintext is absent');
+        }
+        invalidRemotePlaintext[20] = (invalidRemotePlaintext[20] ?? 0) ^ 1;
         expect(() =>
             paddedContinuationRuntime.generateParticipant(
                 jointContinuationCertificate,
@@ -2727,35 +2593,62 @@ describe('source fixation scalar WASM runtime', () => {
                         (() => {
                             throw new Error('test padded input is absent');
                         })()),
-                    gateMaterial: crossAlternativeMaterial,
+                    remotePlaintexts: invalidRemotePlaintexts,
                 },
             ),
         ).toThrowError(
-            /^InvalidProtocolObject: padded continuation gate material is invalid$/,
+            /^InvalidProtocolObject: source or preparation has the wrong context$/,
         );
 
-        const replayedPaddedMaterial = Uint8Array.from(
-            paddedInputs[0]?.gateMaterial ?? new Uint8Array(),
+        const inconsistentPairwiseMasters = Uint8Array.from(
+            paddedParticipantZero.ownPairwiseMasters,
         );
-        replayedPaddedMaterial.copyWithin(
-            oneGateMaterialByteLength,
-            0,
-            oneGateMaterialByteLength,
-        );
-        expect(() =>
+        inconsistentPairwiseMasters[32] =
+            (inconsistentPairwiseMasters[32] ?? 0) ^ 1;
+        const inconsistentPairwiseParticipant =
             paddedContinuationRuntime.generateParticipant(
                 jointContinuationCertificate,
                 jointContinuationPlan,
                 {
-                    ...(paddedInputs[0] ??
-                        (() => {
-                            throw new Error('test padded input is absent');
-                        })()),
-                    gateMaterial: replayedPaddedMaterial,
+                    ...paddedParticipantZero,
+                    ownPairwiseMasters: inconsistentPairwiseMasters,
+                    allocationNonce: deterministicBytes(32, 0x750_000n),
+                    labelEntropy: deterministicPaddedLabelEntropy(
+                        paddedContinuationLabelEntropyByteLength(
+                            jointContinuationPlan,
+                        ),
+                        0x760_000n,
+                    ),
                 },
+            );
+        const inconsistentPairwiseSignature =
+            paddedContinuationRuntime.encodeActivationSignature(
+                0,
+                inconsistentPairwiseParticipant.manifestIdentity,
+                signatureRuntime.signBodyIdentity(
+                    signatureSecretKeys[0]?.[3] ?? new Uint8Array(),
+                    inconsistentPairwiseParticipant.manifestIdentity,
+                ),
+            );
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                [
+                    inconsistentPairwiseParticipant.manifest,
+                    ...paddedManifests.slice(1),
+                ],
+                [
+                    inconsistentPairwiseSignature,
+                    ...paddedActivationSignatures.slice(1),
+                ],
+                [
+                    inconsistentPairwiseParticipant.chunk,
+                    ...paddedChunks.slice(1),
+                ],
             ),
         ).toThrowError(
-            /^InvalidProtocolObject: padded continuation gate material is invalid$/,
+            /^InvalidProtocolObject: padded continuation authentication failed$/,
         );
 
         const duplicatedNonceInput = paddedInputs[1];
@@ -3091,7 +2984,7 @@ describe('source fixation scalar WASM runtime', () => {
         );
 
         const secondSubmissionCorrection = sourceRuntime.deriveHonestCorrection(
-            abstainingPosition,
+            abstainingContext,
             Uint8Array.of(10, 9, 8, 7, 6, 5, 4, 3, 2, 1),
             abstainingPreparation.heldSubsetKeys,
         );

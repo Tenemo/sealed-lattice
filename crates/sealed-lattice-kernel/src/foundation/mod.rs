@@ -1,6 +1,8 @@
 mod canonical_tuple;
 mod ceremony;
 mod hash;
+#[cfg(any(feature = "construction", test))]
+mod kmac;
 mod participant_identity;
 mod refusal;
 mod schemas;
@@ -16,6 +18,8 @@ pub(crate) use ceremony::{
 };
 pub(crate) use hash::StreamingFoundationTupleHash512;
 pub(crate) use hash::{Hash512, hash_foundation_tuple_512};
+#[cfg(any(feature = "construction", test))]
+pub(crate) use kmac::kmac256;
 pub(crate) use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
 };

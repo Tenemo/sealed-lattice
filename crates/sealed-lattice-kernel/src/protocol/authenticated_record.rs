@@ -8,7 +8,7 @@ use zeroize::Zeroize;
 
 pub const KEY_BYTE_LENGTH: usize = 32;
 pub const ASSOCIATED_DATA_BYTE_LENGTH: usize = 356;
-pub const PLAINTEXT_BYTE_LENGTH: usize = 6_734;
+pub const PLAINTEXT_BYTE_LENGTH: usize = 6_766;
 pub const TAG_BYTE_LENGTH: usize = 16;
 pub const SEALED_RECORD_BYTE_LENGTH: usize = PLAINTEXT_BYTE_LENGTH + TAG_BYTE_LENGTH;
 

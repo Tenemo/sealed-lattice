@@ -32,8 +32,9 @@ use crate::protocol::preparation_parent::{
     verify_private_preparation_carrier,
 };
 use crate::protocol::preparation_plaintext::{
-    CONTRIBUTION_OPENING_BYTE_LENGTH, PREPARATION_PLAINTEXT_BYTE_LENGTH,
-    PreparationMaterialContext, generate_preparation_material, verify_preparation_plaintext,
+    CONTRIBUTION_OPENING_BYTE_LENGTH, PAIRWISE_MASTER_VECTOR_BYTE_LENGTH,
+    PREPARATION_PLAINTEXT_BYTE_LENGTH, PreparationMaterialContext, generate_preparation_material,
+    verify_preparation_plaintext,
 };
 use crate::protocol::private_preparation_body::{
     PrivatePreparationBody, PrivatePreparationContext,
@@ -237,7 +238,7 @@ fn evaluate_joint_continuation_batch(reader: &mut BinaryReader<'_>) -> Canonical
 fn generate_padded_continuation_participant(
     reader: &mut BinaryReader<'_>,
 ) -> CanonicalResult<Vec<u8>> {
-    let (capability, _) = read_verified_finality_capability(reader)?;
+    let (capability, action_key_sets) = read_verified_finality_capability(reader)?;
     let plan = JointContinuationPlan::decode(reader.read_bytes()?).map_err(construction_error)?;
     let participant_position = reader.read_u16()?;
     let initial_wire_values = reader.read_bytes()?;
@@ -245,9 +246,42 @@ fn generate_padded_continuation_participant(
     let terminal_mask_shares = reader.read_bytes()?;
     let allocation_nonce = reader.read_bytes()?;
     let label_entropy = reader.read_bytes()?;
-    let gate_material = reader.read_bytes()?;
+    let participant_count = capability.target.context().participant_count;
+    let mut parent_bodies = Vec::with_capacity(usize::from(participant_count));
+    let mut parent_signatures = Vec::with_capacity(usize::from(participant_count));
+    for _ in 0..participant_count {
+        parent_bodies.push(reader.read_bytes()?.to_vec());
+        parent_signatures.push(reader.read_bytes()?.to_vec());
+    }
+    let own_opening_bytes = reader.read_bytes()?;
+    let own_pairwise_master_bytes = reader.read_bytes()?;
+    let remote_plaintext_bytes = Zeroizing::new(
+        (0..participant_count.saturating_sub(1))
+            .map(|_| Ok(reader.read_bytes()?.to_vec()))
+            .collect::<CanonicalResult<Vec<_>>>()?,
+    );
+    let target = capability.target.context();
+    let preparation_context = PreparationMaterialContext {
+        action_proposal_identity: target.action_proposal_identity,
+        action_key_set_roster_identity: target.action_key_set_roster_identity,
+        preparation_attempt: target.preparation_attempt,
+        predecessor_identity: target.predecessor_identity,
+        sender_position: participant_position,
+    };
+    let preparation = verify_complete_preparation(
+        &preparation_context,
+        participant_position,
+        &action_key_sets,
+        &parent_bodies,
+        &parent_signatures,
+        own_opening_bytes,
+        own_pairwise_master_bytes,
+        &remote_plaintext_bytes,
+    )
+    .map_err(construction_error)?;
     let generated = generate_padded_participant(
         &capability,
+        &preparation,
         &plan,
         PaddedParticipantGenerationInput {
             participant_position,
@@ -256,7 +290,6 @@ fn generate_padded_continuation_participant(
             terminal_mask_shares,
             allocation_nonce,
             label_entropy,
-            gate_material,
         },
     )
     .map_err(construction_error)?;
@@ -495,6 +528,7 @@ fn verify_complete_preparation_command(reader: &mut BinaryReader<'_>) -> Canonic
         parent_signatures.push(reader.read_bytes()?.to_vec());
     }
     let own_opening_bytes = reader.read_bytes()?;
+    let own_pairwise_master_bytes = reader.read_bytes()?;
     let remote_plaintext_bytes = Zeroizing::new(
         (0..participant_count.saturating_sub(1))
             .map(|_| Ok(reader.read_bytes()?.to_vec()))
@@ -514,6 +548,7 @@ fn verify_complete_preparation_command(reader: &mut BinaryReader<'_>) -> Canonic
         &parent_bodies,
         &parent_signatures,
         own_opening_bytes,
+        own_pairwise_master_bytes,
         &remote_plaintext_bytes,
     )
     .map_err(construction_error)?;
@@ -531,13 +566,21 @@ fn verify_complete_preparation_command(reader: &mut BinaryReader<'_>) -> Canonic
 }
 
 fn derive_source_correction_command(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
-    let source_position = reader.read_u16()?;
+    let context = SourceContext {
+        participant_count: reader.read_u16()?,
+        action_proposal_identity: read_hash512(reader)?,
+        action_key_set_roster_identity: read_hash512(reader)?,
+        preparation_attempt: reader.read_u16()?,
+        predecessor_identity: read_hash512(reader)?,
+        verified_preparation_root: read_hash512(reader)?,
+        sender_position: reader.read_u16()?,
+        source_ordinal: SOURCE_ORDINAL,
+    };
     let score_encodings = reader.read_bytes()?;
-    let held_subset_keys = decode_held_subset_keys(source_position, reader.read_bytes()?)
+    let held_subset_keys = decode_held_subset_keys(context.sender_position, reader.read_bytes()?)
         .map_err(construction_error)?;
-    let correction =
-        derive_honest_source_correction(source_position, score_encodings, &held_subset_keys)
-            .map_err(construction_error)?;
+    let correction = derive_honest_source_correction(&context, score_encodings, &held_subset_keys)
+        .map_err(construction_error)?;
     let mut response = BinaryWriter::new();
     response.write_fixed(&correction)?;
     Ok(response.into_bytes())
@@ -708,7 +751,11 @@ fn generate_preparation(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8
     let predecessor_identity = read_hash512(reader)?;
     let sender_position = reader.read_u16()?;
     let opening_bytes = reader.read_bytes()?;
+    let pairwise_master_bytes = reader.read_bytes()?;
     if opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH {
+        return Err(malformed_construction_length());
+    }
+    if pairwise_master_bytes.len() != PAIRWISE_MASTER_VECTOR_BYTE_LENGTH {
         return Err(malformed_construction_length());
     }
     let context = PreparationMaterialContext {
@@ -718,8 +765,8 @@ fn generate_preparation(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8
         predecessor_identity,
         sender_position,
     };
-    let material =
-        generate_preparation_material(&context, opening_bytes).map_err(construction_error)?;
+    let material = generate_preparation_material(&context, opening_bytes, pairwise_master_bytes)
+        .map_err(construction_error)?;
     let mut response = BinaryWriter::new();
     for commitment in material.subset_commitments {
         response.write_fixed(&commitment)?;

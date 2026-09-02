@@ -18,7 +18,7 @@ const identityByteLength = 64;
 
 export const privatePreparationPlaintextByteLength =
     preparationPlaintextByteLength;
-export const privatePreparationBodyByteLength = 8_220;
+export const privatePreparationBodyByteLength = 8_252;
 export const privatePreparationRecordKeyByteLength = 32;
 
 export type PrivatePreparationContextInput = Readonly<{

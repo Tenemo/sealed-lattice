@@ -17,12 +17,17 @@ pub const CONTRIBUTION_OPENING_BYTE_LENGTH: usize =
     CONTRIBUTION_SEED_BYTE_LENGTH + CONTRIBUTION_SALT_BYTE_LENGTH;
 pub const PAIR_OPENING_COUNT: usize = 84;
 pub const PAIR_OPENING_BYTE_LENGTH: usize = PAIR_OPENING_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH;
-pub const PREPARATION_PLAINTEXT_BYTE_LENGTH: usize = 8 + 6 + PAIR_OPENING_BYTE_LENGTH;
+pub const PAIRWISE_MASTER_BYTE_LENGTH: usize = 32;
+pub const PAIRWISE_MASTER_COUNT: usize = COMPLETION_PROFILE_PARTICIPANT_COUNT as usize;
+pub const PAIRWISE_MASTER_VECTOR_BYTE_LENGTH: usize =
+    PAIRWISE_MASTER_COUNT * PAIRWISE_MASTER_BYTE_LENGTH;
+pub const PREPARATION_PLAINTEXT_BYTE_LENGTH: usize =
+    8 + 6 + PAIR_OPENING_BYTE_LENGTH + PAIRWISE_MASTER_BYTE_LENGTH;
 
 const LOW_SUBSET_SIZE: u16 = 7;
 const STATUS_SUBSET_SIZE: u16 = 8;
 const PREPARATION_PLAINTEXT_SCHEMA_IDENTIFIER: u16 = 0x0207;
-const PREPARATION_PLAINTEXT_SCHEMA_VERSION: u16 = 2;
+const PREPARATION_PLAINTEXT_SCHEMA_VERSION: u16 = 3;
 const SUBSET_CONTRIBUTION_PURPOSE: u16 = 1;
 const SUBSET_CONTRIBUTION_COMMITMENT_DOMAIN: &str =
     "sealed-lattice/construction/subset-contribution-commitment/v1";
@@ -88,18 +93,27 @@ impl ContributionOpening {
 #[derive(Clone, PartialEq, Eq, Zeroize)]
 pub struct PreparationPlaintext {
     openings: [ContributionOpening; PAIR_OPENING_COUNT],
+    pairwise_master: [u8; PAIRWISE_MASTER_BYTE_LENGTH],
 }
 
 impl PreparationPlaintext {
-    fn new(openings: [ContributionOpening; PAIR_OPENING_COUNT]) -> Self {
-        Self { openings }
+    fn new(
+        openings: [ContributionOpening; PAIR_OPENING_COUNT],
+        pairwise_master: [u8; PAIRWISE_MASTER_BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            openings,
+            pairwise_master,
+        }
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, PreparationPlaintextError> {
-        let mut opening_bytes = Vec::with_capacity(PAIR_OPENING_BYTE_LENGTH);
+        let mut opening_bytes =
+            Vec::with_capacity(PAIR_OPENING_BYTE_LENGTH + PAIRWISE_MASTER_BYTE_LENGTH);
         for opening in self.openings {
             opening.append_to(&mut opening_bytes);
         }
+        opening_bytes.extend_from_slice(&self.pairwise_master);
         let encoded = CanonicalTuple::new(
             PREPARATION_PLAINTEXT_SCHEMA_IDENTIFIER,
             PREPARATION_PLAINTEXT_SCHEMA_VERSION,
@@ -129,18 +143,22 @@ impl PreparationPlaintext {
         }
         if tuple.items.len() != 1
             || tuple.items[0].item_type() != CanonicalItemType::RawBytes
-            || tuple.items[0].canonical_bytes().len() != PAIR_OPENING_BYTE_LENGTH
+            || tuple.items[0].canonical_bytes().len()
+                != PAIR_OPENING_BYTE_LENGTH + PAIRWISE_MASTER_BYTE_LENGTH
         {
             return Err(PreparationPlaintextError::WrongItemTypeOrLength);
         }
-        let openings = tuple.items[0]
-            .canonical_bytes()
+        let raw_bytes = tuple.items[0].canonical_bytes();
+        let openings = raw_bytes[..PAIR_OPENING_BYTE_LENGTH]
             .chunks_exact(CONTRIBUTION_OPENING_BYTE_LENGTH)
             .map(ContributionOpening::decode)
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
-        let plaintext = Self::new(openings);
+        let pairwise_master = raw_bytes[PAIR_OPENING_BYTE_LENGTH..]
+            .try_into()
+            .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
+        let plaintext = Self::new(openings, pairwise_master);
         if plaintext.encode()?.as_slice() != bytes {
             return Err(PreparationPlaintextError::InvalidCanonicalEncoding);
         }
@@ -151,6 +169,61 @@ impl PreparationPlaintext {
 pub struct GeneratedPreparationMaterial {
     pub subset_commitments: [[u8; SUBSET_COMMITMENT_BYTE_LENGTH]; SUBSET_COMMITMENT_COUNT],
     pub recipient_plaintexts: Vec<Vec<u8>>,
+}
+
+#[derive(Zeroize)]
+pub struct PairwiseMasterInventory {
+    participant_position: u16,
+    outgoing: [[u8; PAIRWISE_MASTER_BYTE_LENGTH]; PAIRWISE_MASTER_COUNT],
+    remote_incoming: [[u8; PAIRWISE_MASTER_BYTE_LENGTH]; PAIRWISE_MASTER_COUNT - 1],
+}
+
+impl PairwiseMasterInventory {
+    #[cfg(test)]
+    pub(super) fn from_position_ordered(
+        participant_position: u16,
+        outgoing: [[u8; PAIRWISE_MASTER_BYTE_LENGTH]; PAIRWISE_MASTER_COUNT],
+        remote_incoming: [[u8; PAIRWISE_MASTER_BYTE_LENGTH]; PAIRWISE_MASTER_COUNT - 1],
+    ) -> Self {
+        Self {
+            participant_position,
+            outgoing,
+            remote_incoming,
+        }
+    }
+
+    pub(super) fn outgoing_to(
+        &self,
+        recipient_position: u16,
+    ) -> Option<&[u8; PAIRWISE_MASTER_BYTE_LENGTH]> {
+        self.outgoing.get(usize::from(recipient_position))
+    }
+
+    pub(super) fn incoming_from(
+        &self,
+        sender_position: u16,
+    ) -> Option<&[u8; PAIRWISE_MASTER_BYTE_LENGTH]> {
+        if sender_position == self.participant_position {
+            return self.outgoing.get(usize::from(sender_position));
+        }
+        let remote_index = if sender_position < self.participant_position {
+            usize::from(sender_position)
+        } else {
+            usize::from(sender_position.checked_sub(1)?)
+        };
+        self.remote_incoming.get(remote_index)
+    }
+}
+
+impl Drop for PairwiseMasterInventory {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+pub struct HeldPreparationMaterial {
+    pub held_subset_keys: Vec<HeldSubsetKey>,
+    pub pairwise_masters: PairwiseMasterInventory,
 }
 
 #[derive(Zeroize)]
@@ -178,9 +251,12 @@ pub struct PreparationMaterialContext {
 pub fn generate_preparation_material(
     context: &PreparationMaterialContext,
     opening_bytes: &[u8],
+    pairwise_master_bytes: &[u8],
 ) -> Result<GeneratedPreparationMaterial, PreparationPlaintextError> {
     validate_position(context.sender_position)?;
-    if opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH {
+    if opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
+        || pairwise_master_bytes.len() != PAIRWISE_MASTER_VECTOR_BYTE_LENGTH
+    {
         return Err(PreparationPlaintextError::WrongItemTypeOrLength);
     }
     let openings = Zeroizing::new(
@@ -229,7 +305,13 @@ pub fn generate_preparation_material(
             .collect::<Vec<_>>()
             .try_into()
             .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
-        recipient_plaintexts.push(PreparationPlaintext::new(pair_openings).encode()?);
+        let pairwise_master_start = usize::from(recipient_position) * PAIRWISE_MASTER_BYTE_LENGTH;
+        let pairwise_master = pairwise_master_bytes
+            [pairwise_master_start..pairwise_master_start + PAIRWISE_MASTER_BYTE_LENGTH]
+            .try_into()
+            .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
+        recipient_plaintexts
+            .push(PreparationPlaintext::new(pair_openings, pairwise_master).encode()?);
     }
     Ok(GeneratedPreparationMaterial {
         subset_commitments,
@@ -241,6 +323,7 @@ pub fn verify_local_preparation_material(
     parent: &PreparationParent,
     expected_context: &PreparationMaterialContext,
     opening_bytes: &[u8],
+    pairwise_master_bytes: &[u8],
 ) -> Result<(), PreparationPlaintextError> {
     if parent.participant_count() != COMPLETION_PROFILE_PARTICIPANT_COUNT
         || parent.action_proposal_identity() != expected_context.action_proposal_identity
@@ -252,7 +335,8 @@ pub fn verify_local_preparation_material(
     {
         return Err(PreparationPlaintextError::WrongContext);
     }
-    let mut material = generate_preparation_material(expected_context, opening_bytes)?;
+    let mut material =
+        generate_preparation_material(expected_context, opening_bytes, pairwise_master_bytes)?;
     let matches = material
         .subset_commitments
         .iter()
@@ -267,13 +351,15 @@ pub fn verify_local_preparation_material(
     Ok(())
 }
 
-pub fn derive_held_subset_keys(
+pub fn derive_held_preparation_material(
     participant_position: u16,
     own_opening_bytes: &[u8],
+    own_pairwise_master_bytes: &[u8],
     remote_plaintext_bytes: &[Vec<u8>],
-) -> Result<Vec<HeldSubsetKey>, PreparationPlaintextError> {
+) -> Result<HeldPreparationMaterial, PreparationPlaintextError> {
     validate_position(participant_position)?;
     if own_opening_bytes.len() != SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH
+        || own_pairwise_master_bytes.len() != PAIRWISE_MASTER_VECTOR_BYTE_LENGTH
         || remote_plaintext_bytes.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT - 1)
     {
         return Err(PreparationPlaintextError::WrongItemTypeOrLength);
@@ -334,7 +420,30 @@ pub fn derive_held_subset_keys(
             key,
         });
     }
-    Ok(held_keys)
+    let outgoing = own_pairwise_master_bytes
+        .chunks_exact(PAIRWISE_MASTER_BYTE_LENGTH)
+        .map(|bytes| {
+            bytes
+                .try_into()
+                .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .try_into()
+        .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
+    let remote_incoming = remote_plaintexts
+        .iter()
+        .map(|plaintext| plaintext.pairwise_master)
+        .collect::<Vec<_>>()
+        .try_into()
+        .map_err(|_| PreparationPlaintextError::WrongItemTypeOrLength)?;
+    Ok(HeldPreparationMaterial {
+        held_subset_keys: held_keys,
+        pairwise_masters: PairwiseMasterInventory {
+            participant_position,
+            outgoing,
+            remote_incoming,
+        },
+    })
 }
 
 pub fn verify_preparation_plaintext(
@@ -492,6 +601,7 @@ mod tests {
                 SUBSET_COMMITMENT_COUNT * CONTRIBUTION_OPENING_BYTE_LENGTH,
                 0x5001,
             ),
+            &deterministic_bytes(PAIRWISE_MASTER_VECTOR_BYTE_LENGTH, 0x5002),
         )
         .expect("preparation material generates")
     }
@@ -529,6 +639,13 @@ mod tests {
                 .recipient_plaintexts
                 .iter()
                 .all(|plaintext| plaintext.len() == PREPARATION_PLAINTEXT_BYTE_LENGTH)
+        );
+        let recipient_zero = PreparationPlaintext::decode(&material.recipient_plaintexts[0])
+            .expect("recipient plaintext decodes");
+        assert_eq!(
+            recipient_zero.pairwise_master,
+            deterministic_bytes(PAIRWISE_MASTER_VECTOR_BYTE_LENGTH, 0x5002)
+                [..PAIRWISE_MASTER_BYTE_LENGTH]
         );
         let parent = parent(&material);
         for recipient in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {

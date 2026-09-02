@@ -1,13 +1,11 @@
 use core::fmt;
 use std::collections::BTreeSet;
 
-use sha3::{
-    CShake256, CShake256Core,
-    digest::{ExtendableOutput, Update, XofReader},
-};
+use aes::Aes256;
+use aes::cipher::{Block, BlockEncrypt, KeyInit};
 use zeroize::Zeroize;
 
-use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
+use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512, kmac256};
 
 use super::action_key_set::{ActionKeySet, action_key_set_roster_identity};
 use super::finality::{
@@ -15,12 +13,15 @@ use super::finality::{
 };
 use super::joint_continuation::{JointContinuationGate, JointContinuationPlan};
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
+use super::preparation_plaintext::{HeldSubsetKey, PairwiseMasterInventory};
+use super::source::VerifiedCompletePreparation;
 
 pub const PADDED_LABEL_BYTE_LENGTH: usize = 40;
 pub const PADDED_MODULE_VALUE_BYTE_LENGTH: usize = 40;
 pub const PADDED_TOKEN_BYTE_LENGTH: usize = PADDED_LABEL_BYTE_LENGTH + 1;
 pub const PADDED_ALLOCATION_NONCE_BYTE_LENGTH: usize = 32;
-pub const PADDED_GATE_MATERIAL_BYTE_LENGTH: usize =
+#[cfg(test)]
+const PADDED_GATE_MATERIAL_BYTE_LENGTH: usize =
     (2 + COMPLETION_PROFILE_PARTICIPANT_COUNT as usize * 5) * PADDED_MODULE_VALUE_BYTE_LENGTH;
 
 const FIELD_BIT_WIDTH: usize = 4;
@@ -68,14 +69,18 @@ const CHUNK_IDENTITY_DOMAIN: &str = "sealed-lattice/padded-continuation/chunk/v1
 const MANIFEST_IDENTITY_DOMAIN: &str = "sealed-lattice/padded-continuation/manifest/v1";
 const BATCH_IDENTITY_DOMAIN: &str = "sealed-lattice/padded-continuation/batch/v1";
 const KMAC_CUSTOMIZATION: &[u8] = b"sealed-lattice/padded-continuation/pad/v1";
+const SUBKEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/padded-continuation/subkey/v1";
 const LOCAL_ROW_DOMAIN: &[u8] = b"sealed-lattice/padded-continuation/local-row/v1";
 const JOINT_ROW_DOMAIN: &[u8] = b"sealed-lattice/padded-continuation/joint-row/v1";
 const CONTINUATION_ROW_DOMAIN: &[u8] = b"sealed-lattice/padded-continuation/continuation-row/v1";
-const KMAC_RATE_BYTE_LENGTH: usize = 136;
 const OPERATION_KIND_LOCAL_MULTIPLICATION: u8 = 1;
 const OPERATION_KIND_TERMINAL_XOR: u8 = 3;
 const ABSENT_U16: u16 = u16::MAX;
 const ABSENT_U8: u8 = u8::MAX;
+const SUBSET_FAMILY_SIZE_SEVEN: u16 = 7;
+const DERIVED_STREAM_ADDRESS_VERSION: u8 = 2;
+const DERIVED_STREAM_FAMILY_JOINT_B: u8 = 5;
+const DERIVED_STREAM_FAMILY_JOINT_PAD: u8 = 6;
 
 type Label = [u8; PADDED_LABEL_BYTE_LENGTH];
 type ModuleValue = [u8; PADDED_MODULE_VALUE_BYTE_LENGTH];
@@ -408,66 +413,14 @@ impl<'a> LabelEntropyCursor<'a> {
     }
 }
 
-fn left_encode(value: usize) -> Vec<u8> {
-    let value = value as u64;
-    let byte_length = (64 - value.leading_zeros() as usize).max(1).div_ceil(8);
-    let mut encoded = Vec::with_capacity(byte_length + 1);
-    encoded.push(byte_length as u8);
-    encoded.extend_from_slice(&value.to_be_bytes()[8 - byte_length..]);
-    encoded
-}
-
-fn right_encode(value: usize) -> Vec<u8> {
-    let value = value as u64;
-    let byte_length = (64 - value.leading_zeros() as usize).max(1).div_ceil(8);
-    let mut encoded = Vec::with_capacity(byte_length + 1);
-    encoded.extend_from_slice(&value.to_be_bytes()[8 - byte_length..]);
-    encoded.push(byte_length as u8);
-    encoded
-}
-
-fn encode_string(value: &[u8]) -> Vec<u8> {
-    let mut encoded = left_encode(value.len() * 8);
-    encoded.extend_from_slice(value);
-    encoded
-}
-
-fn bytepad(value: &[u8], width: usize) -> Vec<u8> {
-    let mut encoded = left_encode(width);
-    encoded.extend_from_slice(value);
-    let padding = (width - encoded.len() % width) % width;
-    encoded.resize(encoded.len() + padding, 0);
-    encoded
-}
-
-fn kmac256_with_customization<const LENGTH: usize>(
-    key: &[u8],
-    message: &[u8],
-    customization: &[u8],
-) -> [u8; LENGTH] {
-    let mut encoded_key = encode_string(key);
-    let mut input = bytepad(&encoded_key, KMAC_RATE_BYTE_LENGTH);
-    encoded_key.zeroize();
-    input.extend_from_slice(message);
-    input.extend_from_slice(&right_encode(LENGTH * 8));
-    let core = CShake256Core::new_with_function_name(b"KMAC", customization);
-    let mut hasher = CShake256::from_core(core);
-    hasher.update(&input);
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0_u8; LENGTH];
-    reader.read(&mut output);
-    input.zeroize();
-    output
-}
-
-fn kmac256<const LENGTH: usize>(key: &[u8], message: &[u8]) -> [u8; LENGTH] {
+fn padded_kmac256<const LENGTH: usize>(key: &[u8], message: &[u8]) -> [u8; LENGTH] {
     #[cfg(test)]
     KMAC_TRACE.with(|trace| {
         if let Some(entries) = trace.borrow_mut().as_mut() {
             entries.push((key.to_vec(), message.to_vec()));
         }
     });
-    kmac256_with_customization(key, message, KMAC_CUSTOMIZATION)
+    kmac256(key, message, KMAC_CUSTOMIZATION)
 }
 
 #[cfg(test)]
@@ -564,7 +517,7 @@ fn local_row_pad(
             basis: ABSENT_U8,
         },
     );
-    let output = kmac256(label, &message);
+    let output = padded_kmac256(label, &message);
     message.zeroize();
     output
 }
@@ -595,7 +548,7 @@ fn joint_row_pad(
             basis,
         },
     );
-    let output = kmac256(label, &message);
+    let output = padded_kmac256(label, &message);
     message.zeroize();
     output
 }
@@ -623,7 +576,7 @@ fn continuation_row_pad(
             basis: ABSENT_U8,
         },
     );
-    let output = kmac256(key, &message);
+    let output = padded_kmac256(key, &message);
     message.zeroize();
     output
 }
@@ -641,6 +594,7 @@ struct GateMaterial {
     receivers: [ReceiverGateMaterial; COMPLETION_PROFILE_PARTICIPANT_COUNT as usize],
 }
 
+#[cfg(test)]
 fn decode_gate_material(bytes: &[u8]) -> Result<GateMaterial, PaddedContinuationError> {
     if bytes.len() != PADDED_GATE_MATERIAL_BYTE_LENGTH {
         return Err(PaddedContinuationError::InvalidGateMaterial);
@@ -684,6 +638,289 @@ fn validate_operation_fresh_gate_material(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct DerivedStreamScope {
+    family: u8,
+    subset: u16,
+    receiver_position: u16,
+    garbler_position: u16,
+}
+
+#[derive(Clone, Copy)]
+struct DerivedStreamAddress {
+    scope: DerivedStreamScope,
+    gate_ordinal: u32,
+    basis: u8,
+}
+
+fn derived_subkey(
+    master: &[u8; 32],
+    context: &EvaluationContext,
+    scope: DerivedStreamScope,
+) -> [u8; 32] {
+    let mut message = Vec::with_capacity(2 * Hash512::BYTE_LENGTH + 7);
+    message.extend_from_slice(context.target_identity.as_bytes());
+    message.extend_from_slice(context.circuit_identity.as_bytes());
+    message.push(scope.family);
+    message.extend_from_slice(&scope.subset.to_le_bytes());
+    message.extend_from_slice(&scope.receiver_position.to_le_bytes());
+    message.extend_from_slice(&scope.garbler_position.to_le_bytes());
+    let subkey = kmac256(master, &message, SUBKEY_CUSTOMIZATION);
+    message.zeroize();
+    subkey
+}
+
+fn derived_module_value(
+    master: &[u8; 32],
+    context: &EvaluationContext,
+    stream_address: DerivedStreamAddress,
+) -> Result<ModuleValue, PaddedContinuationError> {
+    let mut subkey = derived_subkey(master, context, stream_address.scope);
+    let cipher = Aes256::new_from_slice(&subkey)
+        .map_err(|_| PaddedContinuationError::InvalidGateMaterial)?;
+    subkey.zeroize();
+    let mut output = [0_u8; PADDED_MODULE_VALUE_BYTE_LENGTH];
+    for block_index in 0..3_u8 {
+        let mut address_block = Block::<Aes256>::default();
+        address_block[0] = DERIVED_STREAM_ADDRESS_VERSION;
+        address_block[1] = stream_address.scope.family;
+        address_block[2..4].copy_from_slice(&stream_address.scope.receiver_position.to_le_bytes());
+        address_block[4..6].copy_from_slice(&stream_address.scope.garbler_position.to_le_bytes());
+        address_block[6..10].copy_from_slice(&stream_address.gate_ordinal.to_le_bytes());
+        address_block[10] = stream_address.basis;
+        address_block[11] = block_index;
+        cipher.encrypt_block(&mut address_block);
+        let output_start = usize::from(block_index) * 16;
+        let output_end = (output_start + 16).min(PADDED_MODULE_VALUE_BYTE_LENGTH);
+        output[output_start..output_end]
+            .copy_from_slice(&address_block[..output_end - output_start]);
+        address_block.as_mut_slice().zeroize();
+    }
+    Ok(output)
+}
+
+fn normalized_subset_basis(subset: u16, point: Gf16) -> Result<Gf16, PaddedContinuationError> {
+    let admitted_mask = (1_u16 << COMPLETION_PROFILE_PARTICIPANT_COUNT) - 1;
+    if subset & !admitted_mask != 0 || subset.count_ones() != u32::from(SUBSET_FAMILY_SIZE_SEVEN) {
+        return Err(PaddedContinuationError::InvalidGateMaterial);
+    }
+    let mut numerator = Gf16::ONE;
+    let mut denominator = Gf16::ONE;
+    for participant_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+        if subset & (1_u16 << participant_position) != 0 {
+            continue;
+        }
+        let coordinate = Gf16::new((participant_position + 1) as u8);
+        numerator = numerator.multiply(point.add(coordinate));
+        denominator = denominator.multiply(coordinate);
+    }
+    Ok(numerator.multiply(
+        denominator
+            .inverse()
+            .ok_or(PaddedContinuationError::InvalidGateMaterial)?,
+    ))
+}
+
+fn coordinate_interpolation_weight_at_zero(
+    participant_position: u16,
+) -> Result<Gf16, PaddedContinuationError> {
+    validate_position(participant_position)?;
+    let point = Gf16::new((participant_position + 1) as u8);
+    let mut numerator = Gf16::ONE;
+    let mut denominator = Gf16::ONE;
+    for other_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+        if other_position == participant_position {
+            continue;
+        }
+        let other_point = Gf16::new((other_position + 1) as u8);
+        numerator = numerator.multiply(other_point);
+        denominator = denominator.multiply(point.add(other_point));
+    }
+    Ok(numerator.multiply(
+        denominator
+            .inverse()
+            .ok_or(PaddedContinuationError::InvalidGateMaterial)?,
+    ))
+}
+
+fn derive_b_value(
+    context: &EvaluationContext,
+    held_subset_keys: &[HeldSubsetKey],
+    local_position: u16,
+    receiver_position: u16,
+    gate_ordinal: u32,
+    point: Gf16,
+) -> Result<ModuleValue, PaddedContinuationError> {
+    let mut value = [0_u8; PADDED_MODULE_VALUE_BYTE_LENGTH];
+    let mut used_subset_count = 0_usize;
+    for held_key in held_subset_keys {
+        if held_key.family != SUBSET_FAMILY_SIZE_SEVEN
+            || held_key.subset & (1_u16 << receiver_position) == 0
+        {
+            continue;
+        }
+        if held_key.subset & (1_u16 << local_position) == 0 {
+            return Err(PaddedContinuationError::InvalidGateMaterial);
+        }
+        let scalar = normalized_subset_basis(held_key.subset, point)?;
+        let mut stream = derived_module_value(
+            &held_key.key,
+            context,
+            DerivedStreamAddress {
+                scope: DerivedStreamScope {
+                    family: DERIVED_STREAM_FAMILY_JOINT_B,
+                    subset: held_key.subset,
+                    receiver_position,
+                    garbler_position: ABSENT_U16,
+                },
+                gate_ordinal,
+                basis: ABSENT_U8,
+            },
+        )?;
+        module_add_scaled(&mut value, &stream, scalar);
+        stream.zeroize();
+        used_subset_count += 1;
+    }
+    let expected_subset_count = if receiver_position == local_position {
+        84
+    } else {
+        56
+    };
+    if used_subset_count != expected_subset_count {
+        return Err(PaddedContinuationError::InvalidGateMaterial);
+    }
+    Ok(value)
+}
+
+fn derive_pairwise_pad(
+    context: &EvaluationContext,
+    master: &[u8; 32],
+    receiver_position: u16,
+    garbler_position: u16,
+    gate_ordinal: u32,
+    basis: u8,
+) -> Result<ModuleValue, PaddedContinuationError> {
+    if basis >= FIELD_BIT_WIDTH as u8 {
+        return Err(PaddedContinuationError::InvalidGateMaterial);
+    }
+    derived_module_value(
+        master,
+        context,
+        DerivedStreamAddress {
+            scope: DerivedStreamScope {
+                family: DERIVED_STREAM_FAMILY_JOINT_PAD,
+                subset: 0,
+                receiver_position,
+                garbler_position,
+            },
+            gate_ordinal,
+            basis,
+        },
+    )
+}
+
+fn derive_gate_material(
+    context: &EvaluationContext,
+    participant_position: u16,
+    held_subset_keys: &[HeldSubsetKey],
+    pairwise_masters: &PairwiseMasterInventory,
+    gate_count: usize,
+) -> Result<Vec<GateMaterial>, PaddedContinuationError> {
+    validate_position(participant_position)?;
+    let mut material = Vec::with_capacity(gate_count);
+    for gate_index in 0..gate_count {
+        let gate_ordinal =
+            u32::try_from(gate_index).map_err(|_| PaddedContinuationError::ArithmeticOverflow)?;
+        let own_affine_b_constant = derive_b_value(
+            context,
+            held_subset_keys,
+            participant_position,
+            participant_position,
+            gate_ordinal,
+            Gf16::ZERO,
+        )?;
+        if own_affine_b_constant.iter().all(|byte| *byte == 0) {
+            return Err(PaddedContinuationError::InvalidGateMaterial);
+        }
+        let mut own_affine_a_constant = [0_u8; PADDED_MODULE_VALUE_BYTE_LENGTH];
+        for garbler_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            let interpolation_weight = coordinate_interpolation_weight_at_zero(garbler_position)?;
+            let master = pairwise_masters
+                .outgoing_to(garbler_position)
+                .ok_or(PaddedContinuationError::InvalidGateMaterial)?;
+            for basis in 0..FIELD_BIT_WIDTH {
+                let mut pad = derive_pairwise_pad(
+                    context,
+                    master,
+                    participant_position,
+                    garbler_position,
+                    gate_ordinal,
+                    basis as u8,
+                )?;
+                module_add_scaled(&mut own_affine_a_constant, &pad, interpolation_weight);
+                pad.zeroize();
+            }
+        }
+        let mut receivers = [ReceiverGateMaterial {
+            affine_b_evaluation: [0; PADDED_MODULE_VALUE_BYTE_LENGTH],
+            basis_pads: [[0; PADDED_MODULE_VALUE_BYTE_LENGTH]; FIELD_BIT_WIDTH],
+        }; COMPLETION_PROFILE_PARTICIPANT_COUNT as usize];
+        for (receiver_position, receiver_material) in receivers.iter_mut().enumerate() {
+            let receiver_position = receiver_position as u16;
+            receiver_material.affine_b_evaluation = derive_b_value(
+                context,
+                held_subset_keys,
+                participant_position,
+                receiver_position,
+                gate_ordinal,
+                Gf16::new(participant_position as u8 + 1),
+            )?;
+            let master = pairwise_masters
+                .incoming_from(receiver_position)
+                .ok_or(PaddedContinuationError::InvalidGateMaterial)?;
+            for (basis, pad) in receiver_material.basis_pads.iter_mut().enumerate() {
+                *pad = derive_pairwise_pad(
+                    context,
+                    master,
+                    receiver_position,
+                    participant_position,
+                    gate_ordinal,
+                    basis as u8,
+                )?;
+            }
+        }
+        material.push(GateMaterial {
+            own_affine_a_constant,
+            own_affine_b_constant,
+            receivers,
+        });
+    }
+    validate_operation_fresh_gate_material(&material)?;
+    if material.len() != gate_count {
+        return Err(PaddedContinuationError::InvalidGateMaterial);
+    }
+    Ok(material)
+}
+
+fn validate_preparation_context(
+    capability: &VerifiedFinalityCapability,
+    preparation: &VerifiedCompletePreparation,
+    participant_position: u16,
+) -> Result<(), PaddedContinuationError> {
+    let target = capability.target.context();
+    if preparation.root != target.verified_preparation_root
+        || preparation.context.action_proposal_identity != target.action_proposal_identity
+        || preparation.context.action_key_set_roster_identity
+            != target.action_key_set_roster_identity
+        || preparation.context.preparation_attempt != target.preparation_attempt
+        || preparation.context.predecessor_identity != target.predecessor_identity
+        || preparation.context.sender_position != participant_position
+    {
+        return Err(PaddedContinuationError::InvalidContext);
+    }
+    Ok(())
+}
+
 pub struct PaddedParticipantGenerationInput<'a> {
     pub participant_position: u16,
     pub initial_wire_values: &'a [u8],
@@ -691,7 +928,6 @@ pub struct PaddedParticipantGenerationInput<'a> {
     pub terminal_mask_shares: &'a [u8],
     pub allocation_nonce: &'a [u8],
     pub label_entropy: &'a [u8],
-    pub gate_material: &'a [u8],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -704,6 +940,7 @@ pub struct GeneratedPaddedParticipant {
 
 pub fn generate_padded_participant(
     capability: &VerifiedFinalityCapability,
+    preparation: &VerifiedCompletePreparation,
     plan: &JointContinuationPlan,
     input: PaddedParticipantGenerationInput<'_>,
 ) -> Result<GeneratedPaddedParticipant, PaddedContinuationError> {
@@ -715,7 +952,15 @@ pub fn generate_padded_participant(
         circuit_identity: target.circuit_identity,
         top_count: target.top_count,
     };
-    generate_participant_for_context(&context, plan, &plan_view, input)
+    validate_preparation_context(capability, preparation, input.participant_position)?;
+    let gate_material = derive_gate_material(
+        &context,
+        input.participant_position,
+        &preparation.held_subset_keys,
+        &preparation.pairwise_masters,
+        plan_view.gates.len(),
+    )?;
+    generate_participant_for_context(&context, plan, &plan_view, input, &gate_material)
 }
 
 fn generate_participant_for_context(
@@ -723,6 +968,7 @@ fn generate_participant_for_context(
     plan: &JointContinuationPlan,
     plan_view: &PlanView,
     input: PaddedParticipantGenerationInput<'_>,
+    gate_material: &[GateMaterial],
 ) -> Result<GeneratedPaddedParticipant, PaddedContinuationError> {
     validate_position(input.participant_position)?;
     if input.initial_wire_values.len() != usize::from(plan_view.input_wire_count)
@@ -733,7 +979,7 @@ fn generate_participant_for_context(
         || input.terminal_mask_shares.iter().any(|value| *value > 0x0f)
         || input.allocation_nonce.len() != PADDED_ALLOCATION_NONCE_BYTE_LENGTH
         || input.label_entropy.len() != padded_label_entropy_byte_length(plan)?
-        || input.gate_material.len() != plan_view.gates.len() * PADDED_GATE_MATERIAL_BYTE_LENGTH
+        || gate_material.len() != plan_view.gates.len()
     {
         return Err(PaddedContinuationError::InvalidBody);
     }
@@ -741,12 +987,7 @@ fn generate_participant_for_context(
         .allocation_nonce
         .try_into()
         .map_err(|_| PaddedContinuationError::InvalidBody)?;
-    let gate_material = input
-        .gate_material
-        .chunks_exact(PADDED_GATE_MATERIAL_BYTE_LENGTH)
-        .map(decode_gate_material)
-        .collect::<Result<Vec<_>, _>>()?;
-    validate_operation_fresh_gate_material(&gate_material)?;
+    validate_operation_fresh_gate_material(gate_material)?;
 
     let mut entropy = LabelEntropyCursor::new(input.label_entropy);
     let payload_byte_length = padded_participant_payload_byte_length(plan)?;
@@ -2120,7 +2361,11 @@ impl<'a> ByteReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha3::Shake256;
+    use crate::protocol::preparation_plaintext::sender_subset_slots;
+    use sha3::{
+        Shake256,
+        digest::{ExtendableOutput, Update, XofReader},
+    };
     use std::collections::BTreeMap;
 
     const PARTICIPANT_COUNT: usize = COMPLETION_PROFILE_PARTICIPANT_COUNT as usize;
@@ -2438,6 +2683,11 @@ mod tests {
                 0x710_000 + participant_position as u64,
             );
             let label_entropy = deterministic_label_entropy(&plan, participant_position);
+            let decoded_gate_material = gate_material[participant_position]
+                .chunks_exact(PADDED_GATE_MATERIAL_BYTE_LENGTH)
+                .map(decode_gate_material)
+                .collect::<Result<Vec<_>, _>>()
+                .expect("explicit fixture gate material decodes");
             let generated = generate_participant_for_context(
                 &context,
                 &plan,
@@ -2449,8 +2699,8 @@ mod tests {
                     terminal_mask_shares: &terminal_masks[participant_position],
                     allocation_nonce: &allocation_nonce,
                     label_entropy: &label_entropy,
-                    gate_material: &gate_material[participant_position],
                 },
+                &decoded_gate_material,
             )
             .expect("padded participant body generates");
             assert_eq!(generated.chunk.len(), PADDED_REDUCED_CHUNK_BYTE_LENGTH);
@@ -2563,14 +2813,145 @@ mod tests {
         })
     }
 
+    fn deterministic_held_subset_keys(participant_position: u16) -> Vec<HeldSubsetKey> {
+        sender_subset_slots(participant_position)
+            .into_iter()
+            .map(|(family, subset)| HeldSubsetKey {
+                family,
+                subset,
+                key: deterministic_bytes(32, (u64::from(family) << 16) | u64::from(subset))
+                    .try_into()
+                    .expect("subset key length"),
+            })
+            .collect()
+    }
+
+    fn deterministic_pairwise_master(sender_position: u16, recipient_position: u16) -> [u8; 32] {
+        deterministic_bytes(
+            32,
+            0x990_000 + u64::from(sender_position) * 16 + u64::from(recipient_position),
+        )
+        .try_into()
+        .expect("pairwise master length")
+    }
+
+    fn deterministic_pairwise_inventory(
+        participant_position: u16,
+        changed_recipient: Option<u16>,
+    ) -> PairwiseMasterInventory {
+        let mut outgoing = core::array::from_fn(|recipient_position| {
+            deterministic_pairwise_master(participant_position, recipient_position as u16)
+        });
+        if let Some(recipient_position) = changed_recipient {
+            outgoing[usize::from(recipient_position)][0] ^= 1;
+        }
+        let mut remote_incoming = [[0_u8; 32]; PARTICIPANT_COUNT - 1];
+        let mut remote_index = 0;
+        for sender_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            if sender_position == participant_position {
+                continue;
+            }
+            remote_incoming[remote_index] =
+                deterministic_pairwise_master(sender_position, participant_position);
+            remote_index += 1;
+        }
+        PairwiseMasterInventory::from_position_ordered(
+            participant_position,
+            outgoing,
+            remote_incoming,
+        )
+    }
+
+    #[test]
+    fn preparation_derived_b_and_pairwise_a_interpolate_exactly() {
+        let context = EvaluationContext {
+            target_identity: Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]),
+            circuit_identity: Hash512::from_bytes([0x72; Hash512::BYTE_LENGTH]),
+            top_count: 1,
+        };
+        let all_material = (0..COMPLETION_PROFILE_PARTICIPANT_COUNT)
+            .map(|participant_position| {
+                derive_gate_material(
+                    &context,
+                    participant_position,
+                    &deterministic_held_subset_keys(participant_position),
+                    &deterministic_pairwise_inventory(participant_position, None),
+                    2,
+                )
+                .expect("derived material")
+            })
+            .collect::<Vec<_>>();
+
+        for receiver_position in 0..PARTICIPANT_COUNT {
+            for gate_index in 0..2 {
+                let b_coordinates = all_material
+                    .iter()
+                    .map(|garbler_material| {
+                        garbler_material[gate_index].receivers[receiver_position]
+                            .affine_b_evaluation
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    interpolate_module_at_zero(&b_coordinates).expect("B interpolates"),
+                    all_material[receiver_position][gate_index].own_affine_b_constant,
+                );
+
+                let a_coordinates = all_material
+                    .iter()
+                    .map(|garbler_material| {
+                        let mut coordinate = [0_u8; PADDED_MODULE_VALUE_BYTE_LENGTH];
+                        for pad in
+                            garbler_material[gate_index].receivers[receiver_position].basis_pads
+                        {
+                            module_xor(&mut coordinate, &pad);
+                        }
+                        coordinate
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    interpolate_module_at_zero(&a_coordinates).expect("A interpolates"),
+                    all_material[receiver_position][gate_index].own_affine_a_constant,
+                );
+            }
+        }
+
+        assert_ne!(all_material[0][0], all_material[0][1]);
+        let replay_context = EvaluationContext {
+            target_identity: Hash512::from_bytes([0x73; Hash512::BYTE_LENGTH]),
+            ..context
+        };
+        let replayed = derive_gate_material(
+            &replay_context,
+            0,
+            &deterministic_held_subset_keys(0),
+            &deterministic_pairwise_inventory(0, None),
+            2,
+        )
+        .expect("replay-context material derives");
+        assert_ne!(all_material[0], replayed);
+
+        let inconsistent_receiver = derive_gate_material(
+            &context,
+            0,
+            &deterministic_held_subset_keys(0),
+            &deterministic_pairwise_inventory(0, Some(1)),
+            2,
+        )
+        .expect("inconsistent local material still derives");
+        assert_ne!(
+            inconsistent_receiver[0].own_affine_a_constant,
+            all_material[0][0].own_affine_a_constant,
+        );
+        assert_eq!(
+            inconsistent_receiver[0].receivers[0],
+            all_material[0][0].receivers[0],
+        );
+    }
+
     #[test]
     fn kmac256_matches_nist_sample_four() {
         let key: Vec<u8> = (0x40..=0x5f).collect();
-        let output = kmac256_with_customization::<64>(
-            &key,
-            &[0x00, 0x01, 0x02, 0x03],
-            b"My Tagged Application",
-        );
+        let output = kmac256::<64>(&key, &[0x00, 0x01, 0x02, 0x03], b"My Tagged Application");
         assert_eq!(
             output,
             [
@@ -2580,6 +2961,70 @@ mod tests {
                 0x89, 0xf2, 0x7c, 0xf6, 0xf5, 0x95, 0x1f, 0x01, 0x03, 0xf3, 0x3f, 0x4f, 0x24, 0x87,
                 0x10, 0x24, 0xd9, 0xc2, 0x77, 0x73, 0xa8, 0xdd,
             ]
+        );
+    }
+
+    #[test]
+    fn preparation_subkeys_and_aes_streams_match_independent_vectors() {
+        let master = core::array::from_fn(|index| index as u8);
+        let context = EvaluationContext {
+            target_identity: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            circuit_identity: Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            top_count: 1,
+        };
+        assert_eq!(
+            derived_subkey(
+                &master,
+                &context,
+                DerivedStreamScope {
+                    family: DERIVED_STREAM_FAMILY_JOINT_B,
+                    subset: 0x007f,
+                    receiver_position: 2,
+                    garbler_position: ABSENT_U16,
+                },
+            ),
+            decode_hex::<32>("992d3484c8f39d6a9fb4cf5dfeedf5d489f2cf0e102338e80841ebe2ce96d7b1",),
+        );
+        assert_eq!(
+            derived_module_value(
+                &master,
+                &context,
+                DerivedStreamAddress {
+                    scope: DerivedStreamScope {
+                        family: DERIVED_STREAM_FAMILY_JOINT_B,
+                        subset: 0x007f,
+                        receiver_position: 2,
+                        garbler_position: ABSENT_U16,
+                    },
+                    gate_ordinal: 0x01020304,
+                    basis: ABSENT_U8,
+                },
+            )
+            .expect("B stream derives"),
+            decode_hex::<40>(
+                "8d1bded07b4f6c3952318c19a268fbe1a8278f6d8a2ee503c9adb2410665e3f5\
+                 8670ed430a5cc162",
+            ),
+        );
+        assert_eq!(
+            derived_subkey(
+                &master,
+                &context,
+                DerivedStreamScope {
+                    family: DERIVED_STREAM_FAMILY_JOINT_PAD,
+                    subset: 0,
+                    receiver_position: 2,
+                    garbler_position: 3,
+                },
+            ),
+            decode_hex::<32>("a596f932078c50fb091ddf3371b1a152e2636eb87c5a61ef534bf54b7f648b8e",),
+        );
+        assert_eq!(
+            derive_pairwise_pad(&context, &master, 2, 3, 7, 1).expect("pairwise stream derives"),
+            decode_hex::<40>(
+                "7dda5d39792d8c0f229fdc6e67ef16537c60a4ad1df644ace08187cbf7edf99b\
+                 c79e76bd767da0db",
+            ),
         );
     }
 
@@ -2652,25 +3097,25 @@ mod tests {
             )
         );
         assert_eq!(
-            kmac256::<PADDED_TOKEN_BYTE_LENGTH>(&key, &local_message),
+            padded_kmac256::<PADDED_TOKEN_BYTE_LENGTH>(&key, &local_message),
             decode_hex::<PADDED_TOKEN_BYTE_LENGTH>(
                 "d4314351319fb715cbe0673ffbeb50f708e4324ff174276610ff00d19a292fab551743737d3c1c959f"
             )
         );
         assert_eq!(
-            kmac256::<PADDED_MODULE_VALUE_BYTE_LENGTH>(&key, &joint_message),
+            padded_kmac256::<PADDED_MODULE_VALUE_BYTE_LENGTH>(&key, &joint_message),
             decode_hex::<PADDED_MODULE_VALUE_BYTE_LENGTH>(
                 "880c52f4968e60686193f624e13d8cc0b6d4e33576af6e8b31722b8db4a1f88536381c090d74a901"
             )
         );
         assert_eq!(
-            kmac256::<CONTINUATION_ROW_BYTE_LENGTH>(&key, &continuation_message),
+            padded_kmac256::<CONTINUATION_ROW_BYTE_LENGTH>(&key, &continuation_message),
             decode_hex::<CONTINUATION_ROW_BYTE_LENGTH>(
                 "d269de75c18374ff743a10f2e49df78b12cf418cc5528ad2576f99d2c5f6f43c85b9288534f650a33ebadf47e1bcd97a0f12b33417357e1e5d589ff1666f08a97524a684cfd50c4123d0c54829eac3989c"
             )
         );
 
-        let baseline = kmac256::<PADDED_MODULE_VALUE_BYTE_LENGTH>(&key, &joint_message);
+        let baseline = padded_kmac256::<PADDED_MODULE_VALUE_BYTE_LENGTH>(&key, &joint_message);
         let mut distinct_messages = Vec::new();
         let mut changed_context = context;
         changed_context.target_identity = Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]);
@@ -2739,7 +3184,7 @@ mod tests {
         }
         for message in distinct_messages {
             assert_ne!(
-                kmac256::<PADDED_MODULE_VALUE_BYTE_LENGTH>(&key, &message),
+                padded_kmac256::<PADDED_MODULE_VALUE_BYTE_LENGTH>(&key, &message),
                 baseline
             );
         }
@@ -3803,6 +4248,11 @@ mod tests {
                     pair[PADDED_LABEL_BYTE_LENGTH] ^= 1;
                 }
             }
+            let decoded_gate_material = gate_material
+                .chunks_exact(PADDED_GATE_MATERIAL_BYTE_LENGTH)
+                .map(decode_gate_material)
+                .collect::<Result<Vec<_>, _>>()
+                .expect("fork fixture gate material decodes");
             generate_participant_for_context(
                 &fixture.context,
                 &fixture.plan,
@@ -3814,8 +4264,8 @@ mod tests {
                     terminal_mask_shares: &fixture.terminal_masks[0],
                     allocation_nonce: &allocation_nonce,
                     label_entropy: &canonical_label_entropy,
-                    gate_material: &gate_material,
                 },
+                &decoded_gate_material,
             )
             .expect("fork variant generates")
         };
@@ -4377,6 +4827,11 @@ mod tests {
 
         let allocation_nonce = deterministic_bytes(PADDED_ALLOCATION_NONCE_BYTE_LENGTH, 0x710_000);
         let label_entropy = deterministic_label_entropy(&fixture.plan, 0);
+        let decoded_gate_material = fixture.gate_material[0]
+            .chunks_exact(PADDED_GATE_MATERIAL_BYTE_LENGTH)
+            .map(decode_gate_material)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("fixture gate material decodes");
         for field in 0..3 {
             let mut initial_values = fixture.initial_values[0].clone();
             let mut gate_masks = fixture.gate_masks[0].clone();
@@ -4399,8 +4854,8 @@ mod tests {
                         terminal_mask_shares: &terminal_masks,
                         allocation_nonce: &allocation_nonce,
                         label_entropy: &label_entropy,
-                        gate_material: &fixture.gate_material[0],
                     },
+                    &decoded_gate_material,
                 ),
                 Err(PaddedContinuationError::InvalidBody),
                 "noncanonical field {field} must refuse before GF(16) truncation"

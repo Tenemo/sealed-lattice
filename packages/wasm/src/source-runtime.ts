@@ -7,6 +7,7 @@ import {
 import type { ConstructionKernelCommandRuntime } from './foundation-kernel/kernel-runtime.js';
 import {
     preparationContributionOpeningVectorByteLength,
+    preparationPairwiseMasterVectorByteLength,
     preparationPlaintextByteLength,
 } from './preparation-material-runtime.js';
 import { actionSignatureCarrierByteLength } from './preparation-parent-runtime.js';
@@ -74,10 +75,11 @@ export type SourceRuntime = Readonly<{
         actionKeySetBodies: readonly Uint8Array[],
         preparationParents: readonly PreparationParentCarrier[],
         ownContributionOpenings: Uint8Array,
+        ownPairwiseMasters: Uint8Array,
         remotePlaintexts: readonly Uint8Array[],
     ): VerifiedCompletePreparation;
     deriveHonestCorrection(
-        sourcePosition: number,
+        context: SourceContext,
         scoreEncodings: Uint8Array,
         heldSubsetKeys: Uint8Array,
     ): Uint8Array;
@@ -198,6 +200,7 @@ export const openSourceRuntime = (
         actionKeySetBodies,
         preparationParents,
         ownContributionOpenings,
+        ownPairwiseMasters,
         remotePlaintexts,
     ) => {
         validatePreparationContext(context);
@@ -225,6 +228,11 @@ export const openSourceRuntime = (
             preparationContributionOpeningVectorByteLength,
             'ownContributionOpenings',
         );
+        requireExactConstructionBytes(
+            ownPairwiseMasters,
+            preparationPairwiseMasterVectorByteLength,
+            'ownPairwiseMasters',
+        );
         if (remotePlaintexts.length !== completionProfileParticipantCount - 1) {
             throw new RangeError(
                 'remotePlaintexts must contain every remote sender in roster order.',
@@ -250,6 +258,7 @@ export const openSourceRuntime = (
             request.writeBytes(parent.signature);
         }
         request.writeBytes(ownContributionOpenings);
+        request.writeBytes(ownPairwiseMasters);
         for (const plaintext of remotePlaintexts) {
             request.writeBytes(plaintext);
         }
@@ -271,12 +280,14 @@ export const openSourceRuntime = (
             };
         });
     },
-    deriveHonestCorrection: (
-        sourcePosition,
-        scoreEncodings,
-        heldSubsetKeys,
-    ) => {
-        requirePosition(sourcePosition, 'sourcePosition');
+    deriveHonestCorrection: (context, scoreEncodings, heldSubsetKeys) => {
+        validatePreparationContext(context);
+        requirePosition(context.senderPosition, 'senderPosition');
+        requireExactConstructionBytes(
+            context.verifiedPreparationRoot,
+            identityByteLength,
+            'verifiedPreparationRoot',
+        );
         requireExactConstructionBytes(
             scoreEncodings,
             sourceScoreEncodingCount,
@@ -292,7 +303,10 @@ export const openSourceRuntime = (
         );
         const request = new ConstructionCommandWriter();
         request.writeU8(deriveHonestSourceCorrectionCommand);
-        request.writeU16(sourcePosition);
+        request.writeU16(context.participantCount);
+        writePreparationContext(request, context);
+        request.writeFixed(context.verifiedPreparationRoot);
+        request.writeU16(context.senderPosition);
         request.writeBytes(scoreEncodings);
         request.writeBytes(heldSubsetKeys);
         return executeConstructionCommand(kernel, request, (reader) => {
