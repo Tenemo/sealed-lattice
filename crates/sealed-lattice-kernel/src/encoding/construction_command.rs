@@ -7,7 +7,9 @@ use crate::protocol::action_signature::{
 };
 use crate::protocol::finality::{
     FinalityDerivationContext, FinalityTarget, VerifiedFinalityCapability, derive_finality_target,
-    encode_finality_signature_carrier, verify_finality_certificate, verify_finality_signature,
+    encode_finality_signature_carrier, encode_no_result_acknowledgement_carrier,
+    verify_finality_certificate, verify_finality_signature, verify_no_result_acknowledgement,
+    verify_no_result_release,
 };
 use crate::protocol::padded_continuation::{
     PaddedTallyEvaluationInitializationInput, PaddedTallyGenerationInitializationInput,
@@ -539,18 +541,45 @@ fn encode_finality_signature_carrier_command(
     reader: &mut BinaryReader<'_>,
 ) -> CanonicalResult<Vec<u8>> {
     let participant_count = reader.read_u16()?;
+    let purpose = reader.read_u16()?;
     let signer_position = reader.read_u16()?;
     let target_identity = read_hash512(reader)?;
     let signature = reader.read_bytes()?;
-    bytes_response(
-        &encode_finality_signature_carrier(
-            participant_count,
-            signer_position,
-            target_identity,
-            signature,
-        )
-        .map_err(construction_error)?,
-    )
+    let carrier = match purpose {
+        value if value == ActionSignaturePurpose::Finality as u16 => {
+            encode_finality_signature_carrier(
+                participant_count,
+                signer_position,
+                target_identity,
+                signature,
+            )
+        }
+        value if value == ActionSignaturePurpose::NoResultAcknowledgement as u16 => {
+            encode_no_result_acknowledgement_carrier(
+                participant_count,
+                signer_position,
+                target_identity,
+                signature,
+            )
+        }
+        value => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidEnum,
+                format!("unsupported target-signature purpose: {value}"),
+            ));
+        }
+    }
+    .map_err(construction_error)?;
+    bytes_response(&carrier)
+}
+
+fn read_positioned_signature_carriers(
+    reader: &mut BinaryReader<'_>,
+    count: u16,
+) -> CanonicalResult<Vec<(u16, Vec<u8>)>> {
+    (0..count)
+        .map(|_| Ok((reader.read_u16()?, reader.read_bytes()?.to_vec())))
+        .collect::<CanonicalResult<Vec<_>>>()
 }
 
 fn verify_finality_certificate_command(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
@@ -564,22 +593,31 @@ fn verify_finality_certificate_command(reader: &mut BinaryReader<'_>) -> Canonic
     }
     let roster = read_completion_roster(reader, participant_count)?;
     let signature_count = reader.read_u16()?;
-    let signatures = (0..signature_count)
-        .map(|_| Ok((reader.read_u16()?, reader.read_bytes()?.to_vec())))
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let signatures = read_positioned_signature_carriers(reader, signature_count)?;
+    let acknowledgement_count = reader.read_u16()?;
+    let acknowledgements = read_positioned_signature_carriers(reader, acknowledgement_count)?;
     let capability =
         verify_finality_certificate(&target, &roster, &signatures).map_err(construction_error)?;
+    let no_result_release = if acknowledgements.is_empty() {
+        false
+    } else {
+        verify_no_result_release(capability.clone(), &roster, &acknowledgements)
+            .map_err(construction_error)?;
+        true
+    };
     let mut response = BinaryWriter::new();
     response.write_u16(capability.target.quorum())?;
     response.write_u16(capability.target.target_kind() as u16)?;
     response.write_u16(capability.target.context().source_submission_bitmap)?;
     response.write_u16(capability.target.context().top_count)?;
     response.write_fixed(capability.target_identity.as_bytes())?;
+    response.write_u8(u8::from(no_result_release))?;
     Ok(response.into_bytes())
 }
 
 fn verify_finality_signature_command(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
     let participant_count = reader.read_u16()?;
+    let purpose = reader.read_u16()?;
     let signer_position = reader.read_u16()?;
     let target = FinalityTarget::decode(reader.read_bytes()?).map_err(construction_error)?;
     if target.context().participant_count != participant_count {
@@ -589,8 +627,26 @@ fn verify_finality_signature_command(reader: &mut BinaryReader<'_>) -> Canonical
         ));
     }
     let roster = read_completion_roster(reader, participant_count)?;
-    verify_finality_signature(&target, &roster, signer_position, reader.read_bytes()?)
-        .map_err(construction_error)?;
+    match purpose {
+        value if value == ActionSignaturePurpose::Finality as u16 => {
+            verify_finality_signature(&target, &roster, signer_position, reader.read_bytes()?)
+        }
+        value if value == ActionSignaturePurpose::NoResultAcknowledgement as u16 => {
+            verify_no_result_acknowledgement(
+                &target,
+                &roster,
+                signer_position,
+                reader.read_bytes()?,
+            )
+        }
+        value => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidEnum,
+                format!("unsupported target-signature purpose: {value}"),
+            ));
+        }
+    }
+    .map_err(construction_error)?;
     Ok(Vec::new())
 }
 
@@ -1039,6 +1095,7 @@ fn derive_action_signature_statement(reader: &mut BinaryReader<'_>) -> Canonical
         2 => ActionSignaturePurpose::Source,
         3 => ActionSignaturePurpose::Finality,
         4 => ActionSignaturePurpose::Activation,
+        5 => ActionSignaturePurpose::NoResultAcknowledgement,
         value => {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidEnum,

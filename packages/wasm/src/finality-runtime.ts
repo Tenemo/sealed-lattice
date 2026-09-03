@@ -22,7 +22,7 @@ const identityByteLength = 64;
 
 export const finalityTargetBodyByteLength = 1_058;
 export const sourceBodyIdentityVectorByteLength = 640;
-export const completionProfileFinalityQuorum = 8;
+export const completionProfileFinalityQuorum = 7;
 
 type FinalityTargetKind = 'computation' | 'no-result';
 
@@ -61,6 +61,8 @@ export type FinalitySignatureCarrier = Readonly<{
     signature: Uint8Array;
 }>;
 
+export type NoResultAcknowledgementCarrier = FinalitySignatureCarrier;
+
 const verifiedFinalityCapabilityBrand: unique symbol = Symbol(
     'verified-finality-capability',
 );
@@ -74,6 +76,15 @@ type VerifiedFinalityCapability = Readonly<{
     targetIdentity: Uint8Array;
 }>;
 
+const verifiedNoResultReleaseCapabilityBrand: unique symbol = Symbol(
+    'verified-no-result-release-capability',
+);
+
+export type VerifiedNoResultReleaseCapability = VerifiedFinalityCapability &
+    Readonly<{
+        [verifiedNoResultReleaseCapabilityBrand]: true;
+    }>;
+
 type FinalityRuntime = Readonly<{
     deriveTarget(
         context: FinalityDerivationContext,
@@ -85,16 +96,33 @@ type FinalityRuntime = Readonly<{
         targetIdentity: Uint8Array,
         signature: Uint8Array,
     ): Uint8Array;
+    encodeNoResultAcknowledgement(
+        signerPosition: number,
+        targetIdentity: Uint8Array,
+        signature: Uint8Array,
+    ): Uint8Array;
     verifyCertificate(
         targetBody: Uint8Array,
         canonicalRosterBytes: Uint8Array,
         signatures: readonly FinalitySignatureCarrier[],
     ): VerifiedFinalityCapability;
+    verifyNoResultRelease(
+        targetBody: Uint8Array,
+        canonicalRosterBytes: Uint8Array,
+        finalitySignatures: readonly FinalitySignatureCarrier[],
+        acknowledgements: readonly NoResultAcknowledgementCarrier[],
+    ): VerifiedNoResultReleaseCapability;
     verifySignature(
         signerPosition: number,
         targetBody: Uint8Array,
         canonicalRosterBytes: Uint8Array,
         signature: Uint8Array,
+    ): void;
+    verifyNoResultAcknowledgement(
+        signerPosition: number,
+        targetBody: Uint8Array,
+        canonicalRosterBytes: Uint8Array,
+        acknowledgement: Uint8Array,
     ): void;
 }>;
 
@@ -297,6 +325,7 @@ export const openFinalityRuntime = (
         const request = new ConstructionCommandWriter();
         request.writeU8(encodeFinalitySignatureCarrierCommand);
         request.writeU16(completionProfileParticipantCount);
+        request.writeU16(3);
         request.writeU16(signerPosition);
         request.writeFixed(targetIdentity);
         request.writeBytes(signature);
@@ -306,6 +335,39 @@ export const openFinalityRuntime = (
                 carrier,
                 actionSignatureCarrierByteLength,
                 'finalitySignatureCarrier',
+            );
+            return carrier;
+        });
+    },
+    encodeNoResultAcknowledgement: (
+        signerPosition,
+        targetIdentity,
+        signature,
+    ) => {
+        requirePosition(signerPosition, 'signerPosition');
+        requireExactConstructionBytes(
+            targetIdentity,
+            identityByteLength,
+            'targetIdentity',
+        );
+        requireExactConstructionBytes(
+            signature,
+            actionSignatureByteLength,
+            'actionSignature',
+        );
+        const request = new ConstructionCommandWriter();
+        request.writeU8(encodeFinalitySignatureCarrierCommand);
+        request.writeU16(completionProfileParticipantCount);
+        request.writeU16(5);
+        request.writeU16(signerPosition);
+        request.writeFixed(targetIdentity);
+        request.writeBytes(signature);
+        return executeConstructionCommand(kernel, request, (reader) => {
+            const carrier = Uint8Array.from(reader.readBytes());
+            requireExactConstructionBytes(
+                carrier,
+                actionSignatureCarrierByteLength,
+                'noResultAcknowledgementCarrier',
             );
             return carrier;
         });
@@ -341,6 +403,7 @@ export const openFinalityRuntime = (
             request.writeU16(entry.signerPosition);
             request.writeBytes(entry.signature);
         }
+        request.writeU16(0);
         return executeConstructionCommand(kernel, request, (reader) => {
             const quorum = reader.readU16();
             const targetKind = targetKindFromCode(reader.readU16());
@@ -349,8 +412,10 @@ export const openFinalityRuntime = (
             const targetIdentity = Uint8Array.from(
                 reader.readFixed(identityByteLength),
             );
+            const noResultRelease = reader.readU8();
             if (
                 quorum !== completionProfileFinalityQuorum ||
+                noResultRelease !== 0 ||
                 sourceSubmissionBitmap >=
                     1 << completionProfileParticipantCount ||
                 topCount === 0 ||
@@ -364,6 +429,90 @@ export const openFinalityRuntime = (
             }
             return {
                 [verifiedFinalityCapabilityBrand]: true,
+                quorum,
+                targetKind,
+                sourceSubmissionBitmap,
+                topCount,
+                targetIdentity,
+            };
+        });
+    },
+    verifyNoResultRelease: (
+        targetBody,
+        canonicalRosterBytes,
+        finalitySignatures,
+        acknowledgements,
+    ) => {
+        requireExactConstructionBytes(
+            targetBody,
+            finalityTargetBodyByteLength,
+            'finalityTargetBody',
+        );
+        validateRoster(canonicalRosterBytes);
+        if (
+            finalitySignatures.length < completionProfileFinalityQuorum ||
+            finalitySignatures.length > completionProfileParticipantCount
+        ) {
+            throw new RangeError(
+                'finalitySignatures must contain one completion-profile finality quorum.',
+            );
+        }
+        if (acknowledgements.length !== completionProfileParticipantCount) {
+            throw new RangeError(
+                'acknowledgements must contain every completion-profile position.',
+            );
+        }
+        const request = new ConstructionCommandWriter();
+        request.writeU8(verifyFinalityCertificateCommand);
+        request.writeU16(completionProfileParticipantCount);
+        request.writeBytes(targetBody);
+        request.writeBytes(canonicalRosterBytes);
+        request.writeU16(finalitySignatures.length);
+        for (const entry of finalitySignatures) {
+            requirePosition(entry.signerPosition, 'signerPosition');
+            requireExactConstructionBytes(
+                entry.signature,
+                actionSignatureCarrierByteLength,
+                'finalitySignatureCarrier',
+            );
+            request.writeU16(entry.signerPosition);
+            request.writeBytes(entry.signature);
+        }
+        request.writeU16(acknowledgements.length);
+        for (const entry of acknowledgements) {
+            requirePosition(entry.signerPosition, 'signerPosition');
+            requireExactConstructionBytes(
+                entry.signature,
+                actionSignatureCarrierByteLength,
+                'noResultAcknowledgementCarrier',
+            );
+            request.writeU16(entry.signerPosition);
+            request.writeBytes(entry.signature);
+        }
+        return executeConstructionCommand(kernel, request, (reader) => {
+            const quorum = reader.readU16();
+            const targetKind = targetKindFromCode(reader.readU16());
+            const sourceSubmissionBitmap = reader.readU16();
+            const topCount = reader.readU16();
+            const targetIdentity = Uint8Array.from(
+                reader.readFixed(identityByteLength),
+            );
+            const noResultRelease = reader.readU8();
+            if (
+                quorum !== completionProfileFinalityQuorum ||
+                targetKind !== 'no-result' ||
+                sourceSubmissionBitmap !== 0 ||
+                topCount === 0 ||
+                topCount > completionProfileParticipantCount ||
+                noResultRelease !== 1
+            ) {
+                throw new Error(
+                    'The construction kernel returned inconsistent no-result release metadata.',
+                );
+            }
+            return {
+                [verifiedFinalityCapabilityBrand]: true,
+                [verifiedNoResultReleaseCapabilityBrand]: true,
                 quorum,
                 targetKind,
                 sourceSubmissionBitmap,
@@ -393,10 +542,39 @@ export const openFinalityRuntime = (
         const request = new ConstructionCommandWriter();
         request.writeU8(verifyFinalitySignatureCommand);
         request.writeU16(completionProfileParticipantCount);
+        request.writeU16(3);
         request.writeU16(signerPosition);
         request.writeBytes(targetBody);
         request.writeBytes(canonicalRosterBytes);
         request.writeBytes(signature);
+        executeConstructionCommand(kernel, request, () => undefined);
+    },
+    verifyNoResultAcknowledgement: (
+        signerPosition,
+        targetBody,
+        canonicalRosterBytes,
+        acknowledgement,
+    ) => {
+        requirePosition(signerPosition, 'signerPosition');
+        requireExactConstructionBytes(
+            targetBody,
+            finalityTargetBodyByteLength,
+            'finalityTargetBody',
+        );
+        validateRoster(canonicalRosterBytes);
+        requireExactConstructionBytes(
+            acknowledgement,
+            actionSignatureCarrierByteLength,
+            'noResultAcknowledgementCarrier',
+        );
+        const request = new ConstructionCommandWriter();
+        request.writeU8(verifyFinalitySignatureCommand);
+        request.writeU16(completionProfileParticipantCount);
+        request.writeU16(5);
+        request.writeU16(signerPosition);
+        request.writeBytes(targetBody);
+        request.writeBytes(canonicalRosterBytes);
+        request.writeBytes(acknowledgement);
         executeConstructionCommand(kernel, request, () => undefined);
     },
 });

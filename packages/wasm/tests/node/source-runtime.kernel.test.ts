@@ -109,6 +109,7 @@ describe('source fixation scalar WASM runtime', () => {
             'source',
             'finality',
             'activation',
+            'no-result-acknowledgement',
         ] as const satisfies readonly ActionSignaturePurpose[];
 
         for (
@@ -566,7 +567,10 @@ describe('source fixation scalar WASM runtime', () => {
             finalityRuntime.verifyCertificate(
                 target.targetBody,
                 canonicalRosterBytes,
-                finalitySignatures.slice(0, 7),
+                finalitySignatures.slice(
+                    0,
+                    completionProfileFinalityQuorum - 1,
+                ),
             ),
         ).toThrow(RangeError);
         expect(() =>
@@ -574,7 +578,10 @@ describe('source fixation scalar WASM runtime', () => {
                 target.targetBody,
                 canonicalRosterBytes,
                 [
-                    ...finalitySignatures.slice(0, 7),
+                    ...finalitySignatures.slice(
+                        0,
+                        completionProfileFinalityQuorum - 1,
+                    ),
                     finalitySignatures[0] ?? {
                         signerPosition: 0,
                         signature: new Uint8Array(),
@@ -708,6 +715,109 @@ describe('source fixation scalar WASM runtime', () => {
                 noResultCertificate.signatures,
             ).targetKind,
         ).toBe('no-result');
+        const noResultAcknowledgements = Array.from(
+            { length: participantCount },
+            (_, signerPosition) => {
+                const acknowledgementSecretKey =
+                    signatureSecretKeys[signerPosition]?.[4];
+                if (acknowledgementSecretKey === undefined) {
+                    throw new Error(
+                        'test no-result acknowledgement key is absent',
+                    );
+                }
+                return {
+                    signerPosition,
+                    signature: finalityRuntime.encodeNoResultAcknowledgement(
+                        signerPosition,
+                        noResultTarget.targetIdentity,
+                        signatureRuntime.signBodyIdentity(
+                            acknowledgementSecretKey,
+                            noResultTarget.targetIdentity,
+                        ),
+                    ),
+                };
+            },
+        );
+        for (const acknowledgement of noResultAcknowledgements) {
+            expect(() =>
+                finalityRuntime.verifyNoResultAcknowledgement(
+                    acknowledgement.signerPosition,
+                    noResultTarget.targetBody,
+                    canonicalRosterBytes,
+                    acknowledgement.signature,
+                ),
+            ).not.toThrow();
+        }
+        const noResultRelease = finalityRuntime.verifyNoResultRelease(
+            noResultTarget.targetBody,
+            canonicalRosterBytes,
+            noResultCertificate.signatures,
+            noResultAcknowledgements,
+        );
+        expect(noResultRelease).toMatchObject({
+            quorum: completionProfileFinalityQuorum,
+            targetKind: 'no-result',
+            sourceSubmissionBitmap: 0,
+            topCount: 1,
+            targetIdentity: noResultTarget.targetIdentity,
+        });
+        expect(
+            finalityRuntime.verifyNoResultRelease(
+                noResultTarget.targetBody,
+                canonicalRosterBytes,
+                noResultFinalitySignatures
+                    .slice(participantCount - completionProfileFinalityQuorum)
+                    .reverse(),
+                [...noResultAcknowledgements].reverse(),
+            ),
+        ).toEqual(noResultRelease);
+        expect(() =>
+            finalityRuntime.verifyNoResultRelease(
+                noResultTarget.targetBody,
+                canonicalRosterBytes,
+                noResultCertificate.signatures,
+                noResultAcknowledgements.slice(0, participantCount - 1),
+            ),
+        ).toThrow(RangeError);
+        expect(() =>
+            finalityRuntime.verifyNoResultRelease(
+                noResultTarget.targetBody,
+                canonicalRosterBytes,
+                noResultCertificate.signatures,
+                [
+                    ...noResultAcknowledgements.slice(0, participantCount - 1),
+                    noResultAcknowledgements[0] ?? {
+                        signerPosition: 0,
+                        signature: new Uint8Array(),
+                    },
+                ],
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+        expect(() =>
+            finalityRuntime.verifyNoResultRelease(
+                noResultTarget.targetBody,
+                canonicalRosterBytes,
+                noResultCertificate.signatures,
+                noResultAcknowledgements.map((acknowledgement, index) =>
+                    index === 0
+                        ? {
+                              signerPosition: 0,
+                              signature:
+                                  noResultFinalitySignatures[0]?.signature ??
+                                  new Uint8Array(),
+                          }
+                        : acknowledgement,
+                ),
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+        expect(() =>
+            finalityRuntime.verifyNoResultRelease(
+                target.targetBody,
+                canonicalRosterBytes,
+                finalitySignatures.slice(0, completionProfileFinalityQuorum),
+                noResultAcknowledgements,
+            ),
+        ).toThrow(ConstructionKernelCommandError);
         const secondSubmissionCorrection = sourceRuntime.deriveHonestCorrection(
             abstainingContext,
             Uint8Array.of(10, 9, 8, 7, 6, 5, 4, 3, 2, 1),

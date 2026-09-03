@@ -19,11 +19,10 @@ pub const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 pub const COMPLETION_PROFILE_OPTION_COUNT: u16 = 10;
 pub const FINALITY_TARGET_BODY_BYTE_LENGTH: usize = 1_058;
 pub const OUTPUT_ORDINAL: u64 = 0;
-pub const INDEPENDENT_HONEST_LOCK_LOSS_COUNT: u16 = 1;
 
 const FINALITY_TARGET_SCHEMA_IDENTIFIER: u16 = 0x0209;
-const FINALITY_TARGET_SCHEMA_VERSION: u16 = 4;
-const FINALITY_TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/finality-target/v2";
+const FINALITY_TARGET_SCHEMA_VERSION: u16 = 5;
+const FINALITY_TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/finality-target/v3";
 const SOURCE_INVENTORY_ROOT_DOMAIN: &str = "sealed-lattice/construction/source-inventory-root/v2";
 const TALLY_COMPILER_IDENTITY_DOMAIN: &str =
     "sealed-lattice/construction/tally-compiler-identity/v1";
@@ -32,10 +31,10 @@ const TALLY_OUTPUT_SCHEMA_IDENTITY_DOMAIN: &str =
     "sealed-lattice/construction/tally-output-schema-identity/v1";
 const SOURCE_SELECTION_POLICY_IDENTITY_DOMAIN: &str =
     "sealed-lattice/construction/source-selection-policy-identity/v1";
-const ACTIVATION_POLICY_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/construction/activation-policy-identity/v1";
+const FINAL_ACTION_POLICY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/construction/final-action-policy-identity/v2";
 const FINALITY_POLICY_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/construction/finality-policy-identity/v1";
+    "sealed-lattice/construction/finality-policy-identity/v2";
 const MINIMUM_PARTICIPANT_COUNT: u16 = 3;
 const MAXIMUM_PARTICIPANT_COUNT: u16 = 20;
 
@@ -60,6 +59,7 @@ impl FinalityTargetKind {
 pub enum FinalityError {
     DuplicateSignature,
     DuplicateSourceIdentity,
+    IncompleteNoResultAcknowledgements,
     InsufficientSignatures,
     InvalidCanonicalEncoding,
     InvalidSignature,
@@ -78,6 +78,9 @@ impl fmt::Display for FinalityError {
         formatter.write_str(match self {
             Self::DuplicateSignature => "finality certificate contains a duplicate signer",
             Self::DuplicateSourceIdentity => "finality target contains a duplicate source identity",
+            Self::IncompleteNoResultAcknowledgements => {
+                "no-result release does not contain every roster acknowledgement"
+            }
             Self::InsufficientSignatures => {
                 "finality certificate does not contain the derived quorum"
             }
@@ -133,7 +136,7 @@ pub struct FinalityTargetContext {
     pub source_inventory_root: Hash512,
     pub source_submission_bitmap: u16,
     pub source_selection_policy_identity: Hash512,
-    pub activation_policy_identity: Hash512,
+    pub final_action_policy_identity: Hash512,
     pub top_count: u16,
     pub finality_policy_identity: Hash512,
 }
@@ -169,7 +172,8 @@ impl FinalityTarget {
             || context.output_schema_identity != semantic_bindings.output_schema_identity
             || context.source_selection_policy_identity
                 != semantic_bindings.source_selection_policy_identity
-            || context.activation_policy_identity != semantic_bindings.activation_policy_identity
+            || context.final_action_policy_identity
+                != semantic_bindings.final_action_policy_identity
             || context.finality_policy_identity != semantic_bindings.finality_policy_identity
         {
             return Err(FinalityError::WrongContext);
@@ -209,7 +213,7 @@ impl FinalityTarget {
                 CanonicalItem::hash512(self.context.source_inventory_root.into_bytes()),
                 CanonicalItem::unsigned16(self.context.source_submission_bitmap),
                 CanonicalItem::hash512(self.context.source_selection_policy_identity.into_bytes()),
-                CanonicalItem::hash512(self.context.activation_policy_identity.into_bytes()),
+                CanonicalItem::hash512(self.context.final_action_policy_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.target_kind as u16),
                 CanonicalItem::unsigned64(self.output_ordinal),
                 CanonicalItem::hash512(self.context.finality_policy_identity.into_bytes()),
@@ -254,7 +258,7 @@ impl FinalityTarget {
             source_inventory_root: read_hash512(&tuple.items[14])?,
             source_submission_bitmap: read_unsigned16(&tuple.items[15])?,
             source_selection_policy_identity: read_hash512(&tuple.items[16])?,
-            activation_policy_identity: read_hash512(&tuple.items[17])?,
+            final_action_policy_identity: read_hash512(&tuple.items[17])?,
             finality_policy_identity: read_hash512(&tuple.items[20])?,
         };
         let target_kind = FinalityTargetKind::from_u16(read_unsigned16(&tuple.items[18])?)?;
@@ -396,7 +400,7 @@ pub fn derive_finality_target(
         source_inventory_root,
         source_submission_bitmap,
         source_selection_policy_identity: semantic_bindings.source_selection_policy_identity,
-        activation_policy_identity: semantic_bindings.activation_policy_identity,
+        final_action_policy_identity: semantic_bindings.final_action_policy_identity,
         top_count: context.top_count,
         finality_policy_identity: semantic_bindings.finality_policy_identity,
     })?;
@@ -429,10 +433,33 @@ pub fn encode_finality_signature_carrier(
     .map_err(|_| FinalityError::InvalidCanonicalEncoding)
 }
 
+pub fn encode_no_result_acknowledgement_carrier(
+    participant_count: u16,
+    signer_position: u16,
+    target_identity: Hash512,
+    signature: &[u8],
+) -> Result<Vec<u8>, FinalityError> {
+    ActionSignatureCarrier::new(
+        participant_count,
+        signer_position,
+        ActionSignaturePurpose::NoResultAcknowledgement,
+        target_identity,
+        signature,
+    )
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
+    .encode()
+    .map_err(|_| FinalityError::InvalidCanonicalEncoding)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedFinalityCapability {
     pub target: FinalityTarget,
     pub target_identity: Hash512,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedNoResultReleaseCapability {
+    pub finality: VerifiedFinalityCapability,
 }
 
 pub fn verify_finality_certificate(
@@ -494,10 +521,91 @@ pub fn verify_finality_signature(
     )
 }
 
+pub fn verify_no_result_acknowledgement(
+    target: &FinalityTarget,
+    roster: &Roster,
+    signer_position: u16,
+    signature_bytes: &[u8],
+) -> Result<(), FinalityError> {
+    if target.target_kind() != FinalityTargetKind::NoResult {
+        return Err(FinalityError::WrongTargetKind);
+    }
+    let participant_count = target.context().participant_count;
+    validate_completion_profile(participant_count)?;
+    validate_position(participant_count, signer_position)?;
+    require_roster_identity(roster, target.context().roster_identity)
+        .map_err(|_| FinalityError::WrongContext)?;
+    verify_signature_for_identity(
+        participant_count,
+        roster,
+        signer_position,
+        ActionSignaturePurpose::NoResultAcknowledgement,
+        target.body_identity()?,
+        signature_bytes,
+    )
+}
+
+pub fn verify_no_result_release(
+    finality: VerifiedFinalityCapability,
+    roster: &Roster,
+    acknowledgements: &[(u16, Vec<u8>)],
+) -> Result<VerifiedNoResultReleaseCapability, FinalityError> {
+    if finality.target.target_kind() != FinalityTargetKind::NoResult {
+        return Err(FinalityError::WrongTargetKind);
+    }
+    let participant_count = finality.target.context().participant_count;
+    validate_completion_profile(participant_count)?;
+    require_roster_identity(roster, finality.target.context().roster_identity)
+        .map_err(|_| FinalityError::WrongContext)?;
+    if acknowledgements.len() != usize::from(participant_count) {
+        return Err(FinalityError::IncompleteNoResultAcknowledgements);
+    }
+    let mut signer_bitmap = 0_u16;
+    for (signer_position, acknowledgement_bytes) in acknowledgements {
+        validate_position(participant_count, *signer_position)?;
+        let signer_mask = 1_u16 << *signer_position;
+        if signer_bitmap & signer_mask != 0 {
+            return Err(FinalityError::DuplicateSignature);
+        }
+        verify_signature_for_identity(
+            participant_count,
+            roster,
+            *signer_position,
+            ActionSignaturePurpose::NoResultAcknowledgement,
+            finality.target_identity,
+            acknowledgement_bytes,
+        )?;
+        signer_bitmap |= signer_mask;
+    }
+    let full_roster_bitmap = (1_u16 << participant_count) - 1;
+    if signer_bitmap != full_roster_bitmap {
+        return Err(FinalityError::IncompleteNoResultAcknowledgements);
+    }
+    Ok(VerifiedNoResultReleaseCapability { finality })
+}
+
 fn verify_finality_signature_for_identity(
     participant_count: u16,
     roster: &Roster,
     signer_position: u16,
+    target_identity: Hash512,
+    signature_bytes: &[u8],
+) -> Result<(), FinalityError> {
+    verify_signature_for_identity(
+        participant_count,
+        roster,
+        signer_position,
+        ActionSignaturePurpose::Finality,
+        target_identity,
+        signature_bytes,
+    )
+}
+
+fn verify_signature_for_identity(
+    participant_count: u16,
+    roster: &Roster,
+    signer_position: u16,
+    purpose: ActionSignaturePurpose,
     target_identity: Hash512,
     signature_bytes: &[u8],
 ) -> Result<(), FinalityError> {
@@ -506,12 +614,7 @@ fn verify_finality_signature_for_identity(
     let verification_key = signing_verification_key(roster, signer_position)
         .map_err(|_| FinalityError::WrongParticipantPosition)?;
     carrier
-        .verify(
-            signer_position,
-            ActionSignaturePurpose::Finality,
-            target_identity,
-            verification_key,
-        )
+        .verify(signer_position, purpose, target_identity, verification_key)
         .map_err(|_| FinalityError::InvalidSignature)
 }
 
@@ -521,7 +624,7 @@ struct SemanticBindings {
     circuit_identity: Hash512,
     output_schema_identity: Hash512,
     source_selection_policy_identity: Hash512,
-    activation_policy_identity: Hash512,
+    final_action_policy_identity: Hash512,
     finality_policy_identity: Hash512,
 }
 
@@ -594,12 +697,13 @@ fn derive_semantic_bindings(
         ],
     )
     .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
-    let activation_policy_identity = hash_foundation_tuple_512(
-        ACTIVATION_POLICY_IDENTITY_DOMAIN,
+    let final_action_policy_identity = hash_foundation_tuple_512(
+        FINAL_ACTION_POLICY_IDENTITY_DOMAIN,
         &[
-            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(2),
             CanonicalItem::unsigned16(participant_count),
-            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(participant_count),
+            CanonicalItem::unsigned16(participant_count),
             CanonicalItem::unsigned16(0),
             CanonicalItem::unsigned64(OUTPUT_ORDINAL),
         ],
@@ -608,10 +712,9 @@ fn derive_semantic_bindings(
     let finality_policy_identity = hash_foundation_tuple_512(
         FINALITY_POLICY_IDENTITY_DOMAIN,
         &[
-            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(2),
             CanonicalItem::unsigned16(participant_count),
             CanonicalItem::unsigned16(static_fault_bound(participant_count)?),
-            CanonicalItem::unsigned16(INDEPENDENT_HONEST_LOCK_LOSS_COUNT),
             CanonicalItem::unsigned16(direct_finality_quorum(participant_count)?),
         ],
     )
@@ -621,7 +724,7 @@ fn derive_semantic_bindings(
         circuit_identity,
         output_schema_identity,
         source_selection_policy_identity,
-        activation_policy_identity,
+        final_action_policy_identity,
         finality_policy_identity,
     })
 }
@@ -635,10 +738,11 @@ pub fn direct_finality_quorum(participant_count: u16) -> Result<u16, FinalityErr
     let fault_bound = static_fault_bound(participant_count)?;
     let numerator = participant_count
         .checked_add(fault_bound)
-        .and_then(|value| value.checked_add(INDEPENDENT_HONEST_LOCK_LOSS_COUNT))
-        .and_then(|value| value.checked_add(1))
         .ok_or(FinalityError::WrongQuorum)?;
-    Ok(numerator.div_ceil(2))
+    numerator
+        .checked_div(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(FinalityError::WrongQuorum)
 }
 
 fn validate_admitted_participant_count(participant_count: u16) -> Result<(), FinalityError> {
@@ -729,7 +833,7 @@ mod tests {
             source_inventory_root: hash(7),
             source_submission_bitmap: submission_bitmap,
             source_selection_policy_identity: semantic_bindings.source_selection_policy_identity,
-            activation_policy_identity: semantic_bindings.activation_policy_identity,
+            final_action_policy_identity: semantic_bindings.final_action_policy_identity,
             top_count: 1,
             finality_policy_identity: semantic_bindings.finality_policy_identity,
         })
@@ -742,37 +846,33 @@ mod tests {
             let fault_bound = static_fault_bound(participant_count).expect("fault bound");
             let quorum = direct_finality_quorum(participant_count).expect("quorum");
             let stable_intersection =
-                2 * quorum - participant_count - fault_bound - INDEPENDENT_HONEST_LOCK_LOSS_COUNT;
+                i32::from(2 * quorum) - i32::from(participant_count) - i32::from(fault_bound);
             assert!(stable_intersection >= 1);
             let smaller = quorum - 1;
-            let smaller_intersection = i32::from(2 * smaller)
-                - i32::from(participant_count)
-                - i32::from(fault_bound)
-                - i32::from(INDEPENDENT_HONEST_LOCK_LOSS_COUNT);
+            let smaller_intersection =
+                i32::from(2 * smaller) - i32::from(participant_count) - i32::from(fault_bound);
             assert!(smaller_intersection < 1);
         }
-        assert_eq!(direct_finality_quorum(10), Ok(8));
+        assert_eq!(direct_finality_quorum(10), Ok(7));
     }
 
     #[test]
-    fn quorum_seven_has_the_completion_conflict_witness() {
-        let left = [0_u16, 1, 2, 3, 4, 5, 6];
-        let right = [0_u16, 1, 2, 3, 7, 8, 9];
+    fn quorum_six_has_the_completion_conflict_witness() {
+        let left = [0_u16, 1, 2, 3, 4, 5];
+        let right = [0_u16, 1, 2, 6, 7, 8];
         let intersection = left
             .iter()
             .filter(|position| right.contains(position))
             .copied()
             .collect::<Vec<_>>();
-        assert_eq!(intersection, [0, 1, 2, 3]);
-        assert_eq!(intersection[..3], [0, 1, 2]);
-        assert_eq!(intersection[3], 3);
+        assert_eq!(intersection, [0, 1, 2]);
     }
 
     #[test]
-    fn three_malicious_participants_and_one_lock_loss_cannot_finalize_two_targets() {
+    fn three_malicious_participants_cannot_finalize_two_targets() {
         let roster_mask = (1_u16 << COMPLETION_PROFILE_PARTICIPANT_COUNT) - 1;
         let quorum_masks = (0_u16..=roster_mask)
-            .filter(|mask| mask.count_ones() == 8)
+            .filter(|mask| mask.count_ones() == 7)
             .collect::<Vec<_>>();
         let corrupt_masks = (0_u16..=roster_mask)
             .filter(|mask| mask.count_ones() == 3)
@@ -781,14 +881,11 @@ mod tests {
             for right in &quorum_masks {
                 let intersection = left & right;
                 for corrupt in &corrupt_masks {
-                    let stable_honest = intersection & !corrupt & roster_mask;
-                    for lost_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
-                        let after_independent_loss = stable_honest & !(1_u16 << lost_position);
-                        assert!(
-                            after_independent_loss.count_ones() >= 2,
-                            "two completion quorums lost their stable honest intersection"
-                        );
-                    }
+                    let honest_intersection = intersection & !corrupt & roster_mask;
+                    assert!(
+                        honest_intersection.count_ones() >= 1,
+                        "two completion quorums lost their honest intersection"
+                    );
                 }
             }
         }
@@ -805,7 +902,7 @@ mod tests {
             assert_eq!(encoded.len(), FINALITY_TARGET_BODY_BYTE_LENGTH);
             assert_eq!(FinalityTarget::decode(&encoded).expect("decodes"), target);
             assert_eq!(target.target_kind(), expected_kind);
-            assert_eq!(target.quorum(), 8);
+            assert_eq!(target.quorum(), 7);
         }
     }
 
@@ -826,7 +923,7 @@ mod tests {
                 output_schema_identity: semantic_bindings.output_schema_identity,
                 source_selection_policy_identity: semantic_bindings
                     .source_selection_policy_identity,
-                activation_policy_identity: semantic_bindings.activation_policy_identity,
+                final_action_policy_identity: semantic_bindings.final_action_policy_identity,
                 finality_policy_identity: semantic_bindings.finality_policy_identity,
                 ..target(1).context()
             })
@@ -875,7 +972,7 @@ mod tests {
                 ..baseline.context()
             },
             FinalityTargetContext {
-                activation_policy_identity: hash(0xa5),
+                final_action_policy_identity: hash(0xa5),
                 ..baseline.context()
             },
             FinalityTargetContext {

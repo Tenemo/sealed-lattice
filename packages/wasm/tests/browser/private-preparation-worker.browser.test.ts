@@ -7,6 +7,10 @@ import {
     openActionSignatureRuntime,
 } from '../../src/action-signature-runtime.js';
 import {
+    completionProfileFinalityQuorum,
+    type NoResultAcknowledgementCarrier,
+} from '../../src/finality-runtime.js';
+import {
     instantiateConstructionKernelCommandRuntime,
     type KernelResourceMeasurement,
 } from '../../src/foundation-kernel/kernel-runtime.js';
@@ -23,6 +27,7 @@ import type {
     PrivatePreparationWorkerResponse,
     PaddedTallyEvaluationStep,
     PublishedFinalityPackage,
+    PublishedNoResultAcknowledgement,
     PublishedPaddedTallyChunk,
     PublishedPreparationPackage,
     PublishedSourcePackage,
@@ -100,6 +105,14 @@ const crashWorkerUrl = new URL(
 );
 const sourceCrashWorkerUrl = new URL(
     './fixtures/private-preparation-source-crash-worker.ts',
+    import.meta.url,
+);
+const noResultAcknowledgementPrePersistCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-no-result-acknowledgement-pre-persist-crash-worker.ts',
+    import.meta.url,
+);
+const noResultAcknowledgementPostPersistCrashWorkerUrl = new URL(
+    './fixtures/private-preparation-no-result-acknowledgement-post-persist-crash-worker.ts',
     import.meta.url,
 );
 const tallyGenerationInitializationCrashWorkerUrl = new URL(
@@ -1193,7 +1206,7 @@ const expectCompletePaddedTallyCeremony = async (
         ),
     ).toBe(true);
     const finalitySignatures = finalities
-        .slice(0, 8)
+        .slice(0, completionProfileFinalityQuorum)
         .map((finality, signerPosition) => ({
             signerPosition,
             signature: finality.finalitySignature,
@@ -3139,7 +3152,7 @@ describe('private preparation worker in Chromium', () => {
 
             const activationPosition = 0;
             const finalitySignatures = finalityPackages
-                .slice(0, 8)
+                .slice(0, completionProfileFinalityQuorum)
                 .map((finality, signerPosition) => ({
                     signerPosition,
                     signature: finality.finalitySignature,
@@ -3214,7 +3227,10 @@ describe('private preparation worker in Chromium', () => {
                     preparationAttempt,
                     preparationParents,
                     sourceCarriers,
-                    finalitySignatures.slice(0, 7),
+                    finalitySignatures.slice(
+                        0,
+                        completionProfileFinalityQuorum - 1,
+                    ),
                     topCount,
                 ),
             ).rejects.toThrow();
@@ -3442,7 +3458,7 @@ describe('private preparation worker in Chromium', () => {
     );
 
     it(
-        'finalizes an all-abstain roster without an activation wave',
+        'finalizes an all-abstain roster only after every target acknowledgement',
         { timeout: 300_000 },
         async () => {
             const runIdentity = crypto.randomUUID();
@@ -3504,12 +3520,19 @@ describe('private preparation worker in Chromium', () => {
                         finality.sourceSubmissionBitmap === 0,
                 ),
             ).toBe(true);
-            const certificate = finalities
-                .slice(0, 8)
-                .map((finality, signerPosition) => ({
+            const finalityCarriers = finalities.map(
+                (finality, signerPosition) => ({
                     signerPosition,
                     signature: finality.finalitySignature,
-                }));
+                }),
+            );
+            const certificate = finalityCarriers.slice(
+                0,
+                completionProfileFinalityQuorum,
+            );
+            const alternateCertificate = finalityCarriers
+                .slice(participantCount - completionProfileFinalityQuorum)
+                .reverse();
             const resultClient = await openClient(runIdentity, 0);
             await expect(
                 resultClient.readTallyResult(actionContext(0)),
@@ -3520,9 +3543,123 @@ describe('private preparation worker in Chromium', () => {
                     canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
-                    certificate.slice(0, 7),
+                    certificate.slice(0, completionProfileFinalityQuorum - 1),
+                    [],
                     topCount,
                 ),
+            ).rejects.toThrow();
+            await crashWorkerAtBoundary(
+                runIdentity,
+                0,
+                noResultAcknowledgementPrePersistCrashWorkerUrl,
+                'no-result-acknowledgement-before-persist',
+                {
+                    requestId: 2,
+                    operation: 'create-no-result-acknowledgement',
+                    input: {
+                        ...actionContext(0),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sources: sourceCarriers,
+                        finalitySignatures: certificate,
+                        topCount,
+                    },
+                },
+            );
+            await crashWorkerAtBoundary(
+                runIdentity,
+                1,
+                noResultAcknowledgementPostPersistCrashWorkerUrl,
+                'no-result-acknowledgement-after-persist',
+                {
+                    requestId: 2,
+                    operation: 'create-no-result-acknowledgement',
+                    input: {
+                        ...actionContext(1),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sources: sourceCarriers,
+                        finalitySignatures: alternateCertificate,
+                        topCount,
+                    },
+                },
+            );
+            const acknowledgements: NoResultAcknowledgementCarrier[] = [];
+            let firstAcknowledgement:
+                PublishedNoResultAcknowledgement | undefined;
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                const acknowledgement =
+                    await client.createNoResultAcknowledgement(
+                        actionContext(participantPosition),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sourceCarriers,
+                        participantPosition % 2 === 0
+                            ? certificate
+                            : alternateCertificate,
+                        topCount,
+                    );
+                expect(acknowledgement.signerPosition).toBe(
+                    participantPosition,
+                );
+                expect(acknowledgement.targetIdentity).toEqual(
+                    finalities[0]?.targetIdentity,
+                );
+                acknowledgements.push({
+                    signerPosition: acknowledgement.signerPosition,
+                    signature: acknowledgement.acknowledgement,
+                });
+                if (participantPosition === 0) {
+                    firstAcknowledgement = acknowledgement;
+                }
+                closeClient(client);
+            }
+            if (firstAcknowledgement === undefined) {
+                throw new Error('The first acknowledgement is absent.');
+            }
+            const replayClient = await openClient(runIdentity, 0);
+            await expect(
+                replayClient.createNoResultAcknowledgement(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sourceCarriers,
+                    alternateCertificate,
+                    topCount,
+                ),
+            ).resolves.toEqual(firstAcknowledgement);
+            closeClient(replayClient);
+            for (
+                let acknowledgementCount = 0;
+                acknowledgementCount < participantCount;
+                acknowledgementCount += 1
+            ) {
+                await expect(
+                    resultClient.finalizeNoResult(
+                        actionContext(0),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sourceCarriers,
+                        certificate,
+                        acknowledgements.slice(0, acknowledgementCount),
+                        topCount,
+                    ),
+                ).resolves.toEqual({
+                    kind: 'pending',
+                    receivedAcknowledgements: acknowledgementCount,
+                    requiredAcknowledgements: participantCount,
+                });
+            }
+            await expect(
+                resultClient.readTallyResult(actionContext(0)),
             ).rejects.toThrow();
             await expect(
                 resultClient.finalizeNoResult(
@@ -3530,7 +3667,8 @@ describe('private preparation worker in Chromium', () => {
                     canonicalRosterBytes,
                     preparationAttempt,
                     sourceCarriers,
-                    certificate,
+                    alternateCertificate,
+                    [...acknowledgements].reverse(),
                     topCount,
                 ),
             ).resolves.toMatchObject({

@@ -7,10 +7,13 @@ import {
     type ActionSignatureRuntime,
 } from './action-signature-runtime.js';
 import {
+    completionProfileFinalityQuorum,
     finalityTargetBodyByteLength,
     openFinalityRuntime,
     type FinalitySignatureCarrier,
+    type NoResultAcknowledgementCarrier,
     type SourceCarrier,
+    type VerifiedNoResultReleaseCapability,
 } from './finality-runtime.js';
 import {
     instantiateConstructionKernelCommandRuntime,
@@ -95,10 +98,12 @@ import type {
     PaddedTallyEvaluationStep,
     PaddedTallyWorkerInitialization,
     PublishedFinalityPackage,
+    PublishedNoResultAcknowledgement,
     PublishedPaddedTallyChunk,
     PublishedPreparationPackage,
     PublishedSourcePackage,
     SourcePublicationChoice,
+    NoResultFinalizationProgress,
     TallyEvaluationProgress,
 } from './private-preparation-worker-protocol.js';
 import {
@@ -119,7 +124,7 @@ import {
 } from './source-runtime.js';
 
 const completionProfileParticipantCount = 10;
-const signaturePurposeCount = 4;
+const signaturePurposeCount = 5;
 const identityByteLength = 64;
 const localContextDomainByteLength = 32;
 const localContextDomain = 'sealed-lattice/local-record/v3';
@@ -143,6 +148,8 @@ const unsignedSourcePhase = 1;
 const publishedSourcePhase = 2;
 const unsignedFinalityPhase = 1;
 const publishedFinalityPhase = 2;
+const unpublishedNoResultAcknowledgementPhase = 0;
+const publishedNoResultAcknowledgementPhase = 1;
 const unpublishedActivationLocalPhase = 0;
 const publishedActivationLocalPhase = 1;
 const privatePreparationOperationOrdinal = 1n;
@@ -153,6 +160,8 @@ type WorkerConfiguration = Readonly<{
     candidateBuildIdentity: Uint8Array;
     afterDurableConsume?: () => Promise<void> | void;
     afterDurableSourceBind?: () => Promise<void> | void;
+    beforeDurableNoResultAcknowledgementPersist?: () => Promise<void> | void;
+    afterDurableNoResultAcknowledgementPersist?: () => Promise<void> | void;
     afterDurableTallyGenerationInitialize?: () => Promise<void> | void;
     afterDurableTallyChunkPersist?: () => Promise<void> | void;
     afterDurableTallyActivationPublish?: () => Promise<void> | void;
@@ -269,6 +278,10 @@ type FinalityState = {
     topCount: number;
     targetKind: 'computation' | 'no-result';
     finalitySignature: Uint8Array;
+    noResultAcknowledgementPhase:
+        | typeof unpublishedNoResultAcknowledgementPhase
+        | typeof publishedNoResultAcknowledgementPhase;
+    noResultAcknowledgement: Uint8Array;
 };
 
 type LoadedFinalityState = Readonly<{
@@ -626,7 +639,7 @@ const copyFinalitySignatures = (
     signatures: readonly FinalitySignatureCarrier[],
 ): FinalitySignatureCarrier[] => {
     if (
-        signatures.length < 8 ||
+        signatures.length < completionProfileFinalityQuorum ||
         signatures.length > completionProfileParticipantCount
     ) {
         throw new TypeError(
@@ -643,6 +656,29 @@ const copyFinalitySignatures = (
                 carrier.signature,
                 actionSignatureCarrierByteLength,
                 `finalitySignatures[${String(index)}].signature`,
+            ),
+        ),
+    }));
+};
+
+const copyNoResultAcknowledgements = (
+    acknowledgements: readonly NoResultAcknowledgementCarrier[],
+): NoResultAcknowledgementCarrier[] => {
+    if (acknowledgements.length > completionProfileParticipantCount) {
+        throw new TypeError(
+            'acknowledgements cannot exceed the completion roster.',
+        );
+    }
+    return acknowledgements.map((carrier, index) => ({
+        signerPosition: requirePosition(
+            carrier.signerPosition,
+            `acknowledgements[${String(index)}].signerPosition`,
+        ),
+        signature: Uint8Array.from(
+            requireBytes(
+                carrier.signature,
+                actionSignatureCarrierByteLength,
+                `acknowledgements[${String(index)}].signature`,
             ),
         ),
     }));
@@ -856,6 +892,15 @@ const copyPublishedFinalityPackage = (
     finalitySignature: Uint8Array.from(state.finalitySignature),
 });
 
+const copyPublishedNoResultAcknowledgement = (
+    participantPosition: number,
+    state: FinalityState,
+): PublishedNoResultAcknowledgement => ({
+    signerPosition: participantPosition,
+    targetIdentity: Uint8Array.from(state.targetIdentity),
+    acknowledgement: Uint8Array.from(state.noResultAcknowledgement),
+});
+
 const copyPublishedPaddedTallyChunk = (
     state: CompletedPaddedTallyGenerationState | RetainedPaddedTallyChunkState,
 ): PublishedPaddedTallyChunk =>
@@ -879,7 +924,10 @@ const copyPublishedPaddedTallyChunk = (
 const copyTallyEvaluationProgress = (
     state: NoResultState,
     resources: KernelResourceMeasurement,
-): TallyEvaluationProgress => ({
+): Extract<
+    TallyEvaluationProgress,
+    Readonly<{ terminalPath: 'source-empty' }>
+> => ({
     kind: 'no-result',
     terminalPath: 'source-empty',
     acceptedBallotAuthorshipBitmap: state.acceptedBallotAuthorshipBitmap,
@@ -987,7 +1035,7 @@ const actionStateByteLength =
 
 const encodeActionState = (state: ActionState): Uint8Array => {
     const writer = new FixedWriter(actionStateByteLength);
-    writer.writeU8(6);
+    writer.writeU8(7);
     writer.writeU8(state.phase);
     writer.writeU16(state.participantPosition);
     writer.writeU64(state.generation);
@@ -1017,7 +1065,7 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 6) {
+    if (reader.readU8() !== 7) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has the wrong version.',
@@ -1326,6 +1374,8 @@ const finalityStateByteLength =
     2 +
     2 +
     1 +
+    actionSignatureCarrierByteLength +
+    1 +
     actionSignatureCarrierByteLength;
 
 const finalityTargetKindCode = (
@@ -1349,7 +1399,7 @@ const finalityTargetKindFromCode = (
 
 const encodeFinalityState = (state: FinalityState): Uint8Array => {
     const writer = new FixedWriter(finalityStateByteLength);
-    writer.writeU8(2);
+    writer.writeU8(3);
     writer.writeU8(state.phase);
     writer.writeU64(state.generation);
     writer.writeU16(state.preparationAttempt);
@@ -1361,6 +1411,8 @@ const encodeFinalityState = (state: FinalityState): Uint8Array => {
     writer.writeU16(state.topCount);
     writer.writeU8(finalityTargetKindCode(state.targetKind));
     writer.writeFixed(state.finalitySignature);
+    writer.writeU8(state.noResultAcknowledgementPhase);
+    writer.writeFixed(state.noResultAcknowledgement);
     return writer.finish();
 };
 
@@ -1372,7 +1424,7 @@ const decodeFinalityState = (bytes: Uint8Array): FinalityState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 2) {
+    if (reader.readU8() !== 3) {
         throw new DurableStateError(
             'CorruptState',
             'The retained finality state has the wrong version.',
@@ -1399,6 +1451,12 @@ const decodeFinalityState = (bytes: Uint8Array): FinalityState => {
         topCount: reader.readU16(),
         targetKind: finalityTargetKindFromCode(reader.readU8()),
         finalitySignature: reader.readFixed(actionSignatureCarrierByteLength),
+        noResultAcknowledgementPhase: reader.readU8() as
+            | typeof unpublishedNoResultAcknowledgementPhase
+            | typeof publishedNoResultAcknowledgementPhase,
+        noResultAcknowledgement: reader.readFixed(
+            actionSignatureCarrierByteLength,
+        ),
     };
     reader.finish();
     return state;
@@ -1410,6 +1468,7 @@ const zeroFinalityState = (state: FinalityState): void => {
     state.targetIdentity.fill(0);
     state.sourceBodyIdentities.fill(0);
     state.finalitySignature.fill(0);
+    state.noResultAcknowledgement.fill(0);
 };
 
 const noResultStateByteLength = 1 + 8 + identityByteLength + 2 + 2 + 2;
@@ -1776,6 +1835,8 @@ class PrivatePreparationWorkerRuntime {
         unpinnedKernelAllowed: boolean,
         afterDurableConsume?: () => Promise<void> | void,
         afterDurableSourceBind?: () => Promise<void> | void,
+        beforeDurableNoResultAcknowledgementPersist?: () => Promise<void> | void,
+        afterDurableNoResultAcknowledgementPersist?: () => Promise<void> | void,
         afterDurableTallyGenerationInitialize?: () => Promise<void> | void,
         afterDurableTallyChunkPersist?: () => Promise<void> | void,
         afterDurableTallyActivationPublish?: () => Promise<void> | void,
@@ -1830,6 +1891,8 @@ class PrivatePreparationWorkerRuntime {
                 candidateBuildIdentity,
                 afterDurableConsume,
                 afterDurableSourceBind,
+                beforeDurableNoResultAcknowledgementPersist,
+                afterDurableNoResultAcknowledgementPersist,
                 afterDurableTallyGenerationInitialize,
                 afterDurableTallyChunkPersist,
                 afterDurableTallyActivationPublish,
@@ -2674,6 +2737,11 @@ class PrivatePreparationWorkerRuntime {
             topCount: verified.topCount,
             targetKind: verified.targetKind,
             finalitySignature: new Uint8Array(actionSignatureCarrierByteLength),
+            noResultAcknowledgementPhase:
+                unpublishedNoResultAcknowledgementPhase,
+            noResultAcknowledgement: new Uint8Array(
+                actionSignatureCarrierByteLength,
+            ),
         };
         try {
             const finalityPlaintext = encodeFinalityState(state);
@@ -4161,7 +4229,7 @@ class PrivatePreparationWorkerRuntime {
         }
     }
 
-    async finalizeNoResult(
+    async createNoResultAcknowledgement(
         input: PrivatePreparationActionContext & {
             canonicalRosterBytes: Uint8Array;
             preparationAttempt: number;
@@ -4169,7 +4237,7 @@ class PrivatePreparationWorkerRuntime {
             finalitySignatures: readonly FinalitySignatureCarrier[];
             topCount: number;
         },
-    ): Promise<TallyEvaluationProgress> {
+    ): Promise<PublishedNoResultAcknowledgement> {
         const action = copyActionContext(input);
         const canonicalRosterBytes = copyCanonicalRosterBytes(
             input.canonicalRosterBytes,
@@ -4181,6 +4249,255 @@ class PrivatePreparationWorkerRuntime {
         const sources = copySourceCarriers(input.sources);
         const finalitySignatures = copyFinalitySignatures(
             input.finalitySignatures,
+        );
+        const topCount = requireUnsigned16(input.topCount, 'topCount');
+        if (topCount < 1 || topCount > completionProfileParticipantCount) {
+            throw new TypeError('topCount is outside the completion profile.');
+        }
+        return this.durableState.exclusive(async () => {
+            const [actionRecord, sourceRecord, finalityRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'sources',
+                        sourceIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'finalities',
+                        finalityIdentifier(this.configuration, action),
+                    ),
+                ]);
+            if (
+                actionRecord === undefined ||
+                sourceRecord === undefined ||
+                finalityRecord === undefined
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Published local source and finality state are required for a no-result acknowledgement.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            const loadedSource = await this.loadSourceState(
+                action,
+                loadedAction.state.rosterIdentity,
+                sourceRecord,
+            );
+            const loadedFinality = await this.loadFinalityState(
+                action,
+                loadedAction.state.rosterIdentity,
+                finalityRecord,
+            );
+            try {
+                this.verifyRosterBoundAction(
+                    action,
+                    loadedAction.state,
+                    canonicalRosterBytes,
+                );
+                this.validateSourceState(
+                    action,
+                    canonicalRosterBytes,
+                    loadedAction.state,
+                    loadedSource.state,
+                );
+                if (
+                    loadedSource.state.phase !== publishedSourcePhase ||
+                    loadedSource.state.preparationAttempt !== preparationAttempt
+                ) {
+                    throw new DurableStateError(
+                        'Conflict',
+                        'The retained source is not the finalized preparation attempt.',
+                    );
+                }
+                const verified = this.deriveVerifiedTallyContext(
+                    action,
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sources,
+                    topCount,
+                    loadedAction.state,
+                    loadedSource.state,
+                );
+                try {
+                    this.validateFinalityState(
+                        action,
+                        canonicalRosterBytes,
+                        loadedAction.state,
+                        loadedFinality.state,
+                        verified,
+                    );
+                    this.verifyNoResultCertificate(
+                        verified,
+                        canonicalRosterBytes,
+                        finalitySignatures,
+                    );
+                    if (
+                        loadedFinality.state.phase !== publishedFinalityPhase ||
+                        loadedFinality.state.targetKind !== 'no-result'
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'Only published no-result finality can be acknowledged.',
+                        );
+                    }
+                    if (
+                        loadedFinality.state.noResultAcknowledgementPhase ===
+                        publishedNoResultAcknowledgementPhase
+                    ) {
+                        return copyPublishedNoResultAcknowledgement(
+                            action.participantPosition,
+                            loadedFinality.state,
+                        );
+                    }
+                    const acknowledgementBoundIdentity =
+                        loadedAction.state.signatureBodyIdentities[4];
+                    if (
+                        acknowledgementBoundIdentity === undefined ||
+                        !isZero(acknowledgementBoundIdentity)
+                    ) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'The no-result acknowledgement signature slot is consumed without a retained acknowledgement.',
+                        );
+                    }
+                    const signingRandomness = randomBytes(
+                        actionSignatureSigningRandomnessByteLength,
+                    );
+                    const signature =
+                        this.actionSignatureRuntime.signBodyIdentity(
+                            loadedAction.state.signingSecretKey,
+                            action.participantPosition,
+                            'no-result-acknowledgement',
+                            verified.targetIdentity,
+                            signingRandomness,
+                        );
+                    let acknowledgement: Uint8Array;
+                    try {
+                        acknowledgement =
+                            this.finalityRuntime.encodeNoResultAcknowledgement(
+                                action.participantPosition,
+                                verified.targetIdentity,
+                                signature,
+                            );
+                    } finally {
+                        signature.fill(0);
+                        signingRandomness.fill(0);
+                    }
+                    const replacementFinalityState: FinalityState = {
+                        ...loadedFinality.state,
+                        generation: loadedFinality.state.generation + 1n,
+                        noResultAcknowledgementPhase:
+                            publishedNoResultAcknowledgementPhase,
+                        noResultAcknowledgement: acknowledgement,
+                    };
+                    const replacementActionState: ActionState = {
+                        ...loadedAction.state,
+                        generation: loadedAction.state.generation + 1n,
+                        signatureBodyIdentities:
+                            loadedAction.state.signatureBodyIdentities.map(
+                                (identity, index) =>
+                                    index === 4
+                                        ? Uint8Array.from(
+                                              verified.targetIdentity,
+                                          )
+                                        : Uint8Array.from(identity),
+                            ),
+                    };
+                    await this.configuration.beforeDurableNoResultAcknowledgementPersist?.();
+                    await this.replaceActionAndFinalityStates(
+                        action,
+                        loadedAction,
+                        replacementActionState,
+                        loadedFinality,
+                        replacementFinalityState,
+                    );
+                    await this.configuration.afterDurableNoResultAcknowledgementPersist?.();
+                    const [retainedActionRecord, retainedFinalityRecord] =
+                        await Promise.all([
+                            this.durableState.readProtected(
+                                'actions',
+                                actionIdentifier(this.configuration, action),
+                            ),
+                            this.durableState.readProtected(
+                                'finalities',
+                                finalityIdentifier(this.configuration, action),
+                            ),
+                        ]);
+                    if (
+                        retainedActionRecord === undefined ||
+                        retainedFinalityRecord === undefined
+                    ) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'The durable no-result acknowledgement disappeared after persistence.',
+                        );
+                    }
+                    const reboundAction = await this.loadActionState(
+                        action,
+                        retainedActionRecord,
+                    );
+                    const reboundFinality = await this.loadFinalityState(
+                        action,
+                        reboundAction.state.rosterIdentity,
+                        retainedFinalityRecord,
+                    );
+                    try {
+                        this.validateFinalityState(
+                            action,
+                            canonicalRosterBytes,
+                            reboundAction.state,
+                            reboundFinality.state,
+                            verified,
+                        );
+                        return copyPublishedNoResultAcknowledgement(
+                            action.participantPosition,
+                            reboundFinality.state,
+                        );
+                    } finally {
+                        zeroFinalityState(reboundFinality.state);
+                        zeroActionState(reboundAction.state);
+                    }
+                } finally {
+                    zeroVerifiedTallyContext(verified);
+                }
+            } finally {
+                zeroFinalityState(loadedFinality.state);
+                zeroSourceState(loadedSource.state);
+                zeroActionState(loadedAction.state);
+            }
+        });
+    }
+
+    async finalizeNoResult(
+        input: PrivatePreparationActionContext & {
+            canonicalRosterBytes: Uint8Array;
+            preparationAttempt: number;
+            sources: readonly SourceCarrier[];
+            finalitySignatures: readonly FinalitySignatureCarrier[];
+            acknowledgements: readonly NoResultAcknowledgementCarrier[];
+            topCount: number;
+        },
+    ): Promise<NoResultFinalizationProgress> {
+        const action = copyActionContext(input);
+        const canonicalRosterBytes = copyCanonicalRosterBytes(
+            input.canonicalRosterBytes,
+        );
+        const preparationAttempt = requireUnsigned16(
+            input.preparationAttempt,
+            'preparationAttempt',
+        );
+        const sources = copySourceCarriers(input.sources);
+        const finalitySignatures = copyFinalitySignatures(
+            input.finalitySignatures,
+        );
+        const acknowledgements = copyNoResultAcknowledgements(
+            input.acknowledgements,
         );
         const topCount = requireUnsigned16(input.topCount, 'topCount');
         if (topCount < 1 || topCount > completionProfileParticipantCount) {
@@ -4246,6 +4563,52 @@ class PrivatePreparationWorkerRuntime {
                         canonicalRosterBytes,
                         finalitySignatures,
                     );
+                    let acknowledgementSignerBitmap = 0;
+                    for (const acknowledgement of acknowledgements) {
+                        const signerMask = 1 << acknowledgement.signerPosition;
+                        if ((acknowledgementSignerBitmap & signerMask) !== 0) {
+                            throw new Error(
+                                'No-result acknowledgements contain a duplicate signer.',
+                            );
+                        }
+                        this.finalityRuntime.verifyNoResultAcknowledgement(
+                            acknowledgement.signerPosition,
+                            verified.targetBody,
+                            canonicalRosterBytes,
+                            acknowledgement.signature,
+                        );
+                        acknowledgementSignerBitmap |= signerMask;
+                    }
+                    if (
+                        acknowledgements.length <
+                        completionProfileParticipantCount
+                    ) {
+                        return {
+                            kind: 'pending',
+                            receivedAcknowledgements: acknowledgements.length,
+                            requiredAcknowledgements:
+                                completionProfileParticipantCount,
+                        };
+                    }
+                    const release = this.finalityRuntime.verifyNoResultRelease(
+                        verified.targetBody,
+                        canonicalRosterBytes,
+                        finalitySignatures,
+                        acknowledgements,
+                    );
+                    if (
+                        release.targetKind !== 'no-result' ||
+                        release.sourceSubmissionBitmap !== 0 ||
+                        release.topCount !== verified.topCount ||
+                        !bytesEqual(
+                            release.targetIdentity,
+                            verified.targetIdentity,
+                        )
+                    ) {
+                        throw new Error(
+                            'The verified no-result release does not match the semantic target.',
+                        );
+                    }
                     const identifier = noResultIdentifier(
                         this.configuration,
                         action,
@@ -4286,6 +4649,7 @@ class PrivatePreparationWorkerRuntime {
                     try {
                         this.validateFinalizedNoResultState(state, verified);
                         await this.insertNoResultState(
+                            release,
                             action,
                             loadedAction,
                             state,
@@ -4571,6 +4935,8 @@ class PrivatePreparationWorkerRuntime {
         verified: VerifiedTallyContext,
     ): void {
         const boundIdentity = actionState.signatureBodyIdentities[2];
+        const acknowledgementBoundIdentity =
+            actionState.signatureBodyIdentities[4];
         if (
             state.generation < 1n ||
             state.verifiedPreparationRoot.byteLength !== identityByteLength ||
@@ -4580,10 +4946,13 @@ class PrivatePreparationWorkerRuntime {
                 sourceBodyIdentityVectorByteLength ||
             state.finalitySignature.byteLength !==
                 actionSignatureCarrierByteLength ||
+            state.noResultAcknowledgement.byteLength !==
+                actionSignatureCarrierByteLength ||
             state.sourceSubmissionBitmap >=
                 1 << completionProfileParticipantCount ||
             state.topCount !== verified.topCount ||
             boundIdentity === undefined ||
+            acknowledgementBoundIdentity === undefined ||
             !bytesEqual(boundIdentity, state.targetIdentity) ||
             !bytesEqual(
                 state.verifiedPreparationRoot,
@@ -4604,10 +4973,16 @@ class PrivatePreparationWorkerRuntime {
             );
         }
         if (state.phase === unsignedFinalityPhase) {
-            if (!isZero(state.finalitySignature)) {
+            if (
+                !isZero(state.finalitySignature) ||
+                state.noResultAcknowledgementPhase !==
+                    unpublishedNoResultAcknowledgementPhase ||
+                !isZero(state.noResultAcknowledgement) ||
+                !isZero(acknowledgementBoundIdentity)
+            ) {
                 throw new DurableStateError(
                     'CorruptState',
-                    'Unsigned retained finality contains a signature.',
+                    'Unsigned retained finality contains published signature material.',
                 );
             }
             return;
@@ -4617,6 +4992,51 @@ class PrivatePreparationWorkerRuntime {
             state.targetBody,
             canonicalRosterBytes,
             state.finalitySignature,
+        );
+        if (state.targetKind === 'computation') {
+            if (
+                state.noResultAcknowledgementPhase !==
+                    unpublishedNoResultAcknowledgementPhase ||
+                !isZero(state.noResultAcknowledgement) ||
+                !isZero(acknowledgementBoundIdentity)
+            ) {
+                throw new DurableStateError(
+                    'CorruptState',
+                    'A computation finality contains no-result acknowledgement state.',
+                );
+            }
+            return;
+        }
+        if (
+            state.noResultAcknowledgementPhase ===
+            unpublishedNoResultAcknowledgementPhase
+        ) {
+            if (
+                !isZero(state.noResultAcknowledgement) ||
+                !isZero(acknowledgementBoundIdentity)
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The no-result acknowledgement journal is incomplete.',
+                );
+            }
+            return;
+        }
+        if (
+            state.noResultAcknowledgementPhase !==
+                publishedNoResultAcknowledgementPhase ||
+            !bytesEqual(acknowledgementBoundIdentity, state.targetIdentity)
+        ) {
+            throw new DurableStateError(
+                'StateLost',
+                'The published no-result acknowledgement journal is inconsistent.',
+            );
+        }
+        this.finalityRuntime.verifyNoResultAcknowledgement(
+            action.participantPosition,
+            state.targetBody,
+            canonicalRosterBytes,
+            state.noResultAcknowledgement,
         );
     }
 
@@ -5182,6 +5602,66 @@ class PrivatePreparationWorkerRuntime {
         );
     }
 
+    private async replaceActionAndFinalityStates(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+        replacementActionState: ActionState,
+        loadedFinality: LoadedFinalityState,
+        replacementFinalityState: FinalityState,
+    ): Promise<void> {
+        const actionPlaintext = encodeActionState(replacementActionState);
+        const actionContext = encodeLocalRecordContext(
+            actionLocalContext(
+                this.configuration,
+                action,
+                replacementActionState.rosterIdentity,
+                replacementActionState.generation,
+            ),
+        );
+        let actionReplacement: ProtectedRecord;
+        try {
+            actionReplacement = await createProtectedRecord(
+                loadedAction.record.id,
+                actionContext,
+                actionPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            actionPlaintext.fill(0);
+            actionContext.fill(0);
+        }
+        const finalityPlaintext = encodeFinalityState(replacementFinalityState);
+        const finalityContext = encodeLocalRecordContext(
+            terminalLocalContext(
+                this.configuration,
+                action,
+                replacementActionState.rosterIdentity,
+                replacementFinalityState.generation,
+                finalityStateKind,
+            ),
+        );
+        let finalityReplacement: ProtectedRecord;
+        try {
+            finalityReplacement = await createProtectedRecord(
+                loadedFinality.record.id,
+                finalityContext,
+                finalityPlaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            finalityPlaintext.fill(0);
+            finalityContext.fill(0);
+        }
+        await this.durableState.replaceTwoExact(
+            'actions',
+            loadedAction.record,
+            actionReplacement,
+            'finalities',
+            loadedFinality.record,
+            finalityReplacement,
+        );
+    }
+
     private async replaceFinalityState(
         action: PrivatePreparationActionContext,
         loadedAction: LoadedActionState,
@@ -5218,10 +5698,22 @@ class PrivatePreparationWorkerRuntime {
     }
 
     private async insertNoResultState(
+        release: VerifiedNoResultReleaseCapability,
         action: PrivatePreparationActionContext,
         loadedAction: LoadedActionState,
         state: NoResultState,
     ): Promise<void> {
+        if (
+            release.targetKind !== 'no-result' ||
+            release.sourceSubmissionBitmap !== 0 ||
+            release.topCount !== state.topCount ||
+            !bytesEqual(release.targetIdentity, state.targetIdentity)
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The no-result terminal does not match its verified release capability.',
+            );
+        }
         const plaintext = encodeNoResultState(state);
         const context = encodeLocalRecordContext(
             terminalLocalContext(
@@ -6877,6 +7369,8 @@ type WorkerInstallationOptions = Readonly<{
     unpinnedKernelAllowed: boolean;
     afterDurableConsume?: () => Promise<void> | void;
     afterDurableSourceBind?: () => Promise<void> | void;
+    beforeDurableNoResultAcknowledgementPersist?: () => Promise<void> | void;
+    afterDurableNoResultAcknowledgementPersist?: () => Promise<void> | void;
     afterDurableTallyGenerationInitialize?: () => Promise<void> | void;
     afterDurableTallyChunkPersist?: () => Promise<void> | void;
     afterDurableTallyActivationPublish?: () => Promise<void> | void;
@@ -6940,6 +7434,9 @@ const responseTransferables = (
             result.finalitySignature.buffer,
         ];
     }
+    if ('acknowledgement' in result) {
+        return [result.targetIdentity.buffer, result.acknowledgement.buffer];
+    }
     if ('chunk' in result) {
         const transferables = [
             result.chunk.buffer,
@@ -6996,6 +7493,8 @@ export const installPrivatePreparationWorker = (
                             options.unpinnedKernelAllowed,
                             options.afterDurableConsume,
                             options.afterDurableSourceBind,
+                            options.beforeDurableNoResultAcknowledgementPersist,
+                            options.afterDurableNoResultAcknowledgementPersist,
                             options.afterDurableTallyGenerationInitialize,
                             options.afterDurableTallyChunkPersist,
                             options.afterDurableTallyActivationPublish,
@@ -7053,6 +7552,17 @@ export const installPrivatePreparationWorker = (
                                 requestId: request.requestId,
                                 ok: true,
                                 result: await runtime.createFinalitySignature(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation ===
+                            'create-no-result-acknowledgement'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.createNoResultAcknowledgement(
                                     request.input,
                                 ),
                             };

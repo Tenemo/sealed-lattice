@@ -8,7 +8,9 @@ type SemanticTarget = Readonly<{
     predecessorIdentity: string;
     preparationIdentity: string;
     rosterIdentity: string;
+    sourceSubmissionBitmap: number;
     suiteAndCompilerIdentity: string;
+    targetKind: 'computation' | 'no-result';
 }>;
 
 type FinalitySignature = Readonly<{
@@ -27,19 +29,13 @@ type FinalitySignerState = Readonly<{
 type SigningCut =
     'before-persist' | 'after-persist-before-publish' | 'after-publish';
 
-const independentlyToleratedHonestStateFailures = 1;
-
 const corruptionThresholdForRoster = (participantCount: number): number =>
     Math.floor((participantCount - 1) / 3);
 
 const minimumDirectFinalityQuorum = (participantCount: number): number =>
-    Math.ceil(
-        (participantCount +
-            corruptionThresholdForRoster(participantCount) +
-            independentlyToleratedHonestStateFailures +
-            1) /
-            2,
-    );
+    Math.floor(
+        (participantCount + corruptionThresholdForRoster(participantCount)) / 2,
+    ) + 1;
 
 const minimumQuorumIntersection = (
     participantCount: number,
@@ -51,8 +47,7 @@ const minimumStableHonestIntersection = (
     quorumSize: number,
 ): number =>
     minimumQuorumIntersection(participantCount, quorumSize) -
-    corruptionThresholdForRoster(participantCount) -
-    independentlyToleratedHonestStateFailures;
+    corruptionThresholdForRoster(participantCount);
 
 const chooseParticipantPositions = (
     participantPositions: readonly number[],
@@ -196,7 +191,9 @@ const createTarget = (
     predecessorIdentity: 'predecessor',
     preparationIdentity: 'verified-preparation',
     rosterIdentity: 'roster',
+    sourceSubmissionBitmap: 1,
     suiteAndCompilerIdentity: 'suite-and-compiler',
+    targetKind: 'computation',
     ...overrides,
 });
 
@@ -215,6 +212,77 @@ const createSignatures = (
     }));
 };
 
+type NoResultAcknowledgement = Readonly<{
+    acknowledgementCarrier: string;
+    participantPosition: number;
+    semanticTargetIdentity: string;
+}>;
+
+type VerifiedNoResultRelease = Readonly<{
+    semanticTargetIdentity: string;
+}>;
+
+const deterministicNoResultAcknowledgementCarrier = (
+    participantPosition: number,
+    targetIdentity: string,
+): string =>
+    `no-result-acknowledgement:${String(participantPosition)}:${targetIdentity}`;
+
+const createNoResultAcknowledgements = (
+    target: SemanticTarget,
+    participantPositions: readonly number[],
+): readonly NoResultAcknowledgement[] => {
+    const targetIdentity = semanticTargetIdentity(target);
+    return participantPositions.map((participantPosition) => ({
+        acknowledgementCarrier: deterministicNoResultAcknowledgementCarrier(
+            participantPosition,
+            targetIdentity,
+        ),
+        participantPosition,
+        semanticTargetIdentity: targetIdentity,
+    }));
+};
+
+const verifyNoResultRelease = (
+    target: SemanticTarget,
+    finalitySignatures: readonly FinalitySignature[],
+    acknowledgements: readonly NoResultAcknowledgement[],
+    participantCount: number,
+): VerifiedNoResultRelease | undefined => {
+    const certificate = verifyFinalityCertificate(
+        target,
+        finalitySignatures,
+        participantCount,
+    );
+    if (
+        certificate === undefined ||
+        target.targetKind !== 'no-result' ||
+        target.sourceSubmissionBitmap !== 0 ||
+        acknowledgements.length !== participantCount
+    ) {
+        return undefined;
+    }
+    const signerPositions = new Set<number>();
+    for (const acknowledgement of acknowledgements) {
+        if (
+            acknowledgement.participantPosition < 0 ||
+            acknowledgement.participantPosition >= participantCount ||
+            acknowledgement.semanticTargetIdentity !==
+                certificate.semanticTargetIdentity ||
+            acknowledgement.acknowledgementCarrier !==
+                deterministicNoResultAcknowledgementCarrier(
+                    acknowledgement.participantPosition,
+                    certificate.semanticTargetIdentity,
+                ) ||
+            signerPositions.has(acknowledgement.participantPosition)
+        ) {
+            return undefined;
+        }
+        signerPositions.add(acknowledgement.participantPosition);
+    }
+    return signerPositions.size === participantCount ? certificate : undefined;
+};
+
 type ActionOutcome =
     | Readonly<{ kind: 'pending' }>
     | Readonly<{
@@ -230,9 +298,8 @@ type ActionOutcome =
 type OutcomeEvent =
     | Readonly<{ kind: 'invalid-contribution' }>
     | Readonly<{
-          kind: 'finalized-empty-inventory';
-          semanticTargetIdentity: string;
-          usableBallotCount: number;
+          kind: 'no-result-release';
+          release: VerifiedNoResultRelease | undefined;
       }>
     | Readonly<{
           exactCodewordVerified: boolean;
@@ -247,13 +314,13 @@ const applyOutcomeEvent = (
 ): ActionOutcome => {
     if (outcome.kind !== 'pending') return outcome;
     if (event.kind === 'invalid-contribution') return outcome;
-    if (event.kind === 'finalized-empty-inventory') {
-        return event.usableBallotCount === 0
-            ? {
+    if (event.kind === 'no-result-release') {
+        return event.release === undefined
+            ? outcome
+            : {
                   kind: 'verified-no-result',
-                  semanticTargetIdentity: event.semanticTargetIdentity,
-              }
-            : outcome;
+                  semanticTargetIdentity: event.release.semanticTargetIdentity,
+              };
     }
     return event.exactCodewordVerified
         ? {
@@ -367,7 +434,6 @@ const runGeneratedVisitSchedule = (input: {
             productive = true;
             if (
                 relayState.finalityCertificateAvailable &&
-                input.allAbstain !== true &&
                 input.withholdOutputFrom !== participantPosition
             ) {
                 participantState.outputPublished = true;
@@ -384,8 +450,6 @@ const runGeneratedVisitSchedule = (input: {
         }
 
         relayState.resultAvailable =
-            (input.allAbstain === true &&
-                relayState.finalityCertificateAvailable) ||
             relayState.outputPublishers.size === input.participantCount;
         if (relayState.resultAvailable && !participantState.resultRetrieved) {
             participantState.resultRetrieved = true;
@@ -439,11 +503,11 @@ describe('direct finality quorum model', () => {
         }
 
         expect(derivedQuorums).toEqual([
-            3, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 12, 12, 13, 14, 14,
+            2, 3, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 12, 12, 13, 14,
         ]);
     });
 
-    it('exhausts completion-roster quorum pairs, corrupt triples, and one honest rollback', () => {
+    it('exhausts completion-roster quorum pairs and every corrupt triple', () => {
         const participantCount = 10;
         const participantPositions = Array.from(
             { length: participantCount },
@@ -475,43 +539,32 @@ describe('direct finality quorum model', () => {
                     const sharedHonestSigners = sharedSigners.filter(
                         (position) => !corruptPositions.has(position),
                     );
-                    for (const rolledBackSigner of sharedHonestSigners) {
-                        const stableHonestSignerCount =
-                            sharedHonestSigners.filter(
-                                (position) => position !== rolledBackSigner,
-                            ).length;
-                        minimumStableHonestSigners = Math.min(
-                            minimumStableHonestSigners,
-                            stableHonestSignerCount,
-                        );
-                        casesChecked += 1;
-                    }
+                    minimumStableHonestSigners = Math.min(
+                        minimumStableHonestSigners,
+                        sharedHonestSigners.length,
+                    );
+                    casesChecked += 1;
                 }
             }
         }
 
-        expect(quorumSets).toHaveLength(45);
+        expect(quorumSets).toHaveLength(120);
         expect(corruptionSets).toHaveLength(120);
         expect(casesChecked).toBeGreaterThan(0);
-        expect(minimumStableHonestSigners).toBe(2);
+        expect(minimumStableHonestSigners).toBe(1);
     });
 
-    it('shows why seven signatures fail after one honest rollback', () => {
-        const leftQuorum = [0, 1, 2, 3, 4, 5, 6];
-        const rightQuorum = [0, 1, 2, 3, 7, 8, 9];
+    it('shows why six signatures do not force an honest intersection', () => {
+        const leftQuorum = [0, 1, 2, 3, 4, 5];
+        const rightQuorum = [0, 1, 2, 6, 7, 8];
         const corruptParticipants = new Set([0, 1, 2]);
-        const rolledBackHonestSigner = 3;
         const stableHonestIntersection = intersectParticipantPositions(
             leftQuorum,
             rightQuorum,
-        ).filter(
-            (position) =>
-                !corruptParticipants.has(position) &&
-                position !== rolledBackHonestSigner,
-        );
+        ).filter((position) => !corruptParticipants.has(position));
 
         expect(stableHonestIntersection).toEqual([]);
-        expect(minimumDirectFinalityQuorum(10)).toBe(8);
+        expect(minimumDirectFinalityQuorum(10)).toBe(7);
     });
 });
 
@@ -576,11 +629,8 @@ describe('direct finality signer state', () => {
 
     it('binds the semantic target rather than a certificate carrier', () => {
         const target = createTarget();
-        const firstCarrier = createSignatures(target, [0, 1, 2, 3, 4, 5, 6, 7]);
-        const secondCarrier = createSignatures(
-            target,
-            [9, 8, 7, 6, 5, 4, 3, 2],
-        );
+        const firstCarrier = createSignatures(target, [0, 1, 2, 3, 4, 5, 6]);
+        const secondCarrier = createSignatures(target, [9, 8, 7, 6, 5, 4, 3]);
 
         expect(verifyFinalityCertificate(target, firstCarrier, 10)).toEqual(
             verifyFinalityCertificate(target, secondCarrier, 10),
@@ -588,7 +638,7 @@ describe('direct finality signer state', () => {
         expect(
             verifyFinalityCertificate(
                 target,
-                [...firstCarrier.slice(0, 7), firstCarrier[0]],
+                [...firstCarrier.slice(0, 6), firstCarrier[0]],
                 10,
             ),
         ).toBeUndefined();
@@ -596,10 +646,10 @@ describe('direct finality signer state', () => {
             verifyFinalityCertificate(
                 target,
                 [
-                    ...firstCarrier.slice(0, 7),
+                    ...firstCarrier.slice(0, 6),
                     ...createSignatures(
                         createTarget({ actionIdentity: 'other-action' }),
-                        [8],
+                        [7],
                     ),
                 ],
                 10,
@@ -625,24 +675,59 @@ describe('post-finality outcome model', () => {
         ).toEqual(pending);
     });
 
-    it('finalizes no result only for a finalized empty usable inventory', () => {
+    it('finalizes no result only from all ten target acknowledgements', () => {
         const pending: ActionOutcome = { kind: 'pending' };
+        const target = createTarget({
+            sourceSubmissionBitmap: 0,
+            targetKind: 'no-result',
+        });
+        const finalitySignatures = createSignatures(
+            target,
+            [0, 1, 2, 3, 4, 5, 6],
+        );
+        const allAcknowledgements = createNoResultAcknowledgements(
+            target,
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        );
 
+        for (
+            let acknowledgementCount = 0;
+            acknowledgementCount < 10;
+            acknowledgementCount += 1
+        ) {
+            expect(
+                applyOutcomeEvent(pending, {
+                    kind: 'no-result-release',
+                    release: verifyNoResultRelease(
+                        target,
+                        finalitySignatures,
+                        allAcknowledgements.slice(0, acknowledgementCount),
+                        10,
+                    ),
+                }),
+            ).toEqual(pending);
+        }
+        const release = verifyNoResultRelease(
+            target,
+            finalitySignatures,
+            allAcknowledgements,
+            10,
+        );
         expect(
-            applyOutcomeEvent(pending, {
-                kind: 'finalized-empty-inventory',
-                semanticTargetIdentity: 'target',
-                usableBallotCount: 0,
-            }),
+            applyOutcomeEvent(pending, { kind: 'no-result-release', release }),
         ).toEqual({
             kind: 'verified-no-result',
-            semanticTargetIdentity: 'target',
+            semanticTargetIdentity: semanticTargetIdentity(target),
         });
         expect(
             applyOutcomeEvent(pending, {
-                kind: 'finalized-empty-inventory',
-                semanticTargetIdentity: 'target',
-                usableBallotCount: 1,
+                kind: 'no-result-release',
+                release: verifyNoResultRelease(
+                    createTarget(),
+                    createSignatures(createTarget(), [0, 1, 2, 3, 4, 5, 6]),
+                    allAcknowledgements,
+                    10,
+                ),
             }),
         ).toEqual(pending);
     });
@@ -690,7 +775,7 @@ describe('generated direct-finality visit schedule', () => {
         ).toBe(6);
     });
 
-    it('retrieves an all-abstain terminal in five productive visits', () => {
+    it('requires a final-action wave before retrieving all-abstain', () => {
         const schedule = runGeneratedVisitSchedule({
             allAbstain: true,
             participantCount: 10,
@@ -702,7 +787,7 @@ describe('generated direct-finality visit schedule', () => {
                     (participantState) => participantState.productiveVisitCount,
                 ),
             ),
-        ).toBe(5);
+        ).toBe(6);
     });
 
     it('leaves missing passes and post-finality withholding pending', () => {

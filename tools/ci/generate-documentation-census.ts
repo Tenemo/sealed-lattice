@@ -6,7 +6,10 @@ import {
     actionSignatureSecretKeyByteLength,
     actionSignatureVerificationKeyByteLength,
 } from '#packages/wasm/src/action-signature-runtime.js';
-import { finalityTargetBodyByteLength } from '#packages/wasm/src/finality-runtime.js';
+import {
+    completionProfileFinalityQuorum,
+    finalityTargetBodyByteLength,
+} from '#packages/wasm/src/finality-runtime.js';
 import {
     maximumFoundationCopiedBufferByteLength,
     maximumFoundationWasmMemoryByteLength,
@@ -91,7 +94,7 @@ export const renderDocumentationCensus = (): string => {
                 topCount,
                 participantCount,
             ),
-            resourceQuorumSubmitted: compileFullTallyResourceModel(topCount, 8),
+            resourceEightSubmitted: compileFullTallyResourceModel(topCount, 8),
         };
     });
     const maximum = perWidth[perWidth.length - 1];
@@ -288,7 +291,7 @@ export const renderDocumentationCensus = (): string => {
         [
             '## Clean verified download by output width',
             '',
-            'The all-submitted column is the absolute maximum. The quorum-submitted column has eight submissions and two abstentions.',
+            'The all-submitted column is the absolute maximum. The eight-submitted column has eight submissions and two abstentions.',
             '',
             table(
                 [
@@ -304,7 +307,7 @@ export const renderDocumentationCensus = (): string => {
                     ({
                         topCount,
                         resourceAllSubmitted,
-                        resourceQuorumSubmitted,
+                        resourceEightSubmitted,
                     }) => [
                         String(topCount),
                         formatCount(
@@ -323,10 +326,53 @@ export const renderDocumentationCensus = (): string => {
                             resourceAllSubmitted.cleanVerifiedDownloadByteLength,
                         ),
                         formatCount(
-                            resourceQuorumSubmitted.cleanVerifiedDownloadByteLength,
+                            resourceEightSubmitted.cleanVerifiedDownloadByteLength,
                         ),
                     ],
                 ),
+            ),
+        ].join('\n'),
+    );
+
+    sections.push(
+        [
+            '## Completion finality and no-result release',
+            '',
+            'These fixed inventories are generated from the same emitted carrier lengths as the per-width resource table. Finality accepts any distinct valid signer set from the derived quorum through the complete roster; all-abstain release still requires every roster acknowledgement.',
+            '',
+            table(
+                ['Quantity', 'Value'],
+                [
+                    [
+                        'Direct finality quorum',
+                        formatCount(completionProfileFinalityQuorum),
+                    ],
+                    [
+                        'Quorum finality carriers',
+                        formatCount(
+                            maximum.resourceAllSubmitted
+                                .finalitySignatureInventoryByteLength,
+                        ),
+                    ],
+                    [
+                        'No-result acknowledgement count',
+                        formatCount(participantCount),
+                    ],
+                    [
+                        'No-result acknowledgement carriers',
+                        formatCount(
+                            maximum.resourceAllSubmitted
+                                .noResultAcknowledgementInventoryByteLength,
+                        ),
+                    ],
+                    [
+                        'All-abstain clean verified download',
+                        formatCount(
+                            maximum.resourceAllSubmitted
+                                .allAbstainCleanVerifiedDownloadByteLength,
+                        ),
+                    ],
+                ],
             ),
         ].join('\n'),
     );
@@ -690,7 +736,7 @@ export const renderDocumentationCensus = (): string => {
                         formatCount(ledger.foundation.signatureKeyCount),
                     ],
                     [
-                        'Honest signing purposes per key',
+                        'Honest signing queries per key and target branch',
                         formatCount(
                             ledger.foundation.signaturePurposeQueriesPerKey,
                         ),

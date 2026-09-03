@@ -12,17 +12,20 @@ import {
 } from '#packages/wasm/src/source-runtime.js';
 
 const participantCount = 10;
-const finalityQuorum = 8;
+const finalityQuorum = 7;
 const preparationParentBodyByteLength = 8_502;
 
 export type FullTallyResourceModel = Readonly<{
     activationChunkCorpusByteLength: number;
     activationInventoryByteLength: number;
+    allAbstainCleanVerifiedDownloadByteLength: number;
     cleanVerifiedDownloadByteLength: number;
+    finalitySignatureInventoryByteLength: number;
     maximumConstructionCommandRequestByteLength: number;
     maximumChunkEvaluationRequestByteLength: number;
     maximumChunkGenerationRequestByteLength: number;
     maximumPrivatePreparationRecipientByteLength: number;
+    noResultAcknowledgementInventoryByteLength: number;
     preparationParentInventoryByteLength: number;
     sourceInventoryByteLength: number;
 }>;
@@ -63,8 +66,13 @@ export const compileFullTallyResourceModel = (
             (submittedSourceBodyByteLength + actionSignatureCarrierByteLength) +
         (participantCount - submittedParticipantCount) *
             (abstentionSourceBodyByteLength + actionSignatureCarrierByteLength);
+    const allAbstainSourceInventoryByteLength =
+        participantCount *
+        (abstentionSourceBodyByteLength + actionSignatureCarrierByteLength);
     const quorumFinalityInventoryByteLength =
         finalityQuorum * actionSignatureCarrierByteLength;
+    const noResultAcknowledgementInventoryByteLength =
+        participantCount * actionSignatureCarrierByteLength;
     const cleanVerifiedDownloadByteLength =
         5 * completionRosterByteLength +
         maximumPrivatePreparationRecipientByteLength +
@@ -73,11 +81,20 @@ export const compileFullTallyResourceModel = (
         2 * quorumFinalityInventoryByteLength +
         activationInventoryByteLength +
         activationChunkCorpusByteLength;
+    const allAbstainCleanVerifiedDownloadByteLength =
+        5 * completionRosterByteLength +
+        maximumPrivatePreparationRecipientByteLength +
+        2 * preparationParentInventoryByteLength +
+        2 * allAbstainSourceInventoryByteLength +
+        2 * quorumFinalityInventoryByteLength +
+        noResultAcknowledgementInventoryByteLength;
 
     return {
         activationChunkCorpusByteLength,
         activationInventoryByteLength,
+        allAbstainCleanVerifiedDownloadByteLength,
         cleanVerifiedDownloadByteLength,
+        finalitySignatureInventoryByteLength: quorumFinalityInventoryByteLength,
         maximumConstructionCommandRequestByteLength: Math.max(
             commandProjection.maximumChunkGenerationRequestByteLength,
             commandProjection.maximumChunkEvaluationRequestByteLength,
@@ -87,6 +104,7 @@ export const compileFullTallyResourceModel = (
         maximumChunkGenerationRequestByteLength:
             commandProjection.maximumChunkGenerationRequestByteLength,
         maximumPrivatePreparationRecipientByteLength,
+        noResultAcknowledgementInventoryByteLength,
         preparationParentInventoryByteLength,
         sourceInventoryByteLength,
     };

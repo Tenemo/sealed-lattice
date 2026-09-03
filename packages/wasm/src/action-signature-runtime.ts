@@ -28,7 +28,11 @@ type ActionSignatureKeyPair = Readonly<{
 }>;
 
 export type ActionSignaturePurpose =
-    'activation' | 'finality' | 'preparation' | 'source';
+    | 'activation'
+    | 'finality'
+    | 'no-result-acknowledgement'
+    | 'preparation'
+    | 'source';
 
 export type ActionSignatureRuntime = Readonly<{
     generateKeyPair(randomness: Uint8Array): ActionSignatureKeyPair;
@@ -82,6 +86,8 @@ const purposeCode = (purpose: ActionSignaturePurpose): number => {
             return 3;
         case 'activation':
             return 4;
+        case 'no-result-acknowledgement':
+            return 5;
     }
 };
 

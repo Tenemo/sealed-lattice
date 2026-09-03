@@ -24,6 +24,7 @@ pub const ACTION_SIGNATURE_CARRIER_BYTE_LENGTH: usize =
 
 const ACTION_SIGNATURE_CARRIER_SCHEMA_IDENTIFIER: u16 = 0x0205;
 const PREPARATION_PARENT_SCHEMA_IDENTIFIER: u16 = 0x0206;
+const ACTION_SIGNATURE_CARRIER_SCHEMA_VERSION: u16 = 4;
 const PREPARATION_SCHEMA_VERSION: u16 = 3;
 const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
 const PREPARATION_PARENT_IDENTITY_DOMAIN: &str =
@@ -38,6 +39,7 @@ pub enum ActionSignaturePurpose {
     Source = 2,
     Finality = 3,
     Activation = 4,
+    NoResultAcknowledgement = 5,
 }
 
 impl ActionSignaturePurpose {
@@ -47,6 +49,7 @@ impl ActionSignaturePurpose {
             2 => Ok(Self::Source),
             3 => Ok(Self::Finality),
             4 => Ok(Self::Activation),
+            5 => Ok(Self::NoResultAcknowledgement),
             _ => Err(PreparationParentError::WrongSignaturePurpose),
         }
     }
@@ -126,7 +129,7 @@ impl ActionSignatureCarrier {
     pub fn encode(&self) -> Result<Vec<u8>, PreparationParentError> {
         let encoded = CanonicalTuple::new(
             ACTION_SIGNATURE_CARRIER_SCHEMA_IDENTIFIER,
-            PREPARATION_SCHEMA_VERSION,
+            ACTION_SIGNATURE_CARRIER_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.signer_position),
                 CanonicalItem::unsigned16(self.purpose as u16),
@@ -150,7 +153,12 @@ impl ActionSignatureCarrier {
         }
         let tuple = CanonicalTuple::decode(bytes, &CanonicalDecodeLimits::default())
             .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)?;
-        require_tuple(&tuple, ACTION_SIGNATURE_CARRIER_SCHEMA_IDENTIFIER, 4)?;
+        require_tuple(
+            &tuple,
+            ACTION_SIGNATURE_CARRIER_SCHEMA_IDENTIFIER,
+            ACTION_SIGNATURE_CARRIER_SCHEMA_VERSION,
+            4,
+        )?;
         let carrier = Self::new(
             participant_count,
             read_unsigned16(&tuple.items[0])?,
@@ -347,7 +355,12 @@ impl PreparationParent {
         }
         let tuple = CanonicalTuple::decode(bytes, &CanonicalDecodeLimits::default())
             .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)?;
-        require_tuple(&tuple, PREPARATION_PARENT_SCHEMA_IDENTIFIER, 7)?;
+        require_tuple(
+            &tuple,
+            PREPARATION_PARENT_SCHEMA_IDENTIFIER,
+            PREPARATION_SCHEMA_VERSION,
+            7,
+        )?;
         let subset_commitments = read_raw_bytes(&tuple.items[5])?
             .chunks_exact(SUBSET_COMMITMENT_BYTE_LENGTH)
             .map(|bytes| {
@@ -549,11 +562,10 @@ fn validate_position(participant_count: u16, position: u16) -> Result<(), Prepar
 fn require_tuple(
     tuple: &CanonicalTuple,
     schema_identifier: u16,
+    schema_version: u16,
     item_count: usize,
 ) -> Result<(), PreparationParentError> {
-    if tuple.schema_identifier != schema_identifier
-        || tuple.schema_version != PREPARATION_SCHEMA_VERSION
-    {
+    if tuple.schema_identifier != schema_identifier || tuple.schema_version != schema_version {
         return Err(PreparationParentError::WrongSchema);
     }
     if tuple.items.len() != item_count {

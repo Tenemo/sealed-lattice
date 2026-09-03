@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 const participantCount = 10;
-const finalityQuorum = 8;
+const finalityQuorum = 7;
 const preCertificateSignerCount = finalityQuorum - 1;
 
 type ComputationSchedule = Readonly<{
@@ -117,6 +117,8 @@ const allAbstainVisitTrace = (
     joinOrder: readonly number[],
     certificateCompleter: number,
     certificateDeliveredDuringFinality: boolean,
+    lastAcknowledgementPublisher: number,
+    completeAcknowledgementInventoryDeliveredDuringPublication: boolean,
 ): string[][] => {
     const visits = visitsThroughPreparation(participantPosition, joinOrder);
     visits.push(
@@ -129,10 +131,31 @@ const allAbstainVisitTrace = (
     ) {
         visits[visits.length - 1]?.push(
             'verify-finality-certificate',
+            'publish-no-result-acknowledgement',
+        );
+    } else {
+        visits.push([
+            'verify-finality-certificate',
+            'publish-no-result-acknowledgement',
+        ]);
+    }
+    const publishedLastAcknowledgement =
+        participantPosition === lastAcknowledgementPublisher;
+    const acknowledgementVisit = visits[visits.length - 1];
+    if (
+        publishedLastAcknowledgement &&
+        completeAcknowledgementInventoryDeliveredDuringPublication &&
+        acknowledgementVisit !== undefined
+    ) {
+        acknowledgementVisit.push(
+            'verify-complete-no-result-acknowledgements',
             'retrieve-no-result',
         );
     } else {
-        visits.push(['verify-finality-certificate', 'retrieve-no-result']);
+        visits.push([
+            'verify-complete-no-result-acknowledgements',
+            'retrieve-no-result',
+        ]);
     }
     return visits;
 };
@@ -142,6 +165,13 @@ const durablePublicationActions = [
     'publish-source',
     'publish-finality',
     'publish-body',
+] as const;
+
+const allAbstainDurablePublicationActions = [
+    'publish-preparation',
+    'publish-source',
+    'publish-finality',
+    'publish-no-result-acknowledgement',
 ] as const;
 
 const applyCompletingRecovery = (
@@ -230,7 +260,7 @@ describe('completion-profile participant visit graph', () => {
                 for (const certificateCompleter of possibleCertificateCompleters) {
                     if (preCertificateSigners.has(certificateCompleter)) {
                         throw new Error(
-                            'The eighth signer was already counted.',
+                            'The certificate completer was already counted.',
                         );
                     }
                     for (const lastBodyPublisher of positions) {
@@ -288,8 +318,8 @@ describe('completion-profile participant visit graph', () => {
         expect(
             new Set(joinOrders.map((order) => order[order.length - 1])).size,
         ).toBe(10);
-        expect(preCertificateSignerSets).toHaveLength(120);
-        expect(casesChecked).toBe(1_440_000);
+        expect(preCertificateSignerSets).toHaveLength(210);
+        expect(casesChecked).toBe(3_360_000);
         expect(minimumVisits).toBe(3);
         expect(maximumVisits).toBe(6);
         expect(maximumLastJoinerVisits).toBe(5);
@@ -313,34 +343,43 @@ describe('completion-profile participant visit graph', () => {
                         false,
                         true,
                     ]) {
-                        const visitCount = allAbstainVisitTrace(
-                            participantPosition,
-                            joinOrder,
-                            certificateCompleter,
-                            certificateDeliveredDuringFinality,
-                        ).length;
-                        allAbstainMaximum = Math.max(
-                            allAbstainMaximum,
-                            visitCount,
-                        );
-                        if (participantPosition === lastJoiner) {
-                            allAbstainLastJoinerMaximum = Math.max(
-                                allAbstainLastJoinerMaximum,
-                                visitCount,
-                            );
+                        for (const lastAcknowledgementPublisher of positions) {
+                            for (const completeAcknowledgementInventoryDeliveredDuringPublication of [
+                                false,
+                                true,
+                            ]) {
+                                const visitCount = allAbstainVisitTrace(
+                                    participantPosition,
+                                    joinOrder,
+                                    certificateCompleter,
+                                    certificateDeliveredDuringFinality,
+                                    lastAcknowledgementPublisher,
+                                    completeAcknowledgementInventoryDeliveredDuringPublication,
+                                ).length;
+                                allAbstainMaximum = Math.max(
+                                    allAbstainMaximum,
+                                    visitCount,
+                                );
+                                if (participantPosition === lastJoiner) {
+                                    allAbstainLastJoinerMaximum = Math.max(
+                                        allAbstainLastJoinerMaximum,
+                                        visitCount,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        expect(allAbstainMaximum).toBe(5);
-        expect(allAbstainLastJoinerMaximum).toBe(4);
+        expect(allAbstainMaximum).toBe(6);
+        expect(allAbstainLastJoinerMaximum).toBe(5);
 
         const ordinaryMaximumTrace = computationVisitTrace({
             participantPosition: 0,
             joinOrder: [...positions.slice(0, 9), 9],
-            preCertificateSigners: new Set(positions.slice(0, 7)),
-            certificateCompleter: 8,
+            preCertificateSigners: new Set(positions.slice(0, 6)),
+            certificateCompleter: 6,
             certificateDeliveredDuringFinality: false,
             lastBodyPublisher: 9,
             completeBodyInventoryDeliveredDuringPublication: false,
@@ -375,6 +414,40 @@ describe('completion-profile participant visit graph', () => {
                     visit.includes('refetch-authentic-carrier'),
                 ),
             ).toHaveLength(1);
+        }
+
+        const allAbstainMaximumTrace = allAbstainVisitTrace(
+            0,
+            [...positions.slice(0, 9), 9],
+            6,
+            false,
+            9,
+            false,
+        );
+        expect(allAbstainMaximumTrace).toHaveLength(6);
+        const allAbstainCrashSelections = choosePositions(
+            allAbstainDurablePublicationActions.map((_action, index) => index),
+            3,
+        );
+        expect(allAbstainCrashSelections).toHaveLength(4);
+        for (const crashSelection of allAbstainCrashSelections) {
+            const crashAfter = new Set<string>(
+                crashSelection.map((index) => {
+                    const action = allAbstainDurablePublicationActions[index];
+                    if (action === undefined) {
+                        throw new Error(
+                            'The all-abstain crash selection is out of range.',
+                        );
+                    }
+                    return action;
+                }),
+            );
+            const recoveryTrace = applyCompletingRecovery(
+                allAbstainMaximumTrace,
+                crashAfter,
+                'verify-complete-no-result-acknowledgements',
+            );
+            expect(recoveryTrace).toHaveLength(10);
         }
 
         expect(

@@ -173,6 +173,9 @@ describe('preparation parent scalar WASM runtime', () => {
             parentSignature,
         );
         expect(signatureCarrier).toHaveLength(actionSignatureCarrierByteLength);
+        expect(signatureCarrier.slice(0, 4)).toEqual(
+            Uint8Array.of(0x05, 0x02, 0x04, 0x00),
+        );
 
         expect(
             parentRuntime.verifyPrivateCarrier(
@@ -197,6 +200,18 @@ describe('preparation parent scalar WASM runtime', () => {
                 canonicalRosterBytes,
                 parent.body,
                 mutatedSignature,
+                privateCarrier.body,
+            ),
+        ).toThrow(ConstructionKernelCommandError);
+
+        const withdrawnSchemaSignature = Uint8Array.from(signatureCarrier);
+        withdrawnSchemaSignature[2] = 3;
+        expect(() =>
+            parentRuntime.verifyPrivateCarrier(
+                context,
+                canonicalRosterBytes,
+                parent.body,
+                withdrawnSchemaSignature,
                 privateCarrier.body,
             ),
         ).toThrow(ConstructionKernelCommandError);

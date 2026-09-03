@@ -1,5 +1,6 @@
 import type {
     FinalitySignatureCarrier,
+    NoResultAcknowledgementCarrier,
     SourceCarrier,
 } from './finality-runtime.js';
 import type {
@@ -11,10 +12,12 @@ import type {
     PaddedTallyEvaluationStep,
     PaddedTallyWorkerInitialization,
     PublishedFinalityPackage,
+    PublishedNoResultAcknowledgement,
     PublishedPaddedTallyChunk,
     PublishedPreparationPackage,
     PublishedSourcePackage,
     SourcePublicationChoice,
+    NoResultFinalizationProgress,
     TallyEvaluationProgress,
 } from './private-preparation-worker-protocol.js';
 
@@ -50,6 +53,14 @@ const copyFinalitySignatures = (
     signatures.map((signature) => ({
         signerPosition: signature.signerPosition,
         signature: copyBytes(signature.signature),
+    }));
+
+const copyNoResultAcknowledgements = (
+    acknowledgements: readonly NoResultAcknowledgementCarrier[],
+): NoResultAcknowledgementCarrier[] =>
+    acknowledgements.map((acknowledgement) => ({
+        signerPosition: acknowledgement.signerPosition,
+        signature: copyBytes(acknowledgement.signature),
     }));
 
 const copySourceChoice = (
@@ -127,6 +138,7 @@ const collectRequestTransferables = (
     }
     if (
         request.operation === 'create-finality-signature' ||
+        request.operation === 'create-no-result-acknowledgement' ||
         request.operation === 'finalize-no-result'
     ) {
         for (const source of request.input.sources) {
@@ -134,9 +146,17 @@ const collectRequestTransferables = (
             collect(source.signature);
         }
     }
-    if (request.operation === 'finalize-no-result') {
+    if (
+        request.operation === 'create-no-result-acknowledgement' ||
+        request.operation === 'finalize-no-result'
+    ) {
         for (const signature of request.input.finalitySignatures) {
             collect(signature.signature);
+        }
+    }
+    if (request.operation === 'finalize-no-result') {
+        for (const acknowledgement of request.input.acknowledgements) {
+            collect(acknowledgement.signature);
         }
     }
     return transferables;
@@ -312,10 +332,35 @@ export class PrivatePreparationWorkerClient {
         preparationAttempt: number,
         sources: readonly SourceCarrier[],
         finalitySignatures: readonly FinalitySignatureCarrier[],
+        acknowledgements: readonly NoResultAcknowledgementCarrier[],
         topCount: number,
-    ): Promise<TallyEvaluationProgress> {
+    ): Promise<NoResultFinalizationProgress> {
         return this.send({
             operation: 'finalize-no-result',
+            input: {
+                ...copyActionContext(context),
+                canonicalRosterBytes:
+                    copyCanonicalRosterBytes(canonicalRosterBytes),
+                preparationAttempt,
+                sources: copySources(sources),
+                finalitySignatures: copyFinalitySignatures(finalitySignatures),
+                acknowledgements:
+                    copyNoResultAcknowledgements(acknowledgements),
+                topCount,
+            },
+        });
+    }
+
+    createNoResultAcknowledgement(
+        context: PrivatePreparationActionContext,
+        canonicalRosterBytes: Uint8Array,
+        preparationAttempt: number,
+        sources: readonly SourceCarrier[],
+        finalitySignatures: readonly FinalitySignatureCarrier[],
+        topCount: number,
+    ): Promise<PublishedNoResultAcknowledgement> {
+        return this.send({
+            operation: 'create-no-result-acknowledgement',
             input: {
                 ...copyActionContext(context),
                 canonicalRosterBytes:

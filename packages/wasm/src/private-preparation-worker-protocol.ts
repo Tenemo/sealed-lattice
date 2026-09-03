@@ -1,5 +1,6 @@
 import type {
     FinalitySignatureCarrier,
+    NoResultAcknowledgementCarrier,
     SourceCarrier,
 } from './finality-runtime.js';
 import type {
@@ -77,12 +78,24 @@ export type PrivatePreparationWorkerRequest =
       }>
     | Readonly<{
           requestId: number;
+          operation: 'create-no-result-acknowledgement';
+          input: PrivatePreparationActionContext & {
+              canonicalRosterBytes: Uint8Array;
+              preparationAttempt: number;
+              sources: readonly SourceCarrier[];
+              finalitySignatures: readonly FinalitySignatureCarrier[];
+              topCount: number;
+          };
+      }>
+    | Readonly<{
+          requestId: number;
           operation: 'finalize-no-result';
           input: PrivatePreparationActionContext & {
               canonicalRosterBytes: Uint8Array;
               preparationAttempt: number;
               sources: readonly SourceCarrier[];
               finalitySignatures: readonly FinalitySignatureCarrier[];
+              acknowledgements: readonly NoResultAcknowledgementCarrier[];
               topCount: number;
           };
       }>
@@ -155,6 +168,12 @@ export type PublishedFinalityPackage = Readonly<{
     finalitySignature: Uint8Array;
 }>;
 
+export type PublishedNoResultAcknowledgement = Readonly<{
+    signerPosition: number;
+    targetIdentity: Uint8Array;
+    acknowledgement: Uint8Array;
+}>;
+
 export type PaddedTallyWorkerInitialization = Readonly<{
     status: 'already-initialized' | 'initialized';
     plan: PaddedTallyPlan;
@@ -202,6 +221,14 @@ export type TallyEvaluationProgress =
           resources: KernelResourceMeasurement;
       }>;
 
+export type NoResultFinalizationProgress =
+    | Readonly<{
+          kind: 'pending';
+          receivedAcknowledgements: number;
+          requiredAcknowledgements: number;
+      }>
+    | Extract<TallyEvaluationProgress, Readonly<{ kind: 'no-result' }>>;
+
 export type PaddedTallyEvaluationStep =
     | Readonly<{
           kind: 'pending';
@@ -219,11 +246,13 @@ type PrivatePreparationWorkerSuccess = Readonly<{
         | PrivatePreparationConsumption
         | PublishedPreparationPackage
         | PublishedFinalityPackage
+        | PublishedNoResultAcknowledgement
         | PublishedPaddedTallyChunk
         | PublishedSourcePackage
         | PaddedTallyEvaluationStep
         | PaddedTallyWorkerInitialization
         | TallyEvaluationProgress
+        | NoResultFinalizationProgress
         | Readonly<{ initialized: true }>;
 }>;
 

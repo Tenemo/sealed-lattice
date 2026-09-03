@@ -456,9 +456,22 @@ export const enumerateAllAbstainLocalRecordSeals =
             participantPosition += 1
         ) {
             const participantSeals: IndependentLocalRecordSeal[] = [];
-            const actionGeneration = appendFoundationCeremonySeals(
+            let actionGeneration = appendFoundationCeremonySeals(
                 participantSeals,
                 participantPosition,
+            );
+            appendSeal(
+                participantSeals,
+                participantPosition,
+                localRecordObjectKinds.finality,
+                3n,
+            );
+            actionGeneration += 1n;
+            appendSeal(
+                participantSeals,
+                participantPosition,
+                localRecordObjectKinds.action,
+                actionGeneration,
             );
             if (participantPosition === 0) {
                 appendSeal(
@@ -477,6 +490,7 @@ export const enumerateAllAbstainLocalRecordSeals =
             seals.push(
                 ...resealCompleteInventory(participantSeals, [
                     ...foundationTransitionRecordCounts,
+                    2,
                     ...(participantPosition === 0 ? [2] : []),
                 ]),
             );

@@ -108,18 +108,18 @@ describe('independent local-record context model', () => {
             enumerateAllAbstainLocalRecordSeals(),
         );
         expect(census).toEqual({
-            storageVisibleSealCount: 1_824,
-            distinctDerivationInputCount: 282,
-            inventoryCommitCount: 251,
+            storageVisibleSealCount: 1_954,
+            distinctDerivationInputCount: 302,
+            inventoryCommitCount: 261,
             retainedRecordCount: 131,
-            maximumSealsPerExactContext: 24,
-            sameContextSealPairCount: 12_844n,
+            maximumSealsPerExactContext: 25,
+            sameContextSealPairCount: 14_285n,
             objectKindCounts: {
-                [localRecordObjectKinds.action]: 251,
-                [localRecordObjectKinds.preparation]: 241,
-                [localRecordObjectKinds.privatePreparationSlot]: 1_269,
-                [localRecordObjectKinds.source]: 41,
-                [localRecordObjectKinds.finality]: 21,
+                [localRecordObjectKinds.action]: 261,
+                [localRecordObjectKinds.preparation]: 251,
+                [localRecordObjectKinds.privatePreparationSlot]: 1_359,
+                [localRecordObjectKinds.source]: 51,
+                [localRecordObjectKinds.finality]: 31,
                 [localRecordObjectKinds.noResult]: 1,
             },
             retainedObjectKindCounts: {
