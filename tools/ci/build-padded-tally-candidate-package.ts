@@ -25,13 +25,46 @@ import {
     type CommandInvocation,
 } from './run-command.js';
 
-import { completionProfileFinalityQuorum } from '#packages/wasm/src/finality-runtime.js';
+import {
+    actionSignatureKeyGenerationRandomnessByteLength,
+    actionSignatureSigningRandomnessByteLength,
+    openActionSignatureRuntime,
+} from '#packages/wasm/src/action-signature-runtime.js';
+import {
+    completionProfileFinalityQuorum,
+    openFinalityRuntime,
+    type FinalitySignatureCarrier,
+    type SourceCarrier,
+} from '#packages/wasm/src/finality-runtime.js';
 import {
     maximumFoundationCopiedBufferByteLength,
     maximumFoundationWasmMemoryByteLength,
 } from '#packages/wasm/src/foundation-contract.js';
-import { paddedTallyMaximumChunkByteLength } from '#packages/wasm/src/padded-tally-runtime.js';
-import { sourceScoreEncodingCount } from '#packages/wasm/src/source-runtime.js';
+import type { ConstructionKernelCommandRuntime } from '#packages/wasm/src/foundation-kernel/kernel-runtime.js';
+import {
+    drawPaddedTallyLabelEntropy,
+    openPaddedTallyRuntime,
+    paddedTallyMaximumChunkByteLength,
+    type PaddedTallyPlan,
+} from '#packages/wasm/src/padded-tally-runtime.js';
+import {
+    openPairEncryptionRuntime,
+    pairEncryptionKeyGenerationRandomnessByteLength,
+} from '#packages/wasm/src/pair-encryption-runtime.js';
+import {
+    openPreparationMaterialRuntime,
+    preparationContributionOpeningVectorByteLength,
+    preparationPairwiseMasterVectorByteLength,
+    type GeneratedPreparationMaterial,
+} from '#packages/wasm/src/preparation-material-runtime.js';
+import { openPreparationParentRuntime } from '#packages/wasm/src/preparation-parent-runtime.js';
+import { openRosterRuntime } from '#packages/wasm/src/roster-runtime.js';
+import {
+    openSourceRuntime,
+    sourceScoreEncodingCount,
+    type PreparationParentCarrier,
+    type SourcePreparationContext,
+} from '#packages/wasm/src/source-runtime.js';
 import {
     compileIndependentPaddedTallyModel,
     encodeIndependentPaddedTallyCircuit,
@@ -51,6 +84,36 @@ const completionOptionCount = 10;
 const scoreBitWidth = 4;
 const maximumCorruptParticipantCount = 3;
 const identityRecordRelativePath = 'candidate/candidate-build-identity.json';
+const publicKernelRelativePath = 'candidate/public-foundation-kernel.wasm';
+const activeConstructionCommandOrdinals = [42, 43, 44, 45, 46, 47] as const;
+const manifestIdentityDomain = 'sealed-lattice/padded-continuation/manifest/v1';
+const exactBuildInputs = new Set([
+    '.nvmrc',
+    'Cargo.lock',
+    'Cargo.toml',
+    'LICENSE',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    'packages/sdk/package.json',
+    'packages/sdk/tsconfig.json',
+    'packages/wasm/README.md',
+    'packages/wasm/package.json',
+    'packages/wasm/tsconfig.json',
+    'rust-toolchain.toml',
+    'tests/padded-tally-transcript-model.ts',
+    'tools/ci/build-padded-tally-candidate-package.ts',
+    'tools/ci/build-sdk-package.ts',
+    'tools/ci/build-wasm-kernel.ts',
+    'tools/ci/local-run-log.ts',
+    'tools/ci/package-manager-runner.ts',
+    'tools/ci/run-command.ts',
+    'tools/ci/run-log-diagnostics.ts',
+    'tools/ci/sdk-package-tsdown.config.ts',
+    'tsconfig.base.json',
+    'tsconfig.json',
+    'tsconfig.tools.json',
+]);
 
 type ContentEntry = Readonly<{
     bytes: Uint8Array;
@@ -61,6 +124,12 @@ type FileIdentity = Readonly<{
     byteLength: number;
     path: string;
     sha256Hex: string;
+}>;
+
+type KernelArtifact = Readonly<{
+    bytes: Uint8Array;
+    identity: FileIdentity;
+    wasmExports: readonly string[];
 }>;
 
 type PackMetadata = Readonly<{
@@ -75,9 +144,7 @@ type CandidateKernelModule = Readonly<{
     instantiateConstructionKernelCommandRuntime: (
         kernelUrl: URL,
         options: Readonly<{ expectedKernelSha256Hex: string }>,
-    ) => Promise<
-        Readonly<{ executeCommand: (bytes: Uint8Array) => Uint8Array }>
-    >;
+    ) => Promise<ConstructionKernelCommandRuntime>;
 }>;
 
 type CandidatePaddedTallyModule = Readonly<{
@@ -268,22 +335,6 @@ const trackedSourcePaths = (): string[] => {
     })
         .split('\0')
         .filter(Boolean);
-    const exactBuildInputs = new Set([
-        'Cargo.lock',
-        'Cargo.toml',
-        'package.json',
-        'pnpm-lock.yaml',
-        'packages/sdk/package.json',
-        'packages/sdk/tsconfig.json',
-        'packages/wasm/package.json',
-        'packages/wasm/tsconfig.json',
-        'tests/padded-tally-transcript-model.ts',
-        'tools/ci/build-padded-tally-candidate-package.ts',
-        'tools/ci/build-wasm-kernel.ts',
-        'tsconfig.base.json',
-        'tsconfig.json',
-        'tsconfig.tools.json',
-    ]);
     return tracked
         .filter(
             (relativePath) =>
@@ -345,7 +396,40 @@ const productionSourceText = (relativePath: string, source: string): string => {
 };
 
 const parseNumericLiteral = (literal: string): bigint =>
-    BigInt(literal.replace(/_/gu, ''));
+    BigInt(literal.replace(/_/gu, '').replace(/n$/u, ''));
+
+const parseTypeScriptNumericConstant = (
+    expression: string,
+    declaredType: string | undefined,
+):
+    | Readonly<{ declaredType: 'bigint' | 'number'; value: bigint }>
+    | undefined => {
+    const normalized = expression.trim();
+    const literal = /^(0x[0-9A-Fa-f_]+|[0-9][0-9_]*)(n)?$/u.exec(normalized);
+    if (literal?.[1] !== undefined) {
+        const bigintSuffix = literal[2] === 'n';
+        if (
+            (declaredType === 'bigint' && !bigintSuffix) ||
+            (declaredType === 'number' && bigintSuffix)
+        ) {
+            return undefined;
+        }
+        return {
+            declaredType: bigintSuffix ? 'bigint' : 'number',
+            value: parseNumericLiteral(literal[0]),
+        };
+    }
+    const maximumExpression =
+        /^\(\s*1n\s*<<\s*([0-9][0-9_]*)n\s*\)\s*-\s*1n$/u.exec(normalized);
+    if (maximumExpression?.[1] === undefined || declaredType === 'number') {
+        return undefined;
+    }
+    const bitLength = parseNumericLiteral(maximumExpression[1]);
+    return {
+        declaredType: 'bigint',
+        value: (1n << bitLength) - 1n,
+    };
+};
 
 const hasImmediateTestOnlyAttribute = (
     source: string,
@@ -382,7 +466,7 @@ const extractProtocolGrammar = async (
     const rustConstantPattern =
         /(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s*(u8|u16|u32|u64|usize)\s*=\s*(0x[0-9A-Fa-f_]+|[0-9][0-9_]*)\s*;/gu;
     const typeScriptConstantPattern =
-        /const\s+([A-Za-z][A-Za-z0-9_]*)\s*(?::\s*number\s*)?=\s*(0x[0-9A-Fa-f_]+|[0-9][0-9_]*)\s*;/gu;
+        /const\s+([A-Za-z][A-Za-z0-9_]*)\s*(?::\s*(number|bigint)\s*)?=\s*([^;\r\n]+)\s*;/gu;
     const enumerationPattern =
         /#\[repr\((u8|u16|u32)\)\]\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z][A-Za-z0-9_]*)\s*\{([^}]+)\}/gu;
     const enumerationValuePattern =
@@ -436,15 +520,21 @@ const extractProtocolGrammar = async (
                 typeScriptConstantPattern,
             )) {
                 const name = match[1];
-                const literal = match[2];
-                if (name === undefined || literal === undefined) continue;
+                const declaredType = match[2];
+                const expression = match[3];
+                if (name === undefined || expression === undefined) continue;
+                const parsed = parseTypeScriptNumericConstant(
+                    expression,
+                    declaredType,
+                );
+                if (parsed === undefined) continue;
                 numericLiteralConstants.push({
-                    declaredType: 'number',
+                    declaredType: parsed.declaredType,
                     language: 'typescript',
                     line: sourceLineNumber(source, match.index),
                     name,
                     path: identity.path,
-                    valueDecimal: parseNumericLiteral(literal).toString(10),
+                    valueDecimal: parsed.value.toString(10),
                 });
             }
         }
@@ -573,10 +663,8 @@ const wasmExportNames = (bytes: Uint8Array): readonly string[] =>
 
 const requireKernelBoundaries = async (): Promise<
     Readonly<{
-        candidateKernel: FileIdentity;
-        candidateWasmExports: readonly string[];
-        publicKernel: FileIdentity;
-        publicWasmExports: readonly string[];
+        candidateKernel: KernelArtifact;
+        publicKernel: KernelArtifact;
     }>
 > => {
     const candidatePath = path.join(
@@ -614,16 +702,19 @@ const requireKernelBoundaries = async (): Promise<
         throw new Error('The public package exposes the construction command.');
     }
     return {
-        candidateKernel: identifyBytes(
-            'dist/sealed-lattice-kernel.wasm',
-            candidateBytes,
-        ),
-        candidateWasmExports,
-        publicKernel: identifyBytes(
-            'packages/sdk/dist/sealed-lattice-kernel.wasm',
-            publicBytes,
-        ),
-        publicWasmExports,
+        candidateKernel: {
+            bytes: candidateBytes,
+            identity: identifyBytes(
+                'dist/sealed-lattice-kernel.wasm',
+                candidateBytes,
+            ),
+            wasmExports: candidateWasmExports,
+        },
+        publicKernel: {
+            bytes: publicBytes,
+            identity: identifyBytes(publicKernelRelativePath, publicBytes),
+            wasmExports: publicWasmExports,
+        },
     };
 };
 
@@ -677,6 +768,504 @@ const unsigned32Bytes = (value: number): Uint8Array => {
     const bytes = new Uint8Array(4);
     new DataView(bytes.buffer).setUint32(0, value, true);
     return bytes;
+};
+
+type CapturedCommandExchange = Readonly<{
+    command: number;
+    request: Uint8Array;
+    response: Uint8Array;
+}>;
+
+const deterministicBytes = (length: number, seed: bigint): Uint8Array => {
+    let state = seed;
+    const mask = (1n << 64n) - 1n;
+    return Uint8Array.from({ length }, () => {
+        state ^= (state << 13n) & mask;
+        state ^= state >> 7n;
+        state ^= (state << 17n) & mask;
+        state &= mask;
+        return Number(state & 0xffn);
+    });
+};
+
+const deterministicFill = (seed: bigint): ((bytes: Uint8Array) => void) => {
+    let state = seed;
+    const mask = (1n << 64n) - 1n;
+    return (bytes): void => {
+        for (let index = 0; index < bytes.byteLength; index += 1) {
+            state ^= (state << 13n) & mask;
+            state ^= state >> 7n;
+            state ^= (state << 17n) & mask;
+            state &= mask;
+            bytes[index] = Number(state & 0xffn);
+        }
+    };
+};
+
+const foundationVariableBytesHash = (
+    domain: string,
+    payload: Uint8Array,
+): Uint8Array => {
+    const domainBytes = new TextEncoder().encode(domain);
+    const preimage = concatenateBytes([
+        unsigned16Bytes(0x0001),
+        unsigned16Bytes(1),
+        unsigned32Bytes(2),
+        unsigned16Bytes(0x0002),
+        unsigned32Bytes(domainBytes.byteLength + 4),
+        unsigned32Bytes(domainBytes.byteLength),
+        domainBytes,
+        unsigned16Bytes(0x0001),
+        unsigned32Bytes(payload.byteLength + 4),
+        unsigned32Bytes(payload.byteLength),
+        payload,
+    ]);
+    return Uint8Array.from(
+        createHash('shake256', { outputLength: identityByteLength })
+            .update(preimage)
+            .digest(),
+    );
+};
+
+const readFinalityCircuitIdentity = (targetBody: Uint8Array): Uint8Array => {
+    const view = new DataView(
+        targetBody.buffer,
+        targetBody.byteOffset,
+        targetBody.byteLength,
+    );
+    const itemCount = view.getUint32(4, true);
+    let offset = 8;
+    for (let itemIndex = 0; itemIndex < itemCount; itemIndex += 1) {
+        const itemType = view.getUint16(offset, true);
+        const itemByteLength = view.getUint32(offset + 2, true);
+        offset += 6;
+        const end = offset + itemByteLength;
+        if (end > targetBody.byteLength) {
+            throw new Error('The vector finality target is truncated.');
+        }
+        if (itemIndex === 10) {
+            if (itemType !== 0x0006 || itemByteLength !== identityByteLength) {
+                throw new Error(
+                    'The vector finality target has no canonical circuit identity.',
+                );
+            }
+            return Uint8Array.from(targetBody.subarray(offset, end));
+        }
+        offset = end;
+    }
+    throw new Error('The vector finality target omits its circuit identity.');
+};
+
+const syntheticChunkIdentity = (
+    participantPosition: number,
+    chunkOrdinal: number,
+): Uint8Array =>
+    Uint8Array.from(
+        createHash('shake256', { outputLength: identityByteLength })
+            .update('sealed-lattice/candidate-package/chunk-fixture/v1')
+            .update(unsigned16Bytes(participantPosition))
+            .update(unsigned32Bytes(chunkOrdinal))
+            .digest(),
+    );
+
+const encodeFixtureManifest = (
+    targetIdentity: Uint8Array,
+    circuitIdentity: Uint8Array,
+    participantPosition: number,
+    allocationNonce: Uint8Array,
+    plan: PaddedTallyPlan,
+    firstChunkIdentity?: Uint8Array,
+): Uint8Array => {
+    const model = compileIndependentPaddedTallyModel(plan.topCount);
+    if (model.descriptors.length !== plan.chunks.length) {
+        throw new Error('The vector manifest model disagrees with the plan.');
+    }
+    return concatenateBytes([
+        new TextEncoder().encode('SLPM'),
+        unsigned16Bytes(1),
+        targetIdentity,
+        circuitIdentity,
+        unsigned16Bytes(completionParticipantCount),
+        unsigned16Bytes(participantPosition),
+        unsigned16Bytes(plan.topCount),
+        allocationNonce,
+        unsigned32Bytes(model.descriptors.length),
+        ...model.descriptors.flatMap((descriptor, chunkOrdinal) => [
+            unsigned32Bytes(descriptor.firstOperation),
+            unsigned32Bytes(descriptor.operationEnd),
+            Uint8Array.of(descriptor.includesInitial ? 1 : 0),
+            Uint8Array.of(descriptor.includesTerminal ? 1 : 0),
+            unsigned32Bytes(descriptor.chunkByteLength),
+            chunkOrdinal === 0 && firstChunkIdentity !== undefined
+                ? firstChunkIdentity
+                : syntheticChunkIdentity(participantPosition, chunkOrdinal),
+        ]),
+    ]);
+};
+
+const requireCapturedCommand = (
+    exchanges: readonly CapturedCommandExchange[],
+    command: number,
+): CapturedCommandExchange => {
+    const exchange = exchanges.find(
+        (candidate) => candidate.command === command,
+    );
+    if (exchange === undefined || exchange.response[0] !== 0) {
+        throw new Error(
+            `The canonical fixture omitted successful command ${String(command)}.`,
+        );
+    }
+    return exchange;
+};
+
+const generateActiveConstructionCommandVectors = (
+    kernel: ConstructionKernelCommandRuntime,
+): readonly CapturedCommandExchange[] => {
+    const exchanges: CapturedCommandExchange[] = [];
+    const recordingKernel: ConstructionKernelCommandRuntime = {
+        executeCommand: (request) => {
+            const requestCopy = Uint8Array.from(request);
+            const response = kernel.executeCommand(request);
+            exchanges.push({
+                command: requestCopy[0] ?? -1,
+                request: requestCopy,
+                response: Uint8Array.from(response),
+            });
+            return response;
+        },
+        measureResources: () => kernel.measureResources(),
+    };
+    const signatureRuntime = openActionSignatureRuntime(recordingKernel);
+    const pairRuntime = openPairEncryptionRuntime(recordingKernel);
+    const rosterRuntime = openRosterRuntime(recordingKernel);
+    const materialRuntime = openPreparationMaterialRuntime(recordingKernel);
+    const parentRuntime = openPreparationParentRuntime(recordingKernel);
+    const sourceRuntime = openSourceRuntime(recordingKernel);
+    const finalityRuntime = openFinalityRuntime(recordingKernel);
+    const paddedRuntime = openPaddedTallyRuntime(recordingKernel);
+    const actionProposalIdentity = deterministicBytes(64, 0x1_001n);
+    const predecessorIdentity = deterministicBytes(64, 0x1_002n);
+    const signingSecretKeys: Uint8Array[] = [];
+    const rosterPublicKeys: Array<{
+        mailboxEncapsulationKey: Uint8Array;
+        signingVerificationKey: Uint8Array;
+    }> = [];
+    for (
+        let participantPosition = 0;
+        participantPosition < completionParticipantCount;
+        participantPosition += 1
+    ) {
+        const signing = signatureRuntime.generateKeyPair(
+            deterministicBytes(
+                actionSignatureKeyGenerationRandomnessByteLength,
+                0x2_000n + BigInt(participantPosition),
+            ),
+        );
+        const mailbox = pairRuntime.generateKeyPair(
+            deterministicBytes(
+                pairEncryptionKeyGenerationRandomnessByteLength,
+                0x4_000n + BigInt(participantPosition),
+            ),
+        );
+        signingSecretKeys.push(signing.secretKey);
+        rosterPublicKeys.push({
+            mailboxEncapsulationKey: mailbox.encryptionKey,
+            signingVerificationKey: signing.verificationKey,
+        });
+    }
+    const roster = rosterRuntime.encode(rosterPublicKeys);
+    const preparationContext: SourcePreparationContext = {
+        participantCount: completionParticipantCount,
+        actionProposalIdentity,
+        rosterIdentity: roster.rosterIdentity,
+        preparationAttempt: 7,
+        predecessorIdentity,
+    };
+    const contributionOpenings: Uint8Array[] = [];
+    const pairwiseMasters: Uint8Array[] = [];
+    const materials: GeneratedPreparationMaterial[] = [];
+    const parents: PreparationParentCarrier[] = [];
+    let signingOrdinal = 0n;
+    const sign = (
+        participantPosition: number,
+        purpose: 'activation' | 'finality' | 'preparation' | 'source',
+        bodyIdentity: Uint8Array,
+    ): Uint8Array => {
+        const secretKey = signingSecretKeys[participantPosition];
+        if (secretKey === undefined) {
+            throw new Error('The vector fixture omitted a signing key.');
+        }
+        signingOrdinal += 1n;
+        return signatureRuntime.signBodyIdentity(
+            secretKey,
+            participantPosition,
+            purpose,
+            bodyIdentity,
+            deterministicBytes(
+                actionSignatureSigningRandomnessByteLength,
+                0x7_0000n + signingOrdinal,
+            ),
+        );
+    };
+    for (
+        let senderPosition = 0;
+        senderPosition < completionParticipantCount;
+        senderPosition += 1
+    ) {
+        const openings = deterministicBytes(
+            preparationContributionOpeningVectorByteLength,
+            0x8_000n + BigInt(senderPosition),
+        );
+        const senderPairwiseMasters = deterministicBytes(
+            preparationPairwiseMasterVectorByteLength,
+            0x9_000n + BigInt(senderPosition),
+        );
+        contributionOpenings.push(openings);
+        pairwiseMasters.push(senderPairwiseMasters);
+        const material = materialRuntime.generate(
+            { ...preparationContext, senderPosition },
+            openings,
+            senderPairwiseMasters,
+        );
+        materials.push(material);
+        const parent = parentRuntime.encode({
+            ...preparationContext,
+            senderPosition,
+            subsetCommitments: material.subsetCommitments,
+            privateBodyIdentities: Array.from(
+                { length: completionParticipantCount - 1 },
+                (_, recipientIndex) =>
+                    deterministicBytes(
+                        64,
+                        0xa_000n +
+                            BigInt(
+                                senderPosition * completionParticipantCount +
+                                    recipientIndex,
+                            ),
+                    ),
+            ),
+        });
+        parents.push({
+            body: parent.body,
+            signature: parentRuntime.encodeSignature(
+                completionParticipantCount,
+                senderPosition,
+                parent.identity,
+                sign(senderPosition, 'preparation', parent.identity),
+            ),
+        });
+    }
+    const remotePlaintextsFor = (localPosition: number): Uint8Array[] => {
+        const plaintexts: Uint8Array[] = [];
+        for (
+            let senderPosition = 0;
+            senderPosition < completionParticipantCount;
+            senderPosition += 1
+        ) {
+            if (senderPosition === localPosition) continue;
+            const plaintextIndex =
+                localPosition < senderPosition
+                    ? localPosition
+                    : localPosition - 1;
+            const plaintext =
+                materials[senderPosition]?.recipientPlaintexts[plaintextIndex];
+            if (plaintext === undefined) {
+                throw new Error(
+                    'The vector fixture omitted a preparation plaintext.',
+                );
+            }
+            plaintexts.push(plaintext);
+        }
+        return plaintexts;
+    };
+    const sources: SourceCarrier[] = [];
+    let verifiedPreparationRoot: Uint8Array | undefined;
+    for (
+        let participantPosition = 0;
+        participantPosition < completionParticipantCount;
+        participantPosition += 1
+    ) {
+        const preparation = sourceRuntime.verifyCompletePreparation(
+            preparationContext,
+            participantPosition,
+            roster.canonicalBytes,
+            parents,
+            contributionOpenings[participantPosition] ?? new Uint8Array(),
+            pairwiseMasters[participantPosition] ?? new Uint8Array(),
+            remotePlaintextsFor(participantPosition),
+        );
+        verifiedPreparationRoot ??= preparation.root;
+        if (
+            !preparation.root.every(
+                (value, index) => value === verifiedPreparationRoot?.[index],
+            )
+        ) {
+            throw new Error(
+                'The vector fixture produced inconsistent preparation roots.',
+            );
+        }
+        const sourceContext = {
+            ...preparationContext,
+            verifiedPreparationRoot: preparation.root,
+            senderPosition: participantPosition,
+        } as const;
+        const declaration = participantPosition === 0 ? 'submit' : 'abstain';
+        const correction =
+            declaration === 'submit'
+                ? sourceRuntime.deriveHonestCorrection(
+                      sourceContext,
+                      Uint8Array.from(
+                          { length: sourceScoreEncodingCount },
+                          (_, optionPosition) => optionPosition + 1,
+                      ),
+                      preparation.heldSubsetKeys,
+                  )
+                : undefined;
+        const body = sourceRuntime.encodeBody(
+            sourceContext,
+            declaration,
+            correction,
+        );
+        sources.push({
+            declaration,
+            body: body.body,
+            signature: sourceRuntime.encodeSignature(
+                participantPosition,
+                body.identity,
+                sign(participantPosition, 'source', body.identity),
+            ),
+        });
+    }
+    if (verifiedPreparationRoot === undefined) {
+        throw new Error('The vector fixture omitted its preparation root.');
+    }
+    const target = finalityRuntime.deriveTarget(
+        {
+            participantCount: completionParticipantCount,
+            runtimeIdentity: deterministicBytes(64, 0xb_001n),
+            candidateBuildIdentity: deterministicBytes(64, 0xb_002n),
+            actionProposalIdentity,
+            actionDefinitionIdentity: deterministicBytes(64, 0xb_003n),
+            rosterIdentity: roster.rosterIdentity,
+            preparationAttempt: preparationContext.preparationAttempt,
+            predecessorIdentity,
+            verifiedPreparationRoot,
+            topCount: 1,
+        },
+        roster.canonicalBytes,
+        sources,
+    );
+    const finalitySignatures: FinalitySignatureCarrier[] = Array.from(
+        { length: completionProfileFinalityQuorum },
+        (_, signerPosition) => ({
+            signerPosition,
+            signature: finalityRuntime.encodeSignature(
+                signerPosition,
+                target.targetIdentity,
+                sign(signerPosition, 'finality', target.targetIdentity),
+            ),
+        }),
+    );
+    const certificate = {
+        targetBody: target.targetBody,
+        canonicalRosterBytes: roster.canonicalBytes,
+        signatures: finalitySignatures,
+    };
+    const plan = paddedRuntime.compilePlan(1);
+    const generationCheckpointKey = deterministicBytes(32, 0xc_001n);
+    const participantZeroAllocationNonce = deterministicBytes(32, 0xc_002n);
+    const generationCheckpoint = paddedRuntime.initializeGeneration(
+        certificate,
+        0,
+        participantZeroAllocationNonce,
+        generationCheckpointKey,
+        sources.map(({ body, signature }) => ({ body, signature })),
+        {
+            parents,
+            ownContributionOpenings:
+                contributionOpenings[0] ?? new Uint8Array(),
+            ownPairwiseMasters: pairwiseMasters[0] ?? new Uint8Array(),
+            remotePlaintexts: remotePlaintextsFor(0),
+        },
+    );
+    const firstChunkPlan = plan.chunks[0];
+    if (firstChunkPlan === undefined) {
+        throw new Error('The vector fixture plan has no first chunk.');
+    }
+    const generated = paddedRuntime.generateNextChunk(
+        plan,
+        0,
+        generationCheckpointKey,
+        generationCheckpoint,
+        drawPaddedTallyLabelEntropy(
+            firstChunkPlan.labelEntropyByteLength,
+            deterministicFill(0xd_001n),
+        ),
+    );
+    const circuitIdentity = readFinalityCircuitIdentity(target.targetBody);
+    const manifests: Uint8Array[] = [];
+    const activationSignatures: Uint8Array[] = [];
+    for (
+        let participantPosition = 0;
+        participantPosition < completionParticipantCount;
+        participantPosition += 1
+    ) {
+        const allocationNonce =
+            participantPosition === 0
+                ? participantZeroAllocationNonce
+                : deterministicBytes(
+                      32,
+                      0xe_000n + BigInt(participantPosition),
+                  );
+        const manifest = encodeFixtureManifest(
+            target.targetIdentity,
+            circuitIdentity,
+            participantPosition,
+            allocationNonce,
+            plan,
+            participantPosition === 0 ? generated.chunkIdentity : undefined,
+        );
+        const manifestIdentity = foundationVariableBytesHash(
+            manifestIdentityDomain,
+            manifest,
+        );
+        manifests.push(manifest);
+        activationSignatures.push(
+            paddedRuntime.encodeActivationSignature(
+                participantPosition,
+                manifestIdentity,
+                sign(participantPosition, 'activation', manifestIdentity),
+            ),
+        );
+    }
+    const evaluationCheckpointKey = deterministicBytes(32, 0xf_001n);
+    const evaluationCheckpoint = paddedRuntime.initializeEvaluation(
+        certificate,
+        evaluationCheckpointKey,
+        manifests,
+        activationSignatures,
+        plan,
+    );
+    const evaluationRequest = concatenateBytes([
+        Uint8Array.of(46),
+        unsigned32Bytes(evaluationCheckpointKey.byteLength),
+        evaluationCheckpointKey,
+        unsigned32Bytes(evaluationCheckpoint.byteLength),
+        evaluationCheckpoint,
+        unsigned16Bytes(0),
+        unsigned32Bytes(generated.chunk.byteLength),
+        generated.chunk,
+    ]);
+    const evaluationResponse =
+        recordingKernel.executeCommand(evaluationRequest);
+    if (evaluationResponse.byteLength !== 1 || evaluationResponse[0] !== 0) {
+        throw new Error(
+            'The vector fixture failed to buffer its first evaluation chunk.',
+        );
+    }
+    return [43, 44, 45, 47, 46].map((command) =>
+        requireCapturedCommand(exchanges, command),
+    );
 };
 
 const encodeIndependentCompilePlanResponse = (topCount: number): Uint8Array => {
@@ -765,7 +1354,7 @@ const decodeRefusalCode = (response: Uint8Array): string => {
 
 const writeCanonicalConstructionVectors = async (
     candidateDirectoryPath: string,
-    candidateKernel: FileIdentity,
+    candidateKernel: KernelArtifact,
 ): Promise<Readonly<Record<string, unknown>>> => {
     const kernelModule = (await import(
         pathToFileURL(
@@ -779,8 +1368,8 @@ const writeCanonicalConstructionVectors = async (
             ),
         ).href
     )) as CandidateKernelModule;
-    const kernel =
-        await kernelModule.instantiateConstructionKernelCommandRuntime(
+    const instantiateKernel = (): Promise<ConstructionKernelCommandRuntime> =>
+        kernelModule.instantiateConstructionKernelCommandRuntime(
             pathToFileURL(
                 path.join(
                     repositoryRoot,
@@ -790,8 +1379,14 @@ const writeCanonicalConstructionVectors = async (
                     'sealed-lattice-kernel.wasm',
                 ),
             ),
-            { expectedKernelSha256Hex: candidateKernel.sha256Hex },
+            {
+                expectedKernelSha256Hex: candidateKernel.identity.sha256Hex,
+            },
         );
+    const fixtureKernel = await instantiateKernel();
+    const activeCommandVectors =
+        generateActiveConstructionCommandVectors(fixtureKernel);
+    const kernel = await instantiateKernel();
     const vectorDirectoryPath = path.join(candidateDirectoryPath, 'vectors');
     await mkdir(vectorDirectoryPath, { recursive: true });
     const cases: Array<Readonly<Record<string, unknown>>> = [];
@@ -897,6 +1492,36 @@ const writeCanonicalConstructionVectors = async (
         await writeCase(hostileCase.name, hostileCase.request, {
             code: hostileCase.code,
             kind: 'refusal',
+        });
+    }
+    const activeCommandNames = new Map([
+        [43, 'initialize-generation'],
+        [44, 'generate-first-chunk'],
+        [45, 'initialize-evaluation'],
+        [46, 'buffer-first-evaluation-chunk'],
+        [47, 'encode-activation-signature'],
+    ]);
+    for (const exchange of activeCommandVectors) {
+        const commandName = activeCommandNames.get(exchange.command);
+        if (commandName === undefined) {
+            throw new Error(
+                `The active vector uses unexpected command ${String(exchange.command)}.`,
+            );
+        }
+        await writeCase(
+            `${commandName}-trailing-byte`,
+            concatenateBytes([exchange.request, Uint8Array.of(0xff)]),
+            { code: 'TrailingBytes', kind: 'refusal' },
+        );
+    }
+    for (const exchange of activeCommandVectors) {
+        const commandName = activeCommandNames.get(exchange.command);
+        if (commandName === undefined) {
+            throw new Error('The active vector command name is absent.');
+        }
+        await writeCase(commandName, exchange.request, {
+            kind: 'success',
+            response: exchange.response,
         });
     }
     const manifestBytes = serializeCandidateJson({
@@ -1067,7 +1692,7 @@ const stageCandidatePackage = async (
         },
         construction: {
             operationLabelByteLength,
-            constructionCommandOrdinals: [42, 43, 44, 45, 46, 47],
+            constructionCommandOrdinals: activeConstructionCommandOrdinals,
             transcriptVersion: 1,
         },
         maximumEmittedDemand: {
@@ -1098,6 +1723,11 @@ const stageCandidatePackage = async (
         parameterIdentityDomain,
     );
     const kernelBoundaries = await requireKernelBoundaries();
+    await writeFile(
+        path.join(packageDirectoryPath, ...publicKernelRelativePath.split('/')),
+        kernelBoundaries.publicKernel.bytes,
+        { flag: 'wx' },
+    );
     const canonicalVectors = await writeCanonicalConstructionVectors(
         candidateDirectoryPath,
         kernelBoundaries.candidateKernel,
@@ -1126,10 +1756,10 @@ const stageCandidatePackage = async (
             rootExport: 'foundation-only',
             existingConstructionRuntime: 'dist/padded-tally-runtime.js',
             existingWorkerRuntime: 'dist/private-preparation-worker-runtime.js',
-            publicKernel: kernelBoundaries.publicKernel,
-            publicWasmExports: kernelBoundaries.publicWasmExports,
-            candidateKernel: kernelBoundaries.candidateKernel,
-            candidateWasmExports: kernelBoundaries.candidateWasmExports,
+            publicKernel: kernelBoundaries.publicKernel.identity,
+            publicWasmExports: kernelBoundaries.publicKernel.wasmExports,
+            candidateKernel: kernelBoundaries.candidateKernel.identity,
+            candidateWasmExports: kernelBoundaries.candidateKernel.wasmExports,
         },
         parameterSet: {
             parameters: identifyBytes(parameterRelativePath, parameterBytes),
@@ -1167,7 +1797,8 @@ const stageCandidatePackage = async (
     );
     return {
         candidateBuildIdentityHex,
-        candidateKernelSha256Hex: kernelBoundaries.candidateKernel.sha256Hex,
+        candidateKernelSha256Hex:
+            kernelBoundaries.candidateKernel.identity.sha256Hex,
         parameterIdentityHex,
     };
 };
@@ -1345,6 +1976,57 @@ const verifyPackedCandidate = async (
             `The unactivated candidate emits prohibited metadata key ${prohibitedMetadataKey}.`,
         );
     }
+    const packageBoundary = candidateBundle.packageBoundary;
+    if (
+        typeof packageBoundary !== 'object' ||
+        packageBoundary === null ||
+        Array.isArray(packageBoundary)
+    ) {
+        throw new Error('The candidate package boundary is malformed.');
+    }
+    const packageBoundaryRecord = packageBoundary as Record<string, unknown>;
+    const [candidateKernelEntry, publicKernelEntry] = await Promise.all([
+        requireFileIdentity(
+            installedPackagePath,
+            packageBoundaryRecord.candidateKernel,
+            'Candidate construction kernel',
+        ),
+        requireFileIdentity(
+            installedPackagePath,
+            packageBoundaryRecord.publicKernel,
+            'Candidate public kernel',
+        ),
+    ]);
+    if (
+        candidateKernelEntry.path !== 'dist/sealed-lattice-kernel.wasm' ||
+        publicKernelEntry.path !== publicKernelRelativePath ||
+        sha256Hex(candidateKernelEntry.bytes) !==
+            identity.candidateKernelSha256Hex
+    ) {
+        throw new Error('The candidate kernel boundary is inaccurate.');
+    }
+    const candidateWasmExports = wasmExportNames(candidateKernelEntry.bytes);
+    const publicWasmExports = wasmExportNames(publicKernelEntry.bytes);
+    requireExactValue(
+        packageBoundaryRecord.candidateWasmExports,
+        candidateWasmExports,
+        'Candidate construction kernel exports',
+    );
+    requireExactValue(
+        packageBoundaryRecord.publicWasmExports,
+        publicWasmExports,
+        'Candidate public kernel exports',
+    );
+    if (
+        !candidateWasmExports.includes(
+            'sealed_lattice_construction_command_with_length',
+        ) ||
+        publicWasmExports.includes(
+            'sealed_lattice_construction_command_with_length',
+        )
+    ) {
+        throw new Error('The packed candidate crosses its kernel boundary.');
+    }
     const parameterSet = candidateBundle.parameterSet;
     if (
         typeof parameterSet !== 'object' ||
@@ -1509,6 +2191,26 @@ const verifyPackedCandidate = async (
             'finalityStateKind',
             '5',
         ) ||
+        !hasNumericLiteral(
+            'packages/wasm/src/foundation-ceremony-runtime.ts',
+            'maximumUnsigned64',
+            '18446744073709551615',
+        ) ||
+        !hasNumericLiteral(
+            'packages/wasm/src/private-preparation-durable-state.ts',
+            'maximumInventoryGeneration',
+            '4294967295',
+        ) ||
+        !hasNumericLiteral(
+            'packages/wasm/src/private-preparation-worker-runtime.ts',
+            'privatePreparationOperationOrdinal',
+            '1',
+        ) ||
+        !hasNumericLiteral(
+            'packages/wasm/src/private-preparation-worker-runtime.ts',
+            'sourceOperationOrdinal',
+            '0',
+        ) ||
         !hasEnumeratedCode('ActionSignaturePurpose', 'Activation', '4') ||
         !hasEnumeratedCode('SourceDeclaration', 'Submit', '2') ||
         !hasEnumeratedCode('FinalityTargetKind', 'NoResult', '2')
@@ -1520,6 +2222,7 @@ const verifyPackedCandidate = async (
     if (!Array.isArray(candidateBundle.sourceIdentities)) {
         throw new Error('The candidate source closure is malformed.');
     }
+    const sourceRepositoryPaths = new Set<string>();
     for (const source of candidateBundle.sourceIdentities) {
         if (
             typeof source !== 'object' ||
@@ -1536,20 +2239,31 @@ const verifyPackedCandidate = async (
             (repositoryPath.startsWith('tests/') &&
                 repositoryPath !== 'tests/padded-tally-transcript-model.ts') ||
             (repositoryPath.startsWith('tools/ci/') &&
-                repositoryPath !==
-                    'tools/ci/build-padded-tally-candidate-package.ts' &&
-                repositoryPath !== 'tools/ci/build-wasm-kernel.ts')
+                !exactBuildInputs.has(repositoryPath))
         ) {
             throw new Error(
                 'The candidate source closure includes a non-generator evidence source.',
             );
         }
+        if (sourceRepositoryPaths.has(repositoryPath)) {
+            throw new Error(
+                `The candidate source closure repeats ${repositoryPath}.`,
+            );
+        }
+        sourceRepositoryPaths.add(repositoryPath);
         await requireFileIdentity(
             installedPackagePath,
             sourceRecord.packagedSource,
             `Candidate source ${repositoryPath}`,
         );
     }
+    requireExactValue(
+        [...sourceRepositoryPaths].sort((left, right) =>
+            left.localeCompare(right, 'en'),
+        ),
+        trackedSourcePaths(),
+        'Candidate source-closure path inventory',
+    );
     const rootModule = (await import(
         pathToFileURL(path.join(installedPackagePath, 'dist', 'index.js')).href
     )) as Record<string, unknown>;
@@ -1593,12 +2307,11 @@ const verifyPackedCandidate = async (
             pathToFileURL(
                 path.join(
                     installedPackagePath,
-                    'dist',
-                    'sealed-lattice-kernel.wasm',
+                    ...candidateKernelEntry.path.split('/'),
                 ),
             ),
             {
-                expectedKernelSha256Hex: identity.candidateKernelSha256Hex,
+                expectedKernelSha256Hex: sha256Hex(candidateKernelEntry.bytes),
             },
         );
     const runtime = paddedTallyModule.openPaddedTallyRuntime(kernel);
@@ -1630,6 +2343,16 @@ const verifyPackedCandidate = async (
     if (!Array.isArray(vectorManifest.cases)) {
         throw new Error('The canonical vector manifest omits its cases.');
     }
+    if (
+        canonicalVectorRecord.caseCount !== vectorManifest.cases.length ||
+        vectorManifest.cases.length !== 39
+    ) {
+        throw new Error('The canonical vector inventory is incomplete.');
+    }
+    const commandOutcomes = new Map<
+        number,
+        Readonly<{ refusal: boolean; success: boolean }>
+    >();
     for (const [index, vector] of vectorManifest.cases.entries()) {
         if (
             typeof vector !== 'object' ||
@@ -1661,6 +2384,57 @@ const verifyPackedCandidate = async (
         ) {
             throw new Error(
                 `Canonical vector ${String(index)} does not replay byte-identically.`,
+            );
+        }
+        const command = requestEntry.bytes[0];
+        const expectedOutcome = vectorRecord.expectedOutcome;
+        if (
+            command === undefined ||
+            typeof expectedOutcome !== 'object' ||
+            expectedOutcome === null ||
+            Array.isArray(expectedOutcome)
+        ) {
+            throw new Error(
+                `Canonical vector ${String(index)} has no typed outcome.`,
+            );
+        }
+        const expectedOutcomeRecord = expectedOutcome as Record<
+            string,
+            unknown
+        >;
+        const previousOutcome = commandOutcomes.get(command) ?? {
+            refusal: false,
+            success: false,
+        };
+        if (
+            expectedOutcomeRecord.kind === 'success' &&
+            responseEntry.bytes[0] === 0
+        ) {
+            commandOutcomes.set(command, {
+                ...previousOutcome,
+                success: true,
+            });
+        } else if (
+            expectedOutcomeRecord.kind === 'refusal' &&
+            typeof expectedOutcomeRecord.code === 'string' &&
+            decodeRefusalCode(responseEntry.bytes) ===
+                expectedOutcomeRecord.code
+        ) {
+            commandOutcomes.set(command, {
+                ...previousOutcome,
+                refusal: true,
+            });
+        } else {
+            throw new Error(
+                `Canonical vector ${String(index)} misclassifies its response.`,
+            );
+        }
+    }
+    for (const command of activeConstructionCommandOrdinals) {
+        const outcomes = commandOutcomes.get(command);
+        if (outcomes?.success !== true || outcomes.refusal !== true) {
+            throw new Error(
+                `Canonical vectors do not cover both outcomes for command ${String(command)}.`,
             );
         }
     }
