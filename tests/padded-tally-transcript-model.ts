@@ -154,6 +154,155 @@ export type IndependentPaddedTallyModel = Readonly<{
     kmacCensus: IndependentPaddedTallyKmacCensus;
 }>;
 
+export type IndependentPaddedTallyCircuitMapping = Readonly<{
+    inputs: readonly Readonly<{
+        participantPosition: number;
+        ballotPresenceWire: number;
+        optionScoreWires: readonly (readonly number[])[];
+    }>[];
+    outputs: Readonly<{
+        acceptedBallotAuthorshipWires: readonly number[];
+        nonemptyWire: number;
+        orderedOptionPositionWires: readonly (readonly number[])[];
+    }>;
+}>;
+
+const encodeUnsignedInteger = (
+    value: number,
+    byteLength: 4 | 8,
+): Uint8Array => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new RangeError(
+            'The circuit integer must be nonnegative and safe.',
+        );
+    }
+    const bytes = new Uint8Array(byteLength);
+    const view = new DataView(bytes.buffer);
+    if (byteLength === 4) view.setUint32(0, value, true);
+    else view.setBigUint64(0, BigInt(value), true);
+    return bytes;
+};
+
+const concatenateBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
+    const byteLength = chunks.reduce(
+        (total, chunk) => total + chunk.byteLength,
+        0,
+    );
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return bytes;
+};
+
+export const encodeIndependentPaddedTallyCircuit = (
+    model: IndependentPaddedTallyModel,
+): Uint8Array => {
+    const chunks: Uint8Array[] = [
+        encodeUnsignedInteger(model.inputWireCount, 8),
+        encodeUnsignedInteger(model.operations.length, 8),
+    ];
+    for (const operation of model.operations) {
+        switch (operation.kind) {
+            case 'constant':
+                chunks.push(Uint8Array.of(1, operation.value ? 1 : 0));
+                break;
+            case 'linear':
+                chunks.push(
+                    Uint8Array.of(2),
+                    encodeUnsignedInteger(operation.leftWire, 4),
+                    encodeUnsignedInteger(operation.rightWire, 4),
+                );
+                break;
+            case 'conjunction':
+                chunks.push(
+                    Uint8Array.of(3),
+                    encodeUnsignedInteger(operation.leftWire, 4),
+                    encodeUnsignedInteger(operation.rightWire, 4),
+                );
+                break;
+            case 'negation':
+                chunks.push(
+                    Uint8Array.of(4),
+                    encodeUnsignedInteger(operation.inputWire, 4),
+                );
+                break;
+        }
+    }
+    chunks.push(encodeUnsignedInteger(model.outputWires.length, 8));
+    chunks.push(
+        ...model.outputWires.map((wire) => encodeUnsignedInteger(wire, 4)),
+    );
+    return concatenateBytes(chunks);
+};
+
+export const mapIndependentPaddedTallyCircuit = (
+    model: IndependentPaddedTallyModel,
+): IndependentPaddedTallyCircuitMapping => {
+    const inputWidthPerParticipant = 1 + completionOptionCount * scoreBitWidth;
+    if (
+        model.inputWireCount !==
+        completionParticipantCount * inputWidthPerParticipant
+    ) {
+        throw new Error('The independent tally input mapping is inconsistent.');
+    }
+    const acceptedBallotAuthorshipWires = model.outputWires.slice(
+        0,
+        completionParticipantCount,
+    );
+    const nonemptyWire = model.outputWires[completionParticipantCount];
+    if (nonemptyWire === undefined) {
+        throw new Error('The independent tally omits its nonempty output.');
+    }
+    const orderedOutputWires = model.outputWires.slice(
+        completionParticipantCount + 1,
+    );
+    if (orderedOutputWires.length !== scoreBitWidth * model.topCount) {
+        throw new Error(
+            'The independent tally output mapping is inconsistent.',
+        );
+    }
+    return {
+        inputs: Array.from(
+            { length: completionParticipantCount },
+            (_participantValue, participantPosition) => {
+                const firstWire =
+                    participantPosition * inputWidthPerParticipant;
+                return {
+                    participantPosition,
+                    ballotPresenceWire: firstWire,
+                    optionScoreWires: Array.from(
+                        { length: completionOptionCount },
+                        (_optionValue, optionPosition) =>
+                            Array.from(
+                                { length: scoreBitWidth },
+                                (_bitValue, bitPosition) =>
+                                    firstWire +
+                                    1 +
+                                    optionPosition * scoreBitWidth +
+                                    bitPosition,
+                            ),
+                    ),
+                };
+            },
+        ),
+        outputs: {
+            acceptedBallotAuthorshipWires,
+            nonemptyWire,
+            orderedOptionPositionWires: Array.from(
+                { length: model.topCount },
+                (_, outputPosition) =>
+                    orderedOutputWires.slice(
+                        outputPosition * scoreBitWidth,
+                        (outputPosition + 1) * scoreBitWidth,
+                    ),
+            ),
+        },
+    };
+};
+
 const operationPayloadByteLength = (
     operation: IndependentBooleanOperation,
     encodingLengths = admittedEncodingLengths,

@@ -5,8 +5,8 @@ use crate::foundation::{
     hash_foundation_tuple_512,
 };
 use crate::tally_circuit::{
-    BooleanOperation, TallyCircuitProfile, bit_width_for_maximum_value,
-    compiler::compile_tally_circuit,
+    TallyCircuitProfile, bit_width_for_maximum_value, compiler::compile_tally_circuit,
+    encode_compiled_tally_circuit,
 };
 
 use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
@@ -542,54 +542,8 @@ fn derive_semantic_bindings(
     let profile = TallyCircuitProfile::new(participant_count, option_count, top_count)
         .map_err(|_| FinalityError::WrongContext)?;
     let circuit = compile_tally_circuit(profile).map_err(|_| FinalityError::WrongContext)?;
-    let mut circuit_bytes = Vec::new();
-    circuit_bytes.extend_from_slice(
-        &u64::try_from(circuit.input_bit_count())
-            .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
-            .to_le_bytes(),
-    );
-    circuit_bytes.extend_from_slice(
-        &u64::try_from(circuit.operations().len())
-            .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
-            .to_le_bytes(),
-    );
-    for operation in circuit.operations() {
-        match operation {
-            BooleanOperation::Constant(value) => {
-                circuit_bytes.push(1);
-                circuit_bytes.push(u8::from(*value));
-            }
-            BooleanOperation::ExclusiveOr {
-                left_wire,
-                right_wire,
-            } => {
-                circuit_bytes.push(2);
-                circuit_bytes.extend_from_slice(&left_wire.to_le_bytes());
-                circuit_bytes.extend_from_slice(&right_wire.to_le_bytes());
-            }
-            BooleanOperation::Conjunction {
-                left_wire,
-                right_wire,
-            } => {
-                circuit_bytes.push(3);
-                circuit_bytes.extend_from_slice(&left_wire.to_le_bytes());
-                circuit_bytes.extend_from_slice(&right_wire.to_le_bytes());
-            }
-            BooleanOperation::Negation { input_wire } => {
-                circuit_bytes.push(4);
-                circuit_bytes.extend_from_slice(&input_wire.to_le_bytes());
-            }
-        }
-    }
-    let output_wires = circuit.output_wires();
-    circuit_bytes.extend_from_slice(
-        &u64::try_from(output_wires.len())
-            .map_err(|_| FinalityError::InvalidCanonicalEncoding)?
-            .to_le_bytes(),
-    );
-    for output_wire in output_wires {
-        circuit_bytes.extend_from_slice(&output_wire.to_le_bytes());
-    }
+    let circuit_bytes = encode_compiled_tally_circuit(&circuit)
+        .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
     let circuit_identity = hash_foundation_tuple_512(
         TALLY_CIRCUIT_IDENTITY_DOMAIN,
         &[

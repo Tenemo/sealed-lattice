@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileIndependentPaddedTallyModel,
+    encodeIndependentPaddedTallyCircuit,
+    mapIndependentPaddedTallyCircuit,
     projectIndependentPaddedTallyWidth,
     screenIndependentPaddedTallyPadKmac,
 } from '#tests/padded-tally-transcript-model.js';
@@ -20,6 +22,51 @@ const expectedCompletionProfileCensus = [
 ] as const;
 
 describe('independent padded-tally transcript model', () => {
+    it('encodes the exact circuit topology and input/output mappings', () => {
+        for (let topCount = 1; topCount <= 10; topCount += 1) {
+            const model = compileIndependentPaddedTallyModel(topCount);
+            const circuitBytes = encodeIndependentPaddedTallyCircuit(model);
+            const header = new DataView(
+                circuitBytes.buffer,
+                circuitBytes.byteOffset,
+                circuitBytes.byteLength,
+            );
+            expect(header.getBigUint64(0, true)).toBe(410n);
+            expect(header.getBigUint64(8, true)).toBe(
+                BigInt(model.operations.length),
+            );
+
+            const mapping = mapIndependentPaddedTallyCircuit(model);
+            expect(mapping.inputs).toHaveLength(10);
+            expect(mapping.inputs[0]).toEqual({
+                participantPosition: 0,
+                ballotPresenceWire: 0,
+                optionScoreWires: Array.from(
+                    { length: 10 },
+                    (_optionValue, optionPosition) =>
+                        Array.from(
+                            { length: 4 },
+                            (_bitValue, bitPosition) =>
+                                1 + optionPosition * 4 + bitPosition,
+                        ),
+                ),
+            });
+            expect(mapping.inputs[9]?.ballotPresenceWire).toBe(369);
+            expect(mapping.outputs.acceptedBallotAuthorshipWires).toEqual(
+                model.outputWires.slice(0, 10),
+            );
+            expect(mapping.outputs.nonemptyWire).toBe(model.outputWires[10]);
+            expect(mapping.outputs.orderedOptionPositionWires).toHaveLength(
+                topCount,
+            );
+            expect(
+                mapping.outputs.orderedOptionPositionWires.every(
+                    (wires) => wires.length === 4,
+                ),
+            ).toBe(true);
+        }
+    });
+
     it('regenerates every admitted completion-profile circuit and chunk census', () => {
         for (const [
             topCount,

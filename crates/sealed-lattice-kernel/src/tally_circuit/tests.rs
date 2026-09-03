@@ -3,6 +3,7 @@ use super::{
     TallyEvaluationInput,
     compiler::compile_tally_circuit,
     direct_evaluator::evaluate_tally_directly,
+    encode_compiled_tally_circuit,
     interpreter::{evaluate_compiled_tally_circuit, interpret_boolean_operations},
 };
 use crate::foundation::{
@@ -182,6 +183,35 @@ fn completion_profile_circuit_geometry_is_derived_for_every_top_count() {
             EXPECTED_CIRCUIT_DEPTHS[usize::from(top_count - 1)]
         );
         assert_eq!(output_bit_count, 11 + usize::from(top_count) * 4);
+    }
+}
+
+#[test]
+fn exports_exact_completion_profile_circuit_bytes_when_requested() {
+    let output_directory = std::env::var_os("SEALED_LATTICE_CANDIDATE_CIRCUIT_DIRECTORY")
+        .map(std::path::PathBuf::from);
+    if let Some(directory) = output_directory.as_ref() {
+        std::fs::create_dir_all(directory).expect("candidate circuit directory must be writable");
+    }
+
+    for top_count in 1..=PROTOTYPE_OPTION_COUNT {
+        let circuit = compile_tally_circuit(profile(
+            PROTOTYPE_PARTICIPANT_COUNT,
+            PROTOTYPE_OPTION_COUNT,
+            top_count,
+        ))
+        .expect("completion circuit must compile");
+        let bytes = encode_compiled_tally_circuit(&circuit)
+            .expect("completion circuit must have a canonical topology encoding");
+        assert!(bytes.len() > 16);
+
+        if let Some(directory) = output_directory.as_ref() {
+            std::fs::write(
+                directory.join(format!("top-count-{top_count:02}.circuit.bin")),
+                bytes,
+            )
+            .expect("candidate circuit bytes must be written exactly");
+        }
     }
 }
 

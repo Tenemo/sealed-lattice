@@ -115,6 +115,60 @@ impl CompiledTallyCircuit {
     }
 }
 
+pub(crate) fn encode_compiled_tally_circuit(
+    circuit: &CompiledTallyCircuit,
+) -> Result<Vec<u8>, TallyCircuitError> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(
+        &u64::try_from(circuit.input_bit_count())
+            .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    bytes.extend_from_slice(
+        &u64::try_from(circuit.operations().len())
+            .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for operation in circuit.operations() {
+        match operation {
+            BooleanOperation::Constant(value) => {
+                bytes.push(1);
+                bytes.push(u8::from(*value));
+            }
+            BooleanOperation::ExclusiveOr {
+                left_wire,
+                right_wire,
+            } => {
+                bytes.push(2);
+                bytes.extend_from_slice(&left_wire.to_le_bytes());
+                bytes.extend_from_slice(&right_wire.to_le_bytes());
+            }
+            BooleanOperation::Conjunction {
+                left_wire,
+                right_wire,
+            } => {
+                bytes.push(3);
+                bytes.extend_from_slice(&left_wire.to_le_bytes());
+                bytes.extend_from_slice(&right_wire.to_le_bytes());
+            }
+            BooleanOperation::Negation { input_wire } => {
+                bytes.push(4);
+                bytes.extend_from_slice(&input_wire.to_le_bytes());
+            }
+        }
+    }
+    let output_wires = circuit.output_wires();
+    bytes.extend_from_slice(
+        &u64::try_from(output_wires.len())
+            .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for output_wire in output_wires {
+        bytes.extend_from_slice(&output_wire.to_le_bytes());
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyEvaluationInput {
