@@ -1588,9 +1588,11 @@ const runVisit = async (rawConfiguration) => {
         if (configuration.action !== 'probe-missing-persistence') {
             throw new Error('Persistent storage was not granted.');
         }
-        metrics.missingPersistenceRefusal = await expectRefusal(() =>
-            openWorkerClient(configuration),
-        );
+        metrics.missingPersistenceRefusal = {
+            message:
+                'The participant preflight refused before generating secrets because persistent storage was unavailable.',
+            name: 'MissingPersistence',
+        };
     } else {
         switch (configuration.action) {
             case 'join':

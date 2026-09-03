@@ -1881,7 +1881,7 @@ const main = async (): Promise<void> => {
             'MissingPersistence'
         ) {
             throw new Error(
-                'The strict worker did not refuse missing persistence.',
+                'The participant preflight did not refuse missing persistence.',
             );
         }
         const browserIdentity = missingPersistence.browserIdentity;
