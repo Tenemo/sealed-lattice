@@ -49,6 +49,16 @@ export const manualEvidenceCases: readonly ManualEvidenceCase[] = [
         testName:
             'screens full-width storage and scalar KMAC work in external Chrome',
     },
+    {
+        browserEnvironmentVariable:
+            'SEALED_LATTICE_EXTERNAL_CHROME_COMPLETE_CEREMONY',
+        identifier: 'external-chrome-complete-ceremony',
+        memoryLimitByteLength: 6 * 1_024 * 1_024 * 1_024,
+        runnerKind: 'external-chrome',
+        testFile: 'tools/ci/external-chrome-ceremony.html',
+        testName:
+            'runs the exact candidate ceremony sequentially in external Chrome',
+    },
 ];
 
 export const resolveManualEvidenceCase = (

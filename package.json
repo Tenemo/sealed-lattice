@@ -21,6 +21,7 @@
         "docs:census": "tsx ./tools/ci/generate-documentation-census.ts",
         "docs:verify-sources": "tsx ./tools/ci/verify-source-manifest.ts",
         "evidence:external-chrome-resource-screen": "tsx ./tools/ci/run-external-chrome-resource-screen.ts",
+        "evidence:external-chrome-ceremony": "tsx ./tools/ci/run-external-chrome-ceremony.ts",
         "evidence:padded-tally": "tsx ./tools/ci/run-padded-tally-evidence.ts",
         "release:version": "tsx ./tools/ci/release-version.ts",
         "test:rust:kernel": "tsx ./tools/ci/run-rust-kernel-tests.ts",
