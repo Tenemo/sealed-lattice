@@ -15,6 +15,7 @@ import {
     pairEncryptionKeyGenerationRandomnessByteLength,
 } from '../../src/pair-encryption-runtime.js';
 import { actionSignatureCarrierByteLength } from '../../src/preparation-parent-runtime.js';
+import { PrivatePreparationDurableState } from '../../src/private-preparation-durable-state.js';
 import { PrivatePreparationWorkerClient } from '../../src/private-preparation-worker-client.js';
 import type {
     PrivatePreparationActionContext,
@@ -2158,6 +2159,43 @@ afterEach(async () => {
 });
 
 describe('private preparation worker in Chromium', () => {
+    it('accepts pregranted worker storage and refuses ungranted storage without a window requester', async () => {
+        const originalStorage = Object.getOwnPropertyDescriptor(
+            navigator,
+            'storage',
+        );
+        const durableDatabaseName = `sealed-lattice-persistent-storage-${crypto.randomUUID()}`;
+        databaseNames.add(durableDatabaseName);
+        try {
+            Object.defineProperty(navigator, 'storage', {
+                configurable: true,
+                value: { persisted: () => Promise.resolve(true) },
+            });
+            const durableState = await PrivatePreparationDurableState.open(
+                durableDatabaseName,
+                true,
+            );
+            durableState.close();
+
+            Object.defineProperty(navigator, 'storage', {
+                configurable: true,
+                value: { persisted: () => Promise.resolve(false) },
+            });
+            await expect(
+                PrivatePreparationDurableState.open(
+                    `${durableDatabaseName}-ungranted`,
+                    true,
+                ),
+            ).rejects.toMatchObject({ code: 'MissingPersistence' });
+        } finally {
+            if (originalStorage === undefined) {
+                Reflect.deleteProperty(navigator, 'storage');
+            } else {
+                Object.defineProperty(navigator, 'storage', originalStorage);
+            }
+        }
+    });
+
     it(
         'persists one exact package, opens only after durable consumption, and burns a crash-interrupted slot',
         { timeout: 300_000 },

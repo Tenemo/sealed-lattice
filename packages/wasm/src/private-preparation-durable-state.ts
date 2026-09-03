@@ -451,17 +451,19 @@ const rootRecordMetadataEqual = (
 
 const requirePersistentStorage = async (): Promise<void> => {
     const storage = navigator.storage;
-    if (
-        storage === undefined ||
-        typeof storage.persist !== 'function' ||
-        typeof storage.persisted !== 'function'
-    ) {
+    if (storage === undefined || typeof storage.persisted !== 'function') {
         throw new DurableStateError(
             'MissingPersistence',
             'Persistent browser storage is unavailable.',
         );
     }
-    if (!(await storage.persisted()) && !(await storage.persist())) {
+    if (await storage.persisted()) {
+        return;
+    }
+    // The Storage Standard exposes persist() only to Window, while persisted()
+    // is also exposed to Worker. A participant page must obtain persistence
+    // before starting a strict worker; a window caller may still request it.
+    if (typeof storage.persist !== 'function' || !(await storage.persist())) {
         throw new DurableStateError(
             'MissingPersistence',
             'Persistent browser storage was not granted.',
