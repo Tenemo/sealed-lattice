@@ -1,7 +1,9 @@
 const candidateModuleRoot = '/candidate/dist';
+console.info('[external-ceremony-worker] loading candidate runtime');
 const { installPrivatePreparationWorker } = await import(
     `${candidateModuleRoot}/private-preparation-worker-runtime.js`
 );
+console.info('[external-ceremony-worker] candidate runtime loaded');
 
 const boundary = new URL(globalThis.location.href).searchParams.get('boundary');
 
@@ -32,3 +34,9 @@ installPrivatePreparationWorker(globalThis, {
     persistentStorageRequired: true,
     unpinnedKernelAllowed: false,
 });
+globalThis.addEventListener('message', (event) => {
+    console.info(
+        `[external-ceremony-worker] received ${String(event.data?.operation ?? 'unknown')} request`,
+    );
+});
+console.info('[external-ceremony-worker] runtime installed');

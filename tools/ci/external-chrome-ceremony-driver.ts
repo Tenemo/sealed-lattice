@@ -1226,7 +1226,10 @@ const launchVisit = async (input: {
         const page = context.pages()[0] ?? (await context.newPage());
         const pageDiagnostics: string[] = [];
         page.on('console', (message) => {
-            if (message.type() === 'error') {
+            if (
+                message.type() === 'error' ||
+                message.text().startsWith('[external-ceremony-worker]')
+            ) {
                 pageDiagnostics.push(`console: ${message.text()}`);
             }
         });
@@ -1308,7 +1311,7 @@ const launchVisit = async (input: {
                 .textContent()
                 .catch(() => undefined);
             if (error instanceof Error) {
-                error.message = `${error.message} Last page stage: ${status ?? 'unavailable'}.`;
+                error.message = `${error.message} Last page stage: ${status ?? 'unavailable'}. Browser diagnostics: ${pageDiagnostics.join(' | ') || 'none'}. Transfer: ${JSON.stringify(input.relayServer.transferForVisit(input.visitToken))}.`;
             }
             throw error;
         } finally {
