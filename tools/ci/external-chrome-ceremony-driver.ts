@@ -1157,7 +1157,7 @@ const configureChromePage = async (
     } else {
         await browserSession.send('Browser.setPermission', {
             origin,
-            permission: { name: 'durableStorage' },
+            permission: { name: 'persistent-storage' },
             setting: 'denied',
         });
     }
