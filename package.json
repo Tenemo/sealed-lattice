@@ -18,6 +18,8 @@
         "build:verify-reproducible": "tsx ./tools/ci/verify-build-reproducibility.ts",
         "check": "tsx ./tools/ci/run-check.ts",
         "check:desktop": "tsx ./tools/ci/run-check.ts --include-desktop-browser",
+        "docs:census": "tsx ./tools/ci/generate-documentation-census.ts",
+        "docs:verify-sources": "tsx ./tools/ci/verify-source-manifest.ts",
         "evidence:external-chrome-resource-screen": "tsx ./tools/ci/run-external-chrome-resource-screen.ts",
         "evidence:padded-tally": "tsx ./tools/ci/run-padded-tally-evidence.ts",
         "release:version": "tsx ./tools/ci/release-version.ts",
