@@ -1224,6 +1224,15 @@ const launchVisit = async (input: {
             'X-Sealed-Lattice-Visit': input.visitToken,
         });
         const page = context.pages()[0] ?? (await context.newPage());
+        const pageDiagnostics: string[] = [];
+        page.on('console', (message) => {
+            if (message.type() === 'error') {
+                pageDiagnostics.push(`console: ${message.text()}`);
+            }
+        });
+        page.on('pageerror', (error) => {
+            pageDiagnostics.push(`pageerror: ${error.message}`);
+        });
         page.setDefaultNavigationTimeout(120_000);
         const configured = await configureChromePage(
             context,
@@ -1234,6 +1243,22 @@ const launchVisit = async (input: {
         await page.goto(`${input.origin}/?visit=${input.visitToken}`, {
             waitUntil: 'load',
         });
+        try {
+            await page.waitForFunction(
+                () =>
+                    typeof (
+                        globalThis as typeof globalThis & {
+                            runExternalChromeCeremonyVisit?: unknown;
+                        }
+                    ).runExternalChromeCeremonyVisit === 'function',
+                undefined,
+                { timeout: 120_000 },
+            );
+        } catch {
+            throw new Error(
+                `The ceremony page did not initialize: ${pageDiagnostics.join(' | ') || 'no page diagnostic was emitted'}.`,
+            );
+        }
         const observation = await page.evaluate(() => ({
             coarsePointer: matchMedia('(pointer: coarse)').matches,
             devicePixelRatio,
