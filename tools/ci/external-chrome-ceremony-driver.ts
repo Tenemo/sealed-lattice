@@ -1302,6 +1302,15 @@ const launchVisit = async (input: {
                 }, input.configuration),
                 visitForegroundLimitMilliseconds,
             );
+        } catch (error) {
+            const status = await page
+                .locator('#status')
+                .textContent()
+                .catch(() => undefined);
+            if (error instanceof Error) {
+                error.message = `${error.message} Last page stage: ${status ?? 'unavailable'}.`;
+            }
+            throw error;
         } finally {
             runtime = await sampler.finish();
         }

@@ -484,14 +484,36 @@ const workerInitialization = (configuration) => ({
     ),
 });
 
-const openWorkerClient = (configuration) =>
-    PrivatePreparationWorkerClient.create(
-        new URL(
-            '/external-chrome-ceremony-worker.mjs',
-            globalThis.location.origin,
-        ),
-        workerInitialization(configuration),
-    );
+const workerInitializationLimitMilliseconds = 60_000;
+
+const openWorkerClient = async (configuration) => {
+    setStatus('opening the participant worker');
+    let timeoutIdentifier;
+    try {
+        return await Promise.race([
+            PrivatePreparationWorkerClient.create(
+                new URL(
+                    '/external-chrome-ceremony-worker.mjs',
+                    globalThis.location.origin,
+                ),
+                workerInitialization(configuration),
+            ),
+            new Promise((_, reject) => {
+                timeoutIdentifier = setTimeout(
+                    () =>
+                        reject(
+                            new Error(
+                                'The participant worker did not initialize within one minute.',
+                            ),
+                        ),
+                    workerInitializationLimitMilliseconds,
+                );
+            }),
+        ]);
+    } finally {
+        clearTimeout(timeoutIdentifier);
+    }
+};
 
 const workerTransferables = (request) => {
     const transferables = [];
@@ -653,10 +675,13 @@ const fetchChunkSet = async (configuration, chunkOrdinal) =>
     );
 
 const publishPreparation = async (configuration, metrics) => {
+    setStatus('reading the retained join credential');
     const credential = await readCredential(configuration);
+    setStatus('reading the frozen roster');
     const canonicalRosterBytes = await fetchRoster(configuration);
     const client = await openWorkerClient(configuration);
     try {
+        setStatus('creating the participant preparation package');
         const startedAt = performance.now();
         const publication = await client.createPreparationPackage(
             actionContext(configuration),
