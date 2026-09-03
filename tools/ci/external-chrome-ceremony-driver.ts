@@ -1662,27 +1662,86 @@ const summarizeScenario = (
                         ]) ?? 0,
                 ),
             );
+            const violations = [
+                ...(participantVisits.length > maximumVisitCount
+                    ? [
+                          {
+                              limit: maximumVisitCount,
+                              measured: participantVisits.length,
+                              name: 'visit count',
+                          },
+                      ]
+                    : []),
+                ...(foregroundMilliseconds >
+                participantForegroundLimitMilliseconds
+                    ? [
+                          {
+                              limit: participantForegroundLimitMilliseconds,
+                              measured: foregroundMilliseconds,
+                              name: 'participant foreground milliseconds',
+                          },
+                      ]
+                    : []),
+                ...(uploadByteLength > participantTransferLimitByteLength
+                    ? [
+                          {
+                              limit: participantTransferLimitByteLength,
+                              measured: uploadByteLength,
+                              name: 'participant upload bytes',
+                          },
+                      ]
+                    : []),
+                ...(downloadByteLength > participantTransferLimitByteLength
+                    ? [
+                          {
+                              limit: participantTransferLimitByteLength,
+                              measured: downloadByteLength,
+                              name: 'participant download bytes',
+                          },
+                      ]
+                    : []),
+                ...(peakStorageUsageByteLength >
+                persistentStorageLimitByteLength
+                    ? [
+                          {
+                              limit: persistentStorageLimitByteLength,
+                              measured: peakStorageUsageByteLength,
+                              name: 'participant persistent storage bytes',
+                          },
+                      ]
+                    : []),
+                ...(maximumLiveProtocolByteLength >
+                copiedBufferAbsoluteLimitByteLength
+                    ? [
+                          {
+                              limit: copiedBufferAbsoluteLimitByteLength,
+                              measured: maximumLiveProtocolByteLength,
+                              name: 'live protocol bytes',
+                          },
+                      ]
+                    : []),
+                ...(maximumWasmMemoryByteLength >
+                wasmMemoryPlanningTargetByteLength
+                    ? [
+                          {
+                              limit: wasmMemoryPlanningTargetByteLength,
+                              measured: maximumWasmMemoryByteLength,
+                              name: 'WebAssembly memory bytes',
+                          },
+                      ]
+                    : []),
+            ];
             return {
                 downloadByteLength,
                 foregroundMilliseconds,
                 maximumLiveProtocolByteLength,
                 maximumWasmMemoryByteLength,
                 participantPosition,
-                pass:
-                    participantVisits.length <= maximumVisitCount &&
-                    foregroundMilliseconds <=
-                        participantForegroundLimitMilliseconds &&
-                    uploadByteLength <= participantTransferLimitByteLength &&
-                    downloadByteLength <= participantTransferLimitByteLength &&
-                    peakStorageUsageByteLength <=
-                        persistentStorageLimitByteLength &&
-                    maximumLiveProtocolByteLength <=
-                        copiedBufferAbsoluteLimitByteLength &&
-                    maximumWasmMemoryByteLength <=
-                        wasmMemoryPlanningTargetByteLength,
+                pass: violations.length === 0,
                 peakStorageUsageByteLength,
                 uploadByteLength,
                 visitCount: participantVisits.length,
+                violations,
             };
         },
     );
@@ -1723,6 +1782,59 @@ const summarizeScenario = (
               ]
             : []),
     ];
+    const violations = [
+        ...visits.flatMap((visit) =>
+            visit.coldNavigation
+                ? []
+                : [
+                      {
+                          measured: false,
+                          name: `cold navigation for visit ${String(visit.sequence)}`,
+                          required: true,
+                      },
+                  ],
+        ),
+        ...visits.flatMap((visit) =>
+            visit.foregroundMilliseconds <= visitForegroundLimitMilliseconds
+                ? []
+                : [
+                      {
+                          limit: visitForegroundLimitMilliseconds,
+                          measured: visit.foregroundMilliseconds,
+                          name: `foreground milliseconds for visit ${String(visit.sequence)}`,
+                      },
+                  ],
+        ),
+        ...(wallMilliseconds > ceremonyWallLimitMilliseconds
+            ? [
+                  {
+                      limit: ceremonyWallLimitMilliseconds,
+                      measured: wallMilliseconds,
+                      name: 'ceremony wall milliseconds',
+                  },
+              ]
+            : []),
+        ...(relayCorpusByteLength > publicCorpusLimitByteLength
+            ? [
+                  {
+                      limit: publicCorpusLimitByteLength,
+                      measured: relayCorpusByteLength,
+                      name: 'relay corpus bytes',
+                  },
+              ]
+            : []),
+        ...planningVariances.flatMap((variance) =>
+            variance.measuredByteLength <= variance.targetByteLength * 1.5
+                ? []
+                : [
+                      {
+                          limit: variance.targetByteLength * 1.5,
+                          measured: variance.measuredByteLength,
+                          name: variance.name,
+                      },
+                  ],
+        ),
+    ];
     return {
         browserPrivateMemoryPlanningTargetByteLength,
         ceremonyWallLimitMilliseconds,
@@ -1732,19 +1844,7 @@ const summarizeScenario = (
         participantSummaries,
         pass:
             participantSummaries.every((entry) => entry.pass) &&
-            visits.every(
-                (visit) =>
-                    visit.coldNavigation &&
-                    visit.foregroundMilliseconds <=
-                        visitForegroundLimitMilliseconds,
-            ) &&
-            wallMilliseconds <= ceremonyWallLimitMilliseconds &&
-            relayCorpusByteLength <= publicCorpusLimitByteLength &&
-            planningVariances.every(
-                (variance) =>
-                    variance.measuredByteLength <=
-                    variance.targetByteLength * 1.5,
-            ),
+            violations.length === 0,
         peakBrowserPrivateMemoryIncreaseByteLength,
         peakJavascriptHeapIncreaseByteLength,
         planningVariances,
@@ -1752,6 +1852,7 @@ const summarizeScenario = (
         relayCorpusByteLength,
         visitCounts,
         visitForegroundLimitMilliseconds,
+        violations,
         wallMilliseconds,
     };
 };
@@ -2075,12 +2176,7 @@ const main = async (): Promise<void> => {
                 relayCorpusByteLength,
                 wallMilliseconds,
             );
-            if (!requireBoolean(summary, 'pass')) {
-                throw new Error(
-                    `${scenario.identifier} failed its runtime bounds.`,
-                );
-            }
-            scenarioEvidence.push({
+            const scenarioRecord = {
                 definition: scenario,
                 profileDiskByteLengthBeforeRemoval: await Promise.all(
                     profiles.map(directoryByteLength),
@@ -2088,7 +2184,25 @@ const main = async (): Promise<void> => {
                 summary,
                 terminal,
                 visits,
-            });
+            };
+            if (!requireBoolean(summary, 'pass')) {
+                const failureFilePath = path.join(
+                    path.dirname(arguments_.resultFilePath),
+                    `${scenario.identifier}-failed.json`,
+                );
+                await writeFile(
+                    failureFilePath,
+                    `${JSON.stringify(scenarioRecord, null, 2)}\n`,
+                    { encoding: 'utf8', flag: 'wx' },
+                );
+                process.stdout.write(
+                    `[${scenario.identifier}] failed summary ${JSON.stringify(summary)}\n`,
+                );
+                throw new Error(
+                    `${scenario.identifier} failed its runtime bounds.`,
+                );
+            }
+            scenarioEvidence.push(scenarioRecord);
             for (const profilePath of profiles) {
                 if (!withinDirectory(profilesRootPath, profilePath)) {
                     throw new Error('A participant profile escaped its root.');
