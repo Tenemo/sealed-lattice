@@ -1,4 +1,12 @@
 const candidateModuleRoot = '/candidate/dist';
+const startupMessages = [];
+const captureStartupMessage = (event) => {
+    startupMessages.push(event.data);
+};
+// A module worker can receive its first message while this wrapper is suspended
+// at the dynamic import. Buffer that message until the exact candidate handler
+// is installed instead of silently losing initialization.
+globalThis.addEventListener('message', captureStartupMessage);
 console.info('[external-ceremony-worker] loading candidate runtime');
 const { installPrivatePreparationWorker } = await import(
     `${candidateModuleRoot}/private-preparation-worker-runtime.js`
@@ -40,3 +48,7 @@ globalThis.addEventListener('message', (event) => {
     );
 });
 console.info('[external-ceremony-worker] runtime installed');
+globalThis.removeEventListener('message', captureStartupMessage);
+for (const data of startupMessages) {
+    globalThis.dispatchEvent(new MessageEvent('message', { data }));
+}
