@@ -1287,8 +1287,10 @@ const launchVisit = async (input: {
             innerHeight,
             innerWidth,
             maxTouchPoints: navigator.maxTouchPoints,
-            navigationType:
-                performance.getEntriesByType('navigation')[0]?.entryType,
+            navigationType: (
+                performance.getEntriesByType('navigation')[0] as
+                    PerformanceNavigationTiming | undefined
+            )?.type,
             userAgent: navigator.userAgent,
         }));
         if (
