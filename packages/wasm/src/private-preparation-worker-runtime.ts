@@ -286,6 +286,16 @@ type LoadedPaddedTallyEvaluationState = Readonly<{
     state: PaddedTallyEvaluationState;
 }>;
 
+type PaddedTallyEvaluationChunkStream = {
+    action: PrivatePreparationActionContext;
+    expectedChunkOrdinal: number;
+    nextParticipantPosition: number;
+    mode: 'advance' | 'replay';
+    plan: PaddedTallyPlan;
+    chunkByteLengths: number[];
+    chunkDigests: Uint8Array[];
+};
+
 type NoResultState = {
     generation: bigint;
     targetIdentity: Uint8Array;
@@ -501,6 +511,15 @@ const copyActionContext = (
     ),
 });
 
+const actionContextsEqual = (
+    left: PrivatePreparationActionContext,
+    right: PrivatePreparationActionContext,
+): boolean =>
+    left.participantPosition === right.participantPosition &&
+    bytesEqual(left.actionProposalIdentity, right.actionProposalIdentity) &&
+    bytesEqual(left.actionDefinitionIdentity, right.actionDefinitionIdentity) &&
+    bytesEqual(left.predecessorIdentity, right.predecessorIdentity);
+
 const requireUnsigned16 = (value: unknown, name: string): number => {
     if (
         typeof value !== 'number' ||
@@ -663,26 +682,17 @@ const requireChunkOrdinal = (value: unknown): number => {
     return value;
 };
 
-const digestByteInventory = async (
+const digestByteInventoryFrame = async (
     domain: string,
-    inventory: readonly Uint8Array[],
+    itemByteLengths: readonly number[],
+    itemDigests: readonly Uint8Array[],
 ): Promise<Uint8Array> => {
-    const domainBytes = new TextEncoder().encode(domain);
-    const itemDigests: Uint8Array[] = [];
-    for (const item of inventory) {
-        const itemCopy = Uint8Array.from(item);
-        try {
-            itemDigests.push(
-                new Uint8Array(
-                    await crypto.subtle.digest('SHA-256', itemCopy.buffer),
-                ),
-            );
-        } finally {
-            itemCopy.fill(0);
-        }
+    if (itemByteLengths.length !== itemDigests.length) {
+        throw new Error('The local replay digest inventory is incomplete.');
     }
+    const domainBytes = new TextEncoder().encode(domain);
     const frame = new Uint8Array(
-        2 + domainBytes.byteLength + 2 + inventory.length * (2 + 4 + 32),
+        2 + domainBytes.byteLength + 2 + itemByteLengths.length * (2 + 4 + 32),
     );
     const view = new DataView(frame.buffer);
     let offset = 0;
@@ -690,17 +700,17 @@ const digestByteInventory = async (
     offset += 2;
     frame.set(domainBytes, offset);
     offset += domainBytes.byteLength;
-    view.setUint16(offset, inventory.length, true);
+    view.setUint16(offset, itemByteLengths.length, true);
     offset += 2;
-    for (const [position, item] of inventory.entries()) {
+    for (const [position, itemByteLength] of itemByteLengths.entries()) {
         const digest = itemDigests[position];
-        if (digest === undefined) {
+        if (digest === undefined || digest.byteLength !== 32) {
             frame.fill(0);
             throw new Error('The local replay digest inventory is incomplete.');
         }
         view.setUint16(offset, position, true);
         offset += 2;
-        view.setUint32(offset, item.byteLength, true);
+        view.setUint32(offset, itemByteLength, true);
         offset += 4;
         frame.set(digest, offset);
         offset += digest.byteLength;
@@ -709,6 +719,33 @@ const digestByteInventory = async (
         return new Uint8Array(await crypto.subtle.digest('SHA-256', frame));
     } finally {
         frame.fill(0);
+    }
+};
+
+const digestByteInventory = async (
+    domain: string,
+    inventory: readonly Uint8Array[],
+): Promise<Uint8Array> => {
+    const itemDigests: Uint8Array[] = [];
+    try {
+        for (const item of inventory) {
+            const itemCopy = Uint8Array.from(item);
+            try {
+                itemDigests.push(
+                    new Uint8Array(
+                        await crypto.subtle.digest('SHA-256', itemCopy.buffer),
+                    ),
+                );
+            } finally {
+                itemCopy.fill(0);
+            }
+        }
+        return await digestByteInventoryFrame(
+            domain,
+            inventory.map((item) => item.byteLength),
+            itemDigests,
+        );
+    } finally {
         for (const digest of itemDigests) digest.fill(0);
     }
 };
@@ -1699,6 +1736,9 @@ const assertActionStateContext = (
 };
 
 class PrivatePreparationWorkerRuntime {
+    private paddedTallyEvaluationChunkStream:
+        PaddedTallyEvaluationChunkStream | undefined;
+
     private constructor(
         private readonly configuration: WorkerConfiguration,
         private readonly durableState: PrivatePreparationDurableState,
@@ -1714,6 +1754,21 @@ class PrivatePreparationWorkerRuntime {
         private readonly rosterRuntime: RosterRuntime,
         private readonly sourceRuntime: SourceRuntime,
     ) {}
+
+    private clearPaddedTallyEvaluationChunkStream(): void {
+        const stream = this.paddedTallyEvaluationChunkStream;
+        this.paddedTallyEvaluationChunkStream = undefined;
+        if (stream === undefined) {
+            return;
+        }
+        stream.action.actionProposalIdentity.fill(0);
+        stream.action.actionDefinitionIdentity.fill(0);
+        stream.action.predecessorIdentity.fill(0);
+        for (const digest of stream.chunkDigests) {
+            digest.fill(0);
+        }
+        stream.chunkByteLengths.fill(0);
+    }
 
     static async create(
         initialization: PrivatePreparationWorkerInitialization,
@@ -3620,23 +3675,38 @@ class PrivatePreparationWorkerRuntime {
     async evaluatePaddedTallyChunk(
         input: PrivatePreparationActionContext & {
             expectedChunkOrdinal: number;
-            chunks: readonly Uint8Array[];
+            chunkParticipantPosition: number;
+            chunk: Uint8Array;
         },
     ): Promise<PaddedTallyEvaluationStep> {
-        const action = copyActionContext(input);
-        const expectedChunkOrdinal = requireChunkOrdinal(
-            input.expectedChunkOrdinal,
-        );
-        if (input.chunks.length !== completionProfileParticipantCount) {
-            throw new TypeError(
-                'chunks must contain the complete participant roster.',
+        let action: PrivatePreparationActionContext;
+        let expectedChunkOrdinal: number;
+        let chunkParticipantPosition: number;
+        try {
+            action = copyActionContext(input);
+            expectedChunkOrdinal = requireChunkOrdinal(
+                input.expectedChunkOrdinal,
             );
+            chunkParticipantPosition = requirePosition(
+                input.chunkParticipantPosition,
+                'chunkParticipantPosition',
+            );
+        } catch (error) {
+            this.clearPaddedTallyEvaluationChunkStream();
+            throw error;
         }
-        const chunks = input.chunks.map((chunk) => Uint8Array.from(chunk));
-        const chunkSetDigest = await digestByteInventory(
-            'sealed-lattice/local/padded-tally-chunk-set/v1',
-            chunks,
-        );
+        if (chunkParticipantPosition === 0) {
+            this.clearPaddedTallyEvaluationChunkStream();
+        }
+        if (
+            !(input.chunk instanceof Uint8Array) ||
+            !(input.chunk.buffer instanceof ArrayBuffer)
+        ) {
+            this.clearPaddedTallyEvaluationChunkStream();
+            throw new TypeError('chunk must be an ordinary Uint8Array.');
+        }
+        const chunk = input.chunk as Uint8Array<ArrayBuffer>;
+        let retainChunkStream = false;
         try {
             return await this.durableState.exclusive(async () => {
                 const [actionRecord, finalityRecord, evaluationRecord] =
@@ -3667,18 +3737,52 @@ class PrivatePreparationWorkerRuntime {
                         'Initialized tally evaluation state is unavailable.',
                     );
                 }
+                let continuationPlan: PaddedTallyPlan | undefined;
+                if (chunkParticipantPosition !== 0) {
+                    const continuingStream =
+                        this.paddedTallyEvaluationChunkStream;
+                    if (
+                        continuingStream === undefined ||
+                        !actionContextsEqual(continuingStream.action, action) ||
+                        continuingStream.expectedChunkOrdinal !==
+                            expectedChunkOrdinal ||
+                        continuingStream.nextParticipantPosition !==
+                            chunkParticipantPosition
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The tally evaluation chunk stream is missing, out of order, or rebound.',
+                        );
+                    }
+                    continuationPlan = continuingStream.plan;
+                }
+                // Position zero verifies the credentials before creating the
+                // worker-local stream. A continuation can skip the same kernel
+                // command only while the matching stream remains live.
                 const loadedAction = await this.loadActionState(
                     action,
                     actionRecord,
+                    chunkParticipantPosition === 0,
                 );
                 const loadedFinality = await this.loadFinalityState(
                     action,
                     loadedAction.state.rosterIdentity,
                     finalityRecord,
                 );
-                const plan = this.paddedTallyRuntime.compilePlan(
-                    loadedFinality.state.topCount,
-                );
+                let plan: PaddedTallyPlan;
+                if (chunkParticipantPosition === 0) {
+                    plan = this.paddedTallyRuntime.compilePlan(
+                        loadedFinality.state.topCount,
+                    );
+                } else {
+                    if (continuationPlan === undefined) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The tally evaluation chunk stream is missing, out of order, or rebound.',
+                        );
+                    }
+                    plan = continuationPlan;
+                }
                 const loadedEvaluation =
                     await this.loadPaddedTallyEvaluationState(
                         action,
@@ -3693,29 +3797,31 @@ class PrivatePreparationWorkerRuntime {
                         loadedFinality.state,
                         plan,
                     );
+                    const chunkPlan = plan.chunks[expectedChunkOrdinal];
+                    if (
+                        chunkPlan === undefined ||
+                        chunk.byteLength !== chunkPlan.chunkByteLength
+                    ) {
+                        throw new TypeError(
+                            'The tally chunk does not match the expected plan ordinal.',
+                        );
+                    }
+                    let streamMode: PaddedTallyEvaluationChunkStream['mode'];
                     if (
                         loadedEvaluation.state.phase ===
                         completedPaddedTallyEvaluationPhase
                     ) {
                         if (
                             expectedChunkOrdinal !==
-                                loadedEvaluation.state.lastChunkOrdinal ||
-                            !bytesEqual(
-                                chunkSetDigest,
-                                loadedEvaluation.state.lastChunkSetDigest,
-                            )
+                            loadedEvaluation.state.lastChunkOrdinal
                         ) {
                             throw new DurableStateError(
                                 'Conflict',
                                 'The completed tally evaluation refuses alternate replay.',
                             );
                         }
-                        return copyCompletedPaddedTallyEvaluation(
-                            loadedEvaluation.state,
-                            this.constructionKernelRuntime.measureResources(),
-                        );
-                    }
-                    if (
+                        streamMode = 'replay';
+                    } else if (
                         loadedEvaluation.state.phase ===
                         pendingPaddedTallyEvaluationPhase
                     ) {
@@ -3723,7 +3829,121 @@ class PrivatePreparationWorkerRuntime {
                             expectedChunkOrdinal ===
                             loadedEvaluation.state.lastChunkOrdinal
                         ) {
+                            streamMode = 'replay';
+                        } else if (
+                            expectedChunkOrdinal !==
+                            loadedEvaluation.state.lastChunkOrdinal + 1
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The tally evaluation refuses rollback or skipped ordinals.',
+                            );
+                        } else {
+                            streamMode = 'advance';
+                        }
+                    } else {
+                        if (expectedChunkOrdinal !== 0) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The tally evaluation must begin at ordinal zero.',
+                            );
+                        }
+                        streamMode = 'advance';
+                    }
+                    let stream = this.paddedTallyEvaluationChunkStream;
+                    if (chunkParticipantPosition === 0) {
+                        stream = {
+                            action: copyActionContext(action),
+                            expectedChunkOrdinal,
+                            nextParticipantPosition: 0,
+                            mode: streamMode,
+                            plan,
+                            chunkByteLengths: [],
+                            chunkDigests: [],
+                        };
+                        this.paddedTallyEvaluationChunkStream = stream;
+                    }
+                    if (
+                        stream === undefined ||
+                        !actionContextsEqual(stream.action, action) ||
+                        stream.expectedChunkOrdinal !== expectedChunkOrdinal ||
+                        stream.nextParticipantPosition !==
+                            chunkParticipantPosition ||
+                        stream.mode !== streamMode
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The tally evaluation chunk stream is missing, out of order, or rebound.',
+                        );
+                    }
+                    const chunkDigest = new Uint8Array(
+                        await crypto.subtle.digest('SHA-256', chunk),
+                    );
+                    let retainedChunkDigest = false;
+                    let evaluated: ReturnType<
+                        PaddedTallyRuntime['evaluateNextChunk']
+                    >;
+                    let advanceCheckpointKey: Uint8Array | undefined;
+                    try {
+                        if (streamMode === 'advance') {
                             if (
+                                !('checkpointKey' in loadedEvaluation.state) ||
+                                !('checkpoint' in loadedEvaluation.state)
+                            ) {
+                                throw new DurableStateError(
+                                    'StateLost',
+                                    'The advancing tally evaluation has no checkpoint.',
+                                );
+                            }
+                            advanceCheckpointKey =
+                                loadedEvaluation.state.checkpointKey;
+                            evaluated =
+                                this.paddedTallyRuntime.evaluateNextChunk(
+                                    plan,
+                                    expectedChunkOrdinal,
+                                    advanceCheckpointKey,
+                                    loadedEvaluation.state
+                                        .checkpoint as PaddedTallyEvaluationCheckpoint,
+                                    chunkParticipantPosition,
+                                    chunk,
+                                );
+                        }
+                        stream.chunkByteLengths.push(chunk.byteLength);
+                        stream.chunkDigests.push(chunkDigest);
+                        stream.nextParticipantPosition += 1;
+                        retainedChunkDigest = true;
+                    } finally {
+                        if (!retainedChunkDigest) {
+                            chunkDigest.fill(0);
+                        }
+                    }
+                    if (
+                        chunkParticipantPosition + 1 <
+                        completionProfileParticipantCount
+                    ) {
+                        retainChunkStream = true;
+                        return {
+                            kind: 'pending',
+                            chunkOrdinal: expectedChunkOrdinal,
+                            nextChunkOrdinal: expectedChunkOrdinal,
+                            nextParticipantPosition:
+                                chunkParticipantPosition + 1,
+                            resources:
+                                this.constructionKernelRuntime.measureResources(),
+                        };
+                    }
+                    const chunkSetDigest = await digestByteInventoryFrame(
+                        'sealed-lattice/local/padded-tally-chunk-set/v1',
+                        stream.chunkByteLengths,
+                        stream.chunkDigests,
+                    );
+                    try {
+                        if (streamMode === 'replay') {
+                            if (
+                                !(
+                                    'lastChunkSetDigest' in
+                                    loadedEvaluation.state
+                                ) ||
                                 !bytesEqual(
                                     chunkSetDigest,
                                     loadedEvaluation.state.lastChunkSetDigest,
@@ -3734,201 +3954,198 @@ class PrivatePreparationWorkerRuntime {
                                     'The tally evaluation refuses alternate chunk replay.',
                                 );
                             }
-                            return {
-                                kind: 'pending',
-                                chunkOrdinal: expectedChunkOrdinal,
-                                nextChunkOrdinal: expectedChunkOrdinal + 1,
-                                resources:
-                                    this.constructionKernelRuntime.measureResources(),
-                            };
-                        }
-                        if (
-                            expectedChunkOrdinal !==
-                            loadedEvaluation.state.lastChunkOrdinal + 1
-                        ) {
-                            throw new DurableStateError(
-                                'Conflict',
-                                'The tally evaluation refuses rollback or skipped ordinals.',
-                            );
-                        }
-                    } else if (expectedChunkOrdinal !== 0) {
-                        throw new DurableStateError(
-                            'Conflict',
-                            'The tally evaluation must begin at ordinal zero.',
-                        );
-                    }
-                    const chunkPlan = plan.chunks[expectedChunkOrdinal];
-                    if (
-                        chunkPlan === undefined ||
-                        chunks.some(
-                            (chunk) =>
-                                chunk.byteLength !== chunkPlan.chunkByteLength,
-                        )
-                    ) {
-                        throw new TypeError(
-                            'The tally chunks do not match the expected plan ordinal.',
-                        );
-                    }
-                    const checkpointKey = loadedEvaluation.state.checkpointKey;
-                    const evaluated = this.paddedTallyRuntime.evaluateNextChunk(
-                        plan,
-                        expectedChunkOrdinal,
-                        checkpointKey,
-                        loadedEvaluation.state
-                            .checkpoint as PaddedTallyEvaluationCheckpoint,
-                        chunks,
-                    );
-                    let replacementState: PaddedTallyEvaluationState;
-                    if (evaluated.status === 'pending') {
-                        const pendingState: PendingPaddedTallyEvaluationState =
-                            {
-                                phase: pendingPaddedTallyEvaluationPhase,
-                                generation: BigInt(expectedChunkOrdinal) + 2n,
-                                targetIdentity: Uint8Array.from(
-                                    loadedEvaluation.state.targetIdentity,
-                                ),
-                                topCount: loadedEvaluation.state.topCount,
-                                chunkCount: loadedEvaluation.state.chunkCount,
-                                activationInventoryDigest: Uint8Array.from(
-                                    loadedEvaluation.state
-                                        .activationInventoryDigest,
-                                ),
-                                lastChunkOrdinal: expectedChunkOrdinal,
-                                lastChunkSetDigest:
-                                    Uint8Array.from(chunkSetDigest),
-                                checkpointKey: Uint8Array.from(checkpointKey),
-                                checkpoint: evaluated.nextCheckpoint,
-                            };
-                        replacementState = pendingState;
-                    } else {
-                        const terminal = evaluated.terminal;
-                        const completedState: CompletedPaddedTallyEvaluationState =
-                            {
-                                phase: completedPaddedTallyEvaluationPhase,
-                                generation: BigInt(expectedChunkOrdinal) + 2n,
-                                targetIdentity: Uint8Array.from(
-                                    loadedEvaluation.state.targetIdentity,
-                                ),
-                                topCount: loadedEvaluation.state.topCount,
-                                chunkCount: loadedEvaluation.state.chunkCount,
-                                activationInventoryDigest: Uint8Array.from(
-                                    loadedEvaluation.state
-                                        .activationInventoryDigest,
-                                ),
-                                lastChunkOrdinal: expectedChunkOrdinal,
-                                lastChunkSetDigest:
-                                    Uint8Array.from(chunkSetDigest),
-                                batchIdentity: Uint8Array.from(
-                                    terminal.batchIdentity,
-                                ),
-                                terminalBody: Uint8Array.from(terminal.body),
-                                terminalIdentity: Uint8Array.from(
-                                    terminal.bodyIdentity,
-                                ),
-                                outputSchemaIdentity: Uint8Array.from(
-                                    terminal.outputSchemaIdentity,
-                                ),
-                                acceptedBallotAuthorshipBitmap:
-                                    acceptedBallotAuthorshipBitmap(
-                                        terminal.acceptedBallotAuthorship,
-                                    ),
-                                orderedOptionPositions:
-                                    terminal.orderedOptionPositions ===
-                                    undefined
-                                        ? undefined
-                                        : Array.from(
-                                              terminal.orderedOptionPositions,
-                                          ),
-                            };
-                        replacementState = completedState;
-                    }
-                    try {
-                        await this.replacePaddedTallyEvaluationState(
-                            action,
-                            loadedAction,
-                            loadedEvaluation,
-                            replacementState,
-                            plan,
-                        );
-                        if (
-                            replacementState.phase ===
-                            completedPaddedTallyEvaluationPhase
-                        ) {
-                            await this.configuration.afterDurableTallyTerminalPersist?.();
-                        } else {
-                            await this.configuration.afterDurableTallyEvaluationStep?.();
-                        }
-                        const [retainedActionRecord, retained] =
-                            await Promise.all([
-                                this.durableState.readProtected(
-                                    'actions',
-                                    loadedAction.record.id,
-                                ),
-                                this.durableState.readProtected(
-                                    'evaluations',
-                                    loadedEvaluation.record.id,
-                                ),
-                            ]);
-                        if (
-                            retainedActionRecord === undefined ||
-                            retained === undefined
-                        ) {
-                            throw new DurableStateError(
-                                'StateLost',
-                                'The persisted tally evaluation disappeared.',
-                            );
-                        }
-                        const reboundAction = await this.loadActionState(
-                            action,
-                            retainedActionRecord,
-                        );
-                        const reloaded =
-                            await this.loadPaddedTallyEvaluationState(
-                                action,
-                                reboundAction.state.rosterIdentity,
-                                retained,
-                                plan,
-                            );
-                        try {
-                            this.validatePaddedTallyEvaluationLocalBinding(
-                                reloaded.state,
-                                reboundAction.state,
-                                loadedFinality.state,
-                                plan,
-                            );
                             if (
-                                reloaded.state.phase ===
+                                loadedEvaluation.state.phase ===
                                 completedPaddedTallyEvaluationPhase
                             ) {
                                 return copyCompletedPaddedTallyEvaluation(
-                                    reloaded.state,
+                                    loadedEvaluation.state,
                                     this.constructionKernelRuntime.measureResources(),
-                                );
-                            }
-                            if (
-                                reloaded.state.phase !==
-                                    pendingPaddedTallyEvaluationPhase ||
-                                reloaded.state.lastChunkOrdinal !==
-                                    expectedChunkOrdinal
-                            ) {
-                                throw new DurableStateError(
-                                    'StateLost',
-                                    'The tally evaluation did not advance durably.',
                                 );
                             }
                             return {
                                 kind: 'pending',
                                 chunkOrdinal: expectedChunkOrdinal,
                                 nextChunkOrdinal: expectedChunkOrdinal + 1,
+                                nextParticipantPosition: 0,
                                 resources:
                                     this.constructionKernelRuntime.measureResources(),
                             };
+                        }
+                        if (evaluated === undefined) {
+                            throw new Error(
+                                'The construction kernel omitted the completed participant stream.',
+                            );
+                        }
+                        if (advanceCheckpointKey === undefined) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'The advancing tally evaluation lost its checkpoint key.',
+                            );
+                        }
+                        const checkpointKey = advanceCheckpointKey;
+                        let replacementState: PaddedTallyEvaluationState;
+                        if (evaluated.status === 'pending') {
+                            const pendingState: PendingPaddedTallyEvaluationState =
+                                {
+                                    phase: pendingPaddedTallyEvaluationPhase,
+                                    generation:
+                                        BigInt(expectedChunkOrdinal) + 2n,
+                                    targetIdentity: Uint8Array.from(
+                                        loadedEvaluation.state.targetIdentity,
+                                    ),
+                                    topCount: loadedEvaluation.state.topCount,
+                                    chunkCount:
+                                        loadedEvaluation.state.chunkCount,
+                                    activationInventoryDigest: Uint8Array.from(
+                                        loadedEvaluation.state
+                                            .activationInventoryDigest,
+                                    ),
+                                    lastChunkOrdinal: expectedChunkOrdinal,
+                                    lastChunkSetDigest:
+                                        Uint8Array.from(chunkSetDigest),
+                                    checkpointKey:
+                                        Uint8Array.from(checkpointKey),
+                                    checkpoint: evaluated.nextCheckpoint,
+                                };
+                            replacementState = pendingState;
+                        } else {
+                            const terminal = evaluated.terminal;
+                            const completedState: CompletedPaddedTallyEvaluationState =
+                                {
+                                    phase: completedPaddedTallyEvaluationPhase,
+                                    generation:
+                                        BigInt(expectedChunkOrdinal) + 2n,
+                                    targetIdentity: Uint8Array.from(
+                                        loadedEvaluation.state.targetIdentity,
+                                    ),
+                                    topCount: loadedEvaluation.state.topCount,
+                                    chunkCount:
+                                        loadedEvaluation.state.chunkCount,
+                                    activationInventoryDigest: Uint8Array.from(
+                                        loadedEvaluation.state
+                                            .activationInventoryDigest,
+                                    ),
+                                    lastChunkOrdinal: expectedChunkOrdinal,
+                                    lastChunkSetDigest:
+                                        Uint8Array.from(chunkSetDigest),
+                                    batchIdentity: Uint8Array.from(
+                                        terminal.batchIdentity,
+                                    ),
+                                    terminalBody: Uint8Array.from(
+                                        terminal.body,
+                                    ),
+                                    terminalIdentity: Uint8Array.from(
+                                        terminal.bodyIdentity,
+                                    ),
+                                    outputSchemaIdentity: Uint8Array.from(
+                                        terminal.outputSchemaIdentity,
+                                    ),
+                                    acceptedBallotAuthorshipBitmap:
+                                        acceptedBallotAuthorshipBitmap(
+                                            terminal.acceptedBallotAuthorship,
+                                        ),
+                                    orderedOptionPositions:
+                                        terminal.orderedOptionPositions ===
+                                        undefined
+                                            ? undefined
+                                            : Array.from(
+                                                  terminal.orderedOptionPositions,
+                                              ),
+                                };
+                            replacementState = completedState;
+                        }
+                        try {
+                            await this.replacePaddedTallyEvaluationState(
+                                action,
+                                loadedAction,
+                                loadedEvaluation,
+                                replacementState,
+                                plan,
+                            );
+                            if (
+                                replacementState.phase ===
+                                completedPaddedTallyEvaluationPhase
+                            ) {
+                                await this.configuration.afterDurableTallyTerminalPersist?.();
+                            } else {
+                                await this.configuration.afterDurableTallyEvaluationStep?.();
+                            }
+                            const [retainedActionRecord, retained] =
+                                await Promise.all([
+                                    this.durableState.readProtected(
+                                        'actions',
+                                        loadedAction.record.id,
+                                    ),
+                                    this.durableState.readProtected(
+                                        'evaluations',
+                                        loadedEvaluation.record.id,
+                                    ),
+                                ]);
+                            if (
+                                retainedActionRecord === undefined ||
+                                retained === undefined
+                            ) {
+                                throw new DurableStateError(
+                                    'StateLost',
+                                    'The persisted tally evaluation disappeared.',
+                                );
+                            }
+                            const reboundAction = await this.loadActionState(
+                                action,
+                                retainedActionRecord,
+                            );
+                            const reloaded =
+                                await this.loadPaddedTallyEvaluationState(
+                                    action,
+                                    reboundAction.state.rosterIdentity,
+                                    retained,
+                                    plan,
+                                );
+                            try {
+                                this.validatePaddedTallyEvaluationLocalBinding(
+                                    reloaded.state,
+                                    reboundAction.state,
+                                    loadedFinality.state,
+                                    plan,
+                                );
+                                if (
+                                    reloaded.state.phase ===
+                                    completedPaddedTallyEvaluationPhase
+                                ) {
+                                    return copyCompletedPaddedTallyEvaluation(
+                                        reloaded.state,
+                                        this.constructionKernelRuntime.measureResources(),
+                                    );
+                                }
+                                if (
+                                    reloaded.state.phase !==
+                                        pendingPaddedTallyEvaluationPhase ||
+                                    reloaded.state.lastChunkOrdinal !==
+                                        expectedChunkOrdinal
+                                ) {
+                                    throw new DurableStateError(
+                                        'StateLost',
+                                        'The tally evaluation did not advance durably.',
+                                    );
+                                }
+                                return {
+                                    kind: 'pending',
+                                    chunkOrdinal: expectedChunkOrdinal,
+                                    nextChunkOrdinal: expectedChunkOrdinal + 1,
+                                    nextParticipantPosition: 0,
+                                    resources:
+                                        this.constructionKernelRuntime.measureResources(),
+                                };
+                            } finally {
+                                zeroPaddedTallyEvaluationState(reloaded.state);
+                                zeroActionState(reboundAction.state);
+                            }
                         } finally {
-                            zeroPaddedTallyEvaluationState(reloaded.state);
-                            zeroActionState(reboundAction.state);
+                            zeroPaddedTallyEvaluationState(replacementState);
                         }
                     } finally {
-                        zeroPaddedTallyEvaluationState(replacementState);
+                        chunkSetDigest.fill(0);
                     }
                 } finally {
                     zeroPaddedTallyEvaluationState(loadedEvaluation.state);
@@ -3937,7 +4154,10 @@ class PrivatePreparationWorkerRuntime {
                 }
             });
         } finally {
-            chunkSetDigest.fill(0);
+            chunk.fill(0);
+            if (!retainChunkStream) {
+                this.clearPaddedTallyEvaluationChunkStream();
+            }
         }
     }
 
@@ -6604,6 +6824,7 @@ class PrivatePreparationWorkerRuntime {
     private async loadActionState(
         action: PrivatePreparationActionContext,
         record: ProtectedRecord,
+        verifyRosterCredentials = true,
     ): Promise<LoadedActionState> {
         const rootKey = await this.durableState.readRoot();
         if (rootKey === undefined) {
@@ -6628,18 +6849,20 @@ class PrivatePreparationWorkerRuntime {
                 this.configuration,
                 action,
             );
-            const rosterIdentity = this.rosterRuntime.verifyCredentials(
-                state.canonicalRosterBytes,
-                action.participantPosition,
-                state.signingSecretKey,
-                state.mailboxDecapsulationKey,
-            );
-            if (!bytesEqual(rosterIdentity, state.rosterIdentity)) {
-                zeroActionState(state);
-                throw new DurableStateError(
-                    'CorruptState',
-                    'The retained action credentials do not match the frozen roster.',
+            if (verifyRosterCredentials) {
+                const rosterIdentity = this.rosterRuntime.verifyCredentials(
+                    state.canonicalRosterBytes,
+                    action.participantPosition,
+                    state.signingSecretKey,
+                    state.mailboxDecapsulationKey,
                 );
+                if (!bytesEqual(rosterIdentity, state.rosterIdentity)) {
+                    zeroActionState(state);
+                    throw new DurableStateError(
+                        'CorruptState',
+                        'The retained action credentials do not match the frozen roster.',
+                    );
+                }
             }
             return { record, rootKey, state };
         } finally {

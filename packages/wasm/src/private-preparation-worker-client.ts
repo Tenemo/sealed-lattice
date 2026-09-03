@@ -123,7 +123,7 @@ const collectRequestTransferables = (
         }
     }
     if (request.operation === 'evaluate-padded-tally-chunk') {
-        for (const chunk of request.input.chunks) collect(chunk);
+        collect(request.input.chunk);
     }
     if (
         request.operation === 'create-finality-signature' ||
@@ -394,14 +394,16 @@ export class PrivatePreparationWorkerClient {
     evaluatePaddedTallyChunk(
         context: PrivatePreparationActionContext,
         expectedChunkOrdinal: number,
-        chunks: readonly Uint8Array[],
+        chunkParticipantPosition: number,
+        chunk: Uint8Array,
     ): Promise<PaddedTallyEvaluationStep> {
         return this.send({
             operation: 'evaluate-padded-tally-chunk',
             input: {
                 ...copyActionContext(context),
                 expectedChunkOrdinal,
-                chunks: chunks.map(copyBytes),
+                chunkParticipantPosition,
+                chunk: copyBytes(chunk),
             },
         });
     }

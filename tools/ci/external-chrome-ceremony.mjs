@@ -537,7 +537,11 @@ const workerTransferables = (request) => {
     return transferables;
 };
 
-const runUntilCrashBoundary = async (configuration, boundary, request) => {
+const runUntilCrashBoundary = async (
+    configuration,
+    boundary,
+    requestOrSequence,
+) => {
     const workerUrl = new URL(
         '/external-chrome-ceremony-worker.mjs',
         globalThis.location.origin,
@@ -576,12 +580,47 @@ const runUntilCrashBoundary = async (configuration, boundary, request) => {
         ) {
             throw new Error('The crash-boundary worker did not initialize.');
         }
-        const operationRequest = { ...request, requestId: 2 };
-        worker.postMessage(
-            operationRequest,
-            workerTransferables(operationRequest),
-        );
-        const message = await nextMessage();
+        const iterator =
+            requestOrSequence?.[Symbol.asyncIterator] === undefined
+                ? undefined
+                : requestOrSequence[Symbol.asyncIterator]();
+        let current =
+            iterator === undefined
+                ? { done: false, value: requestOrSequence }
+                : await iterator.next();
+        if (current.done) {
+            throw new Error('The crash-boundary request sequence is empty.');
+        }
+        let requestId = 2;
+        let message;
+        while (true) {
+            const following =
+                iterator === undefined
+                    ? { done: true, value: undefined }
+                    : await iterator.next();
+            const operationRequest = {
+                ...current.value,
+                requestId,
+            };
+            worker.postMessage(
+                operationRequest,
+                workerTransferables(operationRequest),
+            );
+            message = await nextMessage();
+            if (following.done) break;
+            if (
+                typeof message !== 'object' ||
+                message === null ||
+                message.requestId !== requestId ||
+                message.ok !== true
+            ) {
+                throw new Error(
+                    'The crash-boundary worker refused an intermediate request.',
+                );
+            }
+            current = following;
+            requestId += 1;
+        }
         if (
             typeof message !== 'object' ||
             message === null ||
@@ -664,15 +703,106 @@ const fetchActivationInventory = async (configuration) => {
     return { activationSignatures, manifests };
 };
 
-const fetchChunkSet = async (configuration, chunkOrdinal) =>
-    Promise.all(
-        Array.from({ length: participantCount }, (_, participantPosition) =>
-            getBytes(
-                configuration,
-                `activation/${String(participantPosition)}/chunk/${String(chunkOrdinal)}`,
-            ),
-        ),
+const fetchParticipantChunk = (
+    configuration,
+    chunkOrdinal,
+    chunkParticipantPosition,
+) =>
+    getBytes(
+        configuration,
+        `activation/${String(chunkParticipantPosition)}/chunk/${String(chunkOrdinal)}`,
     );
+
+const observePayloadChunk = (metrics, chunk) => {
+    metrics.maximumLiveProtocolByteLength = Math.max(
+        metrics.maximumLiveProtocolByteLength,
+        chunk.byteLength,
+    );
+    metrics.accountedMaximumResidentPayloadChunkCount = Math.max(
+        metrics.accountedMaximumResidentPayloadChunkCount,
+        2,
+    );
+};
+
+const evaluatePaddedTallyChunkStream = async (
+    client,
+    configuration,
+    metrics,
+    chunkOrdinal,
+    options = {},
+) => {
+    const participantPositionEnd =
+        options.participantPositionEnd ?? participantCount;
+    const corruptParticipantPositions = new Set(
+        options.corruptParticipantPositions ?? [],
+    );
+    let progress;
+    for (
+        let chunkParticipantPosition = 0;
+        chunkParticipantPosition < participantPositionEnd;
+        chunkParticipantPosition += 1
+    ) {
+        const chunk = await fetchParticipantChunk(
+            configuration,
+            chunkOrdinal,
+            chunkParticipantPosition,
+        );
+        observePayloadChunk(metrics, chunk);
+        if (corruptParticipantPositions.has(chunkParticipantPosition)) {
+            chunk[250] ^= 1;
+        }
+        progress = await client.evaluatePaddedTallyChunk(
+            actionContext(configuration),
+            chunkOrdinal,
+            chunkParticipantPosition,
+            chunk,
+        );
+        if (
+            chunkParticipantPosition + 1 < participantCount &&
+            (progress.kind !== 'pending' ||
+                progress.chunkOrdinal !== chunkOrdinal ||
+                progress.nextChunkOrdinal !== chunkOrdinal ||
+                progress.nextParticipantPosition !==
+                    chunkParticipantPosition + 1)
+        ) {
+            throw new Error(
+                'The participant chunk stream advanced before the complete roster arrived.',
+            );
+        }
+    }
+    if (progress === undefined) {
+        throw new Error('The participant chunk stream produced no progress.');
+    }
+    return progress;
+};
+
+const evaluationCrashRequestSequence = async function* (
+    configuration,
+    metrics,
+    chunkOrdinal,
+) {
+    for (
+        let chunkParticipantPosition = 0;
+        chunkParticipantPosition < participantCount;
+        chunkParticipantPosition += 1
+    ) {
+        const chunk = await fetchParticipantChunk(
+            configuration,
+            chunkOrdinal,
+            chunkParticipantPosition,
+        );
+        observePayloadChunk(metrics, chunk);
+        yield {
+            input: {
+                ...actionContext(configuration),
+                chunk,
+                chunkParticipantPosition,
+                expectedChunkOrdinal: chunkOrdinal,
+            },
+            operation: 'evaluate-padded-tally-chunk',
+        };
+    }
+};
 
 const publishPreparation = async (configuration, metrics) => {
     setStatus('reading the retained join credential');
@@ -1054,10 +1184,7 @@ const publishGeneratedChunk = async (configuration, generated, metrics) => {
         `activation/${String(configuration.participantPosition)}/chunk/${String(generated.chunkOrdinal)}`,
         generated.chunk,
     );
-    metrics.maximumLiveProtocolByteLength = Math.max(
-        metrics.maximumLiveProtocolByteLength,
-        generated.chunk.byteLength,
-    );
+    observePayloadChunk(metrics, generated.chunk);
     if (generated.status === 'complete') {
         await putBytes(
             configuration,
@@ -1244,36 +1371,28 @@ const runEvaluationRepair = async (configuration, metrics) => {
             configuration.databaseName,
             'evaluations',
         );
-        const firstChunks = await fetchChunkSet(configuration, 0);
-        const first = await client.evaluatePaddedTallyChunk(
-            actionContext(configuration),
+        const first = await evaluatePaddedTallyChunkStream(
+            client,
+            configuration,
+            metrics,
             0,
-            firstChunks,
         );
         metrics.kernelResources = first.resources;
-        metrics.maximumLiveProtocolByteLength = Math.max(
-            metrics.maximumLiveProtocolByteLength,
-            firstChunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
-        );
-        const replayChunks = await fetchChunkSet(configuration, 0);
-        const replay = await client.evaluatePaddedTallyChunk(
-            actionContext(configuration),
+        const replay = await evaluatePaddedTallyChunkStream(
+            client,
+            configuration,
+            metrics,
             0,
-            replayChunks,
         );
         if (JSON.stringify(replay) !== JSON.stringify(first)) {
             throw new Error(
                 'A byte-identical evaluation replay changed progress.',
             );
         }
-        const corruptChunks = await fetchChunkSet(configuration, 0);
-        corruptChunks[4][250] ^= 1;
         metrics.alternateContinuationRefusal = await expectRefusal(() =>
-            client.evaluatePaddedTallyChunk(
-                actionContext(configuration),
-                0,
-                corruptChunks,
-            ),
+            evaluatePaddedTallyChunkStream(client, configuration, metrics, 0, {
+                corruptParticipantPositions: [4],
+            }),
         );
         client.close();
         client = undefined;
@@ -1284,12 +1403,12 @@ const runEvaluationRepair = async (configuration, metrics) => {
         await restoreStore(configuration.databaseName, 'evaluations', before);
         const rollbackClient = await openWorkerClient(configuration);
         try {
-            const secondChunks = await fetchChunkSet(configuration, 1);
             metrics.rollbackRefusal = await expectRefusal(() =>
-                rollbackClient.evaluatePaddedTallyChunk(
-                    actionContext(configuration),
+                evaluatePaddedTallyChunkStream(
+                    rollbackClient,
+                    configuration,
+                    metrics,
                     1,
-                    secondChunks,
                 ),
             );
         } finally {
@@ -1298,14 +1417,27 @@ const runEvaluationRepair = async (configuration, metrics) => {
         await restoreStore(configuration.databaseName, 'evaluations', after);
         const restoredClient = await openWorkerClient(configuration);
         try {
-            const secondChunks = await fetchChunkSet(configuration, 1);
-            metrics.withholdingRefusal = await expectRefusal(() =>
-                restoredClient.evaluatePaddedTallyChunk(
-                    actionContext(configuration),
-                    1,
-                    secondChunks.slice(0, participantCount - 1),
-                ),
+            const withheld = await evaluatePaddedTallyChunkStream(
+                restoredClient,
+                configuration,
+                metrics,
+                1,
+                { participantPositionEnd: participantCount - 1 },
             );
+            if (
+                withheld.kind !== 'pending' ||
+                withheld.nextChunkOrdinal !== 1 ||
+                withheld.nextParticipantPosition !== participantCount - 1
+            ) {
+                throw new Error(
+                    'A selectively withheld participant chunk did not leave evaluation pending.',
+                );
+            }
+            metrics.withholdingPending = {
+                chunkOrdinal: 1,
+                nextParticipantPosition: participantCount - 1,
+                pending: true,
+            };
         } finally {
             restoredClient.close();
         }
@@ -1394,23 +1526,16 @@ const runEvaluation = async (configuration, metrics) => {
             );
         }
         if (configuration.crashBoundary === 'tally-evaluation-step') {
-            const chunks = await fetchChunkSet(
-                configuration,
-                firstChunkOrdinal,
-            );
             client.close();
             client = undefined;
             metrics.crash = await runUntilCrashBoundary(
                 configuration,
                 configuration.crashBoundary,
-                {
-                    input: {
-                        ...actionContext(configuration),
-                        chunks,
-                        expectedChunkOrdinal: firstChunkOrdinal,
-                    },
-                    operation: 'evaluate-padded-tally-chunk',
-                },
+                evaluationCrashRequestSequence(
+                    configuration,
+                    metrics,
+                    firstChunkOrdinal,
+                ),
             );
             return;
         }
@@ -1425,54 +1550,40 @@ const runEvaluation = async (configuration, metrics) => {
             chunkOrdinal < operationEnd;
             chunkOrdinal += 1
         ) {
-            const chunks = await fetchChunkSet(configuration, chunkOrdinal);
-            const liveByteLength = chunks.reduce(
-                (sum, chunk) => sum + chunk.byteLength,
-                0,
-            );
-            metrics.maximumLiveProtocolByteLength = Math.max(
-                metrics.maximumLiveProtocolByteLength,
-                liveByteLength,
-            );
             if (
                 configuration.probeThreeCorruptChunks === true &&
                 chunkOrdinal === 0
             ) {
-                const malicious = chunks.map((chunk) => Uint8Array.from(chunk));
-                for (const participantPosition of [0, 1, 2]) {
-                    malicious[participantPosition][250] ^= 1;
-                }
                 metrics.threeCorruptChunkRefusal = await expectRefusal(() =>
-                    client.evaluatePaddedTallyChunk(
-                        actionContext(configuration),
+                    evaluatePaddedTallyChunkStream(
+                        client,
+                        configuration,
+                        metrics,
                         chunkOrdinal,
-                        malicious,
+                        { corruptParticipantPositions: [0, 1, 2] },
                     ),
                 );
             }
-            const progress = await client.evaluatePaddedTallyChunk(
-                actionContext(configuration),
+            const progress = await evaluatePaddedTallyChunkStream(
+                client,
+                configuration,
+                metrics,
                 chunkOrdinal,
-                chunks,
             );
             metrics.kernelResources = progress.resources;
             if (progress.kind !== 'pending') terminal = progress;
         }
         if (stopBeforeTerminal) {
-            const chunks = await fetchChunkSet(configuration, lastChunkOrdinal);
             client.close();
             client = undefined;
             metrics.crash = await runUntilCrashBoundary(
                 configuration,
                 configuration.crashBoundary,
-                {
-                    input: {
-                        ...actionContext(configuration),
-                        chunks,
-                        expectedChunkOrdinal: lastChunkOrdinal,
-                    },
-                    operation: 'evaluate-padded-tally-chunk',
-                },
+                evaluationCrashRequestSequence(
+                    configuration,
+                    metrics,
+                    lastChunkOrdinal,
+                ),
             );
             return;
         }
@@ -1615,6 +1726,7 @@ const runVisit = async (rawConfiguration) => {
     const storageBefore = await storageEstimate();
     const metrics = {
         action: configuration.action,
+        accountedMaximumResidentPayloadChunkCount: 0,
         intervals: [],
         maximumLiveProtocolByteLength: 0,
         participantPosition: configuration.participantPosition,
@@ -1671,6 +1783,18 @@ const runVisit = async (rawConfiguration) => {
         if (configuration.cleanup === true) {
             await cleanupParticipant(configuration);
         }
+    }
+    if (metrics.kernelResources !== undefined) {
+        metrics.maximumCopiedPayloadBufferByteLength = Math.max(
+            metrics.maximumLiveProtocolByteLength,
+            metrics.kernelResources.maximumRequestByteLength,
+            metrics.kernelResources.maximumResponseByteLength,
+        );
+        metrics.accountedJavaScriptWasmOverlapByteLength =
+            2 * metrics.maximumLiveProtocolByteLength +
+            metrics.kernelResources.maximumRequestByteLength +
+            metrics.kernelResources.maximumResponseByteLength +
+            metrics.kernelResources.wasmMemoryByteLength;
     }
     metrics.storageAfter = await storageEstimate();
     metrics.totalForegroundMilliseconds = performance.now() - startedAt;

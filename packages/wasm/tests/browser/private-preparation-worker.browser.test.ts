@@ -298,6 +298,56 @@ const readRelayChunkSet = async (
     }
 };
 
+const evaluatePaddedTallyChunkSet = async (
+    client: PrivatePreparationWorkerClient,
+    context: PrivatePreparationActionContext,
+    expectedChunkOrdinal: number,
+    chunks: readonly Uint8Array[],
+): Promise<PaddedTallyEvaluationStep> => {
+    if (chunks.length === 0 || chunks.length > participantCount) {
+        throw new TypeError(
+            'The evaluation fixture must contain a nonempty participant prefix.',
+        );
+    }
+    let progress: PaddedTallyEvaluationStep | undefined;
+    for (const [chunkParticipantPosition, chunk] of chunks.entries()) {
+        progress = await client.evaluatePaddedTallyChunk(
+            context,
+            expectedChunkOrdinal,
+            chunkParticipantPosition,
+            chunk,
+        );
+        if (chunkParticipantPosition + 1 < participantCount) {
+            expect(progress).toMatchObject({
+                kind: 'pending',
+                chunkOrdinal: expectedChunkOrdinal,
+                nextChunkOrdinal: expectedChunkOrdinal,
+                nextParticipantPosition: chunkParticipantPosition + 1,
+            });
+        }
+    }
+    if (progress === undefined) {
+        throw new Error('The evaluation fixture produced no progress.');
+    }
+    return progress;
+};
+
+const paddedTallyEvaluationRequests = (
+    context: PrivatePreparationActionContext,
+    expectedChunkOrdinal: number,
+    chunks: readonly Uint8Array[],
+): PrivatePreparationWorkerRequest[] =>
+    chunks.map((chunk, chunkParticipantPosition) => ({
+        requestId: 2 + chunkParticipantPosition,
+        operation: 'evaluate-padded-tally-chunk',
+        input: {
+            ...context,
+            expectedChunkOrdinal,
+            chunkParticipantPosition,
+            chunk,
+        },
+    }));
+
 const readRawStateRecord = async (
     name: string,
     storeName: 'activations' | 'evaluations',
@@ -628,6 +678,26 @@ const openClient = async (
     return client;
 };
 
+const restartWorkerWithinCurrentVisit = async (
+    runIdentity: string,
+    participantPosition: number,
+): Promise<PrivatePreparationWorkerClient> => {
+    const name = databaseName(runIdentity, participantPosition);
+    databaseNames.add(name);
+    const client = await PrivatePreparationWorkerClient.create(
+        ordinaryWorkerUrl,
+        {
+            databaseName: name,
+            kernelUrl: await resolveWorkerKernelUrl(),
+            kernelOptions: { allowUnpinnedKernel: true },
+            runtimeIdentity,
+            candidateBuildIdentity,
+        },
+    );
+    openClients.add(client);
+    return client;
+};
+
 const closeClient = (client: PrivatePreparationWorkerClient): void => {
     const visit = visitStartsByClient.get(client);
     if (visit !== undefined) {
@@ -858,7 +928,9 @@ const crashWorkerAtBoundary = async (
     participantPosition: number,
     workerUrl: URL,
     boundaryName: string,
-    request: PrivatePreparationWorkerRequest,
+    requestOrRequests:
+        | PrivatePreparationWorkerRequest
+        | readonly PrivatePreparationWorkerRequest[],
 ): Promise<void> => {
     const startedAtMilliseconds = performance.now();
     recordVisit(runIdentity, participantPosition);
@@ -875,6 +947,28 @@ const crashWorkerAtBoundary = async (
                 candidateBuildIdentity,
             },
         });
+        const requests: readonly PrivatePreparationWorkerRequest[] =
+            Array.isArray(requestOrRequests)
+                ? requestOrRequests
+                : [requestOrRequests];
+        const finalRequest = requests[requests.length - 1];
+        if (finalRequest === undefined) {
+            throw new Error('The crash-boundary request sequence is empty.');
+        }
+        for (const request of requests.slice(0, -1)) {
+            try {
+                await rawRequest(worker, request);
+            } catch (error) {
+                const description =
+                    error instanceof Error ? error.message : String(error);
+                throw Object.assign(
+                    new Error(
+                        `${boundaryName} prerequisite request ${String(request.requestId)} (${request.operation}) failed: ${description}`,
+                    ),
+                    { cause: error },
+                );
+            }
+        }
         const boundary = new Promise<void>((resolve, reject) => {
             worker.addEventListener(
                 'message',
@@ -893,7 +987,7 @@ const crashWorkerAtBoundary = async (
                         typeof data === 'object' &&
                         data !== null &&
                         'requestId' in data &&
-                        data.requestId === 2
+                        data.requestId === finalRequest.requestId
                     ) {
                         const description =
                             'error' in data
@@ -908,7 +1002,7 @@ const crashWorkerAtBoundary = async (
                 },
             );
         });
-        worker.postMessage(request);
+        worker.postMessage(finalRequest);
         await boundary;
     } finally {
         worker.terminate();
@@ -1491,20 +1585,39 @@ const expectCompletePaddedTallyCeremony = async (
             0,
             tallyEvaluationStepCrashWorkerUrl,
             'tally-evaluation-step-durably-persisted',
-            {
-                requestId: 2,
-                operation: 'evaluate-padded-tally-chunk',
-                input: {
-                    ...actionContext(0),
-                    expectedChunkOrdinal: 0,
-                    chunks: firstChunks,
-                },
-            },
+            paddedTallyEvaluationRequests(actionContext(0), 0, firstChunks),
         );
         const replayedFirstChunks = await readRelayChunkSet(
             relayDatabaseName,
             0,
         );
+        const interruptedEvaluator = await restartWorkerWithinCurrentVisit(
+            runIdentity,
+            0,
+        );
+        try {
+            await interruptedEvaluator.initializePaddedTallyEvaluation(
+                actionContext(0),
+                canonicalRosterBytes,
+                finalitySignatures,
+                manifests,
+                activationSignatures,
+            );
+            const interrupted = await evaluatePaddedTallyChunkSet(
+                interruptedEvaluator,
+                actionContext(0),
+                0,
+                replayedFirstChunks.slice(0, participantCount - 1),
+            );
+            expect(interrupted).toMatchObject({
+                kind: 'pending',
+                chunkOrdinal: 0,
+                nextChunkOrdinal: 0,
+                nextParticipantPosition: participantCount - 1,
+            });
+        } finally {
+            closeClient(interruptedEvaluator);
+        }
         const evaluator = await openClient(runIdentity, 0);
         try {
             const initialization =
@@ -1517,19 +1630,109 @@ const expectCompletePaddedTallyCeremony = async (
                 );
             expect(initialization.status).toBe('already-initialized');
             expect(initialization.plan).toEqual(plan);
-            const firstReplay = await evaluator.evaluatePaddedTallyChunk(
+            const finalFirstChunk = replayedFirstChunks[participantCount - 1];
+            if (finalFirstChunk === undefined) {
+                throw new Error('The final participant chunk is absent.');
+            }
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    participantCount - 1,
+                    finalFirstChunk,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            const firstReplay = await evaluatePaddedTallyChunkSet(
+                evaluator,
                 actionContext(0),
                 0,
                 replayedFirstChunks,
             );
             expect(firstReplay.kind).toBe('pending');
+            const incompleteReplay = await evaluatePaddedTallyChunkSet(
+                evaluator,
+                actionContext(0),
+                0,
+                replayedFirstChunks.slice(0, 9),
+            );
+            expect(incompleteReplay).toMatchObject({
+                kind: 'pending',
+                chunkOrdinal: 0,
+                nextChunkOrdinal: 0,
+                nextParticipantPosition: 9,
+            });
+            const participantEightChunk = replayedFirstChunks[8];
+            const participantNineChunk = replayedFirstChunks[9];
+            const participantZeroChunk = replayedFirstChunks[0];
+            const participantOneChunk = replayedFirstChunks[1];
+            const participantTwoChunk = replayedFirstChunks[2];
+            if (
+                participantEightChunk === undefined ||
+                participantNineChunk === undefined ||
+                participantZeroChunk === undefined ||
+                participantOneChunk === undefined ||
+                participantTwoChunk === undefined
+            ) {
+                throw new Error('The stream-order fixture is incomplete.');
+            }
             await expect(
                 evaluator.evaluatePaddedTallyChunk(
                     actionContext(0),
                     0,
-                    replayedFirstChunks.slice(0, 9),
+                    8,
+                    participantEightChunk,
                 ),
-            ).rejects.toThrow();
+            ).rejects.toMatchObject({ name: 'Conflict' });
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    9,
+                    participantNineChunk,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
+
+            const concurrent = await Promise.allSettled([
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    0,
+                    participantZeroChunk,
+                ),
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    2,
+                    participantTwoChunk,
+                ),
+            ]);
+            expect(
+                concurrent.filter((entry) => entry.status === 'fulfilled'),
+            ).toHaveLength(1);
+            expect(
+                concurrent.filter((entry) => entry.status === 'rejected'),
+            ).toHaveLength(1);
+
+            await evaluator.evaluatePaddedTallyChunk(
+                actionContext(0),
+                0,
+                0,
+                participantZeroChunk,
+            );
+            await evaluator.evaluatePaddedTallyChunk(
+                actionContext(0),
+                0,
+                1,
+                participantOneChunk,
+            );
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    0,
+                    1,
+                    participantOneChunk,
+                ),
+            ).rejects.toMatchObject({ name: 'Conflict' });
             const alternateFirstChunks = replayedFirstChunks.map((chunk) =>
                 Uint8Array.from(chunk),
             );
@@ -1539,7 +1742,8 @@ const expectCompletePaddedTallyCeremony = async (
             }
             alternateFirstChunk[250] ^= 1;
             await expect(
-                evaluator.evaluatePaddedTallyChunk(
+                evaluatePaddedTallyChunkSet(
+                    evaluator,
                     actionContext(0),
                     0,
                     alternateFirstChunks,
@@ -1562,7 +1766,41 @@ const expectCompletePaddedTallyCeremony = async (
                 evaluationRollbackStoreNames,
             );
             const secondChunks = await readRelayChunkSet(relayDatabaseName, 1);
-            const second = await evaluator.evaluatePaddedTallyChunk(
+            const secondParticipantZeroChunk = secondChunks[0];
+            const secondParticipantOneChunk = secondChunks[1];
+            if (
+                secondParticipantZeroChunk === undefined ||
+                secondParticipantOneChunk === undefined
+            ) {
+                throw new Error(
+                    'The interleaved-command fixture is incomplete.',
+                );
+            }
+            await evaluator.evaluatePaddedTallyChunk(
+                actionContext(0),
+                1,
+                0,
+                secondParticipantZeroChunk,
+            );
+            await expect(
+                evaluator.initializePaddedTallyEvaluation(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    finalitySignatures,
+                    manifests,
+                    activationSignatures,
+                ),
+            ).resolves.toMatchObject({ status: 'already-initialized' });
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    1,
+                    1,
+                    secondParticipantOneChunk,
+                ),
+            ).rejects.toThrow();
+            const second = await evaluatePaddedTallyChunkSet(
+                evaluator,
                 actionContext(0),
                 1,
                 secondChunks,
@@ -1584,7 +1822,8 @@ const expectCompletePaddedTallyCeremony = async (
                 evaluationRecordAfterFirst,
             );
             await expect(
-                evaluator.evaluatePaddedTallyChunk(
+                evaluatePaddedTallyChunkSet(
+                    evaluator,
                     actionContext(0),
                     1,
                     secondChunks,
@@ -1600,7 +1839,8 @@ const expectCompletePaddedTallyCeremony = async (
                 firstEvaluationRollbackSubset,
             );
             await expect(
-                evaluator.evaluatePaddedTallyChunk(
+                evaluatePaddedTallyChunkSet(
+                    evaluator,
                     actionContext(0),
                     1,
                     secondChunks,
@@ -1616,7 +1856,8 @@ const expectCompletePaddedTallyCeremony = async (
                 chunkOrdinal < plan.chunks.length - 1;
                 chunkOrdinal += 1
             ) {
-                const pending = await evaluator.evaluatePaddedTallyChunk(
+                const pending = await evaluatePaddedTallyChunkSet(
+                    evaluator,
                     actionContext(0),
                     chunkOrdinal,
                     await readRelayChunkSet(relayDatabaseName, chunkOrdinal),
@@ -1636,15 +1877,11 @@ const expectCompletePaddedTallyCeremony = async (
             0,
             tallyTerminalCrashWorkerUrl,
             'tally-terminal-durably-persisted',
-            {
-                requestId: 2,
-                operation: 'evaluate-padded-tally-chunk',
-                input: {
-                    ...actionContext(0),
-                    expectedChunkOrdinal: lastChunkOrdinal,
-                    chunks: lastChunks,
-                },
-            },
+            paddedTallyEvaluationRequests(
+                actionContext(0),
+                lastChunkOrdinal,
+                lastChunks,
+            ),
         );
         const terminalRecord = await readRawEvaluationRecord(
             databaseName(runIdentity, 0),
@@ -1660,7 +1897,8 @@ const expectCompletePaddedTallyCeremony = async (
         const restoredEvaluator = await openClient(runIdentity, 0);
         try {
             acceptedTerminal = acceptTerminal(
-                await restoredEvaluator.evaluatePaddedTallyChunk(
+                await evaluatePaddedTallyChunkSet(
+                    restoredEvaluator,
                     actionContext(0),
                     lastChunkOrdinal,
                     replayedLastChunks,
@@ -1675,7 +1913,8 @@ const expectCompletePaddedTallyCeremony = async (
             }
             alternateLastChunk[250] ^= 1;
             await expect(
-                restoredEvaluator.evaluatePaddedTallyChunk(
+                evaluatePaddedTallyChunkSet(
+                    restoredEvaluator,
                     actionContext(0),
                     lastChunkOrdinal,
                     alternateLastChunks,
@@ -1742,13 +1981,18 @@ const expectCompletePaddedTallyCeremony = async (
                     chunkOrdinal,
                 );
                 if (chunkOrdinal === 0) {
-                    await expect(
-                        evaluator.evaluatePaddedTallyChunk(
-                            actionContext(0),
-                            chunkOrdinal,
-                            chunks.slice(0, 9),
-                        ),
-                    ).rejects.toThrow();
+                    const withheld = await evaluatePaddedTallyChunkSet(
+                        evaluator,
+                        actionContext(0),
+                        chunkOrdinal,
+                        chunks.slice(0, 9),
+                    );
+                    expect(withheld).toMatchObject({
+                        kind: 'pending',
+                        chunkOrdinal,
+                        nextChunkOrdinal: chunkOrdinal,
+                        nextParticipantPosition: 9,
+                    });
                     const maliciousChunks = chunks.map((chunk) =>
                         Uint8Array.from(chunk),
                     );
@@ -1763,20 +2007,23 @@ const expectCompletePaddedTallyCeremony = async (
                         maliciousChunk[250] ^= 1;
                     }
                     await expect(
-                        evaluator.evaluatePaddedTallyChunk(
+                        evaluatePaddedTallyChunkSet(
+                            evaluator,
                             actionContext(0),
                             chunkOrdinal,
                             maliciousChunks,
                         ),
                     ).rejects.toThrow();
                 }
-                const evaluated = await evaluator.evaluatePaddedTallyChunk(
+                const evaluated = await evaluatePaddedTallyChunkSet(
+                    evaluator,
                     actionContext(0),
                     chunkOrdinal,
                     chunks,
                 );
                 await expect(
-                    evaluator.evaluatePaddedTallyChunk(
+                    evaluatePaddedTallyChunkSet(
+                        evaluator,
                         actionContext(0),
                         chunkOrdinal,
                         chunks,
@@ -1822,7 +2069,8 @@ const expectCompletePaddedTallyCeremony = async (
                 chunkOrdinal < plan.chunks.length;
                 chunkOrdinal += 1
             ) {
-                const progress = await evaluator.evaluatePaddedTallyChunk(
+                const progress = await evaluatePaddedTallyChunkSet(
+                    evaluator,
                     actionContext(participantPosition),
                     chunkOrdinal,
                     await readRelayChunkSet(relayDatabaseName, chunkOrdinal),
@@ -2060,11 +2308,15 @@ const expectCompletePaddedTallyCeremony = async (
     const relayRefetchByteLength =
         relayReadByteLength - baselineRelayReadByteLength;
     expect(relayRefetchByteLength).toBeGreaterThanOrEqual(0);
-    const maximumChunkSetByteLength =
-        participantCount *
-        Math.max(...plan.chunks.map((chunk) => chunk.chunkByteLength));
+    const maximumParticipantChunkByteLength = Math.max(
+        ...plan.chunks.map((chunk) => chunk.chunkByteLength),
+    );
+    expect(maximumParticipantChunkByteLength).toBeLessThanOrEqual(1_048_576);
+    expect(kernelResources.maximumRequestByteLength).toBeLessThanOrEqual(
+        1_572_864,
+    );
     const accountedJavaScriptWasmOverlapByteLength =
-        maximumChunkSetByteLength +
+        2 * maximumParticipantChunkByteLength +
         kernelResources.maximumRequestByteLength +
         kernelResources.maximumResponseByteLength +
         kernelResources.wasmMemoryByteLength;
@@ -2114,8 +2366,9 @@ const expectCompletePaddedTallyCeremony = async (
                 evaluationKmacCallCount,
                 generationKmacCallCountPerParticipant,
                 kmacAssumptionCensus: independentModel.kmacCensus,
+                accountedMaximumResidentPayloadChunkCount: 2,
                 maximumActivationRecordByteLength,
-                maximumChunkSetByteLength,
+                maximumParticipantChunkByteLength,
                 maximumEvaluationRecordByteLength,
                 maximumPrivatePreparationRecipientByteLength,
                 protectedRecordByteLength: totalProtectedRecordByteLength,

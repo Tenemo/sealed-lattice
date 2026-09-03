@@ -120,7 +120,8 @@ export type PrivatePreparationWorkerRequest =
           operation: 'evaluate-padded-tally-chunk';
           input: PrivatePreparationActionContext & {
               expectedChunkOrdinal: number;
-              chunks: readonly Uint8Array[];
+              chunkParticipantPosition: number;
+              chunk: Uint8Array;
           };
       }>
     | Readonly<{
@@ -206,6 +207,7 @@ export type PaddedTallyEvaluationStep =
           kind: 'pending';
           chunkOrdinal: number;
           nextChunkOrdinal: number;
+          nextParticipantPosition: number;
           resources: KernelResourceMeasurement;
       }>
     | TallyEvaluationProgress;

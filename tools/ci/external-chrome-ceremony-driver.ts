@@ -89,7 +89,9 @@ const publicCorpusLimitByteLength = 2 * 1_024 * 1_024 * 1_024;
 const participantTransferLimitByteLength = 2 * 1_024 * 1_024 * 1_024;
 const persistentStorageLimitByteLength = 2 * 1_024 * 1_024 * 1_024;
 const scratchPlanningTargetByteLength = 256 * 1_024 * 1_024;
+const copiedBufferPlanningTargetByteLength = 1_572_864;
 const copiedBufferAbsoluteLimitByteLength = 8 * 1_024 * 1_024;
+const residentPayloadChunkPlanningTarget = 2;
 const wasmMemoryPlanningTargetByteLength = 384 * 1_024 * 1_024;
 const javascriptHeapPlanningTargetByteLength = 128 * 1_024 * 1_024;
 const browserPrivateMemoryPlanningTargetByteLength = 640 * 1_024 * 1_024;
@@ -1664,6 +1666,33 @@ const summarizeScenario = (
                         ]) ?? 0,
                 ),
             );
+            const maximumCopiedPayloadBufferByteLength = Math.max(
+                0,
+                ...participantVisits.map(
+                    (visit) =>
+                        extractNumber(visit.pageResult, [
+                            'maximumCopiedPayloadBufferByteLength',
+                        ]) ?? 0,
+                ),
+            );
+            const accountedMaximumResidentPayloadChunkCount = Math.max(
+                0,
+                ...participantVisits.map(
+                    (visit) =>
+                        extractNumber(visit.pageResult, [
+                            'accountedMaximumResidentPayloadChunkCount',
+                        ]) ?? 0,
+                ),
+            );
+            const accountedJavaScriptWasmOverlapByteLength = Math.max(
+                0,
+                ...participantVisits.map(
+                    (visit) =>
+                        extractNumber(visit.pageResult, [
+                            'accountedJavaScriptWasmOverlapByteLength',
+                        ]) ?? 0,
+                ),
+            );
             const violations = [
                 ...(participantVisits.length > maximumVisitCount
                     ? [
@@ -1722,6 +1751,27 @@ const summarizeScenario = (
                           },
                       ]
                     : []),
+                ...(maximumCopiedPayloadBufferByteLength >
+                copiedBufferPlanningTargetByteLength
+                    ? [
+                          {
+                              limit: copiedBufferPlanningTargetByteLength,
+                              measured: maximumCopiedPayloadBufferByteLength,
+                              name: 'copied payload buffer bytes',
+                          },
+                      ]
+                    : []),
+                ...(accountedMaximumResidentPayloadChunkCount >
+                residentPayloadChunkPlanningTarget
+                    ? [
+                          {
+                              limit: residentPayloadChunkPlanningTarget,
+                              measured:
+                                  accountedMaximumResidentPayloadChunkCount,
+                              name: 'simultaneously resident payload chunks',
+                          },
+                      ]
+                    : []),
                 ...(maximumWasmMemoryByteLength >
                 wasmMemoryPlanningTargetByteLength
                     ? [
@@ -1734,8 +1784,11 @@ const summarizeScenario = (
                     : []),
             ];
             return {
+                accountedJavaScriptWasmOverlapByteLength,
+                accountedMaximumResidentPayloadChunkCount,
                 downloadByteLength,
                 foregroundMilliseconds,
+                maximumCopiedPayloadBufferByteLength,
                 maximumLiveProtocolByteLength,
                 maximumWasmMemoryByteLength,
                 participantPosition,
@@ -1840,6 +1893,7 @@ const summarizeScenario = (
     return {
         browserPrivateMemoryPlanningTargetByteLength,
         ceremonyWallLimitMilliseconds,
+        copiedBufferPlanningTargetByteLength,
         javascriptHeapPlanningTargetByteLength,
         longestVisitMilliseconds,
         participantForegroundLimitMilliseconds,
@@ -1852,6 +1906,7 @@ const summarizeScenario = (
         planningVariances,
         publicCorpusLimitByteLength,
         relayCorpusByteLength,
+        residentPayloadChunkPlanningTarget,
         visitCounts,
         visitForegroundLimitMilliseconds,
         violations,

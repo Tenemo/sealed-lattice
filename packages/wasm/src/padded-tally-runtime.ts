@@ -186,8 +186,9 @@ export type PaddedTallyRuntime = Readonly<{
         expectedChunkOrdinal: number,
         checkpointKey: Uint8Array,
         checkpoint: PaddedTallyEvaluationCheckpoint,
-        chunks: readonly Uint8Array[],
-    ): EvaluatedPaddedTallyChunk;
+        participantPosition: number,
+        chunk: Uint8Array,
+    ): EvaluatedPaddedTallyChunk | undefined;
 }>;
 
 type RandomFill = (bytes: Uint8Array) => void;
@@ -802,7 +803,8 @@ export const openPaddedTallyRuntime = (
         expectedChunkOrdinal,
         checkpointKey,
         checkpoint,
-        chunks,
+        participantPosition,
+        chunk,
     ) => {
         validatePlan(plan);
         const chunkPlan = plan.chunks[expectedChunkOrdinal];
@@ -810,92 +812,63 @@ export const openPaddedTallyRuntime = (
             throw new RangeError('expectedChunkOrdinal is outside the plan.');
         }
         requireCheckpointKey(checkpointKey);
-        if (chunks.length !== completionProfileParticipantCount) {
-            throw new RangeError('chunks must contain the complete roster.');
-        }
-        let evaluated:
-            | Readonly<{
-                  status: 'pending';
-                  chunkOrdinal: number;
-                  nextCheckpoint: PaddedTallyEvaluationCheckpoint;
-              }>
-            | Readonly<{
-                  status: 'complete';
-                  chunkOrdinal: number;
-                  terminal: VerifiedPaddedTallyTerminal;
-              }>
-            | undefined;
-        for (const [position, chunk] of chunks.entries()) {
-            requireExactConstructionBytes(
-                chunk,
-                chunkPlan.chunkByteLength,
-                `chunks[${String(position)}]`,
-            );
-            const request = new ConstructionCommandWriter();
-            request.writeU8(evaluateNextChunkCommand);
-            request.writeBytes(checkpointKey);
-            request.writeBytes(checkpoint);
-            request.writeU16(position);
-            request.writeBytes(chunk);
-            evaluated = executeConstructionCommand(
-                kernel,
-                request,
-                (reader) => {
-                    if (position + 1 < completionProfileParticipantCount) {
-                        return undefined;
-                    }
-                    const chunkOrdinal = reader.readU32();
-                    if (chunkOrdinal !== expectedChunkOrdinal) {
-                        throw new Error(
-                            'The evaluation checkpoint advanced out of order.',
-                        );
-                    }
-                    const status = reader.readU8();
-                    if (
-                        status === 1 &&
-                        expectedChunkOrdinal + 1 < plan.chunks.length
-                    ) {
-                        return {
-                            status: 'pending' as const,
-                            chunkOrdinal,
-                            nextCheckpoint: Uint8Array.from(
-                                reader.readBytes(),
-                            ) as PaddedTallyEvaluationCheckpoint,
-                        };
-                    }
-                    if (
-                        status === 2 &&
-                        expectedChunkOrdinal + 1 === plan.chunks.length
-                    ) {
-                        const batchIdentity = Uint8Array.from(
-                            reader.readFixed(identityByteLength),
-                        );
-                        const body = Uint8Array.from(reader.readBytes());
-                        const bodyIdentity = Uint8Array.from(
-                            reader.readFixed(identityByteLength),
-                        );
-                        return {
-                            status: 'complete' as const,
-                            chunkOrdinal,
-                            terminal: decodeVerifiedTerminal(
-                                batchIdentity,
-                                body,
-                                bodyIdentity,
-                                plan.topCount,
-                            ),
-                        };
-                    }
-                    throw new Error(
-                        'The construction kernel returned an invalid evaluation state.',
-                    );
-                },
-            );
-        }
-        if (evaluated === undefined) {
+        requirePosition(participantPosition, 'participantPosition');
+        requireExactConstructionBytes(
+            chunk,
+            chunkPlan.chunkByteLength,
+            'chunk',
+        );
+        const request = new ConstructionCommandWriter();
+        request.writeU8(evaluateNextChunkCommand);
+        request.writeBytes(checkpointKey);
+        request.writeBytes(checkpoint);
+        request.writeU16(participantPosition);
+        request.writeBytes(chunk);
+        return executeConstructionCommand(kernel, request, (reader) => {
+            if (participantPosition + 1 < completionProfileParticipantCount) {
+                return undefined;
+            }
+            const chunkOrdinal = reader.readU32();
+            if (chunkOrdinal !== expectedChunkOrdinal) {
+                throw new Error(
+                    'The evaluation checkpoint advanced out of order.',
+                );
+            }
+            const status = reader.readU8();
+            if (status === 1 && expectedChunkOrdinal + 1 < plan.chunks.length) {
+                return {
+                    status: 'pending' as const,
+                    chunkOrdinal,
+                    nextCheckpoint: Uint8Array.from(
+                        reader.readBytes(),
+                    ) as PaddedTallyEvaluationCheckpoint,
+                };
+            }
+            if (
+                status === 2 &&
+                expectedChunkOrdinal + 1 === plan.chunks.length
+            ) {
+                const batchIdentity = Uint8Array.from(
+                    reader.readFixed(identityByteLength),
+                );
+                const body = Uint8Array.from(reader.readBytes());
+                const bodyIdentity = Uint8Array.from(
+                    reader.readFixed(identityByteLength),
+                );
+                return {
+                    status: 'complete' as const,
+                    chunkOrdinal,
+                    terminal: decodeVerifiedTerminal(
+                        batchIdentity,
+                        body,
+                        bodyIdentity,
+                        plan.topCount,
+                    ),
+                };
+            }
             throw new Error(
-                'The construction kernel omitted the completed participant stream.',
+                'The construction kernel returned an invalid evaluation state.',
             );
-        }
-        return evaluated;
+        });
     },
 });
