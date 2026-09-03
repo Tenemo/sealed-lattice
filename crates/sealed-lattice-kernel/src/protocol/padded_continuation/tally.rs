@@ -3652,34 +3652,22 @@ mod tests {
             71_981_280
         );
 
-        let maximum_query_count = (1_u128 << 80) - 1;
-        let minimum_honest_kmac_calls = 11_955_720_u128 + 534_520 + 360;
-        let selected_evaluation_kmac_calls = 3_596_140_u128;
-        let maximum_verified_inventory_count =
-            (maximum_query_count - minimum_honest_kmac_calls) / selected_evaluation_kmac_calls;
-        let remaining_query_count =
-            (maximum_query_count - minimum_honest_kmac_calls) % selected_evaluation_kmac_calls;
-        let wrong_key_target_count = maximum_verified_inventory_count * 29_620;
-        assert_eq!(maximum_verified_inventory_count, 336_173_180_024_868_098);
-        assert_eq!(remaining_query_count, 273_855);
-        assert_eq!(wrong_key_target_count, 9_957_449_592_336_593_062_760);
-
-        let operation_key_count = 2_951_920_u128;
+        let direct_label_key_count = 20 * symbolic_full_tally_label_census(&plan).len() as u128;
+        let continuation_key_count = 20 * conjunction_count as u128;
+        let operation_key_count = direct_label_key_count + continuation_key_count;
         let operation_key_collision_numerator = operation_key_count * (operation_key_count - 1) / 2;
-        let local_record_seal_count = 2_920_u128;
-        let local_record_collision_numerator =
-            local_record_seal_count * (local_record_seal_count - 1) / 2;
-        let aggregate_finite_numerator_at_denominator_352 = (operation_key_collision_numerator
-            << 32)
-            + (29_620_u128 << 32)
-            + (wrong_key_target_count << 32)
-            + (45_u128 << 96)
-            + local_record_collision_numerator;
+        let zero_continuation_difference_numerator =
+            participant_count as u128 * conjunction_count as u128;
+        let allocation_nonce_collision_numerator = choose(participant_count, 2) as u128;
+        let local_record_context_count = 2_920_u128;
+        let local_record_key_and_nonce_prefix_collision_numerator =
+            local_record_context_count * (local_record_context_count - 1) / 2;
         assert_eq!(operation_key_collision_numerator, 4_356_914_367_240);
-        assert_eq!(local_record_collision_numerator, 4_261_740);
+        assert_eq!(zero_continuation_difference_numerator, 29_620);
+        assert_eq!(allocation_nonce_collision_numerator, 45);
         assert_eq!(
-            aggregate_finite_numerator_at_denominator_352,
-            46_332_187_682_508_899_466_309_422_614_380
+            local_record_key_and_nonce_prefix_collision_numerator,
+            4_261_740
         );
     }
 

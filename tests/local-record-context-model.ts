@@ -39,12 +39,16 @@ export type IndependentLocalRecordContext = Readonly<{
 export type IndependentLocalRecordSeal = Readonly<{
     context: IndependentLocalRecordContext;
     contextBytes: Uint8Array;
+    inventoryGeneration: bigint;
 }>;
 
 export type IndependentLocalRecordCensus = Readonly<{
-    successfulSealCount: number;
+    storageVisibleSealCount: number;
+    distinctDerivationInputCount: number;
+    inventoryCommitCount: number;
     retainedRecordCount: number;
     maximumSealsPerExactContext: number;
+    sameContextSealPairCount: bigint;
     objectKindCounts: Readonly<Record<number, number>>;
     retainedObjectKindCounts: Readonly<Record<number, number>>;
 }>;
@@ -210,6 +214,7 @@ const appendSeal = (
     seals.push({
         context,
         contextBytes: encodeIndependentLocalRecordContext(context),
+        inventoryGeneration: 0n,
     });
 };
 
@@ -295,6 +300,60 @@ const appendFoundationCeremonySeals = (
     return actionGeneration;
 };
 
+const foundationTransitionRecordCounts = [
+    1,
+    2,
+    1,
+    ...Array.from({ length: 2 * (participantCount - 1) }, () => 1),
+    2,
+    1,
+    2,
+    1,
+] as const;
+
+const resealCompleteInventory = (
+    logicalSeals: readonly IndependentLocalRecordSeal[],
+    transitionRecordCounts: readonly number[],
+): IndependentLocalRecordSeal[] => {
+    const retained = new Map<string, IndependentLocalRecordSeal>();
+    const physicalSeals: IndependentLocalRecordSeal[] = [];
+    let logicalOffset = 0;
+    let inventoryGeneration = 0n;
+    for (const transitionRecordCount of transitionRecordCounts) {
+        if (
+            !Number.isSafeInteger(transitionRecordCount) ||
+            transitionRecordCount < 1
+        ) {
+            throw new Error('The local inventory transition is invalid.');
+        }
+        const transitionEnd = logicalOffset + transitionRecordCount;
+        const replacements = logicalSeals.slice(logicalOffset, transitionEnd);
+        if (replacements.length !== transitionRecordCount) {
+            throw new Error('The local inventory transition is truncated.');
+        }
+        for (const replacement of replacements) {
+            retained.set(stableRecordKey(replacement), replacement);
+        }
+        inventoryGeneration += 1n;
+        for (const retainedSeal of Array.from(retained.values()).sort(
+            (left, right) =>
+                stableRecordKey(left).localeCompare(stableRecordKey(right)),
+        )) {
+            physicalSeals.push({
+                ...retainedSeal,
+                inventoryGeneration,
+            });
+        }
+        logicalOffset = transitionEnd;
+    }
+    if (logicalOffset !== logicalSeals.length) {
+        throw new Error(
+            'The local inventory transition map has trailing seals.',
+        );
+    }
+    return physicalSeals;
+};
+
 export const enumerateFullTallyLocalRecordSeals = (
     tally: IndependentPaddedTallyModel,
 ): readonly IndependentLocalRecordSeal[] => {
@@ -304,19 +363,20 @@ export const enumerateFullTallyLocalRecordSeals = (
         participantPosition < participantCount;
         participantPosition += 1
     ) {
+        const participantSeals: IndependentLocalRecordSeal[] = [];
         let actionGeneration = appendFoundationCeremonySeals(
-            seals,
+            participantSeals,
             participantPosition,
         );
         appendSeal(
-            seals,
+            participantSeals,
             participantPosition,
             localRecordObjectKinds.tallyGeneration,
             1n,
         );
         actionGeneration += 1n;
         appendSeal(
-            seals,
+            participantSeals,
             participantPosition,
             localRecordObjectKinds.action,
             actionGeneration,
@@ -327,14 +387,14 @@ export const enumerateFullTallyLocalRecordSeals = (
             chunkOrdinal += 1
         ) {
             appendSeal(
-                seals,
+                participantSeals,
                 participantPosition,
                 localRecordObjectKinds.tallyGeneration,
                 BigInt(chunkOrdinal) + 2n,
             );
             actionGeneration += 1n;
             appendSeal(
-                seals,
+                participantSeals,
                 participantPosition,
                 localRecordObjectKinds.action,
                 actionGeneration,
@@ -342,14 +402,14 @@ export const enumerateFullTallyLocalRecordSeals = (
         }
 
         appendSeal(
-            seals,
+            participantSeals,
             participantPosition,
             localRecordObjectKinds.tallyEvaluation,
             1n,
         );
         actionGeneration += 1n;
         appendSeal(
-            seals,
+            participantSeals,
             participantPosition,
             localRecordObjectKinds.action,
             actionGeneration,
@@ -360,19 +420,29 @@ export const enumerateFullTallyLocalRecordSeals = (
             chunkOrdinal += 1
         ) {
             appendSeal(
-                seals,
+                participantSeals,
                 participantPosition,
                 localRecordObjectKinds.tallyEvaluation,
                 BigInt(chunkOrdinal) + 2n,
             );
             actionGeneration += 1n;
             appendSeal(
-                seals,
+                participantSeals,
                 participantPosition,
                 localRecordObjectKinds.action,
                 actionGeneration,
             );
         }
+        const pairedTransitionRecordCounts = Array.from(
+            { length: 2 + 2 * tally.descriptors.length },
+            () => 2,
+        );
+        seals.push(
+            ...resealCompleteInventory(participantSeals, [
+                ...foundationTransitionRecordCounts,
+                ...pairedTransitionRecordCounts,
+            ]),
+        );
     }
     return seals;
 };
@@ -385,24 +455,31 @@ export const enumerateAllAbstainLocalRecordSeals =
             participantPosition < participantCount;
             participantPosition += 1
         ) {
+            const participantSeals: IndependentLocalRecordSeal[] = [];
             const actionGeneration = appendFoundationCeremonySeals(
-                seals,
+                participantSeals,
                 participantPosition,
             );
             if (participantPosition === 0) {
                 appendSeal(
-                    seals,
+                    participantSeals,
                     participantPosition,
                     localRecordObjectKinds.noResult,
                     1n,
                 );
                 appendSeal(
-                    seals,
+                    participantSeals,
                     participantPosition,
                     localRecordObjectKinds.action,
                     actionGeneration + 1n,
                 );
             }
+            seals.push(
+                ...resealCompleteInventory(participantSeals, [
+                    ...foundationTransitionRecordCounts,
+                    ...(participantPosition === 0 ? [2] : []),
+                ]),
+            );
         }
         return seals;
     };
@@ -431,12 +508,18 @@ export const compileIndependentLocalRecordCensus = (
     seals: readonly IndependentLocalRecordSeal[],
 ): IndependentLocalRecordCensus => {
     const exactContextCounts = new Map<string, number>();
+    const inventoryCommitKeys = new Set<string>();
     const retained = new Map<string, IndependentLocalRecordSeal>();
     for (const seal of seals) {
         const contextKey = localRecordContextKey(seal.contextBytes);
         exactContextCounts.set(
             contextKey,
             (exactContextCounts.get(contextKey) ?? 0) + 1,
+        );
+        inventoryCommitKeys.add(
+            `${String(seal.context.participantPosition)}:${String(
+                seal.inventoryGeneration,
+            )}`,
         );
         const stableKey = stableRecordKey(seal);
         const prior = retained.get(stableKey);
@@ -448,12 +531,18 @@ export const compileIndependentLocalRecordCensus = (
         }
     }
     return {
-        successfulSealCount: seals.length,
+        storageVisibleSealCount: seals.length,
+        distinctDerivationInputCount: exactContextCounts.size,
+        inventoryCommitCount: inventoryCommitKeys.size,
         retainedRecordCount: retained.size,
         maximumSealsPerExactContext: Math.max(
             0,
             ...exactContextCounts.values(),
         ),
+        sameContextSealPairCount: Array.from(
+            exactContextCounts.values(),
+            (count) => (BigInt(count) * BigInt(count - 1)) / 2n,
+        ).reduce((sum, count) => sum + count, 0n),
         objectKindCounts: countsByObjectKind(seals),
         retainedObjectKindCounts: countsByObjectKind(
             Array.from(retained.values()),

@@ -35,6 +35,8 @@ import {
 
 import { compileFullTallyResourceModel } from '#tests/full-tally-resource-model.js';
 import {
+    compileIndependentLocalRecordCensus,
+    enumerateFullTallyLocalRecordSeals,
     localRecordContextKey,
     parseIndependentLocalRecordContext,
 } from '#tests/local-record-context-model.js';
@@ -380,6 +382,108 @@ const deleteRawEvaluationRecord = (
     name: string,
     identifier: string,
 ): Promise<void> => deleteRawStateRecord(name, 'evaluations', identifier);
+
+type RawDurableStoreName =
+    | 'root'
+    | 'actions'
+    | 'preparations'
+    | 'slots'
+    | 'sources'
+    | 'finalities'
+    | 'activations'
+    | 'evaluations';
+
+const readRawStoreSnapshot = async (
+    name: string,
+    storeNames: readonly RawDurableStoreName[],
+): Promise<readonly (readonly unknown[])[]> => {
+    const database = await openDatabase(name);
+    try {
+        const transaction = database.transaction(storeNames, 'readonly');
+        const records = await Promise.all(
+            storeNames.map(
+                (storeName) =>
+                    new Promise<unknown[]>((resolve, reject) => {
+                        const request = transaction
+                            .objectStore(storeName)
+                            .getAll();
+                        request.addEventListener('success', () =>
+                            resolve(request.result as unknown[]),
+                        );
+                        request.addEventListener('error', () =>
+                            reject(
+                                new Error(
+                                    `Failed to snapshot raw ${storeName} state.`,
+                                ),
+                            ),
+                        );
+                    }),
+            ),
+        );
+        await transactionCompletion(transaction);
+        return records;
+    } finally {
+        database.close();
+    }
+};
+
+const restoreRawStoreSnapshot = async (
+    name: string,
+    storeNames: readonly RawDurableStoreName[],
+    records: readonly (readonly unknown[])[],
+): Promise<void> => {
+    if (storeNames.length !== records.length || storeNames.length === 0) {
+        throw new Error('The raw durable snapshot is inconsistent.');
+    }
+    const database = await openDatabase(name);
+    try {
+        const transaction = database.transaction(storeNames, 'readwrite', {
+            durability: 'strict',
+        });
+        for (let index = 0; index < storeNames.length; index += 1) {
+            const storeName = storeNames[index];
+            const storeRecords = records[index];
+            if (storeName === undefined || storeRecords === undefined) {
+                transaction.abort();
+                throw new Error('The raw durable snapshot changed shape.');
+            }
+            const store = transaction.objectStore(storeName);
+            store.clear();
+            for (const record of storeRecords) {
+                store.put(record);
+            }
+        }
+        await transactionCompletion(transaction);
+    } finally {
+        database.close();
+    }
+};
+
+const copyRawProtectedRecordWithIdentifier = (
+    record: unknown,
+    identifier: string,
+): unknown => {
+    if (
+        typeof record !== 'object' ||
+        record === null ||
+        !('id' in record) ||
+        typeof record.id !== 'string' ||
+        !('context' in record) ||
+        !(record.context instanceof ArrayBuffer) ||
+        !('nonce' in record) ||
+        !(record.nonce instanceof ArrayBuffer) ||
+        !('ciphertext' in record) ||
+        !(record.ciphertext instanceof ArrayBuffer)
+    ) {
+        throw new Error('The raw protected-record fixture is malformed.');
+    }
+    return {
+        id: identifier,
+        context: record.context.slice(0),
+        nonce: record.nonce.slice(0),
+        ciphertext: record.ciphertext.slice(0),
+    };
+};
 
 const protectedRecordByteLength = (record: unknown): number => {
     if (
@@ -1447,6 +1551,15 @@ const expectCompletePaddedTallyCeremony = async (
             if (evaluationRecordAfterFirst === undefined) {
                 throw new Error('The first evaluation checkpoint is absent.');
             }
+            const evaluationRollbackStoreNames = [
+                'root',
+                'actions',
+                'evaluations',
+            ] as const;
+            const firstEvaluationRollbackSubset = await readRawStoreSnapshot(
+                databaseName(runIdentity, 0),
+                evaluationRollbackStoreNames,
+            );
             const secondChunks = await readRelayChunkSet(relayDatabaseName, 1);
             const second = await evaluator.evaluatePaddedTallyChunk(
                 actionContext(0),
@@ -1461,6 +1574,10 @@ const expectCompletePaddedTallyCeremony = async (
             if (evaluationRecordAfterSecond === undefined) {
                 throw new Error('The second evaluation checkpoint is absent.');
             }
+            const secondEvaluationRollbackSubset = await readRawStoreSnapshot(
+                databaseName(runIdentity, 0),
+                evaluationRollbackStoreNames,
+            );
             await restoreRawEvaluationRecord(
                 databaseName(runIdentity, 0),
                 evaluationRecordAfterFirst,
@@ -1471,10 +1588,27 @@ const expectCompletePaddedTallyCeremony = async (
                     1,
                     secondChunks,
                 ),
-            ).rejects.toMatchObject({ name: 'Conflict' });
+            ).rejects.toMatchObject({ name: 'StateLost' });
             await restoreRawEvaluationRecord(
                 databaseName(runIdentity, 0),
                 evaluationRecordAfterSecond,
+            );
+            await restoreRawStoreSnapshot(
+                databaseName(runIdentity, 0),
+                evaluationRollbackStoreNames,
+                firstEvaluationRollbackSubset,
+            );
+            await expect(
+                evaluator.evaluatePaddedTallyChunk(
+                    actionContext(0),
+                    1,
+                    secondChunks,
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            await restoreRawStoreSnapshot(
+                databaseName(runIdentity, 0),
+                evaluationRollbackStoreNames,
+                secondEvaluationRollbackSubset,
             );
             for (
                 let chunkOrdinal = 2;
@@ -1872,6 +2006,38 @@ const expectCompletePaddedTallyCeremony = async (
         topCount,
         ballots.filter((ballot) => ballot.declaration === 'submit').length,
     );
+    const localRecordCensus = compileIndependentLocalRecordCensus(
+        enumerateFullTallyLocalRecordSeals(independentModel),
+    );
+    const inventoryGenerations = await Promise.all(
+        Array.from({ length: participantCount }, async (_, position) => {
+            const rootSnapshot = await readRawStoreSnapshot(
+                databaseName(runIdentity, position),
+                ['root'],
+            );
+            const root = rootSnapshot[0]?.[0];
+            if (
+                typeof root !== 'object' ||
+                root === null ||
+                !('generation' in root) ||
+                typeof root.generation !== 'bigint'
+            ) {
+                throw new Error(
+                    'The retained root inventory generation is malformed.',
+                );
+            }
+            return root.generation;
+        }),
+    );
+    const expectedInventoryGeneration = BigInt(
+        localRecordCensus.inventoryCommitCount / participantCount,
+    );
+    expect(inventoryGenerations).toEqual(
+        Array.from(
+            { length: participantCount },
+            () => expectedInventoryGeneration,
+        ),
+    );
     expect(independentResourceModel).toMatchObject({
         activationChunkCorpusByteLength,
         activationInventoryByteLength,
@@ -2111,6 +2277,81 @@ describe('private preparation worker in Chromium', () => {
             });
             closeClient(restoredRecipient);
 
+            const firstRecipientDatabaseName = databaseName(
+                runIdentity,
+                firstRecipientPosition,
+            );
+            const retainedSlotSnapshot = await readRawStoreSnapshot(
+                firstRecipientDatabaseName,
+                ['slots'],
+            );
+            await restoreRawStoreSnapshot(
+                firstRecipientDatabaseName,
+                ['slots'],
+                [[]],
+            );
+            const deletedSlotRecipient = await openClient(
+                runIdentity,
+                firstRecipientPosition,
+            );
+            await expect(
+                deletedSlotRecipient.consumePrivatePreparation(
+                    actionContext(firstRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    firstPackage.parentBody,
+                    firstPackage.parentSignature,
+                    firstPrivateBody,
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            closeClient(deletedSlotRecipient);
+            await restoreRawStoreSnapshot(
+                firstRecipientDatabaseName,
+                ['slots'],
+                retainedSlotSnapshot,
+            );
+            const retainedSlotRecords = retainedSlotSnapshot[0];
+            const retainedSlotRecord = retainedSlotRecords?.[0];
+            if (
+                retainedSlotRecords === undefined ||
+                retainedSlotRecord === undefined
+            ) {
+                throw new Error('The retained slot fixture is empty.');
+            }
+            await restoreRawStoreSnapshot(
+                firstRecipientDatabaseName,
+                ['slots'],
+                [
+                    [
+                        ...retainedSlotRecords,
+                        copyRawProtectedRecordWithIdentifier(
+                            retainedSlotRecord,
+                            'unexpected-protected-slot',
+                        ),
+                    ],
+                ],
+            );
+            const insertedSlotRecipient = await openClient(
+                runIdentity,
+                firstRecipientPosition,
+            );
+            await expect(
+                insertedSlotRecipient.consumePrivatePreparation(
+                    actionContext(firstRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    firstPackage.parentBody,
+                    firstPackage.parentSignature,
+                    firstPrivateBody,
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            closeClient(insertedSlotRecipient);
+            await restoreRawStoreSnapshot(
+                firstRecipientDatabaseName,
+                ['slots'],
+                retainedSlotSnapshot,
+            );
+
             const crashSenderPosition = 3;
             const crashRecipientPosition = 9;
             const crashPackage = preparationPackages[crashSenderPosition];
@@ -2312,6 +2553,16 @@ describe('private preparation worker in Chromium', () => {
             await sourceBoundary;
             crashWorker.terminate();
 
+            const sourceRollbackStoreNames = [
+                'root',
+                'actions',
+                'sources',
+            ] as const;
+            const boundSourceRollbackSubset = await readRawStoreSnapshot(
+                databaseName(runIdentity, sourcePosition),
+                sourceRollbackStoreNames,
+            );
+
             const recoveredSource = await openClient(
                 runIdentity,
                 sourcePosition,
@@ -2354,6 +2605,38 @@ describe('private preparation worker in Chromium', () => {
                 ),
             ).rejects.toThrow();
             closeClient(recoveredSource);
+
+            const publishedSourceRollbackSubset = await readRawStoreSnapshot(
+                databaseName(runIdentity, sourcePosition),
+                sourceRollbackStoreNames,
+            );
+            await restoreRawStoreSnapshot(
+                databaseName(runIdentity, sourcePosition),
+                sourceRollbackStoreNames,
+                boundSourceRollbackSubset,
+            );
+            const rolledBackSource = await openClient(
+                runIdentity,
+                sourcePosition,
+            );
+            await expect(
+                rolledBackSource.createSourcePackage(
+                    actionContext(sourcePosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    {
+                        declaration: 'submit',
+                        scoreEncodings: submittedScores,
+                    },
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            closeClient(rolledBackSource);
+            await restoreRawStoreSnapshot(
+                databaseName(runIdentity, sourcePosition),
+                sourceRollbackStoreNames,
+                publishedSourceRollbackSubset,
+            );
 
             const restoredSource = await openClient(
                 runIdentity,
@@ -2599,6 +2882,15 @@ describe('private preparation worker in Chromium', () => {
                     'The generation initialization crash omitted its durable checkpoint.',
                 );
             }
+            const rollbackSubsetStoreNames = [
+                'root',
+                'actions',
+                'activations',
+            ] as const;
+            const allocatedRollbackSubset = await readRawStoreSnapshot(
+                databaseName(runIdentity, activationPosition),
+                rollbackSubsetStoreNames,
+            );
             const activationClient = await openClient(
                 runIdentity,
                 activationPosition,
@@ -2660,6 +2952,10 @@ describe('private preparation worker in Chromium', () => {
                     'The chunk crash boundary omitted retained chunk state.',
                 );
             }
+            const persistedRollbackSubset = await readRawStoreSnapshot(
+                databaseName(runIdentity, activationPosition),
+                rollbackSubsetStoreNames,
+            );
             const restoredChunkClient = await openClient(
                 runIdentity,
                 activationPosition,
@@ -2702,11 +2998,33 @@ describe('private preparation worker in Chromium', () => {
                     actionContext(activationPosition),
                     0,
                 ),
-            ).rejects.toMatchObject({ name: 'Conflict' });
+            ).rejects.toMatchObject({ name: 'StateLost' });
             closeClient(rollbackClient);
             await restoreRawActivationRecord(
                 databaseName(runIdentity, activationPosition),
                 persistedChunkRecord,
+            );
+
+            await restoreRawStoreSnapshot(
+                databaseName(runIdentity, activationPosition),
+                rollbackSubsetStoreNames,
+                allocatedRollbackSubset,
+            );
+            const coordinatedRollbackClient = await openClient(
+                runIdentity,
+                activationPosition,
+            );
+            await expect(
+                coordinatedRollbackClient.createPaddedTallyChunk(
+                    actionContext(activationPosition),
+                    0,
+                ),
+            ).rejects.toMatchObject({ name: 'StateLost' });
+            closeClient(coordinatedRollbackClient);
+            await restoreRawStoreSnapshot(
+                databaseName(runIdentity, activationPosition),
+                rollbackSubsetStoreNames,
+                persistedRollbackSubset,
             );
 
             const lastChunkOrdinal = initialization.plan.chunks.length - 1;
@@ -2796,7 +3114,7 @@ describe('private preparation worker in Chromium', () => {
                     actionContext(activationPosition),
                     lastChunkOrdinal,
                 ),
-            ).rejects.toMatchObject({ name: 'Conflict' });
+            ).rejects.toMatchObject({ name: 'StateLost' });
             closeClient(publicationRollbackClient);
             await restoreRawActivationRecord(
                 databaseName(runIdentity, activationPosition),

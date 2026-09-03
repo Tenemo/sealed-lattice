@@ -298,31 +298,82 @@ type IndependentFieldPairIdentifiers = readonly [
     number,
 ];
 
+type InactiveLabelProtection =
+    | 'no-plaintext-carrier'
+    | 'direct-row-switched'
+    | 'continuation-row-switched'
+    | 'pending-producer';
+
 class IndependentLabelFanOutCensus {
     readonly outputCountPerLabel: number[] = [];
+    readonly #inactiveLabelProtection: InactiveLabelProtection[] = [];
 
-    newPair(): number {
+    newPair(
+        protection: InactiveLabelProtection = 'no-plaintext-carrier',
+    ): number {
         const identifier = this.outputCountPerLabel.length;
         this.outputCountPerLabel.push(0);
+        this.#inactiveLabelProtection.push(protection);
         return identifier;
     }
 
-    newFieldPairs(): IndependentFieldPairIdentifiers {
-        return [this.newPair(), this.newPair(), this.newPair(), this.newPair()];
+    newFieldPairs(
+        protection: InactiveLabelProtection = 'no-plaintext-carrier',
+    ): IndependentFieldPairIdentifiers {
+        return [
+            this.newPair(protection),
+            this.newPair(protection),
+            this.newPair(protection),
+            this.newPair(protection),
+        ];
     }
 
     appendLocalGate(left: number, right: number, output?: number): number {
         this.addOutputs(left, 2);
         this.addOutputs(right, 2);
-        return output ?? this.newPair();
+        if (output === undefined) {
+            return this.newPair('direct-row-switched');
+        }
+        this.protectProducedPair(output, 'direct-row-switched');
+        return output;
     }
 
     addOutputs(pair: number, count: number): void {
         const current = this.outputCountPerLabel[pair];
-        if (current === undefined) {
+        const protection = this.#inactiveLabelProtection[pair];
+        if (current === undefined || protection === undefined) {
             throw new Error('The independent KMAC census has an invalid pair.');
         }
+        if (protection === 'pending-producer') {
+            throw new Error(
+                'The independent KMAC census used an inactive label before hiding its plaintext carrier.',
+            );
+        }
         this.outputCountPerLabel[pair] = current + count;
+    }
+
+    protectProducedPair(
+        pair: number,
+        protection: 'direct-row-switched' | 'continuation-row-switched',
+    ): void {
+        if (this.#inactiveLabelProtection[pair] !== 'pending-producer') {
+            throw new Error(
+                'The independent KMAC census has an invalid producer transition.',
+            );
+        }
+        this.#inactiveLabelProtection[pair] = protection;
+    }
+
+    finish(): void {
+        if (
+            this.#inactiveLabelProtection.some(
+                (protection) => protection === 'pending-producer',
+            )
+        ) {
+            throw new Error(
+                'The independent KMAC census left an inactive-label plaintext carrier unprotected.',
+            );
+        }
     }
 
     multiplyFields(
@@ -411,7 +462,7 @@ const compileIndependentKmacCensus = (
                     fieldPairs(operation.rightWire),
                 );
                 const mask = census.newFieldPairs();
-                const masked = census.newFieldPairs();
+                const masked = census.newFieldPairs('pending-producer');
                 for (let basis = 0; basis < 4; basis += 1) {
                     const productPair = requireArrayItem(
                         product,
@@ -427,7 +478,17 @@ const compileIndependentKmacCensus = (
                     census.appendLocalGate(productPair, maskPair, maskedPair);
                     census.addOutputs(maskedPair, completionParticipantCount);
                 }
-                wirePairs[outputWire] = census.newFieldPairs();
+                const refreshed: IndependentFieldPairIdentifiers = [
+                    census.newPair('pending-producer'),
+                    census.newPair(),
+                    census.newPair(),
+                    census.newPair(),
+                ];
+                census.protectProducedPair(
+                    refreshed[0],
+                    'continuation-row-switched',
+                );
+                wirePairs[outputWire] = refreshed;
                 break;
             }
             case 'negation':
@@ -439,7 +500,7 @@ const compileIndependentKmacCensus = (
     for (const outputWire of outputWires) {
         const input = fieldPairs(outputWire);
         const mask = census.newFieldPairs();
-        const output = census.newFieldPairs();
+        const output = census.newFieldPairs('pending-producer');
         for (let basis = 0; basis < 4; basis += 1) {
             census.appendLocalGate(
                 requireArrayItem(input, basis, 'terminal input pair'),
@@ -448,6 +509,8 @@ const compileIndependentKmacCensus = (
             );
         }
     }
+
+    census.finish();
 
     const labelFanOutDistribution = new Map<number, number>();
     let labelOutputCount = 0;

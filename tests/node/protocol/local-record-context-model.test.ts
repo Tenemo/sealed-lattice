@@ -40,43 +40,54 @@ describe('independent local-record context model', () => {
         ).toThrow(/length/u);
     });
 
-    it('enumerates one successful seal per exact context for every output width', () => {
+    it('enumerates every full-inventory reseal for every output width', () => {
         for (let topCount = 1; topCount <= 10; topCount += 1) {
             const tally = compileIndependentPaddedTallyModel(topCount);
             const seals = enumerateFullTallyLocalRecordSeals(tally);
             const census = compileIndependentLocalRecordCensus(seals);
-            expect(census.successfulSealCount).toBe(
+            expect(census.storageVisibleSealCount).toBe(
+                10 * (210 + 29 * tally.descriptors.length),
+            );
+            expect(census.distinctDerivationInputCount).toBe(
                 10 * (32 + 4 * tally.descriptors.length),
             );
+            expect(census.inventoryCommitCount).toBe(
+                10 * (27 + 2 * tally.descriptors.length),
+            );
             expect(census.retainedRecordCount).toBe(150);
-            expect(census.maximumSealsPerExactContext).toBe(1);
+            expect(census.maximumSealsPerExactContext).toBe(
+                25 + 2 * tally.descriptors.length,
+            );
             expect(
                 new Set(
                     seals.map(({ contextBytes }) =>
                         localRecordContextKey(contextBytes),
                     ),
                 ).size,
-            ).toBe(seals.length);
+            ).toBe(census.distinctDerivationInputCount);
         }
     });
 
-    it('regenerates the maximum-width successful and retained record census', () => {
+    it('regenerates the maximum-width storage-visible and retained record census', () => {
         const census = compileIndependentLocalRecordCensus(
             enumerateFullTallyLocalRecordSeals(
                 compileIndependentPaddedTallyModel(10),
             ),
         );
         expect(census).toEqual({
-            successfulSealCount: 2_920,
+            storageVisibleSealCount: 20_950,
+            distinctDerivationInputCount: 2_920,
+            inventoryCommitCount: 1_570,
             retainedRecordCount: 150,
-            maximumSealsPerExactContext: 1,
+            maximumSealsPerExactContext: 155,
+            sameContextSealPairCount: 1_262_410n,
             objectKindCounts: {
-                [localRecordObjectKinds.action]: 1_360,
-                [localRecordObjectKinds.preparation]: 20,
-                [localRecordObjectKinds.privatePreparationSlot]: 180,
-                [localRecordObjectKinds.source]: 20,
-                [localRecordObjectKinds.finality]: 20,
-                [localRecordObjectKinds.tallyGeneration]: 660,
+                [localRecordObjectKinds.action]: 1_570,
+                [localRecordObjectKinds.preparation]: 1_560,
+                [localRecordObjectKinds.privatePreparationSlot]: 13_140,
+                [localRecordObjectKinds.source]: 1_360,
+                [localRecordObjectKinds.finality]: 1_340,
+                [localRecordObjectKinds.tallyGeneration]: 1_320,
                 [localRecordObjectKinds.tallyEvaluation]: 660,
             },
             retainedObjectKindCounts: {
@@ -89,7 +100,7 @@ describe('independent local-record context model', () => {
                 [localRecordObjectKinds.tallyEvaluation]: 10,
             },
         });
-        expect(census.successfulSealCount).toBeLessThan(2 ** 30);
+        expect(census.storageVisibleSealCount).toBeLessThan(2 ** 30);
     });
 
     it('regenerates the all-abstain terminal schedule', () => {
@@ -97,15 +108,18 @@ describe('independent local-record context model', () => {
             enumerateAllAbstainLocalRecordSeals(),
         );
         expect(census).toEqual({
-            successfulSealCount: 282,
+            storageVisibleSealCount: 1_824,
+            distinctDerivationInputCount: 282,
+            inventoryCommitCount: 251,
             retainedRecordCount: 131,
-            maximumSealsPerExactContext: 1,
+            maximumSealsPerExactContext: 24,
+            sameContextSealPairCount: 12_844n,
             objectKindCounts: {
-                [localRecordObjectKinds.action]: 41,
-                [localRecordObjectKinds.preparation]: 20,
-                [localRecordObjectKinds.privatePreparationSlot]: 180,
-                [localRecordObjectKinds.source]: 20,
-                [localRecordObjectKinds.finality]: 20,
+                [localRecordObjectKinds.action]: 251,
+                [localRecordObjectKinds.preparation]: 241,
+                [localRecordObjectKinds.privatePreparationSlot]: 1_269,
+                [localRecordObjectKinds.source]: 41,
+                [localRecordObjectKinds.finality]: 21,
                 [localRecordObjectKinds.noResult]: 1,
             },
             retainedObjectKindCounts: {

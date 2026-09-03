@@ -47,7 +47,25 @@ type ProtectedRecordStorageMeasurement = Readonly<{
 type RootRecord = Readonly<{
     id: typeof rootRecordIdentifier;
     key: CryptoKey;
+    generation: bigint;
+    inventoryAuthenticator: ArrayBuffer;
 }>;
+
+type StoredProtectedRecord = Readonly<{
+    storeName: ProtectedStoreName;
+    record: ProtectedRecord;
+}>;
+
+type DurableStateSnapshot = Readonly<{
+    root: RootRecord | undefined;
+    records: readonly StoredProtectedRecord[];
+}>;
+
+const rootInventoryAuthenticatorByteLength = 32;
+const rootInventoryDomain = new TextEncoder().encode(
+    'sealed-lattice.browser-local-inventory.v1',
+);
+const maximumInventoryGeneration = (1n << 32n) - 1n;
 
 export class DurableStateError extends Error {
     constructor(
@@ -197,6 +215,13 @@ const cloneProtectedRecord = (record: ProtectedRecord): ProtectedRecord => ({
     ciphertext: copyArrayBuffer(record.ciphertext),
 });
 
+const cloneRootRecord = (record: RootRecord): RootRecord => ({
+    id: rootRecordIdentifier,
+    key: record.key,
+    generation: record.generation,
+    inventoryAuthenticator: copyArrayBuffer(record.inventoryAuthenticator),
+});
+
 const validateRootKey = (value: unknown): CryptoKey => {
     if (!(value instanceof CryptoKey)) {
         throw new DurableStateError(
@@ -227,14 +252,202 @@ const validateRootRecord = (value: unknown): RootRecord => {
         );
     }
     const candidate = value as Partial<RootRecord>;
-    if (candidate.id !== rootRecordIdentifier) {
+    if (
+        candidate.id !== rootRecordIdentifier ||
+        typeof candidate.generation !== 'bigint' ||
+        candidate.generation < 1n ||
+        candidate.generation > maximumInventoryGeneration ||
+        !isArrayBuffer(candidate.inventoryAuthenticator) ||
+        candidate.inventoryAuthenticator.byteLength !==
+            rootInventoryAuthenticatorByteLength
+    ) {
         throw new DurableStateError(
             'CorruptState',
-            'The browser-local root record has the wrong identity.',
+            'The browser-local root record has invalid identity or inventory fields.',
         );
     }
-    return { id: rootRecordIdentifier, key: validateRootKey(candidate.key) };
+    return {
+        id: rootRecordIdentifier,
+        key: validateRootKey(candidate.key),
+        generation: candidate.generation,
+        inventoryAuthenticator: copyArrayBuffer(
+            candidate.inventoryAuthenticator,
+        ),
+    };
 };
+
+const compareStoredProtectedRecords = (
+    left: StoredProtectedRecord,
+    right: StoredProtectedRecord,
+): number => {
+    const storeOrder =
+        protectedStoreNames.indexOf(left.storeName) -
+        protectedStoreNames.indexOf(right.storeName);
+    if (storeOrder !== 0) {
+        return storeOrder;
+    }
+    return left.record.id < right.record.id
+        ? -1
+        : left.record.id > right.record.id
+          ? 1
+          : 0;
+};
+
+const normalizeStoredProtectedRecords = (
+    records: readonly StoredProtectedRecord[],
+): StoredProtectedRecord[] =>
+    records
+        .map(({ storeName, record }) => ({
+            storeName,
+            record: cloneProtectedRecord(record),
+        }))
+        .sort(compareStoredProtectedRecords);
+
+const storedProtectedRecordSetsEqual = (
+    left: readonly StoredProtectedRecord[],
+    right: readonly StoredProtectedRecord[],
+): boolean =>
+    left.length === right.length &&
+    left.every((entry, index) => {
+        const other = right[index];
+        return (
+            other !== undefined &&
+            entry.storeName === other.storeName &&
+            protectedRecordsEqual(entry.record, other.record)
+        );
+    });
+
+const checkedUnsigned32 = (value: number, name: string): number => {
+    if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
+        throw new DurableStateError(
+            'CorruptState',
+            `The browser-local ${name} exceeds its canonical bound.`,
+        );
+    }
+    return value;
+};
+
+const encodeInventoryAuthenticatorInput = (
+    generation: bigint,
+    records: readonly StoredProtectedRecord[],
+): Uint8Array<ArrayBuffer> => {
+    if (generation < 1n || generation > maximumInventoryGeneration) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The browser-local inventory generation is invalid.',
+        );
+    }
+    const normalized = normalizeStoredProtectedRecords(records);
+    const textEncoder = new TextEncoder();
+    const encodedIdentifiers = normalized.map(({ record }) =>
+        textEncoder.encode(record.id),
+    );
+    let byteLength = rootInventoryDomain.byteLength + 8 + 4;
+    for (let index = 0; index < normalized.length; index += 1) {
+        const entry = normalized[index];
+        const encodedIdentifier = encodedIdentifiers[index];
+        if (entry === undefined || encodedIdentifier === undefined) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The browser-local inventory is inconsistent.',
+            );
+        }
+        checkedUnsigned32(encodedIdentifier.byteLength, 'record identity');
+        checkedUnsigned32(entry.record.context.byteLength, 'record context');
+        checkedUnsigned32(entry.record.nonce.byteLength, 'record nonce');
+        checkedUnsigned32(
+            entry.record.ciphertext.byteLength,
+            'record ciphertext',
+        );
+        byteLength +=
+            1 +
+            4 +
+            encodedIdentifier.byteLength +
+            4 +
+            entry.record.context.byteLength +
+            4 +
+            entry.record.nonce.byteLength +
+            4 +
+            entry.record.ciphertext.byteLength;
+        if (!Number.isSafeInteger(byteLength)) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The browser-local inventory is too large to authenticate.',
+            );
+        }
+    }
+    checkedUnsigned32(normalized.length, 'record count');
+    const bytes = new Uint8Array(new ArrayBuffer(byteLength));
+    const view = new DataView(bytes.buffer);
+    let offset = 0;
+    bytes.set(rootInventoryDomain, offset);
+    offset += rootInventoryDomain.byteLength;
+    view.setBigUint64(offset, generation, true);
+    offset += 8;
+    view.setUint32(offset, normalized.length, true);
+    offset += 4;
+    for (let index = 0; index < normalized.length; index += 1) {
+        const entry = normalized[index];
+        const encodedIdentifier = encodedIdentifiers[index];
+        if (entry === undefined || encodedIdentifier === undefined) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The browser-local inventory changed during encoding.',
+            );
+        }
+        const storeOrdinal = protectedStoreNames.indexOf(entry.storeName);
+        if (storeOrdinal < 0) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The browser-local inventory names an unknown store.',
+            );
+        }
+        bytes[offset] = storeOrdinal;
+        offset += 1;
+        view.setUint32(offset, encodedIdentifier.byteLength, true);
+        offset += 4;
+        bytes.set(encodedIdentifier, offset);
+        offset += encodedIdentifier.byteLength;
+        for (const field of [
+            entry.record.context,
+            entry.record.nonce,
+            entry.record.ciphertext,
+        ]) {
+            view.setUint32(offset, field.byteLength, true);
+            offset += 4;
+            bytes.set(new Uint8Array(field), offset);
+            offset += field.byteLength;
+        }
+    }
+    if (offset !== bytes.byteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The browser-local inventory encoding is inconsistent.',
+        );
+    }
+    return bytes;
+};
+
+const authenticateInventory = async (
+    rootKey: CryptoKey,
+    generation: bigint,
+    records: readonly StoredProtectedRecord[],
+): Promise<ArrayBuffer> => {
+    validateRootKey(rootKey);
+    const input = encodeInventoryAuthenticatorInput(generation, records);
+    try {
+        return await crypto.subtle.sign('HMAC', rootKey, input.buffer);
+    } finally {
+        input.fill(0);
+    }
+};
+
+const rootRecordMetadataEqual = (
+    left: RootRecord,
+    right: RootRecord,
+): boolean =>
+    left.generation === right.generation &&
+    bytesEqual(left.inventoryAuthenticator, right.inventoryAuthenticator);
 
 const requirePersistentStorage = async (): Promise<void> => {
     const storage = navigator.storage;
@@ -311,88 +524,253 @@ export class PrivatePreparationDurableState {
         );
     }
 
-    async readRoot(): Promise<CryptoKey | undefined> {
+    async #readVerifiedSnapshot(): Promise<DurableStateSnapshot> {
         const transaction = this.#database.transaction(
-            rootStoreName,
+            [rootStoreName, ...protectedStoreNames],
             'readonly',
         );
-        const value = await unknownRequestResult(
-            transaction.objectStore(rootStoreName).get(rootRecordIdentifier),
-        );
-        await transactionCompletion(transaction);
-        return value === undefined ? undefined : validateRootRecord(value).key;
-    }
-
-    async readProtected(
-        storeName: ProtectedStoreName,
-        identifier: string,
-    ): Promise<ProtectedRecord | undefined> {
-        const transaction = this.#database.transaction(storeName, 'readonly');
-        const value = await unknownRequestResult(
-            transaction.objectStore(storeName).get(identifier),
-        );
-        await transactionCompletion(transaction);
-        if (value === undefined) {
-            return undefined;
-        }
-        if (!isProtectedRecord(value)) {
-            throw new DurableStateError(
-                'CorruptState',
-                'A protected browser-local record is malformed.',
-            );
-        }
-        return cloneProtectedRecord(value);
-    }
-
-    async countProtectedRecords(): Promise<number> {
-        const transaction = this.#database.transaction(
-            protectedStoreNames,
-            'readonly',
-        );
-        const counts = await Promise.all(
-            protectedStoreNames.map((storeName) =>
-                requestResult<number>(
-                    transaction.objectStore(storeName).count(),
-                ),
+        const [unknownRoots, ...unknownStoreRecords] = await Promise.all([
+            unknownRequestResult(
+                transaction.objectStore(rootStoreName).getAll(),
             ),
-        );
-        await transactionCompletion(transaction);
-        return counts.reduce((sum, count) => sum + count, 0);
-    }
-
-    async measureProtectedRecords(): Promise<
-        readonly ProtectedRecordStorageMeasurement[]
-    > {
-        const transaction = this.#database.transaction(
-            protectedStoreNames,
-            'readonly',
-        );
-        const values = await Promise.all(
-            protectedStoreNames.map((storeName) =>
+            ...protectedStoreNames.map((storeName) =>
                 unknownRequestResult(
                     transaction.objectStore(storeName).getAll(),
                 ),
             ),
-        );
+        ]);
         await transactionCompletion(transaction);
-        const textEncoder = new TextEncoder();
-        return values.map((unknownRecords, storeIndex) => {
+        if (!Array.isArray(unknownRoots)) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The browser-local root store is malformed.',
+            );
+        }
+        const records: StoredProtectedRecord[] = [];
+        for (
+            let storeIndex = 0;
+            storeIndex < protectedStoreNames.length;
+            storeIndex += 1
+        ) {
             const storeName = protectedStoreNames[storeIndex];
+            const unknownRecords = unknownStoreRecords[storeIndex];
             if (storeName === undefined || !Array.isArray(unknownRecords)) {
                 throw new DurableStateError(
                     'CorruptState',
                     'A protected browser-local store is malformed.',
                 );
             }
-            const records = unknownRecords.map((value) => {
+            for (const value of unknownRecords) {
                 if (!isProtectedRecord(value)) {
                     throw new DurableStateError(
                         'CorruptState',
                         'A protected browser-local record is malformed.',
                     );
                 }
-                return value;
-            });
+                records.push({
+                    storeName,
+                    record: cloneProtectedRecord(value),
+                });
+            }
+        }
+        const normalizedRecords = normalizeStoredProtectedRecords(records);
+        if (unknownRoots.length === 0) {
+            if (normalizedRecords.length !== 0) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The browser-local root is absent while protected state remains.',
+                );
+            }
+            return { root: undefined, records: normalizedRecords };
+        }
+        if (unknownRoots.length !== 1) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The browser-local root store has an invalid inventory.',
+            );
+        }
+        const root = validateRootRecord(unknownRoots[0]);
+        const computedAuthenticator = await authenticateInventory(
+            root.key,
+            root.generation,
+            normalizedRecords,
+        );
+        if (!bytesEqual(root.inventoryAuthenticator, computedAuthenticator)) {
+            throw new DurableStateError(
+                'StateLost',
+                'The protected browser-local inventory does not match its root capability.',
+            );
+        }
+        return { root, records: normalizedRecords };
+    }
+
+    async #commitReboundInventory(
+        previous: DurableStateSnapshot,
+        desiredRecords: readonly StoredProtectedRecord[],
+    ): Promise<void> {
+        if (previous.root === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for a durable transition.',
+            );
+        }
+        if (previous.root.generation === maximumInventoryGeneration) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local inventory generation is exhausted.',
+            );
+        }
+        const normalizedDesiredRecords =
+            normalizeStoredProtectedRecords(desiredRecords);
+        const nextGeneration = previous.root.generation + 1n;
+        const resealedRecords: StoredProtectedRecord[] = [];
+        for (const { storeName, record } of normalizedDesiredRecords) {
+            const context = new Uint8Array(record.context);
+            let plaintext: Uint8Array | undefined;
+            try {
+                plaintext = await openProtectedRecord(
+                    record,
+                    context,
+                    previous.root.key,
+                );
+                resealedRecords.push({
+                    storeName,
+                    record: await createInventoryProtectedRecord(
+                        record.id,
+                        context,
+                        plaintext,
+                        previous.root.key,
+                        nextGeneration,
+                    ),
+                });
+            } finally {
+                context.fill(0);
+                plaintext?.fill(0);
+            }
+        }
+        const nextRoot: RootRecord = {
+            id: rootRecordIdentifier,
+            key: previous.root.key,
+            generation: nextGeneration,
+            inventoryAuthenticator: await authenticateInventory(
+                previous.root.key,
+                nextGeneration,
+                resealedRecords,
+            ),
+        };
+        const transaction = this.#database.transaction(
+            [rootStoreName, ...protectedStoreNames],
+            'readwrite',
+            { durability: 'strict' },
+        );
+        const completion = transactionCompletion(transaction);
+        const [unknownRoots, ...unknownStoreRecords] = await Promise.all([
+            unknownRequestResult(
+                transaction.objectStore(rootStoreName).getAll(),
+            ),
+            ...protectedStoreNames.map((storeName) =>
+                unknownRequestResult(
+                    transaction.objectStore(storeName).getAll(),
+                ),
+            ),
+        ]);
+        let currentRoot: RootRecord | undefined;
+        const currentRecords: StoredProtectedRecord[] = [];
+        try {
+            if (!Array.isArray(unknownRoots) || unknownRoots.length !== 1) {
+                throw new DurableStateError(
+                    'Conflict',
+                    'The browser-local root changed before commit.',
+                );
+            }
+            currentRoot = validateRootRecord(unknownRoots[0]);
+            for (
+                let storeIndex = 0;
+                storeIndex < protectedStoreNames.length;
+                storeIndex += 1
+            ) {
+                const storeName = protectedStoreNames[storeIndex];
+                const unknownRecords = unknownStoreRecords[storeIndex];
+                if (storeName === undefined || !Array.isArray(unknownRecords)) {
+                    throw new DurableStateError(
+                        'Conflict',
+                        'A protected browser-local store changed before commit.',
+                    );
+                }
+                for (const value of unknownRecords) {
+                    if (!isProtectedRecord(value)) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'A protected browser-local record changed before commit.',
+                        );
+                    }
+                    currentRecords.push({
+                        storeName,
+                        record: cloneProtectedRecord(value),
+                    });
+                }
+            }
+        } catch (error) {
+            transaction.abort();
+            await completion.catch(() => undefined);
+            throw error;
+        }
+        if (
+            currentRoot === undefined ||
+            !rootRecordMetadataEqual(currentRoot, previous.root) ||
+            !storedProtectedRecordSetsEqual(
+                normalizeStoredProtectedRecords(currentRecords),
+                previous.records,
+            )
+        ) {
+            transaction.abort();
+            await completion.catch(() => undefined);
+            throw new DurableStateError(
+                'Conflict',
+                'The complete durable predecessor changed before commit.',
+            );
+        }
+        transaction.objectStore(rootStoreName).clear();
+        for (const storeName of protectedStoreNames) {
+            transaction.objectStore(storeName).clear();
+        }
+        transaction.objectStore(rootStoreName).put(cloneRootRecord(nextRoot));
+        for (const { storeName, record } of resealedRecords) {
+            transaction
+                .objectStore(storeName)
+                .put(cloneProtectedRecord(record));
+        }
+        await completion;
+    }
+
+    async readRoot(): Promise<CryptoKey | undefined> {
+        return (await this.#readVerifiedSnapshot()).root?.key;
+    }
+
+    async readProtected(
+        storeName: ProtectedStoreName,
+        identifier: string,
+    ): Promise<ProtectedRecord | undefined> {
+        const snapshot = await this.#readVerifiedSnapshot();
+        return snapshot.records.find(
+            (entry) =>
+                entry.storeName === storeName && entry.record.id === identifier,
+        )?.record;
+    }
+
+    async countProtectedRecords(): Promise<number> {
+        return (await this.#readVerifiedSnapshot()).records.length;
+    }
+
+    async measureProtectedRecords(): Promise<
+        readonly ProtectedRecordStorageMeasurement[]
+    > {
+        const snapshot = await this.#readVerifiedSnapshot();
+        const textEncoder = new TextEncoder();
+        return protectedStoreNames.map((storeName) => {
+            const records = snapshot.records
+                .filter((entry) => entry.storeName === storeName)
+                .map((entry) => entry.record);
             return {
                 storeName,
                 recordCount: records.length,
@@ -422,6 +800,40 @@ export class PrivatePreparationDurableState {
         action: ProtectedRecord,
     ): Promise<void> {
         validateRootKey(rootKey);
+        const generation = 1n;
+        const actionContext = new Uint8Array(action.context);
+        let actionPlaintext: Uint8Array | undefined;
+        let retainedAction: ProtectedRecord;
+        try {
+            actionPlaintext = await openProtectedRecord(
+                action,
+                actionContext,
+                rootKey,
+            );
+            retainedAction = await createInventoryProtectedRecord(
+                action.id,
+                actionContext,
+                actionPlaintext,
+                rootKey,
+                generation,
+            );
+        } finally {
+            actionContext.fill(0);
+            actionPlaintext?.fill(0);
+        }
+        const records = normalizeStoredProtectedRecords([
+            { storeName: actionStoreName, record: retainedAction },
+        ]);
+        const root: RootRecord = {
+            id: rootRecordIdentifier,
+            key: rootKey,
+            generation,
+            inventoryAuthenticator: await authenticateInventory(
+                rootKey,
+                generation,
+                records,
+            ),
+        };
         const transaction = this.#database.transaction(
             [rootStoreName, ...protectedStoreNames],
             'readwrite',
@@ -430,9 +842,7 @@ export class PrivatePreparationDurableState {
         const completion = transactionCompletion(transaction);
         const rootStore = transaction.objectStore(rootStoreName);
         const actionStore = transaction.objectStore(actionStoreName);
-        const existingRoot = await unknownRequestResult(
-            rootStore.get(rootRecordIdentifier),
-        );
+        const rootCount = await requestResult<number>(rootStore.count());
         const existingAction = await unknownRequestResult(
             actionStore.get(action.id),
         );
@@ -444,7 +854,7 @@ export class PrivatePreparationDurableState {
             ),
         );
         if (
-            existingRoot !== undefined ||
+            rootCount !== 0 ||
             existingAction !== undefined ||
             stateCounts.some((count) => count !== 0)
         ) {
@@ -455,8 +865,8 @@ export class PrivatePreparationDurableState {
                 'Durable action state appeared during initialization.',
             );
         }
-        rootStore.put({ id: rootRecordIdentifier, key: rootKey });
-        actionStore.put(cloneProtectedRecord(action));
+        rootStore.put(cloneRootRecord(root));
+        actionStore.put(cloneProtectedRecord(retainedAction));
         await completion;
     }
 
@@ -464,22 +874,23 @@ export class PrivatePreparationDurableState {
         storeName: ProtectedStoreName,
         record: ProtectedRecord,
     ): Promise<void> {
-        const transaction = this.#database.transaction(storeName, 'readwrite', {
-            durability: 'strict',
-        });
-        const completion = transactionCompletion(transaction);
-        const store = transaction.objectStore(storeName);
-        const existing = await unknownRequestResult(store.get(record.id));
-        if (existing !== undefined) {
-            transaction.abort();
-            await completion.catch(() => undefined);
+        const snapshot = await this.#readVerifiedSnapshot();
+        if (
+            snapshot.records.some(
+                (entry) =>
+                    entry.storeName === storeName &&
+                    entry.record.id === record.id,
+            )
+        ) {
             throw new DurableStateError(
                 'Conflict',
                 'The durable semantic slot is already occupied.',
             );
         }
-        store.put(cloneProtectedRecord(record));
-        await completion;
+        await this.#commitReboundInventory(snapshot, [
+            ...snapshot.records,
+            { storeName, record },
+        ]);
     }
 
     async replaceExact(
@@ -493,26 +904,25 @@ export class PrivatePreparationDurableState {
                 'A durable replacement changed its stable identity.',
             );
         }
-        const transaction = this.#database.transaction(storeName, 'readwrite', {
-            durability: 'strict',
-        });
-        const completion = transactionCompletion(transaction);
-        const store = transaction.objectStore(storeName);
-        const existing = await unknownRequestResult(store.get(expected.id));
+        const snapshot = await this.#readVerifiedSnapshot();
+        const recordIndex = snapshot.records.findIndex(
+            (entry) =>
+                entry.storeName === storeName &&
+                entry.record.id === expected.id,
+        );
+        const existing = snapshot.records[recordIndex];
         if (
             existing === undefined ||
-            !isProtectedRecord(existing) ||
-            !protectedRecordsEqual(existing, expected)
+            !protectedRecordsEqual(existing.record, expected)
         ) {
-            transaction.abort();
-            await completion.catch(() => undefined);
             throw new DurableStateError(
                 'Conflict',
                 'The durable predecessor changed before replacement.',
             );
         }
-        store.put(cloneProtectedRecord(replacement));
-        await completion;
+        const desiredRecords = [...snapshot.records];
+        desiredRecords[recordIndex] = { storeName, record: replacement };
+        await this.#commitReboundInventory(snapshot, desiredRecords);
     }
 
     async replaceExactAndPutIfAbsent(
@@ -532,34 +942,38 @@ export class PrivatePreparationDurableState {
                 'The atomic durable transition has conflicting identities.',
             );
         }
-        const transaction = this.#database.transaction(
-            [replacementStoreName, insertionStoreName],
-            'readwrite',
-            { durability: 'strict' },
+        const snapshot = await this.#readVerifiedSnapshot();
+        const replacementIndex = snapshot.records.findIndex(
+            (entry) =>
+                entry.storeName === replacementStoreName &&
+                entry.record.id === expected.id,
         );
-        const completion = transactionCompletion(transaction);
-        const replacementStore = transaction.objectStore(replacementStoreName);
-        const insertionStore = transaction.objectStore(insertionStoreName);
-        const [existingReplacement, existingInsertion] = await Promise.all([
-            unknownRequestResult(replacementStore.get(expected.id)),
-            unknownRequestResult(insertionStore.get(insertion.id)),
-        ]);
+        const existingReplacement = snapshot.records[replacementIndex];
+        const existingInsertion = snapshot.records.find(
+            (entry) =>
+                entry.storeName === insertionStoreName &&
+                entry.record.id === insertion.id,
+        );
         if (
             existingReplacement === undefined ||
-            !isProtectedRecord(existingReplacement) ||
-            !protectedRecordsEqual(existingReplacement, expected) ||
+            !protectedRecordsEqual(existingReplacement.record, expected) ||
             existingInsertion !== undefined
         ) {
-            transaction.abort();
-            await completion.catch(() => undefined);
             throw new DurableStateError(
                 'Conflict',
                 'The atomic durable predecessor changed or its destination is occupied.',
             );
         }
-        replacementStore.put(cloneProtectedRecord(replacement));
-        insertionStore.put(cloneProtectedRecord(insertion));
-        await completion;
+        const desiredRecords = [...snapshot.records];
+        desiredRecords[replacementIndex] = {
+            storeName: replacementStoreName,
+            record: replacement,
+        };
+        desiredRecords.push({
+            storeName: insertionStoreName,
+            record: insertion,
+        });
+        await this.#commitReboundInventory(snapshot, desiredRecords);
     }
 
     async replaceTwoExact(
@@ -581,47 +995,56 @@ export class PrivatePreparationDurableState {
                 'The atomic durable replacements have conflicting identities.',
             );
         }
-        const transaction = this.#database.transaction(
-            [firstStoreName, secondStoreName],
-            'readwrite',
-            { durability: 'strict' },
+        const snapshot = await this.#readVerifiedSnapshot();
+        const firstIndex = snapshot.records.findIndex(
+            (entry) =>
+                entry.storeName === firstStoreName &&
+                entry.record.id === firstExpected.id,
         );
-        const completion = transactionCompletion(transaction);
-        const firstStore = transaction.objectStore(firstStoreName);
-        const secondStore = transaction.objectStore(secondStoreName);
-        const [existingFirst, existingSecond] = await Promise.all([
-            unknownRequestResult(firstStore.get(firstExpected.id)),
-            unknownRequestResult(secondStore.get(secondExpected.id)),
-        ]);
+        const secondIndex = snapshot.records.findIndex(
+            (entry) =>
+                entry.storeName === secondStoreName &&
+                entry.record.id === secondExpected.id,
+        );
+        const existingFirst = snapshot.records[firstIndex];
+        const existingSecond = snapshot.records[secondIndex];
         if (
             existingFirst === undefined ||
-            !isProtectedRecord(existingFirst) ||
-            !protectedRecordsEqual(existingFirst, firstExpected) ||
+            !protectedRecordsEqual(existingFirst.record, firstExpected) ||
             existingSecond === undefined ||
-            !isProtectedRecord(existingSecond) ||
-            !protectedRecordsEqual(existingSecond, secondExpected)
+            !protectedRecordsEqual(existingSecond.record, secondExpected)
         ) {
-            transaction.abort();
-            await completion.catch(() => undefined);
             throw new DurableStateError(
                 'Conflict',
                 'An atomic durable predecessor changed before replacement.',
             );
         }
-        firstStore.put(cloneProtectedRecord(firstReplacement));
-        secondStore.put(cloneProtectedRecord(secondReplacement));
-        await completion;
+        const desiredRecords = [...snapshot.records];
+        desiredRecords[firstIndex] = {
+            storeName: firstStoreName,
+            record: firstReplacement,
+        };
+        desiredRecords[secondIndex] = {
+            storeName: secondStoreName,
+            record: secondReplacement,
+        };
+        await this.#commitReboundInventory(snapshot, desiredRecords);
     }
 }
 
-export const createProtectedRecord = async (
+const sealProtectedRecord = async (
     identifier: string,
     context: Uint8Array,
     plaintext: Uint8Array,
     rootKey: CryptoKey,
+    nonce: Uint8Array<ArrayBuffer>,
 ): Promise<ProtectedRecord> => {
     validateRootKey(rootKey);
-    if (context.byteLength === 0 || plaintext.byteLength === 0) {
+    if (
+        context.byteLength === 0 ||
+        plaintext.byteLength === 0 ||
+        nonce.byteLength !== 12
+    ) {
         throw new TypeError('Protected record inputs must be nonempty.');
     }
     const keyInput = new Uint8Array(context.byteLength + 1);
@@ -655,7 +1078,6 @@ export const createProtectedRecord = async (
     envelope.set(plaintextCopy, 4 + digest.byteLength);
     digest.fill(0);
     plaintextCopy.fill(0);
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
     try {
         const ciphertext = await crypto.subtle.encrypt(
             {
@@ -677,6 +1099,50 @@ export const createProtectedRecord = async (
         envelope.fill(0);
         nonce.fill(0);
     }
+};
+
+export const createProtectedRecord = (
+    identifier: string,
+    context: Uint8Array,
+    plaintext: Uint8Array,
+    rootKey: CryptoKey,
+): Promise<ProtectedRecord> =>
+    sealProtectedRecord(
+        identifier,
+        context,
+        plaintext,
+        rootKey,
+        crypto.getRandomValues(new Uint8Array(12)),
+    );
+
+const createInventoryProtectedRecord = async (
+    identifier: string,
+    context: Uint8Array,
+    plaintext: Uint8Array,
+    rootKey: CryptoKey,
+    inventoryGeneration: bigint,
+): Promise<ProtectedRecord> => {
+    if (
+        inventoryGeneration < 1n ||
+        inventoryGeneration > maximumInventoryGeneration
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The protected-record inventory generation is invalid.',
+        );
+    }
+    const nonceInput = new Uint8Array(context.byteLength + 1);
+    nonceInput.set(context);
+    nonceInput[nonceInput.byteLength - 1] = 2;
+    const noncePrefix = new Uint8Array(
+        await crypto.subtle.sign('HMAC', rootKey, nonceInput),
+    );
+    nonceInput.fill(0);
+    const nonce = new Uint8Array(12);
+    nonce.set(noncePrefix.subarray(0, 8));
+    new DataView(nonce.buffer).setUint32(8, Number(inventoryGeneration), true);
+    noncePrefix.fill(0);
+    return sealProtectedRecord(identifier, context, plaintext, rootKey, nonce);
 };
 
 export const openProtectedRecord = async (

@@ -22,9 +22,32 @@ describe('independent full-tally security ledger', () => {
                 ledger.adversaryWork.adversarialOfflineCandidateTests.symbol,
             ).toBe('v_offline');
             expect(
+                ledger.adversaryWork.adversarialStorageStateCandidates.symbol,
+            ).toBe('v_state');
+            expect(
                 ledger.operation.knownKeySecondPreimage
-                    .legitimateTargetCountPerCompleteInventory,
+                    .maximumHonestReceiverTargetCountPerCompleteInventory,
             ).toBe(ledger.circuit.conjunctionCount * 10);
+            for (
+                let corruptParticipantCount = 0;
+                corruptParticipantCount <= 3;
+                corruptParticipantCount += 1
+            ) {
+                const census =
+                    ledger.operation.challengeCensusByCorruptParticipantCount[
+                        corruptParticipantCount
+                    ];
+                expect(census).toMatchObject({
+                    corruptParticipantCount,
+                    honestReceiverCount: 10 - corruptParticipantCount,
+                    alternativeKeyChallengeCount:
+                        (10 - corruptParticipantCount) *
+                        ledger.circuit.conjunctionCount,
+                    knownKeySecondPreimageTargetCount:
+                        (10 - corruptParticipantCount) *
+                        ledger.circuit.conjunctionCount,
+                });
+            }
             expect(
                 ledger.operation
                     .selectedContinuationKeyCountPerCompleteInventory,
@@ -37,9 +60,11 @@ describe('independent full-tally security ledger', () => {
                     ledger.operation
                         .selectedContinuationKeyCountPerCompleteInventory,
             );
-            expect(ledger.localRecord.maximumSealsPerExactContext).toBe(1);
+            expect(
+                ledger.localRecord.maximumSealsPerExactContext,
+            ).toBeGreaterThan(1);
             expect(ledger.localRecord.maximumEncryptionsPerExactContext).toBe(
-                1,
+                ledger.localRecord.maximumSealsPerExactContext,
             );
             expect(
                 ledger.securityStatisticalTerms.map(({ event }) => event),
@@ -87,25 +112,81 @@ describe('independent full-tally security ledger', () => {
         expect(ledger.operation).toEqual({
             directRowHiding: {
                 assumption: 'A_KMAC-DIRECT',
-                independentKeyCount: 2_892_680,
+                sampledIndependentKeyCount: 2_892_680,
+                maximumInaccessibleLabelCount: 1_446_340,
+                maximumNonemptyChallengeKeyCount: 1_439_220,
                 generatedOutputCount: 11_896_480,
                 selectedEvaluationCallCountPerCompleteInventory: 3_566_520,
-                hiddenReplacementCount: 5_948_240,
+                maximumChallengeOutputCount: 5_948_240,
                 maximumKeyFanOut: 332,
             },
             alternativeKeyHiding: {
                 assumption: 'A_KMAC-ALT',
-                conditionallyFreshKeyCountPerSelectedTranscript: 29_620,
+                maximumConditionallyFreshKeyCountPerSelectedTranscript: 29_620,
                 generatedContinuationOutputCount: 59_240,
-                hiddenReplacementCount: 29_620,
+                maximumChallengeOutputCount: 29_620,
             },
             knownKeySecondPreimage: {
                 assumption: 'A_KMAC-2P',
                 authenticatorByteLength: 40,
-                legitimateTargetCountPerCompleteInventory: 29_620,
+                maximumHonestReceiverTargetCountPerCompleteInventory: 29_620,
                 acceptedCandidateCountSymbol: 'v_online',
                 offlineCandidateCountSymbol: 'v_offline',
             },
+            challengeCensusByCorruptParticipantCount: [
+                {
+                    corruptParticipantCount: 0,
+                    honestReceiverCount: 10,
+                    sampledHonestDirectLabelKeyCount: 2_892_680,
+                    inaccessibleHonestDirectLabelKeyCount: 1_446_340,
+                    nonemptyDirectChallengeKeyCount: 1_439_220,
+                    sampledHonestContinuationKeyCount: 59_240,
+                    sampledHonestOperationKeyCount: 2_951_920,
+                    directKmacTargetOutputCount: 5_948_240,
+                    alternativeKeyChallengeCount: 29_620,
+                    knownKeySecondPreimageTargetCount: 29_620,
+                    zeroContinuationDifferenceNumerator: 29_620,
+                },
+                {
+                    corruptParticipantCount: 1,
+                    honestReceiverCount: 9,
+                    sampledHonestDirectLabelKeyCount: 2_603_412,
+                    inaccessibleHonestDirectLabelKeyCount: 1_301_706,
+                    nonemptyDirectChallengeKeyCount: 1_295_298,
+                    sampledHonestContinuationKeyCount: 53_316,
+                    sampledHonestOperationKeyCount: 2_656_728,
+                    directKmacTargetOutputCount: 5_353_416,
+                    alternativeKeyChallengeCount: 26_658,
+                    knownKeySecondPreimageTargetCount: 26_658,
+                    zeroContinuationDifferenceNumerator: 26_658,
+                },
+                {
+                    corruptParticipantCount: 2,
+                    honestReceiverCount: 8,
+                    sampledHonestDirectLabelKeyCount: 2_314_144,
+                    inaccessibleHonestDirectLabelKeyCount: 1_157_072,
+                    nonemptyDirectChallengeKeyCount: 1_151_376,
+                    sampledHonestContinuationKeyCount: 47_392,
+                    sampledHonestOperationKeyCount: 2_361_536,
+                    directKmacTargetOutputCount: 4_758_592,
+                    alternativeKeyChallengeCount: 23_696,
+                    knownKeySecondPreimageTargetCount: 23_696,
+                    zeroContinuationDifferenceNumerator: 23_696,
+                },
+                {
+                    corruptParticipantCount: 3,
+                    honestReceiverCount: 7,
+                    sampledHonestDirectLabelKeyCount: 2_024_876,
+                    inaccessibleHonestDirectLabelKeyCount: 1_012_438,
+                    nonemptyDirectChallengeKeyCount: 1_007_454,
+                    sampledHonestContinuationKeyCount: 41_468,
+                    sampledHonestOperationKeyCount: 2_066_344,
+                    directKmacTargetOutputCount: 4_163_768,
+                    alternativeKeyChallengeCount: 20_734,
+                    knownKeySecondPreimageTargetCount: 20_734,
+                    zeroContinuationDifferenceNumerator: 20_734,
+                },
+            ],
             selectedContinuationKeyCountPerCompleteInventory: 29_620,
             alternativeContinuationKeyCountPerCompleteInventory: 29_620,
             totalContinuationKeyCount: 59_240,
@@ -182,7 +263,7 @@ describe('independent full-tally security ledger', () => {
             preparationAesScalarInvocationCount: 71_981_280,
             activationChunkCorpusByteLength: 304_336_370,
             directLabelAllocationByteLength: 117_153_540,
-            localRecordAssociatedDataByteLength: 1_278_960,
+            localRecordAssociatedDataByteLength: 9_176_100,
             accountingRule:
                 'This is an honest emitted-work vector, not an adversarial-query allowance or a scalar security denominator.',
         });
@@ -204,13 +285,23 @@ describe('independent full-tally security ledger', () => {
             nonexportableLocalRootBitLength: 256,
         });
         expect(ledger.localRecord).toEqual({
-            successfulSealCount: 2_920,
+            storageVisibleSealCount: 20_950,
+            inMemoryProposalSealCount: 2_920,
+            implementationEncryptionCallCount: 23_870,
+            inventoryCommitCount: 1_570,
             retainedRecordCount: 150,
-            maximumSealsPerExactContext: 1,
-            successfulContextCount: 2_920,
-            maximumEncryptionsPerExactContext: 1,
+            maximumSealsPerExactContext: 155,
+            distinctContextCount: 2_920,
+            maximumEncryptionsPerExactContext: 155,
+            encryptionKeyDerivationInputCount: 2_920,
+            noncePrefixDerivationInputCount: 2_920,
+            inventoryAuthenticatorInputCount: 1_570,
+            totalDistinctHmacInputCount: 7_410,
+            inventoryAuthenticatorByteLength: 32,
+            inventoryGenerationBitLength: 32,
             contextByteLength: 438,
-            associatedDataByteLength: 1_278_960,
+            storageVisibleAssociatedDataByteLength: 9_176_100,
+            implementationEncryptionAssociatedDataByteLength: 10_455_060,
         });
     });
 
@@ -224,9 +315,9 @@ describe('independent full-tally security ledger', () => {
                 consequence: 'security',
             },
             {
-                event: 'local-record derived-key-and-nonce collision',
+                event: 'local-record derived-key-and-nonce-prefix collision',
                 numerator: 4_261_740n,
-                denominatorBitLength: 352,
+                denominatorBitLength: 320,
                 consequence: 'security',
             },
         ]);
@@ -250,7 +341,13 @@ describe('independent full-tally security ledger', () => {
             },
         ]);
         expect(ledger.computationalAdvantageTerms).toContain('A_KMAC-2P');
-        expect(ledger.environmentalAssumptions).toHaveLength(4);
+        expect(ledger.environmentalAssumptions).toHaveLength(6);
+        expect(ledger.environmentalAssumptions).toContain(
+            'an initialized root and all seven protected stores are not erased together to the pristine empty state',
+        );
+        expect(ledger.environmentalAssumptions).toContain(
+            "the storage adversary cannot synthesize, replace, or transplant an attacker-controlled usable CryptoKey into an honest profile's root record",
+        );
     });
 
     it('labels the random-function QROM calculation as a heuristic', () => {
