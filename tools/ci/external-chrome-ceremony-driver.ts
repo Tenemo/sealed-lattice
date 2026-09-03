@@ -1310,8 +1310,38 @@ const launchVisit = async (input: {
                 .locator('#status')
                 .textContent()
                 .catch(() => undefined);
+            const workerDiagnostics = await Promise.all(
+                page.workers().map(async (worker) => {
+                    try {
+                        return await withTimeout(
+                            worker.evaluate(async () => ({
+                                persisted: await Promise.race([
+                                    navigator.storage.persisted(),
+                                    new Promise<'timeout'>((resolve) =>
+                                        setTimeout(
+                                            () => resolve('timeout'),
+                                            2_000,
+                                        ),
+                                    ),
+                                ]),
+                                resources: performance
+                                    .getEntriesByType('resource')
+                                    .map((entry) => entry.name),
+                            })),
+                            5_000,
+                        );
+                    } catch (workerError) {
+                        return {
+                            diagnosticError:
+                                workerError instanceof Error
+                                    ? workerError.message
+                                    : 'unknown worker diagnostic failure',
+                        };
+                    }
+                }),
+            );
             process.stderr.write(
-                `External ceremony visit diagnostic: stage=${status ?? 'unavailable'}; browser=${pageDiagnostics.join(' | ') || 'none'}; transfer=${JSON.stringify(input.relayServer.transferForVisit(input.visitToken))}\n`,
+                `External ceremony visit diagnostic: stage=${status ?? 'unavailable'}; browser=${pageDiagnostics.join(' | ') || 'none'}; workers=${JSON.stringify(workerDiagnostics)}; transfer=${JSON.stringify(input.relayServer.transferForVisit(input.visitToken))}\n`,
             );
             if (error instanceof Error) {
                 error.message = `${error.message} Last page stage: ${status ?? 'unavailable'}. Browser diagnostics: ${pageDiagnostics.join(' | ') || 'none'}. Transfer: ${JSON.stringify(input.relayServer.transferForVisit(input.visitToken))}.`;
