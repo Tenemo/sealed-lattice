@@ -344,18 +344,25 @@ const productionSourceText = (relativePath: string, source: string): string => {
     return testModuleOffset < 0 ? source : source.slice(0, testModuleOffset);
 };
 
-const parseNumericLiteral = (literal: string): number =>
-    Number(literal.replace(/_/gu, ''));
+const parseNumericLiteral = (literal: string): bigint =>
+    BigInt(literal.replace(/_/gu, ''));
+
+const hasImmediateTestOnlyAttribute = (
+    source: string,
+    offset: number,
+): boolean => /#\[cfg\(test\)\]\s*$/u.test(source.slice(0, offset));
 
 const extractProtocolGrammar = async (
     sourceIdentities: readonly FileIdentity[],
 ): Promise<Readonly<Record<string, unknown>>> => {
     const sourcePathsByDomain = new Map<string, Set<string>>();
-    const namedCodes: Array<{
+    const numericLiteralConstants: Array<{
+        declaredType: string;
+        language: 'rust' | 'typescript';
         line: number;
         name: string;
         path: string;
-        value: number;
+        valueDecimal: string;
     }> = [];
     const enumeratedCodes: Array<{
         enumName: string;
@@ -363,7 +370,7 @@ const extractProtocolGrammar = async (
         name: string;
         path: string;
         representation: string;
-        value: number;
+        valueDecimal: string;
     }> = [];
     const magicBytes: Array<{
         ascii: string;
@@ -372,10 +379,10 @@ const extractProtocolGrammar = async (
         name: string;
         path: string;
     }> = [];
-    const constantPattern =
-        /(?:pub(?:\(crate\))?\s+)?const\s+([A-Za-z][A-Za-z0-9_]*)\s*(?::[^=;]+)?=\s*(0x[0-9A-Fa-f_]+|[0-9][0-9_]*)\s*;/gu;
-    const codeNamePattern =
-        /(schema|command|object.*kind|state.*kind|ordinal|version|family|address|purpose|declaration|target.*kind|result.*kind|operation.*kind)/iu;
+    const rustConstantPattern =
+        /(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s*(u8|u16|u32|u64|usize)\s*=\s*(0x[0-9A-Fa-f_]+|[0-9][0-9_]*)\s*;/gu;
+    const typeScriptConstantPattern =
+        /const\s+([A-Za-z][A-Za-z0-9_]*)\s*(?::\s*number\s*)?=\s*(0x[0-9A-Fa-f_]+|[0-9][0-9_]*)\s*;/gu;
     const enumerationPattern =
         /#\[repr\((u8|u16|u32)\)\]\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z][A-Za-z0-9_]*)\s*\{([^}]+)\}/gu;
     const enumerationValuePattern =
@@ -403,22 +410,43 @@ const extractProtocolGrammar = async (
             paths.add(identity.path);
             sourcePathsByDomain.set(domain, paths);
         }
-        for (const match of productionSource.matchAll(constantPattern)) {
+        for (const match of productionSource.matchAll(rustConstantPattern)) {
             const name = match[1];
-            const literal = match[2];
+            const declaredType = match[2];
+            const literal = match[3];
             if (
                 name === undefined ||
+                declaredType === undefined ||
                 literal === undefined ||
-                !codeNamePattern.test(name)
+                hasImmediateTestOnlyAttribute(productionSource, match.index)
             ) {
                 continue;
             }
-            namedCodes.push({
+            numericLiteralConstants.push({
+                declaredType,
+                language: 'rust',
                 line: sourceLineNumber(source, match.index),
                 name,
                 path: identity.path,
-                value: parseNumericLiteral(literal),
+                valueDecimal: parseNumericLiteral(literal).toString(10),
             });
+        }
+        if (identity.path.endsWith('.ts')) {
+            for (const match of productionSource.matchAll(
+                typeScriptConstantPattern,
+            )) {
+                const name = match[1];
+                const literal = match[2];
+                if (name === undefined || literal === undefined) continue;
+                numericLiteralConstants.push({
+                    declaredType: 'number',
+                    language: 'typescript',
+                    line: sourceLineNumber(source, match.index),
+                    name,
+                    path: identity.path,
+                    valueDecimal: parseNumericLiteral(literal).toString(10),
+                });
+            }
         }
         for (const enumeration of productionSource.matchAll(
             enumerationPattern,
@@ -433,6 +461,7 @@ const extractProtocolGrammar = async (
             ) {
                 continue;
             }
+            const enumerationBodyOffset = enumeration[0].indexOf(body);
             for (const valueMatch of body.matchAll(enumerationValuePattern)) {
                 const name = valueMatch[1];
                 const literal = valueMatch[2];
@@ -441,12 +470,14 @@ const extractProtocolGrammar = async (
                     enumName,
                     line: sourceLineNumber(
                         source,
-                        enumeration.index + valueMatch.index,
+                        enumeration.index +
+                            enumerationBodyOffset +
+                            valueMatch.index,
                     ),
                     name,
                     path: identity.path,
                     representation,
-                    value: parseNumericLiteral(literal),
+                    valueDecimal: parseNumericLiteral(literal).toString(10),
                 });
             }
         }
@@ -485,7 +516,7 @@ const extractProtocolGrammar = async (
     return {
         functionalDomains,
         magicBytes: bySourcePosition(magicBytes),
-        namedCodes: bySourcePosition(namedCodes),
+        numericLiteralConstants: bySourcePosition(numericLiteralConstants),
         enumeratedCodes: bySourcePosition(enumeratedCodes),
     };
 };
@@ -1342,6 +1373,54 @@ const verifyPackedCandidate = async (
     if (recomputedParameterIdentity !== identity.parameterIdentityHex) {
         throw new Error('The installed candidate parameter identity changed.');
     }
+    const identityRules = candidateBundle.identityRules;
+    if (
+        typeof identityRules !== 'object' ||
+        identityRules === null ||
+        Array.isArray(identityRules)
+    ) {
+        throw new Error('The candidate identity rules are malformed.');
+    }
+    const identityRuleRecord = identityRules as Record<string, unknown>;
+    const candidateBuildIdentityRule =
+        identityRuleRecord.candidateBuildIdentity;
+    const parameterIdentityRule = identityRuleRecord.parameterIdentity;
+    if (
+        typeof candidateBuildIdentityRule !== 'object' ||
+        candidateBuildIdentityRule === null ||
+        Array.isArray(candidateBuildIdentityRule) ||
+        typeof parameterIdentityRule !== 'object' ||
+        parameterIdentityRule === null ||
+        Array.isArray(parameterIdentityRule)
+    ) {
+        throw new Error('A candidate identity rule is malformed.');
+    }
+    const candidateBuildIdentityRecord = candidateBuildIdentityRule as Record<
+        string,
+        unknown
+    >;
+    const parameterIdentityRecord = parameterIdentityRule as Record<
+        string,
+        unknown
+    >;
+    if (
+        candidateBuildIdentityRecord.algorithm !== 'SHAKE256-512' ||
+        candidateBuildIdentityRecord.domain !== candidateIdentityDomain ||
+        candidateBuildIdentityRecord.excludedSelfRecord !==
+            identityRecordRelativePath ||
+        parameterIdentityRecord.algorithm !== 'SHAKE256-512' ||
+        parameterIdentityRecord.domain !== parameterIdentityDomain ||
+        parameterIdentityRecord.identityHex !== recomputedParameterIdentity
+    ) {
+        throw new Error('The candidate identity rules are inaccurate.');
+    }
+    requireExactValue(
+        parameterIdentityRecord.coveredFiles,
+        [parameterEntry, grammarEntry].map((entry) =>
+            identifyBytes(entry.path, entry.bytes),
+        ),
+        'Candidate parameter covered-file inventory',
+    );
     const parameters = parseJsonObject(
         parameterEntry.bytes,
         'Installed candidate parameters',
@@ -1368,9 +1447,75 @@ const verifyPackedCandidate = async (
         ) ||
         !Array.isArray(grammar.schemaSources) ||
         grammar.schemaSources.length === 0 ||
+        !Array.isArray(grammar.numericLiteralConstants) ||
+        !Array.isArray(grammar.enumeratedCodes) ||
         typeof parameters.completionProfile !== 'object'
     ) {
         throw new Error('The candidate protocol grammar is incomplete.');
+    }
+    const hasNumericLiteral = (
+        pathValue: string,
+        nameValue: string,
+        valueDecimal: string,
+    ): boolean =>
+        (grammar.numericLiteralConstants as unknown[]).some(
+            (entry) =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                !Array.isArray(entry) &&
+                (entry as Record<string, unknown>).path === pathValue &&
+                (entry as Record<string, unknown>).name === nameValue &&
+                (entry as Record<string, unknown>).valueDecimal ===
+                    valueDecimal,
+        );
+    const hasEnumeratedCode = (
+        enumName: string,
+        nameValue: string,
+        valueDecimal: string,
+    ): boolean =>
+        (grammar.enumeratedCodes as unknown[]).some(
+            (entry) =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                !Array.isArray(entry) &&
+                (entry as Record<string, unknown>).enumName === enumName &&
+                (entry as Record<string, unknown>).name === nameValue &&
+                (entry as Record<string, unknown>).valueDecimal ===
+                    valueDecimal,
+        );
+    if (
+        !hasNumericLiteral(
+            'crates/sealed-lattice-kernel/src/encoding/foundation_command.rs',
+            'ENCODE_MANIFEST',
+            '1',
+        ) ||
+        !hasNumericLiteral(
+            'crates/sealed-lattice-kernel/src/encoding/construction_command.rs',
+            'ENCODE_PADDED_TALLY_ACTIVATION_SIGNATURE',
+            '47',
+        ) ||
+        !hasNumericLiteral(
+            'crates/sealed-lattice-kernel/src/protocol/padded_continuation/tally.rs',
+            'PADDED_TALLY_MAXIMUM_CHUNK_BYTE_LENGTH',
+            '480000',
+        ) ||
+        !hasNumericLiteral(
+            'packages/wasm/src/padded-tally-runtime.ts',
+            'resultKindNoResult',
+            '2',
+        ) ||
+        !hasNumericLiteral(
+            'packages/wasm/src/private-preparation-worker-runtime.ts',
+            'finalityStateKind',
+            '5',
+        ) ||
+        !hasEnumeratedCode('ActionSignaturePurpose', 'Activation', '4') ||
+        !hasEnumeratedCode('SourceDeclaration', 'Submit', '2') ||
+        !hasEnumeratedCode('FinalityTargetKind', 'NoResult', '2')
+    ) {
+        throw new Error(
+            'The candidate protocol grammar omits a required production code.',
+        );
     }
     if (!Array.isArray(candidateBundle.sourceIdentities)) {
         throw new Error('The candidate source closure is malformed.');
