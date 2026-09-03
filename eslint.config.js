@@ -55,6 +55,7 @@ const packageSourceImportPatterns = [
 export default defineConfig(
     globalIgnores([
         '.tmp*/**',
+        'logs/**',
         'temp/**',
         'node_modules/**',
         'reference-projects/**',

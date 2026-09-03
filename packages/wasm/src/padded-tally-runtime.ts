@@ -48,6 +48,7 @@ const resultKindNoResult = 2;
 
 export const paddedTallyCheckpointKeyByteLength = checkpointKeyByteLength;
 export const paddedTallyAllocationNonceByteLength = allocationNonceByteLength;
+export const paddedTallyMaximumChunkByteLength = maximumChunkByteLength;
 
 type PaddedTallyFinalityCertificate = Readonly<{
     targetBody: Uint8Array;
