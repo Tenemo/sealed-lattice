@@ -22,15 +22,21 @@ describe('external Chrome ceremony schedule', () => {
         const allAbstain = scenarios.find(
             (scenario) => scenario.identifier === 'all-abstain',
         );
+        const privatePreparationStateLoss = scenarios.find(
+            (scenario) =>
+                scenario.identifier ===
+                'private-preparation-consumption-state-loss',
+        );
         expect(topTen).toBeDefined();
         expect(topOne).toBeDefined();
         expect(empty).toBeDefined();
         expect(allAbstain).toBeDefined();
+        expect(privatePreparationStateLoss).toBeDefined();
         expect(
             countExternalCeremonyVisits(
                 buildExternalCeremonyVisitSchedule(topTen!),
             ),
-        ).toEqual([6, 7, 8, 7, 7, 7, 6, 6, 6, 10]);
+        ).toEqual([6, 7, 8, 7, 7, 6, 6, 6, 6, 10]);
         for (const scenario of [topOne!, empty!]) {
             expect(
                 countExternalCeremonyVisits(
@@ -43,17 +49,34 @@ describe('external Chrome ceremony schedule', () => {
                 buildExternalCeremonyVisitSchedule(allAbstain!),
             ),
         ).toEqual([5, 5, 5, 5, 5, 5, 5, 5, 5, 4]);
+        expect(
+            countExternalCeremonyVisits(
+                buildExternalCeremonyVisitSchedule(
+                    privatePreparationStateLoss!,
+                ),
+            ),
+        ).toEqual([2, 2, 2, 2, 2, 4, 2, 2, 2, 1]);
     });
 
     it('covers every durable crash hook without exceeding ten visits', () => {
-        const recoveryScenario = externalCeremonyScenarioDefinitions().find(
+        const scenarios = externalCeremonyScenarioDefinitions();
+        const recoveryScenario = scenarios.find(
             (scenario) => scenario.recoveryAndHostileCoverage,
         );
+        const stateLossScenario = scenarios.find(
+            (scenario) =>
+                scenario.identifier ===
+                'private-preparation-consumption-state-loss',
+        );
         expect(recoveryScenario).toBeDefined();
+        expect(stateLossScenario).toBeDefined();
         const schedule = buildExternalCeremonyVisitSchedule(recoveryScenario!);
+        const stateLossSchedule = buildExternalCeremonyVisitSchedule(
+            stateLossScenario!,
+        );
         expect(
             new Set(
-                schedule.flatMap((visit) =>
+                [...schedule, ...stateLossSchedule].flatMap((visit) =>
                     visit.crashBoundary === undefined
                         ? []
                         : [visit.crashBoundary],
@@ -72,6 +95,11 @@ describe('external Chrome ceremony schedule', () => {
             ]),
         );
         expect(Math.max(...countExternalCeremonyVisits(schedule))).toBe(10);
+        expect(
+            stateLossSchedule.some(
+                (visit) => visit.expectPendingSourceRefusal === true,
+            ),
+        ).toBe(true);
         expect(
             schedule.some((visit) => visit.action === 'evaluation-repair'),
         ).toBe(true);

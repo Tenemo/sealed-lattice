@@ -903,6 +903,18 @@ const runSource = async (configuration, metrics) => {
     }
     const client = await openWorkerClient(configuration);
     try {
+        if (configuration.expectPendingSourceRefusal === true) {
+            metrics.pendingSourceRefusal = await expectRefusal(() =>
+                client.createSourcePackage(
+                    actionContext(configuration),
+                    consumed.canonicalRosterBytes,
+                    preparationAttempt,
+                    consumed.preparationParents,
+                    choice,
+                ),
+            );
+            return;
+        }
         const publication = await client.createSourcePackage(
             actionContext(configuration),
             consumed.canonicalRosterBytes,

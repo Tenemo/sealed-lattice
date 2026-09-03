@@ -111,7 +111,11 @@ const mobileProfile = {
     width: 412,
 };
 
-type CeremonyMode = 'all-abstain' | 'empty-usable-ballots' | 'result';
+type CeremonyMode =
+    | 'all-abstain'
+    | 'empty-usable-ballots'
+    | 'pending-private-preparation'
+    | 'result';
 
 type Ballot = Readonly<{
     declaration: 'abstain' | 'submit';
@@ -155,6 +159,7 @@ export type ExternalCeremonyVisit = Readonly<{
     probeFinalityConflict?: boolean;
     probeSourceConflict?: boolean;
     probeThreeCorruptChunks?: boolean;
+    expectPendingSourceRefusal?: boolean;
     startChunkOrdinal?: number;
 }>;
 
@@ -310,6 +315,13 @@ export const externalCeremonyScenarioDefinitions =
             recoveryAndHostileCoverage: false,
             topCount: 10,
         },
+        {
+            ballots: resultBallots(),
+            identifier: 'private-preparation-consumption-state-loss',
+            mode: 'pending-private-preparation',
+            recoveryAndHostileCoverage: false,
+            topCount: 1,
+        },
     ];
 
 export const buildExternalCeremonyVisitSchedule = (
@@ -330,18 +342,25 @@ export const buildExternalCeremonyVisitSchedule = (
     ) {
         visits.push({ action: 'prepare', participantPosition });
     }
+    if (scenario.mode === 'pending-private-preparation') {
+        visits.push({
+            action: 'source',
+            crashBoundary: 'preparation-consume',
+            participantPosition: 5,
+        });
+        visits.push({
+            action: 'source',
+            cleanup: true,
+            expectPendingSourceRefusal: true,
+            participantPosition: 5,
+        });
+        return visits;
+    }
     for (
         let participantPosition = 0;
         participantPosition < participantCount;
         participantPosition += 1
     ) {
-        if (scenario.recoveryAndHostileCoverage && participantPosition === 5) {
-            visits.push({
-                action: 'source',
-                crashBoundary: 'preparation-consume',
-                participantPosition,
-            });
-        }
         if (scenario.recoveryAndHostileCoverage && participantPosition === 9) {
             visits.push({
                 action: 'source',
@@ -1438,11 +1457,56 @@ const validateScenarioTerminal = async (
     scenario: ScenarioDefinition,
     visitEvidence: readonly VisitEvidence[],
 ): Promise<Readonly<Record<string, unknown>>> => {
-    const expected = expectedDirectResult(scenario.ballots, scenario.topCount);
     const terminalVisits = visitEvidence.filter((visit) => {
         const terminal = visit.pageResult.terminal;
         return typeof terminal === 'object' && terminal !== null;
     });
+    if (scenario.mode === 'pending-private-preparation') {
+        if (terminalVisits.length !== 0) {
+            throw new Error(
+                'The private-preparation state-loss path produced a terminal.',
+            );
+        }
+        const refusalVisits = visitEvidence.filter((visit) => {
+            const refusal = visit.pageResult.pendingSourceRefusal;
+            return typeof refusal === 'object' && refusal !== null;
+        });
+        if (refusalVisits.length !== 1) {
+            throw new Error(
+                'The private-preparation state-loss path did not produce one source refusal.',
+            );
+        }
+        const refusal = requireRecord(
+            refusalVisits[0]?.pageResult.pendingSourceRefusal,
+            'Private-preparation pending refusal',
+        );
+        if (
+            requireString(refusal, 'name') !== 'ProtocolRefusal' ||
+            !requireString(refusal, 'message').includes(
+                'private preparation delivery is not positively resolved',
+            )
+        ) {
+            throw new Error(
+                'The private-preparation state-loss path produced the wrong refusal.',
+            );
+        }
+        const relayTerminals = relayServer
+            .inventory()
+            .filter((entry) =>
+                entry.objectName.startsWith(`${scenario.identifier}/terminal/`),
+            );
+        if (relayTerminals.length !== 0) {
+            throw new Error(
+                'The private-preparation state-loss path published a terminal.',
+            );
+        }
+        return {
+            kind: 'pending',
+            reason: 'private-preparation-state-loss',
+            terminalCount: 0,
+        };
+    }
+    const expected = expectedDirectResult(scenario.ballots, scenario.topCount);
     if (terminalVisits.length !== participantCount) {
         throw new Error(
             `${scenario.identifier} produced ${String(terminalVisits.length)} terminals.`,
@@ -1699,7 +1763,27 @@ const assertSchedule = (scenario: ScenarioDefinition): void => {
     if (counts.some((count) => count > maximumVisitCount)) {
         throw new Error(`${scenario.identifier} exceeds ten visits.`);
     }
-    if (!scenario.recoveryAndHostileCoverage) {
+    if (scenario.mode === 'pending-private-preparation') {
+        const preparationConsumptionCrashes =
+            buildExternalCeremonyVisitSchedule(scenario).filter(
+                (visit) =>
+                    visit.crashBoundary === 'preparation-consume' &&
+                    visit.action === 'source',
+            );
+        const expectedPendingVisits = buildExternalCeremonyVisitSchedule(
+            scenario,
+        ).filter((visit) => visit.expectPendingSourceRefusal === true);
+        if (
+            preparationConsumptionCrashes.length !== 1 ||
+            expectedPendingVisits.length !== 1 ||
+            preparationConsumptionCrashes[0]?.participantPosition !==
+                expectedPendingVisits[0]?.participantPosition
+        ) {
+            throw new Error(
+                'The private-preparation state-loss schedule is incomplete.',
+            );
+        }
+    } else if (!scenario.recoveryAndHostileCoverage) {
         const expectedEarlier = scenario.mode === 'all-abstain' ? 5 : 6;
         const expectedLast = scenario.mode === 'all-abstain' ? 4 : 5;
         if (
