@@ -19,7 +19,7 @@ const defaultCandidateArchivePath = path.join(
     repositoryRootPath,
     'logs',
     '2026-09-03',
-    '2026-09-03T04-03-15.872Z-build-padded-tally-candidate-package',
+    '2026-09-03T06-57-09.078Z-build-padded-tally-candidate-package',
     'attachments',
     'sealed-lattice-wasm-0.0.0.tgz',
 );

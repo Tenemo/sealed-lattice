@@ -71,15 +71,15 @@ const registrySourcePath = path.join(
 );
 const rootPackageManifestPath = path.join(repositoryRootPath, 'package.json');
 const expectedCandidateBuildIdentityHex =
-    'dfee7cd92b199269c24f2c87db2e6d021a721345e9b0274c53edcfb45632f1b5cfd4e41be5850eb68ec9f7b9e3f3b63aa74bb5299fb5e4dfd1f436613eba1382';
+    '98cc57f851e5681c5fc46a555714680ed9cccac494b3645540d6bb7a8ac3a9c11d7049eb0c9b12eca5714f1d6e1d9ef9f1cf065694f4fb7c06fd522533ad812a';
 const expectedParameterIdentityHex =
-    'fb243bad14ee6f96d8c4de10b2834681eed431ecc9beef11ca28f4a59f188b81266cc9b5ad511e69bb81e38f8361c8911a614113b1829d5f56e65a84c17e86e0';
+    'c26ef8c3d3091fdcc35d2827cbcbe33c8d22ca725028b2c4384cf8744b09e6eddb634d6ea14173e7d6cc78c662da9c99e73db4e5ad9b6e9841a0111f56f9bd97';
 const expectedCandidateArchiveSha256Hex =
-    'd47177d77416898e7922ae60b3c5914131a619e78032ee0f1b46a01d97dc4798';
+    'e25ed026c92c893d2f9991f093fdcd1e8ea26dc0905125fd489c6415189bd75c';
 const expectedCandidateKernelSha256Hex =
     'ab896a95ebfe7edc19af3f3fa442f2e0e9ca8111cd0a8460a37e3b97bdbb4af2';
 const expectedCandidateSourceCommit =
-    'fd8fbfee3ea1ba18b16c040351a95a516b69e65e';
+    '801b929714457c269275cde6ff5558d3bf83c1f7';
 const participantCount = 10;
 const maximumVisitCount = 10;
 const visitForegroundLimitMilliseconds = 15 * 60 * 1_000;
