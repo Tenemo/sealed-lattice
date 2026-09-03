@@ -1310,6 +1310,9 @@ const launchVisit = async (input: {
                 .locator('#status')
                 .textContent()
                 .catch(() => undefined);
+            process.stderr.write(
+                `External ceremony visit diagnostic: stage=${status ?? 'unavailable'}; browser=${pageDiagnostics.join(' | ') || 'none'}; transfer=${JSON.stringify(input.relayServer.transferForVisit(input.visitToken))}\n`,
+            );
             if (error instanceof Error) {
                 error.message = `${error.message} Last page stage: ${status ?? 'unavailable'}. Browser diagnostics: ${pageDiagnostics.join(' | ') || 'none'}. Transfer: ${JSON.stringify(input.relayServer.transferForVisit(input.visitToken))}.`;
             }
