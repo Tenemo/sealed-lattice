@@ -29,6 +29,17 @@ describe('independent full-tally resource model', () => {
             preparationParentInventoryByteLength: 119_110,
             sourceInventoryByteLength: 37_438,
         });
+        expect(compileFullTallyResourceModel(10, 10)).toEqual({
+            activationChunkCorpusByteLength: 304_336_370,
+            activationInventoryByteLength: 86_550,
+            cleanVerifiedDownloadByteLength: 305_130_371,
+            maximumConstructionCommandRequestByteLength: 1_200_505,
+            maximumChunkEvaluationRequestByteLength: 1_200_505,
+            maximumChunkGenerationRequestByteLength: 448_553,
+            maximumPrivatePreparationRecipientByteLength: 181_467,
+            preparationParentInventoryByteLength: 119_110,
+            sourceInventoryByteLength: 37_460,
+        });
     });
 
     it('refuses an impossible submission inventory', () => {

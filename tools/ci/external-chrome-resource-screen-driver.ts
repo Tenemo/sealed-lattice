@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -15,6 +16,18 @@ import {
 import { readProcessPrivateMemory } from '#tools/ci/process-tree-memory-guard.js';
 
 const repositoryRootPath = path.resolve(import.meta.dirname, '..', '..');
+const runnerSourcePath = path.join(
+    repositoryRootPath,
+    'tools',
+    'ci',
+    'run-external-chrome-resource-screen.ts',
+);
+const driverSourcePath = path.join(
+    repositoryRootPath,
+    'tools',
+    'ci',
+    'external-chrome-resource-screen-driver.ts',
+);
 const staticPagePath = path.join(
     repositoryRootPath,
     'tools',
@@ -34,6 +47,28 @@ const productionKernelPath = path.join(
     'dist',
     'sealed-lattice-kernel.wasm',
 );
+const productionKmacSourcePath = path.join(
+    repositoryRootPath,
+    'crates',
+    'sealed-lattice-kernel',
+    'src',
+    'protocol',
+    'padded_continuation.rs',
+);
+const resourceScreenKernelSourcePath = path.join(
+    repositoryRootPath,
+    'tools',
+    'ci',
+    'external-chrome-resource-screen-kernel.rs',
+);
+const wasmBuildSourcePath = path.join(
+    repositoryRootPath,
+    'tools',
+    'ci',
+    'build-wasm-kernel.ts',
+);
+const rootPackageManifestPath = path.join(repositoryRootPath, 'package.json');
+const packageLockPath = path.join(repositoryRootPath, 'pnpm-lock.yaml');
 const sdkPackageManifestPath = path.join(
     repositoryRootPath,
     'packages',
@@ -143,6 +178,56 @@ type ColdReclaimEvidence = Readonly<{
     usage: number;
     usageDetails: Readonly<Record<string, number>>;
 }>;
+
+type FileIdentity = Readonly<{
+    byteLength: number;
+    repositoryRelativePath: string;
+    sha256: string;
+}>;
+
+const sha256Hex = (bytes: Uint8Array): string =>
+    createHash('sha256').update(bytes).digest('hex');
+
+const fileIdentity = (filePath: string, bytes: Uint8Array): FileIdentity => ({
+    byteLength: bytes.byteLength,
+    repositoryRelativePath: path
+        .relative(repositoryRootPath, filePath)
+        .split(path.sep)
+        .join('/'),
+    sha256: sha256Hex(bytes),
+});
+
+const readCleanRepositoryCommit = (): string => {
+    const commitHash = execFileSync(
+        'git',
+        ['rev-parse', '--verify', 'HEAD^{commit}'],
+        {
+            cwd: repositoryRootPath,
+            encoding: 'utf8',
+            windowsHide: true,
+        },
+    ).trim();
+    const status = execFileSync(
+        'git',
+        [
+            'status',
+            '--porcelain=v1',
+            '--untracked-files=normal',
+            '--ignore-submodules=none',
+        ],
+        {
+            cwd: repositoryRootPath,
+            encoding: 'utf8',
+            windowsHide: true,
+        },
+    );
+    if (status.length !== 0) {
+        throw new Error(
+            'The external-Chrome resource screen requires a clean committed worktree.',
+        );
+    }
+    return commitHash;
+};
 
 const parseArguments = (arguments_: readonly string[]): DriverArguments => {
     if (
@@ -656,20 +741,40 @@ const main = async (): Promise<void> => {
     const { resultFilePath, wasmFilePath } = parseArguments(
         process.argv.slice(2),
     );
+    const repositoryCommitHash = readCleanRepositoryCommit();
     const chromeExecutablePath = resolveChromeExecutablePath();
-    const [html, script, wasm, productionKernel, sdkPackageManifestBytes] =
-        await Promise.all([
-            readFile(staticPagePath),
-            readFile(staticScriptPath),
-            readFile(wasmFilePath),
-            readFile(productionKernelPath),
-            readFile(sdkPackageManifestPath),
-        ]);
+    const [
+        html,
+        script,
+        wasm,
+        productionKernel,
+        sdkPackageManifestBytes,
+        runnerSource,
+        driverSource,
+        productionKmacSource,
+        resourceScreenKernelSource,
+        wasmBuildSource,
+        rootPackageManifest,
+        packageLock,
+    ] = await Promise.all([
+        readFile(staticPagePath),
+        readFile(staticScriptPath),
+        readFile(wasmFilePath),
+        readFile(productionKernelPath),
+        readFile(sdkPackageManifestPath),
+        readFile(runnerSourcePath),
+        readFile(driverSourcePath),
+        readFile(productionKmacSourcePath),
+        readFile(resourceScreenKernelSourcePath),
+        readFile(wasmBuildSourcePath),
+        readFile(rootPackageManifestPath),
+        readFile(packageLockPath),
+    ]);
     const sdkPackageManifest = requireRecord(
         JSON.parse(sdkPackageManifestBytes.toString('utf8')) as unknown,
         'SDK package manifest',
     );
-    const resourceModel = compileFullTallyResourceModel(10, 8);
+    const resourceModel = compileFullTallyResourceModel(10, 10);
     const securityLedger = compileFullTallySecurityLedger(10);
     const selectedEvaluationKmacHistogram =
         securityLedger.honestWork.operationKmacHistogram.filter(
@@ -682,6 +787,31 @@ const main = async (): Promise<void> => {
     const expectedDigest = expectedShake256Hex(
         chunkCount,
         finalChunkByteLength,
+    );
+    const pageConfiguration = {
+        chunkCount,
+        chunkPayloadByteLength,
+        corpusByteLength,
+        expectedShake256Hex: expectedDigest,
+        finalChunkByteLength,
+        kmacHistogram: selectedEvaluationKmacHistogram,
+    };
+    const completeConfiguration = {
+        browserPrivateMemoryPlanningTargetByteLength,
+        coldReclaimLimitMilliseconds,
+        coldReclaimPollIntervalMilliseconds,
+        cpuThrottlingRate,
+        foregroundLimitMilliseconds,
+        mobileProfile,
+        pageConfiguration,
+        processMemorySampleIntervalMilliseconds,
+        submittedParticipantCount: 10,
+        topCount: 10,
+        wifiProfile,
+    };
+    const completeConfigurationBytes = Buffer.from(
+        JSON.stringify(completeConfiguration),
+        'utf8',
     );
     const server = createServer((request, response) => {
         if (request.method !== 'GET' || request.url === undefined) {
@@ -815,31 +945,21 @@ const main = async (): Promise<void> => {
         let result: ResourceScreenResult;
         let heapUsage: unknown;
         try {
-            const rawResult = await page.evaluate(
-                async (configuration) => {
-                    const run = (
-                        globalThis as typeof globalThis & {
-                            runExternalChromeResourceScreen?: (
-                                input: unknown,
-                            ) => Promise<unknown>;
-                        }
-                    ).runExternalChromeResourceScreen;
-                    if (run === undefined) {
-                        throw new Error(
-                            'The static resource screen did not initialize.',
-                        );
+            const rawResult = await page.evaluate(async (configuration) => {
+                const run = (
+                    globalThis as typeof globalThis & {
+                        runExternalChromeResourceScreen?: (
+                            input: unknown,
+                        ) => Promise<unknown>;
                     }
-                    return run(configuration);
-                },
-                {
-                    chunkCount,
-                    chunkPayloadByteLength,
-                    corpusByteLength,
-                    expectedShake256Hex: expectedDigest,
-                    finalChunkByteLength,
-                    kmacHistogram: selectedEvaluationKmacHistogram,
-                },
-            );
+                ).runExternalChromeResourceScreen;
+                if (run === undefined) {
+                    throw new Error(
+                        'The static resource screen did not initialize.',
+                    );
+                }
+                return run(configuration);
+            }, pageConfiguration);
             result = parseResourceScreenResult(rawResult);
             heapUsage = await session.send('Runtime.getHeapUsage');
         } catch (error) {
@@ -942,6 +1062,11 @@ const main = async (): Promise<void> => {
                 'external-Chrome mobile-emulation development evidence',
             coldReclaim,
             coldRestartBrowserIdentity: coldRestart.browserIdentity,
+            configuration: completeConfiguration,
+            configurationIdentity: {
+                byteLength: completeConfigurationBytes.byteLength,
+                sha256: sha256Hex(completeConfigurationBytes),
+            },
             emulation: {
                 cpuThrottlingRate,
                 mobileProfile,
@@ -953,20 +1078,47 @@ const main = async (): Promise<void> => {
             heapUsage,
             packageIdentity: {
                 name: requireString(sdkPackageManifest, 'name'),
-                packageJsonSha256: createHash('sha256')
-                    .update(sdkPackageManifestBytes)
-                    .digest('hex'),
-                productionKernelByteLength: productionKernel.byteLength,
-                productionKernelSha256: createHash('sha256')
-                    .update(productionKernel)
-                    .digest('hex'),
+                packageLock: fileIdentity(packageLockPath, packageLock),
+                productionKernel: fileIdentity(
+                    productionKernelPath,
+                    productionKernel,
+                ),
+                rootPackageManifest: fileIdentity(
+                    rootPackageManifestPath,
+                    rootPackageManifest,
+                ),
+                sdkPackageManifest: fileIdentity(
+                    sdkPackageManifestPath,
+                    sdkPackageManifestBytes,
+                ),
                 version: requireString(sdkPackageManifest, 'version'),
             },
             pass,
+            repository: {
+                commitHash: repositoryCommitHash,
+                treeDirty: false,
+            },
             result,
+            sourceIdentities: {
+                buildWasmKernel: fileIdentity(
+                    wasmBuildSourcePath,
+                    wasmBuildSource,
+                ),
+                driver: fileIdentity(driverSourcePath, driverSource),
+                pageHtml: fileIdentity(staticPagePath, html),
+                pageScript: fileIdentity(staticScriptPath, script),
+                productionKmac: fileIdentity(
+                    productionKmacSourcePath,
+                    productionKmacSource,
+                ),
+                resourceScreenKernel: fileIdentity(
+                    resourceScreenKernelSourcePath,
+                    resourceScreenKernelSource,
+                ),
+                runner: fileIdentity(runnerSourcePath, runnerSource),
+            },
             wasm: {
-                byteLength: wasm.byteLength,
-                sha256: createHash('sha256').update(wasm).digest('hex'),
+                ...fileIdentity(wasmFilePath, wasm),
             },
         };
         await writeFile(
