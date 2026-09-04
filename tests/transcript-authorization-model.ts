@@ -1,3 +1,6 @@
+// Authorization-policy model only. The ECHO/READY close extension has a
+// delayed-delivery stall captured by publication-close-race-model.ts; these
+// global transitions do not establish a live distributed close protocol.
 export const completionParticipantCount = 10;
 export const completionCertificateThreshold = 7;
 const completionReleaseThreshold = 4;

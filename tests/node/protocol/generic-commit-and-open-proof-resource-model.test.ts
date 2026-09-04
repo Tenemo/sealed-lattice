@@ -7,7 +7,7 @@ describe('generic commit-and-open proof resource model', () => {
         expect(compileGenericCommitAndOpenProofResourceCensus()).toEqual({
             boundedCoefficientCountPerSetupContribution: 2_293_760n,
             boundedRingElementCountPerSetupContribution: 70n,
-            combinedSetupAndProofSubtotalByteLength: 5_456_855_040n,
+            combinedSetupAndProofSubtotalByteLength: 4_423_680_000n,
             exceedsSetupTransferVarianceCeiling: true,
             minimumProofCorpusByteLength: 2_511_667_200n,
             minimumProofSizePerSetupContributionByteLength: 251_166_720n,

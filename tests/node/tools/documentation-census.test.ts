@@ -20,6 +20,9 @@ describe('documentation census generator', () => {
             '## Candidate setup-proof field census',
             '## Share-encryption cross-modulus census',
             '## Polynomial oracle boundary census',
+            '## Recipient-key uniqueness census',
+            '## Fixed-witness release simulation census',
+            '## Publication and close local-view census',
             '## Threshold release flooding bound',
             '## Generic commit-and-open setup-proof floor',
             '## Participant visit dependency census',
@@ -74,7 +77,7 @@ describe('documentation census generator', () => {
             '| Successful-result visits for an early release author | `10` |',
         );
         expect(rendered).toContain(
-            '| Setup plus proof subtotal | `5,456,855,040` |',
+            '| Setup plus proof subtotal | `4,423,680,000` |',
         );
         expect(rendered).toContain(
             '| Ordered pair-difference lanes | `90` | `380` |',

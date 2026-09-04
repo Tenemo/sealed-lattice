@@ -9,6 +9,7 @@ import {
     verifyExactRankingModel,
 } from '#tests/exact-ranking-model.js';
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
+import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
@@ -17,6 +18,8 @@ import {
 } from '#tests/polynomial-oracle-boundary-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
+import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
+import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
@@ -40,6 +43,9 @@ export const renderDocumentationCensus = (): string => {
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
     const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
     const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
+    const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
+    const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
+    const closeRace = runPublicationCloseRaceModel(10, false);
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
     const thresholdKeyResources =
         compileThresholdKeyAggregationResourceLowerBound();
@@ -957,6 +963,88 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
+        '## Recipient-key uniqueness census',
+        '',
+        'For an ideal uniformly sampled common ring element, a determinant and union bound limits the event that any public key has two bounded witnesses. The event covers every recipient public key at once. The exponent below bounds this statistical bad-matrix event only; it is not a computational-security level and does not cover the real SHAKE common-string generator, selective completion conditioning, or proof composition.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Recipient-key coefficient bound',
+                    formatCount(recipientKeyUniqueness.coefficientBound),
+                ],
+                [
+                    'Difference values per coefficient',
+                    formatCount(recipientKeyUniqueness.differenceValueCount),
+                ],
+                [
+                    'Squared determinant-union base numerator',
+                    formatCount(
+                        recipientKeyUniqueness.squaredFailureBaseNumerator,
+                    ),
+                ],
+                [
+                    'Uniform-matrix failure exponent',
+                    formatCount(
+                        recipientKeyUniqueness.uniformMatrixFailureExponent,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Fixed-witness release simulation census',
+        '',
+        'This scalar counterexample applies the KLLPS simulation equation with three fixed corrupt coordinates and one honest release. Using the actual ciphertext plaintext satisfies the expanded noise relation; substituting another output decodes that output but violates the relation to the fixed honest setup witness. It rejects that simulator chronology, not threshold FHE as a family.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Same-plaintext noise checks passed',
+                    formatCount(
+                        releaseSimulation.samePlaintextNoiseChecksPassed,
+                    ),
+                ],
+                [
+                    'Changed-plaintext noise checks refused',
+                    formatCount(
+                        releaseSimulation.changedPlaintextNoiseChecksRefused,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Publication and close local-view census',
+        '',
+        'The rejected close rule can strand an honest READY sender when other honest parties close before receiving its complete ECHO evidence. Every honest message is eventually delivered, while corrupt parties remain silent. Neither publication nor close obtains its quorum. This is a pre-certification liveness counterexample and does not invalidate the post-certification threshold arithmetic.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Continuing honest participants in the close race',
+                    formatCount(closeRace.honestParticipants),
+                ],
+                [
+                    'READY signers after complete delayed delivery',
+                    formatCount(closeRace.readySigners),
+                ],
+                [
+                    'Close signers after complete delayed delivery',
+                    formatCount(closeRace.closeSigners),
+                ],
+                [
+                    'Delivered honest messages',
+                    formatCount(closeRace.deliveredMessages),
+                ],
+                [
+                    'Unresolved honest READY waiters',
+                    formatCount(closeRace.unresolvedReadyWaiters),
+                ],
+            ],
+        ),
+        '',
         '## Threshold release flooding bound',
         '',
         'For ten participants and release threshold four, one rational-ring implementation enumerates every coefficient over the reduced degree-eight negacyclic subring, while the independent modular-ring model obtains the same maxima. The KLLPS26 trigonometric expression remains as a looser analytic cross-check. All noise-budget figures are floors from the dominant flooding term only: they omit the expanded public-proof radius, remaining correctness terms, proof slack, multi-query and multi-session unions, and hidden constants. They are not approved FHE parameters.',
@@ -1093,7 +1181,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Participant visit dependency census',
         '',
-        'This dependency lower bound counts the current fixed-roster candidate with separate common-string commitment and opening, one setup-contribution wave, receipt and ballot co-publication, evidence-carrying ballot echo and ready waves, close-log convergence, target certification, release, and retrieval. It assumes each stage fits its foreground-time budget and does not establish browser feasibility.',
+        'This dependency skeleton counts a favorable delivery trace of the former fixed-roster candidate with separate common-string commitment and opening, one setup-contribution wave, receipt and ballot co-publication, evidence-carrying ballot echo and ready waves, close-log convergence, target certification, release, and retrieval. The close race has no completing trace under some permitted deliveries, and a replacement protocol may require more dependencies. These counts establish neither a live protocol nor a maximum visit bound.',
         '',
         table(
             ['Property', 'Value'],

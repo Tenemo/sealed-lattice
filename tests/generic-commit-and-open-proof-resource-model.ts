@@ -52,7 +52,7 @@ export const compileGenericCommitAndOpenProofResourceCensus =
         const minimumProofCorpusByteLength =
             participantCount * minimumProofSizePerSetupContributionByteLength;
         const combinedSetupAndProofSubtotalByteLength =
-            thresholdKeyResources.minimumSetupTransferCorpusByteLength +
+            thresholdKeyResources.minimumPublicEncryptedSharingSetupCorpusByteLength +
             minimumProofCorpusByteLength;
         const setupTransferVarianceCeiling =
             (publicProtocolCorpusPlanningTargetByteLength *
