@@ -14,8 +14,12 @@ describe('bounded integer sharing privacy model', () => {
             maximumBlockTranslationOneNorm: 96n,
             maximumHybridTranslationOneNorm: 3_932_160n,
             maximumProductionTranslationOneNormPerContribution: 393_216n,
+            perContributionShareCoefficientBound:
+                498_460_498_419_343_452_338_927_647_605_129_217n,
             productionInterpolationPointExponentStride: 4_096n,
             reducedRingBlockCount: 4_096n,
+            shareEncryptionModulus:
+                13_720_195_003_462_208_630_022_647_176_022_597_200_838_657n,
             shareEncryptionModulusBitLength: 144n,
             sharePlaintextMinimumSpan:
                 9_969_209_968_386_869_046_778_552_952_102_584_341n,

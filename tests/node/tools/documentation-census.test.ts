@@ -17,7 +17,9 @@ describe('documentation census generator', () => {
             '## Bounded-integer sharing privacy census',
             '## Threshold key-aggregation resource floor',
             '## Public encrypted-sharing proof screen',
-            '## Specialized setup PIOP screen',
+            '## Candidate setup-proof field census',
+            '## Share-encryption cross-modulus census',
+            '## Polynomial oracle boundary census',
             '## Threshold release flooding bound',
             '## Generic commit-and-open setup-proof floor',
             '## Participant visit dependency census',
@@ -31,29 +33,39 @@ describe('documentation census generator', () => {
             '| Authorized release subsets checked | `210` |',
         );
         expect(rendered).toContain(
-            '| Setup transfer corpus floor | `3,335,454,720` |',
+            '| Setup transfer corpus floor | `2,945,187,840` |',
         );
         expect(rendered).toContain(
-            '| Fully resident evaluation plus relinearization above the absolute bound | yes |',
+            '| Fully resident evaluation plus relinearization above the absolute bound | no |',
         );
         expect(rendered).toContain(
-            '| One-key-pass-per-operation local reads | `7,132,676,096` |',
+            '| Fully resident evaluation plus all keys above the absolute bound | yes |',
         );
         expect(rendered).toContain(
-            '| Public encrypted-sharing setup floor before proofs | `2,204,958,720` |',
+            '| One-key-pass-per-operation local reads | `6,025,379,840` |',
+        );
+        expect(rendered).toContain(
+            '| Public encrypted-sharing setup floor before proofs | `1,912,012,800` |',
         );
         expect(rendered).toContain('| Share-encryption modulus bits | `144` |');
         expect(rendered).toContain(
             '| Share plaintext prime Proth witness | `3` |',
         );
         expect(rendered).toContain(
-            '| Optimistic Ligero proof per contributor | `74,378,926` |',
+            '| Optimistic Ligero proof per contributor | `69,369,183` |',
         );
         expect(rendered).toContain(
-            '| Encoded proof oracle per contributor | `23,685,758,976` |',
+            '| Encoded proof oracle per contributor | `21,948,334,080` |',
         );
         expect(rendered).toContain(
-            '| Optimistic proof bytes per contributor | `706,320` |',
+            '| Shared views between the two one-mask witnesses | `0` |',
+        );
+        expect(rendered).toContain('| Pocklington witnesses checked | `3` |');
+        expect(rendered).toContain(
+            '| Minimum no-wrap proof-field bits | `160` |',
+        );
+        expect(rendered).toContain(
+            '| Signed quotient storage bits per coefficient | `16` |',
         );
         expect(rendered).toContain(
             '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
@@ -62,7 +74,7 @@ describe('documentation census generator', () => {
             '| Successful-result visits for an early release author | `10` |',
         );
         expect(rendered).toContain(
-            '| Setup plus proof subtotal | `6,026,526,720` |',
+            '| Setup plus proof subtotal | `5,456,855,040` |',
         );
         expect(rendered).toContain(
             '| Ordered pair-difference lanes | `90` | `380` |',

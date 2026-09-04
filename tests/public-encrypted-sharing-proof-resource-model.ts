@@ -1,5 +1,5 @@
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
-import { compileCandidateBgvParameterCensus } from '#tests/candidate-bgv-parameter-model.js';
+import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { publicEncryptedSharingModelConstants } from '#tests/public-encrypted-sharing-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
 
@@ -21,6 +21,7 @@ const sharingPolynomialNonconstantCoefficientCount = 3n;
 
 export type PublicEncryptedSharingProofResourceCensus = Readonly<{
     binaryDecompositionConstraintCountPerContributor: bigint;
+    binaryEndpointConstraintCountPerContributor: bigint;
     binaryDecompositionRingElementCountPerContributor: bigint;
     boundedCoefficientCountPerContributor: bigint;
     boundedRingElementCountPerContributor: bigint;
@@ -53,7 +54,7 @@ export type PublicEncryptedSharingProofResourceCensus = Readonly<{
 export const compilePublicEncryptedSharingProofResourceCensus =
     (): PublicEncryptedSharingProofResourceCensus => {
         const resources = compileThresholdKeyAggregationResourceLowerBound();
-        const candidateBgvParameters = compileCandidateBgvParameterCensus();
+        const setupProofField = compileCandidateSetupProofFieldCensus();
         const boundedIntegerSharing =
             compileBoundedIntegerSharingPrivacyCensus();
         const ringDegree =
@@ -61,7 +62,7 @@ export const compilePublicEncryptedSharingProofResourceCensus =
         const participantCount =
             publicEncryptedSharingModelConstants.productionParticipantCount;
         const proofFieldElementBitLength = Number(
-            candidateBgvParameters.ciphertextModulusBitLength + 1n,
+            setupProofField.modulusBitLength,
         );
         const componentSecurityBitLength =
             endToEndTargetSecurityBitLength + componentSecurityMarginBitLength;
@@ -72,10 +73,11 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             componentSecurityBitLength +
             3 * maximumQuantumRandomOracleQueryBitLength;
 
-        // One FHE secret, one auxiliary secret, one encryption-key error, three
-        // relinearization-error vectors, and one automorphism-error vector.
+        // KLSW24 Section 4.1: two secrets and four error vectors; encryption
+        // reuses the first b coordinate. Ternary errors are an HLS25-inspired
+        // screening choice, not Lattigo's Gaussian errors or a KLSW theorem.
         const fheKeyBoundedRingElementCount =
-            3n + 4n * resources.ciphertextModulusLimbCount;
+            2n + 4n * resources.ciphertextModulusLimbCount;
         const ternaryRingElementCountPerContributor =
             fheKeyBoundedRingElementCount +
             BigInt(shareEncryptionKeyBoundedRingElementCount) +
@@ -102,6 +104,11 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             ringDegree;
         const binaryDecompositionConstraintCountPerContributor =
             binaryDecompositionRingElementCountPerContributor * ringDegree;
+        // The highest shifted bit denotes exactly 2R. If it is one, all lower
+        // bits must be zero; one component-wise product against their sum
+        // enforces the endpoint without admitting values above 2R.
+        const binaryEndpointConstraintCountPerContributor =
+            sharingPolynomialNonconstantCoefficientCount * ringDegree;
 
         // The optimistic linear rows comprise every public KLSW key equation,
         // one share-encryption key equation, one sharing evaluation per
@@ -118,6 +125,7 @@ export const compilePublicEncryptedSharingProofResourceCensus =
         const optimisticCircuitConstraintCountPerContributor =
             ternaryConstraintCountPerContributor +
             binaryDecompositionConstraintCountPerContributor +
+            binaryEndpointConstraintCountPerContributor +
             linearConstraintCountPerContributor;
 
         const fieldBitLength = proofFieldElementBitLength;
@@ -210,6 +218,7 @@ export const compilePublicEncryptedSharingProofResourceCensus =
 
         return {
             binaryDecompositionConstraintCountPerContributor,
+            binaryEndpointConstraintCountPerContributor,
             binaryDecompositionRingElementCountPerContributor,
             boundedCoefficientCountPerContributor,
             boundedRingElementCountPerContributor,

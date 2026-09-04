@@ -236,8 +236,10 @@ export type BoundedIntegerSharingPrivacyCensus = Readonly<{
     maximumBlockTranslationOneNorm: bigint;
     maximumHybridTranslationOneNorm: bigint;
     maximumProductionTranslationOneNormPerContribution: bigint;
+    perContributionShareCoefficientBound: bigint;
     productionInterpolationPointExponentStride: bigint;
     reducedRingBlockCount: bigint;
+    shareEncryptionModulus: bigint;
     shareEncryptionModulusBitLength: bigint;
     sharePlaintextMinimumSpan: bigint;
     sharePlaintextModulus: bigint;
@@ -312,9 +314,10 @@ export const compileBoundedIntegerSharingPrivacyCensus =
             );
         }
 
+        const perContributionShareCoefficientBound =
+            1n + BigInt(corruptParticipantCount) * coefficientSamplingBound;
         const aggregateShareCoefficientBound =
-            BigInt(participantCount) *
-            (1n + BigInt(corruptParticipantCount) * coefficientSamplingBound);
+            BigInt(participantCount) * perContributionShareCoefficientBound;
         const sharePlaintextMinimumSpan =
             2n * aggregateShareCoefficientBound + 1n;
         const sharePlaintextPrime = findProthPrimeAbove(
@@ -343,8 +346,10 @@ export const compileBoundedIntegerSharingPrivacyCensus =
             maximumBlockTranslationOneNorm: maximumTranslationPerBlock,
             maximumHybridTranslationOneNorm,
             maximumProductionTranslationOneNormPerContribution,
+            perContributionShareCoefficientBound,
             productionInterpolationPointExponentStride,
             reducedRingBlockCount,
+            shareEncryptionModulus,
             shareEncryptionModulusBitLength: BigInt(
                 shareEncryptionModulus.toString(2).length,
             ),

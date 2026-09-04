@@ -19,6 +19,8 @@ Kernel integrity is the SHA-256 hash of the exact shipped WebAssembly bytes, inc
 
 The public SDK exposes only implemented foundation operations. Source and package tests define the exact command inventory.
 
+The bridge must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or a construction call that bypasses certified target-bound result release. A future result path may expose only positively verified terminal output through the public SDK.
+
 Package tests establish only their named byte, refusal, and runtime properties. See the repository [README](../../README.md) for implementation status and [SECURITY.md](../../SECURITY.md) for security limitations.
 
 ## Development

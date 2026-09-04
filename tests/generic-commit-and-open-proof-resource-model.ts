@@ -30,12 +30,12 @@ export const compileGenericCommitAndOpenProofResourceCensus =
     (): GenericCommitAndOpenProofResourceCensus => {
         const thresholdKeyResources =
             compileThresholdKeyAggregationResourceLowerBound();
-        // One secret, one auxiliary secret, one encryption error, three
-        // relinearization-error vectors, and one minimum automorphism-error
-        // vector. The model optimistically charges only one binary
+        // KLSW24 has two secrets and four error vectors for its three
+        // relinearization vectors and one automorphism. Encryption reuses b[0].
+        // The model optimistically charges only one binary
         // multiplication for each coefficient's non-linear bound check.
         const boundedRingElementCountPerSetupContribution =
-            3n +
+            2n +
             (3n + minimumAutomorphismKeyCount) *
                 thresholdKeyResources.ciphertextModulusLimbCount;
         const boundedCoefficientCountPerSetupContribution =

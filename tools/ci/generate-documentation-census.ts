@@ -2,16 +2,22 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
+import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import {
     exactRankingModelConstants,
     compilePackedRankingEvaluationGraph,
     verifyExactRankingModel,
 } from '#tests/exact-ranking-model.js';
+import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
+import {
+    createFalseBinaryRelationTable,
+    enumerateRandomizedEncodingViews,
+} from '#tests/polynomial-oracle-boundary-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
-import { compileSpecializedSetupPiopResourceCensus } from '#tests/specialized-setup-piop-resource-model.js';
+import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -33,6 +39,7 @@ const table = (
 export const renderDocumentationCensus = (): string => {
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
     const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
+    const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
     const thresholdKeyResources =
         compileThresholdKeyAggregationResourceLowerBound();
@@ -41,7 +48,12 @@ export const renderDocumentationCensus = (): string => {
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
-    const specializedSetupPiop = compileSpecializedSetupPiopResourceCensus();
+    const shareEncryptionCrossModulus =
+        compileShareEncryptionCrossModulusCensus();
+    const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
+    const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
+    const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
+    const falseRelation = createFalseBinaryRelationTable();
     const genericProofResources =
         compileGenericCommitAndOpenProofResourceCensus();
     if (
@@ -330,7 +342,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Threshold key-aggregation resource floor',
         '',
-        'This lower bound screens a depth-sized BGV layout at polynomial modulus degree 32,768. It retains four 55-bit primes after the qualification graph, assigns one 34-bit prime to each consumed multiplication level, and accounts separately for two 60-bit auxiliary evaluation-key primes. The rejected private-opening representation commits to each of four sharing coefficients separately with the smallest computationally hiding BDLOP18 layout and sends one evaluation plus its three-element opening to each remote recipient. The replacement public encrypted-sharing floor uses the certified bounded-integer plaintext prime and model-derived 21-bit zero-failure encoding scale, one common-matrix public-key ring element per recipient, and two ciphertext ring elements for every contributor-recipient pair. It assumes only one automorphism key and compact bit-packed transfer elements, and omits every proof, framing byte, scratch allocation, and JavaScript/WebAssembly copy. The tuple is a resource falsifier informed by a native development probe, not a security parameter approval or browser result.',
+        'This lower bound screens a depth-sized BGV layout at polynomial modulus degree 32,768. It retains three approximately 55-bit primes after the qualification graph, assigns one approximately 34-bit prime to each consumed multiplication level, and accounts separately for two approximately 60-bit auxiliary evaluation-key primes. The rejected private-opening representation commits to each of four sharing coefficients separately with the smallest computationally hiding BDLOP18 layout and sends one evaluation plus its three-element opening to each remote recipient. The replacement public encrypted-sharing floor uses the certified bounded-integer plaintext prime and model-derived 21-bit zero-failure encoding scale, one common-matrix public-key ring element per recipient, and two ciphertext ring elements for every contributor-recipient pair. It counts the exact KLSW (b,d,v,h) contribution: encryption reuses b[0] and one automorphism uses one h vector. Common vectors are regenerated and their runtime work is omitted. It assumes compact bit-packed transfer elements, and omits every proof, framing byte, scratch allocation, and JavaScript/WebAssembly copy. The tuple is a resource falsifier informed by native development and attack-estimator probes, not a security parameter approval or browser result.',
         '',
         table(
             ['Property', 'Value'],
@@ -532,6 +544,18 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
+                    'One aggregate unit-rotation key',
+                    formatCount(
+                        thresholdKeyResources.aggregateUnitRotationKeyLiveByteLength,
+                    ),
+                ],
+                [
+                    'Evaluation plus all required evaluation keys floor',
+                    formatCount(
+                        thresholdKeyResources.minimumEvaluationLiveByteLengthWithAllEvaluationKeys,
+                    ),
+                ],
+                [
                     'Ciphertexts plus current streamed evaluation-key floor',
                     formatCount(
                         thresholdKeyResources.scheduledPeakCiphertextAndCurrentEvaluationKeyByteLength,
@@ -562,17 +586,17 @@ export const renderDocumentationCensus = (): string => {
                         : 'no',
                 ],
                 [
-                    'One aggregate unit-rotation key',
-                    formatCount(
-                        thresholdKeyResources.aggregateUnitRotationKeyLiveByteLength,
-                    ),
+                    'Fully resident evaluation plus all keys above the absolute bound',
+                    thresholdKeyResources.exceedsWebAssemblyAbsoluteMemoryBoundWithAllEvaluationKeys
+                        ? 'yes'
+                        : 'no',
                 ],
             ],
         ),
         '',
         '## Public encrypted-sharing proof screen',
         '',
-        "This optimistic direct-Ligero screen counts two multiplication constraints for each ternary coefficient, one binary constraint for every bit in the bounded-integer sharing coefficients, and one constraint for each linear ring-coordinate equation. It then searches the discrete power-of-two code dimensions in the exact AHIV22 Section 5.3 communication expression, including Merkle authentication paths. The soundness and random-oracle exponents compensate the CMS19 quadratic and cubic losses for an assumed quantum-query bound plus a component margin, but omit the theorem's asymptotic constant. The screen also omits complete modulus conversion, proof framing and roots, a fixed-hash instantiation, release proofs, and every implementation allocation. Expanded witness and encoded-oracle bytes are proof-field representations, not measured live sets.",
+        "This optimistic direct-Ligero screen counts two multiplication constraints for each ternary coefficient, one binary constraint for every shifted-encoding bit, the exact upper-endpoint constraint, and one constraint for each linear ring-coordinate equation. It then searches the discrete power-of-two code dimensions in the exact AHIV22 Section 5.3 communication expression, including Merkle authentication paths. The soundness and random-oracle exponents compensate the CMS19 quadratic and cubic losses for an assumed quantum-query bound plus a component margin, but omit the theorem's asymptotic constant. The screen also omits complete modulus conversion, proof framing and roots, a fixed-hash instantiation, release proofs, and every implementation allocation. Expanded witness and encoded-oracle bytes are proof-field representations, not measured live sets.",
         '',
         table(
             ['Property', 'Value'],
@@ -617,6 +641,12 @@ export const renderDocumentationCensus = (): string => {
                     'Binary-decomposition constraints per contributor',
                     formatCount(
                         publicEncryptedSharingProof.binaryDecompositionConstraintCountPerContributor,
+                    ),
+                ],
+                [
+                    'Binary endpoint constraints per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.binaryEndpointConstraintCountPerContributor,
                     ),
                 ],
                 [
@@ -744,90 +774,185 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Specialized setup PIOP screen',
+        '## Candidate setup-proof field census',
         '',
-        'This optimistic screen extends the HLS25 randomized-encoding, norm-check, linear-check, and row-check formulas to the bounded KLSW, share-encryption, and degree-three sharing witnesses, then charges BCS-style field responses, Merkle paths, and one root per polynomial oracle at the CMS19 query-compensated hash length. It assumes one extra randomized-encoding point and batches the algebra into two linear checks and two row checks. It omits the actual modulus-conversion relation, proof-round transcript, round-by-round-soundness proof, fixed hash, framing, allocator state, computation time, and restart I/O. Passing this screen selects only the next falsifier.',
+        "This arithmetic model verifies the exact power-form modulus, factors its base completely, checks one Pocklington witness for every distinct prime divisor of the factored modulus-minus-one, and verifies the production negacyclic-transform congruence. Pocklington's theorem therefore certifies the candidate as prime without relying on a probabilistic primality test. Its exact value also exceeds every bounded direct FHE key residual, including the quotient term. Packed transfer and uint64-limb storage are separate quantities. This selects a field for proof experiments only; it does not prove PIOP security, approve the FHE tuple, or establish browser feasibility.",
         '',
         table(
             ['Property', 'Value'],
             [
                 [
-                    'Randomized-encoding polynomial length',
+                    'Proof-field modulus',
+                    formatCount(candidateSetupProofField.modulus),
+                ],
+                [
+                    'Proof-field modulus bits',
+                    formatCount(candidateSetupProofField.modulusBitLength),
+                ],
+                [
+                    'Canonical field-element bytes',
+                    formatCount(candidateSetupProofField.modulusByteLength),
+                ],
+                [
+                    'Field element in uint64 limbs',
+                    formatCount(candidateSetupProofField.limbByteLength),
+                ],
+                [
+                    'Minimum field modulus for direct FHE key embedding',
+                    formatCount(fheKeyEmbedding.minimumProofFieldModulus),
+                ],
+                [
+                    'FHE key quotient ring elements per contributor',
                     formatCount(
-                        specializedSetupPiop.randomizedEncodingPolynomialLength,
+                        fheKeyEmbedding.quotientRingElementCountPerContributor,
                     ),
                 ],
                 [
-                    'Randomized-encoding oracles per contributor',
+                    'FHE key quotient magnitude bound',
+                    formatCount(fheKeyEmbedding.maximumQuotientMagnitude),
+                ],
+                ['Power base', formatCount(candidateSetupProofField.powerBase)],
+                [
+                    'Power exponent',
+                    formatCount(candidateSetupProofField.powerExponent),
+                ],
+                [
+                    'Base prime factors certified',
+                    formatCount(candidateSetupProofField.basePrimeFactorCount),
+                ],
+                [
+                    'Pocklington witnesses checked',
                     formatCount(
-                        specializedSetupPiop.randomizedEncodingOracleCountPerContributor,
+                        candidateSetupProofField.pocklingtonWitnessCount,
                     ),
                 ],
                 [
-                    'Polynomial oracles per contributor',
+                    'Required transform order',
+                    formatCount(candidateSetupProofField.transformOrder),
+                ],
+            ],
+        ),
+        '',
+        '## Share-encryption cross-modulus census',
+        '',
+        'This exact arithmetic model embeds the composite share-encryption congruences into the much larger candidate setup-proof field. It derives centered numerator bounds, one integer quotient bound for the share-encryption public-key equation and each ciphertext component, and the minimum proof-field width that prevents a false field equality from wrapping. A separate reduced-ring execution constructs valid quotients and rejects a changed public residue. These results establish only the integer embedding and its witness floor; they do not prove the surrounding PIOP, Ring-LWE security, or browser feasibility.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Share-encryption modulus',
                     formatCount(
-                        specializedSetupPiop.polynomialOracleCountPerContributor,
+                        shareEncryptionCrossModulus.shareEncryptionModulus,
                     ),
                 ],
                 [
-                    'Query field elements per contributor',
+                    'Per-contribution share coefficient bound',
                     formatCount(
-                        specializedSetupPiop.queryFieldElementCountPerContributor,
+                        shareEncryptionCrossModulus.perContributionShareCoefficientBound,
                     ),
                 ],
                 [
-                    'Encoded oracle field elements per contributor',
+                    'Public-key quotient bound',
                     formatCount(
-                        specializedSetupPiop.encodedOracleFieldElementCountPerContributor,
+                        shareEncryptionCrossModulus.shareEncryptionKeyQuotientBound,
                     ),
                 ],
                 [
-                    'Encoded oracle bytes per contributor',
+                    'Ciphertext-first quotient bound',
                     formatCount(
-                        specializedSetupPiop.encodedOracleByteLengthPerContributor,
+                        shareEncryptionCrossModulus.ciphertextFirstQuotientBound,
                     ),
                 ],
                 [
-                    'Merkle authentication bytes per contributor',
+                    'Ciphertext-second quotient bound',
                     formatCount(
-                        specializedSetupPiop.merkleAuthenticationByteLengthPerContributor,
+                        shareEncryptionCrossModulus.ciphertextSecondQuotientBound,
                     ),
                 ],
                 [
-                    'Optimistic proof bytes per contributor',
+                    'Quotient ring elements per contributor',
                     formatCount(
-                        specializedSetupPiop.optimisticProofByteLengthPerContributor,
+                        shareEncryptionCrossModulus.quotientRingElementCountPerContributor,
                     ),
                 ],
                 [
-                    'Optimistic ten-proof corpus',
+                    'Quotient norm decomposition length',
                     formatCount(
-                        specializedSetupPiop.optimisticTenProofCorpusByteLength,
+                        shareEncryptionCrossModulus.quotientNormDecompositionLength,
                     ),
                 ],
                 [
-                    'Public input, expanded witness, oracle, and Merkle bytes per contributor',
+                    'Signed quotient storage bits per coefficient',
                     formatCount(
-                        specializedSetupPiop.publicInputWitnessOracleAndMerkleByteLengthPerContributor,
+                        shareEncryptionCrossModulus.quotientSignedEncodingBitLength,
                     ),
                 ],
                 [
-                    'Maximum streaming row bytes',
+                    'Quotient norm digit ring elements',
                     formatCount(
-                        specializedSetupPiop.maximumStreamingRowByteLength,
+                        shareEncryptionCrossModulus.quotientNormDigitRingElementCountPerContributor,
                     ),
                 ],
                 [
-                    'Fits setup transfer variance ceiling',
-                    specializedSetupPiop.fitsSetupTransferVarianceCeiling
+                    'Minimum no-wrap proof-field bits',
+                    formatCount(
+                        shareEncryptionCrossModulus.minimumProofFieldElementBitLength,
+                    ),
+                ],
+                [
+                    'Candidate proof-field bits',
+                    formatCount(
+                        shareEncryptionCrossModulus.candidateProofFieldElementBitLength,
+                    ),
+                ],
+                [
+                    'Reduced-ring coefficient equations checked',
+                    formatCount(
+                        shareEncryptionCrossModulus.toyCoefficientEquationCount,
+                    ),
+                ],
+                [
+                    'Changed residue rejected',
+                    shareEncryptionCrossModulus.toyTamperRejected
                         ? 'yes'
                         : 'no',
                 ],
+            ],
+        ),
+        '',
+        '## Polynomial oracle boundary census',
+        '',
+        'These exact finite-field counterexamples reject the one-mask, reused-query projection and bare-table compilation. Sufficient independent masks repair only the displayed witness-query marginal; low-degree binding, all auxiliary-polynomial views, QROM compilation, and a complete regeneration schedule remain unproved. No proof-size or streaming-feasibility claim is derived from these examples.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
                 [
-                    'Fits setup storage planning target',
-                    specializedSetupPiop.fitsSetupStoragePlanningTarget
-                        ? 'yes'
-                        : 'no',
+                    'One-mask support per witness after two distinct queries',
+                    formatCount(firstMaskedView.size),
+                ],
+                [
+                    'Shared views between the two one-mask witnesses',
+                    formatCount(
+                        [...firstMaskedView.keys()].filter((view) =>
+                            secondMaskedView.has(view),
+                        ).length,
+                    ),
+                ],
+                [
+                    'Two-mask support per witness after two queries',
+                    formatCount(
+                        enumerateRandomizedEncodingViews(0, 2, [2, 3]).size,
+                    ),
+                ],
+                [
+                    'False binary relation table checks passed',
+                    formatCount(falseRelation.entries.length),
+                ],
+                [
+                    'Required quotient maximum degree',
+                    formatCount(falseRelation.claimedQuotientMaximumDegree),
                 ],
             ],
         ),

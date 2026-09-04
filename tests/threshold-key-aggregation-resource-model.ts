@@ -7,9 +7,10 @@ import { compilePackedRankingEvaluationGraph } from '#tests/exact-ranking-model.
 import { publicEncryptedSharingModelConstants } from '#tests/public-encrypted-sharing-model.js';
 
 // The ring degree and plaintext modulus come from the HLS25 large profile.
-// The candidate modulus layout retains four 55-bit primes after the verified
-// depth-14 graph and assigns one 34-bit prime to each consumed level. The two
-// 60-bit auxiliary primes follow the pinned Lattigo BGV evaluation-key layout.
+// The candidate modulus layout retains three approximately 55-bit primes after
+// the verified depth-14 graph and assigns one approximately 34-bit prime to
+// each consumed level. The two approximately 60-bit auxiliary primes follow
+// the pinned Lattigo BGV evaluation-key layout.
 // This is a resource-screening tuple, not an approved security parameter set.
 const minimumAutomorphismKeyCount = 1n;
 const minimumCommitmentSecurityRowCount = 1n;
@@ -33,6 +34,8 @@ export type ThresholdKeyAggregationResourceLowerBound = Readonly<{
     coefficientCommitmentCorpusByteLength: bigint;
     coefficientCommitmentRingElementCountPerContributor: bigint;
     exceedsWebAssemblyAbsoluteMemoryBound: boolean;
+    exceedsWebAssemblyAbsoluteMemoryBoundWithAllEvaluationKeys: boolean;
+    minimumEvaluationLiveByteLengthWithAllEvaluationKeys: bigint;
     exceedsSetupTransferVarianceCeiling: boolean;
     minimumEvaluationLiveByteLengthWithRelinearizationKey: bigint;
     minimumPrivateCarrierRingElementCount: bigint;
@@ -91,12 +94,12 @@ export const compileThresholdKeyAggregationResourceLowerBound =
         const oneLiveRingElementByteLength =
             polynomialModulusDegree * residueNumberSystemLimbCount * 8n;
 
-        // One encryption component, three gadget vectors for linear
-        // relinearization, and one gadget vector for the minimum possible
-        // automorphism-key inventory.
+        // KLSW24 Section 4.1 publishes (b, d, v, h): encryption reuses b[0],
+        // and each required automorphism contributes one h vector. HLS25
+        // equations (5) and (6) are two DIFFERENT automorphisms, not two
+        // components of one key. Its separate encryption key is not used here.
         const publicKeyContributionRingElementCount =
-            (3n + minimumAutomorphismKeyCount) * residueNumberSystemLimbCount +
-            1n;
+            (3n + minimumAutomorphismKeyCount) * residueNumberSystemLimbCount;
         const onePublicKeyContributionByteLength =
             publicKeyContributionRingElementCount *
             oneSerializedRingElementByteLength;
@@ -140,9 +143,8 @@ export const compileThresholdKeyAggregationResourceLowerBound =
         // A public verifiable-sharing replacement needs at least a two-ring
         // ciphertext for every contributor-recipient share, including the
         // self-share so each holder has one canonical aggregate ciphertext.
-        // Charging the same modulus as the shared FHE value is optimistic:
-        // correctness may require a larger encryption modulus, and recipient
-        // keys and proofs are omitted.
+        // The exact candidate share modulus is tightly bit-packed. Recipient
+        // proofs, framing, and implementation copies are omitted.
         const minimumPublicEncryptedShareCiphertextRingElementCount = 2n;
         const oneSerializedShareEncryptionRingElementByteLength = ceilingDivide(
             polynomialModulusDegree *
@@ -172,6 +174,9 @@ export const compileThresholdKeyAggregationResourceLowerBound =
         const minimumEvaluationLiveByteLengthWithRelinearizationKey =
             completionEvaluationDataLiveByteLength +
             aggregateRelinearizationKeyLiveByteLength;
+        const minimumEvaluationLiveByteLengthWithAllEvaluationKeys =
+            minimumEvaluationLiveByteLengthWithRelinearizationKey +
+            aggregateUnitRotationKeyLiveByteLength;
         const oneKeyPassPerOperationReadByteLength =
             BigInt(
                 evaluationGraph.relinearizationKeyRingLimbReadCount +
@@ -220,6 +225,10 @@ export const compileThresholdKeyAggregationResourceLowerBound =
             exceedsWebAssemblyAbsoluteMemoryBound:
                 minimumEvaluationLiveByteLengthWithRelinearizationKey >
                 webAssemblyAbsoluteMemoryBoundByteLength,
+            exceedsWebAssemblyAbsoluteMemoryBoundWithAllEvaluationKeys:
+                minimumEvaluationLiveByteLengthWithAllEvaluationKeys >
+                webAssemblyAbsoluteMemoryBoundByteLength,
+            minimumEvaluationLiveByteLengthWithAllEvaluationKeys,
             minimumEvaluationLiveByteLengthWithRelinearizationKey,
             minimumPrivateCarrierRingElementCount,
             minimumPublicEncryptedShareCiphertextRingElementCount,
