@@ -102,6 +102,24 @@ const strictComparisonCoefficients = interpolate(
     })),
 );
 
+const comparisonEvaluations = comparisonPoints.map(({ input }) =>
+    evaluatePolynomial(comparisonCoefficients, input),
+);
+const strictComparisonEvaluations = comparisonPoints.map(({ input }) =>
+    evaluatePolynomial(strictComparisonCoefficients, input),
+);
+
+const lookupComparison = (difference: number, strict: boolean): bigint => {
+    if (difference < -maximumDifference || difference > maximumDifference) {
+        throw new Error('A total difference escaped the proven domain.');
+    }
+    const index = difference + maximumDifference;
+    return (
+        (strict ? strictComparisonEvaluations : comparisonEvaluations)[index] ??
+        -1n
+    );
+};
+
 const equalityPolynomials = new Map<number, readonly (readonly bigint[])[]>();
 for (let optionCount = 2; optionCount <= maximumOptionCount; optionCount += 1) {
     equalityPolynomials.set(
@@ -112,6 +130,18 @@ for (let optionCount = 2; optionCount <= maximumOptionCount; optionCount += 1) {
                     input: BigInt(rank),
                     output: rank === requestedRank ? 1n : 0n,
                 })),
+            ),
+        ),
+    );
+}
+
+const equalityEvaluations = new Map<number, readonly (readonly bigint[])[]>();
+for (const [optionCount, polynomials] of equalityPolynomials) {
+    equalityEvaluations.set(
+        optionCount,
+        polynomials.map((polynomial) =>
+            Array.from({ length: optionCount }, (_unused, rank) =>
+                evaluatePolynomial(polynomial, BigInt(rank)),
             ),
         ),
     );
@@ -225,38 +255,26 @@ export const evaluatePolynomialRanking = (
     for (let left = 0; left < optionCount; left += 1) {
         for (let right = left + 1; right < optionCount; right += 1) {
             const difference = (totals[left] ?? 0) - (totals[right] ?? 0);
-            if (
-                difference < -maximumDifference ||
-                difference > maximumDifference
-            ) {
-                throw new Error(
-                    'A total difference escaped the proven domain.',
-                );
-            }
-            const leftAhead = Number(
-                evaluatePolynomial(comparisonCoefficients, BigInt(difference)),
-            );
+            const leftAhead = Number(lookupComparison(difference, false));
             ranks[right] = (ranks[right] ?? 0) + leftAhead;
             ranks[left] = (ranks[left] ?? 0) + 1 - leftAhead;
         }
     }
 
-    const polynomials = equalityPolynomials.get(optionCount);
-    if (polynomials === undefined) {
-        throw new Error('The rank-equality polynomials are absent.');
+    const evaluations = equalityEvaluations.get(optionCount);
+    if (evaluations === undefined) {
+        throw new Error('The rank-equality evaluations are absent.');
     }
     const orderedOptionPositions: number[] = [];
     for (let requestedRank = 0; requestedRank < topCount; requestedRank += 1) {
         let selectedCount = 0;
         let selectedPosition = 0;
-        const polynomial = polynomials[requestedRank];
-        if (polynomial === undefined) {
-            throw new Error('A rank-equality polynomial is absent.');
+        const rankEvaluations = evaluations[requestedRank];
+        if (rankEvaluations === undefined) {
+            throw new Error('Rank-equality evaluations are absent.');
         }
         for (let option = 0; option < optionCount; option += 1) {
-            const indicator = Number(
-                evaluatePolynomial(polynomial, BigInt(ranks[option] ?? -1)),
-            );
+            const indicator = Number(rankEvaluations[ranks[option] ?? -1]);
             if (indicator !== 0 && indicator !== 1) {
                 throw new Error('A rank indicator is not binary.');
             }
@@ -298,43 +316,84 @@ const evaluatePackedPolynomialRanking = (
         }
     }
 
-    const ranks = Array.from({ length: optionCount }, () => 0n);
-    for (let shift = 1; shift < optionCount; shift += 1) {
-        for (let lowerOption = 0; lowerOption < optionCount; lowerOption += 1) {
-            const higherOption = (lowerOption + shift) % optionCount;
-            if (lowerOption >= higherOption) continue;
-            const difference =
-                (totals[lowerOption] ?? 0) - (totals[higherOption] ?? 0);
-            const lowerOptionAhead = evaluatePolynomial(
-                comparisonCoefficients,
-                BigInt(difference),
+    const pairLaneReductionWidth = 2 ** Math.ceil(Math.log2(optionCount - 1));
+    const rankAccumulatorOffset = topCount - 1;
+    const optionBlockWidth =
+        2 **
+        Math.ceil(Math.log2(rankAccumulatorOffset + pairLaneReductionWidth));
+    const pairLanes = Array.from(
+        { length: optionCount * optionBlockWidth },
+        () => 0n,
+    );
+    for (let option = 0; option < optionCount; option += 1) {
+        let lane = option * optionBlockWidth + rankAccumulatorOffset;
+        for (let opponent = 0; opponent < optionCount; opponent += 1) {
+            if (opponent === option) continue;
+            const opponentDifference =
+                (totals[opponent] ?? 0) - (totals[option] ?? 0);
+            pairLanes[lane] = lookupComparison(
+                opponentDifference,
+                opponent >= option,
             );
-            ranks[lowerOption] = modulo(
-                (ranks[lowerOption] ?? 0n) + 1n - lowerOptionAhead,
-            );
-            ranks[higherOption] = modulo(
-                (ranks[higherOption] ?? 0n) + lowerOptionAhead,
-            );
+            lane += 1;
         }
+    }
+    const rotateLeft = (values: readonly bigint[], distance: number) =>
+        Array.from(
+            { length: values.length },
+            (_unused, lane) => values[(lane + distance) % values.length] ?? 0n,
+        );
+    let shiftedPairLanes = pairLanes;
+    let rankBlocks = Array.from({ length: pairLanes.length }, () => 0n);
+    for (
+        let opponentOffset = 0;
+        opponentOffset < optionCount - 1;
+        opponentOffset += 1
+    ) {
+        if (opponentOffset > 0) {
+            shiftedPairLanes = rotateLeft(shiftedPairLanes, 1);
+        }
+        rankBlocks = rankBlocks.map((value, lane) =>
+            lane % optionBlockWidth === rankAccumulatorOffset
+                ? modulo(value + (shiftedPairLanes[lane] ?? 0n))
+                : value,
+        );
     }
 
-    const polynomials = equalityPolynomials.get(optionCount);
-    if (polynomials === undefined) {
-        throw new Error('The rank-equality polynomials are absent.');
+    const evaluations = equalityEvaluations.get(optionCount);
+    if (evaluations === undefined) {
+        throw new Error('The rank-equality evaluations are absent.');
     }
+    let rankGrid = [...rankBlocks];
+    let shiftedRanks = rankBlocks;
+    for (
+        let requestedRank = topCount - 2;
+        requestedRank >= 0;
+        requestedRank -= 1
+    ) {
+        shiftedRanks = rotateLeft(shiftedRanks, 1);
+        rankGrid = rankGrid.map((value, lane) =>
+            lane % optionBlockWidth === requestedRank
+                ? modulo(value + (shiftedRanks[lane] ?? 0n))
+                : value,
+        );
+    }
+    const indicatorGrid = rankGrid.map((rank, lane) => {
+        const requestedRank = lane % optionBlockWidth;
+        if (requestedRank >= topCount) return 0n;
+        const rankEvaluations = evaluations[requestedRank];
+        if (rankEvaluations === undefined) {
+            throw new Error('Rank-equality evaluations are absent.');
+        }
+        return rankEvaluations[Number(rank)] ?? -1n;
+    });
     const orderedOptionPositions: number[] = [];
     for (let requestedRank = 0; requestedRank < topCount; requestedRank += 1) {
-        const polynomial = polynomials[requestedRank];
-        if (polynomial === undefined) {
-            throw new Error('A rank-equality polynomial is absent.');
-        }
         let selectedCount = 0n;
         let selectedPosition = 0n;
         for (let option = 0; option < optionCount; option += 1) {
-            const indicator = evaluatePolynomial(
-                polynomial,
-                ranks[option] ?? -1n,
-            );
+            const indicator =
+                indicatorGrid[option * optionBlockWidth + requestedRank] ?? 0n;
             selectedCount += indicator;
             selectedPosition += indicator * BigInt(option);
         }
@@ -363,18 +422,28 @@ type GraphNode = Readonly<{
 }>;
 
 export type RankingEvaluationGraph = Readonly<{
+    orderedPairDifferenceLaneCount: number;
+    packedBallotLaneCount: number;
     materializedCiphertextNodeCount: number;
     scheduledPeakLiveCiphertextCount: number;
     scheduledPeakCiphertextByteLength: number;
+    scheduledPeakCiphertextAndCurrentEvaluationKeyByteLength: number;
     ciphertextInputCount: number;
     ciphertextAdditionCount: number;
     plaintextAdditionCount: number;
     ciphertextMultiplicationCount: number;
     plaintextMultiplicationCount: number;
+    relinearizationKeyRingLimbReadCount: number;
     relinearizationCount: number;
     rotationCount: number;
+    rotationKeyRingLimbReadCount: number;
     multiplicativeDepth: number;
 }>;
+
+type EvaluationGraphSummary = Omit<
+    RankingEvaluationGraph,
+    'orderedPairDifferenceLaneCount' | 'packedBallotLaneCount'
+>;
 
 class EvaluationGraph {
     readonly #nodes: GraphNode[] = [];
@@ -477,7 +546,10 @@ class EvaluationGraph {
         return pendingConstant ? this.addPlain(result) : result;
     }
 
-    summarize(outputNode: number): RankingEvaluationGraph {
+    summarize(
+        outputNode: number,
+        retainedBottomPrimeCount: number,
+    ): EvaluationGraphSummary {
         const counts = new Map<GraphNodeKind, number>();
         let multiplicativeDepth = 0;
         for (const node of this.#nodes) {
@@ -491,13 +563,32 @@ class EvaluationGraph {
                 references[input] = (references[input] ?? 0) + 1;
             }
         }
-        const dataModulusCount = multiplicativeDepth + 1;
+        const dataModulusCount = multiplicativeDepth + retainedBottomPrimeCount;
+        let relinearizationKeyRingLimbReadCount = 0;
+        let rotationKeyRingLimbReadCount = 0;
+        for (const node of this.#nodes) {
+            if (node.kind === 'ciphertext-multiplication') {
+                const inputLimbCount = Math.max(
+                    retainedBottomPrimeCount,
+                    dataModulusCount - node.depth + 1,
+                );
+                relinearizationKeyRingLimbReadCount +=
+                    3 * inputLimbCount * inputLimbCount;
+            } else if (node.kind === 'rotation') {
+                const inputLimbCount = Math.max(
+                    retainedBottomPrimeCount,
+                    dataModulusCount - node.depth,
+                );
+                rotationKeyRingLimbReadCount += inputLimbCount * inputLimbCount;
+            }
+        }
         const ciphertextBytes = (depth: number): number =>
             113 + 2 * 32_768 * 8 * Math.max(1, dataModulusCount - depth);
         let liveCount = 0;
         let liveBytes = 0;
         let peakCount = 0;
         let peakBytes = 0;
+        let peakBytesWithCurrentEvaluationKey = 0;
         for (let index = 0; index < this.#nodes.length; index += 1) {
             const node = this.#nodes[index];
             if (node === undefined) throw new Error('A graph node is absent.');
@@ -505,6 +596,26 @@ class EvaluationGraph {
             liveBytes += ciphertextBytes(node.depth);
             peakCount = Math.max(peakCount, liveCount);
             peakBytes = Math.max(peakBytes, liveBytes);
+            let currentEvaluationKeyByteLength = 0;
+            if (node.kind === 'ciphertext-multiplication') {
+                const inputLimbCount = Math.max(
+                    retainedBottomPrimeCount,
+                    dataModulusCount - node.depth + 1,
+                );
+                currentEvaluationKeyByteLength =
+                    3 * inputLimbCount * inputLimbCount * 32_768 * 8;
+            } else if (node.kind === 'rotation') {
+                const inputLimbCount = Math.max(
+                    retainedBottomPrimeCount,
+                    dataModulusCount - node.depth,
+                );
+                currentEvaluationKeyByteLength =
+                    inputLimbCount * inputLimbCount * 32_768 * 8;
+            }
+            peakBytesWithCurrentEvaluationKey = Math.max(
+                peakBytesWithCurrentEvaluationKey,
+                liveBytes + currentEvaluationKeyByteLength,
+            );
             for (const input of node.inputs) {
                 references[input] = (references[input] ?? 0) - 1;
                 if (references[input] === 0 && input !== outputNode) {
@@ -526,6 +637,8 @@ class EvaluationGraph {
             materializedCiphertextNodeCount: this.#nodes.length,
             scheduledPeakLiveCiphertextCount: peakCount,
             scheduledPeakCiphertextByteLength: peakBytes,
+            scheduledPeakCiphertextAndCurrentEvaluationKeyByteLength:
+                peakBytesWithCurrentEvaluationKey,
             ciphertextInputCount: counts.get('ciphertext-input') ?? 0,
             ciphertextAdditionCount: counts.get('ciphertext-addition') ?? 0,
             plaintextAdditionCount: counts.get('plaintext-addition') ?? 0,
@@ -533,8 +646,10 @@ class EvaluationGraph {
                 counts.get('ciphertext-multiplication') ?? 0,
             plaintextMultiplicationCount:
                 counts.get('plaintext-multiplication') ?? 0,
+            relinearizationKeyRingLimbReadCount,
             relinearizationCount: counts.get('ciphertext-multiplication') ?? 0,
             rotationCount: counts.get('rotation') ?? 0,
+            rotationKeyRingLimbReadCount,
             multiplicativeDepth,
         };
     }
@@ -567,6 +682,7 @@ export const compilePackedRankingEvaluationGraph = (
     optionCount: number,
     topCount: number,
     comparisonBlockSize = 24,
+    retainedBottomPrimeCount = 1,
 ): RankingEvaluationGraph => {
     requireProfile(
         Array.from(
@@ -580,6 +696,14 @@ export const compilePackedRankingEvaluationGraph = (
         optionCount,
         topCount,
     );
+    if (
+        !Number.isSafeInteger(retainedBottomPrimeCount) ||
+        retainedBottomPrimeCount < 1
+    ) {
+        throw new RangeError(
+            'The retained bottom-prime count must be a positive integer.',
+        );
+    }
     const graph = new EvaluationGraph();
     const encryptedBallots = Array.from({ length: participantCount }, () =>
         graph.input(),
@@ -590,68 +714,66 @@ export const compilePackedRankingEvaluationGraph = (
         totals = graph.add(totals, encryptedBallots[index] ?? -1);
     }
 
-    let rank: number | undefined;
-    for (let shift = 1; shift < optionCount; shift += 1) {
-        // Public masks retain exactly the lanes whose current option position is
-        // lower than the shifted opponent position. Each unordered pair occurs
-        // in exactly one such lane over all shifts. The plaintext multiplication
-        // below also negates the rotated opponent, so the sum is current minus
-        // opponent. H_ge therefore implements the canonical lower-position tie
-        // rule without a second comparison polynomial.
-        const negativeOpponent = graph.multiplyPlain(graph.rotate(totals));
-        const difference = graph.add(totals, negativeOpponent);
-        const lowerOptionAhead = graph.multiplyPlain(
-            graph.patersonStockmeyer(
-                difference,
-                comparisonCoefficients,
-                comparisonBlockSize,
-            ),
-        );
-        // Negation is a free linear operation in this counting model. Adding the
-        // public pair mask yields 1-lowerOptionAhead in the selected lanes.
-        const lowerOptionBehind = graph.addPlain(lowerOptionAhead);
-        const higherOptionRankContribution = graph.rotate(lowerOptionAhead);
-        const pairRankContribution = graph.add(
-            lowerOptionBehind,
-            higherOptionRankContribution,
-        );
-        rank =
-            rank === undefined
-                ? pairRankContribution
-                : graph.add(rank, pairRankContribution);
+    // Each ballot is encoded directly as optionCount power-of-two blocks. The
+    // requested-rank lanes precede an accumulator followed by one lane per
+    // opponent. Slot-varying coefficients select strict comparison for
+    // higher-position opponents and non-strict comparison for lower-position
+    // opponents, so all ordered pairs share one SIMD polynomial evaluation.
+    const comparisonBits = graph.patersonStockmeyer(
+        totals,
+        comparisonCoefficients,
+        comparisonBlockSize,
+    );
+    let shiftedComparisonBits = comparisonBits;
+    let rank = graph.multiplyPlain(comparisonBits);
+    for (
+        let opponentOffset = 1;
+        opponentOffset < optionCount - 1;
+        opponentOffset += 1
+    ) {
+        shiftedComparisonBits = graph.rotate(shiftedComparisonBits);
+        rank = graph.add(rank, graph.multiplyPlain(shiftedComparisonBits));
     }
-    if (rank === undefined) {
-        throw new Error('The comparison graph is empty.');
-    }
-    const rankPowers = graph.densePowers(rank, optionCount - 1);
+
     const polynomials = equalityPolynomials.get(optionCount);
     if (polynomials === undefined) {
         throw new Error('The equality-polynomial inventory is absent.');
     }
-
-    let packedOutput: number | undefined;
-    const reductionStepCount = Math.ceil(Math.log2(optionCount));
-    for (let requestedRank = 0; requestedRank < topCount; requestedRank += 1) {
-        const polynomial = polynomials[requestedRank];
-        if (polynomial === undefined) {
-            throw new Error('A rank-equality polynomial is absent.');
-        }
-        let selected = graph.multiplyPlain(
-            graph.linearCombination(rankPowers, polynomial),
-        );
-        for (let step = 0; step < reductionStepCount; step += 1) {
-            const maskedRotation = graph.multiplyPlain(graph.rotate(selected));
-            selected = graph.add(selected, maskedRotation);
-        }
-        if (requestedRank > 0) selected = graph.rotate(selected);
-        packedOutput =
-            packedOutput === undefined
-                ? selected
-                : graph.add(packedOutput, selected);
+    const pairLaneReductionWidth = 2 ** Math.ceil(Math.log2(optionCount - 1));
+    const rankAccumulatorOffset = topCount - 1;
+    const optionBlockWidth =
+        2 **
+        Math.ceil(Math.log2(rankAccumulatorOffset + pairLaneReductionWidth));
+    const packedBallotLaneCount = optionCount * optionBlockWidth;
+    if (packedBallotLaneCount > 32_768) {
+        throw new Error('The packed ballot exceeds the candidate slot count.');
     }
-    if (packedOutput === undefined)
-        throw new Error('The output graph is empty.');
-    return graph.summarize(packedOutput);
+    let rankGrid = rank;
+    let shiftedRank = rank;
+    for (
+        let requestedRank = topCount - 2;
+        requestedRank >= 0;
+        requestedRank -= 1
+    ) {
+        shiftedRank = graph.rotate(shiftedRank);
+        rankGrid = graph.add(rankGrid, graph.multiplyPlain(shiftedRank));
+    }
+    const equalitySupport = Array.from(
+        { length: optionCount },
+        (_unused, exponent) =>
+            polynomials.some((polynomial) => polynomial[exponent] !== 0n)
+                ? 1n
+                : 0n,
+    );
+    const rankPowers = graph.densePowers(rankGrid, optionCount - 1);
+    const packedOutput = graph.multiplyPlain(
+        graph.linearCombination(rankPowers, equalitySupport),
+    );
+    return {
+        ...graph.summarize(packedOutput, retainedBottomPrimeCount),
+        orderedPairDifferenceLaneCount: optionCount * (optionCount - 1),
+        packedBallotLaneCount,
+    };
 };
 
 const deterministicMatrix = (
@@ -676,14 +798,111 @@ export type ExactRankingModelCensus = Readonly<{
     comparisonPolynomialNonzeroCoefficientCount: number;
     exhaustiveComparisonPointCount: number;
     equalityDomainCount: number;
+    packedLayoutCount: number;
     testedParticipantOptionProfileCount: number;
     testedMatrixCount: number;
     testedTopCountExecutionCount: number;
 }>;
 
+const verifyPackedLaneRouting = (
+    optionCount: number,
+    topCount: number,
+): void => {
+    const pairLaneReductionWidth = 2 ** Math.ceil(Math.log2(optionCount - 1));
+    const rankAccumulatorOffset = topCount - 1;
+    const optionBlockWidth =
+        2 **
+        Math.ceil(Math.log2(rankAccumulatorOffset + pairLaneReductionWidth));
+    const pairLanes = Array.from(
+        { length: optionCount * optionBlockWidth },
+        () => 0n,
+    );
+    const expectedRankTokens = Array.from({ length: optionCount }, () => 0n);
+    let tokenIndex = 0n;
+    for (let option = 0; option < optionCount; option += 1) {
+        let lane = option * optionBlockWidth + rankAccumulatorOffset;
+        for (let opponent = 0; opponent < optionCount; opponent += 1) {
+            if (opponent === option) continue;
+            const token = 1n << tokenIndex;
+            tokenIndex += 1n;
+            pairLanes[lane] = token;
+            expectedRankTokens[option] =
+                (expectedRankTokens[option] ?? 0n) + token;
+            lane += 1;
+        }
+    }
+
+    const rotateLeft = (values: readonly bigint[]) =>
+        Array.from(
+            { length: values.length },
+            (_unused, lane) => values[(lane + 1) % values.length] ?? 0n,
+        );
+    let shiftedPairLanes = pairLanes;
+    let rankBlocks = Array.from({ length: pairLanes.length }, () => 0n);
+    for (
+        let opponentOffset = 0;
+        opponentOffset < optionCount - 1;
+        opponentOffset += 1
+    ) {
+        if (opponentOffset > 0) shiftedPairLanes = rotateLeft(shiftedPairLanes);
+        rankBlocks = rankBlocks.map((value, lane) =>
+            lane % optionBlockWidth === rankAccumulatorOffset
+                ? value + (shiftedPairLanes[lane] ?? 0n)
+                : value,
+        );
+    }
+    for (let option = 0; option < optionCount; option += 1) {
+        if (
+            rankBlocks[option * optionBlockWidth + rankAccumulatorOffset] !==
+            expectedRankTokens[option]
+        ) {
+            throw new Error('Packed pair lanes do not reduce within a block.');
+        }
+    }
+
+    let rankGrid = [...rankBlocks];
+    let shiftedRanks = rankBlocks;
+    for (
+        let requestedRank = topCount - 2;
+        requestedRank >= 0;
+        requestedRank -= 1
+    ) {
+        shiftedRanks = rotateLeft(shiftedRanks);
+        rankGrid = rankGrid.map((value, lane) =>
+            lane % optionBlockWidth === requestedRank
+                ? value + (shiftedRanks[lane] ?? 0n)
+                : value,
+        );
+    }
+    for (let option = 0; option < optionCount; option += 1) {
+        for (
+            let requestedRank = 0;
+            requestedRank < topCount;
+            requestedRank += 1
+        ) {
+            if (
+                rankGrid[option * optionBlockWidth + requestedRank] !==
+                expectedRankTokens[option]
+            ) {
+                throw new Error(
+                    'Packed rank lanes do not receive the option accumulator.',
+                );
+            }
+        }
+    }
+};
+
 export const verifyExactRankingModel = (): ExactRankingModelCensus => {
     if (comparisonCoefficients.length - 1 !== 2 * maximumDifference) {
         throw new Error('The comparison polynomial has the wrong degree.');
+    }
+
+    let packedLayoutCount = 0;
+    for (let optionCount = 2; optionCount <= 20; optionCount += 1) {
+        for (let topCount = 1; topCount <= optionCount; topCount += 1) {
+            verifyPackedLaneRouting(optionCount, topCount);
+            packedLayoutCount += 1;
+        }
     }
     for (
         let difference = -maximumDifference;
@@ -786,23 +1005,37 @@ export const verifyExactRankingModel = (): ExactRankingModelCensus => {
             }
             for (const ballots of cases) {
                 testedMatrixCount += 1;
+                const expectedFull = evaluateReferenceRanking(
+                    ballots,
+                    options,
+                    options,
+                );
+                const actualFull = evaluatePolynomialRanking(
+                    ballots,
+                    options,
+                    options,
+                );
+                const packedFull = evaluatePackedPolynomialRanking(
+                    ballots,
+                    options,
+                    options,
+                );
                 for (let topCount = 1; topCount <= options; topCount += 1) {
                     testedTopCountExecutionCount += 1;
-                    const expected = evaluateReferenceRanking(
-                        ballots,
-                        options,
-                        topCount,
-                    );
-                    const actual = evaluatePolynomialRanking(
-                        ballots,
-                        options,
-                        topCount,
-                    );
-                    const packed = evaluatePackedPolynomialRanking(
-                        ballots,
-                        options,
-                        topCount,
-                    );
+                    const truncate = (result: RankingResult): RankingResult =>
+                        result.kind === 'no-result'
+                            ? result
+                            : {
+                                  kind: 'result',
+                                  orderedOptionPositions:
+                                      result.orderedOptionPositions.slice(
+                                          0,
+                                          topCount,
+                                      ),
+                              };
+                    const expected = truncate(expectedFull);
+                    const actual = truncate(actualFull);
+                    const packed = truncate(packedFull);
                     if (
                         JSON.stringify(actual) !== JSON.stringify(expected) ||
                         JSON.stringify(packed) !== JSON.stringify(expected)
@@ -823,6 +1056,7 @@ export const verifyExactRankingModel = (): ExactRankingModelCensus => {
                 .length,
         exhaustiveComparisonPointCount: comparisonPoints.length,
         equalityDomainCount: equalityPolynomials.size,
+        packedLayoutCount,
         testedParticipantOptionProfileCount: 18 * 19,
         testedMatrixCount,
         testedTopCountExecutionCount,

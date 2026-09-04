@@ -11,6 +11,7 @@ describe('threshold release noise model', () => {
         );
         expect(census).toMatchObject({
             authorizedSubsetCount: 210,
+            boundedIntegerSharingReconstructionCount: 210,
             completionParticipantCount: 10,
             exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength: 154,
             exactInterpolationProduct: 352n,
@@ -18,6 +19,7 @@ describe('threshold release noise model', () => {
             exactMaximumSimulationCoefficientOneNorm: 8n,
             exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength: 106,
             lagrangeCoefficientCount: 840,
+            productionInterpolationPointExponentStride: 4_096,
             releaseThreshold: 4,
             spacedInterpolationSize: 16,
             targetSecurityDominantNoiseBudgetLowerBoundBitLength: 110,

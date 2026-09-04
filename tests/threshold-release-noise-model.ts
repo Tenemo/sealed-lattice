@@ -3,6 +3,8 @@ const releaseThreshold = 4;
 const polynomialModulusDegree = 32_768;
 const spacedInterpolationSize = 16;
 const reducedInterpolationRingDegree = 8;
+const productionInterpolationPointExponentStride =
+    polynomialModulusDegree / reducedInterpolationRingDegree;
 
 type Fraction = Readonly<{ denominator: bigint; numerator: bigint }>;
 type RationalRingElement = readonly Fraction[];
@@ -272,6 +274,7 @@ const integerOneNorm = (value: RationalRingElement): bigint =>
 
 const exactInterpolationCensus = (): Readonly<{
     authorizedSubsetCount: number;
+    boundedIntegerSharingReconstructionCount: number;
     exactMaximumScaledReconstructionCoefficientOneNorm: bigint;
     exactMaximumSimulationCoefficientOneNorm: bigint;
     lagrangeCoefficientCount: number;
@@ -282,8 +285,30 @@ const exactInterpolationCensus = (): Readonly<{
         (_unused, index) => monomialPoint(index),
     );
     const authorizedSubsets = combinations(participantCount, releaseThreshold);
+    const integerSharingPolynomial = Array.from(
+        { length: releaseThreshold },
+        (_unused, degree) =>
+            createRationalRing((index) =>
+                fraction(BigInt((degree + 1) * (index + 3) - 2 * index)),
+            ),
+    );
+    const integerShares = participantPoints.map((point) => {
+        let value = createRationalRing(() => fraction(0n));
+        for (
+            let degree = integerSharingPolynomial.length - 1;
+            degree >= 0;
+            degree -= 1
+        ) {
+            value = addRationalRing(
+                multiplyRationalRing(value, point),
+                integerSharingPolynomial[degree] ?? rationalRingOne(),
+            );
+        }
+        return value;
+    });
     let exactMaximumScaledReconstructionCoefficientOneNorm = 0n;
     let exactMaximumSimulationCoefficientOneNorm = 0n;
+    let boundedIntegerSharingReconstructionCount = 0;
     let lagrangeCoefficientCount = 0;
 
     for (const authorizedSubset of authorizedSubsets) {
@@ -313,10 +338,39 @@ const exactInterpolationCensus = (): Readonly<{
                     : inverseCoefficientOneNorm;
             lagrangeCoefficientCount += 1;
         }
+        const reconstructed = authorizedSubset.reduce(
+            (sum, participant, index) =>
+                addRationalRing(
+                    sum,
+                    multiplyRationalRing(
+                        scaleRationalRing(
+                            lagrangeCoefficientAtZero(points, index),
+                            clearingFactor,
+                        ),
+                        integerShares[participant] ?? rationalRingOne(),
+                    ),
+                ),
+            createRationalRing(() => fraction(0n)),
+        );
+        if (
+            !equalRationalRing(
+                reconstructed,
+                scaleRationalRing(
+                    integerSharingPolynomial[0] ?? rationalRingOne(),
+                    clearingFactor,
+                ),
+            )
+        ) {
+            throw new Error(
+                'A bounded-integer sharing subset failed reconstruction.',
+            );
+        }
+        boundedIntegerSharingReconstructionCount += 1;
     }
 
     return {
         authorizedSubsetCount: authorizedSubsets.length,
+        boundedIntegerSharingReconstructionCount,
         exactMaximumScaledReconstructionCoefficientOneNorm,
         exactMaximumSimulationCoefficientOneNorm,
         lagrangeCoefficientCount,
@@ -353,6 +407,7 @@ const requiredDominantNoiseBudgetBitLength = (
 
 export type ThresholdReleaseNoiseCensus = Readonly<{
     authorizedSubsetCount: number;
+    boundedIntegerSharingReconstructionCount: number;
     completionParticipantCount: number;
     exactInterpolationProduct: bigint;
     exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength: number;
@@ -360,6 +415,7 @@ export type ThresholdReleaseNoiseCensus = Readonly<{
     exactMaximumSimulationCoefficientOneNorm: bigint;
     exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength: number;
     lagrangeCoefficientCount: number;
+    productionInterpolationPointExponentStride: number;
     releaseThreshold: number;
     spacedInterpolationSize: number;
     interpolationProductBound: number;
@@ -386,6 +442,8 @@ export const compileThresholdReleaseNoiseCensus =
         );
         return {
             authorizedSubsetCount: exactInterpolation.authorizedSubsetCount,
+            boundedIntegerSharingReconstructionCount:
+                exactInterpolation.boundedIntegerSharingReconstructionCount,
             completionParticipantCount: participantCount,
             exactInterpolationProduct,
             exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength:
@@ -404,6 +462,7 @@ export const compileThresholdReleaseNoiseCensus =
                 ),
             lagrangeCoefficientCount:
                 exactInterpolation.lagrangeCoefficientCount,
+            productionInterpolationPointExponentStride,
             releaseThreshold,
             spacedInterpolationSize,
             interpolationProductBound,

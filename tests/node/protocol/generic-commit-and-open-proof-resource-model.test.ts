@@ -5,12 +5,12 @@ import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-c
 describe('generic commit-and-open proof resource model', () => {
     it('rejects direct ZKB++ compilation of the large setup relation', () => {
         expect(compileGenericCommitAndOpenProofResourceCensus()).toEqual({
-            boundedCoefficientCountPerSetupContribution: 2_195_456n,
-            boundedRingElementCountPerSetupContribution: 67n,
-            combinedSetupAndProofSubtotalByteLength: 5_203_025_920n,
-            exceedsPublicCorpusVarianceCeiling: true,
-            minimumProofCorpusByteLength: 2_404_024_320n,
-            minimumProofSizePerSetupContributionByteLength: 240_402_432n,
+            boundedCoefficientCountPerSetupContribution: 2_457_600n,
+            boundedRingElementCountPerSetupContribution: 75n,
+            combinedSetupAndProofSubtotalByteLength: 6_026_526_720n,
+            exceedsSetupTransferVarianceCeiling: true,
+            minimumProofCorpusByteLength: 2_691_072_000n,
+            minimumProofSizePerSetupContributionByteLength: 269_107_200n,
             proofBitsPerBinaryMultiplicationGate: 876n,
             quantumSecurityParallelRepetitionCount: 438n,
         });

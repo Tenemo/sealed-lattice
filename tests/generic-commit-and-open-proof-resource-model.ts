@@ -5,9 +5,9 @@ const quantumSecurityParallelRepetitionCount = 438n;
 const proofBitsPerBinaryMultiplicationGate =
     2n * quantumSecurityParallelRepetitionCount;
 
-// Pinned HLS25 large-profile operands and its setup-share witness layout.
+// The ring degree and setup-share witness layout follow HLS25. The exact limb
+// count comes from the release-capable screening tuple in the setup model.
 const polynomialModulusDegree = 32_768n;
-const residueNumberSystemLimbCount = 16n;
 const participantCount = 10n;
 const minimumAutomorphismKeyCount = 1n;
 
@@ -19,7 +19,7 @@ export type GenericCommitAndOpenProofResourceCensus = Readonly<{
     boundedCoefficientCountPerSetupContribution: bigint;
     boundedRingElementCountPerSetupContribution: bigint;
     combinedSetupAndProofSubtotalByteLength: bigint;
-    exceedsPublicCorpusVarianceCeiling: boolean;
+    exceedsSetupTransferVarianceCeiling: boolean;
     minimumProofCorpusByteLength: bigint;
     minimumProofSizePerSetupContributionByteLength: bigint;
     proofBitsPerBinaryMultiplicationGate: bigint;
@@ -28,13 +28,16 @@ export type GenericCommitAndOpenProofResourceCensus = Readonly<{
 
 export const compileGenericCommitAndOpenProofResourceCensus =
     (): GenericCommitAndOpenProofResourceCensus => {
+        const thresholdKeyResources =
+            compileThresholdKeyAggregationResourceLowerBound();
         // One secret, one auxiliary secret, one encryption error, three
         // relinearization-error vectors, and one minimum automorphism-error
         // vector. The model optimistically charges only one binary
         // multiplication for each coefficient's non-linear bound check.
         const boundedRingElementCountPerSetupContribution =
             3n +
-            (3n + minimumAutomorphismKeyCount) * residueNumberSystemLimbCount;
+            (3n + minimumAutomorphismKeyCount) *
+                thresholdKeyResources.ciphertextModulusLimbCount;
         const boundedCoefficientCountPerSetupContribution =
             boundedRingElementCountPerSetupContribution *
             polynomialModulusDegree;
@@ -49,10 +52,9 @@ export const compileGenericCommitAndOpenProofResourceCensus =
         const minimumProofCorpusByteLength =
             participantCount * minimumProofSizePerSetupContributionByteLength;
         const combinedSetupAndProofSubtotalByteLength =
-            compileThresholdKeyAggregationResourceLowerBound()
-                .minimumPublicSetupCorpusByteLength +
+            thresholdKeyResources.minimumSetupTransferCorpusByteLength +
             minimumProofCorpusByteLength;
-        const publicCorpusVarianceCeiling =
+        const setupTransferVarianceCeiling =
             (publicProtocolCorpusPlanningTargetByteLength *
                 publicProtocolCorpusVarianceNumerator) /
             publicProtocolCorpusVarianceDenominator;
@@ -61,9 +63,9 @@ export const compileGenericCommitAndOpenProofResourceCensus =
             boundedCoefficientCountPerSetupContribution,
             boundedRingElementCountPerSetupContribution,
             combinedSetupAndProofSubtotalByteLength,
-            exceedsPublicCorpusVarianceCeiling:
+            exceedsSetupTransferVarianceCeiling:
                 combinedSetupAndProofSubtotalByteLength >
-                publicCorpusVarianceCeiling,
+                setupTransferVarianceCeiling,
             minimumProofCorpusByteLength,
             minimumProofSizePerSetupContributionByteLength,
             proofBitsPerBinaryMultiplicationGate,
