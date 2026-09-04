@@ -12,8 +12,12 @@ describe('threshold completion model', () => {
             maximumCorruptParticipantCount: 3,
             inventoryCertificateThreshold: 7,
             resultReleaseThreshold: 4,
+            setupReceiptThreshold: 10,
             guaranteedHonestResponderCount: 4,
+            minimumHonestVerifiedShareCountAfterDisappearance: 4,
+            minimumHonestPublicationSignerCount: 4,
             minimumCertificateIntersection: 4,
+            maximumPostClosePublicationSignerCount: 6,
             mandatoryReleaseParticipantCount: 0,
             certificateSetCount: 120n,
             orderedCertificatePairCount: 14_400n,
@@ -33,6 +37,15 @@ describe('threshold completion model', () => {
             expect(
                 profile.guaranteedHonestResponderCount,
             ).toBeGreaterThanOrEqual(profile.resultReleaseThreshold);
+            expect(
+                profile.minimumHonestVerifiedShareCountAfterDisappearance,
+            ).toBeGreaterThanOrEqual(profile.resultReleaseThreshold);
+            expect(profile.minimumHonestPublicationSignerCount).toBe(
+                profile.guaranteedHonestResponderCount,
+            );
+            expect(profile.maximumPostClosePublicationSignerCount).toBeLessThan(
+                profile.inventoryCertificateThreshold,
+            );
             expect(profile.minimumCertificateIntersection).toBeGreaterThan(
                 profile.maximumCorruptParticipantCount,
             );

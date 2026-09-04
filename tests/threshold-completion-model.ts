@@ -207,8 +207,12 @@ export type ThresholdCompletionProfile = Readonly<{
     maximumCorruptParticipantCount: number;
     inventoryCertificateThreshold: number;
     resultReleaseThreshold: number;
+    setupReceiptThreshold: number;
     guaranteedHonestResponderCount: number;
+    minimumHonestVerifiedShareCountAfterDisappearance: number;
+    minimumHonestPublicationSignerCount: number;
     minimumCertificateIntersection: number;
+    maximumPostClosePublicationSignerCount: number;
     mandatoryReleaseParticipantCount: number;
     corruptionSetCount: bigint;
     disappearanceSetCount: bigint;
@@ -238,6 +242,7 @@ export const compileThresholdCompletionProfile = (
     const inventoryCertificateThreshold =
         participantCount - maximumCorruptParticipantCount;
     const resultReleaseThreshold = maximumCorruptParticipantCount + 1;
+    const setupReceiptThreshold = participantCount;
     const mandatoryReleaseParticipantCount =
         binomial(participantCount - 1, resultReleaseThreshold) === 0n
             ? participantCount
@@ -247,12 +252,24 @@ export const compileThresholdCompletionProfile = (
     }
     const guaranteedHonestResponderCount =
         participantCount - 2 * maximumCorruptParticipantCount;
+    const minimumHonestVerifiedShareCountAfterDisappearance =
+        setupReceiptThreshold - 2 * maximumCorruptParticipantCount;
+    const minimumHonestPublicationSignerCount =
+        inventoryCertificateThreshold - maximumCorruptParticipantCount;
+    const maximumPostClosePublicationSignerCount =
+        2 * maximumCorruptParticipantCount;
     const minimumCertificateIntersection =
         2 * inventoryCertificateThreshold - participantCount;
 
     if (
         maximumCorruptParticipantCount >= resultReleaseThreshold ||
         guaranteedHonestResponderCount < resultReleaseThreshold ||
+        minimumHonestVerifiedShareCountAfterDisappearance <
+            resultReleaseThreshold ||
+        minimumHonestPublicationSignerCount !==
+            guaranteedHonestResponderCount ||
+        maximumPostClosePublicationSignerCount >=
+            inventoryCertificateThreshold ||
         minimumCertificateIntersection <= maximumCorruptParticipantCount
     ) {
         throw new Error(
@@ -333,8 +350,12 @@ export const compileThresholdCompletionProfile = (
         maximumCorruptParticipantCount,
         inventoryCertificateThreshold,
         resultReleaseThreshold,
+        setupReceiptThreshold,
         guaranteedHonestResponderCount,
+        minimumHonestVerifiedShareCountAfterDisappearance,
+        minimumHonestPublicationSignerCount,
         minimumCertificateIntersection,
+        maximumPostClosePublicationSignerCount,
         mandatoryReleaseParticipantCount,
         corruptionSetCount: setCount,
         disappearanceSetCount: setCount,

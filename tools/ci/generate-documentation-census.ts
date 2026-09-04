@@ -6,7 +6,12 @@ import {
     compilePackedRankingEvaluationGraph,
     verifyExactRankingModel,
 } from '#tests/exact-ranking-model.js';
+import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
+import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
+import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
+import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
+import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 
 const formatCount = (value: bigint | number): string =>
     `\`${value.toLocaleString('en-US')}\``;
@@ -23,6 +28,23 @@ const table = (
 
 export const renderDocumentationCensus = (): string => {
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
+    const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
+    const thresholdKeyResources =
+        compileThresholdKeyAggregationResourceLowerBound();
+    const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
+    const participantVisits = compileParticipantVisitDependencyCensus();
+    const genericProofResources =
+        compileGenericCommitAndOpenProofResourceCensus();
+    if (
+        thresholdKeyAggregation.maximumScaledReconstructionCoefficientOneNorm !==
+            thresholdReleaseNoise.exactMaximumScaledReconstructionCoefficientOneNorm ||
+        thresholdKeyAggregation.maximumSimulationCoefficientOneNorm !==
+            thresholdReleaseNoise.exactMaximumSimulationCoefficientOneNorm
+    ) {
+        throw new Error(
+            'Independent modular and rational interpolation models disagree.',
+        );
+    }
     const rankingCensus = verifyExactRankingModel();
     const completionGraph = compilePackedRankingEvaluationGraph(10, 10, 10);
     const maximumGraph = compilePackedRankingEvaluationGraph(20, 20, 20);
@@ -34,7 +56,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Threshold completion census',
         '',
-        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, inventory-certificate threshold `q = n - f`, and result-release threshold `d = f + 1`. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
+        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, and result-release threshold `d = f + 1`. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
         '',
         table(
             [
@@ -42,8 +64,10 @@ export const renderDocumentationCensus = (): string => {
                 'Maximum corrupt',
                 'Inventory certificate',
                 'Result release',
-                'Guaranteed honest responders',
+                'Setup receipts',
+                'Guaranteed honest responders / publication waiters',
                 'Minimum certificate intersection',
+                'Maximum post-close publication signers',
                 'Mandatory release positions',
                 'Corruption/disappearance/refusal cases',
                 'Ordered certificate pairs',
@@ -54,13 +78,323 @@ export const renderDocumentationCensus = (): string => {
                 String(profile.maximumCorruptParticipantCount),
                 String(profile.inventoryCertificateThreshold),
                 String(profile.resultReleaseThreshold),
+                String(profile.setupReceiptThreshold),
                 String(profile.guaranteedHonestResponderCount),
                 String(profile.minimumCertificateIntersection),
+                String(profile.maximumPostClosePublicationSignerCount),
                 String(profile.mandatoryReleaseParticipantCount),
                 formatCount(profile.corruptionDisappearanceRefusalCaseCount),
                 formatCount(profile.orderedCertificatePairCount),
                 profile.bruteForceCrossChecked ? 'yes' : 'class-counted',
             ]),
+        ),
+        '',
+        '## Threshold key-aggregation structural census',
+        '',
+        'This finite-ring model checks that independently generated linear encryption, relinearization, and rotation-key contributions aggregate under one global secret, while degree-three Shamir redistributions at the KLLPS-style monomial points reconstruct from every four-position subset. It also checks the target-dependent flooded partial-decryption equation for every subset. It omits commitments, proofs, encryption of private shares, rounding correctness, and security reductions.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participant count',
+                    formatCount(thresholdKeyAggregation.participantCount),
+                ],
+                [
+                    'Release threshold',
+                    formatCount(thresholdKeyAggregation.releaseThreshold),
+                ],
+                [
+                    'Authorized release subsets checked',
+                    formatCount(
+                        thresholdKeyAggregation.authorizedReleaseSetCount,
+                    ),
+                ],
+                [
+                    'Monomial interpolation points',
+                    formatCount(
+                        thresholdKeyAggregation.monomialInterpolationPointCount,
+                    ),
+                ],
+                [
+                    'Linear aggregate key equations checked',
+                    formatCount(
+                        thresholdKeyAggregation.aggregatePublicKeyEquationCount,
+                    ),
+                ],
+                [
+                    'Flooded release equations checked',
+                    formatCount(thresholdKeyAggregation.releaseEquationCount),
+                ],
+                [
+                    'Tampered share changed reconstruction',
+                    thresholdKeyAggregation.tamperedShareChangedReconstruction
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Wrong target changed partial decryption',
+                    thresholdKeyAggregation.wrongTargetChangedPartialDecryption
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Experiment coefficient modulus',
+                    formatCount(thresholdKeyAggregation.coefficientModulus),
+                ],
+                [
+                    'Experiment ring degree',
+                    formatCount(thresholdKeyAggregation.ringDegree),
+                ],
+                [
+                    'Experiment gadget length',
+                    formatCount(thresholdKeyAggregation.gadgetLength),
+                ],
+            ],
+        ),
+        '',
+        '## Threshold key-aggregation resource floor',
+        '',
+        'This optimistic lower bound uses the pinned HLS25 large-profile operands: polynomial modulus degree 32,768, 865 coefficient-modulus bits, and 16 RNS limbs. It assumes only one automorphism key, compact bit-packed wire elements, no ciphertext expansion for private Shamir delivery, and the impossible-to-improve one-row structural minimum for a BDLOP18 commitment to four polynomial coefficients. It omits commitment and setup proofs, framing, scratch, allocator overhead, and JavaScript/WebAssembly copies.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Serialized ring element',
+                    formatCount(
+                        thresholdKeyResources.oneSerializedRingElementByteLength,
+                    ),
+                ],
+                [
+                    'Ring elements in one public-key contribution',
+                    formatCount(
+                        thresholdKeyResources.publicKeyContributionRingElementCount,
+                    ),
+                ],
+                [
+                    'One public-key contribution',
+                    formatCount(
+                        thresholdKeyResources.onePublicKeyContributionByteLength,
+                    ),
+                ],
+                [
+                    'Ten public-key contributions',
+                    formatCount(
+                        thresholdKeyResources.publicKeyContributionCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Ring elements in one coefficient commitment',
+                    formatCount(
+                        thresholdKeyResources.coefficientCommitmentRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'One coefficient commitment',
+                    formatCount(
+                        thresholdKeyResources.oneCoefficientCommitmentByteLength,
+                    ),
+                ],
+                [
+                    'Ten coefficient commitments',
+                    formatCount(
+                        thresholdKeyResources.coefficientCommitmentCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Remote encrypted-sharing payload floor',
+                    formatCount(
+                        thresholdKeyResources.minimumRemoteEncryptedSharingPayloadByteLength,
+                    ),
+                ],
+                [
+                    'Public setup corpus floor',
+                    formatCount(
+                        thresholdKeyResources.minimumPublicSetupCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Completion evaluation data live set',
+                    formatCount(
+                        thresholdKeyResources.completionEvaluationDataLiveByteLength,
+                    ),
+                ],
+                [
+                    'Aggregate relinearization key live set',
+                    formatCount(
+                        thresholdKeyResources.aggregateRelinearizationKeyLiveByteLength,
+                    ),
+                ],
+                [
+                    'Evaluation plus relinearization floor',
+                    formatCount(
+                        thresholdKeyResources.minimumEvaluationLiveByteLengthWithRelinearizationKey,
+                    ),
+                ],
+                [
+                    'One aggregate unit-rotation key',
+                    formatCount(
+                        thresholdKeyResources.aggregateUnitRotationKeyLiveByteLength,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Threshold release flooding bound',
+        '',
+        'For ten participants and release threshold four, one rational-ring implementation enumerates every coefficient over the reduced degree-eight negacyclic subring, while the independent modular-ring model obtains the same maxima. The KLLPS26 trigonometric expression remains as a looser analytic cross-check. All noise-budget figures are floors from the dominant flooding term only: they omit the expanded public-proof radius, remaining correctness terms, proof slack, multi-query and multi-session unions, and hidden constants. They are not approved FHE parameters.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Authorized release subsets enumerated',
+                    formatCount(thresholdReleaseNoise.authorizedSubsetCount),
+                ],
+                [
+                    'Lagrange coefficients enumerated',
+                    formatCount(thresholdReleaseNoise.lagrangeCoefficientCount),
+                ],
+                [
+                    'Exact maximum scaled reconstruction coefficient one-norm',
+                    formatCount(
+                        thresholdReleaseNoise.exactMaximumScaledReconstructionCoefficientOneNorm,
+                    ),
+                ],
+                [
+                    'Exact maximum simulation coefficient one-norm',
+                    formatCount(
+                        thresholdReleaseNoise.exactMaximumSimulationCoefficientOneNorm,
+                    ),
+                ],
+                [
+                    'Exact interpolation product',
+                    formatCount(
+                        thresholdReleaseNoise.exactInterpolationProduct,
+                    ),
+                ],
+                [
+                    'Trigonometric interpolation-product upper bound',
+                    `\`${thresholdReleaseNoise.interpolationProductBound.toFixed(6)}\``,
+                ],
+                [
+                    'Exact dominant noise-budget floor at 80 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+                [
+                    'Exact dominant noise-budget floor at 128 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+                [
+                    'Analytic dominant noise-budget floor at 80 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.targetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+                [
+                    'Analytic dominant noise-budget floor at 128 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.conservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Generic commit-and-open setup-proof floor',
+        '',
+        'This optimistic subtotal applies the pinned 128-bit quantum ZKB++/Unruh repetition count and only the binary-multiplication term of its proof-size formula to the bounded coefficients in the large-profile setup witness. It charges an unrealistically favorable one non-linear gate per bounded coefficient and omits all inputs, commitments, openings, linear work, encrypted sharing, and proof framing. It rejects this direct generic compiler for setup, not commit-and-open proofs or lattice-native proofs as families.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Quantum-security parallel repetitions',
+                    formatCount(
+                        genericProofResources.quantumSecurityParallelRepetitionCount,
+                    ),
+                ],
+                [
+                    'Proof bits per binary multiplication gate',
+                    formatCount(
+                        genericProofResources.proofBitsPerBinaryMultiplicationGate,
+                    ),
+                ],
+                [
+                    'Bounded ring elements per setup witness',
+                    formatCount(
+                        genericProofResources.boundedRingElementCountPerSetupContribution,
+                    ),
+                ],
+                [
+                    'Bounded coefficients per setup witness',
+                    formatCount(
+                        genericProofResources.boundedCoefficientCountPerSetupContribution,
+                    ),
+                ],
+                [
+                    'Proof floor per setup contribution',
+                    formatCount(
+                        genericProofResources.minimumProofSizePerSetupContributionByteLength,
+                    ),
+                ],
+                [
+                    'Ten-proof corpus floor',
+                    formatCount(
+                        genericProofResources.minimumProofCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Setup plus proof subtotal',
+                    formatCount(
+                        genericProofResources.combinedSetupAndProofSubtotalByteLength,
+                    ),
+                ],
+                [
+                    'Above public-corpus variance ceiling',
+                    genericProofResources.exceedsPublicCorpusVarianceCeiling
+                        ? 'yes'
+                        : 'no',
+                ],
+            ],
+        ),
+        '',
+        '## Participant visit dependency census',
+        '',
+        'This dependency lower bound counts the current fixed-roster candidate with separate common-string commitment and opening, one setup-contribution wave, receipt and ballot co-publication, evidence-carrying ballot echo and ready waves, close-log convergence, target certification, release, and retrieval. It assumes each stage fits its foreground-time budget and does not establish browser feasibility.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Successful-result visits for an early release author',
+                    formatCount(participantVisits.successfulResultVisitCount),
+                ],
+                [
+                    'No-result visits for an early target signer',
+                    formatCount(participantVisits.noResultVisitCount),
+                ],
+                [
+                    'Preferred visit count',
+                    formatCount(participantVisits.preferredVisitCount),
+                ],
+                [
+                    'Mandatory visit ceiling',
+                    formatCount(participantVisits.maximumPermittedVisitCount),
+                ],
+                [
+                    'Within preferred count',
+                    participantVisits.withinPreferredVisitCount ? 'yes' : 'no',
+                ],
+                [
+                    'Within mandatory ceiling',
+                    participantVisits.withinMaximumVisitCount ? 'yes' : 'no',
+                ],
+            ],
         ),
         '',
         '## Exact ranking arithmetic census',

@@ -5,13 +5,16 @@ const completionReleaseThreshold = 4;
 type IgnoredReason =
     | 'ballot-period-closed'
     | 'conflicting-ballot-certificate'
-    | 'conflicting-ballot-receipt'
+    | 'conflicting-ballot-echo'
+    | 'conflicting-ballot-ready'
     | 'duplicate-message'
     | 'invalid-context'
+    | 'invalid-echo-certificate'
     | 'invalid-finality-signature'
     | 'invalid-release-share'
     | 'invalid-signature'
     | 'invalid-setup-contribution'
+    | 'invalid-setup-receipt'
     | 'participant-state-unavailable'
     | 'release-before-finality'
     | 'terminal-state'
@@ -20,7 +23,8 @@ type IgnoredReason =
 
 type BallotCandidate = Readonly<{
     author: number;
-    receiptSigners: ReadonlySet<number>;
+    echoSigners: ReadonlySet<number>;
+    readySigners: ReadonlySet<number>;
     verified: boolean;
 }>;
 
@@ -40,11 +44,14 @@ export type TranscriptState = Readonly<{
         | 'preparation'
         | 'terminal';
     setupContributions: ReadonlyMap<number, string>;
-    ballotReceiptLocks: ReadonlyMap<string, string>;
+    setupReceipts: ReadonlyMap<number, string>;
+    ballotEchoLocks: ReadonlyMap<string, string>;
+    ballotReadyLocks: ReadonlyMap<string, string>;
     ballotCandidates: ReadonlyMap<string, BallotCandidate>;
     publishedSubmissions: ReadonlyMap<number, string>;
     acceptedBallots: ReadonlyMap<number, string>;
     closeLocks: ReadonlySet<number>;
+    closeLogs: ReadonlyMap<number, readonly string[]>;
     finalityLocks: ReadonlyMap<number, string>;
     finalitySignatures: ReadonlyMap<string, ReadonlySet<number>>;
     releaseShares: ReadonlyMap<number, string>;
@@ -61,14 +68,24 @@ export type TranscriptEvent =
           contextValid: boolean;
           envelopeIdentity: string;
           envelopeSignatureValid: boolean;
-          kind: 'ballot-receipt';
+          echoSignatureValid: boolean;
+          kind: 'ballot-echo';
           proofValid: boolean;
-          receiptSignatureValid: boolean;
+          signer: number;
+      }>
+    | Readonly<{
+          author: number;
+          contextValid: boolean;
+          echoCertificateValid: boolean;
+          envelopeIdentity: string;
+          kind: 'ballot-ready';
+          readySignatureValid: boolean;
           signer: number;
       }>
     | Readonly<{
           contextValid: boolean;
           kind: 'close-lock';
+          readyEnvelopeIdentities: readonly string[];
           signatureValid: boolean;
           signer: number;
       }>
@@ -94,6 +111,14 @@ export type TranscriptEvent =
           proofValid: boolean;
           signatureValid: boolean;
       }>
+    | Readonly<{
+          contextValid: boolean;
+          contributionInventoryIdentity: string;
+          kind: 'setup-receipt';
+          participant: number;
+          shareOpeningsValid: boolean;
+          signatureValid: boolean;
+      }>
     | Readonly<{ kind: 'state-loss'; participant: number }>;
 
 type TranscriptOutcome =
@@ -101,8 +126,10 @@ type TranscriptOutcome =
           accepted?: boolean;
           certificateComplete?: boolean;
           closeComplete?: boolean;
+          echoCertificateComplete?: boolean;
           kind: 'processed';
           published?: boolean;
+          publicationCertificateComplete?: boolean;
           releaseComplete?: boolean;
           verified?: boolean;
       }>
@@ -140,11 +167,14 @@ export const createTranscriptState = (
     return {
         phase: 'preparation',
         setupContributions: new Map(),
-        ballotReceiptLocks: new Map(),
+        setupReceipts: new Map(),
+        ballotEchoLocks: new Map(),
+        ballotReadyLocks: new Map(),
         ballotCandidates: new Map(),
         publishedSubmissions: new Map(),
         acceptedBallots: new Map(),
         closeLocks: new Set(),
+        closeLogs: new Map(),
         finalityLocks: new Map(),
         finalitySignatures: new Map(),
         releaseShares: new Map(),
@@ -159,19 +189,28 @@ export const createTranscriptState = (
 const cloneState = (state: TranscriptState): TranscriptState => ({
     ...state,
     setupContributions: new Map(state.setupContributions),
-    ballotReceiptLocks: new Map(state.ballotReceiptLocks),
+    setupReceipts: new Map(state.setupReceipts),
+    ballotEchoLocks: new Map(state.ballotEchoLocks),
+    ballotReadyLocks: new Map(state.ballotReadyLocks),
     ballotCandidates: new Map(
         [...state.ballotCandidates].map(([identity, candidate]) => [
             identity,
             {
                 ...candidate,
-                receiptSigners: new Set(candidate.receiptSigners),
+                echoSigners: new Set(candidate.echoSigners),
+                readySigners: new Set(candidate.readySigners),
             },
         ]),
     ),
     publishedSubmissions: new Map(state.publishedSubmissions),
     acceptedBallots: new Map(state.acceptedBallots),
     closeLocks: new Set(state.closeLocks),
+    closeLogs: new Map(
+        [...state.closeLogs].map(([signer, identities]) => [
+            signer,
+            [...identities],
+        ]),
+    ),
     finalityLocks: new Map(state.finalityLocks),
     finalitySignatures: new Map(
         [...state.finalitySignatures].map(([target, signers]) => [
@@ -200,8 +239,40 @@ const ignored = (
     reason: IgnoredReason,
 ): TranscriptTransition => ({ state, outcome: { kind: 'ignored', reason } });
 
-const receiptLockKey = (signer: number, author: number): string =>
+const ballotLockKey = (signer: number, author: number): string =>
     `${String(signer)}:${String(author)}`;
+
+const readyLogForSigner = (
+    state: TranscriptState,
+    signer: number,
+): readonly string[] =>
+    [...state.ballotCandidates]
+        .filter(([_identity, candidate]) => candidate.readySigners.has(signer))
+        .map(([identity]) => identity)
+        .sort();
+
+const arraysEqual = (
+    left: readonly string[],
+    right: readonly string[],
+): boolean =>
+    left.length === right.length &&
+    left.every((value, index) => value === right[index]);
+
+export const deriveSetupContributionInventoryIdentity = (
+    state: TranscriptState,
+): string => {
+    if (state.setupContributions.size !== completionParticipantCount) {
+        throw new Error('The setup contribution inventory is incomplete.');
+    }
+    const inventory = [...state.setupContributions]
+        .sort(([left], [right]) => left - right)
+        .map(
+            ([participant, identity]) =>
+                `${String(participant)}=${identity.length}:${identity}`,
+        )
+        .join(',');
+    return `setup:${inventory.length}:${inventory}`;
+};
 
 export const deriveFinalityTargetIdentity = (
     state: TranscriptState,
@@ -286,8 +357,47 @@ export const applyTranscriptEvent = (
             state: {
                 ...state,
                 setupContributions,
+            },
+            outcome: { kind: 'processed', accepted: true, verified: true },
+        };
+    }
+
+    if (event.kind === 'setup-receipt') {
+        requireParticipant(event.participant);
+        if (state.phase !== 'preparation') {
+            return ignored(state, 'duplicate-message');
+        }
+        if (state.stoppedParticipants.has(event.participant)) {
+            return ignored(state, 'participant-state-unavailable');
+        }
+        if (state.setupContributions.size !== completionParticipantCount) {
+            return {
+                state,
+                outcome: { kind: 'pending', reason: 'missing-dependency' },
+            };
+        }
+        if (!event.signatureValid) return ignored(state, 'invalid-signature');
+        if (!event.contextValid) return ignored(state, 'invalid-context');
+        if (
+            !event.shareOpeningsValid ||
+            event.contributionInventoryIdentity !==
+                deriveSetupContributionInventoryIdentity(state)
+        ) {
+            return ignored(state, 'invalid-setup-receipt');
+        }
+        if (state.setupReceipts.has(event.participant)) {
+            return ignored(state, 'duplicate-message');
+        }
+        const setupReceipts = new Map(state.setupReceipts).set(
+            event.participant,
+            event.contributionInventoryIdentity,
+        );
+        return {
+            state: {
+                ...state,
+                setupReceipts,
                 phase:
-                    setupContributions.size === completionParticipantCount
+                    setupReceipts.size === completionParticipantCount
                         ? 'ballots-open'
                         : 'preparation',
             },
@@ -295,7 +405,7 @@ export const applyTranscriptEvent = (
         };
     }
 
-    if (event.kind === 'ballot-receipt') {
+    if (event.kind === 'ballot-echo') {
         requireParticipant(event.author);
         requireParticipant(event.signer);
         if (state.phase === 'preparation') {
@@ -314,17 +424,17 @@ export const applyTranscriptEvent = (
         if (state.stoppedParticipants.has(event.signer)) {
             return ignored(state, 'participant-state-unavailable');
         }
-        if (!event.envelopeSignatureValid || !event.receiptSignatureValid) {
+        if (!event.envelopeSignatureValid || !event.echoSignatureValid) {
             return ignored(state, 'invalid-signature');
         }
         if (!event.contextValid) return ignored(state, 'invalid-context');
 
-        const lockKey = receiptLockKey(event.signer, event.author);
-        const priorLock = state.ballotReceiptLocks.get(lockKey);
+        const lockKey = ballotLockKey(event.signer, event.author);
+        const priorLock = state.ballotEchoLocks.get(lockKey);
         const existingCandidate = state.ballotCandidates.get(
             event.envelopeIdentity,
         );
-        if (existingCandidate?.receiptSigners.has(event.signer) === true) {
+        if (existingCandidate?.echoSigners.has(event.signer) === true) {
             return ignored(state, 'duplicate-message');
         }
         if (
@@ -335,7 +445,7 @@ export const applyTranscriptEvent = (
                 state,
                 priorLock === event.envelopeIdentity
                     ? 'duplicate-message'
-                    : 'conflicting-ballot-receipt',
+                    : 'conflicting-ballot-echo',
             );
         }
         if (
@@ -346,25 +456,103 @@ export const applyTranscriptEvent = (
             return ignored(state, 'invalid-context');
         }
 
-        const ballotReceiptLocks = new Map(state.ballotReceiptLocks);
+        const ballotEchoLocks = new Map(state.ballotEchoLocks);
         if (!state.corruptParticipants.has(event.signer)) {
-            ballotReceiptLocks.set(lockKey, event.envelopeIdentity);
+            ballotEchoLocks.set(lockKey, event.envelopeIdentity);
         }
-        const receiptSigners = new Set(existingCandidate?.receiptSigners).add(
+        const echoSigners = new Set(existingCandidate?.echoSigners).add(
             event.signer,
         );
         const ballotCandidates = new Map(state.ballotCandidates).set(
             event.envelopeIdentity,
             {
                 author: event.author,
-                receiptSigners,
+                echoSigners,
+                readySigners: new Set(existingCandidate?.readySigners),
                 verified: event.proofValid,
             },
         );
+        return {
+            state: {
+                ...state,
+                ballotCandidates,
+                ballotEchoLocks,
+            },
+            outcome: {
+                kind: 'processed',
+                accepted: false,
+                echoCertificateComplete:
+                    echoSigners.size >= completionCertificateThreshold,
+                published: false,
+                verified: event.proofValid,
+            },
+        };
+    }
+
+    if (event.kind === 'ballot-ready') {
+        requireParticipant(event.author);
+        requireParticipant(event.signer);
+        if (state.phase === 'preparation') {
+            return {
+                state,
+                outcome: { kind: 'pending', reason: 'missing-dependency' },
+            };
+        }
+        if (
+            state.phase !== 'ballots-open' ||
+            (state.closeLocks.has(event.signer) &&
+                !state.corruptParticipants.has(event.signer))
+        ) {
+            return ignored(state, 'ballot-period-closed');
+        }
+        if (state.stoppedParticipants.has(event.signer)) {
+            return ignored(state, 'participant-state-unavailable');
+        }
+        if (!event.readySignatureValid) {
+            return ignored(state, 'invalid-signature');
+        }
+        if (!event.contextValid) return ignored(state, 'invalid-context');
+
+        const candidate = state.ballotCandidates.get(event.envelopeIdentity);
+        if (
+            !event.echoCertificateValid ||
+            candidate === undefined ||
+            candidate.author !== event.author ||
+            candidate.echoSigners.size < completionCertificateThreshold
+        ) {
+            return ignored(state, 'invalid-echo-certificate');
+        }
+
+        const lockKey = ballotLockKey(event.signer, event.author);
+        const priorLock = state.ballotReadyLocks.get(lockKey);
+        if (candidate.readySigners.has(event.signer)) {
+            return ignored(state, 'duplicate-message');
+        }
+        if (
+            priorLock !== undefined &&
+            !state.corruptParticipants.has(event.signer)
+        ) {
+            return ignored(
+                state,
+                priorLock === event.envelopeIdentity
+                    ? 'duplicate-message'
+                    : 'conflicting-ballot-ready',
+            );
+        }
+
+        const ballotReadyLocks = new Map(state.ballotReadyLocks);
+        if (!state.corruptParticipants.has(event.signer)) {
+            ballotReadyLocks.set(lockKey, event.envelopeIdentity);
+        }
+        const readySigners = new Set(candidate.readySigners).add(event.signer);
+        const ballotCandidates = new Map(state.ballotCandidates).set(
+            event.envelopeIdentity,
+            { ...candidate, readySigners },
+        );
         const publishedSubmissions = new Map(state.publishedSubmissions);
-        const certificateComplete =
-            receiptSigners.size >= completionCertificateThreshold;
-        if (certificateComplete) {
+        const publicationCertificateComplete =
+            readySigners.size >= completionCertificateThreshold;
+        if (publicationCertificateComplete) {
             const priorPublished = publishedSubmissions.get(event.author);
             if (
                 priorPublished !== undefined &&
@@ -378,15 +566,15 @@ export const applyTranscriptEvent = (
             state: {
                 ...state,
                 ballotCandidates,
-                ballotReceiptLocks,
+                ballotReadyLocks,
                 publishedSubmissions,
             },
             outcome: {
                 kind: 'processed',
                 accepted: false,
-                certificateComplete,
-                published: certificateComplete,
-                verified: event.proofValid,
+                publicationCertificateComplete,
+                published: publicationCertificateComplete,
+                verified: candidate.verified,
             },
         };
     }
@@ -413,7 +601,29 @@ export const applyTranscriptEvent = (
         if (state.closeLocks.has(event.signer)) {
             return ignored(state, 'duplicate-message');
         }
+        const expectedReadyLog = readyLogForSigner(state, event.signer);
+        if (!arraysEqual(event.readyEnvelopeIdentities, expectedReadyLog)) {
+            return ignored(state, 'invalid-context');
+        }
+        if (
+            expectedReadyLog.some((identity) => {
+                const candidate = state.ballotCandidates.get(identity);
+                return (
+                    candidate === undefined ||
+                    state.publishedSubmissions.get(candidate.author) !==
+                        identity
+                );
+            })
+        ) {
+            return {
+                state,
+                outcome: { kind: 'pending', reason: 'missing-dependency' },
+            };
+        }
         const closeLocks = new Set(state.closeLocks).add(event.signer);
+        const closeLogs = new Map(state.closeLogs).set(event.signer, [
+            ...event.readyEnvelopeIdentities,
+        ]);
         const closeComplete = closeLocks.size >= completionCertificateThreshold;
         const acceptedBallots =
             closeComplete && state.phase === 'ballots-open'
@@ -430,6 +640,7 @@ export const applyTranscriptEvent = (
                 ...state,
                 acceptedBallots,
                 closeLocks,
+                closeLogs,
                 phase: closeComplete ? 'ballots-closing' : 'ballots-open',
             },
             outcome: { kind: 'processed', closeComplete },

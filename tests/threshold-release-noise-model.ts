@@ -1,0 +1,413 @@
+const participantCount = 10;
+const releaseThreshold = 4;
+const polynomialModulusDegree = 32_768;
+const spacedInterpolationSize = 16;
+const reducedInterpolationRingDegree = 8;
+
+type Fraction = Readonly<{ denominator: bigint; numerator: bigint }>;
+type RationalRingElement = readonly Fraction[];
+
+const absolute = (value: bigint): bigint => (value < 0n ? -value : value);
+
+const greatestCommonDivisor = (left: bigint, right: bigint): bigint => {
+    let first = absolute(left);
+    let second = absolute(right);
+    while (second !== 0n) {
+        [first, second] = [second, first % second];
+    }
+    return first;
+};
+
+const fraction = (numerator: bigint, denominator = 1n): Fraction => {
+    if (denominator === 0n) throw new RangeError('Division by zero.');
+    const sign = denominator < 0n ? -1n : 1n;
+    const divisor = greatestCommonDivisor(numerator, denominator);
+    return {
+        numerator: (sign * numerator) / divisor,
+        denominator: absolute(denominator) / divisor,
+    };
+};
+
+const addFraction = (left: Fraction, right: Fraction): Fraction =>
+    fraction(
+        left.numerator * right.denominator + right.numerator * left.denominator,
+        left.denominator * right.denominator,
+    );
+const negateFraction = (value: Fraction): Fraction =>
+    fraction(-value.numerator, value.denominator);
+const subtractFraction = (left: Fraction, right: Fraction): Fraction =>
+    addFraction(left, negateFraction(right));
+const multiplyFraction = (left: Fraction, right: Fraction): Fraction =>
+    fraction(
+        left.numerator * right.numerator,
+        left.denominator * right.denominator,
+    );
+const inverseFraction = (value: Fraction): Fraction => {
+    if (value.numerator === 0n) throw new RangeError('Zero has no inverse.');
+    return fraction(value.denominator, value.numerator);
+};
+
+const createRationalRing = (
+    coefficient: (index: number) => Fraction,
+): RationalRingElement =>
+    Array.from({ length: reducedInterpolationRingDegree }, (_unused, index) =>
+        coefficient(index),
+    );
+const rationalRingOne = (): RationalRingElement =>
+    createRationalRing((index) => fraction(index === 0 ? 1n : 0n));
+const rationalRingCoefficient = (
+    value: RationalRingElement,
+    index: number,
+): Fraction => {
+    const coefficient = value[index];
+    if (coefficient === undefined) {
+        throw new Error('A rational-ring coefficient is absent.');
+    }
+    return coefficient;
+};
+const addRationalRing = (
+    left: RationalRingElement,
+    right: RationalRingElement,
+): RationalRingElement =>
+    createRationalRing((index) =>
+        addFraction(
+            rationalRingCoefficient(left, index),
+            rationalRingCoefficient(right, index),
+        ),
+    );
+const negateRationalRing = (value: RationalRingElement): RationalRingElement =>
+    createRationalRing((index) =>
+        negateFraction(rationalRingCoefficient(value, index)),
+    );
+const subtractRationalRing = (
+    left: RationalRingElement,
+    right: RationalRingElement,
+): RationalRingElement => addRationalRing(left, negateRationalRing(right));
+const multiplyRationalRing = (
+    left: RationalRingElement,
+    right: RationalRingElement,
+): RationalRingElement => {
+    const coefficients = Array.from(
+        { length: reducedInterpolationRingDegree },
+        () => fraction(0n),
+    );
+    for (
+        let leftIndex = 0;
+        leftIndex < reducedInterpolationRingDegree;
+        leftIndex += 1
+    ) {
+        for (
+            let rightIndex = 0;
+            rightIndex < reducedInterpolationRingDegree;
+            rightIndex += 1
+        ) {
+            const exponent = leftIndex + rightIndex;
+            const target = exponent % reducedInterpolationRingDegree;
+            const sign = exponent >= reducedInterpolationRingDegree ? -1n : 1n;
+            coefficients[target] = addFraction(
+                rationalRingCoefficient(coefficients, target),
+                multiplyFraction(
+                    fraction(sign),
+                    multiplyFraction(
+                        rationalRingCoefficient(left, leftIndex),
+                        rationalRingCoefficient(right, rightIndex),
+                    ),
+                ),
+            );
+        }
+    }
+    return coefficients;
+};
+const scaleRationalRing = (
+    value: RationalRingElement,
+    scalar: bigint,
+): RationalRingElement =>
+    createRationalRing((index) =>
+        multiplyFraction(
+            rationalRingCoefficient(value, index),
+            fraction(scalar),
+        ),
+    );
+const equalRationalRing = (
+    left: RationalRingElement,
+    right: RationalRingElement,
+): boolean =>
+    left.every((coefficient, index) => {
+        const other = rationalRingCoefficient(right, index);
+        return (
+            coefficient.numerator === other.numerator &&
+            coefficient.denominator === other.denominator
+        );
+    });
+
+const invertRationalRing = (
+    value: RationalRingElement,
+): RationalRingElement => {
+    const matrix = Array.from(
+        { length: reducedInterpolationRingDegree },
+        (_unused, row) => [
+            ...Array.from(
+                { length: reducedInterpolationRingDegree },
+                (_unusedColumn, column) =>
+                    rationalRingCoefficient(
+                        multiplyRationalRing(
+                            value,
+                            createRationalRing((index) =>
+                                fraction(index === column ? 1n : 0n),
+                            ),
+                        ),
+                        row,
+                    ),
+            ),
+            fraction(row === 0 ? 1n : 0n),
+        ],
+    );
+
+    for (let column = 0; column < reducedInterpolationRingDegree; column += 1) {
+        const pivot = matrix.findIndex(
+            (row, rowIndex) =>
+                rowIndex >= column && (row[column]?.numerator ?? 0n) !== 0n,
+        );
+        if (pivot < 0) {
+            throw new RangeError(
+                'The rational-ring element is not invertible.',
+            );
+        }
+        [matrix[column], matrix[pivot]] = [matrix[pivot], matrix[column]];
+        const pivotInverse = inverseFraction(matrix[column][column]);
+        matrix[column] = matrix[column].map((entry) =>
+            multiplyFraction(entry, pivotInverse),
+        );
+        for (let row = 0; row < reducedInterpolationRingDegree; row += 1) {
+            if (row === column) continue;
+            const factor = matrix[row][column];
+            if (factor.numerator === 0n) continue;
+            matrix[row] = matrix[row].map((entry, index) =>
+                subtractFraction(
+                    entry,
+                    multiplyFraction(factor, matrix[column][index]),
+                ),
+            );
+        }
+    }
+
+    const result = createRationalRing(
+        (index) => matrix[index][reducedInterpolationRingDegree],
+    );
+    if (
+        !equalRationalRing(
+            multiplyRationalRing(value, result),
+            rationalRingOne(),
+        )
+    ) {
+        throw new Error('The rational-ring inverse is incorrect.');
+    }
+    return result;
+};
+
+const monomialPoint = (exponent: number): RationalRingElement => {
+    const reducedExponent = exponent % (2 * reducedInterpolationRingDegree);
+    const coefficientIndex = reducedExponent % reducedInterpolationRingDegree;
+    const sign = reducedExponent >= reducedInterpolationRingDegree ? -1n : 1n;
+    return createRationalRing((index) =>
+        fraction(index === coefficientIndex ? sign : 0n),
+    );
+};
+
+const combinations = (size: number, choose: number): readonly number[][] => {
+    const result: number[][] = [];
+    const visit = (start: number, selected: number[]): void => {
+        if (selected.length === choose) {
+            result.push([...selected]);
+            return;
+        }
+        for (
+            let index = start;
+            index <= size - (choose - selected.length);
+            index += 1
+        ) {
+            selected.push(index);
+            visit(index + 1, selected);
+            selected.pop();
+        }
+    };
+    visit(0, []);
+    return result;
+};
+
+const lagrangeCoefficientAtZero = (
+    points: readonly RationalRingElement[],
+    selectedIndex: number,
+): RationalRingElement => {
+    const selectedPoint = points[selectedIndex];
+    if (selectedPoint === undefined) {
+        throw new Error('The selected interpolation point is absent.');
+    }
+    let numerator = rationalRingOne();
+    let denominator = rationalRingOne();
+    for (let index = 0; index < points.length; index += 1) {
+        if (index === selectedIndex) continue;
+        const point = points[index];
+        if (point === undefined) {
+            throw new Error('An interpolation point is absent.');
+        }
+        numerator = multiplyRationalRing(numerator, negateRationalRing(point));
+        denominator = multiplyRationalRing(
+            denominator,
+            subtractRationalRing(selectedPoint, point),
+        );
+    }
+    return multiplyRationalRing(numerator, invertRationalRing(denominator));
+};
+
+const integerOneNorm = (value: RationalRingElement): bigint =>
+    value.reduce((sum, coefficient) => {
+        if (coefficient.denominator !== 1n) {
+            throw new Error(
+                'A cleared interpolation coefficient is fractional.',
+            );
+        }
+        return sum + absolute(coefficient.numerator);
+    }, 0n);
+
+const exactInterpolationCensus = (): Readonly<{
+    authorizedSubsetCount: number;
+    exactMaximumScaledReconstructionCoefficientOneNorm: bigint;
+    exactMaximumSimulationCoefficientOneNorm: bigint;
+    lagrangeCoefficientCount: number;
+}> => {
+    const clearingFactor = 1n << BigInt(Math.ceil(Math.log2(releaseThreshold)));
+    const participantPoints = Array.from(
+        { length: participantCount },
+        (_unused, index) => monomialPoint(index),
+    );
+    const authorizedSubsets = combinations(participantCount, releaseThreshold);
+    let exactMaximumScaledReconstructionCoefficientOneNorm = 0n;
+    let exactMaximumSimulationCoefficientOneNorm = 0n;
+    let lagrangeCoefficientCount = 0;
+
+    for (const authorizedSubset of authorizedSubsets) {
+        const points = authorizedSubset.map((index) => {
+            const point = participantPoints[index];
+            if (point === undefined) {
+                throw new Error('A participant interpolation point is absent.');
+            }
+            return point;
+        });
+        for (let index = 0; index < points.length; index += 1) {
+            const coefficient = lagrangeCoefficientAtZero(points, index);
+            exactMaximumScaledReconstructionCoefficientOneNorm =
+                exactMaximumScaledReconstructionCoefficientOneNorm >
+                integerOneNorm(scaleRationalRing(coefficient, clearingFactor))
+                    ? exactMaximumScaledReconstructionCoefficientOneNorm
+                    : integerOneNorm(
+                          scaleRationalRing(coefficient, clearingFactor),
+                      );
+            const inverseCoefficientOneNorm = integerOneNorm(
+                invertRationalRing(coefficient),
+            );
+            exactMaximumSimulationCoefficientOneNorm =
+                exactMaximumSimulationCoefficientOneNorm >
+                inverseCoefficientOneNorm
+                    ? exactMaximumSimulationCoefficientOneNorm
+                    : inverseCoefficientOneNorm;
+            lagrangeCoefficientCount += 1;
+        }
+    }
+
+    return {
+        authorizedSubsetCount: authorizedSubsets.length,
+        exactMaximumScaledReconstructionCoefficientOneNorm,
+        exactMaximumSimulationCoefficientOneNorm,
+        lagrangeCoefficientCount,
+    };
+};
+
+const optimizedInterpolationProductBound = (): number => {
+    const halfThreshold = Math.floor(releaseThreshold / 2);
+    let product =
+        1 / Math.sin((Math.PI * halfThreshold) / spacedInterpolationSize) ** 2;
+    for (let index = 1; index < halfThreshold; index += 1) {
+        product *=
+            1 / Math.tan((Math.PI * index) / spacedInterpolationSize) ** 2;
+    }
+    return (
+        2 ** Math.ceil(Math.log2(releaseThreshold)) *
+        (spacedInterpolationSize / 2) *
+        product
+    );
+};
+
+const requiredDominantNoiseBudgetBitLength = (
+    statisticalSecurityBitLength: number,
+    interpolationProductBound: number,
+): number =>
+    Math.ceil(
+        Math.log2(
+            releaseThreshold *
+                2 ** statisticalSecurityBitLength *
+                polynomialModulusDegree *
+                interpolationProductBound,
+        ),
+    );
+
+export type ThresholdReleaseNoiseCensus = Readonly<{
+    authorizedSubsetCount: number;
+    completionParticipantCount: number;
+    exactInterpolationProduct: bigint;
+    exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+    exactMaximumScaledReconstructionCoefficientOneNorm: bigint;
+    exactMaximumSimulationCoefficientOneNorm: bigint;
+    exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+    lagrangeCoefficientCount: number;
+    releaseThreshold: number;
+    spacedInterpolationSize: number;
+    interpolationProductBound: number;
+    targetSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+    conservativeSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+}>;
+
+export const compileThresholdReleaseNoiseCensus =
+    (): ThresholdReleaseNoiseCensus => {
+        const exactInterpolation = exactInterpolationCensus();
+        const interpolationProductBound = optimizedInterpolationProductBound();
+        const targetSecurityDominantNoiseBudgetLowerBoundBitLength =
+            requiredDominantNoiseBudgetBitLength(80, interpolationProductBound);
+        const conservativeSecurityDominantNoiseBudgetLowerBoundBitLength =
+            requiredDominantNoiseBudgetBitLength(
+                128,
+                interpolationProductBound,
+            );
+        const exactInterpolationProduct =
+            exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm *
+            exactInterpolation.exactMaximumSimulationCoefficientOneNorm;
+        const exactInterpolationProductNumber = Number(
+            exactInterpolationProduct,
+        );
+        return {
+            authorizedSubsetCount: exactInterpolation.authorizedSubsetCount,
+            completionParticipantCount: participantCount,
+            exactInterpolationProduct,
+            exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength:
+                requiredDominantNoiseBudgetBitLength(
+                    128,
+                    exactInterpolationProductNumber,
+                ),
+            exactMaximumScaledReconstructionCoefficientOneNorm:
+                exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm,
+            exactMaximumSimulationCoefficientOneNorm:
+                exactInterpolation.exactMaximumSimulationCoefficientOneNorm,
+            exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength:
+                requiredDominantNoiseBudgetBitLength(
+                    80,
+                    exactInterpolationProductNumber,
+                ),
+            lagrangeCoefficientCount:
+                exactInterpolation.lagrangeCoefficientCount,
+            releaseThreshold,
+            spacedInterpolationSize,
+            interpolationProductBound,
+            targetSecurityDominantNoiseBudgetLowerBoundBitLength,
+            conservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+        };
+    };

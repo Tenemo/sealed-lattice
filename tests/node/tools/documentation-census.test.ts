@@ -12,12 +12,32 @@ describe('documentation census generator', () => {
         expect(renderDocumentationCensus()).toBe(rendered);
         for (const heading of [
             '## Threshold completion census',
+            '## Threshold key-aggregation structural census',
+            '## Threshold key-aggregation resource floor',
+            '## Threshold release flooding bound',
+            '## Generic commit-and-open setup-proof floor',
+            '## Participant visit dependency census',
             '## Exact ranking arithmetic census',
             '## Packed ranking graph census',
         ]) {
             expect(rendered).toContain(`\n${heading}\n`);
         }
-        expect(rendered).toContain('| 10 | 3 | 7 | 4 | 4 | 4 | 0 |');
+        expect(rendered).toContain('| 10 | 3 | 7 | 4 | 10 | 4 | 4 | 6 | 0 |');
+        expect(rendered).toContain(
+            '| Authorized release subsets checked | `210` |',
+        );
+        expect(rendered).toContain(
+            '| Public setup corpus floor | `2,799,001,600` |',
+        );
+        expect(rendered).toContain(
+            '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
+        );
+        expect(rendered).toContain(
+            '| Successful-result visits for an early release author | `10` |',
+        );
+        expect(rendered).toContain(
+            '| Setup plus proof subtotal | `5,203,025,920` |',
+        );
         expect(rendered).toContain('`467`');
         expect(rendered).toContain('`987`');
         expect(rendered).not.toMatch(/\d{4}-\d{2}-\d{2}T/u);
