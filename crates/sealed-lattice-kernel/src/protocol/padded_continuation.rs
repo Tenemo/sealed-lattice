@@ -113,6 +113,7 @@ type FieldTokens = [Token; FIELD_BIT_WIDTH];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaddedContinuationError {
     ArithmeticOverflow,
+    AuthenticatedParticipantViolation,
     ContinuationAuthenticationFailed,
     DuplicateAllocationNonce,
     DuplicateParticipant,
@@ -125,6 +126,7 @@ pub enum PaddedContinuationError {
     InvalidManifest,
     InvalidPlan,
     InvalidSignature,
+    UnexpectedChunkIdentity,
     WrongParticipantCount,
     WrongParticipantPosition,
     WrongTargetKind,
@@ -134,6 +136,9 @@ impl fmt::Display for PaddedContinuationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::ArithmeticOverflow => "padded continuation arithmetic overflow",
+            Self::AuthenticatedParticipantViolation => {
+                "authenticated participant bytes violate their public relation"
+            }
             Self::ContinuationAuthenticationFailed => "padded continuation authentication failed",
             Self::DuplicateAllocationNonce => "padded continuation reuses a label-allocation nonce",
             Self::DuplicateParticipant => {
@@ -148,6 +153,9 @@ impl fmt::Display for PaddedContinuationError {
             Self::InvalidManifest => "padded continuation manifest is invalid",
             Self::InvalidPlan => "padded continuation plan is invalid",
             Self::InvalidSignature => "padded continuation signature is invalid",
+            Self::UnexpectedChunkIdentity => {
+                "padded continuation chunk does not match its signed identity"
+            }
             Self::WrongParticipantCount => {
                 "padded continuation requires the ten-participant completion roster"
             }

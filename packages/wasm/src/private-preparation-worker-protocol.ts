@@ -266,6 +266,7 @@ export type PrivatePreparationWorkerFailure = Readonly<{
             | 'InvalidRequest'
             | 'MissingPersistence'
             | 'ProtocolRefusal'
+            | 'RetiredAction'
             | 'StateLost'
             | 'StorageFailure';
         message: string;

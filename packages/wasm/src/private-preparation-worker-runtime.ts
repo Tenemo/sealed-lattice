@@ -6,6 +6,7 @@ import {
     openActionSignatureRuntime,
     type ActionSignatureRuntime,
 } from './action-signature-runtime.js';
+import { ConstructionKernelCommandError } from './construction-kernel-command-runtime.js';
 import {
     completionProfileFinalityQuorum,
     finalityTargetBodyByteLength,
@@ -138,7 +139,9 @@ const sourceStateKind = 4;
 const finalityStateKind = 5;
 // Object kinds 6, 7, and 9 are reserved for rejected tally-activation records.
 const noResultStateKind = 8;
+const retirementStateKind = 12;
 const rosterBoundActionPhase = 1;
+const terminalActionPhase = 2;
 const unsignedPreparationPhase = 1;
 const publishedPreparationPhase = 2;
 const consumedPrivatePreparationPhase = 1;
@@ -185,7 +188,7 @@ type LocalRecordContext = Readonly<{
 }>;
 
 type ActionState = {
-    phase: typeof rosterBoundActionPhase;
+    phase: typeof rosterBoundActionPhase | typeof terminalActionPhase;
     generation: bigint;
     runtimeIdentity: Uint8Array;
     candidateBuildIdentity: Uint8Array;
@@ -203,6 +206,17 @@ type ActionState = {
     evaluationJournalGeneration: bigint;
     signingSecretKey: Uint8Array;
     mailboxDecapsulationKey: Uint8Array;
+};
+
+type RetirementReason =
+    | 'retained-state-integrity'
+    | 'signed-private-package-open-failure'
+    | 'signed-public-relation-violation'
+    | 'valid-one-shot-equivocation';
+
+type RetirementState = {
+    reason: RetirementReason;
+    evidenceDigest: Uint8Array;
 };
 
 type LoadedActionState = Readonly<{
@@ -860,6 +874,8 @@ const noResultIdentifier = (
         action.actionProposalIdentity,
     )}.${String(action.participantPosition)}`;
 
+const retirementIdentifier = 'local-action-retirement-v1';
+
 const remotePositions = (localPosition: number): number[] =>
     Array.from(
         { length: completionProfileParticipantCount },
@@ -1035,7 +1051,7 @@ const actionStateByteLength =
 
 const encodeActionState = (state: ActionState): Uint8Array => {
     const writer = new FixedWriter(actionStateByteLength);
-    writer.writeU8(7);
+    writer.writeU8(8);
     writer.writeU8(state.phase);
     writer.writeU16(state.participantPosition);
     writer.writeU64(state.generation);
@@ -1065,14 +1081,14 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
         );
     }
     const reader = new FixedReader(bytes);
-    if (reader.readU8() !== 7) {
+    if (reader.readU8() !== 8) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has the wrong version.',
         );
     }
     const phase = reader.readU8();
-    if (phase !== rosterBoundActionPhase) {
+    if (phase !== rosterBoundActionPhase && phase !== terminalActionPhase) {
         throw new DurableStateError(
             'CorruptState',
             'The action state has an invalid phase.',
@@ -1118,6 +1134,73 @@ const decodeActionState = (bytes: Uint8Array): ActionState => {
 const zeroActionState = (state: ActionState): void => {
     state.signingSecretKey.fill(0);
     state.mailboxDecapsulationKey.fill(0);
+};
+
+const retirementReasonOrdinal = (reason: RetirementReason): number => {
+    switch (reason) {
+        case 'retained-state-integrity':
+            return 1;
+        case 'valid-one-shot-equivocation':
+            return 2;
+        case 'signed-private-package-open-failure':
+            return 3;
+        case 'signed-public-relation-violation':
+            return 4;
+    }
+};
+
+const retirementReasonFromOrdinal = (ordinal: number): RetirementReason => {
+    switch (ordinal) {
+        case 1:
+            return 'retained-state-integrity';
+        case 2:
+            return 'valid-one-shot-equivocation';
+        case 3:
+            return 'signed-private-package-open-failure';
+        case 4:
+            return 'signed-public-relation-violation';
+        default:
+            throw new DurableStateError(
+                'CorruptState',
+                'The local retirement reason is invalid.',
+            );
+    }
+};
+
+const retirementStateByteLength = 1 + 1 + 32;
+
+const encodeRetirementState = (state: RetirementState): Uint8Array => {
+    const writer = new FixedWriter(retirementStateByteLength);
+    writer.writeU8(1);
+    writer.writeU8(retirementReasonOrdinal(state.reason));
+    writer.writeFixed(state.evidenceDigest);
+    return writer.finish();
+};
+
+const decodeRetirementState = (bytes: Uint8Array): RetirementState => {
+    if (bytes.byteLength !== retirementStateByteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The local retirement state has the wrong byte length.',
+        );
+    }
+    const reader = new FixedReader(bytes);
+    if (reader.readU8() !== 1) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The local retirement state has the wrong version.',
+        );
+    }
+    const state: RetirementState = {
+        reason: retirementReasonFromOrdinal(reader.readU8()),
+        evidenceDigest: reader.readFixed(32),
+    };
+    reader.finish();
+    return state;
+};
+
+const zeroRetirementState = (state: RetirementState): void => {
+    state.evidenceDigest.fill(0);
 };
 
 const remoteParticipantCount = completionProfileParticipantCount - 1;
@@ -1673,6 +1756,23 @@ const terminalLocalContext = (
     operationOrdinal: 0n,
 });
 
+const retirementLocalContext = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): LocalRecordContext => ({
+    runtimeIdentity: configuration.runtimeIdentity,
+    candidateBuildIdentity: configuration.candidateBuildIdentity,
+    actionProposalIdentity: action.actionProposalIdentity,
+    actionDefinitionIdentity: action.actionDefinitionIdentity,
+    rosterIdentity: new Uint8Array(identityByteLength),
+    predecessorIdentity: action.predecessorIdentity,
+    participantPosition: action.participantPosition,
+    objectKind: retirementStateKind,
+    generation: 1n,
+    peerPosition: noPeerPosition,
+    operationOrdinal: 0n,
+});
+
 const assertTerminalLocalContext = (
     generation: bigint,
     localContext: LocalRecordContext,
@@ -1743,10 +1843,10 @@ const assertActionStateContext = (
     action: PrivatePreparationActionContext,
 ): void => {
     if (
-        state.phase !== rosterBoundActionPhase ||
+        (state.phase !== rosterBoundActionPhase &&
+            state.phase !== terminalActionPhase) ||
         state.generation !== localContext.generation ||
-        state.participantPosition !== action.participantPosition ||
-        localContext.participantPosition !== action.participantPosition ||
+        state.participantPosition !== localContext.participantPosition ||
         localContext.objectKind !== actionStateKind ||
         localContext.peerPosition !== noPeerPosition ||
         localContext.operationOrdinal !== 0n ||
@@ -1765,24 +1865,15 @@ const assertActionStateContext = (
         ) ||
         !bytesEqual(
             state.actionProposalIdentity,
-            action.actionProposalIdentity,
-        ) ||
-        !bytesEqual(
             localContext.actionProposalIdentity,
-            action.actionProposalIdentity,
         ) ||
         !bytesEqual(
             state.actionDefinitionIdentity,
-            action.actionDefinitionIdentity,
-        ) ||
-        !bytesEqual(
             localContext.actionDefinitionIdentity,
-            action.actionDefinitionIdentity,
         ) ||
-        !bytesEqual(state.predecessorIdentity, action.predecessorIdentity) ||
         !bytesEqual(
+            state.predecessorIdentity,
             localContext.predecessorIdentity,
-            action.predecessorIdentity,
         ) ||
         !bytesEqual(state.rosterIdentity, localContext.rosterIdentity) ||
         isZero(state.rosterIdentity)
@@ -1790,6 +1881,23 @@ const assertActionStateContext = (
         throw new DurableStateError(
             'StateLost',
             'The retained action state does not match its authenticated context.',
+        );
+    }
+    if (
+        state.participantPosition !== action.participantPosition ||
+        !bytesEqual(
+            state.actionProposalIdentity,
+            action.actionProposalIdentity,
+        ) ||
+        !bytesEqual(
+            state.actionDefinitionIdentity,
+            action.actionDefinitionIdentity,
+        ) ||
+        !bytesEqual(state.predecessorIdentity, action.predecessorIdentity)
+    ) {
+        throw new DurableStateError(
+            'Conflict',
+            'The retained action is bound to another action context.',
         );
     }
 };
@@ -1827,6 +1935,185 @@ class PrivatePreparationWorkerRuntime {
             digest.fill(0);
         }
         stream.chunkByteLengths.fill(0);
+    }
+
+    private async actionExclusive<Result>(
+        action: PrivatePreparationActionContext,
+        operation: () => Promise<Result>,
+    ): Promise<Result> {
+        return this.durableState.exclusive(async () => {
+            try {
+                await this.assertActionNotRetired();
+                return await operation();
+            } catch (error: unknown) {
+                if (
+                    error instanceof ConstructionKernelCommandError &&
+                    error.code === 'AttributableProtocolViolation'
+                ) {
+                    await this.retireAction(
+                        action,
+                        'signed-public-relation-violation',
+                        [],
+                    );
+                    throw new DurableStateError(
+                        'RetiredAction',
+                        'The local action is durably retired.',
+                    );
+                }
+                if (
+                    error instanceof DurableStateError &&
+                    error.code !== 'RetiredAction' &&
+                    error.retirementRequired
+                ) {
+                    await this.retireAction(
+                        action,
+                        'retained-state-integrity',
+                        [],
+                    );
+                    throw new DurableStateError(
+                        'RetiredAction',
+                        'The local action is durably retired.',
+                    );
+                }
+                throw error;
+            }
+        });
+    }
+
+    private async assertActionNotRetired(): Promise<void> {
+        const record = await this.durableState.readProtected(
+            'retirements',
+            retirementIdentifier,
+        );
+        if (record === undefined) {
+            return;
+        }
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for retirement state.',
+                true,
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        let plaintext: Uint8Array | undefined;
+        let state: RetirementState | undefined;
+        try {
+            const encodedLocalContext = encodeLocalRecordContext(localContext);
+            try {
+                plaintext = await openProtectedRecord(
+                    record,
+                    encodedLocalContext,
+                    rootKey,
+                );
+            } finally {
+                encodedLocalContext.fill(0);
+            }
+            if (
+                !bytesEqual(
+                    localContext.rosterIdentity,
+                    new Uint8Array(identityByteLength),
+                )
+            ) {
+                throw new DurableStateError(
+                    'CorruptState',
+                    'The retirement context contains a roster identity.',
+                );
+            }
+            if (
+                localContext.objectKind !== retirementStateKind ||
+                localContext.generation !== 1n ||
+                localContext.peerPosition !== noPeerPosition ||
+                localContext.operationOrdinal !== 0n ||
+                localContext.participantPosition >=
+                    completionProfileParticipantCount ||
+                !bytesEqual(
+                    localContext.runtimeIdentity,
+                    this.configuration.runtimeIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.candidateBuildIdentity,
+                    this.configuration.candidateBuildIdentity,
+                )
+            ) {
+                throw new DurableStateError(
+                    'CorruptState',
+                    'The retirement context is not canonical for this worker.',
+                );
+            }
+            state = decodeRetirementState(plaintext);
+        } finally {
+            plaintext?.fill(0);
+            if (state !== undefined) {
+                zeroRetirementState(state);
+            }
+        }
+        throw new DurableStateError(
+            'RetiredAction',
+            'The local action is durably retired.',
+        );
+    }
+
+    private async retireAction(
+        action: PrivatePreparationActionContext,
+        reason: RetirementReason,
+        evidence: readonly Uint8Array[],
+    ): Promise<void> {
+        this.clearPaddedTallyEvaluationChunkStream();
+        const reasonBytes = Uint8Array.of(retirementReasonOrdinal(reason));
+        const actionPosition = new Uint8Array(2);
+        new DataView(actionPosition.buffer).setUint16(
+            0,
+            action.participantPosition,
+            true,
+        );
+        const evidenceDigest = await digestByteInventory(
+            'sealed-lattice/local/action-retirement-evidence/v1',
+            [
+                this.configuration.runtimeIdentity,
+                this.configuration.candidateBuildIdentity,
+                action.actionProposalIdentity,
+                action.actionDefinitionIdentity,
+                action.predecessorIdentity,
+                actionPosition,
+                reasonBytes,
+                ...evidence,
+            ],
+        );
+        const state: RetirementState = { reason, evidenceDigest };
+        const plaintext = encodeRetirementState(state);
+        const context = encodeLocalRecordContext(
+            retirementLocalContext(this.configuration, action),
+        );
+        const rootKey = await generateBrowserLocalRootKey();
+        let record: ProtectedRecord;
+        try {
+            record = await createProtectedRecord(
+                retirementIdentifier,
+                context,
+                plaintext,
+                rootKey,
+            );
+        } finally {
+            reasonBytes.fill(0);
+            actionPosition.fill(0);
+            plaintext.fill(0);
+            context.fill(0);
+            zeroRetirementState(state);
+        }
+        await this.durableState.replaceWithRetirement(rootKey, record);
+        const retained = await this.durableState.readProtected(
+            'retirements',
+            retirementIdentifier,
+        );
+        if (retained === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The local retirement marker disappeared after persistence.',
+                true,
+            );
+        }
     }
 
     static async create(
@@ -1960,7 +2247,7 @@ class PrivatePreparationWorkerRuntime {
             }
         }
 
-        let rootKey = await this.durableState.readRoot();
+        const rootKey = await this.durableState.readRoot();
         const protectedRecordCount =
             await this.durableState.countProtectedRecords();
         if (rootKey === undefined && protectedRecordCount !== 0) {
@@ -1969,7 +2256,13 @@ class PrivatePreparationWorkerRuntime {
                 'The browser-local root is absent while protected state remains.',
             );
         }
-        rootKey ??= await generateBrowserLocalRootKey();
+        if (rootKey !== undefined || protectedRecordCount !== 0) {
+            throw new DurableStateError(
+                'Conflict',
+                'The browser-local database is already bound to another action.',
+            );
+        }
+        const newRootKey = await generateBrowserLocalRootKey();
         const state: ActionState = {
             phase: rosterBoundActionPhase,
             generation: 1n,
@@ -2007,20 +2300,13 @@ class PrivatePreparationWorkerRuntime {
                     identifier,
                     context,
                     plaintext,
-                    rootKey,
+                    newRootKey,
                 );
             } finally {
                 plaintext.fill(0);
                 context.fill(0);
             }
-            if ((await this.durableState.readRoot()) === undefined) {
-                await this.durableState.initializeRootAndAction(
-                    rootKey,
-                    record,
-                );
-            } else {
-                await this.durableState.putIfAbsent('actions', record);
-            }
+            await this.durableState.initializeRootAndAction(newRootKey, record);
             const retained = await this.durableState.readProtected(
                 'actions',
                 identifier,
@@ -2073,117 +2359,114 @@ class PrivatePreparationWorkerRuntime {
             input.preparationAttempt,
             'preparationAttempt',
         );
-        return this.durableState
-            .exclusive(async () => {
-                await this.ensureRosterBoundAction(
+        return this.actionExclusive(action, async () => {
+            await this.ensureRosterBoundAction(
+                action,
+                canonicalRosterBytes,
+                signingSecretKey,
+                mailboxDecapsulationKey,
+            );
+            const actionRecord = await this.durableState.readProtected(
+                'actions',
+                actionIdentifier(this.configuration, action),
+            );
+            if (actionRecord === undefined) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The roster-bound action state is absent for preparation publication.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            try {
+                this.verifyRosterBoundAction(action, loadedAction.state);
+                const identifier = preparationIdentifier(
+                    this.configuration,
                     action,
-                    canonicalRosterBytes,
-                    signingSecretKey,
-                    mailboxDecapsulationKey,
                 );
-                const actionRecord = await this.durableState.readProtected(
-                    'actions',
-                    actionIdentifier(this.configuration, action),
+                const existing = await this.durableState.readProtected(
+                    'preparations',
+                    identifier,
                 );
-                if (actionRecord === undefined) {
+                const boundParentIdentity =
+                    loadedAction.state.signatureBodyIdentities[0];
+                if (boundParentIdentity === undefined) {
                     throw new DurableStateError(
-                        'StateLost',
-                        'The roster-bound action state is absent for preparation publication.',
+                        'CorruptState',
+                        'The preparation-signature slot is absent.',
                     );
                 }
-                const loadedAction = await this.loadActionState(
-                    action,
-                    actionRecord,
-                );
-                try {
-                    this.verifyRosterBoundAction(action, loadedAction.state);
-                    const identifier = preparationIdentifier(
-                        this.configuration,
-                        action,
-                    );
-                    const existing = await this.durableState.readProtected(
-                        'preparations',
-                        identifier,
-                    );
-                    const boundParentIdentity =
-                        loadedAction.state.signatureBodyIdentities[0];
-                    if (boundParentIdentity === undefined) {
-                        throw new DurableStateError(
-                            'CorruptState',
-                            'The preparation-signature slot is absent.',
-                        );
-                    }
-                    if (existing !== undefined) {
-                        if (isZero(boundParentIdentity)) {
-                            throw new DurableStateError(
-                                'StateLost',
-                                'Retained preparation exists without its action-level signature binding.',
-                            );
-                        }
-                        const loadedPreparation =
-                            await this.loadPreparationState(
-                                action,
-                                loadedAction.state.rosterIdentity,
-                                existing,
-                            );
-                        try {
-                            if (
-                                loadedPreparation.state.preparationAttempt !==
-                                    preparationAttempt ||
-                                !bytesEqual(
-                                    loadedPreparation.state.parentIdentity,
-                                    boundParentIdentity,
-                                )
-                            ) {
-                                throw new DurableStateError(
-                                    'Conflict',
-                                    'The action is already bound to another preparation.',
-                                );
-                            }
-                            this.validatePreparationState(
-                                action,
-                                canonicalRosterBytes,
-                                loadedAction.state,
-                                loadedPreparation.state,
-                            );
-                            if (
-                                loadedPreparation.state.phase ===
-                                publishedPreparationPhase
-                            ) {
-                                return copyPublishedPreparationPackage(
-                                    loadedPreparation.state,
-                                );
-                            }
-                            return await this.publishRetainedPreparation(
-                                action,
-                                canonicalRosterBytes,
-                                loadedAction,
-                                loadedPreparation,
-                            );
-                        } finally {
-                            zeroPreparationState(loadedPreparation.state);
-                        }
-                    }
-                    if (!isZero(boundParentIdentity)) {
+                if (existing !== undefined) {
+                    if (isZero(boundParentIdentity)) {
                         throw new DurableStateError(
                             'StateLost',
-                            'The preparation-signature slot is consumed but its retained package is absent.',
+                            'Retained preparation exists without its action-level signature binding.',
                         );
                     }
-                    return await this.createAndPublishPreparation(
+                    const loadedPreparation = await this.loadPreparationState(
                         action,
-                        canonicalRosterBytes,
-                        preparationAttempt,
-                        loadedAction,
+                        loadedAction.state.rosterIdentity,
+                        existing,
                     );
-                } finally {
-                    zeroActionState(loadedAction.state);
+                    try {
+                        if (
+                            loadedPreparation.state.preparationAttempt !==
+                                preparationAttempt ||
+                            !bytesEqual(
+                                loadedPreparation.state.parentIdentity,
+                                boundParentIdentity,
+                            )
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The action is already bound to another preparation.',
+                            );
+                        }
+                        this.validatePreparationState(
+                            action,
+                            canonicalRosterBytes,
+                            loadedAction.state,
+                            loadedPreparation.state,
+                        );
+                        if (
+                            loadedPreparation.state.phase ===
+                            publishedPreparationPhase
+                        ) {
+                            return copyPublishedPreparationPackage(
+                                loadedPreparation.state,
+                            );
+                        }
+                        return await this.publishRetainedPreparation(
+                            action,
+                            canonicalRosterBytes,
+                            loadedAction,
+                            loadedPreparation,
+                        );
+                    } finally {
+                        zeroPreparationState(loadedPreparation.state);
+                    }
                 }
-            })
-            .finally(() => {
-                signingSecretKey.fill(0);
-                mailboxDecapsulationKey.fill(0);
-            });
+                if (!isZero(boundParentIdentity)) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The preparation-signature slot is consumed but its retained package is absent.',
+                    );
+                }
+                return await this.createAndPublishPreparation(
+                    action,
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    loadedAction,
+                );
+            } finally {
+                zeroActionState(loadedAction.state);
+            }
+        }).finally(() => {
+            signingSecretKey.fill(0);
+            mailboxDecapsulationKey.fill(0);
+        });
     }
 
     async consumePrivatePreparation(
@@ -2224,15 +2507,15 @@ class PrivatePreparationWorkerRuntime {
                 'privateBody',
             ),
         );
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const actionRecord = await this.durableState.readProtected(
                 'actions',
                 actionIdentifier(this.configuration, action),
             );
             if (actionRecord === undefined) {
                 throw new DurableStateError(
-                    'StateLost',
-                    'Action keys are absent for private preparation consumption.',
+                    'Conflict',
+                    'Preparation publication is required before private preparation consumption.',
                 );
             }
             const loadedAction = await this.loadActionState(
@@ -2279,12 +2562,29 @@ class PrivatePreparationWorkerRuntime {
                         existing,
                     );
                     try {
-                        this.assertSlotMatchesCarrier(
-                            loadedSlot.state,
-                            preparationAttempt,
-                            carrier.parentIdentity,
-                            carrier.bodyIdentity,
-                        );
+                        if (
+                            !this.slotMatchesCarrier(
+                                loadedSlot.state,
+                                preparationAttempt,
+                                carrier.parentIdentity,
+                                carrier.bodyIdentity,
+                            )
+                        ) {
+                            await this.retireAction(
+                                action,
+                                'valid-one-shot-equivocation',
+                                [
+                                    loadedSlot.state.parentIdentity,
+                                    loadedSlot.state.bodyIdentity,
+                                    carrier.parentIdentity,
+                                    carrier.bodyIdentity,
+                                ],
+                            );
+                            throw new DurableStateError(
+                                'RetiredAction',
+                                'The local action is durably retired.',
+                            );
+                        }
                         if (
                             loadedSlot.state.phase ===
                             resolvedPrivatePreparationPhase
@@ -2412,15 +2712,15 @@ class PrivatePreparationWorkerRuntime {
             input.preparationParents,
         );
         const choice = copySourcePublicationChoice(input.choice);
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const actionRecord = await this.durableState.readProtected(
                 'actions',
                 actionIdentifier(this.configuration, action),
             );
             if (actionRecord === undefined) {
                 throw new DurableStateError(
-                    'StateLost',
-                    'Action keys are absent for source publication.',
+                    'Conflict',
+                    'Preparation publication is required before source publication.',
                 );
             }
             const loadedAction = await this.loadActionState(
@@ -2570,7 +2870,7 @@ class PrivatePreparationWorkerRuntime {
         if (topCount < 1 || topCount > completionProfileParticipantCount) {
             throw new TypeError('topCount is outside the completion profile.');
         }
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const actionRecord = await this.durableState.readProtected(
                 'actions',
                 actionIdentifier(this.configuration, action),
@@ -2581,8 +2881,8 @@ class PrivatePreparationWorkerRuntime {
             );
             if (actionRecord === undefined || sourceRecord === undefined) {
                 throw new DurableStateError(
-                    'StateLost',
-                    'Published local source state is absent for finality.',
+                    'Conflict',
+                    'Published local source state is required before finality.',
                 );
             }
             const loadedAction = await this.loadActionState(
@@ -2654,6 +2954,11 @@ class PrivatePreparationWorkerRuntime {
                             existing,
                         );
                         try {
+                            await this.assertNoVerifiedSourceEquivocation(
+                                action,
+                                loadedFinality.state,
+                                verified,
+                            );
                             this.validateFinalityState(
                                 action,
                                 canonicalRosterBytes,
@@ -2864,6 +3169,11 @@ class PrivatePreparationWorkerRuntime {
                 'The retained finality target is already published.',
             );
         }
+        await this.assertNoVerifiedSourceEquivocation(
+            action,
+            loadedFinality.state,
+            verified,
+        );
         this.validateFinalityState(
             action,
             canonicalRosterBytes,
@@ -2963,7 +3273,7 @@ class PrivatePreparationWorkerRuntime {
             throw new TypeError('topCount is outside the completion profile.');
         }
         const plan = this.paddedTallyRuntime.compilePlan(topCount);
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const [actionRecord, sourceRecord, finalityRecord] =
                 await Promise.all([
                     this.durableState.readProtected(
@@ -2985,7 +3295,7 @@ class PrivatePreparationWorkerRuntime {
                 finalityRecord === undefined
             ) {
                 throw new DurableStateError(
-                    'StateLost',
+                    'Conflict',
                     'Published source and finality state are required before tally generation.',
                 );
             }
@@ -3038,6 +3348,11 @@ class PrivatePreparationWorkerRuntime {
                         verified,
                         canonicalRosterBytes,
                         finalitySignatures,
+                    );
+                    await this.assertNoVerifiedSourceEquivocation(
+                        action,
+                        loadedFinality.state,
+                        verified,
                     );
                     this.validateFinalityState(
                         action,
@@ -3214,7 +3529,7 @@ class PrivatePreparationWorkerRuntime {
         const expectedChunkOrdinal = requireChunkOrdinal(
             input.expectedChunkOrdinal,
         );
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const [actionRecord, finalityRecord, generationRecord] =
                 await Promise.all([
                     this.durableState.readProtected(
@@ -3239,8 +3554,8 @@ class PrivatePreparationWorkerRuntime {
                 generationRecord === undefined
             ) {
                 throw new DurableStateError(
-                    'StateLost',
-                    'Initialized tally generation state is unavailable.',
+                    'Conflict',
+                    'Tally generation must be initialized before advancing it.',
                 );
             }
             const loadedAction = await this.loadActionState(
@@ -3532,7 +3847,7 @@ class PrivatePreparationWorkerRuntime {
             ]),
         );
         try {
-            return await this.durableState.exclusive(async () => {
+            return await this.actionExclusive(action, async () => {
                 const [actionRecord, finalityRecord] = await Promise.all([
                     this.durableState.readProtected(
                         'actions',
@@ -3548,7 +3863,7 @@ class PrivatePreparationWorkerRuntime {
                     finalityRecord === undefined
                 ) {
                     throw new DurableStateError(
-                        'StateLost',
+                        'Conflict',
                         'Published local finality state is required before tally evaluation.',
                     );
                 }
@@ -3585,8 +3900,8 @@ class PrivatePreparationWorkerRuntime {
                         );
                     if (localGenerationRecord === undefined) {
                         throw new DurableStateError(
-                            'StateLost',
-                            'The local completed tally generation is absent.',
+                            'Conflict',
+                            'Local tally generation must complete before evaluation.',
                         );
                     }
                     const localGeneration =
@@ -3675,7 +3990,7 @@ class PrivatePreparationWorkerRuntime {
                         loadedAction.state.evaluationJournalGeneration !== 0n
                     ) {
                         throw new DurableStateError(
-                            'StateLost',
+                            'Conflict',
                             'The local activation must be durably published before evaluation.',
                         );
                     }
@@ -3776,7 +4091,7 @@ class PrivatePreparationWorkerRuntime {
         const chunk = input.chunk as Uint8Array<ArrayBuffer>;
         let retainChunkStream = false;
         try {
-            return await this.durableState.exclusive(async () => {
+            return await this.actionExclusive(action, async () => {
                 const [actionRecord, finalityRecord, evaluationRecord] =
                     await Promise.all([
                         this.durableState.readProtected(
@@ -3801,8 +4116,8 @@ class PrivatePreparationWorkerRuntime {
                     evaluationRecord === undefined
                 ) {
                     throw new DurableStateError(
-                        'StateLost',
-                        'Initialized tally evaluation state is unavailable.',
+                        'Conflict',
+                        'Tally evaluation must be initialized before advancing it.',
                     );
                 }
                 let continuationPlan: PaddedTallyPlan | undefined;
@@ -3819,7 +4134,17 @@ class PrivatePreparationWorkerRuntime {
                     ) {
                         throw new DurableStateError(
                             'Conflict',
-                            'The tally evaluation chunk stream is missing, out of order, or rebound.',
+                            continuingStream === undefined
+                                ? 'The tally evaluation chunk stream is absent.'
+                                : !actionContextsEqual(
+                                        continuingStream.action,
+                                        action,
+                                    )
+                                  ? 'The tally evaluation chunk stream is bound to another action.'
+                                  : continuingStream.expectedChunkOrdinal !==
+                                      expectedChunkOrdinal
+                                    ? 'The tally evaluation chunk stream is bound to another chunk ordinal.'
+                                    : 'The tally evaluation chunk stream received an out-of-order participant position.',
                         );
                     }
                     continuationPlan = continuingStream.plan;
@@ -3832,6 +4157,14 @@ class PrivatePreparationWorkerRuntime {
                     actionRecord,
                     chunkParticipantPosition === 0,
                 );
+                if (chunkParticipantPosition === 0) {
+                    this.verifyRosterBoundAction(
+                        action,
+                        loadedAction.state,
+                        loadedAction.state.canonicalRosterBytes,
+                        true,
+                    );
+                }
                 const loadedFinality = await this.loadFinalityState(
                     action,
                     loadedAction.state.rosterIdentity,
@@ -3846,7 +4179,7 @@ class PrivatePreparationWorkerRuntime {
                     if (continuationPlan === undefined) {
                         throw new DurableStateError(
                             'Conflict',
-                            'The tally evaluation chunk stream is missing, out of order, or rebound.',
+                            'The tally evaluation chunk stream lost its verified plan.',
                         );
                     }
                     plan = continuationPlan;
@@ -3941,7 +4274,17 @@ class PrivatePreparationWorkerRuntime {
                     ) {
                         throw new DurableStateError(
                             'Conflict',
-                            'The tally evaluation chunk stream is missing, out of order, or rebound.',
+                            stream === undefined
+                                ? 'The tally evaluation chunk stream is absent after initialization.'
+                                : !actionContextsEqual(stream.action, action)
+                                  ? 'The tally evaluation chunk stream changed action after initialization.'
+                                  : stream.expectedChunkOrdinal !==
+                                      expectedChunkOrdinal
+                                    ? 'The tally evaluation chunk stream changed ordinal after initialization.'
+                                    : stream.nextParticipantPosition !==
+                                        chunkParticipantPosition
+                                      ? 'The tally evaluation chunk stream changed participant position after initialization.'
+                                      : 'The tally evaluation chunk stream changed mode after initialization.',
                         );
                     }
                     const chunkDigest = new Uint8Array(
@@ -4254,7 +4597,7 @@ class PrivatePreparationWorkerRuntime {
         if (topCount < 1 || topCount > completionProfileParticipantCount) {
             throw new TypeError('topCount is outside the completion profile.');
         }
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const [actionRecord, sourceRecord, finalityRecord] =
                 await Promise.all([
                     this.durableState.readProtected(
@@ -4276,7 +4619,7 @@ class PrivatePreparationWorkerRuntime {
                 finalityRecord === undefined
             ) {
                 throw new DurableStateError(
-                    'StateLost',
+                    'Conflict',
                     'Published local source and finality state are required for a no-result acknowledgement.',
                 );
             }
@@ -4325,6 +4668,11 @@ class PrivatePreparationWorkerRuntime {
                     loadedSource.state,
                 );
                 try {
+                    await this.assertNoVerifiedSourceEquivocation(
+                        action,
+                        loadedFinality.state,
+                        verified,
+                    );
                     this.validateFinalityState(
                         action,
                         canonicalRosterBytes,
@@ -4474,6 +4822,55 @@ class PrivatePreparationWorkerRuntime {
         });
     }
 
+    private async readRetainedNoResultTerminal(
+        action: PrivatePreparationActionContext,
+        loadedAction: LoadedActionState,
+    ): Promise<
+        Extract<
+            TallyEvaluationProgress,
+            Readonly<{ terminalPath: 'source-empty' }>
+        >
+    > {
+        if (loadedAction.state.phase !== terminalActionPhase) {
+            throw new DurableStateError(
+                'Conflict',
+                'The local action does not have a verified terminal.',
+            );
+        }
+        const record = await this.durableState.readProtected(
+            'evaluations',
+            noResultIdentifier(this.configuration, action),
+        );
+        if (record === undefined) {
+            throw new DurableStateError(
+                'Conflict',
+                'The local action already has another verified terminal.',
+            );
+        }
+        const loadedNoResult = await this.loadNoResultState(
+            action,
+            loadedAction.state.rosterIdentity,
+            record,
+        );
+        try {
+            if (
+                loadedNoResult.state.generation !==
+                loadedAction.state.evaluationJournalGeneration
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The no-result terminal and action journal disagree.',
+                );
+            }
+            return copyTallyEvaluationProgress(
+                loadedNoResult.state,
+                this.constructionKernelRuntime.measureResources(),
+            );
+        } finally {
+            zeroNoResultState(loadedNoResult.state);
+        }
+    }
+
     async finalizeNoResult(
         input: PrivatePreparationActionContext & {
             canonicalRosterBytes: Uint8Array;
@@ -4503,207 +4900,267 @@ class PrivatePreparationWorkerRuntime {
         if (topCount < 1 || topCount > completionProfileParticipantCount) {
             throw new TypeError('topCount is outside the completion profile.');
         }
-        return this.durableState.exclusive(async () => {
-            const actionRecord = await this.durableState.readProtected(
-                'actions',
-                actionIdentifier(this.configuration, action),
-            );
-            const sourceRecord = await this.durableState.readProtected(
-                'sources',
-                sourceIdentifier(this.configuration, action),
-            );
-            if (actionRecord === undefined || sourceRecord === undefined) {
+        return this.actionExclusive(action, async () => {
+            const [actionRecord, sourceRecord, finalityRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'sources',
+                        sourceIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'finalities',
+                        finalityIdentifier(this.configuration, action),
+                    ),
+                ]);
+            if (actionRecord === undefined) {
                 throw new DurableStateError(
-                    'StateLost',
-                    'Published local source state is absent for no-result finalization.',
+                    'Conflict',
+                    'An initialized action is required before no-result finalization.',
                 );
             }
             const loadedAction = await this.loadActionState(
                 action,
                 actionRecord,
             );
-            const loadedSource = await this.loadSourceState(
-                action,
-                loadedAction.state.rosterIdentity,
-                sourceRecord,
-            );
             try {
-                this.verifyRosterBoundAction(
-                    action,
-                    loadedAction.state,
-                    canonicalRosterBytes,
-                );
-                this.validateSourceState(
-                    action,
-                    canonicalRosterBytes,
-                    loadedAction.state,
-                    loadedSource.state,
-                );
+                if (loadedAction.state.phase === terminalActionPhase) {
+                    const terminal = await this.readRetainedNoResultTerminal(
+                        action,
+                        loadedAction,
+                    );
+                    return terminal;
+                }
                 if (
-                    loadedSource.state.phase !== publishedSourcePhase ||
-                    loadedSource.state.preparationAttempt !== preparationAttempt
+                    sourceRecord === undefined ||
+                    finalityRecord === undefined
                 ) {
                     throw new DurableStateError(
                         'Conflict',
-                        'The retained source is not the finalized preparation attempt.',
+                        'Published local source and finality state are required before no-result finalization.',
                     );
                 }
-                const verified = this.deriveVerifiedTallyContext(
+                const loadedSource = await this.loadSourceState(
                     action,
-                    canonicalRosterBytes,
-                    preparationAttempt,
-                    sources,
-                    topCount,
-                    loadedAction.state,
-                    loadedSource.state,
+                    loadedAction.state.rosterIdentity,
+                    sourceRecord,
+                );
+                const loadedFinality = await this.loadFinalityState(
+                    action,
+                    loadedAction.state.rosterIdentity,
+                    finalityRecord,
                 );
                 try {
-                    this.verifyNoResultCertificate(
-                        verified,
+                    this.verifyRosterBoundAction(
+                        action,
+                        loadedAction.state,
                         canonicalRosterBytes,
-                        finalitySignatures,
                     );
-                    let acknowledgementSignerBitmap = 0;
-                    for (const acknowledgement of acknowledgements) {
-                        const signerMask = 1 << acknowledgement.signerPosition;
-                        if ((acknowledgementSignerBitmap & signerMask) !== 0) {
+                    this.validateSourceState(
+                        action,
+                        canonicalRosterBytes,
+                        loadedAction.state,
+                        loadedSource.state,
+                    );
+                    if (
+                        loadedSource.state.phase !== publishedSourcePhase ||
+                        loadedSource.state.preparationAttempt !==
+                            preparationAttempt
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The retained source is not the finalized preparation attempt.',
+                        );
+                    }
+                    const verified = this.deriveVerifiedTallyContext(
+                        action,
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sources,
+                        topCount,
+                        loadedAction.state,
+                        loadedSource.state,
+                    );
+                    try {
+                        await this.assertNoVerifiedSourceEquivocation(
+                            action,
+                            loadedFinality.state,
+                            verified,
+                        );
+                        this.validateFinalityState(
+                            action,
+                            canonicalRosterBytes,
+                            loadedAction.state,
+                            loadedFinality.state,
+                            verified,
+                        );
+                        this.verifyNoResultCertificate(
+                            verified,
+                            canonicalRosterBytes,
+                            finalitySignatures,
+                        );
+                        let acknowledgementSignerBitmap = 0;
+                        for (const acknowledgement of acknowledgements) {
+                            const signerMask =
+                                1 << acknowledgement.signerPosition;
+                            if (
+                                (acknowledgementSignerBitmap & signerMask) !==
+                                0
+                            ) {
+                                throw new Error(
+                                    'No-result acknowledgements contain a duplicate signer.',
+                                );
+                            }
+                            this.finalityRuntime.verifyNoResultAcknowledgement(
+                                acknowledgement.signerPosition,
+                                verified.targetBody,
+                                canonicalRosterBytes,
+                                acknowledgement.signature,
+                            );
+                            acknowledgementSignerBitmap |= signerMask;
+                        }
+                        if (
+                            acknowledgements.length <
+                            completionProfileParticipantCount
+                        ) {
+                            return {
+                                kind: 'pending',
+                                receivedAcknowledgements:
+                                    acknowledgements.length,
+                                requiredAcknowledgements:
+                                    completionProfileParticipantCount,
+                            };
+                        }
+                        const release =
+                            this.finalityRuntime.verifyNoResultRelease(
+                                verified.targetBody,
+                                canonicalRosterBytes,
+                                finalitySignatures,
+                                acknowledgements,
+                            );
+                        if (
+                            release.targetKind !== 'no-result' ||
+                            release.sourceSubmissionBitmap !== 0 ||
+                            release.topCount !== verified.topCount ||
+                            !bytesEqual(
+                                release.targetIdentity,
+                                verified.targetIdentity,
+                            )
+                        ) {
                             throw new Error(
-                                'No-result acknowledgements contain a duplicate signer.',
+                                'The verified no-result release does not match the semantic target.',
                             );
                         }
-                        this.finalityRuntime.verifyNoResultAcknowledgement(
-                            acknowledgement.signerPosition,
-                            verified.targetBody,
-                            canonicalRosterBytes,
-                            acknowledgement.signature,
-                        );
-                        acknowledgementSignerBitmap |= signerMask;
-                    }
-                    if (
-                        acknowledgements.length <
-                        completionProfileParticipantCount
-                    ) {
-                        return {
-                            kind: 'pending',
-                            receivedAcknowledgements: acknowledgements.length,
-                            requiredAcknowledgements:
-                                completionProfileParticipantCount,
-                        };
-                    }
-                    const release = this.finalityRuntime.verifyNoResultRelease(
-                        verified.targetBody,
-                        canonicalRosterBytes,
-                        finalitySignatures,
-                        acknowledgements,
-                    );
-                    if (
-                        release.targetKind !== 'no-result' ||
-                        release.sourceSubmissionBitmap !== 0 ||
-                        release.topCount !== verified.topCount ||
-                        !bytesEqual(
-                            release.targetIdentity,
-                            verified.targetIdentity,
-                        )
-                    ) {
-                        throw new Error(
-                            'The verified no-result release does not match the semantic target.',
-                        );
-                    }
-                    const identifier = noResultIdentifier(
-                        this.configuration,
-                        action,
-                    );
-                    const existing = await this.durableState.readProtected(
-                        'evaluations',
-                        identifier,
-                    );
-                    if (existing !== undefined) {
-                        const loadedNoResult = await this.loadNoResultState(
+                        const identifier = noResultIdentifier(
+                            this.configuration,
                             action,
-                            loadedAction.state.rosterIdentity,
-                            existing,
+                        );
+                        const existing = await this.durableState.readProtected(
+                            'evaluations',
+                            identifier,
+                        );
+                        if (existing !== undefined) {
+                            const loadedNoResult = await this.loadNoResultState(
+                                action,
+                                loadedAction.state.rosterIdentity,
+                                existing,
+                            );
+                            try {
+                                this.validateFinalizedNoResultState(
+                                    loadedNoResult.state,
+                                    verified,
+                                    loadedAction.state
+                                        .evaluationJournalGeneration,
+                                );
+                                return copyTallyEvaluationProgress(
+                                    loadedNoResult.state,
+                                    this.constructionKernelRuntime.measureResources(),
+                                );
+                            } finally {
+                                zeroNoResultState(loadedNoResult.state);
+                            }
+                        }
+                        const state: NoResultState = {
+                            generation: 1n,
+                            targetIdentity: Uint8Array.from(
+                                verified.targetIdentity,
+                            ),
+                            topCount: verified.topCount,
+                            sourceSubmissionBitmap:
+                                verified.sourceSubmissionBitmap,
+                            acceptedBallotAuthorshipBitmap: 0,
+                        };
+                        try {
+                            this.validateFinalizedNoResultState(
+                                state,
+                                verified,
+                            );
+                            await this.insertNoResultState(
+                                release,
+                                action,
+                                loadedAction,
+                                state,
+                            );
+                        } finally {
+                            zeroNoResultState(state);
+                        }
+                        const [retainedActionRecord, retained] =
+                            await Promise.all([
+                                this.durableState.readProtected(
+                                    'actions',
+                                    actionIdentifier(
+                                        this.configuration,
+                                        action,
+                                    ),
+                                ),
+                                this.durableState.readProtected(
+                                    'evaluations',
+                                    identifier,
+                                ),
+                            ]);
+                        if (
+                            retainedActionRecord === undefined ||
+                            retained === undefined
+                        ) {
+                            throw new DurableStateError(
+                                'StateLost',
+                                'The durable no-result terminal disappeared after persistence.',
+                            );
+                        }
+                        const reboundAction = await this.loadActionState(
+                            action,
+                            retainedActionRecord,
+                        );
+                        const reloaded = await this.loadNoResultState(
+                            action,
+                            reboundAction.state.rosterIdentity,
+                            retained,
                         );
                         try {
                             this.validateFinalizedNoResultState(
-                                loadedNoResult.state,
+                                reloaded.state,
                                 verified,
-                                loadedAction.state.evaluationJournalGeneration,
+                                reboundAction.state.evaluationJournalGeneration,
                             );
                             return copyTallyEvaluationProgress(
-                                loadedNoResult.state,
+                                reloaded.state,
                                 this.constructionKernelRuntime.measureResources(),
                             );
                         } finally {
-                            zeroNoResultState(loadedNoResult.state);
+                            zeroNoResultState(reloaded.state);
+                            zeroActionState(reboundAction.state);
                         }
-                    }
-                    const state: NoResultState = {
-                        generation: 1n,
-                        targetIdentity: Uint8Array.from(
-                            verified.targetIdentity,
-                        ),
-                        topCount: verified.topCount,
-                        sourceSubmissionBitmap: verified.sourceSubmissionBitmap,
-                        acceptedBallotAuthorshipBitmap: 0,
-                    };
-                    try {
-                        this.validateFinalizedNoResultState(state, verified);
-                        await this.insertNoResultState(
-                            release,
-                            action,
-                            loadedAction,
-                            state,
-                        );
                     } finally {
-                        zeroNoResultState(state);
-                    }
-                    const [retainedActionRecord, retained] = await Promise.all([
-                        this.durableState.readProtected(
-                            'actions',
-                            actionIdentifier(this.configuration, action),
-                        ),
-                        this.durableState.readProtected(
-                            'evaluations',
-                            identifier,
-                        ),
-                    ]);
-                    if (
-                        retainedActionRecord === undefined ||
-                        retained === undefined
-                    ) {
-                        throw new DurableStateError(
-                            'StateLost',
-                            'The durable no-result terminal disappeared after persistence.',
-                        );
-                    }
-                    const reboundAction = await this.loadActionState(
-                        action,
-                        retainedActionRecord,
-                    );
-                    const reloaded = await this.loadNoResultState(
-                        action,
-                        reboundAction.state.rosterIdentity,
-                        retained,
-                    );
-                    try {
-                        this.validateFinalizedNoResultState(
-                            reloaded.state,
-                            verified,
-                            reboundAction.state.evaluationJournalGeneration,
-                        );
-                        return copyTallyEvaluationProgress(
-                            reloaded.state,
-                            this.constructionKernelRuntime.measureResources(),
-                        );
-                    } finally {
-                        zeroNoResultState(reloaded.state);
-                        zeroActionState(reboundAction.state);
+                        zeroVerifiedTallyContext(verified);
                     }
                 } finally {
-                    zeroVerifiedTallyContext(verified);
+                    zeroFinalityState(loadedFinality.state);
+                    zeroSourceState(loadedSource.state);
                 }
             } finally {
-                zeroSourceState(loadedSource.state);
                 zeroActionState(loadedAction.state);
             }
         });
@@ -4713,15 +5170,15 @@ class PrivatePreparationWorkerRuntime {
         input: PrivatePreparationActionContext,
     ): Promise<TallyEvaluationProgress> {
         const action = copyActionContext(input);
-        return this.durableState.exclusive(async () => {
+        return this.actionExclusive(action, async () => {
             const actionRecord = await this.durableState.readProtected(
                 'actions',
                 actionIdentifier(this.configuration, action),
             );
             if (actionRecord === undefined) {
                 throw new DurableStateError(
-                    'StateLost',
-                    'Action state is absent for tally result retrieval.',
+                    'Conflict',
+                    'An initialized action is required for tally result retrieval.',
                 );
             }
             const loadedAction = await this.loadActionState(
@@ -4819,8 +5276,8 @@ class PrivatePreparationWorkerRuntime {
                     }
                 }
                 throw new DurableStateError(
-                    'StateLost',
-                    'No certificate-verified durable tally terminal is available.',
+                    'Conflict',
+                    'No verified tally terminal is available yet.',
                 );
             } finally {
                 zeroActionState(loadedAction.state);
@@ -4925,6 +5382,29 @@ class PrivatePreparationWorkerRuntime {
                 'Activation requires the exact finalized nonempty source inventory.',
             );
         }
+    }
+
+    private async assertNoVerifiedSourceEquivocation(
+        action: PrivatePreparationActionContext,
+        retained: FinalityState,
+        candidate: VerifiedTallyContext,
+    ): Promise<void> {
+        if (
+            bytesEqual(
+                retained.sourceBodyIdentities,
+                candidate.sourceBodyIdentities,
+            )
+        ) {
+            return;
+        }
+        await this.retireAction(action, 'valid-one-shot-equivocation', [
+            retained.sourceBodyIdentities,
+            candidate.sourceBodyIdentities,
+        ]);
+        throw new DurableStateError(
+            'RetiredAction',
+            'The local action is durably retired.',
+        );
     }
 
     private validateFinalityState(
@@ -5568,6 +6048,10 @@ class PrivatePreparationWorkerRuntime {
         }
         const actionReplacementState: ActionState = {
             ...loadedAction.state,
+            phase:
+                state.phase === completedPaddedTallyEvaluationPhase
+                    ? terminalActionPhase
+                    : loadedAction.state.phase,
             generation: loadedAction.state.generation + 1n,
             evaluationJournalGeneration: state.generation,
         };
@@ -5744,6 +6228,7 @@ class PrivatePreparationWorkerRuntime {
         }
         const actionReplacementState: ActionState = {
             ...loadedAction.state,
+            phase: terminalActionPhase,
             generation: loadedAction.state.generation + 1n,
             evaluationJournalGeneration: state.generation,
         };
@@ -5886,14 +6371,23 @@ class PrivatePreparationWorkerRuntime {
                     position * identityByteLength,
                     (position + 1) * identityByteLength,
                 );
-                if (
-                    expectedIdentity === undefined ||
-                    !bytesEqual(expectedIdentity, verifiedIdentity)
-                ) {
+                if (expectedIdentity === undefined) {
                     verified.heldSubsetKeys.fill(0);
                     throw new DurableStateError(
-                        'Conflict',
-                        'The certified preparation parent does not match the retained private delivery.',
+                        'CorruptState',
+                        'The retained preparation identity inventory is incomplete.',
+                    );
+                }
+                if (!bytesEqual(expectedIdentity, verifiedIdentity)) {
+                    verified.heldSubsetKeys.fill(0);
+                    await this.retireAction(
+                        action,
+                        'valid-one-shot-equivocation',
+                        [expectedIdentity, verifiedIdentity],
+                    );
+                    throw new DurableStateError(
+                        'RetiredAction',
+                        'The local action is durably retired.',
                     );
                 }
             }
@@ -6317,11 +6811,17 @@ class PrivatePreparationWorkerRuntime {
         action: PrivatePreparationActionContext,
         state: ActionState,
         canonicalRosterBytes: Uint8Array = state.canonicalRosterBytes,
+        terminalAllowed = false,
     ): void {
-        if (state.phase !== rosterBoundActionPhase) {
+        if (
+            state.phase !== rosterBoundActionPhase &&
+            !(terminalAllowed && state.phase === terminalActionPhase)
+        ) {
             throw new DurableStateError(
                 'Conflict',
-                'The action is not bound to a frozen roster.',
+                state.phase === terminalActionPhase
+                    ? 'The local action already has a verified terminal.'
+                    : 'The action is not bound to a frozen roster.',
             );
         }
         const rosterIdentity = this.rosterRuntime.verify(canonicalRosterBytes);
@@ -6792,9 +7292,10 @@ class PrivatePreparationWorkerRuntime {
             );
         };
         let plaintext: Uint8Array | undefined;
+        let verifiedPlaintextIdentity: Uint8Array;
         try {
             plaintext = openOnce();
-            const verifiedPlaintextIdentity =
+            verifiedPlaintextIdentity =
                 this.preparationMaterialRuntime.verifyPlaintext(
                     {
                         participantCount: completionProfileParticipantCount,
@@ -6808,6 +7309,29 @@ class PrivatePreparationWorkerRuntime {
                     parentBody,
                     plaintext,
                 );
+        } catch {
+            try {
+                await this.retireAction(
+                    action,
+                    'signed-private-package-open-failure',
+                    [
+                        loadedSlot.state.parentIdentity,
+                        loadedSlot.state.bodyIdentity,
+                        parentBody,
+                        privateBody,
+                    ],
+                );
+                throw new DurableStateError(
+                    'RetiredAction',
+                    'The local action is durably retired.',
+                );
+            } finally {
+                capabilityIsLive = false;
+                mailboxEncapsulationKey.fill(0);
+                plaintext?.fill(0);
+            }
+        }
+        try {
             const resolvedState: PrivatePreparationSlotState = {
                 ...loadedSlot.state,
                 phase: resolvedPrivatePreparationPhase,
@@ -6823,18 +7347,11 @@ class PrivatePreparationWorkerRuntime {
                 resolvedState,
             );
             return { senderPosition, status: 'resolved' };
-        } catch (error: unknown) {
-            await this.burnPrivatePreparationSlot(
-                action,
-                loadedAction.rootKey,
-                loadedAction.state.rosterIdentity,
-                loadedSlot,
-            );
-            throw error;
         } finally {
             capabilityIsLive = false;
             mailboxEncapsulationKey.fill(0);
             plaintext?.fill(0);
+            verifiedPlaintextIdentity.fill(0);
         }
     }
 
@@ -6948,15 +7465,31 @@ class PrivatePreparationWorkerRuntime {
         bodyIdentity: Uint8Array,
     ): void {
         if (
-            state.preparationAttempt !== preparationAttempt ||
-            !bytesEqual(state.parentIdentity, parentIdentity) ||
-            !bytesEqual(state.bodyIdentity, bodyIdentity)
+            !this.slotMatchesCarrier(
+                state,
+                preparationAttempt,
+                parentIdentity,
+                bodyIdentity,
+            )
         ) {
             throw new DurableStateError(
-                'Conflict',
-                'The private-preparation slot is already bound to another carrier.',
+                'CorruptState',
+                'The newly retained private-preparation slot changed carrier identity.',
             );
         }
+    }
+
+    private slotMatchesCarrier(
+        state: PrivatePreparationSlotState,
+        preparationAttempt: number,
+        parentIdentity: Uint8Array,
+        bodyIdentity: Uint8Array,
+    ): boolean {
+        return (
+            state.preparationAttempt === preparationAttempt &&
+            bytesEqual(state.parentIdentity, parentIdentity) &&
+            bytesEqual(state.bodyIdentity, bodyIdentity)
+        );
     }
 
     private async loadPreparationState(

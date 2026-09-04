@@ -8,6 +8,8 @@ mod foundation_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalErrorCode {
+    #[cfg(feature = "construction")]
+    AttributableProtocolViolation,
     InvalidEnum,
     InvalidProtocolObject,
     InvalidUtf8,
@@ -18,6 +20,8 @@ pub enum CanonicalErrorCode {
 impl CanonicalErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
+            #[cfg(feature = "construction")]
+            Self::AttributableProtocolViolation => "AttributableProtocolViolation",
             Self::InvalidEnum => "InvalidEnum",
             Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidUtf8 => "InvalidUtf8",

@@ -273,12 +273,7 @@ impl PrivatePreparationBody {
     }
 
     pub fn body_identity(&self) -> Result<Hash512, PrivatePreparationBodyError> {
-        hash_foundation_tuple_512(
-            PRIVATE_PREPARATION_BODY_IDENTITY_DOMAIN,
-            &[CanonicalItem::variable_bytes(self.encode()?)
-                .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)?],
-        )
-        .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)
+        private_preparation_body_identity(&self.encode()?)
     }
 
     pub fn open(
@@ -310,6 +305,17 @@ impl PrivatePreparationBody {
         )
         .map_err(|_| PrivatePreparationBodyError::AuthenticationFailed)
     }
+}
+
+pub(super) fn private_preparation_body_identity(
+    body_bytes: &[u8],
+) -> Result<Hash512, PrivatePreparationBodyError> {
+    hash_foundation_tuple_512(
+        PRIVATE_PREPARATION_BODY_IDENTITY_DOMAIN,
+        &[CanonicalItem::variable_bytes(body_bytes)
+            .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)?],
+    )
+    .map_err(|_| PrivatePreparationBodyError::InvalidCanonicalEncoding)
 }
 
 fn pair_encryption_key_identity(

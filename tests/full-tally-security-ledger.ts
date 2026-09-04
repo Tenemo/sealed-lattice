@@ -494,7 +494,7 @@ export const compileFullTallySecurityLedger = (
             adversarialStorageStateCandidates: {
                 symbol: 'v_state',
                 countingRule:
-                    'Count each distinct initialized root-and-seven-store snapshot presented to an honest restore, including losing-fork, replay, rollback, insertion, partial-deletion, and mutation candidates; post-initialization rootless empty state is excluded by A_STATE.',
+                    'Count each distinct initialized root-and-eight-store snapshot presented to an honest restore, including losing-fork, replay, rollback, insertion, partial-deletion, and mutation candidates; post-initialization rootless empty state is excluded by A_STATE.',
             },
         },
         unionMultiplicities: {
@@ -732,7 +732,7 @@ export const compileFullTallySecurityLedger = (
             'honest retained state, long-lived keys, and CSPRNG state remain outside the adversary view',
             'Web Locks and strict IndexedDB transactions serialize each honest participant',
             'the complete root-authenticated protected-record inventory is not rolled back as one coherent snapshot',
-            'an initialized root and all seven protected stores are not erased together to the pristine empty state',
+            'an initialized root and all eight protected stores are not erased together to the pristine empty state',
             "the storage adversary cannot synthesize, replace, or transplant an attacker-controlled usable CryptoKey into an honest profile's root record",
         ],
         randomFunctionQromHeuristic: {

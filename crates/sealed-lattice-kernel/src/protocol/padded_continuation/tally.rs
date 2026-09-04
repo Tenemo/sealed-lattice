@@ -1331,14 +1331,19 @@ pub fn initialize_padded_tally_evaluation(
     let mut seen_manifest_identities = BTreeSet::new();
     let mut seen_allocation_nonces = BTreeSet::new();
     let mut seen_chunk_identities = BTreeSet::new();
+    let expected_manifest_byte_length = PADDED_MANIFEST_HEADER_BYTE_LENGTH
+        .checked_add(
+            plan.descriptors
+                .len()
+                .checked_mul(PADDED_MANIFEST_DESCRIPTOR_BYTE_LENGTH)
+                .ok_or(PaddedContinuationError::ArithmeticOverflow)?,
+        )
+        .ok_or(PaddedContinuationError::ArithmeticOverflow)?;
     for participant_position in 0..participant_count {
         let manifest_identity = hash_bytes(
             MANIFEST_IDENTITY_DOMAIN,
             &input.manifests[participant_position],
         )?;
-        if !seen_manifest_identities.insert(*manifest_identity.as_bytes()) {
-            return Err(PaddedContinuationError::InvalidManifest);
-        }
         let carrier = ActionSignatureCarrier::decode(
             COMPLETION_PROFILE_PARTICIPANT_COUNT,
             &input.signatures[participant_position],
@@ -1354,17 +1359,28 @@ pub fn initialize_padded_tally_evaluation(
                 verification_key,
             )
             .map_err(|_| PaddedContinuationError::InvalidSignature)?;
+        if input.manifests[participant_position].len() != expected_manifest_byte_length {
+            return Err(PaddedContinuationError::InvalidManifest);
+        }
+        if !seen_manifest_identities.insert(*manifest_identity.as_bytes()) {
+            return Err(PaddedContinuationError::AuthenticatedParticipantViolation);
+        }
         let parsed =
-            ParsedTallyManifest::new(&input.manifests[participant_position], &context, &plan)?;
+            ParsedTallyManifest::new(&input.manifests[participant_position], &context, &plan)
+                .map_err(authenticated_manifest_error)?;
         if parsed.participant_position != participant_position as u16 {
-            return Err(PaddedContinuationError::DuplicateParticipant);
+            return Err(authenticated_participant_error(
+                PaddedContinuationError::DuplicateParticipant,
+            ));
         }
         if !seen_allocation_nonces.insert(parsed.allocation_nonce) {
-            return Err(PaddedContinuationError::DuplicateAllocationNonce);
+            return Err(authenticated_participant_error(
+                PaddedContinuationError::DuplicateAllocationNonce,
+            ));
         }
         for chunk_identity in &parsed.chunk_identities {
             if !seen_chunk_identities.insert(*chunk_identity.as_bytes()) {
-                return Err(PaddedContinuationError::InvalidChunk);
+                return Err(PaddedContinuationError::AuthenticatedParticipantViolation);
             }
         }
         manifest_identities.push(manifest_identity);
@@ -2195,7 +2211,12 @@ fn derive_initial_wire_values(
         source_bodies,
         source_signatures,
     )
-    .map_err(|_| PaddedContinuationError::InvalidContext)?;
+    .map_err(|error| match error {
+        crate::protocol::finality::FinalityError::AuthenticatedBodyViolation => {
+            PaddedContinuationError::AuthenticatedParticipantViolation
+        }
+        _ => PaddedContinuationError::InvalidContext,
+    })?;
     if verified.target != capability.target
         || verified.target_identity != capability.target_identity
         || verified.verified_sources.len() != usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
@@ -2525,7 +2546,7 @@ pub fn evaluate_next_padded_tally_chunk(
             .ok_or(PaddedContinuationError::ArithmeticOverflow)?;
         let identity = hash_bytes(CHUNK_IDENTITY_DOMAIN, participant_chunk)?;
         if checkpoint.expected_chunk_identities.get(identity_index) != Some(&identity) {
-            return Err(PaddedContinuationError::InvalidChunk);
+            return Err(PaddedContinuationError::UnexpectedChunkIdentity);
         }
         let previous_chunk_identity = if chunk_ordinal == 0 {
             Hash512::from_bytes([0; Hash512::BYTE_LENGTH])
@@ -2540,14 +2561,16 @@ pub fn evaluate_next_padded_tally_chunk(
             chunk_ordinal,
             descriptor,
             previous_chunk_identity,
-        )?;
+        )
+        .map_err(authenticated_participant_error)?;
         bodies.push(ParsedTallyBody {
             participant_position: participant_position as u16,
             allocation_nonce: checkpoint.allocation_nonces[participant_position],
             chunks: vec![parsed],
         });
     }
-    let evaluated = evaluate_one_tally_chunk(&plan, &mut checkpoint, descriptor, &bodies)?;
+    let evaluated = evaluate_one_tally_chunk(&plan, &mut checkpoint, descriptor, &bodies)
+        .map_err(authenticated_participant_error)?;
     if descriptor.includes_terminal != evaluated.is_some() {
         return Err(PaddedContinuationError::InvalidPlan);
     }
@@ -2574,6 +2597,22 @@ pub fn evaluate_next_padded_tally_chunk(
         next_checkpoint,
         evaluated,
     })
+}
+
+fn authenticated_participant_error(error: PaddedContinuationError) -> PaddedContinuationError {
+    match error {
+        PaddedContinuationError::ArithmeticOverflow | PaddedContinuationError::InvalidPlan => error,
+        _ => PaddedContinuationError::AuthenticatedParticipantViolation,
+    }
+}
+
+fn authenticated_manifest_error(error: PaddedContinuationError) -> PaddedContinuationError {
+    match error {
+        PaddedContinuationError::ArithmeticOverflow
+        | PaddedContinuationError::InvalidContext
+        | PaddedContinuationError::InvalidPlan => error,
+        _ => PaddedContinuationError::AuthenticatedParticipantViolation,
+    }
 }
 
 fn evaluate_one_tally_chunk(
@@ -4023,7 +4062,7 @@ mod tests {
                 &nonzero_checkpoint_bytes,
                 &nonzero_corrupt_chunks,
             ),
-            Err(PaddedContinuationError::ContinuationAuthenticationFailed)
+            Err(PaddedContinuationError::AuthenticatedParticipantViolation)
         );
 
         let mut corrupt_continuation_chunks = chunks.clone();
@@ -4065,7 +4104,7 @@ mod tests {
         corrupt_chunks[3][PADDED_CHUNK_HEADER_BYTE_LENGTH] ^= 1;
         assert_eq!(
             evaluate_next_padded_tally_chunk(&evaluation_key, &encoded, &corrupt_chunks),
-            Err(PaddedContinuationError::InvalidChunk)
+            Err(PaddedContinuationError::UnexpectedChunkIdentity)
         );
         let mut corrupt_checkpoint = encoded.clone();
         let mutation_index = corrupt_checkpoint.len() / 2;

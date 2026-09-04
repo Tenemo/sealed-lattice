@@ -6,22 +6,24 @@ use crate::protocol::action_signature::{
     verify as verify_action_signature,
 };
 use crate::protocol::finality::{
-    FinalityDerivationContext, FinalityTarget, VerifiedFinalityCapability, derive_finality_target,
-    encode_finality_signature_carrier, encode_no_result_acknowledgement_carrier,
-    verify_finality_certificate, verify_finality_signature, verify_no_result_acknowledgement,
-    verify_no_result_release,
+    FinalityDerivationContext, FinalityError, FinalityTarget, VerifiedFinalityCapability,
+    derive_finality_target, encode_finality_signature_carrier,
+    encode_no_result_acknowledgement_carrier, verify_finality_certificate,
+    verify_finality_signature, verify_no_result_acknowledgement, verify_no_result_release,
 };
 use crate::protocol::padded_continuation::{
-    PaddedTallyEvaluationInitializationInput, PaddedTallyGenerationInitializationInput,
-    compile_padded_tally_plan_summary, encode_padded_activation_signature,
-    evaluate_next_padded_tally_chunk, generate_next_padded_tally_chunk,
-    initialize_padded_tally_evaluation, initialize_padded_tally_generation,
+    PaddedContinuationError, PaddedTallyEvaluationInitializationInput,
+    PaddedTallyGenerationInitializationInput, compile_padded_tally_plan_summary,
+    encode_padded_activation_signature, evaluate_next_padded_tally_chunk,
+    generate_next_padded_tally_chunk, initialize_padded_tally_evaluation,
+    initialize_padded_tally_generation,
 };
 use crate::protocol::pair_encryption::generate_key_pair;
 use crate::protocol::preparation_parent::{
     ACTION_SIGNATURE_CARRIER_BYTE_LENGTH, ActionSignatureCarrier, ActionSignaturePurpose,
-    PreparationParent, SUBSET_COMMITMENT_BYTE_LENGTH, SUBSET_COMMITMENT_COUNT,
-    action_signature_statement_identity, verify_private_preparation_carrier,
+    PreparationParent, PreparationParentError, SUBSET_COMMITMENT_BYTE_LENGTH,
+    SUBSET_COMMITMENT_COUNT, action_signature_statement_identity,
+    verify_private_preparation_carrier,
 };
 use crate::protocol::preparation_plaintext::{
     CONTRIBUTION_OPENING_BYTE_LENGTH, PAIRWISE_MASTER_VECTOR_BYTE_LENGTH,
@@ -37,7 +39,7 @@ use crate::protocol::roster::{
 };
 use crate::protocol::source::{
     SOURCE_CORRECTION_BYTE_LENGTH, SOURCE_ORDINAL, SourceBody, SourceContext, SourceDeclaration,
-    decode_held_subset_keys, derive_honest_source_correction, encode_held_subset_keys,
+    SourceError, decode_held_subset_keys, derive_honest_source_correction, encode_held_subset_keys,
     verify_complete_preparation, verify_source_carrier,
 };
 use std::cell::RefCell;
@@ -302,7 +304,7 @@ fn initialize_padded_tally_generation_command(
         own_pairwise_master_bytes,
         &remote_plaintext_bytes,
     )
-    .map_err(construction_error)?;
+    .map_err(source_error)?;
     let checkpoint = initialize_padded_tally_generation(
         &capability,
         &roster,
@@ -315,7 +317,7 @@ fn initialize_padded_tally_generation_command(
             checkpoint_key,
         },
     )
-    .map_err(construction_error)?;
+    .map_err(padded_continuation_error)?;
     bytes_response(&checkpoint)
 }
 
@@ -372,7 +374,7 @@ fn initialize_padded_tally_evaluation_command(
             checkpoint_key,
         },
     )
-    .map_err(construction_error)?;
+    .map_err(padded_continuation_error)?;
     bytes_response(&checkpoint)
 }
 
@@ -442,7 +444,7 @@ fn evaluate_next_padded_tally_chunk_command(
         &stream.checkpoint,
         &stream.chunks,
     )
-    .map_err(construction_error)?;
+    .map_err(padded_continuation_error)?;
     let mut response = BinaryWriter::new();
     response.write_u32(evaluated.chunk_ordinal)?;
     match (evaluated.next_checkpoint, evaluated.evaluated) {
@@ -521,7 +523,7 @@ fn derive_finality_target_command(reader: &mut BinaryReader<'_>) -> CanonicalRes
         &source_bodies,
         &source_signatures,
     )
-    .map_err(construction_error)?;
+    .map_err(finality_error)?;
     let target_context = verified.target.context();
     let mut response = BinaryWriter::new();
     response.write_bytes(&verified.target_body)?;
@@ -688,7 +690,7 @@ fn verify_complete_preparation_command(reader: &mut BinaryReader<'_>) -> Canonic
         own_pairwise_master_bytes,
         &remote_plaintext_bytes,
     )
-    .map_err(construction_error)?;
+    .map_err(source_error)?;
     let mut held_subset_key_bytes =
         encode_held_subset_keys(local_position, &verified.held_subset_keys)
             .map_err(construction_error)?;
@@ -821,7 +823,7 @@ fn verify_source(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
         reader.read_bytes()?,
         reader.read_bytes()?,
     )
-    .map_err(construction_error)?;
+    .map_err(source_error)?;
     let mut response = BinaryWriter::new();
     response.write_u16(verified.sender_position)?;
     response.write_u16(verified.declaration as u16)?;
@@ -1006,7 +1008,7 @@ fn verify_private_preparation(reader: &mut BinaryReader<'_>) -> CanonicalResult<
         reader.read_bytes()?,
         reader.read_bytes()?,
     )
-    .map_err(construction_error)?;
+    .map_err(preparation_parent_error)?;
     let mut response = BinaryWriter::new();
     response.write_u16(verified.sender_position)?;
     response.write_u16(verified.recipient_position)?;
@@ -1260,6 +1262,43 @@ fn bytes_response(bytes: &[u8]) -> CanonicalResult<Vec<u8>> {
 
 fn construction_error(error: impl core::fmt::Display) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, error.to_string())
+}
+
+fn attributable_protocol_error(error: impl core::fmt::Display) -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::AttributableProtocolViolation,
+        error.to_string(),
+    )
+}
+
+fn preparation_parent_error(error: PreparationParentError) -> CanonicalError {
+    match error {
+        PreparationParentError::AuthenticatedBodyViolation => attributable_protocol_error(error),
+        _ => construction_error(error),
+    }
+}
+
+fn source_error(error: SourceError) -> CanonicalError {
+    match error {
+        SourceError::AuthenticatedBodyViolation => attributable_protocol_error(error),
+        _ => construction_error(error),
+    }
+}
+
+fn finality_error(error: FinalityError) -> CanonicalError {
+    match error {
+        FinalityError::AuthenticatedBodyViolation => attributable_protocol_error(error),
+        _ => construction_error(error),
+    }
+}
+
+fn padded_continuation_error(error: PaddedContinuationError) -> CanonicalError {
+    match error {
+        PaddedContinuationError::AuthenticatedParticipantViolation => {
+            attributable_protocol_error(error)
+        }
+        _ => construction_error(error),
+    }
 }
 
 fn action_signature_error(error: impl core::fmt::Display) -> CanonicalError {

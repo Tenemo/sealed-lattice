@@ -1,4 +1,4 @@
-const databaseVersion = 4;
+const databaseVersion = 5;
 const rootStoreName = 'root';
 const actionStoreName = 'actions';
 const preparationStoreName = 'preparations';
@@ -7,6 +7,7 @@ const sourceStoreName = 'sources';
 const finalityStoreName = 'finalities';
 const activationStoreName = 'activations';
 const evaluationStoreName = 'evaluations';
+const retirementStoreName = 'retirements';
 const rootRecordIdentifier = 'browser-local-hmac-root-v1';
 
 type ProtectedStoreName =
@@ -16,7 +17,8 @@ type ProtectedStoreName =
     | typeof sourceStoreName
     | typeof finalityStoreName
     | typeof activationStoreName
-    | typeof evaluationStoreName;
+    | typeof evaluationStoreName
+    | typeof retirementStoreName;
 
 const protectedStoreNames: readonly ProtectedStoreName[] = [
     actionStoreName,
@@ -26,6 +28,7 @@ const protectedStoreNames: readonly ProtectedStoreName[] = [
     finalityStoreName,
     activationStoreName,
     evaluationStoreName,
+    retirementStoreName,
 ];
 
 export type ProtectedRecord = Readonly<{
@@ -73,9 +76,12 @@ export class DurableStateError extends Error {
             | 'Conflict'
             | 'CorruptState'
             | 'MissingPersistence'
+            | 'RetiredAction'
             | 'StateLost'
             | 'StorageFailure',
         message: string,
+        readonly retirementRequired = code === 'CorruptState' ||
+            code === 'StateLost',
     ) {
         super(message);
         this.name = 'DurableStateError';
@@ -230,8 +236,14 @@ const validateRootKey = (value: unknown): CryptoKey => {
         );
     }
     const algorithm = value.algorithm;
+    const hmacAlgorithm = algorithm as Partial<HmacKeyAlgorithm>;
+    const hashAlgorithm = hmacAlgorithm.hash;
     if (
         algorithm.name !== 'HMAC' ||
+        typeof hashAlgorithm !== 'object' ||
+        hashAlgorithm === null ||
+        hashAlgorithm.name !== 'SHA-256' ||
+        hmacAlgorithm.length !== 256 ||
         value.extractable ||
         value.usages.length !== 1 ||
         value.usages[0] !== 'sign'
@@ -581,6 +593,7 @@ export class PrivatePreparationDurableState {
                 throw new DurableStateError(
                     'StateLost',
                     'The browser-local root is absent while protected state remains.',
+                    true,
                 );
             }
             return { root: undefined, records: normalizedRecords };
@@ -601,6 +614,7 @@ export class PrivatePreparationDurableState {
             throw new DurableStateError(
                 'StateLost',
                 'The protected browser-local inventory does not match its root capability.',
+                true,
             );
         }
         return { root, records: normalizedRecords };
@@ -869,6 +883,65 @@ export class PrivatePreparationDurableState {
         }
         rootStore.put(cloneRootRecord(root));
         actionStore.put(cloneProtectedRecord(retainedAction));
+        await completion;
+    }
+
+    async replaceWithRetirement(
+        rootKey: CryptoKey,
+        retirement: ProtectedRecord,
+    ): Promise<void> {
+        validateRootKey(rootKey);
+        const generation = 1n;
+        const retirementContext = new Uint8Array(retirement.context);
+        let retirementPlaintext: Uint8Array | undefined;
+        let retainedRetirement: ProtectedRecord;
+        try {
+            retirementPlaintext = await openProtectedRecord(
+                retirement,
+                retirementContext,
+                rootKey,
+            );
+            retainedRetirement = await createInventoryProtectedRecord(
+                retirement.id,
+                retirementContext,
+                retirementPlaintext,
+                rootKey,
+                generation,
+            );
+        } finally {
+            retirementContext.fill(0);
+            retirementPlaintext?.fill(0);
+        }
+        const records = normalizeStoredProtectedRecords([
+            {
+                storeName: retirementStoreName,
+                record: retainedRetirement,
+            },
+        ]);
+        const root: RootRecord = {
+            id: rootRecordIdentifier,
+            key: rootKey,
+            generation,
+            inventoryAuthenticator: await authenticateInventory(
+                rootKey,
+                generation,
+                records,
+            ),
+        };
+        const transaction = this.#database.transaction(
+            [rootStoreName, ...protectedStoreNames],
+            'readwrite',
+            { durability: 'strict' },
+        );
+        const completion = transactionCompletion(transaction);
+        transaction.objectStore(rootStoreName).clear();
+        for (const storeName of protectedStoreNames) {
+            transaction.objectStore(storeName).clear();
+        }
+        transaction.objectStore(rootStoreName).put(cloneRootRecord(root));
+        transaction
+            .objectStore(retirementStoreName)
+            .put(cloneProtectedRecord(retainedRetirement));
         await completion;
     }
 

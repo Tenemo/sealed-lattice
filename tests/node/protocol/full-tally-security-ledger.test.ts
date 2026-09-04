@@ -343,7 +343,7 @@ describe('independent full-tally security ledger', () => {
         expect(ledger.computationalAdvantageTerms).toContain('A_KMAC-2P');
         expect(ledger.environmentalAssumptions).toHaveLength(6);
         expect(ledger.environmentalAssumptions).toContain(
-            'an initialized root and all seven protected stores are not erased together to the pristine empty state',
+            'an initialized root and all eight protected stores are not erased together to the pristine empty state',
         );
         expect(ledger.environmentalAssumptions).toContain(
             "the storage adversary cannot synthesize, replace, or transplant an attacker-controlled usable CryptoKey into an honest profile's root record",

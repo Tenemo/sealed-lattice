@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
     actionSignatureKeyGenerationRandomnessByteLength,
+    actionSignatureSigningRandomnessByteLength,
     openActionSignatureRuntime,
 } from '../../src/action-signature-runtime.js';
 import {
@@ -17,8 +18,16 @@ import {
 import {
     openPairEncryptionRuntime,
     pairEncryptionKeyGenerationRandomnessByteLength,
+    pairEncryptionRandomnessByteLength,
 } from '../../src/pair-encryption-runtime.js';
-import { actionSignatureCarrierByteLength } from '../../src/preparation-parent-runtime.js';
+import {
+    actionSignatureCarrierByteLength,
+    openPreparationParentRuntime,
+} from '../../src/preparation-parent-runtime.js';
+import {
+    openPrivatePreparationBodyRuntime,
+    privatePreparationPlaintextByteLength,
+} from '../../src/private-preparation-body-runtime.js';
 import { PrivatePreparationDurableState } from '../../src/private-preparation-durable-state.js';
 import { PrivatePreparationWorkerClient } from '../../src/private-preparation-worker-client.js';
 import type {
@@ -44,6 +53,7 @@ import {
     compileIndependentLocalRecordCensus,
     enumerateFullTallyLocalRecordSeals,
     localRecordContextKey,
+    localRecordObjectKinds,
     parseIndependentLocalRecordContext,
 } from '#tests/local-record-context-model.js';
 import { resolveManualEvidenceCase } from '#tests/manual-evidence-registry.js';
@@ -455,7 +465,20 @@ type RawDurableStoreName =
     | 'sources'
     | 'finalities'
     | 'activations'
-    | 'evaluations';
+    | 'evaluations'
+    | 'retirements';
+
+const rawDurableStoreNames = [
+    'root',
+    'actions',
+    'preparations',
+    'slots',
+    'sources',
+    'finalities',
+    'activations',
+    'evaluations',
+    'retirements',
+] as const satisfies readonly RawDurableStoreName[];
 
 const readRawStoreSnapshot = async (
     name: string,
@@ -523,53 +546,63 @@ const restoreRawStoreSnapshot = async (
     }
 };
 
-const copyRawProtectedRecordWithIdentifier = (
-    record: unknown,
-    identifier: string,
-): unknown => {
+const cloneRawDurableDatabase = async (
+    sourceName: string,
+    destinationName: string,
+): Promise<void> => {
+    databaseNames.add(destinationName);
+    const destination = await PrivatePreparationDurableState.open(
+        destinationName,
+        false,
+    );
+    destination.close();
+    const snapshot = await readRawStoreSnapshot(
+        sourceName,
+        rawDurableStoreNames,
+    );
+    await restoreRawStoreSnapshot(
+        destinationName,
+        rawDurableStoreNames,
+        snapshot,
+    );
+};
+
+type RawProtectedRecord = Readonly<{
+    id: string;
+    context: ArrayBuffer;
+    nonce: ArrayBuffer;
+    ciphertext: ArrayBuffer;
+}>;
+
+const requireRawProtectedRecord = (record: unknown): RawProtectedRecord => {
+    if (typeof record !== 'object' || record === null) {
+        throw new Error('The protected record measurement is malformed.');
+    }
+    const candidate = record as Record<string, unknown>;
     if (
-        typeof record !== 'object' ||
-        record === null ||
-        !('id' in record) ||
-        typeof record.id !== 'string' ||
-        !('context' in record) ||
-        !(record.context instanceof ArrayBuffer) ||
-        !('nonce' in record) ||
-        !(record.nonce instanceof ArrayBuffer) ||
-        !('ciphertext' in record) ||
-        !(record.ciphertext instanceof ArrayBuffer)
+        typeof candidate.id !== 'string' ||
+        !(candidate.context instanceof ArrayBuffer) ||
+        !(candidate.nonce instanceof ArrayBuffer) ||
+        !(candidate.ciphertext instanceof ArrayBuffer)
     ) {
-        throw new Error('The raw protected-record fixture is malformed.');
+        throw new Error('The protected record measurement is malformed.');
     }
     return {
-        id: identifier,
-        context: record.context.slice(0),
-        nonce: record.nonce.slice(0),
-        ciphertext: record.ciphertext.slice(0),
+        id: candidate.id,
+        context: candidate.context,
+        nonce: candidate.nonce,
+        ciphertext: candidate.ciphertext,
     };
 };
 
 const protectedRecordByteLength = (record: unknown): number => {
-    if (
-        typeof record !== 'object' ||
-        record === null ||
-        !('id' in record) ||
-        typeof record.id !== 'string' ||
-        !('context' in record) ||
-        !(record.context instanceof ArrayBuffer) ||
-        !('nonce' in record) ||
-        !(record.nonce instanceof ArrayBuffer) ||
-        !('ciphertext' in record) ||
-        !(record.ciphertext instanceof ArrayBuffer)
-    ) {
-        throw new Error('The protected record measurement is malformed.');
-    }
-    parseIndependentLocalRecordContext(new Uint8Array(record.context));
+    const protectedRecord = requireRawProtectedRecord(record);
+    parseIndependentLocalRecordContext(new Uint8Array(protectedRecord.context));
     return (
-        new TextEncoder().encode(record.id).byteLength +
-        record.context.byteLength +
-        record.nonce.byteLength +
-        record.ciphertext.byteLength
+        new TextEncoder().encode(protectedRecord.id).byteLength +
+        protectedRecord.context.byteLength +
+        protectedRecord.nonce.byteLength +
+        protectedRecord.ciphertext.byteLength
     );
 };
 
@@ -581,6 +614,7 @@ const protectedStoreNames = [
     'finalities',
     'activations',
     'evaluations',
+    'retirements',
 ] as const;
 
 const measureProtectedDatabase = async (
@@ -1826,44 +1860,52 @@ const expectCompletePaddedTallyCeremony = async (
             if (evaluationRecordAfterSecond === undefined) {
                 throw new Error('The second evaluation checkpoint is absent.');
             }
-            const secondEvaluationRollbackSubset = await readRawStoreSnapshot(
+            const evaluationRecordRollbackRunIdentity = `${runIdentity}-evaluation-record-rollback`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, 0),
-                evaluationRollbackStoreNames,
+                databaseName(evaluationRecordRollbackRunIdentity, 0),
             );
             await restoreRawEvaluationRecord(
-                databaseName(runIdentity, 0),
+                databaseName(evaluationRecordRollbackRunIdentity, 0),
                 evaluationRecordAfterFirst,
+            );
+            const evaluationRecordRollbackClient = await openClient(
+                evaluationRecordRollbackRunIdentity,
+                0,
             );
             await expect(
                 evaluatePaddedTallyChunkSet(
-                    evaluator,
+                    evaluationRecordRollbackClient,
                     actionContext(0),
                     1,
                     secondChunks,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
-            await restoreRawEvaluationRecord(
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(evaluationRecordRollbackClient);
+
+            const coordinatedEvaluationRollbackRunIdentity = `${runIdentity}-evaluation-coordinated-rollback`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, 0),
-                evaluationRecordAfterSecond,
+                databaseName(coordinatedEvaluationRollbackRunIdentity, 0),
             );
             await restoreRawStoreSnapshot(
-                databaseName(runIdentity, 0),
+                databaseName(coordinatedEvaluationRollbackRunIdentity, 0),
                 evaluationRollbackStoreNames,
                 firstEvaluationRollbackSubset,
             );
+            const coordinatedEvaluationRollbackClient = await openClient(
+                coordinatedEvaluationRollbackRunIdentity,
+                0,
+            );
             await expect(
                 evaluatePaddedTallyChunkSet(
-                    evaluator,
+                    coordinatedEvaluationRollbackClient,
                     actionContext(0),
                     1,
                     secondChunks,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
-            await restoreRawStoreSnapshot(
-                databaseName(runIdentity, 0),
-                evaluationRollbackStoreNames,
-                secondEvaluationRollbackSubset,
-            );
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(coordinatedEvaluationRollbackClient);
             for (
                 let chunkOrdinal = 2;
                 chunkOrdinal < plan.chunks.length - 1;
@@ -1937,17 +1979,23 @@ const expectCompletePaddedTallyCeremony = async (
                 await restoredEvaluator.readTallyResult(actionContext(0)),
                 acceptedTerminal,
             );
-            await deleteRawEvaluationRecord(
+            const terminalLossRunIdentity = `${runIdentity}-terminal-loss`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, 0),
+                databaseName(terminalLossRunIdentity, 0),
+            );
+            await deleteRawEvaluationRecord(
+                databaseName(terminalLossRunIdentity, 0),
                 evaluationIdentifier(0),
             );
-            await expect(
-                restoredEvaluator.readTallyResult(actionContext(0)),
-            ).rejects.toMatchObject({ name: 'StateLost' });
-            await restoreRawEvaluationRecord(
-                databaseName(runIdentity, 0),
-                terminalRecord,
+            const terminalLossClient = await openClient(
+                terminalLossRunIdentity,
+                0,
             );
+            await expect(
+                terminalLossClient.readTallyResult(actionContext(0)),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(terminalLossClient);
             assertSameTerminal(
                 await restoredEvaluator.readTallyResult(actionContext(0)),
                 acceptedTerminal,
@@ -2462,6 +2510,69 @@ describe('private preparation worker in Chromium', () => {
         }
     });
 
+    it('rejects browser-local root keys with any noncanonical HMAC capability field', async () => {
+        const keys = await Promise.all([
+            crypto.subtle.generateKey(
+                { name: 'HMAC', hash: 'SHA-1', length: 256 },
+                false,
+                ['sign'],
+            ),
+            crypto.subtle.generateKey(
+                { name: 'HMAC', hash: 'SHA-256', length: 128 },
+                false,
+                ['sign'],
+            ),
+            crypto.subtle.generateKey(
+                { name: 'HMAC', hash: 'SHA-256', length: 256 },
+                true,
+                ['sign'],
+            ),
+            crypto.subtle.generateKey(
+                { name: 'HMAC', hash: 'SHA-256', length: 256 },
+                false,
+                ['verify'],
+            ),
+            crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+                'encrypt',
+            ]),
+        ]);
+        for (const [index, key] of keys.entries()) {
+            const name = `sealed-lattice-root-key-${crypto.randomUUID()}-${String(index)}`;
+            databaseNames.add(name);
+            const initialized = await PrivatePreparationDurableState.open(
+                name,
+                false,
+            );
+            initialized.close();
+            const database = await openDatabase(name);
+            try {
+                const transaction = database.transaction('root', 'readwrite', {
+                    durability: 'strict',
+                });
+                transaction.objectStore('root').put({
+                    id: 'browser-local-hmac-root-v1',
+                    key,
+                    generation: 1n,
+                    inventoryAuthenticator: new ArrayBuffer(32),
+                });
+                await transactionCompletion(transaction);
+            } finally {
+                database.close();
+            }
+            const reopened = await PrivatePreparationDurableState.open(
+                name,
+                false,
+            );
+            try {
+                await expect(reopened.readRoot()).rejects.toMatchObject({
+                    code: 'CorruptState',
+                });
+            } finally {
+                reopened.close();
+            }
+        }
+    });
+
     it(
         'persists one exact package, opens only after durable consumption, and burns a crash-interrupted slot',
         { timeout: 300_000 },
@@ -2581,6 +2692,296 @@ describe('private preparation worker in Chromium', () => {
             });
             closeClient(restoredRecipient);
 
+            const relationRecipientPosition = 6;
+            const relationPrivateBody =
+                firstPackage.privateBodies[
+                    remoteBodyIndex(
+                        firstSenderPosition,
+                        relationRecipientPosition,
+                    )
+                ];
+            if (relationPrivateBody === undefined) {
+                throw new Error('The relation fixture omitted a private body.');
+            }
+            const relationKernel =
+                await instantiateConstructionKernelCommandRuntime(kernelUrl, {
+                    allowUnpinnedKernel: true,
+                });
+            const relationSignatureRuntime =
+                openActionSignatureRuntime(relationKernel);
+            const relationParentRuntime =
+                openPreparationParentRuntime(relationKernel);
+            const relationPrivateBodyIdentities = Array.from(
+                { length: participantCount - 1 },
+                () => crypto.getRandomValues(new Uint8Array(64)),
+            );
+            const wrongContextParent = relationParentRuntime.encode({
+                participantCount,
+                actionProposalIdentity: new Uint8Array(64).fill(0x99),
+                rosterIdentity: roster.rosterIdentity,
+                preparationAttempt,
+                predecessorIdentity,
+                senderPosition: firstSenderPosition,
+                subsetCommitments: crypto.getRandomValues(
+                    new Uint8Array(120 * 64),
+                ),
+                privateBodyIdentities: relationPrivateBodyIdentities,
+            });
+            const signRelationParent = (
+                parentIdentity: Uint8Array,
+            ): Uint8Array =>
+                relationParentRuntime.encodeSignature(
+                    participantCount,
+                    firstSenderPosition,
+                    parentIdentity,
+                    relationSignatureRuntime.signBodyIdentity(
+                        firstCredential.signingSecretKey,
+                        firstSenderPosition,
+                        'preparation',
+                        parentIdentity,
+                        crypto.getRandomValues(
+                            new Uint8Array(
+                                actionSignatureSigningRandomnessByteLength,
+                            ),
+                        ),
+                    ),
+                );
+            const relationRecipient = await openClient(
+                runIdentity,
+                relationRecipientPosition,
+            );
+            await expect(
+                relationRecipient.consumePrivatePreparation(
+                    actionContext(relationRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    wrongContextParent.body,
+                    signRelationParent(wrongContextParent.identity),
+                    relationPrivateBody,
+                ),
+            ).rejects.toMatchObject({ name: 'ProtocolRefusal' });
+            await expect(
+                relationRecipient.consumePrivatePreparation(
+                    actionContext(relationRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    firstPackage.parentBody,
+                    firstPackage.parentSignature,
+                    relationPrivateBody,
+                ),
+            ).resolves.toMatchObject({ status: 'resolved' });
+            const falseSenderParent = relationParentRuntime.encode({
+                participantCount,
+                actionProposalIdentity,
+                rosterIdentity: roster.rosterIdentity,
+                preparationAttempt,
+                predecessorIdentity,
+                senderPosition: firstSenderPosition + 1,
+                subsetCommitments: crypto.getRandomValues(
+                    new Uint8Array(120 * 64),
+                ),
+                privateBodyIdentities: relationPrivateBodyIdentities,
+            });
+            await expect(
+                relationRecipient.consumePrivatePreparation(
+                    actionContext(relationRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    falseSenderParent.body,
+                    signRelationParent(falseSenderParent.identity),
+                    relationPrivateBody,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(relationRecipient);
+            const retiredRelationRecipient = await openClient(
+                runIdentity,
+                relationRecipientPosition,
+            );
+            await expect(
+                retiredRelationRecipient.consumePrivatePreparation(
+                    actionContext(relationRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    firstPackage.parentBody,
+                    firstPackage.parentSignature,
+                    relationPrivateBody,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(retiredRelationRecipient);
+
+            const unopenableRecipientPosition = 5;
+            const relationRosterRuntime = openRosterRuntime(relationKernel);
+            const relationPrivateBodyRuntime =
+                openPrivatePreparationBodyRuntime(relationKernel);
+            const unopenableMailboxKey =
+                relationRosterRuntime.resolveMailboxKey(
+                    roster.rosterIdentity,
+                    firstSenderPosition,
+                    unopenableRecipientPosition,
+                    canonicalRosterBytes,
+                );
+            const invalidPreparationPlaintext = new Uint8Array(
+                privatePreparationPlaintextByteLength,
+            ).fill(0xa5);
+            const unopenableBody = relationPrivateBodyRuntime.seal(
+                {
+                    participantCount,
+                    actionProposalIdentity,
+                    rosterIdentity: roster.rosterIdentity,
+                    preparationAttempt,
+                    predecessorIdentity,
+                    senderPosition: firstSenderPosition,
+                    recipientPosition: unopenableRecipientPosition,
+                },
+                unopenableMailboxKey,
+                crypto.getRandomValues(
+                    new Uint8Array(pairEncryptionRandomnessByteLength),
+                ),
+                invalidPreparationPlaintext,
+            );
+            invalidPreparationPlaintext.fill(0);
+            const unopenableBodyIdentities = relationPrivateBodyIdentities.map(
+                (identity) => Uint8Array.from(identity),
+            );
+            unopenableBodyIdentities[
+                remoteBodyIndex(
+                    firstSenderPosition,
+                    unopenableRecipientPosition,
+                )
+            ] = Uint8Array.from(unopenableBody.identity);
+            const unopenableParent = relationParentRuntime.encode({
+                participantCount,
+                actionProposalIdentity,
+                rosterIdentity: roster.rosterIdentity,
+                preparationAttempt,
+                predecessorIdentity,
+                senderPosition: firstSenderPosition,
+                subsetCommitments: crypto.getRandomValues(
+                    new Uint8Array(120 * 64),
+                ),
+                privateBodyIdentities: unopenableBodyIdentities,
+            });
+            const unopenableRecipient = await openClient(
+                runIdentity,
+                unopenableRecipientPosition,
+            );
+            await expect(
+                unopenableRecipient.consumePrivatePreparation(
+                    actionContext(unopenableRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    unopenableParent.body,
+                    signRelationParent(unopenableParent.identity),
+                    unopenableBody.body,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(unopenableRecipient);
+            const retiredUnopenableRecipient = await openClient(
+                runIdentity,
+                unopenableRecipientPosition,
+            );
+            const validUnopenableRecipientBody =
+                firstPackage.privateBodies[
+                    remoteBodyIndex(
+                        firstSenderPosition,
+                        unopenableRecipientPosition,
+                    )
+                ];
+            if (validUnopenableRecipientBody === undefined) {
+                throw new Error('The recovery fixture omitted a private body.');
+            }
+            await expect(
+                retiredUnopenableRecipient.consumePrivatePreparation(
+                    actionContext(unopenableRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    firstPackage.parentBody,
+                    firstPackage.parentSignature,
+                    validUnopenableRecipientBody,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(retiredUnopenableRecipient);
+
+            const alternateSender = await openClient(
+                `${runIdentity}-equivocator`,
+                firstSenderPosition,
+            );
+            const alternatePackage =
+                await alternateSender.createPreparationPackage(
+                    actionContext(firstSenderPosition),
+                    canonicalRosterBytes,
+                    firstCredential.signingSecretKey,
+                    firstCredential.mailboxDecapsulationKey,
+                    preparationAttempt,
+                );
+            closeClient(alternateSender);
+            expect(alternatePackage.parentBody).not.toEqual(
+                firstPackage.parentBody,
+            );
+            const equivocationRecipientPosition = 7;
+            const equivocationCredential =
+                roster.credentials[equivocationRecipientPosition];
+            const originalEquivocationBody =
+                firstPackage.privateBodies[
+                    remoteBodyIndex(
+                        firstSenderPosition,
+                        equivocationRecipientPosition,
+                    )
+                ];
+            const alternateEquivocationBody =
+                alternatePackage.privateBodies[
+                    remoteBodyIndex(
+                        firstSenderPosition,
+                        equivocationRecipientPosition,
+                    )
+                ];
+            if (
+                equivocationCredential === undefined ||
+                originalEquivocationBody === undefined ||
+                alternateEquivocationBody === undefined
+            ) {
+                throw new Error('The equivocation fixture is incomplete.');
+            }
+            const equivocationRecipient = await openClient(
+                runIdentity,
+                equivocationRecipientPosition,
+            );
+            await expect(
+                equivocationRecipient.consumePrivatePreparation(
+                    actionContext(equivocationRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    firstPackage.parentBody,
+                    firstPackage.parentSignature,
+                    originalEquivocationBody,
+                ),
+            ).resolves.toMatchObject({ status: 'resolved' });
+            await expect(
+                equivocationRecipient.consumePrivatePreparation(
+                    actionContext(equivocationRecipientPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    alternatePackage.parentBody,
+                    alternatePackage.parentSignature,
+                    alternateEquivocationBody,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(equivocationRecipient);
+            const retiredEquivocationRecipient = await openClient(
+                runIdentity,
+                equivocationRecipientPosition,
+            );
+            await expect(
+                retiredEquivocationRecipient.createPreparationPackage(
+                    actionContext(equivocationRecipientPosition),
+                    canonicalRosterBytes,
+                    equivocationCredential.signingSecretKey,
+                    equivocationCredential.mailboxDecapsulationKey,
+                    preparationAttempt,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(retiredEquivocationRecipient);
+
             const firstRecipientDatabaseName = databaseName(
                 runIdentity,
                 firstRecipientPosition,
@@ -2607,40 +3008,19 @@ describe('private preparation worker in Chromium', () => {
                     firstPackage.parentSignature,
                     firstPrivateBody,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(deletedSlotRecipient);
             await restoreRawStoreSnapshot(
                 firstRecipientDatabaseName,
                 ['slots'],
                 retainedSlotSnapshot,
             );
-            const retainedSlotRecords = retainedSlotSnapshot[0];
-            const retainedSlotRecord = retainedSlotRecords?.[0];
-            if (
-                retainedSlotRecords === undefined ||
-                retainedSlotRecord === undefined
-            ) {
-                throw new Error('The retained slot fixture is empty.');
-            }
-            await restoreRawStoreSnapshot(
-                firstRecipientDatabaseName,
-                ['slots'],
-                [
-                    [
-                        ...retainedSlotRecords,
-                        copyRawProtectedRecordWithIdentifier(
-                            retainedSlotRecord,
-                            'unexpected-protected-slot',
-                        ),
-                    ],
-                ],
-            );
-            const insertedSlotRecipient = await openClient(
+            const restoredAfterRetirement = await openClient(
                 runIdentity,
                 firstRecipientPosition,
             );
             await expect(
-                insertedSlotRecipient.consumePrivatePreparation(
+                restoredAfterRetirement.consumePrivatePreparation(
                     actionContext(firstRecipientPosition),
                     canonicalRosterBytes,
                     preparationAttempt,
@@ -2648,12 +3028,47 @@ describe('private preparation worker in Chromium', () => {
                     firstPackage.parentSignature,
                     firstPrivateBody,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
-            closeClient(insertedSlotRecipient);
-            await restoreRawStoreSnapshot(
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
+            closeClient(restoredAfterRetirement);
+            const retiredInventory = await readRawStoreSnapshot(
                 firstRecipientDatabaseName,
-                ['slots'],
-                retainedSlotSnapshot,
+                [
+                    'actions',
+                    'preparations',
+                    'slots',
+                    'sources',
+                    'finalities',
+                    'activations',
+                    'evaluations',
+                    'retirements',
+                ],
+            );
+            expect(
+                retiredInventory
+                    .slice(0, -1)
+                    .every((records) => records.length === 0),
+            ).toBe(true);
+            expect(retiredInventory[retiredInventory.length - 1]).toHaveLength(
+                1,
+            );
+            const retirementRecords =
+                retiredInventory[retiredInventory.length - 1];
+            const retirementRecord = retirementRecords?.[0];
+            if (retirementRecord === undefined) {
+                throw new Error('The local retirement marker is malformed.');
+            }
+            const protectedRetirementRecord =
+                requireRawProtectedRecord(retirementRecord);
+            const retirementContext = parseIndependentLocalRecordContext(
+                new Uint8Array(protectedRetirementRecord.context),
+            );
+            expect(retirementContext).toMatchObject({
+                objectKind: localRecordObjectKinds.retirement,
+                participantPosition: firstRecipientPosition,
+                generation: 1n,
+            });
+            expect(retirementContext.rosterIdentity).toEqual(
+                new Uint8Array(64),
             );
 
             const crashSenderPosition = 3;
@@ -2910,17 +3325,18 @@ describe('private preparation worker in Chromium', () => {
             ).rejects.toThrow();
             closeClient(recoveredSource);
 
-            const publishedSourceRollbackSubset = await readRawStoreSnapshot(
+            const sourceRollbackRunIdentity = `${runIdentity}-source-rollback`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, sourcePosition),
-                sourceRollbackStoreNames,
+                databaseName(sourceRollbackRunIdentity, sourcePosition),
             );
             await restoreRawStoreSnapshot(
-                databaseName(runIdentity, sourcePosition),
+                databaseName(sourceRollbackRunIdentity, sourcePosition),
                 sourceRollbackStoreNames,
                 boundSourceRollbackSubset,
             );
             const rolledBackSource = await openClient(
-                runIdentity,
+                sourceRollbackRunIdentity,
                 sourcePosition,
             );
             await expect(
@@ -2934,13 +3350,8 @@ describe('private preparation worker in Chromium', () => {
                         scoreEncodings: submittedScores,
                     },
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(rolledBackSource);
-            await restoreRawStoreSnapshot(
-                databaseName(runIdentity, sourcePosition),
-                sourceRollbackStoreNames,
-                publishedSourceRollbackSubset,
-            );
 
             const restoredSource = await openClient(
                 runIdentity,
@@ -3035,6 +3446,8 @@ describe('private preparation worker in Chromium', () => {
             sourceDeclarations[0] = 'submit';
             sourcePackages[1] = abstention;
             sourcePackages[2] = recoveredAbstention;
+            const sourceEquivocatorPosition = 3;
+            const sourceEquivocatorRunIdentity = `${runIdentity}-source-equivocator`;
             const unusableScores = [
                 new Uint8Array(10),
                 new Uint8Array(10).fill(15),
@@ -3044,6 +3457,15 @@ describe('private preparation worker in Chromium', () => {
                 participantPosition < participantCount;
                 participantPosition += 1
             ) {
+                if (participantPosition === sourceEquivocatorPosition) {
+                    await cloneRawDurableDatabase(
+                        databaseName(runIdentity, participantPosition),
+                        databaseName(
+                            sourceEquivocatorRunIdentity,
+                            participantPosition,
+                        ),
+                    );
+                }
                 const client = await openClient(
                     runIdentity,
                     participantPosition,
@@ -3117,6 +3539,43 @@ describe('private preparation worker in Chromium', () => {
                         ),
                 ),
             ).toBe(true);
+            const sourceEquivocator = await openClient(
+                sourceEquivocatorRunIdentity,
+                sourceEquivocatorPosition,
+            );
+            const equivocatedSource =
+                await sourceEquivocator.createSourcePackage(
+                    actionContext(sourceEquivocatorPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    { declaration: 'abstain' },
+                );
+            closeClient(sourceEquivocator);
+            const originalEquivocatedSource =
+                sourcePackages[sourceEquivocatorPosition];
+            if (originalEquivocatedSource === undefined) {
+                throw new Error('The source-equivocation fixture is absent.');
+            }
+            expect(equivocatedSource.sourceBody).not.toEqual(
+                originalEquivocatedSource.sourceBody,
+            );
+            const equivocatedSourceCarriers = sourceCarriers.map(
+                (carrier, participantPosition) =>
+                    participantPosition === sourceEquivocatorPosition
+                        ? {
+                              declaration: 'abstain' as const,
+                              body: equivocatedSource.sourceBody,
+                              signature: equivocatedSource.sourceSignature,
+                          }
+                        : carrier,
+            );
+            const finalitySignatures = finalityPackages
+                .slice(0, completionProfileFinalityQuorum)
+                .map((finality, signerPosition) => ({
+                    signerPosition,
+                    signature: finality.finalitySignature,
+                }));
             const conflictingFinality = await openClient(runIdentity, 9);
             await expect(
                 conflictingFinality.createFinalitySignature(
@@ -3127,6 +3586,19 @@ describe('private preparation worker in Chromium', () => {
                     topCount,
                 ),
             ).rejects.toThrow();
+            const retainedNinthFinality = finalityPackages[9];
+            if (retainedNinthFinality === undefined) {
+                throw new Error('The retained finality fixture is absent.');
+            }
+            await expect(
+                conflictingFinality.createFinalitySignature(
+                    actionContext(9),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sourceCarriers,
+                    topCount,
+                ),
+            ).resolves.toEqual(retainedNinthFinality);
             await expect(
                 conflictingFinality.createFinalitySignature(
                     actionContext(9),
@@ -3148,15 +3620,136 @@ describe('private preparation worker in Chromium', () => {
                     topCount,
                 ),
             ).rejects.toThrow();
+            await expect(
+                conflictingFinality.createFinalitySignature(
+                    actionContext(9),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sourceCarriers,
+                    topCount,
+                ),
+            ).resolves.toEqual(retainedNinthFinality);
+            await expect(
+                conflictingFinality.createFinalitySignature(
+                    actionContext(9),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    equivocatedSourceCarriers,
+                    topCount,
+                ),
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(conflictingFinality);
+            const retiredFinality = await openClient(runIdentity, 9);
+            const retiredCredential = roster.credentials[9];
+            const incomingPreparation = preparationPackages[0];
+            const incomingPrivateBody =
+                incomingPreparation?.privateBodies[remoteBodyIndex(0, 9)];
+            if (
+                retiredCredential === undefined ||
+                incomingPreparation === undefined ||
+                incomingPrivateBody === undefined
+            ) {
+                throw new Error('The retirement refusal fixture is absent.');
+            }
+            const retirementOperations: readonly (() => Promise<unknown>)[] = [
+                () =>
+                    retiredFinality.createPreparationPackage(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        retiredCredential.signingSecretKey,
+                        retiredCredential.mailboxDecapsulationKey,
+                        preparationAttempt,
+                    ),
+                () =>
+                    retiredFinality.consumePrivatePreparation(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        incomingPreparation.parentBody,
+                        incomingPreparation.parentSignature,
+                        incomingPrivateBody,
+                    ),
+                () =>
+                    retiredFinality.createSourcePackage(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        preparationParents,
+                        { declaration: 'abstain' },
+                    ),
+                () =>
+                    retiredFinality.createFinalitySignature(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sourceCarriers,
+                        topCount,
+                    ),
+                () =>
+                    retiredFinality.createNoResultAcknowledgement(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sourceCarriers,
+                        finalitySignatures,
+                        topCount,
+                    ),
+                () =>
+                    retiredFinality.finalizeNoResult(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        sourceCarriers,
+                        finalitySignatures,
+                        [],
+                        topCount,
+                    ),
+                () =>
+                    retiredFinality.initializePaddedTallyGeneration(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        preparationAttempt,
+                        preparationParents,
+                        sourceCarriers,
+                        finalitySignatures,
+                        topCount,
+                    ),
+                () =>
+                    retiredFinality.createPaddedTallyChunk(actionContext(9), 0),
+                () =>
+                    retiredFinality.initializePaddedTallyEvaluation(
+                        actionContext(9),
+                        canonicalRosterBytes,
+                        finalitySignatures,
+                        Array.from(
+                            { length: participantCount },
+                            () => new Uint8Array(),
+                        ),
+                        Array.from(
+                            { length: participantCount },
+                            () =>
+                                new Uint8Array(
+                                    actionSignatureCarrierByteLength,
+                                ),
+                        ),
+                    ),
+                () =>
+                    retiredFinality.evaluatePaddedTallyChunk(
+                        actionContext(9),
+                        0,
+                        0,
+                        new Uint8Array(),
+                    ),
+                () => retiredFinality.readTallyResult(actionContext(9)),
+            ];
+            for (const retirementOperation of retirementOperations) {
+                await expect(retirementOperation()).rejects.toMatchObject({
+                    name: 'RetiredAction',
+                });
+            }
+            closeClient(retiredFinality);
 
             const activationPosition = 0;
-            const finalitySignatures = finalityPackages
-                .slice(0, completionProfileFinalityQuorum)
-                .map((finality, signerPosition) => ({
-                    signerPosition,
-                    signature: finality.finalitySignature,
-                }));
             const activationInput: TallyGenerationInitializationInput = {
                 ...actionContext(activationPosition),
                 canonicalRosterBytes,
@@ -3259,10 +3852,6 @@ describe('private preparation worker in Chromium', () => {
                     'The chunk crash boundary omitted retained chunk state.',
                 );
             }
-            const persistedRollbackSubset = await readRawStoreSnapshot(
-                databaseName(runIdentity, activationPosition),
-                rollbackSubsetStoreNames,
-            );
             const restoredChunkClient = await openClient(
                 runIdentity,
                 activationPosition,
@@ -3292,12 +3881,23 @@ describe('private preparation worker in Chromium', () => {
             ).rejects.toMatchObject({ name: 'Conflict' });
             closeClient(restoredChunkClient);
 
-            await restoreRawActivationRecord(
+            const activationRecordRollbackRunIdentity = `${runIdentity}-activation-record-rollback`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, activationPosition),
+                databaseName(
+                    activationRecordRollbackRunIdentity,
+                    activationPosition,
+                ),
+            );
+            await restoreRawActivationRecord(
+                databaseName(
+                    activationRecordRollbackRunIdentity,
+                    activationPosition,
+                ),
                 allocatedGenerationRecord,
             );
             const rollbackClient = await openClient(
-                runIdentity,
+                activationRecordRollbackRunIdentity,
                 activationPosition,
             );
             await expect(
@@ -3305,20 +3905,27 @@ describe('private preparation worker in Chromium', () => {
                     actionContext(activationPosition),
                     0,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(rollbackClient);
-            await restoreRawActivationRecord(
-                databaseName(runIdentity, activationPosition),
-                persistedChunkRecord,
-            );
 
-            await restoreRawStoreSnapshot(
+            const coordinatedRollbackRunIdentity = `${runIdentity}-coordinated-rollback`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, activationPosition),
+                databaseName(
+                    coordinatedRollbackRunIdentity,
+                    activationPosition,
+                ),
+            );
+            await restoreRawStoreSnapshot(
+                databaseName(
+                    coordinatedRollbackRunIdentity,
+                    activationPosition,
+                ),
                 rollbackSubsetStoreNames,
                 allocatedRollbackSubset,
             );
             const coordinatedRollbackClient = await openClient(
-                runIdentity,
+                coordinatedRollbackRunIdentity,
                 activationPosition,
             );
             await expect(
@@ -3326,13 +3933,8 @@ describe('private preparation worker in Chromium', () => {
                     actionContext(activationPosition),
                     0,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(coordinatedRollbackClient);
-            await restoreRawStoreSnapshot(
-                databaseName(runIdentity, activationPosition),
-                rollbackSubsetStoreNames,
-                persistedRollbackSubset,
-            );
 
             const lastChunkOrdinal = initialization.plan.chunks.length - 1;
             const publicationPreparationClient = await openClient(
@@ -3408,12 +4010,24 @@ describe('private preparation worker in Chromium', () => {
                 ),
             ).resolves.toEqual(published);
             closeClient(publishedActivationClient);
-            await restoreRawActivationRecord(
+
+            const publicationRollbackRunIdentity = `${runIdentity}-publication-rollback`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, activationPosition),
+                databaseName(
+                    publicationRollbackRunIdentity,
+                    activationPosition,
+                ),
+            );
+            await restoreRawActivationRecord(
+                databaseName(
+                    publicationRollbackRunIdentity,
+                    activationPosition,
+                ),
                 prePublicationRecord,
             );
             const publicationRollbackClient = await openClient(
-                runIdentity,
+                publicationRollbackRunIdentity,
                 activationPosition,
             );
             await expect(
@@ -3421,19 +4035,20 @@ describe('private preparation worker in Chromium', () => {
                     actionContext(activationPosition),
                     lastChunkOrdinal,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(publicationRollbackClient);
-            await restoreRawActivationRecord(
-                databaseName(runIdentity, activationPosition),
-                publishedGenerationRecord,
-            );
 
-            await deleteRawActivationRecord(
+            const stateLossRunIdentity = `${runIdentity}-activation-loss`;
+            await cloneRawDurableDatabase(
                 databaseName(runIdentity, activationPosition),
+                databaseName(stateLossRunIdentity, activationPosition),
+            );
+            await deleteRawActivationRecord(
+                databaseName(stateLossRunIdentity, activationPosition),
                 activationIdentifier(activationPosition),
             );
             const stateLossClient = await openClient(
-                runIdentity,
+                stateLossRunIdentity,
                 activationPosition,
             );
             await expect(
@@ -3446,7 +4061,7 @@ describe('private preparation worker in Chromium', () => {
                     finalitySignatures,
                     topCount,
                 ),
-            ).rejects.toMatchObject({ name: 'StateLost' });
+            ).rejects.toMatchObject({ name: 'RetiredAction' });
             closeClient(stateLossClient);
 
             const computationResultClient = await openClient(runIdentity, 0);
@@ -3465,11 +4080,22 @@ describe('private preparation worker in Chromium', () => {
             const { canonicalRosterBytes, preparationParents } =
                 await createCompletePreparation(runIdentity);
             const sources: PublishedSourcePackage[] = [];
+            const terminalEquivocatorPosition = 3;
+            const terminalEquivocatorRunIdentity = `${runIdentity}-terminal-equivocator`;
             for (
                 let participantPosition = 0;
                 participantPosition < participantCount;
                 participantPosition += 1
             ) {
+                if (participantPosition === terminalEquivocatorPosition) {
+                    await cloneRawDurableDatabase(
+                        databaseName(runIdentity, participantPosition),
+                        databaseName(
+                            terminalEquivocatorRunIdentity,
+                            participantPosition,
+                        ),
+                    );
+                }
                 const client = await openClient(
                     runIdentity,
                     participantPosition,
@@ -3490,6 +4116,35 @@ describe('private preparation worker in Chromium', () => {
                 body: source.sourceBody,
                 signature: source.sourceSignature,
             }));
+            const terminalEquivocator = await openClient(
+                terminalEquivocatorRunIdentity,
+                terminalEquivocatorPosition,
+            );
+            const equivocatedSource =
+                await terminalEquivocator.createSourcePackage(
+                    actionContext(terminalEquivocatorPosition),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    preparationParents,
+                    {
+                        declaration: 'submit',
+                        scoreEncodings: Uint8Array.from(
+                            { length: participantCount },
+                            (_, index) => index + 1,
+                        ),
+                    },
+                );
+            closeClient(terminalEquivocator);
+            const equivocatedSourceCarriers = sourceCarriers.map(
+                (carrier, participantPosition) =>
+                    participantPosition === terminalEquivocatorPosition
+                        ? {
+                              declaration: 'submit' as const,
+                              body: equivocatedSource.sourceBody,
+                              signature: equivocatedSource.sourceSignature,
+                          }
+                        : carrier,
+            );
             const topCount = 10;
             const finalities: PublishedFinalityPackage[] = [];
             for (
@@ -3677,11 +4332,68 @@ describe('private preparation worker in Chromium', () => {
             });
             closeClient(resultClient);
             const restoredResultClient = await openClient(runIdentity, 0);
+            const restoredTerminal = await restoredResultClient.readTallyResult(
+                actionContext(0),
+            );
+            expect(restoredTerminal).toMatchObject({
+                kind: 'no-result',
+                acceptedBallotAuthorshipBitmap: 0,
+            });
+            if (restoredTerminal.kind !== 'no-result') {
+                throw new Error(
+                    'The restored no-result terminal changed kind.',
+                );
+            }
+            const injectedAcknowledgements = acknowledgements.map(
+                (acknowledgement) => ({
+                    signerPosition: acknowledgement.signerPosition,
+                    signature: Uint8Array.from(acknowledgement.signature),
+                }),
+            );
+            const injectedSignature = injectedAcknowledgements[0]?.signature;
+            if (injectedSignature === undefined) {
+                throw new Error('The terminal injection fixture is absent.');
+            }
+            injectedSignature[injectedSignature.byteLength - 1] ^= 1;
+            await expect(
+                restoredResultClient.finalizeNoResult(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    sourceCarriers,
+                    certificate,
+                    injectedAcknowledgements,
+                    topCount,
+                ),
+            ).resolves.toMatchObject({
+                kind: restoredTerminal.kind,
+                terminalPath: restoredTerminal.terminalPath,
+                acceptedBallotAuthorshipBitmap:
+                    restoredTerminal.acceptedBallotAuthorshipBitmap,
+            });
+            await expect(
+                restoredResultClient.finalizeNoResult(
+                    actionContext(0),
+                    canonicalRosterBytes,
+                    preparationAttempt,
+                    equivocatedSourceCarriers,
+                    certificate,
+                    acknowledgements,
+                    topCount,
+                ),
+            ).resolves.toMatchObject({
+                kind: restoredTerminal.kind,
+                terminalPath: restoredTerminal.terminalPath,
+                acceptedBallotAuthorshipBitmap:
+                    restoredTerminal.acceptedBallotAuthorshipBitmap,
+            });
             await expect(
                 restoredResultClient.readTallyResult(actionContext(0)),
             ).resolves.toMatchObject({
-                kind: 'no-result',
-                acceptedBallotAuthorshipBitmap: 0,
+                kind: restoredTerminal.kind,
+                terminalPath: restoredTerminal.terminalPath,
+                acceptedBallotAuthorshipBitmap:
+                    restoredTerminal.acceptedBallotAuthorshipBitmap,
             });
             closeClient(restoredResultClient);
             const measurements = await Promise.all(

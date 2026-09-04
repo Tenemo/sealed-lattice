@@ -8,7 +8,9 @@ use crate::foundation::{
 use super::action_signature::{
     SIGNATURE_BYTE_LENGTH as ACTION_SIGNATURE_BYTE_LENGTH, verify as verify_action_signature,
 };
-use super::private_preparation_body::{PrivatePreparationBody, PrivatePreparationContext};
+use super::private_preparation_body::{
+    PrivatePreparationBody, PrivatePreparationContext, private_preparation_body_identity,
+};
 use super::roster::{mailbox_encapsulation_key, require_roster_identity, signing_verification_key};
 
 pub const SUBSET_COMMITMENT_COUNT: usize = 120;
@@ -57,6 +59,7 @@ impl ActionSignaturePurpose {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparationParentError {
+    AuthenticatedBodyViolation,
     DuplicateBodyIdentity,
     InvalidCanonicalEncoding,
     InvalidSignature,
@@ -72,6 +75,9 @@ pub enum PreparationParentError {
 impl fmt::Display for PreparationParentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::AuthenticatedBodyViolation => {
+                "authenticated preparation bytes violate their public relation"
+            }
             Self::DuplicateBodyIdentity => {
                 "preparation parent contains a duplicate private-body identity"
             }
@@ -242,16 +248,7 @@ pub fn verify_preparation_parent_carrier(
     require_roster_identity(roster, expected_roster_identity)
         .map_err(|_| PreparationParentError::WrongContext)?;
 
-    let parent = PreparationParent::decode(participant_count, parent_bytes)?;
-    if parent.action_proposal_identity != expected_action_proposal_identity
-        || parent.roster_identity != expected_roster_identity
-        || parent.preparation_attempt != expected_preparation_attempt
-        || parent.predecessor_identity != expected_predecessor_identity
-        || parent.sender_position != expected_sender_position
-    {
-        return Err(PreparationParentError::WrongContext);
-    }
-    let parent_identity = parent.body_identity()?;
+    let parent_identity = preparation_parent_identity(parent_bytes)?;
     let signature = ActionSignatureCarrier::decode(participant_count, signature_bytes)?;
     let verification_key = signing_verification_key(roster, expected_sender_position)
         .map_err(|_| PreparationParentError::WrongParticipantPosition)?;
@@ -261,6 +258,17 @@ pub fn verify_preparation_parent_carrier(
         parent_identity,
         verification_key,
     )?;
+    let parent = PreparationParent::decode(participant_count, parent_bytes)?;
+    if parent.action_proposal_identity != expected_action_proposal_identity
+        || parent.roster_identity != expected_roster_identity
+        || parent.preparation_attempt != expected_preparation_attempt
+        || parent.predecessor_identity != expected_predecessor_identity
+    {
+        return Err(PreparationParentError::WrongContext);
+    }
+    if parent.sender_position != expected_sender_position {
+        return Err(PreparationParentError::AuthenticatedBodyViolation);
+    }
     Ok(VerifiedPreparationParent {
         sender_position: expected_sender_position,
         parent_identity,
@@ -396,12 +404,7 @@ impl PreparationParent {
     }
 
     pub fn body_identity(&self) -> Result<Hash512, PreparationParentError> {
-        hash_foundation_tuple_512(
-            PREPARATION_PARENT_IDENTITY_DOMAIN,
-            &[CanonicalItem::variable_bytes(self.encode()?)
-                .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)?],
-        )
-        .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)
+        preparation_parent_identity(&self.encode()?)
     }
 
     pub(super) const fn participant_count(&self) -> u16 {
@@ -481,20 +484,13 @@ pub fn verify_private_preparation_carrier(
     require_roster_identity(roster, expected_roster_identity)
         .map_err(|_| PreparationParentError::WrongContext)?;
 
-    let parent = PreparationParent::decode(participant_count, parent_bytes)?;
-    if parent.action_proposal_identity != expected_action_proposal_identity
-        || parent.roster_identity != expected_roster_identity
-        || parent.preparation_attempt != expected_preparation_attempt
-        || parent.predecessor_identity != expected_predecessor_identity
-    {
-        return Err(PreparationParentError::WrongContext);
-    }
-    let sender_position = parent.sender_position;
+    let parent_identity = preparation_parent_identity(parent_bytes)?;
+    let signature = ActionSignatureCarrier::decode(participant_count, signature_bytes)?;
+    let sender_position = signature.signer_position;
+    validate_position(participant_count, sender_position)?;
     if sender_position == recipient_position {
         return Err(PreparationParentError::WrongParticipantPosition);
     }
-    let parent_identity = parent.body_identity()?;
-    let signature = ActionSignatureCarrier::decode(participant_count, signature_bytes)?;
     let verification_key = signing_verification_key(roster, sender_position)
         .map_err(|_| PreparationParentError::WrongParticipantPosition)?;
     signature.verify(
@@ -503,6 +499,17 @@ pub fn verify_private_preparation_carrier(
         parent_identity,
         verification_key,
     )?;
+    let parent = PreparationParent::decode(participant_count, parent_bytes)?;
+    if parent.action_proposal_identity != expected_action_proposal_identity
+        || parent.roster_identity != expected_roster_identity
+        || parent.preparation_attempt != expected_preparation_attempt
+        || parent.predecessor_identity != expected_predecessor_identity
+    {
+        return Err(PreparationParentError::WrongContext);
+    }
+    if parent.sender_position != sender_position {
+        return Err(PreparationParentError::AuthenticatedBodyViolation);
+    }
 
     let pair_encryption_key = mailbox_encapsulation_key(roster, recipient_position)
         .map_err(|_| PreparationParentError::WrongParticipantPosition)?;
@@ -517,16 +524,15 @@ pub fn verify_private_preparation_carrier(
         pair_encryption_key,
     )
     .map_err(|_| PreparationParentError::WrongContext)?;
-    let private_body = PrivatePreparationBody::decode(participant_count, private_body_bytes)
-        .map_err(|_| PreparationParentError::WrongContext)?;
-    if private_body.context != expected_private_context {
-        return Err(PreparationParentError::WrongContext);
-    }
-    let body_identity = private_body
-        .body_identity()
+    let body_identity = private_preparation_body_identity(private_body_bytes)
         .map_err(|_| PreparationParentError::WrongBodyIdentity)?;
     if parent.private_body_identity_for_recipient(recipient_position)? != body_identity {
         return Err(PreparationParentError::WrongBodyIdentity);
+    }
+    let private_body = PrivatePreparationBody::decode(participant_count, private_body_bytes)
+        .map_err(|_| PreparationParentError::AuthenticatedBodyViolation)?;
+    if private_body.context != expected_private_context {
+        return Err(PreparationParentError::AuthenticatedBodyViolation);
     }
 
     Ok(VerifiedPrivatePreparationCarrier {
@@ -535,6 +541,15 @@ pub fn verify_private_preparation_carrier(
         parent_identity,
         body_identity,
     })
+}
+
+fn preparation_parent_identity(parent_bytes: &[u8]) -> Result<Hash512, PreparationParentError> {
+    hash_foundation_tuple_512(
+        PREPARATION_PARENT_IDENTITY_DOMAIN,
+        &[CanonicalItem::variable_bytes(parent_bytes)
+            .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)?],
+    )
+    .map_err(|_| PreparationParentError::InvalidCanonicalEncoding)
 }
 
 pub fn preparation_parent_body_byte_length(

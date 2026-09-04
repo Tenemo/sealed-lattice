@@ -20,6 +20,7 @@ export const localRecordObjectKinds = {
     noResult: 8,
     tallyGeneration: 10,
     tallyEvaluation: 11,
+    retirement: 12,
 } as const;
 
 export type IndependentLocalRecordContext = Readonly<{

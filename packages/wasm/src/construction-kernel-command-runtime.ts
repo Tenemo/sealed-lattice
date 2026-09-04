@@ -2,6 +2,7 @@ import { maximumFoundationCopiedBufferByteLength } from './foundation-contract.j
 import type { ConstructionKernelCommandRuntime } from './foundation-kernel/kernel-runtime.js';
 
 type ConstructionErrorCode =
+    | 'AttributableProtocolViolation'
     | 'InvalidEnum'
     | 'InvalidProtocolObject'
     | 'InvalidUtf8'
@@ -139,6 +140,7 @@ class ConstructionCommandReader {
 }
 
 const constructionErrorCodes = new Set<ConstructionErrorCode>([
+    'AttributableProtocolViolation',
     'InvalidEnum',
     'InvalidProtocolObject',
     'InvalidUtf8',

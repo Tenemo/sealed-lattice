@@ -70,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_nist_sp_800_185_sample_four() {
+    fn matches_nist_sp_800_185_sample_six() {
         let key =
             decode_hex::<32>("404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f");
         let message = decode_hex::<200>(

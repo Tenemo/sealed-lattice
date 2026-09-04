@@ -63,6 +63,7 @@ impl SourceDeclaration {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceError {
+    AuthenticatedBodyViolation,
     DuplicatePreparationIdentity,
     InvalidCanonicalEncoding,
     InvalidSignature,
@@ -79,6 +80,9 @@ pub enum SourceError {
 impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::AuthenticatedBodyViolation => {
+                "authenticated source or preparation bytes violate their public relation"
+            }
             Self::DuplicatePreparationIdentity => {
                 "verified preparation contains a duplicate parent identity"
             }
@@ -236,12 +240,7 @@ impl SourceBody {
     }
 
     pub fn body_identity(&self) -> Result<Hash512, SourceError> {
-        hash_foundation_tuple_512(
-            SOURCE_BODY_IDENTITY_DOMAIN,
-            &[CanonicalItem::variable_bytes(self.encode()?)
-                .map_err(|_| SourceError::InvalidCanonicalEncoding)?],
-        )
-        .map_err(|_| SourceError::InvalidCanonicalEncoding)
+        source_body_identity(&self.encode()?)
     }
 }
 
@@ -310,7 +309,12 @@ pub fn verify_complete_preparation(
             parent_body,
             parent_signature,
         )
-        .map_err(|_| SourceError::InvalidSignature)?;
+        .map_err(|error| match error {
+            super::preparation_parent::PreparationParentError::AuthenticatedBodyViolation => {
+                SourceError::AuthenticatedBodyViolation
+            }
+            _ => SourceError::InvalidSignature,
+        })?;
         if parent_identity_bytes
             .chunks_exact(Hash512::BYTE_LENGTH)
             .any(|identity| identity == verified.parent_identity.as_bytes())
@@ -690,13 +694,7 @@ pub fn verify_source_carrier(
     )?;
     require_roster_identity(roster, expected_context.roster_identity)
         .map_err(|_| SourceError::WrongContext)?;
-    let body = SourceBody::decode(expected_context.participant_count, body_bytes)?;
-    if body.context != expected_context
-        || expected_declaration.is_some_and(|declaration| declaration != body.declaration)
-    {
-        return Err(SourceError::WrongContext);
-    }
-    let body_identity = body.body_identity()?;
+    let body_identity = source_body_identity(body_bytes)?;
     let signature =
         ActionSignatureCarrier::decode(expected_context.participant_count, signature_bytes)
             .map_err(|_| SourceError::InvalidSignature)?;
@@ -710,6 +708,25 @@ pub fn verify_source_carrier(
             verification_key,
         )
         .map_err(|_| SourceError::InvalidSignature)?;
+    let body = SourceBody::decode(expected_context.participant_count, body_bytes)?;
+    if body.context != expected_context {
+        let same_one_shot_scope = body.context.participant_count
+            == expected_context.participant_count
+            && body.context.action_proposal_identity == expected_context.action_proposal_identity
+            && body.context.roster_identity == expected_context.roster_identity
+            && body.context.preparation_attempt == expected_context.preparation_attempt
+            && body.context.predecessor_identity == expected_context.predecessor_identity
+            && body.context.verified_preparation_root == expected_context.verified_preparation_root
+            && body.context.source_ordinal == expected_context.source_ordinal;
+        return Err(if same_one_shot_scope {
+            SourceError::AuthenticatedBodyViolation
+        } else {
+            SourceError::WrongContext
+        });
+    }
+    if expected_declaration.is_some_and(|declaration| declaration != body.declaration) {
+        return Err(SourceError::WrongContext);
+    }
     Ok(VerifiedSource {
         sender_position: expected_context.sender_position,
         declaration: body.declaration,
@@ -717,6 +734,15 @@ pub fn verify_source_carrier(
         body_identity,
         verified_preparation_root: body.context.verified_preparation_root,
     })
+}
+
+fn source_body_identity(body_bytes: &[u8]) -> Result<Hash512, SourceError> {
+    hash_foundation_tuple_512(
+        SOURCE_BODY_IDENTITY_DOMAIN,
+        &[CanonicalItem::variable_bytes(body_bytes)
+            .map_err(|_| SourceError::InvalidCanonicalEncoding)?],
+    )
+    .map_err(|_| SourceError::InvalidCanonicalEncoding)
 }
 
 fn validate_participant_count(participant_count: u16) -> Result<(), SourceError> {

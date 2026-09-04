@@ -57,6 +57,7 @@ impl FinalityTargetKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinalityError {
+    AuthenticatedBodyViolation,
     DuplicateSignature,
     DuplicateSourceIdentity,
     IncompleteNoResultAcknowledgements,
@@ -76,6 +77,9 @@ pub enum FinalityError {
 impl fmt::Display for FinalityError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::AuthenticatedBodyViolation => {
+                "authenticated source bytes violate their public relation"
+            }
             Self::DuplicateSignature => "finality certificate contains a duplicate signer",
             Self::DuplicateSourceIdentity => "finality target contains a duplicate source identity",
             Self::IncompleteNoResultAcknowledgements => {
@@ -360,7 +364,12 @@ pub fn derive_finality_target(
                 .get(usize::from(sender_position))
                 .ok_or(FinalityError::WrongItemTypeOrLength)?,
         )
-        .map_err(|_| FinalityError::InvalidSignature)?;
+        .map_err(|error| match error {
+            super::source::SourceError::AuthenticatedBodyViolation => {
+                FinalityError::AuthenticatedBodyViolation
+            }
+            _ => FinalityError::InvalidSignature,
+        })?;
         if source_body_identities.contains(&verified.body_identity) {
             return Err(FinalityError::DuplicateSourceIdentity);
         }

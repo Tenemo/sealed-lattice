@@ -335,6 +335,51 @@ mod tests {
         generate_key_pair(&randomness).expect("ML-KEM key generation succeeds")
     }
 
+    fn replace_public_key_coefficient(
+        encryption_key: &mut [u8; ENCRYPTION_KEY_BYTE_LENGTH],
+        coefficient_position: usize,
+        coefficient: u16,
+    ) {
+        assert!(coefficient_position < 3 * 256);
+        assert!(coefficient < 1 << 12);
+        let byte_position = 3 * (coefficient_position / 2);
+        if coefficient_position.is_multiple_of(2) {
+            encryption_key[byte_position] = coefficient as u8;
+            encryption_key[byte_position + 1] =
+                (encryption_key[byte_position + 1] & 0xf0) | ((coefficient >> 8) as u8 & 0x0f);
+        } else {
+            encryption_key[byte_position + 1] =
+                (encryption_key[byte_position + 1] & 0x0f) | ((coefficient as u8 & 0x0f) << 4);
+            encryption_key[byte_position + 2] = (coefficient >> 4) as u8;
+        }
+    }
+
+    #[test]
+    fn public_key_coefficients_enforce_the_exact_ml_kem_modulus_boundary() {
+        const ML_KEM_MODULUS: u16 = 3_329;
+        let pair = key_pair(0x30);
+        for coefficient_position in [0, 1, 255, 256, 511, 767] {
+            let mut largest_canonical = pair.encryption_key;
+            replace_public_key_coefficient(
+                &mut largest_canonical,
+                coefficient_position,
+                ML_KEM_MODULUS - 1,
+            );
+            assert_eq!(validate_encryption_key(&largest_canonical), Ok(()));
+
+            let mut first_noncanonical = pair.encryption_key;
+            replace_public_key_coefficient(
+                &mut first_noncanonical,
+                coefficient_position,
+                ML_KEM_MODULUS,
+            );
+            assert_eq!(
+                validate_encryption_key(&first_noncanonical),
+                Err(PairEncryptionError::InvalidEncryptionKey),
+            );
+        }
+    }
+
     #[test]
     fn exact_ml_kem_encapsulation_round_trip_and_context_binding() {
         let pair = key_pair(0x31);

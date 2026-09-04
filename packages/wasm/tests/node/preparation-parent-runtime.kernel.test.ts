@@ -46,6 +46,19 @@ const pseudorandomBytes = (length: number, seed: bigint): Uint8Array => {
     });
 };
 
+const expectConstructionErrorCode = (
+    operation: () => unknown,
+    code: ConstructionKernelCommandError['code'],
+): void => {
+    try {
+        operation();
+        throw new Error('The construction operation unexpectedly succeeded.');
+    } catch (error: unknown) {
+        expect(error).toBeInstanceOf(ConstructionKernelCommandError);
+        expect(error).toMatchObject({ code });
+    }
+};
+
 describe('preparation parent scalar WASM runtime', () => {
     it('verifies the exact signed manifest before admitting a private carrier', async () => {
         const kernel = await instantiateConstructionKernelCommandRuntime(
@@ -218,15 +231,150 @@ describe('preparation parent scalar WASM runtime', () => {
 
         const mutatedBody = Uint8Array.from(privateCarrier.body);
         mutatedBody[mutatedBody.byteLength - 1] ^= 1;
-        expect(() =>
-            parentRuntime.verifyPrivateCarrier(
-                context,
-                canonicalRosterBytes,
-                parent.body,
-                signatureCarrier,
-                mutatedBody,
+        expectConstructionErrorCode(
+            () =>
+                parentRuntime.verifyPrivateCarrier(
+                    context,
+                    canonicalRosterBytes,
+                    parent.body,
+                    signatureCarrier,
+                    mutatedBody,
+                ),
+            'InvalidProtocolObject',
+        );
+
+        const wrongContextParent = parentRuntime.encode({
+            participantCount,
+            actionProposalIdentity: pseudorandomBytes(64, 0x4a32n),
+            rosterIdentity,
+            preparationAttempt: context.preparationAttempt,
+            predecessorIdentity: context.predecessorIdentity,
+            senderPosition,
+            subsetCommitments: pseudorandomBytes(120 * 64, 0xc012n),
+            privateBodyIdentities,
+        });
+        const wrongContextSignature = parentRuntime.encodeSignature(
+            participantCount,
+            senderPosition,
+            wrongContextParent.identity,
+            signatureRuntime.signBodyIdentity(
+                senderPreparationSecretKey,
+                senderPosition,
+                'preparation',
+                wrongContextParent.identity,
+                pseudorandomBytes(
+                    actionSignatureSigningRandomnessByteLength,
+                    0x4712n,
+                ),
             ),
-        ).toThrow(ConstructionKernelCommandError);
+        );
+        expectConstructionErrorCode(
+            () =>
+                parentRuntime.verifyPrivateCarrier(
+                    context,
+                    canonicalRosterBytes,
+                    wrongContextParent.body,
+                    wrongContextSignature,
+                    privateCarrier.body,
+                ),
+            'InvalidProtocolObject',
+        );
+
+        const falseSenderParent = parentRuntime.encode({
+            participantCount,
+            actionProposalIdentity,
+            rosterIdentity,
+            preparationAttempt: context.preparationAttempt,
+            predecessorIdentity: context.predecessorIdentity,
+            senderPosition: senderPosition + 1,
+            subsetCommitments: pseudorandomBytes(120 * 64, 0xc013n),
+            privateBodyIdentities,
+        });
+        const falseSenderSignature = parentRuntime.encodeSignature(
+            participantCount,
+            senderPosition,
+            falseSenderParent.identity,
+            signatureRuntime.signBodyIdentity(
+                senderPreparationSecretKey,
+                senderPosition,
+                'preparation',
+                falseSenderParent.identity,
+                pseudorandomBytes(
+                    actionSignatureSigningRandomnessByteLength,
+                    0x4713n,
+                ),
+            ),
+        );
+        expectConstructionErrorCode(
+            () =>
+                parentRuntime.verifyPrivateCarrier(
+                    context,
+                    canonicalRosterBytes,
+                    falseSenderParent.body,
+                    falseSenderSignature,
+                    privateCarrier.body,
+                ),
+            'AttributableProtocolViolation',
+        );
+
+        const wrongMailboxPair = pairRuntime.generateKeyPair(
+            pseudorandomBytes(
+                pairEncryptionKeyGenerationRandomnessByteLength,
+                0x9011n,
+            ),
+        );
+        const wrongMailboxCarrier = bodyRuntime.seal(
+            context,
+            wrongMailboxPair.encryptionKey,
+            pseudorandomBytes(pairEncryptionRandomnessByteLength, 0x8124n),
+            pseudorandomBytes(privatePreparationPlaintextByteLength, 0x77b2n),
+        );
+        const privateBodyIndex =
+            recipientPosition < senderPosition
+                ? recipientPosition
+                : recipientPosition - 1;
+        const wrongMailboxBodyIdentities = privateBodyIdentities.map(
+            (identity, index) =>
+                index === privateBodyIndex
+                    ? wrongMailboxCarrier.identity
+                    : identity,
+        );
+        const wrongMailboxParent = parentRuntime.encode({
+            participantCount,
+            actionProposalIdentity,
+            rosterIdentity,
+            preparationAttempt: context.preparationAttempt,
+            predecessorIdentity: context.predecessorIdentity,
+            senderPosition,
+            subsetCommitments: pseudorandomBytes(120 * 64, 0xc014n),
+            privateBodyIdentities: wrongMailboxBodyIdentities,
+        });
+        const wrongMailboxSignature = parentRuntime.encodeSignature(
+            participantCount,
+            senderPosition,
+            wrongMailboxParent.identity,
+            signatureRuntime.signBodyIdentity(
+                senderPreparationSecretKey,
+                senderPosition,
+                'preparation',
+                wrongMailboxParent.identity,
+                pseudorandomBytes(
+                    actionSignatureSigningRandomnessByteLength,
+                    0x4714n,
+                ),
+            ),
+        );
+        expectConstructionErrorCode(
+            () =>
+                parentRuntime.verifyPrivateCarrier(
+                    context,
+                    canonicalRosterBytes,
+                    wrongMailboxParent.body,
+                    wrongMailboxSignature,
+                    wrongMailboxCarrier.body,
+                ),
+            'AttributableProtocolViolation',
+        );
 
         const reorderedRoster = Uint8Array.from(canonicalRosterBytes);
         reorderedRoster[reorderedRoster.byteLength - 1] ^= 1;
