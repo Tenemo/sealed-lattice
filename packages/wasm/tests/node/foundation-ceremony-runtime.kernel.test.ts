@@ -37,10 +37,6 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                 kind: 'function',
                 name: 'sealed_lattice_foundation_command_with_length',
             },
-            {
-                kind: 'function',
-                name: 'sealed_lattice_construction_command_with_length',
-            },
             { kind: 'global', name: '__data_end' },
             { kind: 'global', name: '__heap_base' },
         ]);

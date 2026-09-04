@@ -148,7 +148,9 @@ const usage =
     'Usage: verify-source-manifest.ts --manifest <file> --root <directory>';
 
 const main = async (): Promise<void> => {
-    const argumentsList = process.argv.slice(2);
+    const rawArguments = process.argv.slice(2);
+    const argumentsList =
+        rawArguments[0] === '--' ? rawArguments.slice(1) : rawArguments;
     if (
         argumentsList.length !== 4 ||
         argumentsList[0] !== '--manifest' ||

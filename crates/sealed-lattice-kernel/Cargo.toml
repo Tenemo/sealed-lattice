@@ -7,16 +7,9 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-default = ["construction"]
-construction = []
-
 [dependencies]
-aes = { version = "=0.8.4", features = ["zeroize"] }
-aes-gcm-siv = { version = "=0.11.1", default-features = false, features = ["aes"] }
 fips203 = { version = "=0.4.3", default-features = false, features = ["ml-kem-768"] }
 fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
-polyval = { version = "=0.6.2", default-features = false, features = ["zeroize"] }
 sha3 = "=0.10.9"
 unicode-normalization = "=0.1.25"
 zeroize = { version = "=1.8.2", features = ["zeroize_derive"] }

@@ -1,8 +1,6 @@
 mod canonical_tuple;
 mod ceremony;
 mod hash;
-#[cfg(any(feature = "construction", test))]
-mod kmac;
 mod participant_identity;
 mod refusal;
 mod schemas;
@@ -18,19 +16,12 @@ pub(crate) use ceremony::{
 };
 pub(crate) use hash::StreamingFoundationTupleHash512;
 pub(crate) use hash::{Hash512, hash_foundation_tuple_512};
-#[cfg(any(feature = "construction", test))]
-pub(crate) use kmac::kmac256;
 pub(crate) use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
 };
 pub(crate) use refusal::RefusalReason;
-#[cfg(any(feature = "construction", test))]
+#[cfg(test)]
 pub(crate) use schemas::RosterEntry;
-#[cfg(feature = "construction")]
-pub(crate) use schemas::{
-    FOUNDATION_MAXIMUM_SCORE, FOUNDATION_MINIMUM_SCORE, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
-    MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
-};
 pub(crate) use schemas::{
     FOUNDATION_PROTOCOL_NAME, FOUNDATION_PROTOCOL_VERSION,
     MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH, MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH,

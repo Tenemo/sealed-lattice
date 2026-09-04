@@ -6,11 +6,6 @@ import {
 type KernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
-    sealed_lattice_construction_command_with_length?: (
-        pointer: number,
-        length: number,
-        outputLengthPointer: number,
-    ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
     sealed_lattice_foundation_command_with_length?: (
         pointer: number,
@@ -65,9 +60,7 @@ export type FoundationKernelCommandRuntime = Readonly<{
     readonly measureResources: () => KernelResourceMeasurement;
 }>;
 
-export type ConstructionKernelCommandRuntime = FoundationKernelCommandRuntime;
-
-export type KernelResourceMeasurement = Readonly<{
+type KernelResourceMeasurement = Readonly<{
     wasmMemoryByteLength: number;
     maximumRequestByteLength: number;
     maximumResponseByteLength: number;
@@ -164,7 +157,6 @@ const requireKernelMemoryRange = (
 
 type NumberExportName =
     | 'sealed_lattice_allocate'
-    | 'sealed_lattice_construction_command_with_length'
     | 'sealed_lattice_deallocate'
     | 'sealed_lattice_foundation_command_with_length';
 
@@ -327,9 +319,6 @@ const runKernelCommand = (
 const instantiateKernelCommandRuntime = async (
     foundationKernelUrl: URL,
     options: FoundationKernelLoaderOptions,
-    commandExportName:
-        | 'sealed_lattice_construction_command_with_length'
-        | 'sealed_lattice_foundation_command_with_length',
 ): Promise<FoundationKernelCommandRuntime> => {
     const expectedKernelSha256Hex = requireKernelIntegrityExpectation(options);
     const bytes = await resolveKernelBytes(foundationKernelUrl);
@@ -349,7 +338,7 @@ const instantiateKernelCommandRuntime = async (
     );
     const commandWithLength = resolveNumberExport(
         wasmExports,
-        commandExportName,
+        'sealed_lattice_foundation_command_with_length',
     );
     let maximumRequestByteLength = 0;
     let maximumResponseByteLength = 0;
@@ -384,18 +373,4 @@ export const instantiateFoundationKernelCommandRuntime = (
     foundationKernelUrl: URL,
     options: FoundationKernelLoaderOptions = {},
 ): Promise<FoundationKernelCommandRuntime> =>
-    instantiateKernelCommandRuntime(
-        foundationKernelUrl,
-        options,
-        'sealed_lattice_foundation_command_with_length',
-    );
-
-export const instantiateConstructionKernelCommandRuntime = (
-    foundationKernelUrl: URL,
-    options: FoundationKernelLoaderOptions = {},
-): Promise<ConstructionKernelCommandRuntime> =>
-    instantiateKernelCommandRuntime(
-        foundationKernelUrl,
-        options,
-        'sealed_lattice_construction_command_with_length',
-    );
+    instantiateKernelCommandRuntime(foundationKernelUrl, options);

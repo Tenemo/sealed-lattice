@@ -74,9 +74,6 @@ describe('election foundation public package API in Node', () => {
             .sort();
 
         expect(exportNames).toEqual(expectedPublicWasmExportNames);
-        expect(exportNames).not.toContain(
-            'sealed_lattice_construction_command_with_length',
-        );
     });
 
     it('creates and verifies canonical manifest bytes through one packaged kernel instance', async () => {

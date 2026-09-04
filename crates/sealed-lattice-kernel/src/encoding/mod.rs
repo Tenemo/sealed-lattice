@@ -2,14 +2,10 @@ use core::str;
 
 use crate::foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
 
-#[cfg(feature = "construction")]
-mod construction_command;
 mod foundation_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalErrorCode {
-    #[cfg(feature = "construction")]
-    AttributableProtocolViolation,
     InvalidEnum,
     InvalidProtocolObject,
     InvalidUtf8,
@@ -20,8 +16,6 @@ pub enum CanonicalErrorCode {
 impl CanonicalErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            #[cfg(feature = "construction")]
-            Self::AttributableProtocolViolation => "AttributableProtocolViolation",
             Self::InvalidEnum => "InvalidEnum",
             Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidUtf8 => "InvalidUtf8",
@@ -170,16 +164,6 @@ impl BinaryWriter {
         self.extend(&[value])
     }
 
-    #[cfg(feature = "construction")]
-    pub fn write_u16(&mut self, value: u16) -> CanonicalResult<()> {
-        self.extend(&value.to_le_bytes())
-    }
-
-    #[cfg(feature = "construction")]
-    pub fn write_u32(&mut self, value: u32) -> CanonicalResult<()> {
-        self.extend(&value.to_le_bytes())
-    }
-
     pub fn write_bytes(&mut self, value: &[u8]) -> CanonicalResult<()> {
         let length = u32::try_from(value.len()).map_err(|_| {
             CanonicalError::new(
@@ -234,21 +218,6 @@ pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
     }
 
     match foundation_command::run(input) {
-        Ok(payload) => encode_success(payload),
-        Err(error) => encode_error(error),
-    }
-}
-
-#[cfg(feature = "construction")]
-pub(super) fn run_construction_command(input: &[u8]) -> Vec<u8> {
-    if input.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
-        return encode_error(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "construction command exceeds the copied-buffer limit",
-        ));
-    }
-
-    match construction_command::run(input) {
         Ok(payload) => encode_success(payload),
         Err(error) => encode_error(error),
     }

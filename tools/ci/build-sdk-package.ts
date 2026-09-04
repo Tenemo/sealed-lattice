@@ -26,7 +26,6 @@ const kernelOutputPath = path.join(
 
 export const buildSdkPackage = async (): Promise<void> => {
     const { hash: kernelHash } = await buildWasmKernel({
-        includeConstruction: false,
         outputFilePath: kernelStagingPath,
     });
     const kernelBytes = await readFile(kernelStagingPath);

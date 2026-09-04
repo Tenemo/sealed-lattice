@@ -356,7 +356,13 @@ const verifyPackedPackage = async (
         await runPackageManager(
             runLog,
             npmRunner,
-            ['install', '--ignore-scripts', tarballPath],
+            [
+                'install',
+                '--ignore-scripts',
+                '--no-audit',
+                '--no-fund',
+                tarballPath,
+            ],
             {
                 description: 'Install the public tarball in an empty consumer',
                 environment,
