@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
+import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import {
     exactRankingModelConstants,
     compilePackedRankingEvaluationGraph,
@@ -993,6 +994,33 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
+        '## Early commitment extraction census',
+        '',
+        'DFMS21 Corollary 4.8 for full-body hash commitments, including losing frozen views in two commitment stages. The sum charges both simulator disturbance and valid-opening mismatch. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
+        '',
+        table(
+            [
+                'Participants',
+                'Relevant commitments',
+                'Hash output bits',
+                'Quantum query bound',
+                'Combined failure exponent',
+            ],
+            [10, 20].map((participantCount) => {
+                const bound =
+                    compileCommitmentExtractionBound(participantCount);
+                return [
+                    formatCount(participantCount),
+                    formatCount(bound.extractedCommitmentCount),
+                    formatCount(bound.hashOutputBitLength),
+                    formatCount(bound.quantumQueryCount),
+                    bound.combinedFailureExponent === undefined
+                        ? 'No extraction event'
+                        : formatCount(bound.combinedFailureExponent),
+                ];
+            }),
+        ),
+        '',
         '## Fixed-witness release simulation census',
         '',
         'This scalar counterexample applies the KLLPS simulation equation with three fixed corrupt coordinates and one honest release. Using the actual ciphertext plaintext satisfies the expanded noise relation; substituting another output decodes that output but violates the relation to the fixed honest setup witness. It rejects that simulator chronology, not threshold FHE as a family.',
@@ -1082,6 +1110,18 @@ export const renderDocumentationCensus = (): string => {
                     'Exact maximum simulation coefficient one-norm',
                     formatCount(
                         thresholdReleaseNoise.exactMaximumSimulationCoefficientOneNorm,
+                    ),
+                ],
+                [
+                    'Maximum sum of simulation coefficient one-norms over all honest releases',
+                    formatCount(
+                        thresholdReleaseNoise.exactMaximumJointSimulationCoefficientOneNormSum,
+                    ),
+                ],
+                [
+                    'Joint-release dominant noise reserve at 80 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.jointTargetSecurityDominantNoiseReserveBitLength,
                     ),
                 ],
                 [

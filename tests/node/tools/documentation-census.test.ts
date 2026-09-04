@@ -21,6 +21,7 @@ describe('documentation census generator', () => {
             '## Share-encryption cross-modulus census',
             '## Polynomial oracle boundary census',
             '## Recipient-key uniqueness census',
+            '## Early commitment extraction census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
             '## Threshold release flooding bound',

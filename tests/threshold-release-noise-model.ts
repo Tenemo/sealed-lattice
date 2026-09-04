@@ -277,6 +277,7 @@ const exactInterpolationCensus = (): Readonly<{
     boundedIntegerSharingReconstructionCount: number;
     exactMaximumScaledReconstructionCoefficientOneNorm: bigint;
     exactMaximumSimulationCoefficientOneNorm: bigint;
+    exactMaximumJointSimulationCoefficientOneNormSum: bigint;
     lagrangeCoefficientCount: number;
 }> => {
     const clearingFactor = 1n << BigInt(Math.ceil(Math.log2(releaseThreshold)));
@@ -310,6 +311,7 @@ const exactInterpolationCensus = (): Readonly<{
     let exactMaximumSimulationCoefficientOneNorm = 0n;
     let boundedIntegerSharingReconstructionCount = 0;
     let lagrangeCoefficientCount = 0;
+    const simulationNormSums = new Map<string, bigint>();
 
     for (const authorizedSubset of authorizedSubsets) {
         const points = authorizedSubset.map((index) => {
@@ -330,6 +332,14 @@ const exactInterpolationCensus = (): Readonly<{
                       );
             const inverseCoefficientOneNorm = integerOneNorm(
                 invertRationalRing(coefficient),
+            );
+            const corruptPositions = authorizedSubset
+                .filter((_position, selectedIndex) => selectedIndex !== index)
+                .join(',');
+            simulationNormSums.set(
+                corruptPositions,
+                (simulationNormSums.get(corruptPositions) ?? 0n) +
+                    inverseCoefficientOneNorm,
             );
             exactMaximumSimulationCoefficientOneNorm =
                 exactMaximumSimulationCoefficientOneNorm >
@@ -373,6 +383,9 @@ const exactInterpolationCensus = (): Readonly<{
         boundedIntegerSharingReconstructionCount,
         exactMaximumScaledReconstructionCoefficientOneNorm,
         exactMaximumSimulationCoefficientOneNorm,
+        exactMaximumJointSimulationCoefficientOneNormSum: [
+            ...simulationNormSums.values(),
+        ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n),
         lagrangeCoefficientCount,
     };
 };
@@ -413,6 +426,8 @@ export type ThresholdReleaseNoiseCensus = Readonly<{
     exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength: number;
     exactMaximumScaledReconstructionCoefficientOneNorm: bigint;
     exactMaximumSimulationCoefficientOneNorm: bigint;
+    exactMaximumJointSimulationCoefficientOneNormSum: bigint;
+    jointTargetSecurityDominantNoiseReserveBitLength: number;
     exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength: number;
     lagrangeCoefficientCount: number;
     productionInterpolationPointExponentStride: number;
@@ -440,6 +455,15 @@ export const compileThresholdReleaseNoiseCensus =
         const exactInterpolationProductNumber = Number(
             exactInterpolationProduct,
         );
+        // Joint cube coupling charges every honest release for a fixed corrupt
+        // set. Width 2*B_sm+1 gives B_sm = 2^(lambda-1)*N*sum_i ||lambda_0,i||_1*E.
+        // This remains a dominant-term floor; the expanded proof support and
+        // every non-dominant BFV correctness term must also be included.
+        const jointDominantFactor =
+            BigInt(releaseThreshold * polynomialModulusDegree) *
+            (1n << 79n) *
+            exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm *
+            exactInterpolation.exactMaximumJointSimulationCoefficientOneNormSum;
         return {
             authorizedSubsetCount: exactInterpolation.authorizedSubsetCount,
             boundedIntegerSharingReconstructionCount:
@@ -455,6 +479,11 @@ export const compileThresholdReleaseNoiseCensus =
                 exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm,
             exactMaximumSimulationCoefficientOneNorm:
                 exactInterpolation.exactMaximumSimulationCoefficientOneNorm,
+            exactMaximumJointSimulationCoefficientOneNormSum:
+                exactInterpolation.exactMaximumJointSimulationCoefficientOneNormSum,
+            jointTargetSecurityDominantNoiseReserveBitLength: (
+                jointDominantFactor - 1n
+            ).toString(2).length,
             exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength:
                 requiredDominantNoiseBudgetBitLength(
                     80,
