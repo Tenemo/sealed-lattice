@@ -10,6 +10,7 @@ import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.j
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import {
     exactRankingModelConstants,
@@ -37,6 +38,7 @@ import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-co
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
+import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 const formatCount = (value: bigint | number): string =>
@@ -70,6 +72,8 @@ export const renderDocumentationCensus = (): string => {
     const participantVisits = compileParticipantVisitDependencyCensus();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
+    const wideChallengeCompiler = compileWideChallengeCompilerCensus();
+    const commonAgreement = compileCommonAgreementDegreeCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1250,6 +1254,134 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Common-agreement degree census',
+        '',
+        'The direct ordinary-IOP argument uses one common agreement set for every original, shifted, and virtual oracle. Individual proximity is insufficient. The candidate stays inside the proven unique-decoding FRI radius and requires more common points than the complete degree and rational-identity bounds.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Systematic domain size',
+                    formatCount(commonAgreement.systematicSize),
+                ],
+                [
+                    'Reed-Solomon code dimension',
+                    formatCount(commonAgreement.codeDimension),
+                ],
+                [
+                    'Evaluation domain size',
+                    formatCount(commonAgreement.domainSize),
+                ],
+                [
+                    'Distance numerator',
+                    formatCount(commonAgreement.distanceNumerator),
+                ],
+                [
+                    'Distance denominator',
+                    formatCount(commonAgreement.distanceDenominator),
+                ],
+                [
+                    'Minimum common agreement points',
+                    formatCount(commonAgreement.minimumAgreementPoints),
+                ],
+                [
+                    'Conservative degree-shift identity degree',
+                    formatCount(commonAgreement.maximumShiftIdentityDegree),
+                ],
+                [
+                    'Largest relation-identity degree in the word profile',
+                    formatCount(commonAgreement.maximumRelationIdentityDegree),
+                ],
+                [
+                    'Independent query pairs',
+                    formatCount(commonAgreement.queries),
+                ],
+                [
+                    'Joint masking dimension',
+                    formatCount(commonAgreement.maskDimension),
+                ],
+            ],
+        ),
+        '',
+        '## Wide-challenge compiler census',
+        '',
+        'Conditional soundness screen for the full word-layout shape under the prefix-BCS lemma. The underlying IOP must separately establish its common-agreement and algebraic transition bounds, and the implementation must meet the charged query, verification, and role budgets. This does not include setup privacy, proof zero knowledge, lattice assumptions, fixed-function assumptions, or phone qualification.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Field elements in the largest verifier message',
+                    formatCount(wideChallengeCompiler.fieldElements),
+                ],
+                [
+                    'Base-field samples in that message',
+                    formatCount(wideChallengeCompiler.baseFieldSamples),
+                ],
+                [
+                    'Complete verifier-message bytes',
+                    formatCount(wideChallengeCompiler.challengeBytes),
+                ],
+                [
+                    'Merkle and message-root tag bits',
+                    formatCount(wideChallengeCompiler.tagBits),
+                ],
+                [
+                    'Leaf and message salt bits',
+                    formatCount(wideChallengeCompiler.saltBits),
+                ],
+                [
+                    'Relative hash-balance exponent',
+                    formatCount(wideChallengeCompiler.relativeBalanceBits),
+                ],
+                [
+                    'Non-salt input bit-length bound',
+                    formatCount(wideChallengeCompiler.maximumNonSaltInputBits),
+                ],
+                [
+                    'Committed-node budget per proof',
+                    formatCount(wideChallengeCompiler.committedNodeBudget),
+                ],
+                [
+                    'Conditional Merkle-privacy exponent after the role union',
+                    formatCount(wideChallengeCompiler.merklePrivacyBits),
+                ],
+                [
+                    'Programmed verifier-message budget',
+                    formatCount(wideChallengeCompiler.programmedMessageBudget),
+                ],
+                [
+                    'Conditional adaptive-reprogramming exponent',
+                    formatCount(wideChallengeCompiler.reprogrammingBits),
+                ],
+                [
+                    'Independent final query pairs',
+                    formatCount(wideChallengeCompiler.queryCount),
+                ],
+                [
+                    'Adversarial oracle-query budget',
+                    formatCount(wideChallengeCompiler.adversaryQueries),
+                ],
+                [
+                    'Verification and expansion oracle budget',
+                    formatCount(wideChallengeCompiler.verificationBudget),
+                ],
+                [
+                    'Queries after prefix and role routing',
+                    formatCount(wideChallengeCompiler.chargedQueries),
+                ],
+                [
+                    'Proof-role union budget',
+                    formatCount(wideChallengeCompiler.roleBudget),
+                ],
+                [
+                    'Conditional QROM soundness exponent',
+                    formatCount(wideChallengeCompiler.failureBits),
                 ],
             ],
         ),

@@ -29,6 +29,8 @@ describe('documentation census generator', () => {
             '## Certificate custody census',
             '## Publication cut census',
             '## Common-matrix sampling census',
+            '## Wide-challenge compiler census',
+            '## Common-agreement degree census',
             '## Wide sharing and release lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
