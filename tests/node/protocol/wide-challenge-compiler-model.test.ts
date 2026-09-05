@@ -13,9 +13,9 @@ describe('wide verifier messages and short authentication tags', () => {
             baseFieldSamples: 387,
             challengeBytes: 16384,
         });
-        expect(wideChallengeLayout(1177, 432, 18240)).toEqual({
-            fieldElements: 2355,
-            baseFieldSamples: 7065,
+        expect(wideChallengeLayout(1172, 704, 18240)).toEqual({
+            fieldElements: 2345,
+            baseFieldSamples: 7035,
             challengeBytes: 262144,
         });
     });

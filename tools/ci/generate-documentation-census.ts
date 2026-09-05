@@ -1427,7 +1427,11 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(commonAgreement.minimumAgreementPoints),
                 ],
                 [
-                    'Conservative degree-shift identity degree',
+                    'Smallest declared degree in the shifted stack',
+                    formatCount(commonAgreement.minimumDeclaredDegree),
+                ],
+                [
+                    'Largest degree-shift identity degree',
                     formatCount(commonAgreement.maximumShiftIdentityDegree),
                 ],
                 [

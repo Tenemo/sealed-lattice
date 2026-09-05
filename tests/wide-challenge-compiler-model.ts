@@ -1,4 +1,5 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
 export const wideChallengeLayout = (
@@ -62,7 +63,22 @@ export const compileWideChallengeCompilerCensus = () => {
     const queryCount = agreement.queries;
     // Conditional full word-layout profile. Its complete emitted operator
     // still must establish the algebraic-event bounds below.
-    const layout = wideChallengeLayout(1177, queryCount, 18240);
+    const relation = compileSetupContributionRelationCensus();
+    const originalOracles =
+        relation.wordColumns +
+        relation.booleanColumns +
+        relation.lookupEntries +
+        4;
+    const virtualOracles =
+        relation.booleanColumns +
+        relation.disjointPairs +
+        relation.lookupEntries +
+        2;
+    const layout = wideChallengeLayout(
+        originalOracles + virtualOracles,
+        queryCount,
+        (relation.lookupEntries + 2) * 48,
+    );
     const density = jointModuloDensityBound(
         prime,
         256,
