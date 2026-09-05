@@ -22,6 +22,8 @@ describe('documentation census generator', () => {
             '## Polynomial oracle boundary census',
             '## Recipient-key uniqueness census',
             '## Early commitment extraction census',
+            '## Bounded polynomial proof census',
+            '## Small-limb proof-field census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
             '## Threshold release flooding bound',

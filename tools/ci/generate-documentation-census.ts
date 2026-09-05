@@ -2,6 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
+import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
+import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import {
@@ -22,6 +24,7 @@ import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
+import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -43,6 +46,9 @@ const table = (
 export const renderDocumentationCensus = (): string => {
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
     const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
+    const boundedLinearProof = compileBoundedLinearPolynomialProofCensus();
+    const boundedLookup = compileBoundedLookupCensus();
+    const smallLimbProofField = compileSmallLimbProofFieldCensus();
     const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
     const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
@@ -990,6 +996,141 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(
                         recipientKeyUniqueness.uniformMatrixFailureExponent,
                     ),
+                ],
+            ],
+        ),
+        '',
+        '## Bounded polynomial proof census',
+        '',
+        'Finite encoded-proof and lookup experiments. Degree membership is checked by complete interpolation in the linear experiment. These counts do not instantiate a committed ordinary IOP.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Linear experiment field order',
+                    formatCount(boundedLinearProof.prime),
+                ],
+                [
+                    'Systematic domain size',
+                    formatCount(boundedLinearProof.systematicSize),
+                ],
+                [
+                    'Evaluation domain size',
+                    formatCount(boundedLinearProof.domainSize),
+                ],
+                [
+                    'Mask coefficient count',
+                    formatCount(boundedLinearProof.maskDimension),
+                ],
+                [
+                    'Maximum witness degree',
+                    formatCount(boundedLinearProof.witnessDegree),
+                ],
+                [
+                    'Maximum masked-sum degree',
+                    formatCount(boundedLinearProof.sumDegree),
+                ],
+                [
+                    'Accepted valid challenge pairs',
+                    formatCount(boundedLinearProof.trueAcceptanceCount),
+                ],
+                [
+                    'Accepted invalid challenge pairs',
+                    formatCount(boundedLinearProof.falseAcceptanceCount),
+                ],
+                [
+                    'Accepting simulated challenge pairs',
+                    formatCount(
+                        boundedLinearProof.simulatedFalseAcceptanceCount,
+                    ),
+                ],
+                [
+                    'False range-quotient table degree',
+                    formatCount(boundedLinearProof.invalidNormTableDegree),
+                ],
+                [
+                    'Tampered witness table degree',
+                    formatCount(boundedLinearProof.tamperedWitnessTableDegree),
+                ],
+                [
+                    'Lookup base-field characteristic',
+                    formatCount(boundedLookup.basePrime),
+                ],
+                [
+                    'Lookup extension degree',
+                    formatCount(boundedLookup.extensionDegree),
+                ],
+                [
+                    'Lookup challenge count',
+                    formatCount(boundedLookup.challengeCount),
+                ],
+                [
+                    'Valid lookup acceptances',
+                    formatCount(boundedLookup.validAcceptances),
+                ],
+                [
+                    'Targeted invalid lookup acceptances',
+                    formatCount(boundedLookup.invalidAcceptances),
+                ],
+                [
+                    'Invalid acceptances when the occurrence count wraps',
+                    formatCount(boundedLookup.characteristicWrapAcceptances),
+                ],
+            ],
+        ),
+        '',
+        '## Small-limb proof-field census',
+        '',
+        'Proth-certified base field and certified cubic extension for the lookup direction. Large-modulus equations require a separate integer limb-and-carry compiler with complete bounds.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Base-field modulus',
+                    formatCount(smallLimbProofField.modulus),
+                ],
+                ['Word radix', formatCount(smallLimbProofField.wordRadix)],
+                [
+                    'Reduction offset',
+                    formatCount(smallLimbProofField.reductionOffset),
+                ],
+                [
+                    'Proth odd factor',
+                    formatCount(smallLimbProofField.oddFactor),
+                ],
+                [
+                    'Proth witness',
+                    formatCount(smallLimbProofField.prothWitness),
+                ],
+                [
+                    'Cubic nonresidue',
+                    formatCount(smallLimbProofField.cubicNonresidue),
+                ],
+                [
+                    'Field bits',
+                    formatCount(smallLimbProofField.modulusBitLength),
+                ],
+                [
+                    'Packed base-field bytes',
+                    formatCount(
+                        smallLimbProofField.packedFieldElementByteLength,
+                    ),
+                ],
+                [
+                    'Packed extension-field bytes',
+                    formatCount(
+                        smallLimbProofField.packedExtensionElementByteLength,
+                    ),
+                ],
+                [
+                    'Certified transform order',
+                    formatCount(smallLimbProofField.transformOrder),
+                ],
+                [
+                    'Certified transform root',
+                    formatCount(smallLimbProofField.transformRoot),
                 ],
             ],
         ),
