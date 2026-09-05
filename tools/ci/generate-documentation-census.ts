@@ -21,6 +21,7 @@ import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embe
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
+import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
     createFalseBinaryRelationTable,
@@ -78,6 +79,7 @@ export const renderDocumentationCensus = (): string => {
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
+    const linkedRelease = compileLinkedReleaseRelationCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1258,6 +1260,58 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Linked release relation census',
+        '',
+        'The recipient-key, encrypted aggregate-decryption, and dense partial-release equations use the same hidden share and original recipient secret. These are exact integer-lifting and layout values; the emitted proof and target capability remain separate.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Hidden aggregate-share bits',
+                    formatCount(linkedRelease.shareBits),
+                ],
+                [
+                    'Aggregate decoding-error bits',
+                    formatCount(linkedRelease.decodingErrorBits),
+                ],
+                [
+                    'Aggregate decoding-quotient bits',
+                    formatCount(linkedRelease.decodingQuotientBits),
+                ],
+                [
+                    'Aggregate decoding-carry bits',
+                    formatCount(linkedRelease.decodingCarryBits),
+                ],
+                [
+                    'Honest decoding quotient bound',
+                    formatCount(linkedRelease.trueDecodingQuotientBound),
+                ],
+                [
+                    'Honest decoding carry bound',
+                    formatCount(linkedRelease.trueDecodingCarryBound),
+                ],
+                [
+                    'Accepted decoding residual bound',
+                    formatCount(linkedRelease.decodingResidualBound),
+                ],
+                ['Word columns', formatCount(linkedRelease.wordColumns)],
+                [
+                    'Additional narrow memberships',
+                    formatCount(linkedRelease.narrowMemberships),
+                ],
+                ['Boolean columns', formatCount(linkedRelease.booleanColumns)],
+                [
+                    'Single-entry inverse columns',
+                    formatCount(linkedRelease.lookupEntries),
+                ],
+                [
+                    'Full-profile affine rows',
+                    formatCount(linkedRelease.affineRows),
                 ],
             ],
         ),

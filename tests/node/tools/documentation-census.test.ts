@@ -33,6 +33,7 @@ describe('documentation census generator', () => {
             '## Common-agreement degree census',
             '## Exact RNS arithmetic census',
             '## Setup contribution operator census',
+            '## Linked release relation census',
             '## Wide sharing and release lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
