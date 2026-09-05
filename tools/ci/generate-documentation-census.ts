@@ -2,6 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
@@ -80,6 +82,7 @@ export const renderDocumentationCensus = (): string => {
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
     const linkedRelease = compileLinkedReleaseRelationCensus();
+    const ballotRelation = compileBallotEncryptionRelationCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1260,6 +1263,85 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Linked ballot encryption census',
+        '',
+        'The model links a complete bounded score vector to the exact FHE comparison-window packing, literal FHE score tail, and auxiliary score encryption. Every integer quotient, carry, and centered plaintext endpoint is explicit. The auxiliary scheme is for simulator input recovery; it has no participant decryption action.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Auxiliary ring degree',
+                    formatCount(auxiliaryInputEncryptionParameters.degree),
+                ],
+                [
+                    'Auxiliary ciphertext modulus',
+                    formatCount(auxiliaryInputEncryptionParameters.modulus),
+                ],
+                [
+                    'Auxiliary plaintext modulus',
+                    formatCount(
+                        auxiliaryInputEncryptionParameters.plaintextModulus,
+                    ),
+                ],
+                [
+                    'Auxiliary plaintext scale',
+                    formatCount(auxiliaryInputEncryptionParameters.scale),
+                ],
+                [
+                    'Auxiliary secret and ephemeral support',
+                    formatCount(auxiliaryInputEncryptionParameters.support),
+                ],
+                [
+                    'Accepted auxiliary encryption noise',
+                    formatCount(ballotRelation.auxiliaryNoiseBound),
+                ],
+                ['FHE integer limbs', formatCount(ballotRelation.limbs)],
+                [
+                    'Honest FHE encryption quotient bound',
+                    formatCount(ballotRelation.trueQuotientBound),
+                ],
+                [
+                    'Honest FHE encryption carry bound',
+                    formatCount(ballotRelation.trueCarryBound),
+                ],
+                [
+                    'Accepted FHE limb residual bound',
+                    formatCount(ballotRelation.residualBound),
+                ],
+                [
+                    'Honest packing quotient bound',
+                    formatCount(ballotRelation.packingQuotientBound),
+                ],
+                [
+                    'Accepted packing residual bound',
+                    formatCount(ballotRelation.packingResidualBound),
+                ],
+                [
+                    'Accepted auxiliary residual bound',
+                    formatCount(ballotRelation.auxiliaryResidualBound),
+                ],
+                ['Word columns', formatCount(ballotRelation.wordColumns)],
+                ['Boolean columns', formatCount(ballotRelation.booleanColumns)],
+                [
+                    'Additional quadratic constraints',
+                    formatCount(ballotRelation.additionalQuadraticConstraints),
+                ],
+                [
+                    'Additional narrow memberships',
+                    formatCount(ballotRelation.narrowMemberships),
+                ],
+                [
+                    'Single-entry inverse columns',
+                    formatCount(ballotRelation.lookupEntries),
+                ],
+                [
+                    'Full-profile affine rows',
+                    formatCount(ballotRelation.affineRows),
                 ],
             ],
         ),

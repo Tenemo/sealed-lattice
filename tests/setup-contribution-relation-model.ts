@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     fingerprintSignedLimbs,
@@ -56,7 +57,7 @@ const prime = compileSmallLimbProofFieldCensus().modulus;
 const sharingParameters = compileWideShareLiftingCensus();
 const shareScale = sharingParameters.scale;
 const shareModulus = sharingParameters.modulus;
-const auxiliaryModulus = 257n * 101n * (1n << 20n) + 1n;
+const auxiliaryModulus = auxiliaryInputEncryptionParameters.modulus;
 const modulo = (value: bigint, modulus: bigint) =>
     ((value % modulus) + modulus) % modulus;
 const center = (value: bigint, modulus: bigint) => {
@@ -835,7 +836,7 @@ export const compileSetupContributionRelationCensus = () => {
     ).length;
     const supportRows = 2 * disjointPairs;
     const degree = fixedModulusBfvInputs.polynomialDegree;
-    const auxiliaryDegree = 4096n;
+    const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
     const affineRows = model.equations.reduce(
         (sum, equation) =>
             sum +

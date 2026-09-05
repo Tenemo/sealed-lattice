@@ -1,3 +1,4 @@
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
@@ -29,8 +30,8 @@ export const compileCommonMatrixSamplingCensus = () => {
     const fhePolynomialCount = (2n + 1n) * gadgetLength;
     const sharingModulus =
         compileSmallLimbProofFieldCensus().modulus * 998244353n;
-    const auxiliaryDegree = 4096n;
-    const auxiliaryModulus = 257n * 101n * (1n << 20n) + 1n;
+    const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
+    const auxiliaryModulus = auxiliaryInputEncryptionParameters.modulus;
     const coefficientCount =
         fhePolynomialCount * degree + degree + auxiliaryDegree;
     const distanceUpperNumerator =
