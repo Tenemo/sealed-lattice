@@ -4,7 +4,7 @@ import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-m
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 describe('wide sharing and release integer lifting', () => {
-    it('preserves byte-aligned sharing endpoints and independently decrypts each encrypted evaluation', () => {
+    it('preserves power-of-two sharing endpoints and independently decrypts each encrypted evaluation', () => {
         const census = compileWideShareLiftingCensus();
         expect(census.checkedEquations).toBe(32 * 8 * 2);
         expect(census.scale).toBe(119n * (1n << 23n) + 1n);

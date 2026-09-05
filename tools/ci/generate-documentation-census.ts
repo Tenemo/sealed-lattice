@@ -1184,6 +1184,18 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(wideShareLifting.sharingRadius),
                 ],
                 [
+                    'Nonconstant sharing coefficient bits',
+                    formatCount(wideShareLifting.sharingCoefficientBits),
+                ],
+                [
+                    'Share-encryption secret support weight',
+                    formatCount(wideShareLifting.encryptionSupportWeight),
+                ],
+                [
+                    'Shared FHE secret support weight',
+                    formatCount(wideShareLifting.sharedSecretSupportWeight),
+                ],
+                [
                     'Joint sharing-translation numerator',
                     formatCount(wideShareLifting.privacyNumerator),
                 ],
@@ -1310,6 +1322,10 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Gadget coordinates',
                     formatCount(fixedModulusBfv.gadgetLength),
+                ],
+                [
+                    'Comparison block width',
+                    formatCount(fixedModulusBfv.comparisonBlockWidth),
                 ],
                 [
                     'Ciphertext multiplications',

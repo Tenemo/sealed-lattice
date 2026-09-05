@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict';
 
+import { evaluateOddPolynomialBlocks } from '#tests/odd-polynomial-block-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 
-const fixedModulusBfvInputs = {
+export const fixedModulusBfvInputs = {
     participantCount: 10n,
     polynomialDegree: 65536n,
     plaintextSubringDegree: 32768n,
     plaintextModulus: 65537n,
     ciphertextModulus: 65537n * 65319n * (1n << 832n) + 1n,
     releaseModulus: 65537n * 65445n * (1n << 160n) + 1n,
-    secretSupportWeight: 256n,
+    secretSupportWeight: 1024n,
     errorBound: 64n,
     gadgetBase: 1n << 144n,
     optionCount: 10,
+    comparisonBlockWidth: 16,
     statisticalBits: 96,
 } as const;
 
@@ -25,6 +27,7 @@ type NoiseParameters = Readonly<{
     secretSupportWeight: bigint;
     errorBound: bigint;
     gadgetBase: bigint;
+    quantization?: 'scale-then-round' | 'round-then-scale';
 }>;
 type BfvNoiseValue = Readonly<{ error: bigint; depth: number }>;
 
@@ -67,7 +70,8 @@ export const createFixedModulusBfvNoiseModel = (
         errorBound,
         gadgetBase,
     } = parameters;
-    assert.equal(ciphertextModulus % plaintextModulus, 1n);
+    assert.equal(ciphertextModulus % 2n, 1n);
+    assert.equal(plaintextModulus % 2n, 1n);
     assert.equal(polynomialDegree % plaintextSubringDegree, 0n);
     const secretOneNorm = participantCount * secretSupportWeight;
     const plaintextMaximumNorm = plaintextModulus / 2n;
@@ -75,7 +79,13 @@ export const createFixedModulusBfvNoiseModel = (
     const plaintextProductMaximumNorm = plaintextOneNorm * plaintextMaximumNorm;
     const plaintextProductQuotient =
         (plaintextProductMaximumNorm + plaintextMaximumNorm) / plaintextModulus;
-    const delta = (ciphertextModulus - 1n) / plaintextModulus;
+    const delta =
+        (ciphertextModulus + plaintextModulus / 2n) / plaintextModulus;
+    const scaleRemainder = ciphertextModulus - plaintextModulus * delta;
+    const remainderMagnitude =
+        scaleRemainder < 0n ? -scaleRemainder : scaleRemainder;
+    const roundingFactor =
+        parameters.quantization === 'round-then-scale' ? plaintextModulus : 1n;
     let gadgetLength = 0n;
     for (let power = 1n; power < ciphertextModulus; power *= gadgetBase)
         gadgetLength++;
@@ -97,7 +107,9 @@ export const createFixedModulusBfvNoiseModel = (
     };
     const requireDecodable = (value: BfvNoiseValue): BfvNoiseValue => {
         assert.ok(
-            2n * (plaintextModulus * value.error + plaintextMaximumNorm) <
+            2n *
+                (plaintextModulus * value.error +
+                    remainderMagnitude * plaintextMaximumNorm) <
                 ciphertextModulus,
             'The accepted error support exceeds the BFV decoding cell.',
         );
@@ -106,13 +118,16 @@ export const createFixedModulusBfvNoiseModel = (
     const add = (left: BfvNoiseValue, right: BfvNoiseValue): BfvNoiseValue => {
         counts.additions++;
         return requireDecodable({
-            error: left.error + right.error + 1n,
+            error: left.error + right.error + remainderMagnitude,
             depth: Math.max(left.depth, right.depth),
         });
     };
     const addPlaintext = (value: BfvNoiseValue): BfvNoiseValue => {
         counts.plaintextAdditions++;
-        return requireDecodable({ ...value, error: value.error + 1n });
+        return requireDecodable({
+            ...value,
+            error: value.error + remainderMagnitude,
+        });
     };
     const multiply = (
         left: BfvNoiseValue,
@@ -127,18 +142,23 @@ export const createFixedModulusBfvNoiseModel = (
         const leftLift = phaseLift(left);
         const rightLift = phaseLift(right);
         const numerator =
-            (ciphertextModulus - 1n) *
+            (ciphertextModulus - scaleRemainder) *
                 plaintextOneNorm *
                 (left.error + right.error) +
             plaintextModulus * polynomialDegree * left.error * right.error +
-            ciphertextModulus * (leftLift + rightLift) * plaintextOneNorm +
+            ciphertextModulus *
+                remainderMagnitude *
+                (leftLift + rightLift) *
+                plaintextOneNorm +
             ciphertextModulus *
                 plaintextModulus *
                 polynomialDegree *
                 (leftLift * right.error + rightLift * left.error) +
-            delta * plaintextProductMaximumNorm +
-            ciphertextModulus * plaintextProductQuotient +
-            (ciphertextModulus / 2n) * (secretOneNorm + 1n) ** 2n;
+            delta * remainderMagnitude * plaintextProductMaximumNorm +
+            ciphertextModulus * remainderMagnitude * plaintextProductQuotient +
+            roundingFactor *
+                (ciphertextModulus / 2n) *
+                (secretOneNorm + 1n) ** 2n;
         return requireDecodable({
             error:
                 ceilingDivide(numerator, ciphertextModulus) +
@@ -152,15 +172,18 @@ export const createFixedModulusBfvNoiseModel = (
             ...value,
             error:
                 plaintextMaximumNorm * value.error +
-                (plaintextMaximumNorm ** 2n + plaintextMaximumNorm) /
-                    plaintextModulus,
+                remainderMagnitude *
+                    ((plaintextMaximumNorm ** 2n + plaintextMaximumNorm) /
+                        plaintextModulus),
         });
     };
     const multiplyPlaintext = (value: BfvNoiseValue): BfvNoiseValue => {
         counts.plaintextProducts++;
         return requireDecodable({
             ...value,
-            error: plaintextOneNorm * value.error + plaintextProductQuotient,
+            error:
+                plaintextOneNorm * value.error +
+                remainderMagnitude * plaintextProductQuotient,
         });
     };
     const rotate = (value: BfvNoiseValue): BfvNoiseValue => {
@@ -176,6 +199,7 @@ export const createFixedModulusBfvNoiseModel = (
         secretOneNorm,
         externalProductError,
         relinearizationError,
+        scaleRemainder,
         fresh: requireDecodable({
             error: (2n * secretOneNorm + 1n) * errorBound,
             depth: 0,
@@ -226,19 +250,17 @@ export const compileFixedModulusBfvCensus = () => {
             ),
         ),
     );
-    const power = powers(input);
-    const block = (last: number): BfvNoiseValue =>
-        sum(
-            Array.from({ length: (last + 1) / 2 }, (_, index) =>
-                model.multiplyScalar(power(1 + 2 * index)),
-            ),
-        );
     const comparison = model.addPlaintext(
-        sum([
-            block(63),
-            model.multiply(power(64), block(63)),
-            model.multiply(power(128), block(53)),
-        ]),
+        evaluateOddPolynomialBlocks(
+            input,
+            2 * (10 - 1) * Number(parameters.participantCount) + 1,
+            parameters.comparisonBlockWidth,
+            {
+                add: model.add,
+                multiply: model.multiply,
+                weight: model.multiplyScalar,
+            },
+        ),
     );
     let shifted = comparison;
     let rank = comparison;

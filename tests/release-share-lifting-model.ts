@@ -5,6 +5,9 @@ import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-
 
 const field = compileSmallLimbProofFieldCensus().modulus;
 const parameters = compileFixedModulusBfvCensus();
+const noiseBits = parameters.releaseNoiseBits;
+const noiseRadius = 1n << BigInt(noiseBits - 1);
+const noiseWordCount = Math.ceil(noiseBits / 48);
 const modulus = parameters.releaseModulus,
     radix = 1n << 48n,
     carryBound = 1n << 71n;
@@ -19,7 +22,7 @@ const trueCarryBound =
     1n;
 const trueQuotientBound =
     (4n * parameters.polynomialDegree * (modulus / 2n) * (1n << 119n) +
-        4n * (1n << 143n) +
+        4n * noiseRadius +
         modulus / 2n) /
     modulus;
 assert.ok(residualBound < field);
@@ -82,7 +85,7 @@ export const compileReleaseShareLiftingCensus = () => {
     const random = (): bigint =>
         (state =
             (state * 6364136223846793005n + 1442695040888963407n) &
-            ((1n << 160n) - 1n));
+            ((1n << 192n) - 1n));
 
     let checkedEquations = 0,
         maximumObservedCarry = 0n,
@@ -97,13 +100,13 @@ export const compileReleaseShareLiftingCensus = () => {
         );
         const noise = zero().map(() =>
             trial === 0
-                ? -(1n << 143n)
+                ? -noiseRadius
                 : trial === 1
-                  ? (1n << 143n) - 1n
-                  : (random() % (1n << 144n)) - (1n << 143n),
+                  ? noiseRadius - 1n
+                  : (random() % (2n * noiseRadius)) - noiseRadius,
         );
         const publicValue = zero().map(() =>
-            center((random() * modulus) / (1n << 160n)),
+            center((random() * modulus) / (1n << 192n)),
         );
         const raw = product(publicValue, share).map(
             (value, index) => 4n * value + 4n * noise[index],
@@ -114,7 +117,9 @@ export const compileReleaseShareLiftingCensus = () => {
             return (value - partial[index]) / modulus;
         });
         const shareDigits = share.map((value) => privateDigits(value, 120));
-        const noiseDigits = noise.map((value) => privateDigits(value, 144));
+        const noiseDigits = noise.map((value) =>
+            privateDigits(value, noiseBits),
+        );
         const quotientDigits = quotient.map((value) =>
             privateDigits(value, 144),
         );
@@ -124,7 +129,9 @@ export const compileReleaseShareLiftingCensus = () => {
                 let residual =
                     carry[position] -
                     (limb < 4 ? publicDigit(partial[position], limb) : 0n) +
-                    (limb < 3 ? 4n * noiseDigits[position][limb] : 0n);
+                    (limb < noiseWordCount
+                        ? 4n * noiseDigits[position][limb]
+                        : 0n);
                 for (let publicLimb = 0; publicLimb < 4; publicLimb++) {
                     const privateLimb = limb - publicLimb;
                     if (privateLimb < 0 || privateLimb >= 3) continue;

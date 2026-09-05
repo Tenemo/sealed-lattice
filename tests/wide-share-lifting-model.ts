@@ -1,50 +1,59 @@
 import assert from 'node:assert/strict';
 
-import { verifyProthCertificate } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    fixedModulusBfvInputs,
+    verifyProthCertificate,
+} from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
 const proofPrime = compileSmallLimbProofFieldCensus().modulus;
 const scale = verifyProthCertificate(119n, 23, 3n);
 const modulus = proofPrime * scale,
-    radix = 1n << 96n,
-    sharingRadius = 1n << 111n;
+    radix = 1n << 96n;
 const degree = 8,
-    participantCount = 10n,
-    corruptCount = 3,
-    productionWeight = 256n,
+    participantCount = fixedModulusBfvInputs.participantCount,
+    corruptCount = Number((participantCount - 1n) / 3n),
+    encryptionSupportWeight = 256n,
     errorBound = 64n;
+const sharedSecretSupportWeight = fixedModulusBfvInputs.secretSupportWeight;
+const privacyNumerator =
+    participantCount *
+    ((1n << BigInt(corruptCount)) - 1n) *
+    2n *
+    sharedSecretSupportWeight;
+assert.ok(privacyNumerator > 0n);
+const sharingCoefficientBits =
+    fixedModulusBfvInputs.statisticalBits +
+    (privacyNumerator - 1n).toString(2).length;
+const sharingRadius = 1n << BigInt(sharingCoefficientBits - 1);
 const quotientBound = 1n << 15n,
     carryBound = 1n << 31n;
 const residualBound =
-    (productionWeight + quotientBound + 2n) * (radix - 1n) +
+    (encryptionSupportWeight + quotientBound + 2n) * (radix - 1n) +
     scale * ((BigInt(corruptCount) * radix) / 2n + 1n) +
     errorBound +
     carryBound * (radix + 1n);
 assert.ok(residualBound < proofPrime);
 const trueQuotientBound =
-    ((productionWeight + 1n) * (modulus / 2n) +
+    ((encryptionSupportWeight + 1n) * (modulus / 2n) +
         scale * (1n + BigInt(corruptCount) * sharingRadius) +
         errorBound) /
     modulus;
 const trueCarryBound =
-    ((productionWeight + trueQuotientBound + 2n) * (radix - 1n) +
+    ((encryptionSupportWeight + trueQuotientBound + 2n) * (radix - 1n) +
         scale * ((BigInt(corruptCount) * radix) / 2n + 1n) +
         errorBound) /
         (radix - 1n) +
     1n;
 assert.ok(trueQuotientBound < quotientBound);
 assert.ok(trueCarryBound < carryBound);
-const privacyNumerator =
-    participantCount *
-    ((1n << BigInt(corruptCount)) - 1n) *
-    2n *
-    productionWeight;
 assert.ok(privacyNumerator << 96n <= 2n * sharingRadius);
 const aggregateSharingMaximum =
     participantCount * (1n + BigInt(corruptCount) * sharingRadius);
 assert.ok(2n * aggregateSharingMaximum < proofPrime);
 assert.ok(
-    participantCount * (2n * productionWeight + 1n) * errorBound < 1n << 23n,
+    participantCount * (2n * encryptionSupportWeight + 1n) * errorBound <
+        1n << 23n,
 );
 assert.ok(2n * (1n << 23n) < scale);
 type Polynomial = readonly bigint[];
@@ -168,7 +177,7 @@ export const compileWideShareLiftingCensus = () => {
         coefficients.forEach((coefficient, index) =>
             coefficient.forEach((value, position) => {
                 signedRange(low[index][position], 96);
-                signedRange(high[index][position], 16);
+                signedRange(high[index][position], sharingCoefficientBits - 96);
                 assert.equal(
                     low[index][position] +
                         radix * high[index][position] +
@@ -259,7 +268,9 @@ export const compileWideShareLiftingCensus = () => {
         modulus,
         radix,
         sharingRadius,
-        productionWeight,
+        encryptionSupportWeight,
+        sharedSecretSupportWeight,
+        sharingCoefficientBits,
         errorBound,
         residualBound,
         trueQuotientBound,
