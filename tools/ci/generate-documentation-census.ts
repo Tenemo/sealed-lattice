@@ -4,6 +4,7 @@ import path from 'node:path';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
+import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import {
@@ -48,6 +49,7 @@ export const renderDocumentationCensus = (): string => {
     const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
     const boundedLinearProof = compileBoundedLinearPolynomialProofCensus();
     const boundedLookup = compileBoundedLookupCensus();
+    const byteCarryLifting = compileByteCarryLiftingCensus();
     const smallLimbProofField = compileSmallLimbProofFieldCensus();
     const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
@@ -1076,6 +1078,58 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Invalid acceptances when the occurrence count wraps',
                     formatCount(boundedLookup.characteristicWrapAcceptances),
+                ],
+            ],
+        ),
+        '',
+        '## Byte and carry lifting census',
+        '',
+        'The scalar residual bound covers every accepted signed quotient and carry for the experimental FHE key equation. The finite ring checks positive integer rows and a false large-modulus equation that becomes an alias without the carry bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Finite experiment ring degree',
+                    formatCount(byteCarryLifting.degree),
+                ],
+                [
+                    'Public coefficient limb count',
+                    formatCount(byteCarryLifting.limbCount),
+                ],
+                ['Limb radix', formatCount(byteCarryLifting.radix)],
+                [
+                    'Signed quotient magnitude bound',
+                    formatCount(byteCarryLifting.quotientBound),
+                ],
+                [
+                    'Signed carry magnitude bound',
+                    formatCount(byteCarryLifting.carryBound),
+                ],
+                [
+                    'Maximum accepted per-limb residual bound',
+                    formatCount(byteCarryLifting.residualBound),
+                ],
+                ['Proof-field modulus', formatCount(byteCarryLifting.field)],
+                [
+                    'Positive integer equations checked',
+                    formatCount(byteCarryLifting.positiveIntegerEquations),
+                ],
+                [
+                    'Maximum carry in finite positive cases',
+                    formatCount(byteCarryLifting.maximumCarry),
+                ],
+                [
+                    'Maximum quotient in finite positive cases',
+                    formatCount(byteCarryLifting.maximumQuotient),
+                ],
+                [
+                    'Carry required by the field alias',
+                    formatCount(byteCarryLifting.largestCheatingCarry),
+                ],
+                [
+                    'Out-of-range alias carries',
+                    formatCount(byteCarryLifting.outOfRangeCarries),
                 ],
             ],
         ),

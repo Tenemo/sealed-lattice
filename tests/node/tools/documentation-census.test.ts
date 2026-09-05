@@ -24,6 +24,7 @@ describe('documentation census generator', () => {
             '## Early commitment extraction census',
             '## Bounded polynomial proof census',
             '## Small-limb proof-field census',
+            '## Byte and carry lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
             '## Threshold release flooding bound',
