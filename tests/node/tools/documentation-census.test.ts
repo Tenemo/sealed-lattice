@@ -35,6 +35,7 @@ describe('documentation census generator', () => {
             '## Setup contribution operator census',
             '## Linked release relation census',
             '## Linked ballot encryption census',
+            '## Sponge-path extraction census',
             '## Wide sharing and release lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',

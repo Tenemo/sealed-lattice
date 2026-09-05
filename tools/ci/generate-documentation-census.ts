@@ -39,6 +39,7 @@ import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resour
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -83,6 +84,7 @@ export const renderDocumentationCensus = (): string => {
     const setupRelation = compileSetupContributionRelationCensus();
     const linkedRelease = compileLinkedReleaseRelationCensus();
     const ballotRelation = compileBallotEncryptionRelationCensus();
+    const spongePaths = compileSpongePathExtractionCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1263,6 +1265,28 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Sponge-path extraction census',
+        '',
+        'The finite model checks change counts of the shortest complete sponge-path label on injective compression blocks, in both permutation directions and with truncated tags. It tests a proposed local commutator premise; it is not an online extraction theorem or a fixed-Keccak claim.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Forward compression blocks checked',
+                    formatCount(spongePaths.checkedForwardStars),
+                ],
+                [
+                    'Inverse compression blocks checked',
+                    formatCount(spongePaths.checkedInverseStars),
+                ],
+                [
+                    'Changed path labels across both directions',
+                    formatCount(spongePaths.changedPaths),
                 ],
             ],
         ),
