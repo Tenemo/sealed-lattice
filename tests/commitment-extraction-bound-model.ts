@@ -10,10 +10,11 @@ export const compileCommitmentExtractionBound = (participantCount: number) => {
     const corruptParticipantCount = Math.floor((participantCount - 1) / 3);
     const quantumQueryCount = 1n << 80n;
     const hashOutputBitLength = 512n;
-    // Each honest participant freezes at most one complete inventory in each
-    // of the seed and contribution commitment stages. Count losing views too.
-    const extractedCommitmentCount =
-        2n * BigInt(participantCount * corruptParticipantCount);
+    // Each honest participant freezes at most one contribution inventory.
+    // Fixed-suite public matrices require no seed opening. Count losing views.
+    const extractedCommitmentCount = BigInt(
+        participantCount * corruptParticipantCount,
+    );
     const denominator = 1n << hashOutputBitLength;
     // sqrt(2)<3/2 and e<87/32 imply 8*sqrt(2)<12 and 40*e^2<296.
     const traceDistanceNumerator =

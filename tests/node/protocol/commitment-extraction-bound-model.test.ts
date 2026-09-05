@@ -28,8 +28,7 @@ describe('early full-body commitment extraction bounds', () => {
             ).toBeGreaterThan(bound.denominator);
             expect(exponent).toBeGreaterThanOrEqual(163n);
             expect(bound.extractedCommitmentCount).toBe(
-                2n *
-                    BigInt(participantCount) *
+                BigInt(participantCount) *
                     BigInt(Math.floor((participantCount - 1) / 3)),
             );
         }

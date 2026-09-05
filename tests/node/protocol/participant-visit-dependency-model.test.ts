@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileParticipantVisitDependencyCensus,
+    traceCommonMatrixPreparationVisits,
     tracePreparationVisits,
     tracePublicationCompletionVisits,
 } from '#tests/participant-visit-dependency-model.js';
@@ -30,6 +31,8 @@ describe('participant visit dependency model', () => {
             remainingVisitBudget: 3,
             completionWitnessVisitCount: 13,
             completionWitnessExcess: 3,
+            commonMatrixCompletionWitnessVisitCount: 10,
+            interleavedCommonMatrixWitnessVisitCount: 15,
         });
     });
 
@@ -129,5 +132,43 @@ describe('participant visit dependency model', () => {
                 .filter(({ participant }) => participant >= 7)
                 .flatMap(({ actions }) => actions),
         ).not.toContain('target-signature');
+    });
+
+    it('charges the commitment opening and terminal retrieval in the shorter candidate', () => {
+        const visits = tracePublicationCompletionVisits(
+            traceCommonMatrixPreparationVisits,
+        );
+        const first = visits.filter(({ participant }) => participant === 0);
+        expect(first).toHaveLength(10);
+        expect(first.slice(0, 3).map(({ actions }) => actions)).toEqual([
+            ['registration-and-recipient-key'],
+            ['roster-confirmation-and-setup-commitment'],
+            ['setup-opening'],
+        ]);
+        expect(first[3].actions).toContain('ballot-publication-attempt');
+        expect(first[first.length - 1].actions).toEqual(['terminal-retrieval']);
+        const prefix = traceCommonMatrixPreparationVisits(10, []);
+        expect(prefix.flatMap(({ actions }) => actions)).not.toContain(
+            'ballot-publication-attempt',
+        );
+        expect(
+            prefix.filter(({ participant }) => participant === 0),
+        ).toHaveLength(3);
+    });
+
+    it('rejects eager per-envelope witnessing even after shortening preparation', () => {
+        const first = tracePublicationCompletionVisits(
+            traceCommonMatrixPreparationVisits,
+            true,
+        ).filter(({ participant }) => participant === 0);
+        expect(first).toHaveLength(15);
+        expect(first.slice(4, 9).map(({ actions }) => actions)).toEqual([
+            ['echo/1'],
+            ['echo/2'],
+            ['echo/3'],
+            ['echo/4'],
+            ['echo/5'],
+        ]);
+        expect(first.every(({ actions }) => actions.length > 0)).toBe(true);
     });
 });

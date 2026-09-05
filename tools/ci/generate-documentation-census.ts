@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
+import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
@@ -9,6 +10,7 @@ import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.j
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
+import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import {
     exactRankingModelConstants,
     compilePackedRankingEvaluationGraph,
@@ -66,6 +68,8 @@ export const renderDocumentationCensus = (): string => {
         compileThresholdKeyAggregationResourceLowerBound();
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
     const participantVisits = compileParticipantVisitDependencyCensus();
+    const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
+    const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1250,6 +1254,36 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
+        '## Common-matrix sampling census',
+        '',
+        'A fixed admitted suite label selects independent ideal-oracle words. Exact modulo-law enumeration checks the residue distance and the corresponding conditional full-oracle law. The complete bound includes all FHE, sharing, and auxiliary common polynomials. Caller-selected labels, adaptive parameter grinding, the fixed SHAKE implementation, and cryptographic security of the resulting keys are not established by this sampling calculation.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Sample bits per coefficient',
+                    formatCount(commonMatrixSampling.bitsPerCoefficient),
+                ],
+                [
+                    'FHE common polynomials',
+                    formatCount(commonMatrixSampling.fhePolynomialCount),
+                ],
+                [
+                    'Common coefficients across all roles',
+                    formatCount(commonMatrixSampling.coefficientCount),
+                ],
+                [
+                    'Expanded common-matrix sampling bytes',
+                    formatCount(commonMatrixSampling.expandedSampleBytes),
+                ],
+                [
+                    'Complete oracle-distribution distance exponent',
+                    formatCount(commonMatrixSampling.distanceBits),
+                ],
+            ],
+        ),
+        '',
         '## Publication cut census',
         '',
         "The freeze-and-union model retains complete ECHO certificates inside each honest READY sender's close report. The intersection census checks every named completed-publication quorum, close quorum, and maximum corruption set. It establishes the required honest reporter, not a complete protocol or a visit bound.",
@@ -1498,7 +1532,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Early commitment extraction census',
         '',
-        'DFMS21 Corollary 4.8 for full-body hash commitments, including losing frozen views in two commitment stages. The sum charges both simulator disturbance and valid-opening mismatch. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
+        'DFMS21 Corollary 4.8 for full-body contribution commitments, including losing frozen inventory views. Fixed-suite public matrices remove the former seed-commitment stage. The sum charges both simulator disturbance and valid-opening mismatch. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
         '',
         table(
             [
@@ -1753,6 +1787,28 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Completing witness visits above the mandatory ceiling',
                     formatCount(participantVisits.completionWitnessExcess),
+                ],
+                [
+                    'Fixed-suite preparation with eager publication, favorable witness',
+                    formatCount(
+                        participantVisits.commonMatrixCompletionWitnessVisitCount,
+                    ),
+                ],
+                [
+                    'Fixed-suite preparation with eager publication, interleaved ballots',
+                    formatCount(
+                        participantVisits.interleavedCommonMatrixWitnessVisitCount,
+                    ),
+                ],
+                [
+                    'Batched close candidate, conditional result-stage bound',
+                    formatCount(
+                        batchedPublicationVisits.maximumParticipantStages,
+                    ),
+                ],
+                [
+                    'Batched close candidate, conditional no-result-stage bound',
+                    formatCount(batchedPublicationVisits.maximumNoResultStages),
                 ],
                 [
                     'Preferred visit count',

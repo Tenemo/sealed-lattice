@@ -28,6 +28,7 @@ describe('documentation census generator', () => {
             '## Fixed-modulus BFV noise census',
             '## Certificate custody census',
             '## Publication cut census',
+            '## Common-matrix sampling census',
             '## Wide sharing and release lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
