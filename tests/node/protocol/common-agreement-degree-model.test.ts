@@ -48,8 +48,13 @@ describe('common agreement for degree-shifted oracles', () => {
             model.maximumDegree,
         );
         expect(model.agreement).toEqual(
-            Array.from({ length: 24 }, (_, index) => BigInt(index + 1)),
+            Array.from(
+                { length: 24 },
+                (_, index) => 28n ** BigInt(index) % 97n,
+            ),
         );
+        expect(28n ** 32n % 97n).toBe(1n);
+        expect(28n ** 16n % 97n).toBe(96n);
         expect(model.agreement.length).toBe(model.maximumShiftIdentityDegree);
         expect(2 * (32 - model.agreement.length)).toBeLessThan(
             32 - (model.maximumDegree + 1) + 1,

@@ -110,7 +110,10 @@ export const degreeShiftBoundaryCounterexample = () => {
     const prime = 97n,
         maximumDegree = 15,
         declaredDegree = 6;
-    const domain = Array.from({ length: 32 }, (_, index) => BigInt(index + 1));
+    const domain = Array.from(
+        { length: 32 },
+        (_, index) => 28n ** BigInt(index) % prime,
+    );
     let difference = [1n];
     for (const point of domain.slice(0, 24)) {
         const next = Array.from({ length: difference.length + 1 }, () => 0n);
