@@ -33,6 +33,7 @@ import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
@@ -76,6 +77,7 @@ export const renderDocumentationCensus = (): string => {
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
+    const setupRelation = compileSetupContributionRelationCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1256,6 +1258,38 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Setup contribution operator census',
+        '',
+        'The complete reduced-ring model exercises every key, encrypted-share, auxiliary-key, range, and support relation. Full-profile affine rows scale those same equation families to their actual ring degrees. Unused auxiliary padding has no public meaning and needs no zero constraint; support sums read only active coefficients.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Word columns', formatCount(setupRelation.wordColumns)],
+                ['Boolean columns', formatCount(setupRelation.booleanColumns)],
+                [
+                    'Additional narrow-error memberships',
+                    formatCount(setupRelation.errorColumns),
+                ],
+                [
+                    'Disjoint positive/negative pairs',
+                    formatCount(setupRelation.disjointPairs),
+                ],
+                [
+                    'Exact support-sum rows',
+                    formatCount(setupRelation.supportRows),
+                ],
+                [
+                    'Full-profile affine rows',
+                    formatCount(setupRelation.affineRows),
+                ],
+                [
+                    'Single-entry inverse columns',
+                    formatCount(setupRelation.lookupEntries),
                 ],
             ],
         ),
