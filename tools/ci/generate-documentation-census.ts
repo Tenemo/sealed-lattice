@@ -1038,6 +1038,31 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(boundedLinearProof.sumDegree),
                 ],
                 [
+                    'Independent sum-mask degree',
+                    formatCount(boundedLinearProof.sumMaskDegree),
+                ],
+                [
+                    'Short-mask joint views checked',
+                    formatCount(boundedLinearProof.shortMaskViews.checkedViews),
+                ],
+                [
+                    'Short-mask joint observation dimension',
+                    formatCount(
+                        boundedLinearProof.shortMaskViews.observationCount,
+                    ),
+                ],
+                [
+                    'Minimum short-mask observation rank',
+                    formatCount(boundedLinearProof.shortMaskViews.minimumRank),
+                ],
+                [
+                    'Maximum rank without the quotient mask',
+                    formatCount(
+                        boundedLinearProof.shortMaskViews
+                            .maximumRankWithoutQuotientMask,
+                    ),
+                ],
+                [
                     'Accepted valid challenge pairs',
                     formatCount(boundedLinearProof.trueAcceptanceCount),
                 ],

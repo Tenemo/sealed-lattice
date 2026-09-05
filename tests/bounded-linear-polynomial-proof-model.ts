@@ -34,8 +34,6 @@ const add = (left: Polynomial, right: Polynomial): number[] =>
     );
 const scale = (value: Polynomial, factor: number): number[] =>
     trim(value.map((coefficient) => mod(coefficient * factor)));
-const subtract = (left: Polynomial, right: Polynomial): number[] =>
-    add(left, scale(right, -1));
 const multiply = (left: Polynomial, right: Polynomial): number[] => {
     const result = Array.from(
         { length: left.length + right.length - 1 },
@@ -170,7 +168,8 @@ const witness = assignment.map((values, index) =>
 const zeroWitness = assignment.map((_values, index) =>
     multiply(vanishing, [index + 4, index + 8]),
 );
-const firstMask = [4, 1, 9, 7, 2, 3, 8, 5, 6];
+const sumMaskDegree = witnessDegree;
+const firstMask = [4, 1, 9, 7, 2, 3];
 const maskSum = sumOnSystematic(firstMask);
 const linearCombination = (
     oracles: readonly Polynomial[],
@@ -216,7 +215,158 @@ const sumcheckDegree = (masked: Polynomial, claimedSum: number): number => {
     );
 };
 
+const matrixRank = (input: readonly (readonly number[])[]): number => {
+    const rows = input.map((row) => [...row]);
+    let pivot = 0;
+    for (
+        let column = 0;
+        column < rows[0].length && pivot < rows.length;
+        column++
+    ) {
+        const selected = rows.findIndex(
+            (row, index) => index >= pivot && row[column] !== 0,
+        );
+        if (selected < 0) continue;
+        [rows[pivot], rows[selected]] = [rows[selected], rows[pivot]];
+        const divisor = inverse(rows[pivot][column]);
+        rows[pivot] = rows[pivot].map((value) => mod(value * divisor));
+        for (let row = 0; row < rows.length; row++) {
+            if (row === pivot) continue;
+            const factor = rows[row][column];
+            rows[row] = rows[row].map((value, index) =>
+                mod(value - factor * rows[pivot][index]),
+            );
+        }
+        pivot++;
+    }
+    return pivot;
+};
+
+const shortMaskViewCensus = () => {
+    const columnCount = assignment.length;
+    const observationCount = 2 * (columnCount + 2) + 1;
+    const randomCoefficientCount =
+        (columnCount + 1) * maskDimension + systematicSize;
+    let checkedViews = 0;
+    let minimumRank = observationCount;
+    let maximumRankWithoutQuotientMask = 0;
+    for (const pair of [
+        [0, 1],
+        [0, 16],
+        [7, 9],
+        [12, 31],
+    ]) {
+        const points = pair.map((index) => domain[index]);
+        for (let alpha = 0; alpha < prime; alpha++) {
+            const weights = matrix[0].map((column, index) =>
+                interpolate(
+                    systematic,
+                    column.map((value, position) =>
+                        mod(value + alpha * matrix[1][index][position]),
+                    ),
+                ),
+            );
+            for (const challenge of [0, 1, 2, 48, 96]) {
+                const observe = (coins: readonly number[]): number[] => {
+                    const masks = Array.from(
+                        { length: columnCount },
+                        (_, index) =>
+                            coins.slice(
+                                index * maskDimension,
+                                (index + 1) * maskDimension,
+                            ),
+                    );
+                    const low = coins.slice(
+                        columnCount * maskDimension,
+                        columnCount * maskDimension + systematicSize,
+                    );
+                    const high = coins.slice(
+                        columnCount * maskDimension + systematicSize,
+                    );
+                    const values = masks.flatMap((mask) =>
+                        points.map((point) =>
+                            mod(
+                                evaluate(vanishing, point) *
+                                    evaluate(mask, point),
+                            ),
+                        ),
+                    );
+                    values.push(
+                        ...points.map((point) =>
+                            mod(
+                                evaluate(low, point) +
+                                    evaluate(vanishing, point) *
+                                        evaluate(high, point),
+                            ),
+                        ),
+                    );
+                    values.push(
+                        ...points.map((point) =>
+                            mod(
+                                evaluate(high, point) +
+                                    challenge *
+                                        masks.reduce(
+                                            (sum, mask, index) =>
+                                                mod(
+                                                    sum +
+                                                        evaluate(
+                                                            weights[index],
+                                                            point,
+                                                        ) *
+                                                            evaluate(
+                                                                mask,
+                                                                point,
+                                                            ),
+                                                ),
+                                            0,
+                                        ),
+                            ),
+                        ),
+                    );
+                    values.push(mod(systematicSize * low[0]));
+                    return values;
+                };
+                const columns = Array.from(
+                    { length: randomCoefficientCount },
+                    (_, index) =>
+                        observe(
+                            Array.from(
+                                { length: randomCoefficientCount },
+                                (_unused, position) =>
+                                    position === index ? 1 : 0,
+                            ),
+                        ),
+                );
+                const observationMatrix = Array.from(
+                    { length: observationCount },
+                    (_, row) => columns.map((column) => column[row]),
+                );
+                minimumRank = Math.min(
+                    minimumRank,
+                    matrixRank(observationMatrix),
+                );
+                maximumRankWithoutQuotientMask = Math.max(
+                    maximumRankWithoutQuotientMask,
+                    matrixRank(
+                        observationMatrix.map((row) =>
+                            row.slice(0, -maskDimension),
+                        ),
+                    ),
+                );
+                checkedViews++;
+            }
+        }
+    }
+    return {
+        checkedViews,
+        observationCount,
+        minimumRank,
+        maximumRankWithoutQuotientMask,
+    };
+};
+
 export const compileBoundedLinearPolynomialProofCensus = () => {
+    assert.ok(firstMask.length - 1 <= sumMaskDegree);
     assert.ok(witness.every((oracle) => oracle.length - 1 <= witnessDegree));
     const degrees = normDegrees(witness);
     assert.ok(degrees[0] <= 2 * witnessDegree - systematicSize);
@@ -242,23 +392,25 @@ export const compileBoundedLinearPolynomialProofCensus = () => {
                 trueAcceptanceCount += 1;
             if (sumcheckDegree(masked, falseSum) <= systematicSize - 2)
                 falseAcceptanceCount += 1;
-            // Accepting simulator: choose the challenge first, then a random
-            // polynomial with the claimed sum, and derive the mask backwards.
-            const simulatedMasked = [...firstMask];
-            simulatedMasked[0] = mod(
-                simulatedMasked[0] +
-                    (falseSum - sumOnSystematic(simulatedMasked)) *
+            // A short mask changes only its low constant to establish the
+            // claimed sum. Its independent high part masks quotient queries.
+            const simulatedMask = [...firstMask];
+            simulatedMask[0] = mod(
+                simulatedMask[0] +
+                    (falseSum -
+                        sumOnSystematic(
+                            add(
+                                scale(simulatedCombination, maskChallenge),
+                                simulatedMask,
+                            ),
+                        )) *
                         inverse(systematicSize),
             );
-            const simulatedMask = subtract(
-                simulatedMasked,
+            const simulatedMasked = add(
                 scale(simulatedCombination, maskChallenge),
+                simulatedMask,
             );
-            assert.ok(simulatedMask.length - 1 <= sumDegree);
-            assert.deepEqual(
-                add(scale(simulatedCombination, maskChallenge), simulatedMask),
-                trim(simulatedMasked),
-            );
+            assert.ok(simulatedMask.length - 1 <= sumMaskDegree);
             if (sumcheckDegree(simulatedMasked, falseSum) <= systematicSize - 2)
                 simulatedFalseAcceptanceCount += 1;
         }
@@ -271,6 +423,12 @@ export const compileBoundedLinearPolynomialProofCensus = () => {
     const tamperedTable = domain.map((point) => evaluate(witness[0], point));
     tamperedTable[0] = mod(tamperedTable[0] + 1);
     assert.ok(degreeOfTable(tamperedTable) > witnessDegree);
+    const shortMaskViews = shortMaskViewCensus();
+    assert.equal(shortMaskViews.minimumRank, shortMaskViews.observationCount);
+    assert.ok(
+        shortMaskViews.maximumRankWithoutQuotientMask <
+            shortMaskViews.observationCount,
+    );
     return {
         prime,
         systematicSize,
@@ -278,6 +436,8 @@ export const compileBoundedLinearPolynomialProofCensus = () => {
         domainSize: domain.length,
         witnessDegree,
         sumDegree,
+        sumMaskDegree,
+        shortMaskViews,
         normDegrees: degrees,
         trueAcceptanceCount,
         falseAcceptanceCount,

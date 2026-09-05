@@ -457,7 +457,7 @@ export const compileThresholdReleaseNoiseCensus =
         );
         // Joint cube coupling charges every honest release for a fixed corrupt
         // set. Width 2*B_sm+1 gives B_sm = 2^(lambda-1)*N*sum_i ||lambda_0,i||_1*E.
-        // This remains a dominant-term floor; the expanded proof support and
+        // This remains a dominant-term floor; the entire accepted support and
         // every non-dominant BFV correctness term must also be included.
         const jointDominantFactor =
             BigInt(releaseThreshold * polynomialModulusDegree) *
