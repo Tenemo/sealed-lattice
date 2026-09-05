@@ -32,6 +32,7 @@ import { runPublicationCloseRaceModel } from '#tests/publication-close-race-mode
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
+import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
@@ -74,6 +75,7 @@ export const renderDocumentationCensus = (): string => {
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const commonAgreement = compileCommonAgreementDegreeCensus();
+    const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
         compilePublicEncryptedSharingProofResourceCensus();
@@ -1254,6 +1256,53 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Exact RNS arithmetic census',
+        '',
+        'The recursive-context floor comes from the pinned library allocation structure. The alternative uses flat scalar transform plans and sufficiently wide auxiliary integer residues, then exact CRT lifting and rounding under the existing cryptographic modulus. Cached public transforms and scheduled ciphertexts remain separate live-set costs.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Polynomial degree', formatCount(rnsArithmetic.degree)],
+                [
+                    'Base primes in the wrapper screen',
+                    formatCount(rnsArithmetic.basePrimes),
+                ],
+                [
+                    'Extended primes in the wrapper screen',
+                    formatCount(rnsArithmetic.multiplicationPrimes),
+                ],
+                [
+                    'Transform-table bytes per prime',
+                    formatCount(rnsArithmetic.tableBytesPerPrime),
+                ],
+                [
+                    'Recursive extended-context transform tables alone',
+                    formatCount(rnsArithmetic.recursiveTableBytes),
+                ],
+                [
+                    'Auxiliary primes for exact integer products',
+                    formatCount(rnsArithmetic.exactProductPrimes),
+                ],
+                [
+                    'Flat transform-table bytes',
+                    formatCount(rnsArithmetic.flatTableBytes),
+                ],
+                [
+                    'Machine words per canonical cryptographic coefficient',
+                    formatCount(rnsArithmetic.coefficientWords),
+                ],
+                [
+                    'Canonical polynomial working bytes',
+                    formatCount(rnsArithmetic.canonicalPolynomialBytes),
+                ],
+                [
+                    'All transformed multiplication-key working bytes',
+                    formatCount(rnsArithmetic.cachedMultiplicationKeyBytes),
                 ],
             ],
         ),
