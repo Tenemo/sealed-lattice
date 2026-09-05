@@ -27,6 +27,7 @@ describe('documentation census generator', () => {
             '## Byte and carry lifting census',
             '## Fixed-modulus BFV noise census',
             '## Certificate custody census',
+            '## Wide sharing and release lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
             '## Threshold release flooding bound',

@@ -26,12 +26,14 @@ import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-shari
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
+import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 const formatCount = (value: bigint | number): string =>
     `\`${value.toLocaleString('en-US')}\``;
@@ -70,6 +72,8 @@ export const renderDocumentationCensus = (): string => {
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
     const fixedModulusBfv = compileFixedModulusBfvCensus();
     const certificateCustody = compileCertificateCustodyCensus();
+    const wideShareLifting = compileWideShareLiftingCensus();
+    const releaseShareLifting = compileReleaseShareLiftingCensus();
     const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
     const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
     const falseRelation = createFalseBinaryRelationTable();
@@ -1159,6 +1163,74 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Out-of-range alias carries',
                     formatCount(byteCarryLifting.outOfRangeCarries),
+                ],
+            ],
+        ),
+        '',
+        '## Wide sharing and release lifting census',
+        '',
+        'Candidate bounds for byte-aligned integer sharing and the dense release relation. The finite experiments independently construct the integer products, decrypt encrypted evaluations, and reproduce the out-of-range modular aliases. They do not implement the complete public proof or admit a distribution.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Share-encryption scale', formatCount(wideShareLifting.scale)],
+                [
+                    'Share-encryption modulus',
+                    formatCount(wideShareLifting.modulus),
+                ],
+                [
+                    'Nonconstant sharing coefficient radius',
+                    formatCount(wideShareLifting.sharingRadius),
+                ],
+                [
+                    'Joint sharing-translation numerator',
+                    formatCount(wideShareLifting.privacyNumerator),
+                ],
+                [
+                    'Aggregate sharing coefficient bound',
+                    formatCount(wideShareLifting.aggregateSharingMaximum),
+                ],
+                ['Sharing limb radix', formatCount(wideShareLifting.radix)],
+                [
+                    'Sharing quotient magnitude bound',
+                    formatCount(wideShareLifting.quotientBound),
+                ],
+                [
+                    'Sharing carry magnitude bound',
+                    formatCount(wideShareLifting.carryBound),
+                ],
+                [
+                    'Complete sharing limb residual bound',
+                    formatCount(wideShareLifting.residualBound),
+                ],
+                [
+                    'Sharing equations checked',
+                    formatCount(wideShareLifting.checkedEquations),
+                ],
+                [
+                    'Carry needed by the false sharing equation',
+                    formatCount(wideShareLifting.aliasCarry),
+                ],
+                [
+                    'Dense release limb radix',
+                    formatCount(releaseShareLifting.radix),
+                ],
+                [
+                    'Dense release carry magnitude bound',
+                    formatCount(releaseShareLifting.carryBound),
+                ],
+                [
+                    'Complete dense release limb residual bound',
+                    formatCount(releaseShareLifting.residualBound),
+                ],
+                [
+                    'Dense release equations checked',
+                    formatCount(releaseShareLifting.checkedEquations),
+                ],
+                [
+                    'Carry needed by the false release equation',
+                    formatCount(releaseShareLifting.aliasCarry),
                 ],
             ],
         ),
