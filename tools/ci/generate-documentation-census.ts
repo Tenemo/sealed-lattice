@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
@@ -25,6 +26,7 @@ import {
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
+import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
@@ -72,6 +74,7 @@ export const renderDocumentationCensus = (): string => {
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
     const fixedModulusBfv = compileFixedModulusBfvCensus();
     const certificateCustody = compileCertificateCustodyCensus();
+    const publicationCut = compilePublicationCutCensus();
     const wideShareLifting = compileWideShareLiftingCensus();
     const releaseShareLifting = compileReleaseShareLiftingCensus();
     const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
@@ -1247,6 +1250,31 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
+        '## Publication cut census',
+        '',
+        "The freeze-and-union model retains complete ECHO certificates inside each honest READY sender's close report. The intersection census checks every named completed-publication quorum, close quorum, and maximum corruption set. It establishes the required honest reporter, not a complete protocol or a visit bound.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Participants', formatCount(publicationCut.participantCount)],
+                [
+                    'Publication and close quorum',
+                    formatCount(publicationCut.quorum),
+                ],
+                [
+                    'Named intersections checked',
+                    formatCount(publicationCut.checkedIntersections),
+                ],
+                [
+                    'Minimum honest reporters of every completed publication',
+                    formatCount(
+                        publicationCut.minimumHonestPublicationReporters,
+                    ),
+                ],
+            ],
+        ),
+        '',
         '## Certificate custody census',
         '',
         "The counterexample delivers all continuing honest participants' messages but permits suppression of earlier sends from participants who disappeared. Full holders possess the entire certificate and every required predecessor; individual signers do not establish that premise.",
@@ -1277,6 +1305,28 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Required target signatures',
                     formatCount(certificateCustody.counterexample.quorum),
+                ],
+                [
+                    'Full-copy holders sufficient without ledger delivery',
+                    formatCount(
+                        archiveHolderRequirements(
+                            certificateCustody.participantCount,
+                            certificateCustody.corruptCount,
+                            certificateCustody.corruptCount,
+                            1,
+                        ).requiredHolders,
+                    ),
+                ],
+                [
+                    'Coded holders sufficient at the release reconstruction threshold',
+                    formatCount(
+                        archiveHolderRequirements(
+                            certificateCustody.participantCount,
+                            certificateCustody.corruptCount,
+                            certificateCustody.corruptCount,
+                            certificateCustody.corruptCount + 1,
+                        ).requiredHolders,
+                    ),
                 ],
             ],
         ),
@@ -1673,18 +1723,36 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Participant visit dependency census',
         '',
-        'This dependency skeleton counts a favorable delivery trace of the former fixed-roster candidate with separate common-string commitment and opening, one setup-contribution wave, receipt and ballot co-publication, evidence-carrying ballot echo and ready waves, close-log convergence, target certification, release, and retrieval. The close race has no completing trace under some permitted deliveries, and a replacement protocol may require more dependencies. These counts establish neither a live protocol nor a maximum visit bound.',
+        'The preparation prefix counts joining, roster confirmation and seed commitment, seed opening, verified share-encryption keys, setup contributions, all-roster receipts, and an optional ballot attempt. The completing witness then executes the freeze-and-union publication model with immediate delivery, all enabled work coalesced, and corrupt participants refusing after valid preparation. Publication, close, target certification, release, and terminal retrieval exceed the ceiling. An additional setup-proof commitment wave is not charged, so it cannot rescue this rejected composition. These are witnessed costs, not worst-case upper bounds.',
         '',
         table(
             ['Property', 'Value'],
             [
                 [
-                    'Successful-result visits for an early release author',
-                    formatCount(participantVisits.successfulResultVisitCount),
+                    'Participants in the sequential witness',
+                    formatCount(participantVisits.participantCount),
                 ],
                 [
-                    'No-result visits for an early target signer',
-                    formatCount(participantVisits.noResultVisitCount),
+                    'First participant preparation visits including joining',
+                    formatCount(participantVisits.preparationWitnessVisitCount),
+                ],
+                [
+                    'First ballot author visits through its attempt',
+                    formatCount(
+                        participantVisits.ballotAuthorWitnessVisitCount,
+                    ),
+                ],
+                [
+                    'Remaining productive visits within the mandatory ceiling',
+                    formatCount(participantVisits.remainingVisitBudget),
+                ],
+                [
+                    'First participant visits in the completing witness',
+                    formatCount(participantVisits.completionWitnessVisitCount),
+                ],
+                [
+                    'Completing witness visits above the mandatory ceiling',
+                    formatCount(participantVisits.completionWitnessExcess),
                 ],
                 [
                     'Preferred visit count',
@@ -1693,14 +1761,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Mandatory visit ceiling',
                     formatCount(participantVisits.maximumPermittedVisitCount),
-                ],
-                [
-                    'Within preferred count',
-                    participantVisits.withinPreferredVisitCount ? 'yes' : 'no',
-                ],
-                [
-                    'Within mandatory ceiling',
-                    participantVisits.withinMaximumVisitCount ? 'yes' : 'no',
                 ],
             ],
         ),

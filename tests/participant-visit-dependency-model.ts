@@ -1,92 +1,224 @@
+import assert from 'node:assert/strict';
+
+import { createPublicationCutModel } from '#tests/publication-cut-model.js';
+
 const preferredVisitCount = 5;
 const maximumVisitCount = 10;
 
-type VisitStage = Readonly<{
-    id: string;
-    dependsOn: readonly string[];
+// Each stage consumes every participant's preceding publication. Joining is
+// included; the organizer is allowed to freeze registration without extra delay.
+const preparationStages = [
+    'registration',
+    'roster-confirmation-and-seed-commitment',
+    'seed-opening',
+    'share-encryption-key',
+    'setup-contribution',
+    'setup-receipt',
+] as const;
+
+export type ParticipantVisit = Readonly<{
+    participant: number;
+    actions: readonly string[];
 }>;
 
-const successfulResultStages: readonly VisitStage[] = [
-    { id: 'roster-confirmation-and-seed-commitment', dependsOn: [] },
-    {
-        id: 'seed-opening',
-        dependsOn: ['roster-confirmation-and-seed-commitment'],
-    },
-    { id: 'setup-contribution', dependsOn: ['seed-opening'] },
-    {
-        id: 'setup-receipt-and-ballot',
-        dependsOn: ['setup-contribution'],
-    },
-    { id: 'ballot-echo', dependsOn: ['setup-receipt-and-ballot'] },
-    { id: 'ballot-ready', dependsOn: ['ballot-echo'] },
-    { id: 'close-log', dependsOn: ['ballot-ready'] },
-    { id: 'target-signature', dependsOn: ['close-log'] },
-    { id: 'release-share', dependsOn: ['target-signature'] },
-    { id: 'terminal-retrieval', dependsOn: ['release-share'] },
-];
-
-const noResultStages: readonly VisitStage[] = successfulResultStages
-    .filter(({ id }) => id !== 'release-share')
-    .map((stage) =>
-        stage.id === 'terminal-retrieval'
-            ? { ...stage, dependsOn: ['target-signature'] }
-            : stage,
+// A permitted sequential schedule, not a maximum over asynchronous deliveries.
+// The first participant returns before the other participants complete each
+// stage. Every visit still performs all work enabled by the shared transcript.
+export const tracePreparationVisits = (
+    participantCount: number,
+    ballotAuthors: readonly number[],
+): readonly ParticipantVisit[] => {
+    assert.ok(
+        Number.isInteger(participantCount) &&
+            participantCount >= 3 &&
+            participantCount <= 20,
     );
-
-const longestDependencyChain = (stages: readonly VisitStage[]): number => {
-    const byId = new Map(stages.map((stage) => [stage.id, stage]));
-    const memo = new Map<string, number>();
-    const active = new Set<string>();
-
-    const visit = (id: string): number => {
-        const cached = memo.get(id);
-        if (cached !== undefined) return cached;
-        if (active.has(id))
-            throw new Error('The visit graph contains a cycle.');
-        const stage = byId.get(id);
-        if (stage === undefined) {
-            throw new Error(`The visit dependency ${id} is absent.`);
+    const authors = new Set(ballotAuthors);
+    assert.equal(authors.size, ballotAuthors.length);
+    for (const author of authors) {
+        assert.ok(
+            Number.isInteger(author) &&
+                author >= 0 &&
+                author < participantCount,
+        );
+    }
+    const published = preparationStages.map(() => new Set<number>());
+    const ballots = new Set<number>();
+    const visits: ParticipantVisit[] = [];
+    const visit = (participant: number): void => {
+        const actions: string[] = [];
+        for (const [stage, id] of preparationStages.entries()) {
+            if (published[stage].has(participant)) continue;
+            if (stage > 0 && published[stage - 1].size !== participantCount)
+                break;
+            published[stage].add(participant);
+            actions.push(id);
         }
-        active.add(id);
-        const depth =
-            1 +
-            Math.max(
-                0,
-                ...stage.dependsOn.map((dependency) => visit(dependency)),
-            );
-        active.delete(id);
-        memo.set(id, depth);
-        return depth;
+        if (
+            published[published.length - 1].size === participantCount &&
+            authors.has(participant) &&
+            !ballots.has(participant)
+        ) {
+            ballots.add(participant);
+            actions.push('ballot-publication-attempt');
+        }
+        if (actions.length > 0) visits.push({ participant, actions });
     };
-
-    return Math.max(...stages.map(({ id }) => visit(id)));
+    for (const completed of published) {
+        for (
+            let participant = 0;
+            participant < participantCount;
+            participant++
+        ) {
+            if (!completed.has(participant)) visit(participant);
+        }
+        assert.equal(completed.size, participantCount);
+    }
+    for (const participant of authors) {
+        if (!ballots.has(participant)) visit(participant);
+    }
+    return visits;
 };
 
-export type ParticipantVisitDependencyCensus = Readonly<{
-    maximumPermittedVisitCount: number;
-    noResultVisitCount: number;
-    preferredVisitCount: number;
-    successfulResultVisitCount: number;
-    successfulResultStageCount: number;
-    withinMaximumVisitCount: boolean;
-    withinPreferredVisitCount: boolean;
-}>;
-
-export const compileParticipantVisitDependencyCensus =
-    (): ParticipantVisitDependencyCensus => {
-        const successfulResultVisitCount = longestDependencyChain(
-            successfulResultStages,
+export const tracePublicationCompletionVisits =
+    (): readonly ParticipantVisit[] => {
+        const participantCount = 10;
+        const corruptionBound = Math.floor((participantCount - 1) / 3);
+        const quorum = participantCount - corruptionBound;
+        const releaseThreshold = corruptionBound + 1;
+        const honest = Array.from(
+            { length: quorum },
+            (_, position) => position,
         );
-        const noResultVisitCount = longestDependencyChain(noResultStages);
-        return {
-            maximumPermittedVisitCount: maximumVisitCount,
-            noResultVisitCount,
-            preferredVisitCount,
-            successfulResultVisitCount,
-            successfulResultStageCount: successfulResultStages.length,
-            withinMaximumVisitCount:
-                successfulResultVisitCount <= maximumVisitCount,
-            withinPreferredVisitCount:
-                successfulResultVisitCount <= preferredVisitCount,
+        // Corrupt parties finish required preparation, then withhold everything.
+        const model = createPublicationCutModel(
+            participantCount,
+            Array.from(
+                { length: corruptionBound },
+                (_, position) => quorum + position,
+            ),
+        );
+        const bodies: {
+            slot: number;
+            identity: string;
+            validBallot: boolean;
+        }[] = [];
+        const visits: ParticipantVisit[] = [];
+        const frozen = new Set<number>();
+        const signed = new Set<number>();
+        const released = new Set<number>();
+        const retrieved = new Set<number>();
+        let closeRequested = false;
+        let targetProposed = false;
+        const visit = (
+            participant: number,
+            priorActions: readonly string[] = [],
+        ) => {
+            const actions = [...priorActions];
+            const before = model.messages().length;
+            for (const body of bodies) model.echo(participant, body);
+            // Immediate ledger delivery and every enabled action are favorable to
+            // coalescing. Even this sequential execution can reject a visit bound.
+            let consumed = 0;
+            while (consumed < model.messages().length) {
+                const messages = model.messages();
+                while (consumed < messages.length)
+                    model.receive(participant, messages[consumed++]);
+            }
+            for (const message of model.messages().slice(before))
+                actions.push(
+                    `${message.kind}/${String(message.certificates[0].body.slot)}`,
+                );
+            const ready = model
+                .messages()
+                .filter(({ kind }) => kind === 'ready');
+            if (
+                participant === 0 &&
+                !closeRequested &&
+                bodies.length === honest.length &&
+                bodies.every(
+                    ({ slot }) =>
+                        ready.filter(
+                            ({ certificates }) =>
+                                certificates[0].body.slot === slot,
+                        ).length >= quorum,
+                )
+            ) {
+                closeRequested = true;
+                actions.push('close-intent');
+            }
+            if (closeRequested && !frozen.has(participant)) {
+                model.freeze(participant);
+                frozen.add(participant);
+                actions.push('close-report');
+            }
+            if (participant === 0 && !targetProposed && frozen.size >= quorum) {
+                const reports = model
+                    .messages()
+                    .filter(({ kind }) => kind === 'freeze');
+                assert.deepEqual(model.inventory(reports), bodies);
+                targetProposed = true;
+                actions.push('target-proposal');
+            }
+            if (targetProposed && !signed.has(participant)) {
+                signed.add(participant);
+                actions.push('target-signature');
+            }
+            if (signed.size >= quorum && !released.has(participant)) {
+                released.add(participant);
+                actions.push('release-share');
+            }
+            if (
+                released.size >= releaseThreshold &&
+                !retrieved.has(participant)
+            ) {
+                retrieved.add(participant);
+                actions.push('terminal-retrieval');
+            }
+            if (actions.length > 0) visits.push({ participant, actions });
         };
+        for (const entry of tracePreparationVisits(participantCount, honest)) {
+            if (entry.actions.includes('ballot-publication-attempt')) {
+                bodies.push({
+                    slot: entry.participant,
+                    identity: `ballot/${String(entry.participant)}`,
+                    validBallot: true,
+                });
+                visit(entry.participant, entry.actions);
+            } else visits.push(entry);
+        }
+        let passes = 0;
+        while (retrieved.size !== honest.length) {
+            assert.ok(
+                passes++ < 20,
+                'The candidate trace stopped progressing.',
+            );
+            for (const participant of honest) visit(participant);
+        }
+        return visits;
     };
+
+export const compileParticipantVisitDependencyCensus = () => {
+    const participantCount = 10;
+    const countFirstParticipantVisits = (authors: readonly number[]): number =>
+        tracePreparationVisits(participantCount, authors).filter(
+            ({ participant }) => participant === 0,
+        ).length;
+    const preparationWitnessVisitCount = countFirstParticipantVisits([]);
+    const ballotAuthorWitnessVisitCount = countFirstParticipantVisits([0]);
+    const completionWitnessVisitCount =
+        tracePublicationCompletionVisits().filter(
+            ({ participant }) => participant === 0,
+        ).length;
+    return {
+        participantCount,
+        preparationWitnessVisitCount,
+        ballotAuthorWitnessVisitCount,
+        preferredVisitCount,
+        maximumPermittedVisitCount: maximumVisitCount,
+        remainingVisitBudget: maximumVisitCount - ballotAuthorWitnessVisitCount,
+        completionWitnessVisitCount,
+        completionWitnessExcess:
+            completionWitnessVisitCount - maximumVisitCount,
+    };
+};

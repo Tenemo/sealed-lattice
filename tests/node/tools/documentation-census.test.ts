@@ -27,6 +27,7 @@ describe('documentation census generator', () => {
             '## Byte and carry lifting census',
             '## Fixed-modulus BFV noise census',
             '## Certificate custody census',
+            '## Publication cut census',
             '## Wide sharing and release lifting census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
@@ -81,7 +82,10 @@ describe('documentation census generator', () => {
             '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
         );
         expect(rendered).toContain(
-            '| Successful-result visits for an early release author | `10` |',
+            '| First ballot author visits through its attempt | `7` |',
+        );
+        expect(rendered).toContain(
+            '| First participant visits in the completing witness | `13` |',
         );
         expect(rendered).toContain(
             '| Setup plus proof subtotal | `4,423,680,000` |',
