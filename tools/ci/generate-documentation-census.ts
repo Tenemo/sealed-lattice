@@ -6,6 +6,7 @@ import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
 import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
+import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import {
     exactRankingModelConstants,
@@ -13,6 +14,7 @@ import {
     verifyExactRankingModel,
 } from '#tests/exact-ranking-model.js';
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
+import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
@@ -66,6 +68,8 @@ export const renderDocumentationCensus = (): string => {
     const shareEncryptionCrossModulus =
         compileShareEncryptionCrossModulusCensus();
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
+    const fixedModulusBfv = compileFixedModulusBfvCensus();
+    const certificateCustody = compileCertificateCustodyCensus();
     const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
     const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
     const falseRelation = createFalseBinaryRelationTable();
@@ -1130,6 +1134,146 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Out-of-range alias carries',
                     formatCount(byteCarryLifting.outOfRangeCarries),
+                ],
+            ],
+        ),
+        '',
+        '## Certificate custody census',
+        '',
+        "The counterexample delivers all continuing honest participants' messages but permits suppression of earlier sends from participants who disappeared. Full holders possess the entire certificate and every required predecessor; individual signers do not establish that premise.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Full-holder threshold examined',
+                    formatCount(certificateCustody.fullHolderThreshold),
+                ],
+                [
+                    'Named custody configurations checked',
+                    formatCount(certificateCustody.checkedConfigurations),
+                ],
+                [
+                    'Minimum surviving honest full holders',
+                    formatCount(
+                        certificateCustody.minimumSurvivingHonestFullHolders,
+                    ),
+                ],
+                [
+                    'Recoverable signatures in the unique-collector counterexample',
+                    formatCount(
+                        certificateCustody.counterexample.recoverableSignatures,
+                    ),
+                ],
+                [
+                    'Required target signatures',
+                    formatCount(certificateCustody.counterexample.quorum),
+                ],
+            ],
+        ),
+        '',
+        '## Fixed-modulus BFV noise census',
+        '',
+        'Exact worst-case noise screen for the uniform comparison and duplicated ranking-window candidate. The full integer tensor-rounding and KLSW relinearization equations are checked independently. This screen does not establish the circular-key assumption, complete proof compiler, browser cost, or protocol admission.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Participants', formatCount(fixedModulusBfv.participantCount)],
+                ['Options', formatCount(fixedModulusBfv.optionCount)],
+                [
+                    'Ciphertext polynomial degree',
+                    formatCount(fixedModulusBfv.polynomialDegree),
+                ],
+                [
+                    'Plaintext subring degree',
+                    formatCount(fixedModulusBfv.plaintextSubringDegree),
+                ],
+                [
+                    'Plaintext modulus',
+                    formatCount(fixedModulusBfv.plaintextModulus),
+                ],
+                [
+                    'Ciphertext modulus',
+                    formatCount(fixedModulusBfv.ciphertextModulus),
+                ],
+                [
+                    'Release modulus',
+                    formatCount(fixedModulusBfv.releaseModulus),
+                ],
+                [
+                    'Per-contributor secret support weight',
+                    formatCount(fixedModulusBfv.secretSupportWeight),
+                ],
+                [
+                    'Accepted error magnitude bound',
+                    formatCount(fixedModulusBfv.errorBound),
+                ],
+                ['Gadget base', formatCount(fixedModulusBfv.gadgetBase)],
+                [
+                    'Gadget coordinates',
+                    formatCount(fixedModulusBfv.gadgetLength),
+                ],
+                [
+                    'Ciphertext multiplications',
+                    formatCount(fixedModulusBfv.multiplications),
+                ],
+                [
+                    'Ciphertext additions',
+                    formatCount(fixedModulusBfv.additions),
+                ],
+                [
+                    'Scalar plaintext products',
+                    formatCount(fixedModulusBfv.scalarProducts),
+                ],
+                [
+                    'Vector plaintext products',
+                    formatCount(fixedModulusBfv.plaintextProducts),
+                ],
+                ['Unit rotations', formatCount(fixedModulusBfv.rotations)],
+                [
+                    'Plaintext additions',
+                    formatCount(fixedModulusBfv.plaintextAdditions),
+                ],
+                [
+                    'Comparison multiplicative depth',
+                    formatCount(fixedModulusBfv.comparisonDepth),
+                ],
+                [
+                    'Ranking multiplicative depth',
+                    formatCount(fixedModulusBfv.rankingDepth),
+                ],
+                [
+                    'Comparison error bound bits',
+                    formatCount(fixedModulusBfv.comparisonErrorBits),
+                ],
+                [
+                    'Ranking error bound bits',
+                    formatCount(fixedModulusBfv.rankingErrorBits),
+                ],
+                [
+                    'Error after final modulus switch',
+                    formatCount(fixedModulusBfv.releaseError),
+                ],
+                [
+                    'Signed uniform release-noise bits',
+                    formatCount(fixedModulusBfv.releaseNoiseBits),
+                ],
+                [
+                    'Statistical target bits',
+                    formatCount(fixedModulusBfv.statisticalBits),
+                ],
+                [
+                    'Joint translated-cube bound holds',
+                    fixedModulusBfv.jointStatisticalBoundHolds ? 'yes' : 'no',
+                ],
+                [
+                    'Complete release correctness inequality holds',
+                    fixedModulusBfv.releaseCorrect ? 'yes' : 'no',
+                ],
+                [
+                    'Public key-contribution corpus bytes before sharing and proofs',
+                    formatCount(fixedModulusBfv.publicKeyCorpusBytes),
                 ],
             ],
         ),

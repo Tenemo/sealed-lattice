@@ -25,6 +25,8 @@ describe('documentation census generator', () => {
             '## Bounded polynomial proof census',
             '## Small-limb proof-field census',
             '## Byte and carry lifting census',
+            '## Fixed-modulus BFV noise census',
+            '## Certificate custody census',
             '## Fixed-witness release simulation census',
             '## Publication and close local-view census',
             '## Threshold release flooding bound',
