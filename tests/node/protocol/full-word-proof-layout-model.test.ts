@@ -21,6 +21,10 @@ describe('full word-proof layout and theorem operands', () => {
             layout.expandedFirstOracleBytes + layout.expandedSecondOracleBytes,
         ).toBe(262144n * (5904n + 18240n));
         expect(layout.maximumProofBytes).toBeLessThan(67_108_864n);
+        expect(layout.maximumMultiproofBytes).toBeLessThan(
+            layout.maximumProofBytes,
+        );
+        expect(layout.maximumCachedNodeDigestBytes).toBeLessThan(2_097_152n);
     });
     it('charges the actual lookup, affine, batching, and first-fold events', () => {
         const census = compileWideChallengeCompilerCensus();

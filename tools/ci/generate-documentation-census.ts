@@ -1747,7 +1747,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Full word-proof encoding census',
         '',
-        'The emitted full-size prototype retains the complete verification domain. The smaller prover interpolation set is an honest-computation optimization justified by the degree bound, not a verifier relaxation. Encoded proof bounds here use explicit authentication paths; Merkle multiproof compression remains a separate encoding step.',
+        'The emitted full-size prototype retains the complete verification domain. The smaller prover interpolation set is an honest-computation optimization justified by the degree bound, not a verifier relaxation. Canonical incremental Merkle multiproofs authenticate each leaf against the first previously verified subtree and omit already known path hashes. Cache payload counts exclude map/allocation overhead, which requires measurement.',
         '',
         table(
             ['Property', 'Value'],
@@ -1769,8 +1769,16 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(fullWordProof.secondWidth),
                 ],
                 [
-                    'Maximum encoded proof bytes',
+                    'Maximum proof bytes with independent paths',
                     formatCount(fullWordProof.maximumProofBytes),
+                ],
+                [
+                    'Maximum proof bytes with incremental multiproofs',
+                    formatCount(fullWordProof.maximumMultiproofBytes),
+                ],
+                [
+                    'Maximum cached node-digest bytes',
+                    formatCount(fullWordProof.maximumCachedNodeDigestBytes),
                 ],
                 [
                     'Prover combination interpolation points',

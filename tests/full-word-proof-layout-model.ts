@@ -1,4 +1,5 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
 import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
@@ -25,15 +26,30 @@ export const compileFullWordProofLayout = () => {
         BigInt(foldCount - 1) * tagBytes +
         extensionBytes;
     let maximumProofBytes = headerBytes;
+    let maximumMultiproofBytes = headerBytes;
+    let maximumCachedNodes = 0;
     let totalLeaves = 3n * BigInt(agreement.domainSize);
     const openingGroup = (length: number, width: bigint) =>
         4n +
         BigInt(Math.min(2 * agreement.queries, length)) *
             (4n + width + saltBytes + BigInt(Math.log2(length)) * tagBytes);
-    for (const width of [firstWidth, secondWidth, extensionBytes])
+    const multiproofGroup = (length: number, width: bigint) => {
+        const count = Math.min(2 * agreement.queries, length);
+        const siblings = maximumSharedPathSiblings(length, count);
+        maximumCachedNodes = Math.max(maximumCachedNodes, 2 * siblings);
+        return (
+            4n +
+            BigInt(count) * (4n + width + saltBytes) +
+            BigInt(siblings) * tagBytes
+        );
+    };
+    for (const width of [firstWidth, secondWidth, extensionBytes]) {
         maximumProofBytes += openingGroup(agreement.domainSize, width);
+        maximumMultiproofBytes += multiproofGroup(agreement.domainSize, width);
+    }
     for (let length = agreement.domainSize / 2; length > 2; length /= 2) {
         maximumProofBytes += openingGroup(length, extensionBytes);
+        maximumMultiproofBytes += multiproofGroup(length, extensionBytes);
         totalLeaves += BigInt(length);
     }
     return {
@@ -42,6 +58,8 @@ export const compileFullWordProofLayout = () => {
         firstWidth,
         secondWidth,
         maximumProofBytes,
+        maximumMultiproofBytes,
+        maximumCachedNodeDigestBytes: BigInt(maximumCachedNodes) * tagBytes,
         proverInterpolationPoints: agreement.codeDimension,
         expandedFirstOracleBytes: firstWidth * BigInt(agreement.domainSize),
         expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
