@@ -8,6 +8,7 @@ import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
+import { compileBrowserWordProverResources } from '#tests/browser-word-prover-resource-model.js';
 import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
@@ -81,6 +82,7 @@ export const renderDocumentationCensus = (): string => {
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const fullWordProof = compileFullWordProofLayout();
+    const browserWordProver = compileBrowserWordProverResources();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -1800,6 +1802,38 @@ export const renderDocumentationCensus = (): string => {
                     'Uniform prover-mask bytes',
                     formatCount(fullWordProof.proverMaskBytes),
                 ],
+            ],
+        ),
+        '',
+        '## Browser word-prover resource census',
+        '',
+        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. These conservative allocation allowances describe the experimental live-data schedule. They are not measurements of browser-private memory, authenticated checkpoints, a complete action, or phone qualification.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Full-degree common-polynomial adjoints',
+                    formatCount(browserWordProver.fullDegreeCommonPolynomials),
+                ],
+                [
+                    'Prepared adjoint bytes',
+                    formatCount(browserWordProver.preparedAdjointBytes),
+                ],
+                [
+                    'Enforced maximum bytes per opaque hasher',
+                    formatCount(browserWordProver.maximumHasherBytes),
+                ],
+                [
+                    'Metadata and allocator allowance bytes',
+                    formatCount(
+                        browserWordProver.metadataAndAllocatorAllowance,
+                    ),
+                ],
+                ...browserWordProver.stages.map((stage) => [
+                    `Allocation allowance: ${stage.stage}`,
+                    formatCount(stage.bytes),
+                ]),
             ],
         ),
         '',
