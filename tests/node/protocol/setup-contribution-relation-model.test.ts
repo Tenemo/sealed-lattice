@@ -78,6 +78,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
                 2n * 4096n * 6n,
             maximumEncodedOperatorByteLength:
                 64n + 2n * 48n + 365n * 1408n * 48n,
+            maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),
+            syntheticWitnessHeaderByteLength: 4n + 3n * 4n + 64n,
+            syntheticWitnessByteLength: 80n + 365n * 65536n * 2n,
         });
     });
 

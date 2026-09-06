@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { integerLimbConvolutionMagnitudeBound } from '#tests/exact-integer-convolution-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     fingerprintSignedLimbs,
@@ -919,6 +920,18 @@ export const compileSetupContributionRelationCensus = () => {
     const sharingStatementPolynomials =
         3n * fixedModulusBfvInputs.participantCount + 1n;
     const auxiliaryStatementPolynomials = 2n;
+    const largestConvolutionOneNorm = [
+        fixedModulusBfvInputs.secretSupportWeight,
+        sharingParameters.encryptionSupportWeight,
+        auxiliaryInputEncryptionParameters.support,
+    ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
+    const maximumIntegerLimbConvolutionMagnitude =
+        integerLimbConvolutionMagnitudeBound(
+            radix,
+            largestConvolutionOneNorm,
+            field.modulus,
+        );
+    const syntheticWitnessHeaderByteLength = 4n + 3n * 4n + 64n;
     const expandedStatementHeaderByteLength =
         4n +
         2n * 4n +
@@ -978,5 +991,10 @@ export const compileSetupContributionRelationCensus = () => {
             64n +
             2n * extensionElementByteLength +
             BigInt(model.columns.length) * publicQueryValueByteLength,
+        maximumIntegerLimbConvolutionMagnitude,
+        syntheticWitnessHeaderByteLength,
+        syntheticWitnessByteLength:
+            syntheticWitnessHeaderByteLength +
+            2n * degree * BigInt(model.columns.length),
     };
 };

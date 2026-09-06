@@ -1513,6 +1513,20 @@ export const renderDocumentationCensus = (): string => {
                     'Maximum encoded queried-operator bytes',
                     formatCount(setupRelation.maximumEncodedOperatorByteLength),
                 ],
+                [
+                    'Maximum exact integer limb-convolution magnitude',
+                    formatCount(
+                        setupRelation.maximumIntegerLimbConvolutionMagnitude,
+                    ),
+                ],
+                [
+                    'Synthetic witness header bytes',
+                    formatCount(setupRelation.syntheticWitnessHeaderByteLength),
+                ],
+                [
+                    'Synthetic witness bytes',
+                    formatCount(setupRelation.syntheticWitnessByteLength),
+                ],
             ],
         ),
         '',
