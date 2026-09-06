@@ -115,7 +115,9 @@ impl CanonicalDecodeBudget {
     }
 }
 
+#[path = "canonical_tuple/decoding.rs"]
 mod decoding;
+#[path = "canonical_tuple/value.rs"]
 mod value;
 
 pub use value::{CanonicalItem, CanonicalItemType, CanonicalTuple};
