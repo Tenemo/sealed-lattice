@@ -40,6 +40,7 @@ import { runPublicationCloseRaceModel } from '#tests/publication-close-race-mode
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
+import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
@@ -96,6 +97,7 @@ export const renderDocumentationCensus = (): string => {
     const setupRandomness = compileSetupRandomnessCensus();
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
+    const registrationEnrollment = compileRegistrationEnrollmentCensus();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -2078,6 +2080,110 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum root authentication polynomial degree',
                     formatCount(registrationCustody.maximumRootHashDegree),
+                ],
+            ],
+        ),
+        '',
+        '## Registration enrollment census',
+        '',
+        'The combined enrollment record binds a canonical public username, actual credentials, and the complete recipient-key proof. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. Payload counts exclude database metadata and browser-managed root-key storage.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Signing public-key bytes',
+                    formatCount(registrationEnrollment.signingPublicKeyBytes),
+                ],
+                [
+                    'Mailbox public-key bytes',
+                    formatCount(registrationEnrollment.mailboxPublicKeyBytes),
+                ],
+                [
+                    'Signature bytes',
+                    formatCount(registrationEnrollment.signatureBytes),
+                ],
+                [
+                    'Maximum canonical username bytes',
+                    formatCount(registrationEnrollment.maximumUsernameBytes),
+                ],
+                [
+                    'Maximum username ingress bytes',
+                    formatCount(
+                        registrationEnrollment.maximumUsernameIngressBytes,
+                    ),
+                ],
+                [
+                    'Maximum encoded header bytes',
+                    formatCount(registrationEnrollment.maximumHeaderBytes),
+                ],
+                [
+                    'Maximum header input bytes',
+                    formatCount(registrationEnrollment.maximumHeaderInputBytes),
+                ],
+                [
+                    'Proof-role bytes',
+                    formatCount(registrationEnrollment.proofRoleBytes),
+                ],
+                [
+                    'Recipient-key capsule bytes',
+                    formatCount(registrationEnrollment.recipientCapsuleBytes),
+                ],
+                [
+                    'Signing-seed capsule bytes',
+                    formatCount(registrationEnrollment.signingCapsuleBytes),
+                ],
+                [
+                    'Maximum retained records',
+                    formatCount(registrationEnrollment.maximumRecords),
+                ],
+                [
+                    'Manifest prefix bytes',
+                    formatCount(registrationEnrollment.manifestPrefixBytes),
+                ],
+                [
+                    'Maximum manifest plaintext bytes',
+                    formatCount(registrationEnrollment.maximumManifestBytes),
+                ],
+                [
+                    'Maximum encrypted root bytes',
+                    formatCount(registrationEnrollment.maximumRootBytes),
+                ],
+                [
+                    'Recipient capsule associated-data bytes',
+                    formatCount(
+                        registrationEnrollment.recipientAssociatedBytes,
+                    ),
+                ],
+                [
+                    'Signing capsule associated-data bytes',
+                    formatCount(registrationEnrollment.signingAssociatedBytes),
+                ],
+                [
+                    'Root associated-data bytes',
+                    formatCount(registrationEnrollment.rootAssociatedBytes),
+                ],
+                [
+                    'Maximum restoration input bytes',
+                    formatCount(
+                        registrationEnrollment.maximumRestoreInputBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained payload bytes',
+                    formatCount(
+                        registrationEnrollment.maximumRetainedPayloadBytes,
+                    ),
+                ],
+                [
+                    'Distinct root AES block inputs',
+                    formatCount(registrationEnrollment.rootDistinctBlockInputs),
+                ],
+                [
+                    'Distinct signing-capsule AES block inputs',
+                    formatCount(
+                        registrationEnrollment.signingDistinctBlockInputs,
+                    ),
                 ],
             ],
         ),
