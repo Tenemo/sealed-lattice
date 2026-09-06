@@ -22,6 +22,7 @@ import {
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
+import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
@@ -79,6 +80,7 @@ export const renderDocumentationCensus = (): string => {
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
+    const fullWordProof = compileFullWordProofLayout();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -1705,8 +1707,90 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(wideChallengeCompiler.roleBudget),
                 ],
                 [
+                    'Lookup entry count',
+                    formatCount(wideChallengeCompiler.lookupEntryCount),
+                ],
+                [
+                    'Lookup residual root-degree bound',
+                    formatCount(wideChallengeCompiler.lookupRootDegree),
+                ],
+                [
+                    'Lookup challenge-space size',
+                    formatCount(wideChallengeCompiler.lookupChallengeSpace),
+                ],
+                [
+                    'Affine residual root-degree bound',
+                    formatCount(wideChallengeCompiler.affineRootDegree),
+                ],
+                [
+                    'Correlated batching rows',
+                    formatCount(wideChallengeCompiler.correlatedRowCount),
+                ],
+                [
+                    'Batching and first-fold numerator',
+                    formatCount(
+                        wideChallengeCompiler.batchingAndFirstFoldNumerator,
+                    ),
+                ],
+                [
+                    'Uniform-field algebraic event numerator',
+                    formatCount(
+                        wideChallengeCompiler.ordinaryAlgebraicNumerator,
+                    ),
+                ],
+                [
                     'Conditional QROM soundness exponent',
                     formatCount(wideChallengeCompiler.failureBits),
+                ],
+            ],
+        ),
+        '',
+        '## Full word-proof encoding census',
+        '',
+        'The emitted full-size prototype retains the complete verification domain. The smaller prover interpolation set is an honest-computation optimization justified by the degree bound, not a verifier relaxation. Encoded proof bounds here use explicit authentication paths; Merkle multiproof compression remains a separate encoding step.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'FRI folds to the terminal constant',
+                    formatCount(fullWordProof.foldCount),
+                ],
+                [
+                    'Fixed proof header bytes',
+                    formatCount(fullWordProof.headerBytes),
+                ],
+                [
+                    'First-oracle leaf payload bytes',
+                    formatCount(fullWordProof.firstWidth),
+                ],
+                [
+                    'Second-oracle leaf payload bytes',
+                    formatCount(fullWordProof.secondWidth),
+                ],
+                [
+                    'Maximum encoded proof bytes',
+                    formatCount(fullWordProof.maximumProofBytes),
+                ],
+                [
+                    'Prover combination interpolation points',
+                    formatCount(fullWordProof.proverInterpolationPoints),
+                ],
+                [
+                    'Expanded first-oracle bytes hashed',
+                    formatCount(fullWordProof.expandedFirstOracleBytes),
+                ],
+                [
+                    'Expanded second-oracle bytes hashed',
+                    formatCount(fullWordProof.expandedSecondOracleBytes),
+                ],
+                [
+                    'Retained leaf-salt bytes',
+                    formatCount(fullWordProof.leafSaltBytes),
+                ],
+                [
+                    'Uniform prover-mask bytes',
+                    formatCount(fullWordProof.proverMaskBytes),
                 ],
             ],
         ),

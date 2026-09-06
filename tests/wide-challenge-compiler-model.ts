@@ -61,8 +61,8 @@ export const compileWideChallengeCompilerCensus = () => {
     const prime = compileSmallLimbProofFieldCensus().modulus;
     const agreement = compileCommonAgreementDegreeCensus();
     const queryCount = agreement.queries;
-    // Conditional full word-layout profile. Its complete emitted operator
-    // still must establish the algebraic-event bounds below.
+    // Ordinary IOP event counts for the full word relation. The QROM
+    // compilation and whole-protocol assumptions remain separate obligations.
     const relation = compileSetupContributionRelationCensus();
     const originalOracles =
         relation.wordColumns +
@@ -124,13 +124,31 @@ export const compileWideChallengeCompilerCensus = () => {
     )
         reprogrammingBits++;
     const fieldSize = prime ** 3n;
+    const lookupEntryCount =
+        BigInt(relation.lookupEntries) * BigInt(agreement.systematicSize);
+    if (lookupEntryCount >= prime)
+        throw new Error('Lookup multiplicities can vanish in the base field.');
+    const lookupRootDegree =
+        lookupEntryCount + BigInt(agreement.systematicSize) - 1n;
+    const lookupChallengeSpace = prime * prime * (prime - 1n);
+    const affineRootDegree = relation.affineRows;
+    const correlatedRowCount = 2n * BigInt(originalOracles + virtualOracles);
+    // BCIKS20 Theorem 6.1, plus the coalesced first fold from BGKTTZ23
+    // Corollary 5.5. The restricted lookup challenge costs less than two.
+    const batchingAndFirstFoldNumerator =
+        (correlatedRowCount + 1n) * BigInt(agreement.domainSize);
+    const ordinaryAlgebraicNumerator = [
+        2n * lookupRootDegree,
+        affineRootDegree + 1n,
+        batchingAndFirstFoldNumerator,
+    ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
     const queryDenominator =
         BigInt(agreement.distanceDenominator) ** BigInt(queryCount);
     const roundErrorNumerator =
         BigInt(agreement.distanceDenominator - agreement.distanceNumerator) **
             BigInt(queryCount) *
             fieldSize +
-        16n * (1n << 32n) * queryDenominator;
+        ordinaryAlgebraicNumerator * queryDenominator;
     const roundErrorDenominator = queryDenominator * fieldSize;
     const tagSpace = 1n << tagBits;
     // Prefix-BCS extension: full verifier messages, at most four reference
@@ -159,6 +177,13 @@ export const compileWideChallengeCompilerCensus = () => {
         verificationBudget,
         chargedQueries,
         roleBudget,
+        lookupEntryCount,
+        lookupRootDegree,
+        lookupChallengeSpace,
+        affineRootDegree,
+        correlatedRowCount,
+        batchingAndFirstFoldNumerator,
+        ordinaryAlgebraicNumerator,
         failureNumerator,
         failureDenominator,
         failureBits,
