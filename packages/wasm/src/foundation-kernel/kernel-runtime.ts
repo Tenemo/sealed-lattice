@@ -14,7 +14,13 @@ type KernelExports = WebAssembly.Exports & {
     ) => number;
 };
 type NodeFileSystemPromises = {
-    readonly readFile: (fileUrl: URL) => Promise<Uint8Array>;
+    readonly open: (
+        fileUrl: URL,
+        flags: 'r',
+    ) => Promise<{
+        readonly readableWebStream: () => ReadableStream<Uint8Array>;
+        readonly close: () => Promise<void>;
+    }>;
 };
 
 const wasmPageByteLength = 65_536;
@@ -86,11 +92,56 @@ const requireKernelIntegrityExpectation = (
     );
 };
 
+const readBoundedKernelStream = async (
+    stream: ReadableStream<Uint8Array>,
+): Promise<ArrayBuffer> => {
+    const reader = stream.getReader();
+    let bytes = new Uint8Array(0);
+    let length = 0;
+    try {
+        for (;;) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            if (
+                chunk.value.byteLength >
+                maximumFoundationCopiedBufferByteLength - length
+            ) {
+                await reader.cancel();
+                throw new RangeError(
+                    'The foundation kernel exceeds the copied-buffer bound.',
+                );
+            }
+            const required = length + chunk.value.byteLength;
+            if (required > bytes.length) {
+                const capacity = Math.min(
+                    maximumFoundationCopiedBufferByteLength,
+                    Math.max(wasmPageByteLength, bytes.length * 2, required),
+                );
+                const grown = new Uint8Array(capacity);
+                grown.set(bytes.subarray(0, length));
+                bytes = grown;
+            }
+            bytes.set(chunk.value, length);
+            length = required;
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    return length === bytes.length
+        ? bytes.buffer
+        : bytes.buffer.slice(0, length);
+};
+
 const readWasmFile = async (fileUrl: URL): Promise<ArrayBuffer> => {
     const fileSystem = (await import(
         /* @vite-ignore */ nodeFileSystemPromisesModuleSpecifier
     )) as NodeFileSystemPromises;
-    return Uint8Array.from(await fileSystem.readFile(fileUrl)).buffer;
+    const file = await fileSystem.open(fileUrl, 'r');
+    try {
+        return await readBoundedKernelStream(file.readableWebStream());
+    } finally {
+        await file.close();
+    }
 };
 
 const resolveKernelBytes = async (
@@ -108,7 +159,10 @@ const resolveKernelBytes = async (
             `Failed to fetch the foundation kernel from ${foundationKernelUrl.toString()}.`,
         );
     }
-    return response.arrayBuffer();
+    if (response.body === null) {
+        throw new Error('The foundation kernel response has no readable body.');
+    }
+    return readBoundedKernelStream(response.body);
     /* v8 ignore stop */
 };
 

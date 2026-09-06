@@ -1,4 +1,15 @@
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import {
+    mkdir,
+    mkdtemp,
+    open,
+    readFile,
+    rmdir,
+    unlink,
+    writeFile,
+} from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -27,6 +38,50 @@ const manifestInput = (optionCount: number) => ({
 });
 
 describe('foundation ceremony runtime with the scalar WASM kernel', () => {
+    it.each([
+        [8_388_608, 'failed integrity verification'],
+        [8_388_609, 'kernel exceeds the copied-buffer bound'],
+    ] as const)(
+        'refuses a %i-byte replacement file and permits a valid subsequent load',
+        async (replacementLength, refusal) => {
+            const scratchRoot = fileURLToPath(
+                new URL('../../../../temp/', import.meta.url),
+            );
+            await mkdir(scratchRoot, { recursive: true });
+            const scratchDirectory = await mkdtemp(
+                join(scratchRoot, 'kernel-loader-'),
+            );
+            const replacementPath = join(scratchDirectory, 'kernel.wasm');
+            try {
+                const file = await open(replacementPath, 'w');
+                try {
+                    await file.truncate(replacementLength);
+                } finally {
+                    await file.close();
+                }
+                const canonicalKernel = await readFile(kernelUrl);
+                const load = createFoundationCeremonyRuntimeLoader(
+                    pathToFileURL(replacementPath),
+                    {
+                        expectedKernelSha256Hex: createHash('sha256')
+                            .update(canonicalKernel)
+                            .digest('hex'),
+                    },
+                );
+                await expect(load()).rejects.toThrow(refusal);
+                await writeFile(replacementPath, canonicalKernel);
+                const runtime = await load();
+                const manifest = runtime.encodeManifest(manifestInput(2));
+                expect(
+                    runtime.verifyManifest(manifest.canonicalBytes).isValid,
+                ).toBe(true);
+            } finally {
+                await unlink(replacementPath);
+                await rmdir(scratchDirectory);
+            }
+        },
+    );
+
     it('exports only the owned command ABIs and standard WASM globals', async () => {
         const module = await WebAssembly.compile(await readFile(kernelUrl));
         expect(WebAssembly.Module.exports(module)).toEqual([

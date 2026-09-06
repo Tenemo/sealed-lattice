@@ -1,40 +1,46 @@
 import { describe, expect, it } from 'vitest';
 
-import type { FoundationWorkerResult } from './foundation-sdk-worker.js';
+import type {
+    FoundationWorkerResult,
+    KernelFixture,
+} from './foundation-sdk-worker.js';
 
 const runWorker = (
     participantCount: number,
     optionCount: number,
-    tamperKernel = false,
+    kernelFixture: KernelFixture = 'valid',
 ) =>
-    new Promise<{ result?: FoundationWorkerResult; error?: string }>(
-        (resolve, reject) => {
-            const worker = new Worker(
-                new URL('./foundation-sdk-worker.ts', import.meta.url),
-                { type: 'module' },
-            );
-            const timer = setTimeout(() => {
-                worker.terminate();
-                reject(new Error('The SDK worker did not finish.'));
-            }, 15000);
-            worker.onmessage = (
-                event: MessageEvent<{
-                    result?: FoundationWorkerResult;
-                    error?: string;
-                }>,
-            ) => {
-                clearTimeout(timer);
-                worker.terminate();
-                resolve(event.data);
-            };
-            worker.onerror = (event) => {
-                clearTimeout(timer);
-                worker.terminate();
-                reject(new Error(event.message));
-            };
-            worker.postMessage({ participantCount, optionCount, tamperKernel });
-        },
-    );
+    new Promise<{
+        result?: FoundationWorkerResult;
+        error?: string;
+        downloadCancelled?: boolean;
+    }>((resolve, reject) => {
+        const worker = new Worker(
+            new URL('./foundation-sdk-worker.ts', import.meta.url),
+            { type: 'module' },
+        );
+        const timer = setTimeout(() => {
+            worker.terminate();
+            reject(new Error('The SDK worker did not finish.'));
+        }, 15000);
+        worker.onmessage = (
+            event: MessageEvent<{
+                result?: FoundationWorkerResult;
+                error?: string;
+                downloadCancelled?: boolean;
+            }>,
+        ) => {
+            clearTimeout(timer);
+            worker.terminate();
+            resolve(event.data);
+        };
+        worker.onerror = (event) => {
+            clearTimeout(timer);
+            worker.terminate();
+            reject(new Error(event.message));
+        };
+        worker.postMessage({ participantCount, optionCount, kernelFixture });
+    });
 
 describe('public SDK foundation flow in a browser worker', () => {
     it.each([
@@ -78,11 +84,20 @@ describe('public SDK foundation flow in a browser worker', () => {
     );
 
     it('refuses a tampered kernel and succeeds in a fresh worker afterward', async () => {
-        const failed = await runWorker(10, 10, true);
+        const failed = await runWorker(10, 10, 'tampered');
         expect(failed.result).toBeUndefined();
         expect(failed.error).toContain('failed integrity verification');
         const fresh = await runWorker(10, 10);
         expect(fresh.error).toBeUndefined();
         expect(fresh.result?.action.isValid).toBe(true);
+    });
+
+    it('refuses an oversized kernel before integrity verification', async () => {
+        const response = await runWorker(10, 10, 'oversized');
+        expect(response.result).toBeUndefined();
+        expect(response.error).toContain(
+            'kernel exceeds the copied-buffer bound',
+        );
+        expect(response.downloadCancelled).toBe(true);
     });
 });

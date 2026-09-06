@@ -90,17 +90,38 @@ const run = async (participantCount: number, optionCount: number) => {
 };
 
 export type FoundationWorkerResult = Awaited<ReturnType<typeof run>>;
+export type KernelFixture = 'valid' | 'tampered' | 'oversized';
 
 self.onmessage = (
     event: MessageEvent<{
         participantCount: number;
         optionCount: number;
-        tamperKernel: boolean;
+        kernelFixture: KernelFixture;
     }>,
 ) => {
     void (async () => {
+        let downloadCancelled = false;
         try {
-            if (event.data.tamperKernel) {
+            if (event.data.kernelFixture === 'oversized') {
+                globalThis.fetch = () =>
+                    Promise.resolve(
+                        new Response(
+                            new ReadableStream<Uint8Array>({
+                                start(controller) {
+                                    controller.enqueue(
+                                        new Uint8Array(8_388_608),
+                                    );
+                                    controller.enqueue(new Uint8Array(1));
+                                    // Deliberately remain open: refusal must not wait for EOF.
+                                },
+                                cancel() {
+                                    downloadCancelled = true;
+                                },
+                            }),
+                            { headers: { 'Content-Length': '1' } },
+                        ),
+                    );
+            } else if (event.data.kernelFixture === 'tampered') {
                 const fetchOriginal = globalThis.fetch.bind(globalThis);
                 globalThis.fetch = async (...arguments_) => {
                     const response = await fetchOriginal(...arguments_);
@@ -120,6 +141,7 @@ self.onmessage = (
         } catch (error) {
             self.postMessage({
                 error: error instanceof Error ? error.message : String(error),
+                downloadCancelled,
             });
         }
     })();
