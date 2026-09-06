@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     fingerprintSignedLimbs,
@@ -850,8 +851,12 @@ export const compileSetupContributionRelationCensus = () => {
     const supportRows = 2 * disjointPairs;
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
-    const extensionElementByteLength =
-        compileSmallLimbProofFieldCensus().packedExtensionElementByteLength;
+    const field = compileSmallLimbProofFieldCensus();
+    const extensionElementByteLength = field.packedExtensionElementByteLength;
+    const agreement = compileCommonAgreementDegreeCensus();
+    const maximumPublicQueryCount = 2 * agreement.queries;
+    const publicQueryValueByteLength =
+        BigInt(maximumPublicQueryCount) * extensionElementByteLength;
     const singlePublicAdjointCoefficientByteLength =
         degree * extensionElementByteLength;
     const publicCoefficientMagnitudeByteLength =
@@ -880,5 +885,15 @@ export const compileSetupContributionRelationCensus = () => {
         singlePublicAdjointCoefficientByteLength,
         largestPublicPolynomialByteLength:
             degree * (1n + publicCoefficientMagnitudeByteLength),
+        maximumPublicQueryCount,
+        publicQueryValueByteLength,
+        fullAffineQueryValueByteLength:
+            BigInt(model.columns.length) * publicQueryValueByteLength,
+        publicQueryTransformVectorByteLength:
+            2n * singlePublicAdjointCoefficientByteLength +
+            (degree / 2n) * field.packedFieldElementByteLength +
+            publicQueryValueByteLength,
+        fullRingQueryCosets: BigInt(agreement.domainSize) / degree,
+        auxiliaryQueryCosets: BigInt(agreement.domainSize) / auxiliaryDegree,
     };
 };

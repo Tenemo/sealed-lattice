@@ -1469,8 +1469,36 @@ export const renderDocumentationCensus = (): string => {
                         setupRelation.largestPublicPolynomialByteLength,
                     ),
                 ],
+                [
+                    'Maximum public polynomial query points',
+                    formatCount(setupRelation.maximumPublicQueryCount),
+                ],
+                [
+                    'One public polynomial query-value bytes',
+                    formatCount(setupRelation.publicQueryValueByteLength),
+                ],
+                [
+                    'All affine coefficients at query points bytes',
+                    formatCount(setupRelation.fullAffineQueryValueByteLength),
+                ],
+                [
+                    'Query-transform vectors and twiddles bytes',
+                    formatCount(
+                        setupRelation.publicQueryTransformVectorByteLength,
+                    ),
+                ],
+                [
+                    'Full-ring query cosets',
+                    formatCount(setupRelation.fullRingQueryCosets),
+                ],
+                [
+                    'Auxiliary-ring query cosets',
+                    formatCount(setupRelation.auxiliaryQueryCosets),
+                ],
             ],
         ),
+        '',
+        'The query-transform subtotal includes the coefficient and scratch vectors, one base-field twiddle table, and the queried output vector. It excludes input chunks, parser records, query-index groups, allocator behavior, stack, JavaScript, and the rest of proof verification.',
         '',
         '## Exact RNS arithmetic census',
         '',

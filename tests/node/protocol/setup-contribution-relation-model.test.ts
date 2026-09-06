@@ -61,6 +61,13 @@ describe('complete setup contribution relation in a reduced ring', () => {
             fullAffineCoefficientByteLength: 365n * 65536n * (3n * 16n),
             singlePublicAdjointCoefficientByteLength: 65536n * (3n * 16n),
             largestPublicPolynomialByteLength: 65536n * (1n + 108n),
+            maximumPublicQueryCount: 2 * 704,
+            publicQueryValueByteLength: 2n * 704n * (3n * 16n),
+            fullAffineQueryValueByteLength: 365n * 2n * 704n * (3n * 16n),
+            publicQueryTransformVectorByteLength:
+                2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
+            fullRingQueryCosets: 4n,
+            auxiliaryQueryCosets: 64n,
         });
     });
 
