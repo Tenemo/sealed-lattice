@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileSetupContributionRelationCensus,
+    compileSetupContributionColumnLayout,
     createSetupContributionRelationModel,
 } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -68,7 +69,48 @@ describe('complete setup contribution relation in a reduced ring', () => {
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
             auxiliaryQueryCosets: 64n,
+            expandedStatementPolynomialCount: 42n + 31n + 2n,
+            expandedStatementHeaderByteLength: 4n + 8n + 108n + 20n + 5n,
+            expandedStatementByteLength:
+                145n +
+                42n * 65536n * 109n +
+                31n * 65536n * 21n +
+                2n * 4096n * 6n,
+            maximumEncodedOperatorByteLength:
+                64n + 2n * 48n + 365n * 1408n * 48n,
         });
+    });
+
+    it('orders word and Boolean columns and constrains each narrow error in that order', () => {
+        const layout = compileSetupContributionColumnLayout();
+        expect(
+            [...layout.modelToCanonicalColumn].sort(
+                (left, right) => left - right,
+            ),
+        ).toEqual(Array.from({ length: 365 }, (_unused, index) => index));
+        expect(layout.lookups.slice(0, 333)).toEqual(
+            Array.from({ length: 333 }, (_unused, column) => ({
+                column,
+                scale: 1n,
+            })),
+        );
+        const errorColumns = [
+            ...Array.from({ length: 24 }, (_unused, index) => 30 + 10 * index),
+            ...Array.from({ length: 10 }, (_unused, index) => [
+                264 + 7 * index,
+                267 + 7 * index,
+            ]).flat(),
+            332,
+        ];
+        expect(layout.lookups.slice(333)).toEqual(
+            errorColumns.map((column) => ({ column, scale: 512n })),
+        );
+        expect(layout.disjointBooleanPairs).toEqual(
+            Array.from({ length: 13 }, (_unused, index) => [
+                333 + 2 * index,
+                334 + 2 * index,
+            ]),
+        );
     });
 
     it('rejects full resident affine coefficients at the absolute WASM bound', () => {

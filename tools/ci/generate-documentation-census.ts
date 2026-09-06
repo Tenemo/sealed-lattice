@@ -1495,10 +1495,28 @@ export const renderDocumentationCensus = (): string => {
                     'Auxiliary-ring query cosets',
                     formatCount(setupRelation.auxiliaryQueryCosets),
                 ],
+                [
+                    'Expanded statement polynomials',
+                    formatCount(setupRelation.expandedStatementPolynomialCount),
+                ],
+                [
+                    'Expanded statement header bytes',
+                    formatCount(
+                        setupRelation.expandedStatementHeaderByteLength,
+                    ),
+                ],
+                [
+                    'Expanded statement bytes',
+                    formatCount(setupRelation.expandedStatementByteLength),
+                ],
+                [
+                    'Maximum encoded queried-operator bytes',
+                    formatCount(setupRelation.maximumEncodedOperatorByteLength),
+                ],
             ],
         ),
         '',
-        'The query-transform subtotal includes the coefficient and scratch vectors, one base-field twiddle table, and the queried output vector. It excludes input chunks, parser records, query-index groups, allocator behavior, stack, JavaScript, and the rest of proof verification.',
+        'The query-transform subtotal includes the coefficient and scratch vectors, one base-field twiddle table, and the queried output vector. It excludes input chunks, parser records, query-index groups, allocator behavior, stack, JavaScript, and the rest of proof verification. The experimental expanded statement repeats common matrices and recipient public keys in the verifier input; its length is not the contributor upload size. The encoded operator includes the statement digest, target, final row weight, and queried coefficients.',
         '',
         '## Exact RNS arithmetic census',
         '',

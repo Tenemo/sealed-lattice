@@ -825,6 +825,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
         degree,
         auxiliaryDegree,
         columns,
+        disjointPairs,
         equations,
         rows,
         transpose,
@@ -838,16 +839,57 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
     };
 };
 
-export const compileSetupContributionRelationCensus = () => {
-    const model = createSetupContributionRelationModel();
+const columnLayout = (
+    model: ReturnType<typeof createSetupContributionRelationModel>,
+) => {
     const wordColumns = model.columns.filter(
         ({ kind }) => kind === 'word',
     ).length;
     const booleanColumns = model.columns.length - wordColumns;
+    let nextWord = 0,
+        nextBoolean = wordColumns;
+    const modelToCanonicalColumn = model.columns.map(({ kind }) =>
+        kind === 'word' ? nextWord++ : nextBoolean++,
+    );
+    return {
+        wordColumns,
+        booleanColumns,
+        modelToCanonicalColumn,
+        lookups: [
+            ...Array.from({ length: wordColumns }, (_unused, column) => ({
+                column,
+                scale: 1n,
+            })),
+            ...model.columns.flatMap((column, index) =>
+                column.kind === 'word' && column.bits < 16
+                    ? [
+                          {
+                              column: modelToCanonicalColumn[index],
+                              scale: 1n << BigInt(16 - column.bits),
+                          },
+                      ]
+                    : [],
+            ),
+        ],
+        disjointBooleanPairs: model.disjointPairs.map(
+            ([positive, negative]) =>
+                [
+                    modelToCanonicalColumn[positive],
+                    modelToCanonicalColumn[negative],
+                ] as const,
+        ),
+    };
+};
+
+export const compileSetupContributionColumnLayout = () =>
+    columnLayout(createSetupContributionRelationModel());
+
+export const compileSetupContributionRelationCensus = () => {
+    const model = createSetupContributionRelationModel();
+    const layout = columnLayout(model);
+    const { wordColumns, booleanColumns } = layout;
     const errorColumns = model.columns.filter(({ bits }) => bits === 7).length;
-    const disjointPairs = model.columns.filter(({ name }) =>
-        name.endsWith('/positive'),
-    ).length;
+    const disjointPairs = layout.disjointBooleanPairs.length;
     const supportRows = 2 * disjointPairs;
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
@@ -862,6 +904,27 @@ export const compileSetupContributionRelationCensus = () => {
     const publicCoefficientMagnitudeByteLength =
         BigInt(fixedModulusBfvInputs.ciphertextModulus.toString(2).length + 7) /
         8n;
+    const shareMagnitudeByteLength =
+        BigInt(shareModulus.toString(2).length + 7) / 8n;
+    const auxiliaryMagnitudeByteLength =
+        BigInt(auxiliaryModulus.toString(2).length + 7) / 8n;
+    let gadgetLength = 0n;
+    for (
+        let power = 1n;
+        power < fixedModulusBfvInputs.ciphertextModulus;
+        power *= fixedModulusBfvInputs.gadgetBase
+    )
+        gadgetLength++;
+    const fheStatementPolynomials = 7n * gadgetLength;
+    const sharingStatementPolynomials =
+        3n * fixedModulusBfvInputs.participantCount + 1n;
+    const auxiliaryStatementPolynomials = 2n;
+    const expandedStatementHeaderByteLength =
+        4n +
+        2n * 4n +
+        publicCoefficientMagnitudeByteLength +
+        shareMagnitudeByteLength +
+        auxiliaryMagnitudeByteLength;
     const affineRows = model.equations.reduce(
         (sum, equation) =>
             sum +
@@ -878,7 +941,7 @@ export const compileSetupContributionRelationCensus = () => {
         disjointPairs,
         supportRows,
         affineRows,
-        lookupEntries: wordColumns + errorColumns,
+        lookupEntries: layout.lookups.length,
         fullAffineCoefficientByteLength:
             BigInt(model.columns.length) *
             singlePublicAdjointCoefficientByteLength,
@@ -895,5 +958,25 @@ export const compileSetupContributionRelationCensus = () => {
             publicQueryValueByteLength,
         fullRingQueryCosets: BigInt(agreement.domainSize) / degree,
         auxiliaryQueryCosets: BigInt(agreement.domainSize) / auxiliaryDegree,
+        expandedStatementPolynomialCount:
+            fheStatementPolynomials +
+            sharingStatementPolynomials +
+            auxiliaryStatementPolynomials,
+        expandedStatementHeaderByteLength,
+        expandedStatementByteLength:
+            expandedStatementHeaderByteLength +
+            fheStatementPolynomials *
+                degree *
+                (1n + publicCoefficientMagnitudeByteLength) +
+            sharingStatementPolynomials *
+                degree *
+                (1n + shareMagnitudeByteLength) +
+            auxiliaryStatementPolynomials *
+                auxiliaryDegree *
+                (1n + auxiliaryMagnitudeByteLength),
+        maximumEncodedOperatorByteLength:
+            64n +
+            2n * extensionElementByteLength +
+            BigInt(model.columns.length) * publicQueryValueByteLength,
     };
 };
