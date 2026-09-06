@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     fingerprintSignedLimbs,
@@ -795,6 +796,18 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
         return { coefficients, target: modulo(-constant, prime) };
     };
     const verify = () =>
+        equations.every((equation) =>
+            [
+                equation.publicValue,
+                ...equation.convolution.map((term) => term.publicCoefficients),
+            ].every((coefficients) =>
+                isCanonicalCenteredPolynomial(
+                    coefficients,
+                    equation.degree,
+                    equation.modulus,
+                ),
+            ),
+        ) &&
         columns.every((column) =>
             column.values.every(
                 (value) => value >= 0n && value < 1n << BigInt(column.bits),

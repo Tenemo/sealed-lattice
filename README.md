@@ -9,7 +9,7 @@ Use synthetic data only. The project has no complete voting construction, indepe
 - A poll has 3 through 20 participants and 2 through 20 ordered options.
 - A valid ballot gives every option an integer score from 1 through 10. Every score defaults to 1, and there is no abstention action.
 - A participant may submit at most one ballot. Invalid and late submissions are ignored, and the organizer cannot choose which valid ballots count.
-- The organizer may close voting without waiting for every participant. Closing must create one verifiable inventory of every authoritatively published pre-close submission, including invalid submissions with their deterministic classification and the exact accepted subset. Every accepted ballot is counted exactly once.
+- The organizer may close voting without waiting for every participant to cast a ballot. Closing must create one verifiable inventory of every authoritatively published pre-close submission, including invalid submissions with their deterministic classification and the exact accepted subset. Every accepted ballot is counted exactly once.
 - The result reveals only the requested ordered option identifiers. Totals, margins, comparisons, ranks, and individual scores remain private.
 - If no ballot is accepted, the protocol returns a public, verifiable no-result outcome.
 - After the certified inventory exists, the required disappearance and release guarantees apply without a named participant.

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
@@ -440,6 +441,27 @@ export const createBallotEncryptionRelationModel = (
         rows,
         rangeValid,
         verify: () =>
+            fhe.ciphertext.length === 2 &&
+            auxiliaryCiphertext.ciphertext.length === 2 &&
+            [fhe.common, fhe.publicKey, ...fhe.ciphertext].every(
+                (coefficients) =>
+                    isCanonicalCenteredPolynomial(
+                        coefficients,
+                        degree,
+                        modulus,
+                    ),
+            ) &&
+            [
+                auxiliaryCiphertext.common,
+                auxiliaryCiphertext.publicKey,
+                ...auxiliaryCiphertext.ciphertext,
+            ].every((coefficients) =>
+                isCanonicalCenteredPolynomial(
+                    coefficients,
+                    auxiliaryDegree,
+                    auxiliary.modulus,
+                ),
+            ) &&
             rangeValid() &&
             Object.values(rows())
                 .flat()

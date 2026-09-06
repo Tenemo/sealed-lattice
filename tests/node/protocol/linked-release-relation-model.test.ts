@@ -8,6 +8,32 @@ import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 describe('release linked to the original encrypted aggregate share', () => {
+    it('rejects high-limb aliases in every public polynomial family', () => {
+        const model = createLinkedReleaseRelationModel();
+        for (const [coefficients, bits] of [
+            [model.common, 192],
+            [model.publicKey, 192],
+            [model.encryptedConstant, 192],
+            [model.encryptedLinear, 192],
+            [model.targetLinear, 192],
+            [model.partial, 288],
+        ] as const) {
+            const original = coefficients[0];
+            coefficients[0] +=
+                (original < 0n ? -1n : 1n) * (1n << BigInt(bits));
+            expect(
+                Object.values(model.rows())
+                    .flat()
+                    .every((value) => value === 0n),
+            ).toBe(true);
+            expect(model.verify()).toBe(false);
+            coefficients[0] = original;
+        }
+        expect(model.verify()).toBe(true);
+        model.encryptedLinear.pop();
+        expect(model.verify()).toBe(false);
+    });
+
     it('checks the key, aggregate decryption, and dense partial release in the same integer relation', () => {
         const sharing = compileWideShareLiftingCensus();
         for (const seed of [0n, 1n, 17n, 987654321n]) {

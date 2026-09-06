@@ -8,6 +8,47 @@ import {
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
 describe('linked scored ballot encryption', () => {
+    it('rejects truncated FHE limbs and direct auxiliary proof-field aliases', () => {
+        const model = createBallotEncryptionRelationModel([1n, 10n]);
+        for (const coefficients of [
+            model.fhe.common,
+            model.fhe.publicKey,
+            ...model.fhe.ciphertext,
+        ]) {
+            const original = coefficients[0];
+            coefficients[0] += (original < 0n ? -1n : 1n) * (1n << 864n);
+            expect(model.rows().fhe.every((value) => value === 0n)).toBe(true);
+            expect(model.verify()).toBe(false);
+            coefficients[0] = original;
+        }
+        const prime = compileSmallLimbProofFieldCensus().modulus;
+        for (const coefficients of [
+            model.auxiliaryCiphertext.common,
+            model.auxiliaryCiphertext.publicKey,
+            ...model.auxiliaryCiphertext.ciphertext,
+        ]) {
+            const original = coefficients[0];
+            coefficients[0] += prime;
+            expect(
+                model.rows().auxiliary.every((value) => value % prime === 0n),
+            ).toBe(true);
+            expect(model.verify()).toBe(false);
+            coefficients[0] = original;
+        }
+        expect(model.verify()).toBe(true);
+        for (const ciphertext of [
+            model.fhe.ciphertext,
+            model.auxiliaryCiphertext.ciphertext,
+        ]) {
+            ciphertext.push([...ciphertext[0]]);
+            expect(model.verify()).toBe(false);
+            ciphertext.pop();
+        }
+        expect(model.verify()).toBe(true);
+        model.auxiliaryCiphertext.ciphertext[0].pop();
+        expect(model.verify()).toBe(false);
+    });
+
     it('encrypts the same complete score vector in both ciphertexts and the exact comparison windows', () => {
         const reduce = (value: bigint) =>
             Number(((value % 65537n) + 65537n) % 65537n);

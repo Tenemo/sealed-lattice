@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
@@ -394,6 +395,21 @@ export const createLinkedReleaseRelationModel = (seed = 1n) => {
         partial: releaseRows().flat(),
     });
     const verify = () =>
+        [common, publicKey, encryptedConstant, encryptedLinear].every(
+            (coefficients) =>
+                isCanonicalCenteredPolynomial(
+                    coefficients,
+                    degree,
+                    sharing.modulus,
+                ),
+        ) &&
+        [targetLinear, partial].every((coefficients) =>
+            isCanonicalCenteredPolynomial(
+                coefficients,
+                degree,
+                release.releaseModulus,
+            ),
+        ) &&
         rangeValid() &&
         recipientSecret.every((value) => value >= -1n && value <= 1n) &&
         recipientSecret.filter((value) => value === 1n).length === 2 &&

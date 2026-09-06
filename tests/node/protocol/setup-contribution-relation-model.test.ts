@@ -7,6 +7,35 @@ import {
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
 describe('complete setup contribution relation in a reduced ring', () => {
+    it('rejects public limbs outside the canonical modulus even when the lifted equations are unchanged', () => {
+        const model = createSetupContributionRelationModel();
+        for (const equation of model.equations) {
+            for (const coefficients of [
+                equation.publicValue,
+                ...equation.convolution.map(
+                    (term) => term.publicCoefficients as bigint[],
+                ),
+            ]) {
+                const original = coefficients[0];
+                coefficients[0] +=
+                    (original < 0n ? -1n : 1n) *
+                    (1n << BigInt(96 * equation.limbs));
+                expect(
+                    model.rows().every((row) => model.evaluateRow(row) === 0n),
+                ).toBe(true);
+                expect(model.verify(), equation.name).toBe(false);
+                coefficients[0] = original;
+            }
+        }
+        expect(model.verify()).toBe(true);
+    });
+
+    it('rejects incomplete public polynomials before evaluating the relation', () => {
+        const model = createSetupContributionRelationModel();
+        model.equations[0].publicValue.pop();
+        expect(model.verify()).toBe(false);
+    });
+
     it('satisfies every integer row and decrypts every share at both interval endpoints and varied inputs', () => {
         for (const seed of [0n, 1n, 23n, 987654321n]) {
             const model = createSetupContributionRelationModel(seed);

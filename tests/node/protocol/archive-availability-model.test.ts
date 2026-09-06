@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -37,6 +39,34 @@ const archive = new Map(
 );
 
 describe('hybrid public archive availability model', () => {
+    it('refuses malformed content-addressed records and dependencies without disrupting valid retrieval', () => {
+        for (const encoded of [
+            'not-json',
+            '["purpose", []',
+            'null',
+            '["p",[],"x",0]',
+            ' [ "p", [], "x" ] ',
+        ]) {
+            const bytes = Buffer.from(encoded);
+            const identity = createHash('sha3-512').update(bytes).digest('hex');
+            const store = new Map(archive);
+            store.set(identity, bytes);
+            expect(readArchiveClosure(identity, [store])).toBeUndefined();
+            const parent = createArchiveRecord(
+                'candidate',
+                [identity],
+                'malformed dependency',
+            );
+            store.set(parent.identity, parent.bytes);
+            expect(
+                readArchiveClosure(parent.identity, [store]),
+            ).toBeUndefined();
+            expect(readArchiveClosure(certificate.identity, [store])).toEqual(
+                archive,
+            );
+        }
+    });
+
     it('recovers all authorizing bytes after the original publisher disappears', () => {
         for (let failed = 0; failed < 3; failed++) {
             for (let omitted = 0; omitted < 3; omitted++) {

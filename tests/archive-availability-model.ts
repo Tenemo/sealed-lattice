@@ -33,7 +33,13 @@ export const readArchiveClosure = (
                     candidate !== undefined && hash(candidate) === identity,
             );
         if (bytes === undefined) return;
-        const parsed: unknown = JSON.parse(Buffer.from(bytes).toString('utf8'));
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+        } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
+            return;
+        }
         if (
             !Array.isArray(parsed) ||
             parsed.length !== 3 ||
