@@ -58,7 +58,20 @@ describe('complete setup contribution relation in a reduced ring', () => {
             supportRows: 26,
             affineRows: BigInt((24 * 9 + 20 * 2) * 65536 + 4096 + 26),
             lookupEntries: 333 + 45,
+            fullAffineCoefficientByteLength: 365n * 65536n * (3n * 16n),
+            singlePublicAdjointCoefficientByteLength: 65536n * (3n * 16n),
+            largestPublicPolynomialByteLength: 65536n * (1n + 108n),
         });
+    });
+
+    it('rejects full resident affine coefficients at the absolute WASM bound', () => {
+        const census = compileSetupContributionRelationCensus();
+        expect(census.fullAffineCoefficientByteLength).toBeGreaterThan(
+            671_088_640n,
+        );
+        expect(
+            census.singlePublicAdjointCoefficientByteLength + 1_048_576n,
+        ).toBeLessThan(671_088_640n);
     });
 
     it('binds low and high public limbs in every key and ciphertext equation', () => {

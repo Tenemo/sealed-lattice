@@ -1453,6 +1453,22 @@ export const renderDocumentationCensus = (): string => {
                     'Single-entry inverse columns',
                     formatCount(setupRelation.lookupEntries),
                 ],
+                [
+                    'Full resident affine coefficient bytes',
+                    formatCount(setupRelation.fullAffineCoefficientByteLength),
+                ],
+                [
+                    'One public adjoint coefficient vector bytes',
+                    formatCount(
+                        setupRelation.singlePublicAdjointCoefficientByteLength,
+                    ),
+                ],
+                [
+                    'Largest signed public polynomial bytes',
+                    formatCount(
+                        setupRelation.largestPublicPolynomialByteLength,
+                    ),
+                ],
             ],
         ),
         '',

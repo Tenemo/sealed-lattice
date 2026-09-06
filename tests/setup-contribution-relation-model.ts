@@ -850,6 +850,13 @@ export const compileSetupContributionRelationCensus = () => {
     const supportRows = 2 * disjointPairs;
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
+    const extensionElementByteLength =
+        compileSmallLimbProofFieldCensus().packedExtensionElementByteLength;
+    const singlePublicAdjointCoefficientByteLength =
+        degree * extensionElementByteLength;
+    const publicCoefficientMagnitudeByteLength =
+        BigInt(fixedModulusBfvInputs.ciphertextModulus.toString(2).length + 7) /
+        8n;
     const affineRows = model.equations.reduce(
         (sum, equation) =>
             sum +
@@ -867,5 +874,11 @@ export const compileSetupContributionRelationCensus = () => {
         supportRows,
         affineRows,
         lookupEntries: wordColumns + errorColumns,
+        fullAffineCoefficientByteLength:
+            BigInt(model.columns.length) *
+            singlePublicAdjointCoefficientByteLength,
+        singlePublicAdjointCoefficientByteLength,
+        largestPublicPolynomialByteLength:
+            degree * (1n + publicCoefficientMagnitudeByteLength),
     };
 };
