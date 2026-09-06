@@ -122,3 +122,73 @@ export const compileBrowserWordProverResources = () => {
         ),
     };
 };
+
+export const compileContributionGenerationResources = () => {
+    const degree = fixedModulusBfvInputs.polynomialDegree;
+    const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
+    const participants = fixedModulusBfvInputs.participantCount;
+    const relation = compileSetupContributionRelationCensus();
+    const proof = compileFullWordProofLayout();
+    const sparseData = ((participants + 2n) * degree + auxiliaryDegree) * 17n;
+    const transforms = 3n * (degree + auxiliaryDegree) * 16n;
+    const sharing = 3n * degree * 16n;
+    const privateWorkspace = 24n * degree * 16n;
+    const publicCoefficientAllowance = 1024n;
+    const publicWorkspace = 4n * degree * publicCoefficientAllowance;
+    const generationAllowance =
+        relation.syntheticWitnessByteLength +
+        sparseData +
+        transforms +
+        sharing +
+        privateWorkspace +
+        publicWorkspace +
+        64n * 1024n * 1024n;
+    const proverAllowance =
+        compileBrowserWordProverResources().maximumLiveBytes;
+    let gadgetLength = 0n;
+    for (
+        let value = 1n;
+        value < fixedModulusBfvInputs.ciphertextModulus;
+        value *= fixedModulusBfvInputs.gadgetBase
+    )
+        gadgetLength++;
+    const auxiliaryPolynomialBytes =
+        auxiliaryDegree *
+        (1n +
+            BigInt(
+                Math.ceil(
+                    auxiliaryInputEncryptionParameters.modulus.toString(2)
+                        .length / 8,
+                ),
+            ));
+    const sharingGroupBytes =
+        relation.expandedStatementByteLength -
+        relation.expandedStatementHeaderByteLength -
+        7n * gadgetLength * relation.largestPublicPolynomialByteLength -
+        2n * auxiliaryPolynomialBytes;
+    const sharingPolynomialBytes = sharingGroupBytes / (3n * participants + 1n);
+    if (sharingPolynomialBytes * (3n * participants + 1n) !== sharingGroupBytes)
+        throw new Error('Nonintegral sharing statement shape.');
+    const regeneratedCommonBytes =
+        3n * gadgetLength * relation.largestPublicPolynomialByteLength +
+        sharingPolynomialBytes +
+        auxiliaryPolynomialBytes;
+    return {
+        generationAllowance,
+        combinedAllowance:
+            (generationAllowance > proverAllowance
+                ? generationAllowance
+                : proverAllowance) +
+            2n * 1024n * 1024n,
+        publicCoefficientAllowance,
+        expandedPublicWorkingBytes:
+            relation.expandedStatementByteLength + proof.maximumMultiproofBytes,
+        regeneratedCommonBytes,
+        publicWorkingBytes:
+            relation.expandedStatementByteLength -
+            regeneratedCommonBytes +
+            proof.maximumMultiproofBytes,
+        maximumPublicEmissionBatch:
+            7n * relation.largestPublicPolynomialByteLength,
+    };
+};

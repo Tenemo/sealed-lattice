@@ -8,7 +8,10 @@ import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
-import { compileBrowserWordProverResources } from '#tests/browser-word-prover-resource-model.js';
+import {
+    compileBrowserWordProverResources,
+    compileContributionGenerationResources,
+} from '#tests/browser-word-prover-resource-model.js';
 import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
@@ -39,6 +42,10 @@ import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniquen
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import {
+    compileSetupRandomnessCensus,
+    setupGaussianParameters,
+} from '#tests/setup-randomness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
@@ -83,6 +90,8 @@ export const renderDocumentationCensus = (): string => {
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const fullWordProof = compileFullWordProofLayout();
     const browserWordProver = compileBrowserWordProverResources();
+    const contributionGeneration = compileContributionGenerationResources();
+    const setupRandomness = compileSetupRandomnessCensus();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -1834,6 +1843,86 @@ export const renderDocumentationCensus = (): string => {
                     `Allocation allowance: ${stage.stage}`,
                     formatCount(stage.bytes),
                 ]),
+            ],
+        ),
+        '',
+        '## Contribution generation and sampling census',
+        '',
+        'The combined browser path keeps witness columns inside Rust, regenerates fixed common polynomials, and retains the remaining public statement and proof as bounded local blobs. Allocation allowances require measured closure. The sampling bound charges finite-word quantization and the omitted Gaussian tails for preparation; it is not a lattice-security or composed-protocol bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Gaussian density parameter numerator',
+                    formatCount(setupGaussianParameters.sigmaNumerator),
+                ],
+                [
+                    'Gaussian density parameter denominator',
+                    formatCount(setupGaussianParameters.sigmaDenominator),
+                ],
+                [
+                    'Gaussian sample bits',
+                    formatCount(setupGaussianParameters.sampleBits),
+                ],
+                [
+                    'Encoded nonterminal cumulative thresholds',
+                    formatCount(setupRandomness.thresholdCount),
+                ],
+                [
+                    'Cumulative table bytes',
+                    formatCount(setupRandomness.encodedThresholdBytes),
+                ],
+                [
+                    'Error samples per contribution',
+                    formatCount(setupRandomness.samplesPerContribution),
+                ],
+                [
+                    'Error samples across preparation and registration',
+                    formatCount(setupRandomness.samplesPerPreparation),
+                ],
+                [
+                    'Uniform sample bytes per contribution',
+                    formatCount(setupRandomness.contributionSampleBytes),
+                ],
+                [
+                    'Preparation sampling-distance exponent',
+                    formatCount(setupRandomness.preparationSamplingBits),
+                ],
+                [
+                    'Witness-generation allocation allowance bytes',
+                    formatCount(contributionGeneration.generationAllowance),
+                ],
+                [
+                    'Combined allocation allowance bytes',
+                    formatCount(contributionGeneration.combinedAllowance),
+                ],
+                [
+                    'Public coefficient allocation allowance bytes',
+                    formatCount(
+                        contributionGeneration.publicCoefficientAllowance,
+                    ),
+                ],
+                [
+                    'Expanded public working bytes',
+                    formatCount(
+                        contributionGeneration.expandedPublicWorkingBytes,
+                    ),
+                ],
+                [
+                    'Regenerated common-polynomial bytes',
+                    formatCount(contributionGeneration.regeneratedCommonBytes),
+                ],
+                [
+                    'Retained public working bytes',
+                    formatCount(contributionGeneration.publicWorkingBytes),
+                ],
+                [
+                    'Maximum public emission batch bytes',
+                    formatCount(
+                        contributionGeneration.maximumPublicEmissionBatch,
+                    ),
+                ],
             ],
         ),
         '',
