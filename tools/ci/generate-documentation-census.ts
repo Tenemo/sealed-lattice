@@ -39,6 +39,7 @@ import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
@@ -94,6 +95,7 @@ export const renderDocumentationCensus = (): string => {
     const contributionGeneration = compileContributionGenerationResources();
     const setupRandomness = compileSetupRandomnessCensus();
     const registrationKey = compileRegistrationKeyRelationCensus();
+    const registrationCustody = compileRegistrationCustodyCensus();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -1992,6 +1994,90 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum public coefficient query bytes',
                     formatCount(registrationKey.maximumCoefficientQueryBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Registration custody census',
+        '',
+        'This completed-key capsule retains sorted secret positions and a bounded encrypted manifest over every staged public record. Payload totals exclude IndexedDB metadata and the browser-managed CryptoKey representation. The AES block and hash-polynomial counts describe this fixed sealing schedule; they do not establish a primitive-security bound or general checkpoint protocol.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Secret index bytes',
+                    formatCount(registrationCustody.indexBytes),
+                ],
+                [
+                    'Private capsule plaintext bytes',
+                    formatCount(registrationCustody.secretPlaintextBytes),
+                ],
+                [
+                    'Encrypted capsule bytes',
+                    formatCount(registrationCustody.capsuleBytes),
+                ],
+                [
+                    'Maximum retained data records',
+                    formatCount(registrationCustody.recordCount),
+                ],
+                [
+                    'Manifest prefix bytes',
+                    formatCount(registrationCustody.manifestPrefixBytes),
+                ],
+                [
+                    'Record reference bytes',
+                    formatCount(registrationCustody.recordReferenceBytes),
+                ],
+                [
+                    'Maximum manifest plaintext bytes',
+                    formatCount(registrationCustody.maximumManifestBytes),
+                ],
+                [
+                    'Maximum encrypted root bytes',
+                    formatCount(registrationCustody.maximumRootBytes),
+                ],
+                [
+                    'Maximum root associated-data bytes',
+                    formatCount(registrationCustody.maximumRootAssociatedBytes),
+                ],
+                [
+                    'Maximum capsule associated-data bytes',
+                    formatCount(
+                        registrationCustody.maximumCapsuleAssociatedBytes,
+                    ),
+                ],
+                [
+                    'Maximum restoration input bytes',
+                    formatCount(registrationCustody.maximumRestoreInputBytes),
+                ],
+                [
+                    'Maximum retained payload bytes',
+                    formatCount(registrationCustody.retainedPayloadBytes),
+                ],
+                [
+                    'Capsule seal invocations',
+                    formatCount(registrationCustody.capsuleSealInvocations),
+                ],
+                [
+                    'Root seal invocations',
+                    formatCount(registrationCustody.rootSealInvocations),
+                ],
+                [
+                    'Distinct capsule AES block inputs',
+                    formatCount(registrationCustody.capsuleDistinctBlockInputs),
+                ],
+                [
+                    'Distinct root AES block inputs',
+                    formatCount(registrationCustody.rootDistinctBlockInputs),
+                ],
+                [
+                    'Maximum capsule authentication polynomial degree',
+                    formatCount(registrationCustody.maximumCapsuleHashDegree),
+                ],
+                [
+                    'Maximum root authentication polynomial degree',
+                    formatCount(registrationCustody.maximumRootHashDegree),
                 ],
             ],
         ),
