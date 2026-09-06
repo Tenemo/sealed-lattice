@@ -14,7 +14,7 @@ import {
 const sourceFiles = ['**/*.{js,mjs,ts}'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
 const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
-const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
+const toolFiles = ['tools/**/*.ts', '*.config.{ts,js}'];
 
 const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];
 
@@ -29,7 +29,7 @@ const parserOptions = {
 };
 
 const importResolverSettings = {
-    'import-x/internal-regex': '^#(?:packages|test-vectors|tests|tools)(?:/|$)',
+    'import-x/internal-regex': '^#(?:packages|tests|tools)(?:/|$)',
     'import-x/resolver-next': [
         createTypeScriptImportResolver({
             alwaysTryTypes: true,
@@ -41,16 +41,12 @@ const importResolverSettings = {
 
 const packageSourceImportPatterns = [
     {
-        group: ['#packages/*', '#test-vectors/*', '#tests/*', '#tools/*'],
+        group: ['#packages/*', '#tests/*', '#tools/*'],
         message:
             'Published package source must not depend on repository-private aliases.',
     },
     {
-        group: [
-            '@sealed-lattice/*/*',
-            '!@sealed-lattice/wasm/published-sdk',
-            'sealed-lattice/*',
-        ],
+        group: ['@sealed-lattice/*/*', 'sealed-lattice/*'],
         message:
             'Workspace packages must import another package through its public entry point.',
     },
@@ -59,8 +55,8 @@ const packageSourceImportPatterns = [
 export default defineConfig(
     globalIgnores([
         '.tmp*/**',
-        'temp*/**',
-        'tmp*/**',
+        'logs/**',
+        'temp/**',
         'node_modules/**',
         'reference-projects/**',
         '**/dist/**',
@@ -166,56 +162,7 @@ export default defineConfig(
         },
     },
     {
-        files: ['packages/types/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/crypto',
-                        '@sealed-lattice/protocol',
-                        '@sealed-lattice/wasm',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/crypto/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/protocol',
-                        '@sealed-lattice/wasm',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
         files: ['packages/wasm/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/crypto',
-                        '@sealed-lattice/protocol',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/protocol/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
                 'error',
@@ -277,22 +224,19 @@ export default defineConfig(
         },
     },
     {
-        files: ['tools/ci/*.mjs'],
-        languageOptions: {
-            parserOptions: {
-                project: './tsconfig.tools.json',
-            },
-        },
+        files: [
+            'packages/sdk/tests/node/election-foundation-public-api.test.ts',
+        ],
         rules: {
-            '@typescript-eslint/no-unsafe-argument': 'off',
-        },
-    },
-    {
-        files: ['tools/ci/packed-package-smoke.mjs'],
-        rules: {
-            // This script is copied into a temporary consumer and runs only
-            // after the packed SDK has been installed there.
-            'import-x/no-unresolved': 'off',
+            'import-x/extensions': [
+                'error',
+                'ignorePackages',
+                {
+                    js: 'always',
+                    mjs: 'always',
+                    ts: 'never',
+                },
+            ],
         },
     },
 );

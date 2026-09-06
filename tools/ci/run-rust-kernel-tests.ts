@@ -1,151 +1,116 @@
-import path from 'node:path';
-
+import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
-    createHeavyTestProgressReporter,
-    resolveFocusedRustTestRunResult,
-} from './heavy-test-progress.js';
-import { runWithLocalRunLog } from './local-run-log.js';
-import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
-import {
-    verifyCompleteRustLaneOwnership,
-    verifyFocusedRustLaneSelection,
-} from './rust-focused-lane-selection.js';
-import {
-    cargoTestArgumentsForRustKernelFast,
-    heavyRustKernelTestNamePrefix,
-    normalizeRustTestFilter,
-} from './rust-kernel-test-arguments.js';
-
-export type ParsedRustKernelArguments = {
-    readonly testFilter?: string;
-};
+    runCommandAndCaptureOutput,
+    runCommandsInSeries,
+} from './run-command.js';
 
 const usage =
     'Usage: run-rust-kernel-tests.ts [<test name, module name, or Rust file filter>].';
-
-export const parseRustKernelArguments = (
-    commandArguments: readonly string[],
-): ParsedRustKernelArguments => {
-    const positionalArguments: string[] = [];
-
-    for (const argument of commandArguments) {
-        if (argument === '--') {
-            continue;
-        }
-        if (argument.startsWith('-')) {
-            throw new Error(`Unknown argument: ${argument}. ${usage}`);
-        }
-
-        positionalArguments.push(argument);
-    }
-
-    if (positionalArguments.length > 1) {
-        throw new Error(`Rust kernel test runs accept one filter. ${usage}`);
-    }
-
-    const positionalFilter = positionalArguments[0];
-    const normalizedFilter =
-        positionalFilter !== undefined
-            ? normalizeRustTestFilter(positionalFilter)
-            : undefined;
-    if (normalizedFilter === '') {
-        throw new Error(
-            `Rust kernel test runs require a non-empty filter. ${usage}`,
-        );
-    }
-    if (normalizedFilter?.startsWith(heavyRustKernelTestNamePrefix) === true) {
-        throw new Error(
-            `Heavy Rust kernel tests must use "pnpm run test:rust:kernel:heavy -- ${normalizedFilter}".`,
-        );
-    }
-
-    return {
-        testFilter: normalizedFilter,
-    };
+const cargoArguments = [
+    'test',
+    '--locked',
+    '-p',
+    'sealed-lattice-kernel',
+] as const;
+const cargoEnvironment = {
+    ...process.env,
+    CARGO_INCREMENTAL: '0',
+    RUST_BACKTRACE: '1',
 };
 
-export const buildRustKernelTestCommand = (
-    parsedArguments: ParsedRustKernelArguments,
-): CommandInvocation => ({
-    args: cargoTestArgumentsForRustKernelFast(parsedArguments.testFilter),
-    command: 'cargo',
-    description:
-        parsedArguments.testFilter === undefined
-            ? 'cargo test Rust kernel fast'
-            : `cargo test Rust kernel fast (${parsedArguments.testFilter})`,
-    env: {
-        ...process.env,
-        CARGO_INCREMENTAL: '0',
-        RUST_BACKTRACE: '1',
-    },
-    logFileSlug: 'cargo-test-rust-kernel-fast',
-});
+const parseFilter = (rawArguments: readonly string[]): string | undefined => {
+    const arguments_ = rawArguments.filter((argument) => argument !== '--');
+    if (
+        arguments_.length > 1 ||
+        arguments_.some((argument) => argument.startsWith('-'))
+    ) {
+        throw new Error(
+            `Rust kernel tests accept one optional filter. ${usage}`,
+        );
+    }
+    const rawFilter = arguments_[0];
+    if (rawFilter === undefined) return undefined;
+    const pathParts = rawFilter.replace(/\\/gu, '/').split('/');
+    const fileName = pathParts[pathParts.length - 1] ?? '';
+    const filter = fileName.endsWith('.rs')
+        ? fileName.slice(0, -'.rs'.length)
+        : fileName;
+    if (filter.length === 0) {
+        throw new Error(`Rust kernel test filters must not be empty. ${usage}`);
+    }
+    return filter;
+};
 
-export const runRustKernelTests = async (
-    rawArguments: readonly string[] = process.argv.slice(2),
+const requireTestMatch = async (
+    filter: string,
+    runLog: ActiveLocalRunLog,
 ): Promise<void> => {
+    const result = await runCommandAndCaptureOutput(
+        {
+            args: [
+                ...cargoArguments,
+                filter,
+                '--',
+                '--list',
+                '--format',
+                'terse',
+            ],
+            command: 'cargo',
+            description: `list Rust kernel tests matching ${filter}`,
+            env: cargoEnvironment,
+            logFileSlug: 'cargo-test-rust-kernel-inventory',
+        },
+        { runLog },
+    );
+    if (result.exitCode !== 0 || result.terminationSignal !== null) {
+        throw new Error(`Unable to list Rust kernel tests matching ${filter}.`);
+    }
+    if (
+        !result.stdout
+            .split(/\r?\n/gu)
+            .some((line) => line.trim().endsWith(': test'))
+    ) {
+        throw new Error(
+            `test:rust:kernel filter ${filter} selects zero tests.`,
+        );
+    }
+};
+
+const main = async (): Promise<void> => {
+    const rawArguments = process.argv.slice(2);
     await runWithLocalRunLog(
         {
             commandLineArguments: rawArguments,
-            lanes: ['Rust kernel fast'],
+            lanes: ['Rust kernel'],
             scriptName: 'test:rust:kernel',
         },
         async (runLog) => {
-            const parsedArguments = parseRustKernelArguments(rawArguments);
-            const command = buildRustKernelTestCommand(parsedArguments);
-            if (parsedArguments.testFilter === undefined) {
-                await verifyCompleteRustLaneOwnership({
-                    environment: command.env,
-                    runLog,
-                });
-            } else {
-                await verifyFocusedRustLaneSelection({
-                    environment: command.env,
-                    lane: 'rust-kernel-fast',
-                    runLog,
-                    testFilter: parsedArguments.testFilter,
-                });
-            }
-            const progressReporter = createHeavyTestProgressReporter({
-                eventFilePath: path.join(
-                    runLog.runDirectoryPath,
-                    'tests',
-                    'rust-kernel-fast.jsonl',
-                ),
-                label: 'rust-kernel-fast',
-                threadCount: 1,
-            });
-
-            try {
-                let exitCode = await runCommandsInSeries([command], {
-                    observer: progressReporter.observer,
-                    outputMode: 'inherit',
-                    runLog,
-                    terminalOutputFilter: progressReporter.terminalOutputFilter,
-                });
-                if (parsedArguments.testFilter !== undefined) {
-                    const focusedRunResult = resolveFocusedRustTestRunResult({
-                        commandExitCode: exitCode,
-                        executedTestCount: progressReporter.executedTestCount(),
-                        runnerName: 'Rust kernel fast',
-                        testFilter: parsedArguments.testFilter,
-                    });
-                    exitCode = focusedRunResult.exitCode;
-                    if (focusedRunResult.failureMessage !== undefined) {
-                        console.error(focusedRunResult.failureMessage);
-                        runLog.writeCombinedOutput(
-                            `${focusedRunResult.failureMessage}\n`,
-                        );
-                    }
-                }
-                process.exitCode = exitCode;
-            } finally {
-                progressReporter.stop();
-            }
+            const filter = parseFilter(rawArguments);
+            if (filter !== undefined) await requireTestMatch(filter, runLog);
+            process.exitCode = await runCommandsInSeries(
+                [
+                    {
+                        args: [
+                            ...cargoArguments,
+                            ...(filter === undefined ? [] : [filter]),
+                            '--',
+                            '--test-threads',
+                            '1',
+                            '--show-output',
+                        ],
+                        command: 'cargo',
+                        description:
+                            filter === undefined
+                                ? 'cargo test Rust kernel'
+                                : `cargo test Rust kernel (${filter})`,
+                        env: cargoEnvironment,
+                        logFileSlug: 'cargo-test-rust-kernel',
+                    },
+                ],
+                { outputMode: 'inherit', runLog },
+            );
         },
     );
 };
 
-if (import.meta.main) {
-    void runRustKernelTests();
-}
+if (import.meta.main) void main();

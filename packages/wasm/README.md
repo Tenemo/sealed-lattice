@@ -5,28 +5,34 @@
 ## Responsibilities
 
 - Build the canonical kernel from Rust source and optimize its generated WebAssembly artifact.
-- Load fresh or cached kernel instances and expose typed boundary wrappers.
-- Preserve canonical byte, hash, refusal, and verification behavior across Node.js and browser consumers.
+- Load fresh or cached kernel instances and expose the canonical foundation command boundary.
+- Preserve foundation byte, hash, refusal, and verification behavior across Node.js and browser consumers.
 - Copy the exact producer bytes into the public SDK build and verify their integrity.
 
 ## Runtime boundaries
 
-The canonical participant artifact must remain scalar-capable. Optional SIMD measurement cannot replace the scalar baseline without feature detection and byte-for-byte output, transcript, verification, and refusal parity.
+The canonical participant artifact must remain scalar-capable. SIMD is optional. It may become a runtime optimization only behind feature detection and after proving that it preserves bytes, transcripts, verification, and refusal results.
 
-The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running protocol orchestration must publish proactive authenticated checkpoints and cannot assume that a hidden page or worker will keep running or receive a termination callback.
+The browser bridge transfers owned binary buffers and reacquires WebAssembly memory views after any operation that can grow memory. Its internal command envelope uses one operation tag, bounded length-prefixed byte fields, raw hashes, and complete-input consumption; it does not duplicate bytes as JSON or hexadecimal text.
 
-Transport validation is deliberately narrower than proof verification. It may check canonical structure and openings but cannot verify all equations or mint a positive capability. Full acceptance belongs to the Rust kernel, and only a completed positive result may cross the typed bridge. Generation and verification must remain a matched release-WebAssembly pair.
+Kernel integrity is the SHA-256 hash of the exact shipped WebAssembly bytes, including custom sections. Build reproducibility is enforced during generation rather than by normalizing bytes in the loader.
 
-Long-running kernel cursors contain canonical, source-bound progress rather than opaque runtime state. The protocol package owns authenticated custody and worker orchestration; this package owns cursor encoding, restore validation, bounded polling, cancellation, and linear-state disposal.
+The public SDK exposes only implemented foundation operations. Source and package tests define the exact command inventory.
 
-Test-only proof workbenches and native or desktop results are not an accepted ceremony or supported-phone evidence. The repository [README](../../README.md) owns current implementation status, and [SECURITY.md](../../SECURITY.md) owns security limitations.
+The bridge must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or a construction call that bypasses certified target-bound result release. A future result path may expose only positively verified terminal output through the public SDK.
+
+Package tests establish only their named byte, refusal, and runtime properties. See the repository [README](../../README.md) for implementation status and [SECURITY.md](../../SECURITY.md) for security limitations.
 
 ## Development
 
-Do not edit generated WebAssembly output directly. Build it from the Rust kernel through the package-owned command:
+Do not edit generated WebAssembly output directly. The package-owned build uses a dedicated Cargo target and per-invocation optimizer staging, then atomically replaces the generated artifact. Run:
 
 ```bash
 pnpm --filter @sealed-lattice/wasm run build:wasm
 ```
 
-Use the workspace build when package declarations and copied SDK bytes must be regenerated together.
+Use the workspace build when package declarations and copied SDK bytes must be regenerated together. After that build, the reproducibility gate repeats only WebAssembly generation and the SDK copy, then requires every package byte to match:
+
+```bash
+pnpm run build:verify-reproducible
+```

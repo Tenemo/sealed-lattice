@@ -244,6 +244,112 @@ describe('local run logs', () => {
             );
         }));
 
+    it('keeps the first operative failure instead of a stopped sibling', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['initiator', 'sibling'],
+                rootDirectoryPath,
+                scriptName: 'fail-fast sample',
+            });
+            log.writeEvent({
+                commandId: 'initiating-command',
+                details: { exitCode: 7 },
+                eventType: 'command-finished',
+            });
+            log.writeEvent({
+                commandId: 'stopped-sibling',
+                details: { exitCode: 1, terminationRequested: true },
+                eventType: 'command-finished',
+            });
+            await log.finish({ exitCode: 7 });
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.failedCommandId).toBe('initiating-command');
+            await expect(
+                readFile(
+                    path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                    'utf8',
+                ),
+            ).resolves.toContain('Failed command: initiating-command');
+        }));
+
+    it('preserves structured fail-fast cancellation attribution', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sibling'],
+                rootDirectoryPath,
+                scriptName: 'cancellation sample',
+            });
+            const abortController = new AbortController();
+            const exitCode = await runCommandsInSeries(
+                [
+                    {
+                        args: [
+                            '--input-type=module',
+                            '--eval',
+                            'setInterval(() => undefined, 60_000);',
+                        ],
+                        command: process.execPath,
+                        description: 'Stopped sibling',
+                        logFileSlug: 'stopped-sibling',
+                    },
+                ],
+                {
+                    observer: {
+                        onCommandStart: () =>
+                            abortController.abort({
+                                classification: 'sibling-abort',
+                                initiator: 'Knip unused-code scan',
+                            }),
+                    },
+                    outputMode: 'capture',
+                    runLog: log,
+                    signal: abortController.signal,
+                },
+            );
+            await log.finish({ exitCode });
+
+            expect(exitCode).not.toBe(0);
+            const events = await readJsonLines(
+                path.join(log.runDirectoryPath, 'events.jsonl'),
+            );
+            expect(
+                events.find(
+                    (event) =>
+                        event.eventType === 'command-termination-requested',
+                )?.details,
+            ).toEqual({
+                reason: {
+                    classification: 'sibling-abort',
+                    initiator: 'Knip unused-code scan',
+                },
+            });
+            expect(
+                events.find((event) => event.eventType === 'command-finished')
+                    ?.details,
+            ).toMatchObject({
+                terminationReason: {
+                    classification: 'sibling-abort',
+                    initiator: 'Knip unused-code scan',
+                },
+                terminationRequested: true,
+            });
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary).not.toHaveProperty('failedCommandId');
+        }));
+
     it('keeps ordered event and resource journals through normal completion', () =>
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({

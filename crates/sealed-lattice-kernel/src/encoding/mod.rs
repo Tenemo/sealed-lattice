@@ -1,53 +1,26 @@
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use std::io::{self, Write};
+use core::str;
 
-mod command;
-mod command_fields;
+use crate::foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
+
 mod foundation_command;
-mod json_ingress;
-mod mailbox_command;
-mod private_randomness_command;
 
-const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
-const COMMAND_ERROR_LENGTH_FALLBACK: &[u8] = br#"{"error":{"code":"MalformedLength","message":"command error response exceeds the accepted byte length"},"success":false}"#;
-const COMMAND_ERROR_SERIALIZATION_FALLBACK: &[u8] = br#"{"error":{"code":"InvalidProtocolObject","message":"command error response serialization failed"},"success":false}"#;
-
-#[cfg(test)]
-use command::run_transcript_core_command_inner;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalErrorCode {
-    DuplicateField,
     InvalidEnum,
     InvalidProtocolObject,
-    InvalidHex,
     InvalidUtf8,
     MalformedLength,
-    MalformedMagic,
-    MalformedVarUint,
-    NonCanonicalVarUint,
-    ComponentMismatch,
     TrailingBytes,
-    UnsupportedObjectVersion,
 }
 
 impl CanonicalErrorCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::DuplicateField => "DuplicateField",
             Self::InvalidEnum => "InvalidEnum",
             Self::InvalidProtocolObject => "InvalidProtocolObject",
-            Self::InvalidHex => "InvalidHex",
             Self::InvalidUtf8 => "InvalidUtf8",
             Self::MalformedLength => "MalformedLength",
-            Self::MalformedMagic => "MalformedMagic",
-            Self::MalformedVarUint => "MalformedVarUint",
-            Self::NonCanonicalVarUint => "NonCanonicalVarUint",
-            Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
-            Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
         }
     }
 }
@@ -67,8 +40,8 @@ impl CanonicalError {
     }
 }
 
-impl std::fmt::Display for CanonicalError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for CanonicalError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(formatter, "{}: {}", self.code.as_str(), self.message)
     }
 }
@@ -77,48 +50,25 @@ impl std::error::Error for CanonicalError {}
 
 pub type CanonicalResult<T> = Result<T, CanonicalError>;
 
-// LEB128: 7 payload bits per byte, high bit set marks a continuation byte.
-pub fn encode_varuint(mut value: u64) -> Vec<u8> {
-    let mut output = Vec::new();
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        output.push(byte);
-        if value == 0 {
-            break;
-        }
-    }
-    output
-}
-
-pub fn append_varuint(output: &mut Vec<u8>, value: u64) {
-    output.extend(encode_varuint(value));
-}
-
-pub fn append_bytes(output: &mut Vec<u8>, value: &[u8]) {
-    append_varuint(output, value.len() as u64);
-    output.extend(value);
-}
-
-pub fn append_string(output: &mut Vec<u8>, value: &str) {
-    append_bytes(output, value.as_bytes());
-}
-
-pub struct CanonicalReader<'a> {
+pub(super) struct BinaryReader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
-impl<'a> CanonicalReader<'a> {
-    pub fn new(bytes: &'a [u8]) -> Self {
+impl<'a> BinaryReader<'a> {
+    pub const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
 
-    pub fn is_finished(&self) -> bool {
-        self.offset == self.bytes.len()
+    pub fn finish(self) -> CanonicalResult<()> {
+        if self.offset == self.bytes.len() {
+            Ok(())
+        } else {
+            Err(CanonicalError::new(
+                CanonicalErrorCode::TrailingBytes,
+                "foundation command contains trailing bytes",
+            ))
+        }
     }
 
     pub fn read_exact(&mut self, length: usize) -> CanonicalResult<&'a [u8]> {
@@ -128,309 +78,227 @@ impl<'a> CanonicalReader<'a> {
         if end > self.bytes.len() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "length exceeds remaining bytes",
+                "foundation command field exceeds the remaining bytes",
             ));
         }
-        let slice = &self.bytes[self.offset..end];
+        let value = &self.bytes[self.offset..end];
         self.offset = end;
-
-        Ok(slice)
+        Ok(value)
     }
 
-    pub fn read_varuint(&mut self) -> CanonicalResult<u64> {
-        let start = self.offset;
-        let mut shift = 0_u32;
-        let mut value = 0_u64;
-
-        for index in 0..10 {
-            if self.offset >= self.bytes.len() {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedVarUint,
-                    "varuint is truncated",
-                ));
-            }
-
-            let byte = self.bytes[self.offset];
-            self.offset += 1;
-            let payload = u64::from(byte & 0x7f);
-            // 10th byte (index 9) carries only 1 usable bit of a u64; payload > 1
-            // would overflow, so reject it.
-            if index == 9 && payload > 1 {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedVarUint,
-                    "varuint exceeds u64",
-                ));
-            }
-            value |= payload << shift;
-
-            if byte & 0x80 == 0 {
-                // Enforce minimal/canonical encoding: re-encode the decoded value
-                // and require the consumed bytes to match exactly.
-                let consumed = &self.bytes[start..self.offset];
-                if consumed != encode_varuint(value).as_slice() {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::NonCanonicalVarUint,
-                        "varuint is not minimally encoded",
-                    ));
-                }
-
-                return Ok(value);
-            }
-
-            shift += 7;
-        }
-
-        Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedVarUint,
-            "varuint is too long",
-        ))
+    pub fn read_u8(&mut self) -> CanonicalResult<u8> {
+        Ok(self.read_exact(1)?[0])
     }
 
-    pub fn read_bytes(&mut self) -> CanonicalResult<Vec<u8>> {
-        let length = usize::try_from(self.read_varuint()?).map_err(|_| {
+    pub fn read_u16(&mut self) -> CanonicalResult<u16> {
+        let bytes = self.read_exact(2)?;
+        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    pub fn read_u32(&mut self) -> CanonicalResult<u32> {
+        let bytes = self.read_exact(4)?;
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    pub fn read_u64(&mut self) -> CanonicalResult<u64> {
+        let bytes: [u8; 8] = self
+            .read_exact(8)?
+            .try_into()
+            .map_err(|_| CanonicalError::new(CanonicalErrorCode::MalformedLength, "u64"))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    pub fn read_bytes(&mut self) -> CanonicalResult<&'a [u8]> {
+        let length = usize::try_from(self.read_u32()?).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "length does not fit usize",
+                "field length does not fit usize",
             )
         })?;
-
-        Ok(self.read_exact(length)?.to_vec())
+        self.read_exact(length)
     }
 
-    pub fn read_string(&mut self) -> CanonicalResult<String> {
-        String::from_utf8(self.read_bytes()?).map_err(|_| {
-            CanonicalError::new(CanonicalErrorCode::InvalidUtf8, "string is not valid UTF-8")
+    pub fn read_string(&mut self) -> CanonicalResult<&'a str> {
+        str::from_utf8(self.read_bytes()?).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidUtf8,
+                "foundation command string is not valid UTF-8",
+            )
         })
     }
 }
 
-struct BoundedJsonWriter {
+pub(super) struct BinaryWriter {
     bytes: Vec<u8>,
-    maximum_byte_length: usize,
-    limit_exceeded: bool,
 }
 
-impl BoundedJsonWriter {
-    fn new(maximum_byte_length: usize) -> Self {
-        Self {
-            bytes: Vec::new(),
-            maximum_byte_length,
-            limit_exceeded: false,
-        }
+impl BinaryWriter {
+    pub const fn new() -> Self {
+        Self { bytes: Vec::new() }
     }
-}
 
-impl Write for BoundedJsonWriter {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let required_byte_length = self
-            .bytes
-            .len()
-            .checked_add(buffer.len())
-            .ok_or_else(|| io::Error::other("command response byte length overflows usize"))?;
-        if required_byte_length > self.maximum_byte_length {
-            self.limit_exceeded = true;
-            return Err(io::Error::other(
-                "command response exceeds the accepted byte length",
+    fn extend(&mut self, value: &[u8]) -> CanonicalResult<()> {
+        let required_length = self.bytes.len().checked_add(value.len()).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "response length overflow",
+            )
+        })?;
+        if required_length > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "foundation command response exceeds the copied-buffer limit",
             ));
         }
-        if required_byte_length > self.bytes.capacity() {
-            self.bytes
-                .try_reserve_exact(buffer.len())
-                .map_err(|_| io::Error::other("command response allocation failed"))?;
-        }
-        self.bytes.extend_from_slice(buffer);
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
+        self.bytes.try_reserve(value.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "foundation command response allocation failed",
+            )
+        })?;
+        self.bytes.extend_from_slice(value);
         Ok(())
     }
-}
 
-fn encode_json_response_with_limit(
-    response: &Value,
-    maximum_byte_length: usize,
-) -> CanonicalResult<Vec<u8>> {
-    let mut writer = BoundedJsonWriter::new(maximum_byte_length);
-    if let Err(error) = serde_json::to_writer(&mut writer, response) {
-        let (code, message) = if writer.limit_exceeded {
-            (
+    pub fn write_u8(&mut self, value: u8) -> CanonicalResult<()> {
+        self.extend(&[value])
+    }
+
+    pub fn write_bytes(&mut self, value: &[u8]) -> CanonicalResult<()> {
+        let length = u32::try_from(value.len()).map_err(|_| {
+            CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "command response exceeds the accepted byte length".to_owned(),
+                "response field length does not fit u32",
             )
-        } else {
-            (
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("command response serialization failed: {error}"),
-            )
-        };
-        return Err(CanonicalError::new(code, message));
+        })?;
+        self.extend(&length.to_le_bytes())?;
+        self.extend(value)
     }
-    Ok(writer.bytes)
-}
 
-pub fn encode_success(value: Value) -> Vec<u8> {
-    let response = json!({
-        "success": true,
-        "value": value,
-    });
-    encode_json_response_with_limit(
-        &response,
-        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
-    )
-    .unwrap_or_else(encode_error)
-}
+    pub fn write_string(&mut self, value: &str) -> CanonicalResult<()> {
+        self.write_bytes(value.as_bytes())
+    }
 
-pub fn encode_error(error: CanonicalError) -> Vec<u8> {
-    encode_error_with_limit(error, MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH)
-}
+    pub fn write_fixed(&mut self, value: &[u8]) -> CanonicalResult<()> {
+        self.extend(value)
+    }
 
-fn encode_error_with_limit(error: CanonicalError, maximum_byte_length: usize) -> Vec<u8> {
-    let CanonicalError { code, message } = error;
-    let response = json!({
-        "success": false,
-        "error": {
-            "code": code.as_str(),
-            "message": message,
-        },
-    });
-    match encode_json_response_with_limit(&response, maximum_byte_length) {
-        Ok(encoded) => encoded,
-        Err(encoding_error) => match encoding_error.code {
-            CanonicalErrorCode::MalformedLength => COMMAND_ERROR_LENGTH_FALLBACK.to_vec(),
-            _ => COMMAND_ERROR_SERIALIZATION_FALLBACK.to_vec(),
-        },
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
     }
 }
 
-pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
-    let command_result = command::run_transcript_core_command_inner(input);
+fn encode_error(error: CanonicalError) -> Vec<u8> {
+    let encoded: CanonicalResult<Vec<u8>> = (|| {
+        let mut writer = BinaryWriter::new();
+        writer.write_u8(1)?;
+        writer.write_string(error.code.as_str())?;
+        writer.write_string(&error.message)?;
+        Ok(writer.into_bytes())
+    })();
+    encoded.unwrap_or_else(|_| vec![1])
+}
 
-    match command_result {
-        Ok(value) => encode_success(value),
+fn encode_success(payload: Vec<u8>) -> Vec<u8> {
+    let encoded: CanonicalResult<Vec<u8>> = (|| {
+        let mut writer = BinaryWriter::new();
+        writer.write_u8(0)?;
+        writer.write_fixed(&payload)?;
+        Ok(writer.into_bytes())
+    })();
+    encoded.unwrap_or_else(encode_error)
+}
+
+pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
+    if input.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
+        return encode_error(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "foundation command exceeds the copied-buffer limit",
+        ));
+    }
+
+    match foundation_command::run(input) {
+        Ok(payload) => encode_success(payload),
         Err(error) => encode_error(error),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error, encode_error_with_limit,
-        encode_json_response_with_limit, encode_varuint,
-    };
+    use super::*;
 
-    #[test]
-    fn varuint_round_trips_boundary_values() {
-        for value in [0, 1, 2, 127, 128, 255, 16_384, u32::MAX as u64, u64::MAX] {
-            let encoded = encode_varuint(value);
-            let mut reader = CanonicalReader::new(&encoded);
-
-            assert_eq!(reader.read_varuint().expect("value should decode"), value);
-            assert!(reader.is_finished());
-        }
+    fn decode_command_error(response: &[u8]) -> (&str, &str) {
+        let mut reader = BinaryReader::new(response);
+        assert_eq!(reader.read_u8().expect("command status is present"), 1);
+        let code = reader.read_string().expect("error code is present");
+        let message = reader.read_string().expect("error message is present");
+        reader.finish().expect("error response is fully consumed");
+        (code, message)
     }
 
     #[test]
-    fn rejects_non_canonical_varuint() {
-        let mut reader = CanonicalReader::new(&[0x80, 0x00]);
-        let error = reader
-            .read_varuint()
-            .expect_err("redundant varuint should fail");
-
-        assert_eq!(error.code, CanonicalErrorCode::NonCanonicalVarUint);
-    }
-
-    #[test]
-    fn response_serialization_accepts_the_exact_boundary_and_refuses_one_byte_over() {
-        let response = serde_json::json!({
-            "success": true,
-            "value": { "payload": "bounded response" },
-        });
-        let expected = serde_json::to_vec(&response).expect("test response serializes");
+    fn binary_command_refuses_unknown_and_trailing_input() {
         assert_eq!(
-            encode_json_response_with_limit(&response, expected.len())
-                .expect("the exact response boundary must serialize"),
-            expected
+            decode_command_error(&run_foundation_command(&[0xff])).0,
+            CanonicalErrorCode::InvalidEnum.as_str()
         );
-        let error = encode_json_response_with_limit(&response, expected.len() - 1)
-            .expect_err("one byte over the response limit must refuse");
-        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
-    }
-
-    #[test]
-    fn append_varuint_uses_canonical_encoding() {
-        let mut output = Vec::new();
-        append_varuint(&mut output, 128);
-
-        assert_eq!(output, vec![0x80, 0x01]);
-    }
-
-    #[test]
-    fn command_errors_are_json_encoded() {
-        let encoded = encode_error(super::CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "bad command",
-        ));
-        let response = String::from_utf8(encoded).expect("error should be UTF-8 JSON");
-
-        assert!(response.contains("\"success\":false"));
-        assert!(response.contains("\"InvalidProtocolObject\""));
-    }
-
-    #[test]
-    fn oversized_command_errors_use_the_deterministic_length_fallback() {
-        let encoded = encode_error_with_limit(
-            super::CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "x".repeat(super::COMMAND_ERROR_LENGTH_FALLBACK.len() * 2),
-            ),
-            super::COMMAND_ERROR_LENGTH_FALLBACK.len(),
-        );
-
-        assert_eq!(encoded, super::COMMAND_ERROR_LENGTH_FALLBACK);
-        let response: serde_json::Value =
-            serde_json::from_slice(&encoded).expect("fallback is valid JSON");
-        assert_eq!(response["success"], false);
-        assert_eq!(response["error"]["code"], "MalformedLength");
         assert_eq!(
-            response["error"]["message"],
-            "command error response exceeds the accepted byte length"
+            decode_command_error(&run_foundation_command(&[2, 0, 0, 0, 0, 1])).0,
+            CanonicalErrorCode::TrailingBytes.as_str()
         );
     }
 
     #[test]
-    fn command_derives_canonical_object_hash_with_kernel_canonical_json() {
-        let response = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "DeriveCanonicalObjectHash",
-                "value": {
-                    "objectType": "CanonicalJsonTestObject",
-                    "poll": "main"
-                }
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("canonical object hash command should succeed");
-
+    fn binary_command_enforces_the_exact_input_limit() {
+        let mut command = vec![0_u8; MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH];
+        command[0] = 0xff;
         assert_eq!(
-            response["canonicalObjectHash"]
-                .as_str()
-                .expect("canonical object hash")
-                .len(),
-            128
+            decode_command_error(&run_foundation_command(&command)).0,
+            CanonicalErrorCode::InvalidEnum.as_str(),
+            "an exact-limit command must reach command decoding"
         );
-        // A typeless value is rejected by the canonical-object domain.
-        assert!(
-            super::run_transcript_core_command_inner(
-                serde_json::json!({
-                    "command": "DeriveCanonicalObjectHash",
-                    "value": { "poll": "main" }
-                })
-                .to_string()
-                .as_bytes(),
+
+        command.push(0);
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&command)),
+            (
+                CanonicalErrorCode::MalformedLength.as_str(),
+                "foundation command exceeds the copied-buffer limit"
             )
-            .is_err()
+        );
+    }
+
+    #[test]
+    fn binary_response_writer_enforces_the_exact_output_limit() {
+        let exact_limit = vec![0_u8; MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH];
+        let mut writer = BinaryWriter::new();
+        writer
+            .write_fixed(&exact_limit)
+            .expect("the exact copied-buffer limit is accepted");
+        let error = writer
+            .write_u8(0)
+            .expect_err("one byte beyond the copied-buffer limit must refuse");
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+        assert_eq!(
+            error.message,
+            "foundation command response exceeds the copied-buffer limit"
+        );
+        assert_eq!(
+            writer.into_bytes().len(),
+            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn binary_command_refuses_truncated_lengths_and_invalid_utf8() {
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&[2, 0, 0, 0])).0,
+            CanonicalErrorCode::MalformedLength.as_str()
+        );
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&[5, 1, 0, 0, 0, 0xff])).0,
+            CanonicalErrorCode::InvalidUtf8.as_str()
         );
     }
 }

@@ -22,13 +22,13 @@ concurrency:
     cancel-in-progress: false
 
 jobs:
-    validate-source:
-        name: validate source
+    verify:
+        name: verify source and package
         runs-on: ubuntu-24.04
-        timeout-minutes: 360
-        permissions:
-            actions: read
-            contents: read
+        timeout-minutes: 120
+        outputs:
+            tag: ${{ steps.version.outputs.tag }}
+            version: ${{ steps.version.outputs.version }}
         steps:
             - name: Require the default branch
               env:
@@ -44,73 +44,75 @@ jobs:
                   persist-credentials: false
                   ref: ${{ github.sha }}
             - uses: ./.github/actions/bootstrap-pnpm
-
-            - name: Wait for successful CI for the exact source
-              env:
-                  GH_TOKEN: ${{ github.token }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts await-ci
-
-    prepare-release:
-        name: prepare release
-        needs:
-            - validate-source
-        runs-on: ubuntu-24.04
-        timeout-minutes: 60
-        outputs:
-            tag: ${{ steps.version.outputs.tag }}
-            version: ${{ steps.version.outputs.version }}
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  fetch-depth: 0
-                  persist-credentials: false
-                  ref: ${{ github.sha }}
-            - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
+            - name: Install Chromium
+              run: pnpm exec playwright install --with-deps chromium
+            - name: Verify release source
+              run: pnpm run check:desktop
+            - name: Verify reproducible build output
+              run: pnpm run build:verify-reproducible
+
             - name: Prepare public package version
               id: version
-              env:
-                  RELEASE_INCREMENT: ${{ inputs.release_type }}
-              run: pnpm run release:version -- "${RELEASE_INCREMENT}"
+              run: pnpm run release:version -- "${{ inputs.release_type }}"
 
-            - name: Validate release metadata changes
-              run: pnpm exec tsx ./tools/ci/release-gates.ts metadata
-
-            - name: Require unused release targets
+            - name: Require one unused release target
               env:
-                  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
                   RELEASE_TAG: ${{ steps.version.outputs.tag }}
                   RELEASE_VERSION: ${{ steps.version.outputs.version }}
-                  SOURCE_SHA: ${{ github.sha }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts targets
+              run: |
+                  if [[ "$(git diff --name-only)" != "packages/sdk/package.json" ]]; then
+                    echo "Release preparation must change only packages/sdk/package.json." >&2
+                    git status --short >&2
+                    exit 1
+                  fi
+                  if [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+                    echo "Release preparation produced untracked files." >&2
+                    git ls-files --others --exclude-standard >&2
+                    exit 1
+                  fi
+                  git diff --check
+                  git fetch --tags origin
+                  if git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}"; then
+                    echo "Tag ${RELEASE_TAG} already exists." >&2
+                    exit 1
+                  fi
+                  set +e
+                  npm view "sealed-lattice@${RELEASE_VERSION}" version >"${RUNNER_TEMP}/npm-version" 2>"${RUNNER_TEMP}/npm-error"
+                  npm_status=$?
+                  set -e
+                  if [[ ${npm_status} -eq 0 ]]; then
+                    echo "sealed-lattice@${RELEASE_VERSION} already exists on npm." >&2
+                    exit 1
+                  fi
+                  if ! grep -q "E404" "${RUNNER_TEMP}/npm-error"; then
+                    cat "${RUNNER_TEMP}/npm-error" >&2
+                    exit ${npm_status}
+                  fi
 
-            - name: Run release package smoke tests
-              timeout-minutes: 40
+            - name: Smoke the versioned package
               run: pnpm run smoke:pack:npm
 
-            - name: Upload release-preparation diagnostics
+            - name: Upload verification diagnostics
               if: ${{ always() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
                   if-no-files-found: warn
-                  name: prepare-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  name: release-verify-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
-    push-release:
-        name: push release
-        needs:
-            - prepare-release
+    push:
+        name: push release commit and tag
+        needs: verify
         runs-on: ubuntu-24.04
-        timeout-minutes: 20
+        timeout-minutes: 10
         outputs:
-            release_sha: ${{ steps.release-commit.outputs.sha }}
-        permissions:
-            contents: read
+            release_sha: ${{ steps.release.outputs.sha }}
         steps:
             - name: Require the release deploy key
               env:
@@ -127,172 +129,157 @@ jobs:
                   persist-credentials: true
                   ref: ${{ github.sha }}
                   ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
-            - uses: ./.github/actions/bootstrap-pnpm
 
-            - name: Verify unchanged release targets
+            - name: Apply the verified public version
+              env:
+                  RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+              run: |
+                  node --input-type=module <<'NODE'
+                  import { readFile, writeFile } from 'node:fs/promises';
+                  const manifestPath = 'packages/sdk/package.json';
+                  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+                  manifest.version = process.env.RELEASE_VERSION;
+                  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 4)}\n`);
+                  NODE
+                  test "$(git diff --name-only)" = "packages/sdk/package.json"
+                  git diff --check
+
+            - name: Commit, tag, and atomically push
+              id: release
               env:
                   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-                  RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
-                  SOURCE_SHA: ${{ github.sha }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts targets
-
-            - name: Recreate release metadata
-              id: version
-              env:
-                  RELEASE_INCREMENT: ${{ inputs.release_type }}
-              run: pnpm run release:version -- "${RELEASE_INCREMENT}"
-
-            - name: Verify recreated release metadata
-              env:
-                  EXPECTED_TAG: ${{ needs.prepare-release.outputs.tag }}
-                  EXPECTED_VERSION: ${{ needs.prepare-release.outputs.version }}
-                  RECREATED_TAG: ${{ steps.version.outputs.tag }}
-                  RECREATED_VERSION: ${{ steps.version.outputs.version }}
-              run: |
-                  if [[ "${RECREATED_VERSION}" != "${EXPECTED_VERSION}" || "${RECREATED_TAG}" != "${EXPECTED_TAG}" ]]; then
-                    echo "Recreated release metadata does not match the prepared release." >&2
-                    exit 1
-                  fi
-                  pnpm exec tsx ./tools/ci/release-gates.ts metadata
-
-            - name: Commit and tag release metadata
-              id: release-commit
-              env:
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+                  RELEASE_TAG: ${{ needs.verify.outputs.tag }}
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git add packages/sdk/package.json
-                  if git diff --cached --quiet; then
-                    echo "No release metadata changes were staged." >&2
-                    exit 1
-                  fi
-                  git commit -m "chore(release): ${RELEASE_TAG}"
+                  git commit -m "Release ${RELEASE_TAG}"
                   git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}"
+                  git remote set-url origin "git@github.com:${GITHUB_REPOSITORY}.git"
+                  git push --atomic origin "HEAD:${DEFAULT_BRANCH}" "refs/tags/${RELEASE_TAG}"
                   echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
-            - name: Push release commit and tag atomically
-              env:
-                  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-              run: |
-                  git remote set-url origin "git@github.com:${GITHUB_REPOSITORY}.git"
-                  if ! git push --atomic origin "HEAD:${DEFAULT_BRANCH}" "refs/tags/${RELEASE_TAG}"; then
-                    echo "The release deploy key could not atomically push ${DEFAULT_BRANCH} and ${RELEASE_TAG}." >&2
-                    exit 1
-                  fi
-
-            - name: Upload release-push diagnostics
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: push-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
-
-    publish-npm:
-        name: publish npm
+    package:
+        name: build exact tag package
         needs:
-            - prepare-release
-            - push-release
+            - verify
+            - push
         runs-on: ubuntu-24.04
         timeout-minutes: 60
-        permissions:
-            contents: read
-            id-token: write
+        outputs:
+            integrity: ${{ steps.package.outputs.integrity }}
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
-                  ref: ${{ needs.prepare-release.outputs.tag }}
+                  ref: ${{ needs.verify.outputs.tag }}
             - uses: ./.github/actions/bootstrap-pnpm
-
-            - name: Verify the checked-out release tag
-              env:
-                  RELEASE_SHA: ${{ needs.push-release.outputs.release_sha }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts checked-out-tag
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - name: Run and retain tag-built package smoke tests
-              id: public-package
-              timeout-minutes: 40
+
+            - name: Verify checked-out release commit
               env:
-                  RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+                  RELEASE_SHA: ${{ needs.push.outputs.release_sha }}
+                  RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+              run: |
+                  test "$(git rev-parse HEAD)" = "${RELEASE_SHA}"
+                  test "$(git rev-list -n 1 "${RELEASE_TAG}")" = "${RELEASE_SHA}"
+
+            - name: Build and retain the published tarball
+              id: package
+              env:
+                  RELEASE_VERSION: ${{ needs.verify.outputs.version }}
               run: pnpm run smoke:pack:npm -- --out "${RUNNER_TEMP}/sealed-lattice-${RELEASE_VERSION}.tgz"
 
-            - name: Determine npm publication
-              id: npm-disposition
-              env:
-                  PACKAGE_INTEGRITY: ${{ steps.public-package.outputs.integrity }}
-                  PACKAGE_TARBALL_PATH: ${{ steps.public-package.outputs.tarball }}
-                  RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts npm-disposition
+            - name: Upload exact package
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: error
+                  name: release-package-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ steps.package.outputs.tarball }}
+                  retention-days: 7
 
-            - name: Publish the tag-built package to npm
-              if: steps.npm-disposition.outputs.publish == 'true'
-              env:
-                  PACKAGE_TARBALL_PATH: ${{ steps.public-package.outputs.tarball }}
-              run: npm publish "${PACKAGE_TARBALL_PATH}" --access public --ignore-scripts --provenance --tag latest
-
-            - name: Upload publication diagnostics
+            - name: Upload package diagnostics
               if: ${{ always() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
                   if-no-files-found: warn
-                  name: publish-npm-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  name: release-package-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
-    create-github-release:
-        name: create GitHub release
+    publish-npm:
+        name: publish npm package
         needs:
-            - prepare-release
-            - push-release
-            - publish-npm
+            - verify
+            - package
         runs-on: ubuntu-24.04
         timeout-minutes: 10
         permissions:
+            actions: read
+            contents: read
+            id-token: write
+        steps:
+            - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+              with:
+                  name: release-package-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ runner.temp }}/release-package
+
+            - name: Verify retained package integrity
+              env:
+                  EXPECTED_INTEGRITY: ${{ needs.package.outputs.integrity }}
+                  PACKAGE_TARBALL_PATH: ${{ runner.temp }}/release-package/sealed-lattice-${{ needs.verify.outputs.version }}.tgz
+              run: |
+                  actual_integrity=$(node --input-type=module -e "import { createHash } from 'node:crypto'; import { readFileSync } from 'node:fs'; process.stdout.write('sha512-' + createHash('sha512').update(readFileSync(process.env.PACKAGE_TARBALL_PATH)).digest('base64')); ")
+                  test "${actual_integrity}" = "${EXPECTED_INTEGRITY}"
+
+            - name: Determine npm publication
+              id: npm
+              env:
+                  LOCAL_INTEGRITY: ${{ needs.package.outputs.integrity }}
+                  RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+              run: |
+                  set +e
+                  remote_integrity=$(npm view "sealed-lattice@${RELEASE_VERSION}" dist.integrity 2>"${RUNNER_TEMP}/npm-error")
+                  npm_status=$?
+                  set -e
+                  if [[ ${npm_status} -eq 0 ]]; then
+                    if [[ "${remote_integrity}" != "${LOCAL_INTEGRITY}" ]]; then
+                      echo "npm contains different bytes for sealed-lattice@${RELEASE_VERSION}." >&2
+                      exit 1
+                    fi
+                    echo "publish=false" >> "${GITHUB_OUTPUT}"
+                  elif grep -q "E404" "${RUNNER_TEMP}/npm-error"; then
+                    echo "publish=true" >> "${GITHUB_OUTPUT}"
+                  else
+                    cat "${RUNNER_TEMP}/npm-error" >&2
+                    exit ${npm_status}
+                  fi
+
+            - name: Publish to npm with provenance
+              if: steps.npm.outputs.publish == 'true'
+              env:
+                  PACKAGE_TARBALL_PATH: ${{ runner.temp }}/release-package/sealed-lattice-${{ needs.verify.outputs.version }}.tgz
+              run: npm publish "${PACKAGE_TARBALL_PATH}" --access public --ignore-scripts --provenance --tag latest
+
+    create-release:
+        name: create GitHub release
+        needs:
+            - verify
+            - push
+            - publish-npm
+        runs-on: ubuntu-24.04
+        timeout-minutes: 5
+        permissions:
             contents: write
         steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-                  ref: ${{ needs.prepare-release.outputs.tag }}
-            - uses: ./.github/actions/bootstrap-pnpm
-
-            - name: Verify the checked-out release tag
-              env:
-                  RELEASE_SHA: ${{ needs.push-release.outputs.release_sha }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts checked-out-tag
-
-            - name: Determine GitHub release creation
-              id: github-release-disposition
+            - name: Create GitHub release if absent
               env:
                   GH_TOKEN: ${{ github.token }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-              run: pnpm exec tsx ./tools/ci/release-gates.ts github-release-disposition
-
-            - name: Create a normal GitHub release
-              if: steps.github-release-disposition.outputs.create == 'true'
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+                  RELEASE_TAG: ${{ needs.verify.outputs.tag }}
               run: |
-                  gh release create "${RELEASE_TAG}" \
-                    --repo "${GITHUB_REPOSITORY}" \
-                    --verify-tag \
-                    --title "${RELEASE_TAG}" \
-                    --generate-notes
-
-            - name: Upload GitHub-release diagnostics
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: create-github-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
+                  if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+                    gh release create "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --title "${RELEASE_TAG}" --generate-notes
+                  fi

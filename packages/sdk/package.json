@@ -1,7 +1,7 @@
 {
     "name": "sealed-lattice",
     "version": "0.0.19",
-    "description": "Browser-first post-quantum threshold homomorphic voting verification helpers.",
+    "description": "Browser-first post-quantum-oriented private-score polling helpers.",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "type": "module",
@@ -33,21 +33,15 @@
         "build": "tsx ../../tools/ci/build-sdk-package.ts"
     },
     "devDependencies": {
-        "@sealed-lattice/protocol": "workspace:*",
-        "@sealed-lattice/types": "workspace:*",
         "@sealed-lattice/wasm": "workspace:*",
-        "vitest": "^4.1.4"
+        "vitest": "^4.1.11"
     },
     "keywords": [
         "cryptography",
+        "privacy",
         "security",
         "post-quantum",
-        "lattice",
-        "threshold-encryption",
+        "webassembly",
         "voting"
-    ],
-    "dependencies": {
-        "@noble/hashes": "2.2.0",
-        "@noble/post-quantum": "0.6.1"
-    }
+    ]
 }
