@@ -39,6 +39,7 @@ import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
@@ -92,6 +93,7 @@ export const renderDocumentationCensus = (): string => {
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
     const setupRandomness = compileSetupRandomnessCensus();
+    const registrationKey = compileRegistrationKeyRelationCensus();
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -1922,6 +1924,74 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(
                         contributionGeneration.maximumPublicEmissionBatch,
                     ),
+                ],
+            ],
+        ),
+        '',
+        '## Registration key relation census',
+        '',
+        'The recipient-key relation binds the original balanced sparse secret to its fixed-suite common polynomial and public key. It uses distinct statement/proof domains and the same full verification domain as the contribution proof. The bounds below cover both radix equations and the exact support rows; key ownership, signatures, private-state sealing, and whole-protocol security remain separate obligations.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Polynomial degree', formatCount(registrationKey.degree)],
+                ['Ciphertext modulus', formatCount(registrationKey.modulus)],
+                ['Secret support', formatCount(registrationKey.support)],
+                ['Word columns', formatCount(registrationKey.wordColumns)],
+                [
+                    'Boolean columns',
+                    formatCount(registrationKey.booleanColumns),
+                ],
+                ['Lookup memberships', formatCount(registrationKey.lookups)],
+                ['Affine rows', formatCount(registrationKey.affineRows)],
+                [
+                    'Original oracles',
+                    formatCount(registrationKey.originalOracles),
+                ],
+                [
+                    'Virtual constraint oracles',
+                    formatCount(registrationKey.virtualOracles),
+                ],
+                [
+                    'Honest quotient magnitude bound',
+                    formatCount(registrationKey.honestQuotient),
+                ],
+                [
+                    'Honest carry magnitude bound',
+                    formatCount(registrationKey.honestCarry),
+                ],
+                [
+                    'Maximum accepted integer limb residual magnitude',
+                    formatCount(registrationKey.maximumLimbResidual),
+                ],
+                [
+                    'Canonical public-key bytes',
+                    formatCount(registrationKey.publicKeyBytes),
+                ],
+                [
+                    'Expanded statement bytes',
+                    formatCount(registrationKey.statementBytes),
+                ],
+                [
+                    'First-oracle leaf bytes',
+                    formatCount(registrationKey.firstLeafBytes),
+                ],
+                [
+                    'Second-oracle leaf bytes',
+                    formatCount(registrationKey.secondLeafBytes),
+                ],
+                [
+                    'Proof header bytes',
+                    formatCount(registrationKey.proofHeaderBytes),
+                ],
+                [
+                    'Maximum encoded proof bytes',
+                    formatCount(registrationKey.maximumProofBytes),
+                ],
+                [
+                    'Maximum public coefficient query bytes',
+                    formatCount(registrationKey.maximumCoefficientQueryBytes),
                 ],
             ],
         ),
