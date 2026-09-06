@@ -122,6 +122,8 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Threshold completion census',
         '',
+        'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](non-forking-state.md#release-threshold-under-the-candidate-availability-model); its responder floor is not an additional mandatory fault budget.',
+        '',
         'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, and result-release threshold `d = f + 1`. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
         '',
         table(

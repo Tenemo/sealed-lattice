@@ -53,6 +53,8 @@ type SetClassCensus = Readonly<{
     minimumHonestResponderCount: number;
 }>;
 
+// This candidate stress model allows independent disappearance and corrupt
+// refusal sets. A bound on their union would be a different availability model.
 const enumerateSetClassCensus = (
     participantCount: number,
     faultBound: number,
