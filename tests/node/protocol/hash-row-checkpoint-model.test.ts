@@ -16,7 +16,10 @@ describe('encrypted proof-row hash checkpoints', () => {
                 const remaining = Math.min(count - offset, 4096);
                 const payload = remaining * 201;
                 bytes += BigInt(payload + 16);
-                const first = (BigInt(offset) << 32n) + 1n;
+                const nonce = Buffer.alloc(12);
+                nonce.writeUInt32LE(offset, 8);
+                const nonceValue = BigInt(`0x${nonce.toString('hex')}`);
+                const first = (nonceValue << 32n) + 1n;
                 const last = first + BigInt(Math.ceil(payload / 16));
                 expect(first).toBeGreaterThan(0n);
                 expect(last - first).toBeLessThan(1n << 32n);
@@ -24,6 +27,7 @@ describe('encrypted proof-row hash checkpoints', () => {
                 blocks += last - first + 1n;
                 offset += remaining;
             }
+            intervals.sort(([left], [right]) => (left < right ? -1 : 1));
             for (let index = 1; index < intervals.length; index++)
                 expect(intervals[index - 1][1]).toBeLessThan(
                     intervals[index][0],
