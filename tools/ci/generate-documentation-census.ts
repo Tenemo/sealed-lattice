@@ -34,6 +34,7 @@ import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js'
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
+import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
@@ -106,6 +107,7 @@ export const renderDocumentationCensus = (): string => {
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
+    const hashRowCheckpoint = compileHashRowCheckpointCensus();
     const commitmentEquivocation = compareCommitmentEquivocationHybrids(
         3,
         2,
@@ -2265,6 +2267,53 @@ export const renderDocumentationCensus = (): string => {
                     'Distinct signing-capsule AES block inputs',
                     formatCount(
                         registrationEnrollment.signingDistinctBlockInputs,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Hash-row checkpoint census',
+        '',
+        'The bounded experiment serializes one live proof-row hash array and seals it in ordered chunks. These counts cover one array and one data key; they exclude the remaining prover state, authenticated root, database overhead, key wrapping, repeated checkpoints, retries, and session unions. The primitive-input and authentication-degree operands are not an end-to-end security bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Proof-domain rows', formatCount(hashRowCheckpoint.rowCount)],
+                [
+                    'Serialized hash-state bytes per row',
+                    formatCount(hashRowCheckpoint.serializedStateBytes),
+                ],
+                ['Rows per chunk', formatCount(hashRowCheckpoint.rowsPerChunk)],
+                ['Encrypted chunks', formatCount(hashRowCheckpoint.chunkCount)],
+                [
+                    'Maximum chunk plaintext bytes',
+                    formatCount(hashRowCheckpoint.maximumPlaintextChunkBytes),
+                ],
+                [
+                    'Maximum sealed chunk bytes',
+                    formatCount(hashRowCheckpoint.maximumSealedChunkBytes),
+                ],
+                [
+                    'Complete plaintext bytes',
+                    formatCount(hashRowCheckpoint.plaintextBytes),
+                ],
+                [
+                    'Complete sealed bytes',
+                    formatCount(hashRowCheckpoint.sealedBytes),
+                ],
+                [
+                    'Associated-data bytes per chunk',
+                    formatCount(hashRowCheckpoint.associatedBytes),
+                ],
+                [
+                    'Distinct AES block inputs per array key',
+                    formatCount(hashRowCheckpoint.distinctAesBlockInputs),
+                ],
+                [
+                    'Maximum authentication polynomial degree',
+                    formatCount(
+                        hashRowCheckpoint.maximumAuthenticationPolynomialDegree,
                     ),
                 ],
             ],
