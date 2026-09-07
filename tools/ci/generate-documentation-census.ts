@@ -23,6 +23,7 @@ import {
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
+import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
     exactRankingModelConstants,
     compilePackedRankingEvaluationGraph,
@@ -100,6 +101,7 @@ export const renderDocumentationCensus = (): string => {
     const fullWordProof = compileFullWordProofLayout();
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
+    const contributionBody = compileContributionBodyCensus();
     const setupRandomness = compileSetupRandomnessCensus();
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
@@ -2228,6 +2230,60 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(
                         registrationEnrollment.signingDistinctBlockInputs,
                     ),
+                ],
+            ],
+        ),
+        '',
+        '## Contribution body census',
+        '',
+        'The active profile frames one complete contribution as a fixed header, its owned public polynomials in the compiled statement order, and its complete proof. Fixed common inputs, the statement header, and previously verified recipient keys are reconstructed from predecessors. The body is a virtual concatenation of bounded records; these payload counts do not allocate another whole-body copy or include checkpoint, database, signature, or archive overhead.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participants',
+                    formatCount(contributionBody.participantCount),
+                ],
+                [
+                    'Owned public polynomials',
+                    formatCount(contributionBody.polynomials.length),
+                ],
+                [
+                    'Body header bytes',
+                    formatCount(contributionBody.headerBytes),
+                ],
+                [
+                    'Owned polynomial payload bytes',
+                    formatCount(contributionBody.polynomialPayloadBytes),
+                ],
+                [
+                    'Minimum proof framing bytes',
+                    formatCount(contributionBody.minimumProofBytes),
+                ],
+                [
+                    'Maximum proof bytes',
+                    formatCount(contributionBody.maximumProofBytes),
+                ],
+                [
+                    'Maximum complete body bytes',
+                    formatCount(contributionBody.maximumBodyBytes),
+                ],
+                [
+                    'Commitment salt bytes',
+                    formatCount(contributionBody.saltBytes),
+                ],
+                [
+                    'Commitment hash-prefix bytes',
+                    formatCount(contributionBody.hashPrefixBytes),
+                ],
+                [
+                    'Maximum commitment hash-input bytes',
+                    formatCount(contributionBody.maximumHashInputBytes),
+                ],
+                [
+                    'Maximum all-contributor body payload bytes',
+                    formatCount(contributionBody.maximumAllContributorBodies),
                 ],
             ],
         ),

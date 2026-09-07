@@ -30,6 +30,7 @@ describe('documentation census generator', () => {
             '## Certificate custody census',
             '## Publication cut census',
             '## Roster proposal census',
+            '## Contribution body census',
             '## Common-matrix sampling census',
             '## Wide-challenge compiler census',
             '## Common-agreement degree census',
