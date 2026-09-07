@@ -34,6 +34,12 @@ pub struct OptionDefinition {
 }
 
 impl OptionDefinition {
+    pub fn option_identifier(&self) -> &str {
+        &self.option_identifier
+    }
+    pub fn display_label(&self) -> &StabilizedDisplayText {
+        &self.display_label
+    }
     pub fn new(
         option_index: u16,
         option_identifier: String,
@@ -55,14 +61,14 @@ impl OptionDefinition {
                 "option index is outside the supported profile",
             ));
         }
-        CanonicalItem::nonempty_ascii(&self.option_identifier)?;
-        if self.display_label.as_str().is_empty() {
+        CanonicalItem::nonempty_ascii(self.option_identifier())?;
+        if self.display_label().as_str().is_empty() {
             return Err(FoundationSchemaError::new(
                 RefusalReason::WrongTypeOrLength,
                 "option display label must be nonempty",
             ));
         }
-        CanonicalItem::display_text(&self.display_label)?;
+        CanonicalItem::display_text(self.display_label())?;
         Ok(())
     }
 
@@ -96,6 +102,16 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub fn option_count(&self) -> usize {
+        self.options.len()
+    }
+    pub fn display_title(&self) -> &StabilizedDisplayText {
+        &self.display_title
+    }
+    pub fn options(&self) -> &[OptionDefinition] {
+        &self.options
+    }
+
     pub fn new(
         display_title: StabilizedDisplayText,
         options: Vec<OptionDefinition>,
@@ -111,16 +127,16 @@ impl Manifest {
     fn validate_components(&self) -> SchemaResult<()> {
         if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
             ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
-            .contains(&self.options.len())
+            .contains(&self.option_count())
         {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "manifest option count is outside the configurable range",
             ));
         }
-        CanonicalItem::display_text(&self.display_title)?;
+        CanonicalItem::display_text(self.display_title())?;
         let mut option_identifiers = BTreeSet::new();
-        for (option_position, option) in self.options.iter().enumerate() {
+        for (option_position, option) in self.options().iter().enumerate() {
             option.validate()?;
             if usize::from(option.option_index) != option_position {
                 return Err(FoundationSchemaError::new(

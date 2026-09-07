@@ -7,11 +7,14 @@ describe('signed registration and original-key custody', () => {
         const value = compileRegistrationEnrollmentCensus();
         expect(value.maximumHeaderBytes).toBe(3565n);
         expect(value.proofRoleBytes).toBe(282n);
+        expect(value.pollDefinitionOverheadBytes).toBe(2135n);
+        expect(value.maximumCreatorInputBytes).toBeLessThan(1_048_576n);
+        expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(532n);
         expect(value.signingCapsuleBytes).toBe(52n);
-        expect(value.maximumRecords).toBe(15n);
-        expect(value.maximumManifestBytes).toBe(1167n);
-        expect(value.maximumRootBytes).toBe(1183n);
+        expect(value.maximumRecords).toBe(17n);
+        expect(value.maximumManifestBytes).toBe(1377n);
+        expect(value.maximumRootBytes).toBe(1393n);
         expect(value.maximumRestoreInputBytes).toBeLessThan(1_572_864n);
         expect(value.maximumRetainedPayloadBytes).toBeLessThan(
             16n * 1024n ** 2n,
@@ -20,18 +23,18 @@ describe('signed registration and original-key custody', () => {
 
     it('charges both original secret capsules without reusing their data key', () => {
         const value = compileRegistrationEnrollmentCensus();
-        expect(value.manifestPrefixBytes).toBe(72n);
-        expect(value.rootAssociatedBytes).toBe(132n);
+        expect(value.manifestPrefixBytes).toBe(136n);
+        expect(value.rootAssociatedBytes).toBe(68n);
         expect(value.recipientAssociatedBytes).toBe(482n);
-        expect(value.rootDistinctBlockInputs).toBe(77n);
+        expect(value.rootDistinctBlockInputs).toBe(95n);
         expect(value.signingDistinctBlockInputs).toBe(5n);
     });
 
     it('enumerates the root counter inputs independently of the byte census', () => {
         const inputs = new Set<bigint>([0n]);
         for (const [nonceOrdinal, plaintextBlocks] of [
-            [0n, 1],
-            [1n, 73],
+            [0n, 5],
+            [1n, 87],
         ] as const) {
             const initial = (nonceOrdinal << 32n) + 1n;
             for (let counter = 0; counter <= plaintextBlocks; counter++) {

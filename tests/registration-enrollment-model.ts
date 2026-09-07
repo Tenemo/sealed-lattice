@@ -7,6 +7,7 @@ const registrationEnrollmentInputs = {
     maximumUsernameBytes: 128n,
     maximumUsernameIngressBytes: 512n,
     maximumHeaderInputBytes: 4096n,
+    maximumPollDefinitionBytes: 1_048_576n,
 } as const;
 
 export const compileRegistrationEnrollmentCensus = () => {
@@ -31,12 +32,22 @@ export const compileRegistrationEnrollmentCensus = () => {
     const maximumRecords =
         ceiling(key.publicKeyBytes, 1_048_576n) +
         ceiling(key.maximumProofBytes, 1_048_576n) +
-        4n;
-    const manifestPrefixBytes = 4n + 2n * 32n + 4n;
+        6n;
+    const manifestPrefixBytes = 4n + 2n * 32n + 64n + 4n;
     const maximumManifestBytes = manifestPrefixBytes + maximumRecords * 73n;
     const maximumRootBytes = maximumManifestBytes + 16n;
     const proofRoleBytes =
         bytes('registered-recipient-key/1') + 2n * 64n + 128n;
+    const pollDefinitionOverheadBytes =
+        8n +
+        6n * 6n +
+        4n +
+        bytes('sealed-lattice/poll-definition/v1') +
+        64n +
+        32n +
+        inputs.signingPublicKeyBytes +
+        4n +
+        2n;
     return {
         ...inputs,
         maximumHeaderBytes,
@@ -47,9 +58,27 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumManifestBytes,
         maximumRootBytes,
         proofRoleBytes,
+        pollDefinitionOverheadBytes,
+        maximumCreatorInputBytes:
+            64n +
+            2n +
+            4n +
+            inputs.maximumPollDefinitionBytes -
+            pollDefinitionOverheadBytes +
+            4n +
+            inputs.maximumUsernameIngressBytes +
+            64n,
+        maximumJoinInputBytes:
+            128n +
+            4n +
+            inputs.maximumPollDefinitionBytes +
+            inputs.signatureBytes +
+            4n +
+            inputs.maximumUsernameIngressBytes +
+            64n,
         recipientAssociatedBytes: 4n + 4n + proofRoleBytes + 3n * 64n,
         signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
-        rootAssociatedBytes: 4n + 2n * 64n,
+        rootAssociatedBytes: 4n + 64n,
         maximumRestoreInputBytes:
             128n +
             4n +
@@ -66,9 +95,11 @@ export const compileRegistrationEnrollmentCensus = () => {
             inputs.signatureBytes +
             recipientCapsuleBytes +
             signingCapsuleBytes +
-            maximumRootBytes,
+            maximumRootBytes +
+            inputs.maximumPollDefinitionBytes +
+            inputs.signatureBytes,
         rootDistinctBlockInputs:
-            1n + 2n + 1n + ceiling(maximumManifestBytes, 16n),
+            1n + 2n + ceiling(68n, 16n) + ceiling(maximumManifestBytes, 16n),
         signingDistinctBlockInputs:
             1n + 1n + ceiling(signingCapsuleBytes - 16n, 16n),
     };

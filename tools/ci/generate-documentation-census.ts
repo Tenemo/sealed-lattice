@@ -2108,6 +2108,28 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(registrationEnrollment.maximumUsernameBytes),
                 ],
                 [
+                    'Maximum poll-definition bytes',
+                    formatCount(
+                        registrationEnrollment.maximumPollDefinitionBytes,
+                    ),
+                ],
+                [
+                    'Poll-definition framing bytes',
+                    formatCount(
+                        registrationEnrollment.pollDefinitionOverheadBytes,
+                    ),
+                ],
+                [
+                    'Maximum creator input bytes',
+                    formatCount(
+                        registrationEnrollment.maximumCreatorInputBytes,
+                    ),
+                ],
+                [
+                    'Maximum join input bytes',
+                    formatCount(registrationEnrollment.maximumJoinInputBytes),
+                ],
+                [
                     'Maximum username ingress bytes',
                     formatCount(
                         registrationEnrollment.maximumUsernameIngressBytes,
