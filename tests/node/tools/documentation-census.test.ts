@@ -22,6 +22,7 @@ describe('documentation census generator', () => {
             '## Polynomial oracle boundary census',
             '## Recipient-key uniqueness census',
             '## Early commitment extraction census',
+            '## Full-body commitment equivocation census',
             '## Bounded polynomial proof census',
             '## Small-limb proof-field census',
             '## Byte and carry lifting census',

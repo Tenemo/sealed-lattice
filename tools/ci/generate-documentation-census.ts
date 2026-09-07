@@ -15,6 +15,11 @@ import {
 import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
+import {
+    compareCommitmentEquivocationHybrids,
+    compareDuplicateCommitmentInputs,
+    compileCommitmentEquivocationBound,
+} from '#tests/commitment-equivocation-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
@@ -99,6 +104,19 @@ export const renderDocumentationCensus = (): string => {
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
+    const commitmentEquivocation = compareCommitmentEquivocationHybrids(
+        3,
+        2,
+        'complete-slice',
+    );
+    const commitmentPrefix = compareCommitmentEquivocationHybrids(
+        2,
+        2,
+        'complete-slice',
+        2,
+        1,
+    );
+    const duplicateCommitmentInputs = compareDuplicateCommitmentInputs(false);
     const rosterProposals = thresholdProfiles.map((profile) =>
         compileRosterProposalCensus(profile.participantCount),
     );
@@ -2538,6 +2556,73 @@ export const renderDocumentationCensus = (): string => {
                         : formatCount(bound.combinedFailureExponent),
                 ];
             }),
+        ),
+        '',
+        '## Full-body commitment equivocation census',
+        '',
+        'The original whole-message extension uses a separate hidden salt slice for each honest sender, with one commitment per sender scope. Its bound sums the single-sender one-way-to-hiding hybrids and does not multiply by the body bit length. The count of controlled oracle calls excludes the simulator cost of processing each query and every queried input/output byte; the complete reduction-time and fixed-function obligations remain open.',
+        '',
+        table(
+            [
+                'Participants',
+                'Honest commitment bound',
+                'Salt bits',
+                'Quantum query bound',
+                'Failure exponent',
+                'Controlled oracle call bound',
+            ],
+            [10, 20].map((participantCount) => {
+                const bound =
+                    compileCommitmentEquivocationBound(participantCount);
+                return [
+                    formatCount(participantCount),
+                    formatCount(bound.honestCommitmentCount),
+                    formatCount(bound.saltBitLength),
+                    formatCount(bound.quantumQueryCount),
+                    formatCount(bound.failureExponent),
+                    formatCount(bound.maximumControlledOracleCalls),
+                ];
+            }),
+        ),
+        '',
+        'The finite model compares exact joint density matrices conditioned on the complete post-opening oracle and public transcript. Its alternate constructions test incomplete masking, retained shadow values, and unwanted changes to the uncommitted output suffix. This enumerates selected receivers rather than proving quantum security.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Full-message real cases',
+                    formatCount(commitmentEquivocation.realCases),
+                ],
+                [
+                    'Full-message simulated cases',
+                    formatCount(commitmentEquivocation.simulatedCases),
+                ],
+                [
+                    'Full-message classical blocks',
+                    formatCount(commitmentEquivocation.classicalBlocks),
+                ],
+                [
+                    'Full-message differing entries',
+                    formatCount(commitmentEquivocation.differingEntries),
+                ],
+                [
+                    'Prefix-programming simulated cases',
+                    formatCount(commitmentPrefix.simulatedCases),
+                ],
+                [
+                    'Prefix-programming differing entries',
+                    formatCount(commitmentPrefix.differingEntries),
+                ],
+                [
+                    'Duplicate-input distinguishing events',
+                    formatCount(duplicateCommitmentInputs.simulatedEvents),
+                ],
+                [
+                    'Duplicate-input simulated cases',
+                    formatCount(duplicateCommitmentInputs.simulatedCases),
+                ],
+            ],
         ),
         '',
         '## Fixed-witness release simulation census',

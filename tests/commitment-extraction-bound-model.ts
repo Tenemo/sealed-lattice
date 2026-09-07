@@ -1,4 +1,4 @@
-// DFMS21 Corollary 4.8, specialized to a full-body hash commitment f(x,y)=y.
+// DFMS21 Corollary 4.8 for f(x,y)=(sender(x),y) on full-body commitments.
 // Gamma=Gamma'=1. This is a QROM loss calculation, not a fixed-hash theorem.
 export const compileCommitmentExtractionBound = (participantCount: number) => {
     if (
