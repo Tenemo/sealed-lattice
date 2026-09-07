@@ -39,6 +39,7 @@ import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
+import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
     createFalseBinaryRelationTable,
@@ -100,6 +101,7 @@ export const renderDocumentationCensus = (): string => {
         compileThresholdKeyAggregationResourceLowerBound();
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
     const participantVisits = compileParticipantVisitDependencyCensus();
+    const participantCustody = compileParticipantCustodyCensus();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
@@ -2563,6 +2565,61 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum all-contributor body payload bytes',
                     formatCount(contributionBody.maximumAllContributorBodies),
+                ],
+            ],
+        ),
+        '',
+        '## Shared participant custody census',
+        '',
+        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. Fixed statement framing is regenerated rather than retained as another contribution record. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Participants', formatCount(participantCustody.participants)],
+                [
+                    'Owned polynomial records',
+                    formatCount(participantCustody.publicRecords.length),
+                ],
+                [
+                    'Private checkpoint records',
+                    formatCount(participantCustody.checkpointLengths.length),
+                ],
+                [
+                    'Contribution metadata prefix bytes',
+                    formatCount(participantCustody.metadataPrefixBytes),
+                ],
+                [
+                    'Maximum checkpoint metadata bytes',
+                    formatCount(
+                        participantCustody.maximumCheckpointMetadataBytes,
+                    ),
+                ],
+                [
+                    'Maximum completed metadata bytes',
+                    formatCount(
+                        participantCustody.maximumCompletedMetadataBytes,
+                    ),
+                ],
+                [
+                    'Maximum encrypted participant root bytes',
+                    formatCount(participantCustody.maximumRootBytes),
+                ],
+                [
+                    'Maximum public body ciphertext bytes',
+                    formatCount(
+                        participantCustody.maximumPublicBodyCiphertextBytes,
+                    ),
+                ],
+                [
+                    'Maximum signing plaintext payload bytes',
+                    formatCount(
+                        participantCustody.maximumSigningPlaintextBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained payload and overlap bytes',
+                    formatCount(participantCustody.maximumRetainedPayloadBytes),
                 ],
             ],
         ),
