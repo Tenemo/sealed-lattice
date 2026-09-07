@@ -24,6 +24,7 @@ import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-b
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
+import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
     exactRankingModelConstants,
@@ -129,6 +130,9 @@ export const renderDocumentationCensus = (): string => {
     const duplicateCommitmentInputs = compareDuplicateCommitmentInputs(false);
     const rosterProposals = thresholdProfiles.map((profile) =>
         compileRosterProposalCensus(profile.participantCount),
+    );
+    const contributionAuthentication = thresholdProfiles.map((profile) =>
+        compileContributionAuthenticationCensus(profile.participantCount),
     );
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
@@ -2558,6 +2562,29 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionBody.maximumAllContributorBodies),
                 ],
             ],
+        ),
+        '',
+        '## Contribution authentication census',
+        '',
+        'Canonical confirmation bodies bind the proposal, position, and commitment. Opening headers bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing, archive replication, and local custody.',
+        '',
+        table(
+            [
+                'Participants',
+                'Confirmation body bytes',
+                'Opening header bytes',
+                'Inventory body bytes',
+                'All signed confirmation payload bytes',
+                'All signed opening-header payload bytes',
+            ],
+            contributionAuthentication.map((value) => [
+                String(value.participants),
+                formatCount(value.confirmationBodyBytes),
+                formatCount(value.openingBodyBytes),
+                formatCount(value.inventoryBodyBytes),
+                formatCount(value.allConfirmationPayloadBytes),
+                formatCount(value.allOpeningHeaderPayloadBytes),
+            ]),
         ),
         '',
         '## Roster proposal census',
