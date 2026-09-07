@@ -1928,6 +1928,18 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionGeneration.combinedAllowance),
                 ],
                 [
+                    'Retained verified-roster payload bytes',
+                    formatCount(
+                        contributionGeneration.retainedRosterPayloadBytes,
+                    ),
+                ],
+                [
+                    'Additional roster input-buffer bytes',
+                    formatCount(
+                        contributionGeneration.additionalInputBufferBytes,
+                    ),
+                ],
+                [
                     'Public coefficient allocation allowance bytes',
                     formatCount(
                         contributionGeneration.publicCoefficientAllowance,
@@ -2290,23 +2302,25 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Roster proposal census',
         '',
-        'The proposal binds the ordered complete registration-body identities under an authenticated poll. Its public corpus includes every recipient key and proof, registration header and signature, and one signed poll definition. Retained key bytes exclude verifier scratch. Contribution-control sizes project the canonical format across supported roster sizes; the current contribution prototype accepts only the completion profile. These public input records do not supply organizer authorization or participant confirmation.',
+        'The proposal binds the ordered complete registration-body identities under an authenticated poll. Its public corpus includes every recipient key and proof, registration header and signature, and one signed poll definition. The contribution generator consumes the verified records directly and has no caller-supplied key-digest carrier. Retained payload counts exclude allocator and verifier scratch. These public input records do not supply organizer authorization or participant confirmation.',
         '',
         table(
             [
                 'Participants',
                 'Proposal bytes',
                 'Contribution role bytes',
-                'Contribution control bytes',
                 'Retained recipient-key bytes',
+                'Canonical roster bytes',
+                'Retained record payload bytes',
                 'Maximum public corpus bytes',
             ],
             rosterProposals.map((proposal) => [
                 String(proposal.participantCount),
                 formatCount(proposal.proposalBytes),
                 formatCount(proposal.roleBytes),
-                formatCount(proposal.contributionControlBytes),
                 formatCount(proposal.retainedRecipientKeyBytes),
+                formatCount(proposal.canonicalRosterBytes),
+                formatCount(proposal.retainedRecordPayloadBytes),
                 formatCount(proposal.maximumPublicCorpusBytes),
             ]),
         ),

@@ -32,8 +32,20 @@ export const compileRosterProposalCensus = (participantCount: number) => {
         participantCount,
         roleBytes,
         proposalBytes,
-        contributionControlBytes: 4n + 4n + roleBytes + count * 64n,
         retainedRecipientKeyBytes: count * key.publicKeyBytes,
+        canonicalRosterBytes:
+            8n +
+            6n +
+            6n +
+            count *
+                (8n +
+                    3n * 6n +
+                    2n +
+                    registration.signingPublicKeyBytes +
+                    registration.mailboxPublicKeyBytes),
+        retainedRecordPayloadBytes:
+            count *
+            (key.publicKeyBytes + registration.maximumHeaderBytes + 64n),
         maximumPublicCorpusBytes:
             registration.maximumPollDefinitionBytes +
             registration.signatureBytes +

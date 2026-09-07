@@ -2,6 +2,7 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
@@ -127,6 +128,12 @@ export const compileContributionGenerationResources = () => {
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
     const participants = fixedModulusBfvInputs.participantCount;
+    const roster = compileRosterProposalCensus(Number(participants));
+    const retainedRosterPayloadBytes =
+        roster.retainedRecordPayloadBytes +
+        roster.canonicalRosterBytes +
+        roster.proposalBytes;
+    const additionalInputBufferBytes = 1_572_864n - (1n << 20n);
     const relation = compileSetupContributionRelationCensus();
     const proof = compileFullWordProofLayout();
     const sparseData = ((participants + 2n) * degree + auxiliaryDegree) * 17n;
@@ -175,11 +182,15 @@ export const compileContributionGenerationResources = () => {
         auxiliaryPolynomialBytes;
     return {
         generationAllowance,
+        retainedRosterPayloadBytes,
+        additionalInputBufferBytes,
         combinedAllowance:
             (generationAllowance > proverAllowance
                 ? generationAllowance
                 : proverAllowance) +
-            2n * 1024n * 1024n,
+            2n * 1024n * 1024n +
+            retainedRosterPayloadBytes +
+            additionalInputBufferBytes,
         publicCoefficientAllowance,
         expandedPublicWorkingBytes:
             relation.expandedStatementByteLength + proof.maximumMultiproofBytes,

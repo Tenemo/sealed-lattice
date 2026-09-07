@@ -8,7 +8,6 @@ describe('verified registration roster proposal', () => {
             const value = compileRosterProposalCensus(count);
             expect(value.roleBytes).toBeLessThanOrEqual(1024n);
             expect(value.proposalBytes).toBeLessThan(2048n);
-            expect(value.contributionControlBytes).toBeLessThan(2048n);
             expect(value.maximumPublicCorpusBytes).toBeLessThan(
                 256n * 1024n ** 2n,
             );
