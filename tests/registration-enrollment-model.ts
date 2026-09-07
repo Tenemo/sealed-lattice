@@ -29,12 +29,18 @@ export const compileRegistrationEnrollmentCensus = () => {
         inputs.maximumUsernameBytes;
     const recipientCapsuleBytes = 4n + key.support * 2n + 16n;
     const signingCapsuleBytes = 4n + 32n + 16n;
-    const maximumRecords =
+    const maximumEnrollmentRecords =
         ceiling(key.publicKeyBytes, 1_048_576n) +
         ceiling(key.maximumProofBytes, 1_048_576n) +
         6n;
+    const maximumRecords = maximumEnrollmentRecords + 2n;
     const manifestPrefixBytes = 4n + 2n * 32n + 64n + 4n;
-    const maximumManifestBytes = manifestPrefixBytes + maximumRecords * 73n;
+    const maximumEnrollmentManifestBytes =
+        manifestPrefixBytes + maximumEnrollmentRecords * 73n;
+    const maximumProposalIntentManifestBytes =
+        manifestPrefixBytes + (maximumEnrollmentRecords + 1n) * 73n + 32n;
+    const maximumManifestBytes =
+        manifestPrefixBytes + maximumRecords * 73n + 32n;
     const maximumRootBytes = maximumManifestBytes + 16n;
     const proofRoleBytes =
         bytes('registered-recipient-key/1') + 2n * 64n + 128n;
@@ -54,6 +60,9 @@ export const compileRegistrationEnrollmentCensus = () => {
         recipientCapsuleBytes,
         signingCapsuleBytes,
         maximumRecords,
+        maximumEnrollmentRecords,
+        maximumEnrollmentManifestBytes,
+        maximumProposalIntentManifestBytes,
         manifestPrefixBytes,
         maximumManifestBytes,
         maximumRootBytes,
@@ -87,7 +96,8 @@ export const compileRegistrationEnrollmentCensus = () => {
             64n +
             key.publicKeyBytes +
             recipientCapsuleBytes +
-            signingCapsuleBytes,
+            signingCapsuleBytes +
+            1n,
         maximumRetainedPayloadBytes:
             key.publicKeyBytes +
             key.maximumProofBytes +
@@ -97,9 +107,16 @@ export const compileRegistrationEnrollmentCensus = () => {
             signingCapsuleBytes +
             maximumRootBytes +
             inputs.maximumPollDefinitionBytes +
+            inputs.signatureBytes +
+            2048n +
             inputs.signatureBytes,
-        rootDistinctBlockInputs:
-            1n + 2n + ceiling(68n, 16n) + ceiling(maximumManifestBytes, 16n),
+        initialRootDistinctBlockInputs:
+            1n +
+            2n +
+            ceiling(68n, 16n) +
+            ceiling(maximumEnrollmentManifestBytes, 16n),
+        // Proposal transitions each use a fresh root key for one encryption.
+        rootDistinctBlockInputs: 2n + ceiling(maximumManifestBytes, 16n),
         signingDistinctBlockInputs:
             1n + 1n + ceiling(signingCapsuleBytes - 16n, 16n),
     };

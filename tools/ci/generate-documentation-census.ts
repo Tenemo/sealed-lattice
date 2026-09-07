@@ -2192,12 +2192,30 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(registrationEnrollment.signingCapsuleBytes),
                 ],
                 [
+                    'Maximum enrollment records before proposal signing',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentRecords,
+                    ),
+                ],
+                [
                     'Maximum retained records',
                     formatCount(registrationEnrollment.maximumRecords),
                 ],
                 [
                     'Manifest prefix bytes',
                     formatCount(registrationEnrollment.manifestPrefixBytes),
+                ],
+                [
+                    'Maximum completed-enrollment manifest plaintext bytes',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentManifestBytes,
+                    ),
+                ],
+                [
+                    'Maximum locked-proposal manifest plaintext bytes',
+                    formatCount(
+                        registrationEnrollment.maximumProposalIntentManifestBytes,
+                    ),
                 ],
                 [
                     'Maximum manifest plaintext bytes',
@@ -2234,7 +2252,13 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Distinct root AES block inputs',
+                    'Distinct initial root-key AES block inputs',
+                    formatCount(
+                        registrationEnrollment.initialRootDistinctBlockInputs,
+                    ),
+                ],
+                [
+                    'Maximum distinct AES block inputs per proposal root key',
                     formatCount(registrationEnrollment.rootDistinctBlockInputs),
                 ],
                 [

@@ -12,9 +12,12 @@ describe('signed registration and original-key custody', () => {
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(532n);
         expect(value.signingCapsuleBytes).toBe(52n);
-        expect(value.maximumRecords).toBe(17n);
-        expect(value.maximumManifestBytes).toBe(1377n);
-        expect(value.maximumRootBytes).toBe(1393n);
+        expect(value.maximumEnrollmentRecords).toBe(17n);
+        expect(value.maximumRecords).toBe(19n);
+        expect(value.maximumEnrollmentManifestBytes).toBe(1377n);
+        expect(value.maximumProposalIntentManifestBytes).toBe(1482n);
+        expect(value.maximumManifestBytes).toBe(1555n);
+        expect(value.maximumRootBytes).toBe(1571n);
         expect(value.maximumRestoreInputBytes).toBeLessThan(1_572_864n);
         expect(value.maximumRetainedPayloadBytes).toBeLessThan(
             16n * 1024n ** 2n,
@@ -26,7 +29,8 @@ describe('signed registration and original-key custody', () => {
         expect(value.manifestPrefixBytes).toBe(136n);
         expect(value.rootAssociatedBytes).toBe(68n);
         expect(value.recipientAssociatedBytes).toBe(482n);
-        expect(value.rootDistinctBlockInputs).toBe(95n);
+        expect(value.initialRootDistinctBlockInputs).toBe(95n);
+        expect(value.rootDistinctBlockInputs).toBe(100n);
         expect(value.signingDistinctBlockInputs).toBe(5n);
     });
 
@@ -44,7 +48,22 @@ describe('signed registration and original-key custody', () => {
             }
         }
         expect(BigInt(inputs.size)).toBe(
-            compileRegistrationEnrollmentCensus().rootDistinctBlockInputs,
+            compileRegistrationEnrollmentCensus()
+                .initialRootDistinctBlockInputs,
         );
+        for (const [nonceOrdinal, blocks] of [
+            [2n, 93],
+            [3n, 98],
+        ] as const) {
+            const rotatedKeyInputs = new Set<bigint>([0n]);
+            for (let counter = 0; counter <= blocks; counter++) {
+                const input = (nonceOrdinal << 32n) + 1n + BigInt(counter);
+                expect(rotatedKeyInputs.has(input)).toBe(false);
+                rotatedKeyInputs.add(input);
+            }
+            expect(BigInt(rotatedKeyInputs.size)).toBeLessThanOrEqual(
+                compileRegistrationEnrollmentCensus().rootDistinctBlockInputs,
+            );
+        }
     });
 });
