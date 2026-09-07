@@ -107,6 +107,9 @@ export const renderDocumentationCensus = (): string => {
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
     const contributionBody = compileContributionBodyCensus();
+    const contributionSigning = compileContributionAuthenticationCensus(
+        contributionBody.participantCount,
+    );
     const setupRandomness = compileSetupRandomnessCensus();
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
@@ -2585,6 +2588,34 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(value.allConfirmationPayloadBytes),
                 formatCount(value.allOpeningHeaderPayloadBytes),
             ]),
+        ),
+        '',
+        table(
+            ['Original-credential command frame', 'Bytes'],
+            [
+                [
+                    'Complete-body control',
+                    formatCount(contributionSigning.bodyControlBytes),
+                ],
+                [
+                    'Signing identity and retained coins',
+                    formatCount(contributionSigning.signingControlBytes),
+                ],
+                [
+                    'Signed confirmation packet',
+                    formatCount(contributionSigning.confirmationPacketBytes),
+                ],
+                [
+                    'Signed opening packet',
+                    formatCount(contributionSigning.openingPacketBytes),
+                ],
+                [
+                    'Maximum polynomial input with offset',
+                    formatCount(
+                        contributionSigning.maximumPolynomialCommandBytes,
+                    ),
+                ],
+            ],
         ),
         '',
         '## Roster proposal census',

@@ -6,6 +6,8 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 
+export const contributionBodyHeaderBytes = 4n + 8n;
+
 export const compileContributionBodyCensus = () => {
     const parameters = fixedModulusBfvInputs;
     const participantCount = Number(parameters.participantCount);
@@ -48,7 +50,7 @@ export const compileContributionBodyCensus = () => {
             auxiliaryInputEncryptionParameters.modulus,
         ),
     });
-    const headerBytes = 4n + 8n;
+    const headerBytes = contributionBodyHeaderBytes;
     const polynomialPayloadBytes = polynomials.reduce(
         (total, polynomial) => total + polynomial.bytes,
         0n,

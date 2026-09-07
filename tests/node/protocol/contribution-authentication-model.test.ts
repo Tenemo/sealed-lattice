@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
+import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 
 describe('contribution confirmation and opening payloads', () => {
     it('keeps each signed carrier bounded across every supported roster size', () => {
@@ -37,6 +38,20 @@ describe('contribution confirmation and opening payloads', () => {
                     before.allOpeningHeaderPayloadBytes,
             ).toBe(before.openingBodyBytes + 3309n);
         }
+    });
+
+    it('fits every signing command inside the existing original-key restore input allocation', () => {
+        const inputBytes =
+            compileRegistrationEnrollmentCensus().maximumRestoreInputBytes;
+        const value = compileContributionAuthenticationCensus(10);
+        for (const length of [
+            value.bodyControlBytes,
+            value.signingControlBytes,
+            value.confirmationPacketBytes,
+            value.openingPacketBytes,
+            value.maximumPolynomialCommandBytes,
+        ])
+            expect(length).toBeLessThan(inputBytes);
     });
 
     it('rejects unsupported and nonintegral roster counts before deriving sizes', () => {

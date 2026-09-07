@@ -1,3 +1,5 @@
+import { compileCommitmentEquivocationBound } from '#tests/commitment-equivocation-model.js';
+import { contributionBodyHeaderBytes } from '#tests/contribution-body-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 
 export const compileContributionAuthenticationCensus = (
@@ -10,6 +12,8 @@ export const compileContributionAuthenticationCensus = (
     )
         throw new RangeError('Unsupported participant count.');
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
+    const saltBytes =
+        compileCommitmentEquivocationBound(participants).saltBitLength / 8n;
     const text = (value: string) => BigInt(Buffer.byteLength(value));
     const confirmationBodyBytes =
         8n +
@@ -42,6 +46,11 @@ export const compileContributionAuthenticationCensus = (
         openingBodyBytes,
         inventoryBodyBytes,
         signatureBytes,
+        bodyControlBytes: 2n + saltBytes + contributionBodyHeaderBytes,
+        signingControlBytes: 64n + 32n,
+        confirmationPacketBytes: 4n + confirmationBodyBytes + signatureBytes,
+        openingPacketBytes: 4n + openingBodyBytes + signatureBytes,
+        maximumPolynomialCommandBytes: 4n + (1n << 20n),
         allConfirmationPayloadBytes:
             BigInt(participants) * (confirmationBodyBytes + signatureBytes),
         allOpeningHeaderPayloadBytes:
