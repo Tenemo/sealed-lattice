@@ -23,6 +23,7 @@ import {
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
+import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
     exactRankingModelConstants,
@@ -53,6 +54,7 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
+import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import {
     compileSetupRandomnessCensus,
@@ -110,6 +112,8 @@ export const renderDocumentationCensus = (): string => {
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
     const hashRowCheckpoint = compileHashRowCheckpointCensus();
     const firstOracleCheckpoint = compileFirstOracleCheckpointCensus();
+    const selectedOpeningTransform = compileSelectedOpeningTransformCensus();
+    const completedContribution = compileCompletedContributionStateCensus();
     const commitmentEquivocation = compareCommitmentEquivocationHybrids(
         3,
         2,
@@ -2399,6 +2403,104 @@ export const renderDocumentationCensus = (): string => {
                     'Maximum retained checkpoint payload bytes',
                     formatCount(
                         firstOracleCheckpoint.maximumRetainedPayloadBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Selected opening transform census',
+        '',
+        'The forward transform follows only branches needed by the public opening indices. Bounds allow all selected indices to occupy one coset and count additions, subtractions, and scalar multiplications separately by the same branch ceiling. The full coefficient buffer, inverse transform, coset preparation, existing proof records, allocator overhead, and tree data remain additional. Index pairs use the scalar WebAssembly word width.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Transform length',
+                    formatCount(selectedOpeningTransform.transformLength),
+                ],
+                [
+                    'Maximum selected outputs in one coset',
+                    formatCount(selectedOpeningTransform.maximumSelected),
+                ],
+                [
+                    'Transform levels',
+                    formatCount(selectedOpeningTransform.levels),
+                ],
+                [
+                    'Full forward butterflies',
+                    formatCount(selectedOpeningTransform.fullButterflies),
+                ],
+                [
+                    'Maximum selected operations of each butterfly kind',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectedBranches,
+                    ),
+                ],
+                [
+                    'Maximum live selection-pair bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectionPairBytes,
+                    ),
+                ],
+                [
+                    'Maximum selection-index bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectionIndexBytes,
+                    ),
+                ],
+                [
+                    'Maximum selected base-output bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectedBaseOutputBytes,
+                    ),
+                ],
+                [
+                    'Maximum selected extension-output bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectedExtensionOutputBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Completed contribution state census',
+        '',
+        'Completion retains encrypted generated public inputs and proof records, with their keys and hashes in the authenticated root. The completed root omits the retired private checkpoint and its progress header. The staged bound includes the old checkpoint, proof records, and pending completion root before the atomic retirement transaction. Database and key-storage overhead remain measured quantities.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Maximum proof records',
+                    formatCount(completedContribution.maximumProofRecords),
+                ],
+                [
+                    'Maximum retained public records',
+                    formatCount(completedContribution.maximumPublicRecords),
+                ],
+                [
+                    'Maximum root plaintext bytes',
+                    formatCount(
+                        completedContribution.maximumRootPlaintextBytes,
+                    ),
+                ],
+                [
+                    'Maximum encrypted proof bytes',
+                    formatCount(
+                        completedContribution.maximumProofCiphertextBytes,
+                    ),
+                ],
+                [
+                    'Maximum completed retained payload bytes',
+                    formatCount(
+                        completedContribution.maximumRetainedPayloadBytes,
+                    ),
+                ],
+                [
+                    'Maximum staged payload before checkpoint retirement',
+                    formatCount(
+                        completedContribution.maximumStagedPayloadBytes,
                     ),
                 ],
             ],
