@@ -28,6 +28,7 @@ describe('documentation census generator', () => {
             '## Fixed-modulus BFV noise census',
             '## Certificate custody census',
             '## Publication cut census',
+            '## Roster proposal census',
             '## Common-matrix sampling census',
             '## Wide-challenge compiler census',
             '## Common-agreement degree census',

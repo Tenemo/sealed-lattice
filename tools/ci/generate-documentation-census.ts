@@ -44,6 +44,7 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
+import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import {
     compileSetupRandomnessCensus,
@@ -98,6 +99,9 @@ export const renderDocumentationCensus = (): string => {
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
+    const rosterProposals = thresholdProfiles.map((profile) =>
+        compileRosterProposalCensus(profile.participantCount),
+    );
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
@@ -2208,6 +2212,29 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
             ],
+        ),
+        '',
+        '## Roster proposal census',
+        '',
+        'The proposal binds the ordered complete registration-body identities under an authenticated poll. Its public corpus includes every recipient key and proof, registration header and signature, and one signed poll definition. Retained key bytes exclude verifier scratch. Contribution-control sizes project the canonical format across supported roster sizes; the current contribution prototype accepts only the completion profile. These public input records do not supply organizer authorization or participant confirmation.',
+        '',
+        table(
+            [
+                'Participants',
+                'Proposal bytes',
+                'Contribution role bytes',
+                'Contribution control bytes',
+                'Retained recipient-key bytes',
+                'Maximum public corpus bytes',
+            ],
+            rosterProposals.map((proposal) => [
+                String(proposal.participantCount),
+                formatCount(proposal.proposalBytes),
+                formatCount(proposal.roleBytes),
+                formatCount(proposal.contributionControlBytes),
+                formatCount(proposal.retainedRecipientKeyBytes),
+                formatCount(proposal.maximumPublicCorpusBytes),
+            ]),
         ),
         '',
         '## Common-matrix sampling census',
