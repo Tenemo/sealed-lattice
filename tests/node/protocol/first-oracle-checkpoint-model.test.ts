@@ -34,6 +34,9 @@ describe('complete first-oracle proof checkpoint', () => {
         expect(model.dataKeyBytes).toBe(32n * records);
         expect(model.recordHashBytes).toBe(64n * records);
         expect(model.maximumHeaderBytes).toBeLessThan(16384n);
+        expect(model.maximumHeaderBytes).toBe(
+            4n + 4n + 2n + 1024n + 64n + 64n + 145n + 2n + 10n * 64n,
+        );
         expect(model.publicRecordCount).toBe(1n + 24n * 7n + 20n * 2n + 1n);
         expect(model.publicPlaintextBytes).toBe(
             145n + 24n * 65536n * 109n + 20n * 65536n * 21n + 4096n * 6n,

@@ -55,7 +55,9 @@ export const compileFirstOracleCheckpointCensus = () => {
         1024n +
         64n +
         64n +
-        relation.expandedStatementHeaderByteLength;
+        relation.expandedStatementHeaderByteLength +
+        2n +
+        BigInt(body.participantCount) * 64n;
     const maximumRootPlaintextBytes =
         80n + maximumHeaderBytes + 106n * publicRecordCount + 96n * recordCount;
     return {
