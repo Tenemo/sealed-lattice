@@ -30,6 +30,7 @@ import {
     verifyExactRankingModel,
 } from '#tests/exact-ranking-model.js';
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
+import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
@@ -108,6 +109,7 @@ export const renderDocumentationCensus = (): string => {
     const registrationCustody = compileRegistrationCustodyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
     const hashRowCheckpoint = compileHashRowCheckpointCensus();
+    const firstOracleCheckpoint = compileFirstOracleCheckpointCensus();
     const commitmentEquivocation = compareCommitmentEquivocationHybrids(
         3,
         2,
@@ -1958,6 +1960,10 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionGeneration.regeneratedCommonBytes),
                 ],
                 [
+                    'Reused verified recipient-key bytes',
+                    formatCount(contributionGeneration.reusedRecipientBytes),
+                ],
+                [
                     'Retained public working bytes',
                     formatCount(contributionGeneration.publicWorkingBytes),
                 ],
@@ -2314,6 +2320,85 @@ export const renderDocumentationCensus = (): string => {
                     'Maximum authentication polynomial degree',
                     formatCount(
                         hashRowCheckpoint.maximumAuthenticationPolynomialDegree,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## First-oracle checkpoint census',
+        '',
+        'The complete first-oracle checkpoint retains the actual witness, masks, salts, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. Counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
+        '',
+        table(
+            ['Private field', 'Plaintext bytes', 'Encrypted records'],
+            firstOracleCheckpoint.fields.map((field) => [
+                field.name,
+                formatCount(field.plaintextBytes),
+                formatCount(field.recordCount),
+            ]),
+        ),
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Private encrypted records',
+                    formatCount(firstOracleCheckpoint.recordCount),
+                ],
+                [
+                    'Private checkpoint plaintext bytes',
+                    formatCount(firstOracleCheckpoint.plaintextBytes),
+                ],
+                [
+                    'Private checkpoint ciphertext bytes',
+                    formatCount(firstOracleCheckpoint.ciphertextBytes),
+                ],
+                [
+                    'Private record key bytes',
+                    formatCount(firstOracleCheckpoint.dataKeyBytes),
+                ],
+                [
+                    'Private record hash bytes',
+                    formatCount(firstOracleCheckpoint.recordHashBytes),
+                ],
+                [
+                    'Maximum private plaintext record bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumPlaintextRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum private ciphertext record bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumCiphertextRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum checkpoint header bytes',
+                    formatCount(firstOracleCheckpoint.maximumHeaderBytes),
+                ],
+                [
+                    'Encrypted public-input records',
+                    formatCount(firstOracleCheckpoint.publicRecordCount),
+                ],
+                [
+                    'Public-input plaintext bytes',
+                    formatCount(firstOracleCheckpoint.publicPlaintextBytes),
+                ],
+                [
+                    'Public-input ciphertext bytes',
+                    formatCount(firstOracleCheckpoint.publicCiphertextBytes),
+                ],
+                [
+                    'Maximum browser root plaintext bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumRootPlaintextBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained checkpoint payload bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumRetainedPayloadBytes,
                     ),
                 ],
             ],

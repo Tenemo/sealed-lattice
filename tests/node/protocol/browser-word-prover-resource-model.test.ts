@@ -13,6 +13,11 @@ describe('browser word prover live-data schedule', () => {
         expect(result.regeneratedCommonBytes).toBe(
             18n * 65536n * 109n + 65536n * 21n + 4096n * 6n,
         );
+        expect(result.reusedRecipientBytes).toBe(10n * 65536n * 21n);
+        expect(result.publicWorkingBytes).toBe(
+            result.expandedPublicWorkingBytes -
+                (18n * 65536n * 109n + 11n * 65536n * 21n + 4096n * 6n),
+        );
         expect(result.publicWorkingBytes).toBeLessThan(268_435_456n);
         expect(result.expandedPublicWorkingBytes).toBeGreaterThan(268_435_456n);
     });

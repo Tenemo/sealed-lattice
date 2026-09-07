@@ -195,9 +195,11 @@ export const compileContributionGenerationResources = () => {
         expandedPublicWorkingBytes:
             relation.expandedStatementByteLength + proof.maximumMultiproofBytes,
         regeneratedCommonBytes,
+        reusedRecipientBytes: roster.retainedRecipientKeyBytes,
         publicWorkingBytes:
             relation.expandedStatementByteLength -
-            regeneratedCommonBytes +
+            regeneratedCommonBytes -
+            roster.retainedRecipientKeyBytes +
             proof.maximumMultiproofBytes,
         maximumPublicEmissionBatch:
             7n * relation.largestPublicPolynomialByteLength,
