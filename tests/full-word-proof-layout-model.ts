@@ -1,22 +1,21 @@
+import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
 import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
-export const compileFullWordProofLayout = () => {
+const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     const agreement = compileCommonAgreementDegreeCensus();
-    const columns = compileSetupContributionColumnLayout();
     const field = compileSmallLimbProofFieldCensus();
     const compiler = compileWideChallengeCompilerCensus();
-    const wordCount = columns.wordColumns + columns.booleanColumns;
     const foldCount = Math.log2(agreement.domainSize / 2);
     const tagBytes = compiler.tagBits / 8n;
     const saltBytes = compiler.saltBits / 8n;
     const baseBytes = field.packedFieldElementByteLength;
     const extensionBytes = field.packedExtensionElementByteLength;
     const firstWidth = BigInt(wordCount + 1) * baseBytes + extensionBytes;
-    const secondWidth = BigInt(columns.lookups.length + 2) * extensionBytes;
+    const secondWidth = BigInt(lookupCount + 2) * extensionBytes;
     const headerBytes =
         4n +
         2n * tagBytes +
@@ -69,10 +68,34 @@ export const compileFullWordProofLayout = () => {
                 BigInt(agreement.maskDimension) *
                 baseBytes +
             BigInt(agreement.codeDimension) * extensionBytes +
-            BigInt(columns.lookups.length + 1) *
+            BigInt(lookupCount + 1) *
                 BigInt(agreement.maskDimension) *
                 extensionBytes +
             BigInt(agreement.witnessDegree + 1) * extensionBytes,
+    };
+};
+
+export const compileFullWordProofLayout = () => {
+    const columns = compileSetupContributionColumnLayout();
+    return compileWordProofLayout(
+        columns.wordColumns + columns.booleanColumns,
+        columns.lookups.length,
+    );
+};
+
+export const compileBallotWordProofLayout = () => {
+    const columns = compileBallotEncryptionColumnLayout();
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    return {
+        ...compileWordProofLayout(
+            columns.columns.length,
+            columns.lookups.length,
+        ),
+        residentPublicOperatorBytes:
+            BigInt(columns.columns.length) *
+            BigInt(agreement.systematicSize) *
+            field.packedExtensionElementByteLength,
     };
 };
 

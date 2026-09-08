@@ -35,7 +35,10 @@ import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embe
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
-import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import {
+    compileBallotWordProofLayout,
+    compileFullWordProofLayout,
+} from '#tests/full-word-proof-layout-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
@@ -109,6 +112,7 @@ export const renderDocumentationCensus = (): string => {
     const fixedSpongeInitialization = compileFixedSpongeInitializationCensus();
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const fullWordProof = compileFullWordProofLayout();
+    const ballotWordProof = compileBallotWordProofLayout();
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
     const contributionBody = compileContributionBodyCensus();
@@ -1428,6 +1432,38 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Two-coset product input cache payload bytes',
                     formatCount(ballotRelation.zeroProductCacheBytes),
+                ],
+                [
+                    'Proof header bytes',
+                    formatCount(ballotWordProof.headerBytes),
+                ],
+                [
+                    'First oracle row bytes',
+                    formatCount(ballotWordProof.firstWidth),
+                ],
+                [
+                    'Second oracle row bytes',
+                    formatCount(ballotWordProof.secondWidth),
+                ],
+                [
+                    'Maximum incremental proof bytes',
+                    formatCount(ballotWordProof.maximumMultiproofBytes),
+                ],
+                [
+                    'Maximum cached node digest bytes',
+                    formatCount(ballotWordProof.maximumCachedNodeDigestBytes),
+                ],
+                [
+                    'Retained leaf salt bytes',
+                    formatCount(ballotWordProof.leafSaltBytes),
+                ],
+                [
+                    'Prover mask bytes',
+                    formatCount(ballotWordProof.proverMaskBytes),
+                ],
+                [
+                    'Resident public operator payload bytes',
+                    formatCount(ballotWordProof.residentPublicOperatorBytes),
                 ],
                 [
                     'Additional narrow memberships',
