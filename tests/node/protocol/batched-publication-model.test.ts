@@ -24,6 +24,47 @@ describe('close-triggered batched publication', () => {
         expect(model.supportedBodies(corruptReport)).toEqual([body]);
     });
 
+    it('prevents a newly originated envelope from gaining support after the first valid report', () => {
+        for (let count = 3; count <= 20; count++) {
+            const bound = Math.floor((count - 1) / 3);
+            const model = createBatchedPublicationModel(
+                count,
+                Array.from({ length: bound }, (_, position) => position),
+            );
+            const firstBatches = Array.from(
+                { length: model.quorum },
+                (_, sender) => requireMessage(model.witnessBatch(sender, [])),
+            );
+            const firstReport = requireMessage(
+                model.report(bound, firstBatches),
+            );
+            const late = {
+                ...body,
+                slot: 0,
+                identity: 'originated after the first report',
+            };
+            expect(model.submit(late)).toBe(bound > 0);
+            const latest = Array.from({ length: count }, (_, sender) =>
+                requireMessage(
+                    model.witnessBatch(sender, [late]) ?? firstBatches[sender],
+                ),
+            );
+            const endorsements = latest.filter(
+                (batch) => batch.bodies.length > 0,
+            );
+            expect(endorsements.length).toBeLessThan(model.quorum);
+            const reports = Array.from({ length: count }, (_, sender) =>
+                requireMessage(
+                    model.report(sender, latest) ??
+                        (sender === bound ? firstReport : undefined),
+                ),
+            );
+            for (const report of reports)
+                expect(model.supportedBodies(report)).toEqual([]);
+            expect(model.inventory(reports.slice(0, model.quorum))).toEqual([]);
+        }
+    });
+
     it('finishes valid, invalid, and empty inventories while corrupt parties refuse', () => {
         for (let count = 3; count <= 20; count++) {
             for (const bodies of [
