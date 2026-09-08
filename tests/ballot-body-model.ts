@@ -32,6 +32,7 @@ export const compileBallotBodyCensus = () => {
     const headerBytes = 4n + 8n + contextBytes;
     const ciphertextBytes = 2n * fheBytes + 2n * auxiliaryBytes;
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
+    const envelopeBytes = 4n + 64n + 64n + 2n + 8n + 64n;
     const maximumBodyBytes =
         headerBytes + ciphertextBytes + proof.maximumMultiproofBytes;
     const hashPrefixBytes =
@@ -49,8 +50,10 @@ export const compileBallotBodyCensus = () => {
         minimumProofBytes: proof.headerBytes,
         maximumProofBytes: proof.maximumMultiproofBytes,
         signatureBytes,
+        envelopeBytes,
         maximumBodyBytes,
-        maximumSignedBodyBytes: maximumBodyBytes + signatureBytes,
+        maximumSignedBodyBytes:
+            maximumBodyBytes + envelopeBytes + signatureBytes,
         hashPrefixBytes,
         maximumHashInputBytes: hashPrefixBytes + maximumBodyBytes,
         reconstructedInputBytes: ciphertextBytes,

@@ -1517,6 +1517,10 @@ export const renderDocumentationCensus = (): string => {
                 ],
                 ['Signature bytes', formatCount(ballotBody.signatureBytes)],
                 [
+                    'Envelope header bytes',
+                    formatCount(ballotBody.envelopeBytes),
+                ],
+                [
                     'Maximum body bytes',
                     formatCount(ballotBody.maximumBodyBytes),
                 ],

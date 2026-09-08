@@ -11,6 +11,7 @@ describe('ballot body framing', () => {
         expect(layout.contextBytes).toBe(136n);
         expect(layout.proofRoleBytes).toBe(8n + 30n + 4n + 30n + 192n + 2n);
         expect(layout.headerBytes).toBe(148n);
+        expect(layout.envelopeBytes).toBe(206n);
         expect(layout.ciphertextBytes).toBe(
             2n * 65536n * 109n + 2n * 4096n * 6n,
         );
@@ -19,6 +20,7 @@ describe('ballot body framing', () => {
             layout.headerBytes +
                 layout.ciphertextBytes +
                 layout.maximumProofBytes +
+                206n +
                 3309n,
         );
         expect(layout.maximumBodyBytes).toBeLessThan(1n << 32n);
