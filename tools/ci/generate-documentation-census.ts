@@ -64,6 +64,7 @@ import {
 } from '#tests/setup-randomness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
@@ -104,6 +105,7 @@ export const renderDocumentationCensus = (): string => {
     const participantCustody = compileParticipantCustodyCensus();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
+    const fixedSpongeInitialization = compileFixedSpongeInitializationCensus();
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const fullWordProof = compileFullWordProofLayout();
     const browserWordProver = compileBrowserWordProverResources();
@@ -2726,6 +2728,55 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Complete oracle-distribution distance exponent',
                     formatCount(commonMatrixSampling.distanceBits),
+                ],
+            ],
+        ),
+        '',
+        '## Fixed sponge initialization census',
+        '',
+        'These counts instantiate the conditional fixed-input initialization lemma for the current common-vector seed encoding. Each unique seed and its longest required output prefix are counted once. The distance includes residue-word sampling, capacity conditioning, one-pass capacity-sampling failure, and bounded fiber-sampling bias in an ideal permutation; it is not fixed-Keccak or end-to-end security.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Distinct fixed seeds',
+                    formatCount(fixedSpongeInitialization.seeds.length),
+                ],
+                [
+                    'Maximum unpadded seed bytes',
+                    formatCount(fixedSpongeInitialization.maximumSeedBytes),
+                ],
+                ['Rate bits', formatCount(fixedSpongeInitialization.rateBits)],
+                [
+                    'Capacity bits',
+                    formatCount(fixedSpongeInitialization.capacityBits),
+                ],
+                [
+                    'Permutation output blocks across fixed prefixes',
+                    formatCount(fixedSpongeInitialization.outputBlocks),
+                ],
+                [
+                    'Capacity-conditioning distance exponent',
+                    formatCount(
+                        fixedSpongeInitialization.conditioningFailureExponent,
+                    ),
+                ],
+                [
+                    'Extra random bits for bounded fiber sampling',
+                    formatCount(fixedSpongeInitialization.extraSamplingBits),
+                ],
+                [
+                    'Maximum random bits per simulated fiber word',
+                    formatCount(
+                        fixedSpongeInitialization.maximumFiberRandomBits,
+                    ),
+                ],
+                [
+                    'Combined initialization distance exponent',
+                    formatCount(
+                        fixedSpongeInitialization.combinedInitializationFailureExponent,
+                    ),
                 ],
             ],
         ),
