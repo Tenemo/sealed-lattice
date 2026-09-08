@@ -2662,6 +2662,14 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(participantCustody.maximumRootBytes),
                 ],
                 [
+                    'Maximum participant root records',
+                    formatCount(participantCustody.maximumRootRecords),
+                ],
+                [
+                    'Retained setup reference bytes',
+                    formatCount(participantCustody.setupReferenceBytes),
+                ],
+                [
                     'Maximum public body ciphertext bytes',
                     formatCount(
                         participantCustody.maximumPublicBodyCiphertextBytes,

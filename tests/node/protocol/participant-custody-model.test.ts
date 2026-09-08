@@ -3,11 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
+import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 
 describe('shared participant custody', () => {
     it('retains every contribution polynomial once and omits fixed statement framing', () => {
         const value = compileParticipantCustodyCensus();
         const body = compileContributionBodyCensus();
+        expect(value.maximumRootRecords).toBe(
+            compileRegistrationEnrollmentCensus().maximumRecords + 1n,
+        );
+        expect(value.setupReferenceBytes).toBe(
+            4n + 64n + 64n * BigInt(body.polynomials.length),
+        );
         expect(value.publicRecords.some((record) => record.object === 0)).toBe(
             false,
         );

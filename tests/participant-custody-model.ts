@@ -55,9 +55,12 @@ export const compileParticipantCustodyCensus = () => {
         maximumCheckpointMetadataBytes > maximumCompletedMetadataBytes
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
+    const maximumRootRecords = enrollment.maximumRecords + 1n;
+    const setupReferenceBytes =
+        4n + 64n + 64n * BigInt(body.polynomials.length);
     const maximumRootBytes =
         enrollment.manifestPrefixBytes +
-        73n * enrollment.maximumRecords +
+        73n * maximumRootRecords +
         4n +
         maximumMetadataBytes +
         16n;
@@ -75,6 +78,7 @@ export const compileParticipantCustodyCensus = () => {
         enrollment.maximumRetainedPayloadBytes -
         enrollment.maximumRootBytes +
         maximumRootBytes +
+        setupReferenceBytes +
         maximumPublicBodyCiphertextBytes +
         checkpoint.ciphertextBytes +
         maximumSigningPlaintextBytes +
@@ -87,6 +91,8 @@ export const compileParticipantCustodyCensus = () => {
         maximumCheckpointMetadataBytes,
         maximumCompletedMetadataBytes,
         maximumMetadataBytes,
+        maximumRootRecords,
+        setupReferenceBytes,
         maximumRootBytes,
         maximumPublicBodyCiphertextBytes,
         maximumSigningPlaintextBytes,
