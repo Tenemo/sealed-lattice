@@ -15,6 +15,14 @@ describe('full word-proof layout and theorem operands', () => {
         expect(layout.firstWidth).toBe(33n * 16n + 48n);
         expect(layout.secondWidth).toBe(34n * 48n);
         expect(layout.residentPublicOperatorBytes).toBe(32n * 65536n * 48n);
+        expect(layout.minimumRequestedRandomBytes).toBe(
+            layout.leafSaltBytes +
+                20n * 128n +
+                (33n + 96n + 66n + 50n) * 65536n,
+        );
+        expect(layout.minimumRequestedRandomBytes).toBeGreaterThan(
+            layout.leafSaltBytes + layout.proverMaskBytes,
+        );
         expect(layout.maximumMultiproofBytes).toBeGreaterThan(8_388_608n);
         expect(layout.maximumMultiproofBytes).toBeLessThan(
             layout.maximumProofBytes,

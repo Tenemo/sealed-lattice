@@ -1462,6 +1462,10 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotWordProof.proverMaskBytes),
                 ],
                 [
+                    'Minimum requested proof randomness bytes before field-sampling rejection',
+                    formatCount(ballotWordProof.minimumRequestedRandomBytes),
+                ],
+                [
                     'Resident public operator payload bytes',
                     formatCount(ballotWordProof.residentPublicOperatorBytes),
                 ],

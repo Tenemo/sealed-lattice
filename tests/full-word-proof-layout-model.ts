@@ -14,6 +14,10 @@ const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     const saltBytes = compiler.saltBits / 8n;
     const baseBytes = field.packedFieldElementByteLength;
     const extensionBytes = field.packedExtensionElementByteLength;
+    const randomReadBytes = 65536n;
+    const randomFieldBytes = (count: bigint) =>
+        ((count * baseBytes + randomReadBytes - 1n) / randomReadBytes) *
+        randomReadBytes;
     const firstWidth = BigInt(wordCount + 1) * baseBytes + extensionBytes;
     const secondWidth = BigInt(lookupCount + 2) * extensionBytes;
     const headerBytes =
@@ -63,6 +67,15 @@ const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
         expandedFirstOracleBytes: firstWidth * BigInt(agreement.domainSize),
         expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
         leafSaltBytes: totalLeaves * saltBytes,
+        minimumRequestedRandomBytes:
+            totalLeaves * saltBytes +
+            BigInt(foldCount + 3) * saltBytes +
+            BigInt(wordCount + 1) *
+                randomFieldBytes(BigInt(agreement.maskDimension)) +
+            randomFieldBytes(3n * BigInt(agreement.codeDimension)) +
+            BigInt(lookupCount + 1) *
+                randomFieldBytes(3n * BigInt(agreement.maskDimension)) +
+            randomFieldBytes(3n * BigInt(agreement.witnessDegree + 1)),
         proverMaskBytes:
             BigInt(wordCount + 1) *
                 BigInt(agreement.maskDimension) *
