@@ -57,6 +57,7 @@ import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-m
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
+import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import {
     compileSetupRandomnessCensus,
@@ -111,6 +112,7 @@ export const renderDocumentationCensus = (): string => {
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
     const contributionBody = compileContributionBodyCensus();
+    const setupAggregate = compileSetupAggregateResources();
     const contributionSigning = compileContributionAuthenticationCensus(
         contributionBody.participantCount,
     );
@@ -2567,6 +2569,58 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum all-contributor body payload bytes',
                     formatCount(contributionBody.maximumAllContributorBodies),
+                ],
+            ],
+        ),
+        '',
+        '## Setup aggregate cache census',
+        '',
+        'The public aggregator retains the previous accepted generation and one provisional generation. Coefficient-aligned reads return one immutable polynomial only after its complete digest matches the owning setup reference. Counts below cover canonical polynomial payload and successful cache traffic; they exclude proof verification, database journals, allocation overhead, failed candidates, participant private state, and archive replication.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Canonical aggregate bytes',
+                    formatCount(setupAggregate.aggregateBytes),
+                ],
+                [
+                    'Aggregate coefficients',
+                    formatCount(setupAggregate.coefficients),
+                ],
+                [
+                    'Chunks per cache generation',
+                    formatCount(setupAggregate.cacheChunks),
+                ],
+                [
+                    'Maximum cache read bytes',
+                    formatCount(setupAggregate.maximumReadBytes),
+                ],
+                [
+                    'Largest complete polynomial bytes',
+                    formatCount(setupAggregate.maximumPolynomialBytes),
+                ],
+                [
+                    'Two-generation cache payload bytes',
+                    formatCount(
+                        setupAggregate.maximumTwoGenerationPayloadBytes,
+                    ),
+                ],
+                [
+                    'Contribution polynomial read bytes',
+                    formatCount(setupAggregate.contributionReadBytes),
+                ],
+                [
+                    'Previous-generation cache read bytes',
+                    formatCount(setupAggregate.previousCacheReadBytes),
+                ],
+                [
+                    'Provisional cache write bytes',
+                    formatCount(setupAggregate.provisionalCacheWriteBytes),
+                ],
+                [
+                    'Complete final readback bytes',
+                    formatCount(setupAggregate.completeReadbackBytes),
                 ],
             ],
         ),
