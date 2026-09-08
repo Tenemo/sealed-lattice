@@ -3526,13 +3526,13 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Batched close candidate, conditional result-stage bound',
+                    'Rejected batched close, result-stage count',
                     formatCount(
                         batchedPublicationVisits.maximumParticipantStages,
                     ),
                 ],
                 [
-                    'Batched close candidate, conditional no-result-stage bound',
+                    'Rejected batched close, no-result-stage count',
                     formatCount(batchedPublicationVisits.maximumNoResultStages),
                 ],
                 [

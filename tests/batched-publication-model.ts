@@ -10,8 +10,9 @@ type PublicationReport = Readonly<{
     witnessBatches: readonly EnvelopeBatch[];
 }>;
 
-// One immutable authenticated batch per honest participant and purpose. The
-// registry is an ideal signature boundary, not production authentication.
+// Retained counterexample model: selecting a quorum of reports lets the
+// organizer choose individual pending ballots. The registry is ideal
+// authentication; this rejected close rule creates no protocol capability.
 export const createBatchedPublicationModel = (
     participantCount: number,
     corruptPositions: readonly number[],

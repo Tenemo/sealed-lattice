@@ -183,6 +183,55 @@ describe('close-triggered batched publication', () => {
         expect(model.report(1, witnesses)).toBeUndefined();
     });
 
+    it('exposes organizer selection of an individual honest ballot before any target lock', () => {
+        for (let count = 4; count <= 20; count++) {
+            const bound = Math.floor((count - 1) / 3);
+            const model = createBatchedPublicationModel(
+                count,
+                Array.from(
+                    { length: bound },
+                    (_, index) => count - bound + index,
+                ),
+            );
+            const retained = { ...body, slot: 1, identity: 'always included' };
+            expect(model.submit(body)).toBe(true);
+            expect(model.submit(retained)).toBe(true);
+            const batches = Array.from({ length: count }, (_, sender) =>
+                requireMessage(
+                    model.witnessBatch(
+                        sender,
+                        sender < model.quorum ? [body, retained] : [retained],
+                    ),
+                ),
+            );
+            const reports = Array.from({ length: count }, (_, sender) =>
+                requireMessage(
+                    model.report(
+                        sender,
+                        sender === 0
+                            ? batches.slice(0, model.quorum)
+                            : batches.slice(-model.quorum),
+                    ),
+                ),
+            );
+            // The same authenticated prefix, ballot origins, close intent,
+            // and delivery schedule permit either organizer proposal.
+            const included = model.inventory(reports.slice(0, model.quorum));
+            const omitted = model.inventory(reports.slice(1, model.quorum + 1));
+            expect(included).toEqual([body, retained]);
+            expect(omitted).toEqual([retained]);
+            expect(
+                reports.filter((report) =>
+                    model
+                        .supportedBodies(report)
+                        ?.some(({ slot }) => slot === 0),
+                ),
+            ).toHaveLength(1);
+            // No target signature exists in this model. A later one-target
+            // lock cannot make either first proposal fail these cut checks.
+        }
+    });
+
     it('ignores forged ballots and refuses changed or duplicate predecessor batches', () => {
         const model = createBatchedPublicationModel(4, [3]);
         model.submit(body);
