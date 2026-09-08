@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
@@ -113,6 +114,7 @@ export const renderDocumentationCensus = (): string => {
     const wideChallengeCompiler = compileWideChallengeCompilerCensus();
     const fullWordProof = compileFullWordProofLayout();
     const ballotWordProof = compileBallotWordProofLayout();
+    const ballotBody = compileBallotBodyCensus();
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
     const contributionBody = compileContributionBodyCensus();
@@ -1480,6 +1482,51 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Full-profile affine rows',
                     formatCount(ballotRelation.affineRows),
+                ],
+            ],
+        ),
+        '',
+        '## Ballot body census',
+        '',
+        "The framed body carries the bound context, both ciphertext pairs, and the exact proof. Common matrices and certified public keys are reconstructed from the verifier's setup. Framing alone supplies no signature, publication, or ballot authority.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Context bytes', formatCount(ballotBody.contextBytes)],
+                ['Body header bytes', formatCount(ballotBody.headerBytes)],
+                [
+                    'Ciphertext payload bytes',
+                    formatCount(ballotBody.ciphertextBytes),
+                ],
+                [
+                    'Reconstructed public input bytes',
+                    formatCount(ballotBody.reconstructedInputBytes),
+                ],
+                [
+                    'Minimum proof bytes',
+                    formatCount(ballotBody.minimumProofBytes),
+                ],
+                [
+                    'Maximum proof bytes',
+                    formatCount(ballotBody.maximumProofBytes),
+                ],
+                ['Signature bytes', formatCount(ballotBody.signatureBytes)],
+                [
+                    'Maximum body bytes',
+                    formatCount(ballotBody.maximumBodyBytes),
+                ],
+                [
+                    'Maximum signed body bytes',
+                    formatCount(ballotBody.maximumSignedBodyBytes),
+                ],
+                [
+                    'Body identity hash prefix bytes',
+                    formatCount(ballotBody.hashPrefixBytes),
+                ],
+                [
+                    'Maximum body identity hash input bytes',
+                    formatCount(ballotBody.maximumHashInputBytes),
                 ],
             ],
         ),
