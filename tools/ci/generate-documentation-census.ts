@@ -1494,6 +1494,10 @@ export const renderDocumentationCensus = (): string => {
             ['Property', 'Value'],
             [
                 ['Context bytes', formatCount(ballotBody.contextBytes)],
+                [
+                    'Protocol proof role bytes',
+                    formatCount(ballotBody.proofRoleBytes),
+                ],
                 ['Body header bytes', formatCount(ballotBody.headerBytes)],
                 [
                     'Ciphertext payload bytes',

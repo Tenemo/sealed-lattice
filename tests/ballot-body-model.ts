@@ -22,6 +22,13 @@ export const compileBallotBodyCensus = () => {
         { expandedIndex: 7, bytes: auxiliaryBytes },
     ];
     const contextBytes = 4n + 64n + 64n + 2n + 1n + 1n;
+    const proofRoleBytes =
+        8n +
+        5n * 6n +
+        4n +
+        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v1')) +
+        3n * 64n +
+        2n;
     const headerBytes = 4n + 8n + contextBytes;
     const ciphertextBytes = 2n * fheBytes + 2n * auxiliaryBytes;
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
@@ -36,6 +43,7 @@ export const compileBallotBodyCensus = () => {
     return {
         polynomials,
         contextBytes,
+        proofRoleBytes,
         headerBytes,
         ciphertextBytes,
         minimumProofBytes: proof.headerBytes,
