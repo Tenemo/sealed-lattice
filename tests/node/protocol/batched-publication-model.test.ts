@@ -14,6 +14,16 @@ const requireMessage = <Message>(message: Message | undefined): Message => {
 };
 
 describe('close-triggered batched publication', () => {
+    it('allows a corrupt reporter to sign valid predecessors without following honest local stages', () => {
+        const model = createBatchedPublicationModel(4, [3]);
+        model.submit(body);
+        const batches = [0, 1, 2].map((sender) =>
+            requireMessage(model.witnessBatch(sender, [body])),
+        );
+        const corruptReport = requireMessage(model.report(3, batches));
+        expect(model.supportedBodies(corruptReport)).toEqual([body]);
+    });
+
     it('finishes valid, invalid, and empty inventories while corrupt parties refuse', () => {
         for (let count = 3; count <= 20; count++) {
             for (const bodies of [

@@ -92,8 +92,8 @@ export const createBatchedPublicationModel = (
     ): PublicationReport | undefined => {
         checkPosition(sender);
         if (
-            !witnessed.has(sender) ||
-            (!corrupt.has(sender) && reported.has(sender))
+            !corrupt.has(sender) &&
+            (!witnessed.has(sender) || reported.has(sender))
         )
             return;
         if (
