@@ -1422,6 +1422,14 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotRelation.additionalQuadraticConstraints),
                 ],
                 [
+                    'Maximum simultaneously retained product input columns',
+                    formatCount(ballotRelation.maximumLiveProductColumns),
+                ],
+                [
+                    'Two-coset product input cache payload bytes',
+                    formatCount(ballotRelation.zeroProductCacheBytes),
+                ],
+                [
                     'Additional narrow memberships',
                     formatCount(ballotRelation.narrowMemberships),
                 ],

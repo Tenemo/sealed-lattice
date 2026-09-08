@@ -23,6 +23,67 @@ const digit = (value: bigint, index: number) =>
     (value < 0n ? -1n : 1n) *
     (((value < 0n ? -value : value) / radix ** BigInt(index)) % radix);
 
+export const compileBallotEncryptionColumnLayout = () => {
+    const limbs = Math.ceil(modulus.toString(2).length / 96);
+    const columns: { name: string; maximum: number }[] = [];
+    const add = (name: string, maximum: number) => {
+        columns.push({ name, maximum });
+        return columns.length - 1;
+    };
+    const errors: number[] = [];
+    for (let component = 0; component < 2; component++) {
+        add(`fhe-quotient-${component}`, 65535);
+        for (let carry = 0; carry < limbs - 1; carry++)
+            add(`fhe-carry-${component}-${carry}`, 65535);
+        errors.push(add(`fhe-error-${component}`, 127));
+    }
+    const plaintext = add('plaintext-lower-word', 65535);
+    add('packing-quotient', 65535);
+    const scores = add('score-minus-one', 9);
+    for (let component = 0; component < 2; component++) {
+        add(`auxiliary-quotient-${component}`, 65535);
+        errors.push(add(`auxiliary-error-${component}`, 127));
+    }
+    const wordColumns = columns.length;
+    const fhePositive = add('fhe-positive-support', 1);
+    const fheNegative = add('fhe-negative-support', 1);
+    const auxiliaryPositive = add('auxiliary-positive-support', 1);
+    const auxiliaryNegative = add('auxiliary-negative-support', 1);
+    const plaintextHighBit = add('plaintext-high-bit', 1);
+    const zeroProducts = [
+        [fhePositive, fheNegative],
+        [auxiliaryPositive, auxiliaryNegative],
+        [plaintext, plaintextHighBit],
+    ] as const;
+    const lookups = Array.from({ length: wordColumns }, (_unused, column) => ({
+        column,
+        scale: 1,
+    }));
+    lookups.push(
+        ...errors.map((column) => ({
+            column,
+            scale: 65536 / (columns[column].maximum + 1),
+        })),
+        { column: scores, scale: Math.floor(65535 / columns[scores].maximum) },
+    );
+    // A left input remains live until its right partner has been evaluated.
+    const maximumLiveProductColumns = Math.max(
+        ...columns.map(
+            (_column, index) =>
+                zeroProducts.filter(
+                    ([left, right]) => left <= index && index < right,
+                ).length,
+        ),
+    );
+    return {
+        columns,
+        wordColumns,
+        zeroProducts,
+        lookups,
+        maximumLiveProductColumns,
+    };
+};
+
 export const compileBallotEncryptionRelationCensus = () => {
     const participants = fixedModulusBfvInputs.participantCount;
     const support = fixedModulusBfvInputs.secretSupportWeight;
@@ -67,7 +128,8 @@ export const compileBallotEncryptionRelationCensus = () => {
         auxiliary.modulus * quotientBound;
     assert.ok(packingResidualBound < proofPrime);
     assert.ok(auxiliaryResidualBound < proofPrime);
-    const wordColumns = 2 * (1 + limbs - 1 + 1) + 3 + 4;
+    const layout = compileBallotEncryptionColumnLayout();
+    const wordColumns = layout.wordColumns;
     return {
         limbs,
         scale,
@@ -79,10 +141,16 @@ export const compileBallotEncryptionRelationCensus = () => {
         packingResidualBound,
         auxiliaryResidualBound,
         wordColumns,
-        booleanColumns: 5,
-        additionalQuadraticConstraints: 3,
-        narrowMemberships: 5,
-        lookupEntries: wordColumns + 5,
+        booleanColumns: layout.columns.length - wordColumns,
+        additionalQuadraticConstraints: layout.zeroProducts.length,
+        narrowMemberships: layout.lookups.length - wordColumns,
+        lookupEntries: layout.lookups.length,
+        maximumLiveProductColumns: layout.maximumLiveProductColumns,
+        zeroProductCacheBytes:
+            BigInt(layout.maximumLiveProductColumns) *
+            2n *
+            fixedModulusBfvInputs.polynomialDegree *
+            compileSmallLimbProofFieldCensus().packedFieldElementByteLength,
         affineRows:
             BigInt(2 * limbs + 1) * fixedModulusBfvInputs.polynomialDegree +
             2n * auxiliary.degree +

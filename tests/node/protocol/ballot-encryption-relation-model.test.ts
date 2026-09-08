@@ -2,12 +2,50 @@ import { describe, expect, it } from 'vitest';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import {
+    compileBallotEncryptionColumnLayout,
     compileBallotEncryptionRelationCensus,
     createBallotEncryptionRelationModel,
 } from '#tests/ballot-encryption-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
 describe('linked scored ballot encryption', () => {
+    it('keeps the full plaintext interval and exact score range in the committed columns', () => {
+        const layout = compileBallotEncryptionColumnLayout();
+        expect(
+            layout.columns.slice(20, 23).map((column) => column.name),
+        ).toEqual([
+            'plaintext-lower-word',
+            'packing-quotient',
+            'score-minus-one',
+        ]);
+        expect(layout.zeroProducts).toEqual([
+            [27, 28],
+            [29, 30],
+            [20, 31],
+        ]);
+        const admitted = (column: number, value: number) =>
+            layout.lookups
+                .filter((lookup) => lookup.column === column)
+                .every((lookup) => value >= 0 && value * lookup.scale <= 65535);
+        for (const value of [-1, 0, 1, 9, 10, 127, 128, 65535, 65536]) {
+            expect(admitted(22, value)).toBe(value >= 0 && value <= 9);
+            expect(admitted(9, value)).toBe(value >= 0 && value <= 127);
+            expect(admitted(20, value)).toBe(value >= 0 && value <= 65535);
+        }
+        const endpointValues = [];
+        for (let high = 0; high <= 1; high++)
+            for (let low = 0; low <= 65535; low++)
+                if (low * high === 0)
+                    endpointValues.push(low + 65536 * high - 32768);
+        expect(new Set(endpointValues).size).toBe(65537);
+        expect(Math.min(...endpointValues)).toBe(-32768);
+        expect(Math.max(...endpointValues)).toBe(32768);
+        expect(layout.maximumLiveProductColumns).toBe(2);
+        expect(
+            compileBallotEncryptionRelationCensus().zeroProductCacheBytes,
+        ).toBe(4194304n);
+    });
+
     it('rejects truncated FHE limbs and direct auxiliary proof-field aliases', () => {
         const model = createBallotEncryptionRelationModel([1n, 10n]);
         for (const coefficients of [
