@@ -123,6 +123,13 @@ export const compileBallotRandomnessBudget = () => {
         proofFailure(extraProofReads),
         ...sparse.map((value) => value.failure),
     ]);
+    const recordBytes = 1n << 20n;
+    const recordCount =
+        (maximumEncryptionBytes + recordBytes - 1n) / recordBytes +
+        (maximumProofBytes + recordBytes - 1n) / recordBytes;
+    const maximumContextBytes = 2n * 64n + 2n + 1n + 20n + 2n * 4n;
+    const maximumRootPlaintextBytes =
+        12n + maximumContextBytes + 32n * recordCount;
     return {
         participantCount,
         readBytes,
@@ -136,5 +143,17 @@ export const compileBallotRandomnessBudget = () => {
         sparse,
         exhaustionBound,
         exhaustionBits: bitFloor(exhaustionBound),
+        recordBytes,
+        recordCount,
+        maximumContextBytes,
+        maximumRootPlaintextBytes,
+        maximumRootCiphertextBytes: maximumRootPlaintextBytes + 16n,
+        encryptedJournalBytes:
+            maximumProofBytes + maximumEncryptionBytes + 16n * recordCount,
+        uninterruptedRootKeyCreations: recordCount + 1n,
+        uninterruptedRecordKeyCreations: recordCount,
+        maximumDistinctGcmBlocksPerRecordKey: (recordBytes + 15n) / 16n + 2n,
+        maximumDistinctGcmBlocksPerRootKey:
+            (maximumRootPlaintextBytes + 15n) / 16n + 2n,
     };
 };

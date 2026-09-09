@@ -1576,6 +1576,50 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
+        table(
+            ['Journal storage operand', 'Value'],
+            [
+                [
+                    'Maximum plaintext record bytes',
+                    formatCount(ballotRandomness.recordBytes),
+                ],
+                [
+                    'Encrypted records',
+                    formatCount(ballotRandomness.recordCount),
+                ],
+                [
+                    'Encrypted journal payload bytes',
+                    formatCount(ballotRandomness.encryptedJournalBytes),
+                ],
+                [
+                    'Maximum encrypted root bytes',
+                    formatCount(ballotRandomness.maximumRootCiphertextBytes),
+                ],
+                [
+                    'Root keys in uninterrupted preparation',
+                    formatCount(ballotRandomness.uninterruptedRootKeyCreations),
+                ],
+                [
+                    'Record keys in uninterrupted preparation',
+                    formatCount(
+                        ballotRandomness.uninterruptedRecordKeyCreations,
+                    ),
+                ],
+                [
+                    'Maximum distinct AES inputs per record key',
+                    formatCount(
+                        ballotRandomness.maximumDistinctGcmBlocksPerRecordKey,
+                    ),
+                ],
+                [
+                    'Maximum distinct AES inputs per root key',
+                    formatCount(
+                        ballotRandomness.maximumDistinctGcmBlocksPerRootKey,
+                    ),
+                ],
+            ],
+        ),
+        '',
         '## Linked release relation census',
         '',
         'The recipient-key, encrypted aggregate-decryption, and dense partial-release equations use the same hidden share and original recipient secret. These are exact integer-lifting and layout values; the emitted proof and target capability remain separate.',
