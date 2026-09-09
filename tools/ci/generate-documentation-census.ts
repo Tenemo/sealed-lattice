@@ -44,6 +44,7 @@ import {
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
+import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
@@ -109,6 +110,7 @@ export const renderDocumentationCensus = (): string => {
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
     const participantVisits = compileParticipantVisitDependencyCensus();
     const participantCustody = compileParticipantCustodyCensus();
+    const participantBallotCustody = compileParticipantBallotCustody();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const fixedSpongeInitialization = compileFixedSpongeInitializationCensus();
@@ -1617,6 +1619,40 @@ export const renderDocumentationCensus = (): string => {
                         ballotRandomness.maximumDistinctGcmBlocksPerRootKey,
                     ),
                 ],
+            ],
+        ),
+        '',
+        '## Participant ballot custody',
+        '',
+        'Private ballot suffix and payload bounds, excluding the already retained participant root and its earlier records. The encoded suffix supplies no verification or signing authority by itself.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Maximum ballot state bytes',
+                    formatCount(participantBallotCustody.maximumStateBytes),
+                ],
+                [
+                    'Maximum body records',
+                    formatCount(participantBallotCustody.maximumBodyRecords),
+                ],
+                [
+                    'Maximum encrypted body bytes',
+                    formatCount(
+                        participantBallotCustody.maximumEncryptedBodyBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained journal and body bytes',
+                    formatCount(
+                        participantBallotCustody.maximumJournalAndBodyBytes,
+                    ),
+                ],
+                ...participantBallotCustody.phaseBytes.map((value) => [
+                    'Phase ' + value.phase + ' state bytes',
+                    formatCount(value.bytes),
+                ]),
             ],
         ),
         '',
