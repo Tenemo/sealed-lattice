@@ -1088,12 +1088,32 @@ export const renderDocumentationCensus = (): string => {
             ['Property', 'Value'],
             [
                 [
-                    'Recipient-key coefficient bound',
-                    formatCount(recipientKeyUniqueness.coefficientBound),
+                    'Current registration ring degree',
+                    formatCount(recipientKeyUniqueness.polynomialModulusDegree),
                 ],
                 [
-                    'Difference values per coefficient',
-                    formatCount(recipientKeyUniqueness.differenceValueCount),
+                    'Current registration modulus prime factor',
+                    formatCount(recipientKeyUniqueness.primeModulus),
+                ],
+                [
+                    'Recipient secret coefficient bound',
+                    formatCount(recipientKeyUniqueness.secretCoefficientBound),
+                ],
+                [
+                    'Recipient error coefficient bound',
+                    formatCount(recipientKeyUniqueness.errorCoefficientBound),
+                ],
+                [
+                    'Secret difference values per coefficient',
+                    formatCount(
+                        recipientKeyUniqueness.secretDifferenceValueCount,
+                    ),
+                ],
+                [
+                    'Error difference values per coefficient',
+                    formatCount(
+                        recipientKeyUniqueness.errorDifferenceValueCount,
+                    ),
                 ],
                 [
                     'Squared determinant-union base numerator',
@@ -3361,7 +3381,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Early commitment extraction census',
         '',
-        'DFMS21 Corollary 4.8 for full-body contribution commitments, including losing frozen inventory views. Fixed-suite public matrices remove the former seed-commitment stage. The sum charges both simulator disturbance and valid-opening mismatch. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
+        'DFMS21 Corollary 4.8 for full-body contribution commitments, including losing frozen inventory views. Fixed-suite public matrices remove the former seed-commitment stage. The sum charges both simulator disturbance and valid-opening mismatch. Theorem 4.3 additionally gives O(Q*E*Time[f] + Q^2): the displayed coefficients do not instantiate its constants, reversible gate costs, or the rest of the reduction. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
         '',
         table(
             [
@@ -3369,6 +3389,8 @@ export const renderDocumentationCensus = (): string => {
                 'Relevant commitments',
                 'Hash output bits',
                 'Quantum query bound',
+                'Relation-evaluation coefficient Q*E',
+                'Quadratic-query coefficient Q^2',
                 'Combined failure exponent',
             ],
             [10, 20].map((participantCount) => {
@@ -3379,6 +3401,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(bound.extractedCommitmentCount),
                     formatCount(bound.hashOutputBitLength),
                     formatCount(bound.quantumQueryCount),
+                    formatCount(bound.simulatorRelationEvaluationCoefficient),
+                    formatCount(bound.simulatorQuadraticQueryCoefficient),
                     bound.combinedFailureExponent === undefined
                         ? 'No extraction event'
                         : formatCount(bound.combinedFailureExponent),

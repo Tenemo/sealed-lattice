@@ -31,6 +31,12 @@ describe('early full-body commitment extraction bounds', () => {
                 BigInt(participantCount) *
                     BigInt(Math.floor((participantCount - 1) / 3)),
             );
+            expect(bound.simulatorRelationEvaluationCoefficient).toBe(
+                BigInt(participantCount) *
+                    BigInt(Math.floor((participantCount - 1) / 3)) *
+                    (1n << 80n),
+            );
+            expect(bound.simulatorQuadraticQueryCoefficient).toBe(1n << 160n);
         }
     });
 

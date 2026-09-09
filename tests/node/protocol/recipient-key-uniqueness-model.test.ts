@@ -5,15 +5,19 @@ import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniquen
 const modulo = (value: number, prime: number): number =>
     ((value % prime) + prime) % prime;
 
-const directCollisions = (prime: number, bound: number): Set<number> => {
+const directCollisions = (
+    prime: number,
+    bound: number,
+    errorBound = bound,
+): Set<number> => {
     const collisions = new Set<number>();
     for (let a0 = 0; a0 < prime; a0 += 1) {
         for (let a1 = 0; a1 < prime; a1 += 1) {
             const publicKeys = new Set<number>();
             for (let x0 = -bound; x0 <= bound; x0 += 1) {
                 for (let x1 = -bound; x1 <= bound; x1 += 1) {
-                    for (let e0 = -bound; e0 <= bound; e0 += 1) {
-                        for (let e1 = -bound; e1 <= bound; e1 += 1) {
+                    for (let e0 = -errorBound; e0 <= errorBound; e0 += 1) {
+                        for (let e1 = -errorBound; e1 <= errorBound; e1 += 1) {
                             const b0 = modulo(-a0 * x0 + a1 * x1 + e0, prime);
                             const b1 = modulo(-a0 * x1 - a1 * x0 + e1, prime);
                             const key = b0 + prime * b1;
@@ -35,6 +39,7 @@ const differenceCollisions = (
     prime: number,
     root: number,
     bound: number,
+    errorBound = bound,
 ): Readonly<{
     collisions: ReadonlySet<number>;
     zeroDivisorDifferenceCount: number;
@@ -60,8 +65,8 @@ const differenceCollisions = (
             const plus = modulo(u + root * v, prime);
             const minus = modulo(u - root * v, prime);
             if (plus === 0 || minus === 0) zeroDivisorDifferenceCount += 1;
-            for (let e0 = -2 * bound; e0 <= 2 * bound; e0 += 1) {
-                for (let e1 = -2 * bound; e1 <= 2 * bound; e1 += 1) {
+            for (let e0 = -2 * errorBound; e0 <= 2 * errorBound; e0 += 1) {
+                for (let e1 = -2 * errorBound; e1 <= 2 * errorBound; e1 += 1) {
                     const firstSolutions = solutions(
                         plus,
                         modulo(e0 + root * e1, prime),
@@ -90,6 +95,15 @@ const differenceCollisions = (
 };
 
 describe('recipient key uniqueness under uniform common randomness', () => {
+    it('uses the current registration ring instead of the historical sharing ring', () => {
+        const bound = compileRecipientKeyUniquenessBound();
+        expect(bound.polynomialModulusDegree).toBe(65_536n);
+        expect(bound.primeModulus).toBe((1n << 128n) - 133n * (1n << 64n) + 1n);
+        expect(bound.squaredFailureBaseNumerator).toBe(
+            5n ** 2n * 257n ** 2n * 4n * 65_536n,
+        );
+    });
+
     it('matches direct witness collisions with an independent difference-equation oracle', () => {
         const direct = directCollisions(257, 1);
         const difference = differenceCollisions(257, 16, 1);
@@ -110,12 +124,25 @@ describe('recipient key uniqueness under uniform common randomness', () => {
         expect(difference.zeroDivisorDifferenceCount).toBeGreaterThan(0);
     });
 
+    it('counts the wider error support independently from the ternary secret', () => {
+        const narrow = directCollisions(97, 1);
+        const wider = directCollisions(97, 1, 2);
+        const difference = differenceCollisions(97, 22, 1, 2);
+        expect(wider).toEqual(difference.collisions);
+        expect(wider.size).toBeGreaterThan(narrow.size);
+        for (const matrix of narrow) expect(wider.has(matrix)).toBe(true);
+    });
+
     it('rounds the full-ring determinant union bound conservatively with exact integers', () => {
         const bound = compileRecipientKeyUniquenessBound();
-        // Two difference vectors each have five choices per coefficient;
-        // Hadamard contributes 2*sqrt(N) per coefficient before squaring.
-        expect(bound.squaredFailureBaseNumerator).toBe(25n ** 2n * 4n * 32768n);
-        expect(bound.uniformMatrixFailureExponent).toBe(3_571_712n);
+        // Ternary secret differences have five choices; the accepted signed
+        // error interval is covered by [-64,64], hence 257 difference values.
+        expect(bound.secretCoefficientBound).toBe(1n);
+        expect(bound.errorCoefficientBound).toBe(64n);
+        expect(bound.squaredFailureBaseNumerator).toBe(
+            5n ** 2n * 257n ** 2n * 4n * 65_536n,
+        );
+        expect(bound.uniformMatrixFailureExponent).toBe(108n * 65_536n);
         const exponentPerCoefficient =
             bound.uniformMatrixFailureExponent / bound.polynomialModulusDegree;
         expect(

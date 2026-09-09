@@ -51,5 +51,11 @@ export const compileCommitmentExtractionBound = (participantCount: number) => {
         openingMismatchNumerator,
         quantumQueryCount,
         traceDistanceNumerator,
+        // DFMS21 Theorem 4.3 gives O(Q*E*Time[f] + Q^2). These are
+        // coefficients of that expression, not gate counts. The source does
+        // not provide concrete constants or a fixed-hash implementation.
+        simulatorRelationEvaluationCoefficient:
+            quantumQueryCount * extractedCommitmentCount,
+        simulatorQuadraticQueryCoefficient: quantumQueryCount ** 2n,
     };
 };
