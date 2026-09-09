@@ -1,6 +1,7 @@
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 
@@ -56,13 +57,20 @@ export const compileParticipantCustodyCensus = () => {
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
     const maximumRootRecords = enrollment.maximumRecords + 1n;
+    const ballot = compileParticipantBallotCustody();
     const setupReferenceBytes =
         4n + 64n + 64n * BigInt(body.polynomials.length);
+    const maximumWithBallot =
+        maximumCompletedMetadataBytes + 4n + ballot.maximumStateBytes;
+    const maximumCombinedMetadata =
+        maximumWithBallot > maximumMetadataBytes
+            ? maximumWithBallot
+            : maximumMetadataBytes;
     const maximumRootBytes =
         enrollment.manifestPrefixBytes +
         73n * maximumRootRecords +
         4n +
-        maximumMetadataBytes +
+        maximumCombinedMetadata +
         16n;
     const maximumPublicBodyCiphertextBytes =
         body.polynomialPayloadBytes +
