@@ -40,6 +40,7 @@ import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness
 import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
+    compileLinkedReleaseWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
@@ -157,6 +158,7 @@ export const renderDocumentationCensus = (): string => {
     const rnsArithmetic = compileRnsArithmeticResourceCensus();
     const setupRelation = compileSetupContributionRelationCensus();
     const linkedRelease = compileLinkedReleaseRelationCensus();
+    const linkedReleaseProof = compileLinkedReleaseWordProofLayout();
     const ballotRelation = compileBallotEncryptionRelationCensus();
     const spongePaths = compileSpongePathExtractionCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
@@ -1704,6 +1706,22 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Full-profile affine rows',
                     formatCount(linkedRelease.affineRows),
+                ],
+                [
+                    'First release-oracle row bytes',
+                    formatCount(linkedReleaseProof.firstWidth),
+                ],
+                [
+                    'Second release-oracle row bytes',
+                    formatCount(linkedReleaseProof.secondWidth),
+                ],
+                [
+                    'Maximum canonical release-proof bytes',
+                    formatCount(linkedReleaseProof.maximumMultiproofBytes),
+                ],
+                [
+                    'Resident release affine-operator bytes',
+                    formatCount(linkedReleaseProof.residentPublicOperatorBytes),
                 ],
             ],
         ),

@@ -61,6 +61,57 @@ const rowProduct = (
         0n,
     );
 
+export const compileLinkedReleaseColumnLayout = () => {
+    const variables: readonly (readonly [string, number])[] = [
+        ['key-quotient', 16],
+        ['key-carry', 16],
+        ['key-error', 7],
+        ['aggregate-share', 120],
+        ['decoding-error', 24],
+        ['decoding-quotient', 16],
+        ['decoding-carry', 30],
+        ['release-noise', release.releaseNoiseBits],
+        ['release-quotient', 144],
+        ...Array.from(
+            { length: 5 },
+            (_, index) => [`release-carry-${index}`, 72] as const,
+        ),
+    ];
+    let offset = 0;
+    const columns = variables.map(([name, bits]) => {
+        const width = bits;
+        const wordCount = Math.ceil(width / 16);
+        const column = {
+            name,
+            bits: width,
+            firstColumn: offset,
+            wordCount,
+        };
+        offset += wordCount;
+        return column;
+    });
+    const lookups = Array.from({ length: offset }, (_, column) => ({
+        column,
+        factor: 1n,
+    }));
+    for (const column of columns) {
+        const remainder = column.bits % 16;
+        if (remainder !== 0)
+            lookups.push({
+                column: column.firstColumn + column.wordCount - 1,
+                factor: 1n << BigInt(16 - remainder),
+            });
+    }
+    return {
+        columns,
+        lookups,
+        wordColumns: offset,
+        booleanColumns: 2,
+        positiveSecretColumn: offset,
+        negativeSecretColumn: offset + 1,
+    };
+};
+
 export const compileLinkedReleaseRelationCensus = () => {
     const recipientSupport = sharing.encryptionSupportWeight;
     const shareBits = 120;
@@ -97,25 +148,9 @@ export const compileLinkedReleaseRelationCensus = () => {
     assert.ok(trueDecodingQuotientBound < quotientRadius);
     assert.ok(trueDecodingCarryBound < decodingCarryRadius);
     assert.ok(decodingResidualBound < sharing.proofPrime);
-    const signedWidths = [
-        16,
-        16,
-        7,
-        shareBits,
-        decodingErrorBits,
-        decodingQuotientBits,
-        decodingCarryBits,
-        release.releaseNoiseBits,
-        144,
-        ...Array.from({ length: 5 }, () => 72),
-    ];
-    const wordColumns = signedWidths.reduce(
-        (sum, bits) => sum + Math.ceil(bits / 16),
-        0,
-    );
-    const narrowMemberships = signedWidths.filter(
-        (bits) => bits % 16 !== 0,
-    ).length;
+    const layout = compileLinkedReleaseColumnLayout();
+    const wordColumns = layout.wordColumns;
+    const narrowMemberships = layout.lookups.length - wordColumns;
     return {
         shareBits,
         decodingErrorBits,

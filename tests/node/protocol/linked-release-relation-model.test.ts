@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    compileLinkedReleaseColumnLayout,
     compileLinkedReleaseRelationCensus,
     createLinkedReleaseRelationModel,
 } from '#tests/linked-release-relation-model.js';
@@ -8,6 +9,35 @@ import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 describe('release linked to the original encrypted aggregate share', () => {
+    it('places every signed range in complete words and constrains each high word', () => {
+        const layout = compileLinkedReleaseColumnLayout();
+        expect(layout.wordColumns).toBe(61);
+        expect(layout.positiveSecretColumn).toBe(61);
+        expect(layout.negativeSecretColumn).toBe(62);
+        expect(
+            layout.columns.find((column) => column.name === 'aggregate-share'),
+        ).toMatchObject({ firstColumn: 3, bits: 120, wordCount: 8 });
+        expect(
+            layout.columns.find((column) => column.name === 'release-noise'),
+        ).toMatchObject({ firstColumn: 16, bits: 168, wordCount: 11 });
+        expect(layout.lookups.slice(layout.wordColumns)).toEqual([
+            { column: 2, factor: 512n },
+            { column: 10, factor: 256n },
+            { column: 12, factor: 256n },
+            { column: 15, factor: 4n },
+            { column: 26, factor: 256n },
+            { column: 40, factor: 256n },
+            { column: 45, factor: 256n },
+            { column: 50, factor: 256n },
+            { column: 55, factor: 256n },
+            { column: 60, factor: 256n },
+        ]);
+        for (const { factor } of layout.lookups) {
+            const firstOutside = 65536n / factor;
+            expect((firstOutside - 1n) * factor).toBeLessThan(65536n);
+            expect(firstOutside * factor).toBe(65536n);
+        }
+    });
     it('rejects high-limb aliases in every public polynomial family', () => {
         const model = createLinkedReleaseRelationModel();
         for (const [coefficients, bits] of [

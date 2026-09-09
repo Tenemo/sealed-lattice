@@ -1,5 +1,6 @@
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
 import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -107,6 +108,22 @@ export const compileBallotWordProofLayout = () => {
         ),
         residentPublicOperatorBytes:
             BigInt(columns.columns.length) *
+            BigInt(agreement.systematicSize) *
+            field.packedExtensionElementByteLength,
+    };
+};
+
+export const compileLinkedReleaseWordProofLayout = () => {
+    const columns = compileLinkedReleaseColumnLayout();
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    return {
+        ...compileWordProofLayout(
+            columns.wordColumns + columns.booleanColumns,
+            columns.lookups.length,
+        ),
+        residentPublicOperatorBytes:
+            BigInt(columns.wordColumns + columns.booleanColumns) *
             BigInt(agreement.systematicSize) *
             field.packedExtensionElementByteLength,
     };
