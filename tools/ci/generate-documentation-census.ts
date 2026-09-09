@@ -72,6 +72,7 @@ import {
     setupGaussianParameters,
 } from '#tests/setup-randomness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
+import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
@@ -3403,6 +3404,27 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(smallLimbProofField.transformRoot),
                 ],
             ],
+        ),
+        '',
+        '## Simulator recipient-key availability',
+        '',
+        'An encryption reduction with one unknown honest recipient key uses other honest recipient keys for corrupt-contribution interpolation. These are combinatorial availability counts only; the actual sharing scheme, decryption correctness and ciphertext/proof contracts remain separate. More than one unknown key is not silently assumed to satisfy the same count.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corruption bound',
+                'Required evaluations',
+                'Known honest keys with one challenge',
+                'Maximum unknown honest keys from the count alone',
+            ],
+            compileSimulatorKeyKnowledgeCensus().map((value) => [
+                formatCount(value.participants),
+                formatCount(value.faults),
+                formatCount(value.threshold),
+                formatCount(value.knownHonestWithOneChallenge),
+                formatCount(value.maximumUnknownHonestKeys),
+            ]),
         ),
         '',
         '## Early commitment extraction census',
