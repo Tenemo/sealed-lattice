@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { evaluateOddPolynomialBlocks } from '#tests/odd-polynomial-block-model.js';
+import { evaluateFixedModulusBfvRanking } from '#tests/fixed-modulus-bfv-ranking-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 
 export const fixedModulusBfvInputs = {
@@ -224,58 +224,14 @@ export const compileFixedModulusBfvCensus = () => {
         parameters.releaseModulus,
     );
     const model = createFixedModulusBfvNoiseModel(parameters);
-    const sum = (values: readonly BfvNoiseValue[]): BfvNoiseValue => {
-        assert.ok(values.length > 0);
-        return values.slice(1).reduce(model.add, values[0]);
-    };
-    const powers = (input: BfvNoiseValue) => {
-        const cache = new Map<number, BfvNoiseValue>([[1, input]]);
-        const power = (exponent: number): BfvNoiseValue => {
-            const existing = cache.get(exponent);
-            if (existing) return existing;
-            const value = model.multiply(
-                power(Math.floor(exponent / 2)),
-                power(Math.ceil(exponent / 2)),
-            );
-            cache.set(exponent, value);
-            return value;
-        };
-        return power;
-    };
-    const input = model.addPlaintext(
-        sum(
-            Array.from(
-                { length: Number(parameters.participantCount) },
-                () => model.fresh,
-            ),
+    const { comparison, result } = evaluateFixedModulusBfvRanking(
+        Array.from(
+            { length: Number(parameters.participantCount) },
+            () => model.fresh,
         ),
-    );
-    const comparison = model.addPlaintext(
-        evaluateOddPolynomialBlocks(
-            input,
-            2 * (10 - 1) * Number(parameters.participantCount) + 1,
-            parameters.comparisonBlockWidth,
-            {
-                add: model.add,
-                multiply: model.multiply,
-                weight: model.multiplyScalar,
-            },
-        ),
-    );
-    let shifted = comparison;
-    let rank = comparison;
-    const windowWidth = 2 ** Math.ceil(Math.log2(parameters.optionCount));
-    for (let offset = 1; offset < windowWidth; offset++) {
-        shifted = model.rotate(shifted);
-        rank = model.add(rank, shifted);
-    }
-    const rankPower = powers(rank);
-    const result = model.addPlaintext(
-        sum(
-            Array.from({ length: parameters.optionCount - 1 }, (_, index) =>
-                model.multiplyPlaintext(rankPower(index + 1)),
-            ),
-        ),
+        parameters.optionCount,
+        parameters.comparisonBlockWidth,
+        model,
     );
     const releaseError = ceilingDivide(
         2n *
