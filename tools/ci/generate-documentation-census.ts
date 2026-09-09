@@ -5,6 +5,7 @@ import { archiveHolderRequirements } from '#tests/archive-availability-model.js'
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
+import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
 import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
@@ -115,6 +116,7 @@ export const renderDocumentationCensus = (): string => {
     const fullWordProof = compileFullWordProofLayout();
     const ballotWordProof = compileBallotWordProofLayout();
     const ballotBody = compileBallotBodyCensus();
+    const ballotRandomness = compileBallotRandomnessBudget();
     const browserWordProver = compileBrowserWordProverResources();
     const contributionGeneration = compileContributionGenerationResources();
     const contributionBody = compileContributionBodyCensus();
@@ -1535,6 +1537,41 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum body identity hash input bytes',
                     formatCount(ballotBody.maximumHashInputBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Ballot randomness budget',
+        '',
+        'Finite independent random-byte budgets for the replay experiment. These bounds cover exhaustion of the existing samplers, not journal custody, deterministic replay, or complete protocol security.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Sampler read bytes', formatCount(ballotRandomness.readBytes)],
+                [
+                    'Additional proof reads',
+                    formatCount(ballotRandomness.extraProofReads),
+                ],
+                [
+                    'Proof random-byte budget',
+                    formatCount(ballotRandomness.maximumProofBytes),
+                ],
+                [
+                    'Encryption random-byte budget',
+                    formatCount(ballotRandomness.maximumEncryptionBytes),
+                ],
+                [
+                    'Total private random bytes',
+                    formatCount(ballotRandomness.totalRandomBytes),
+                ],
+                [
+                    'Exhaustion allocation bits',
+                    formatCount(ballotRandomness.exhaustionAllocationBits),
+                ],
+                [
+                    'All-ballot exhaustion bound bits',
+                    formatCount(ballotRandomness.exhaustionBits),
                 ],
             ],
         ),
