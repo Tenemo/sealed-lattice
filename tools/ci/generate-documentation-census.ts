@@ -1568,7 +1568,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof simulator randomness budgets',
         '',
-        'These limits cover each complete word-proof role and one fresh programmed wide verifier message. Extra buffered reads are charged by the rejected-field-word event bound, including the stated conditional invocation cap. That cap is not a derived lifetime population for the unfinished protocol. Witness/key generation and other primitive samplers remain separate. Only the linked-release research simulator currently enforces this complete cap.',
+        'These limits cover each complete word-proof role and one fresh programmed wide verifier message. Extra buffered reads are charged by the rejected-field-word event bound, including the stated conditional invocation cap. That cap is not a derived lifetime population for the unfinished protocol. Witness/key generation, participant lifecycle and other primitive samplers remain separate.',
         '',
         table(
             [
