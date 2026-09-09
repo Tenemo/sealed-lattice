@@ -52,6 +52,7 @@ import {
     createFalseBinaryRelationTable,
     enumerateRandomizedEncodingViews,
 } from '#tests/polynomial-oracle-boundary-model.js';
+import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
@@ -1563,6 +1564,31 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotBody.maximumHashInputBytes),
                 ],
             ],
+        ),
+        '',
+        '## Proof simulator randomness budgets',
+        '',
+        'These limits cover each complete word-proof role and one fresh programmed wide verifier message. Extra buffered reads are charged by the rejected-field-word event bound, including the stated conditional invocation cap. That cap is not a derived lifetime population for the unfinished protocol. Witness/key generation and other primitive samplers remain separate. Only the linked-release research simulator currently enforces this complete cap.',
+        '',
+        table(
+            [
+                'Role',
+                'Ordinary proof baseline bytes',
+                'Programmed-message bytes',
+                'Extra buffered reads',
+                'Maximum simulator bytes',
+                'Conditional invocation cap',
+                'Failure allocation bits',
+            ],
+            compileProofRandomnessBudgets().map((value) => [
+                value.role,
+                formatCount(value.ordinaryBaselineBytes),
+                formatCount(value.programmedMessageBytes),
+                formatCount(value.extraReads),
+                formatCount(value.failure.maximumBytes),
+                formatCount(value.invocationCap),
+                formatCount(value.failureAllocationBits),
+            ]),
         ),
         '',
         '## Ballot randomness budget',
