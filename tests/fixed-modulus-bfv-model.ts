@@ -322,6 +322,19 @@ export const compileFixedModulusBfvCensus = () => {
     return {
         ...parameters,
         ...model.counts,
+        // KLSW24 section 4.3 rounds every tensor coordinate separately.
+        tensorProducts: 4 * model.counts.multiplications,
+        relinearizationExternalProducts: 4 * model.counts.multiplications,
+        relinearizationGadgetDecompositions: 2 * model.counts.multiplications,
+        // Section 4.4 computes both psi(c1) external h and psi(c1) external k.
+        // Only h contributes fresh key error; the common k still costs work.
+        rotationExternalProducts: 2 * model.counts.rotations,
+        rotationGadgetDecompositions: model.counts.rotations,
+        gadgetPolynomialProducts:
+            BigInt(
+                4 * model.counts.multiplications + 2 * model.counts.rotations,
+            ) * model.gadgetLength,
+        finalModulusSwitchCoefficients: 2n * parameters.polynomialDegree,
         gadgetLength: model.gadgetLength,
         comparisonDepth: comparison.depth,
         rankingDepth: result.depth,

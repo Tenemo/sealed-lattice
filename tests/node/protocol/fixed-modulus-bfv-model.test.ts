@@ -175,6 +175,12 @@ describe('fixed-modulus BFV noise', () => {
         expect(census.comparisonDepth).toBe(8);
         expect(census.rankingDepth).toBe(12);
         expect(census.multiplications).toBe(26 + 8);
+        // KLSW24's one-group formulas have four tensor coordinates, four
+        // relinearization outputs, and two external products per automorphism.
+        expect(census.tensorProducts).toBe(136);
+        expect(census.relinearizationExternalProducts).toBe(136);
+        expect(census.rotationExternalProducts).toBe(30);
+        expect(census.gadgetPolynomialProducts).toBe(996n);
         expect(census.releaseCorrect).toBe(true);
         expect(census.jointStatisticalBoundHolds).toBe(true);
         expect(census.publicKeyCorpusBytes).toBe(10n * 4n * 6n * 65536n * 108n);

@@ -3208,6 +3208,38 @@ export const renderDocumentationCensus = (): string => {
                 ],
                 ['Unit rotations', formatCount(fixedModulusBfv.rotations)],
                 [
+                    'Separately rounded tensor-coordinate products',
+                    formatCount(fixedModulusBfv.tensorProducts),
+                ],
+                [
+                    'Relinearization external products',
+                    formatCount(
+                        fixedModulusBfv.relinearizationExternalProducts,
+                    ),
+                ],
+                [
+                    'Relinearization gadget decompositions',
+                    formatCount(
+                        fixedModulusBfv.relinearizationGadgetDecompositions,
+                    ),
+                ],
+                [
+                    'Rotation external products including the common vector',
+                    formatCount(fixedModulusBfv.rotationExternalProducts),
+                ],
+                [
+                    'Rotation gadget decompositions',
+                    formatCount(fixedModulusBfv.rotationGadgetDecompositions),
+                ],
+                [
+                    'Total polynomial products inside gadget external products',
+                    formatCount(fixedModulusBfv.gadgetPolynomialProducts),
+                ],
+                [
+                    'Final modulus-switch coefficient roundings',
+                    formatCount(fixedModulusBfv.finalModulusSwitchCoefficients),
+                ],
+                [
                     'Plaintext additions',
                     formatCount(fixedModulusBfv.plaintextAdditions),
                 ],
