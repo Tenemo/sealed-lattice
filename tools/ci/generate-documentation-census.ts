@@ -59,6 +59,7 @@ import {
     createFalseBinaryRelationTable,
     enumerateRandomizedEncodingViews,
 } from '#tests/polynomial-oracle-boundary-model.js';
+import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
@@ -112,6 +113,7 @@ export const renderDocumentationCensus = (): string => {
     const boundedLookup = compileBoundedLookupCensus();
     const byteCarryLifting = compileByteCarryLiftingCensus();
     const smallLimbProofField = compileSmallLimbProofFieldCensus();
+    const proofFieldReduction = compileProofFieldReductionCensus();
     const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
     const proofVerifierQueries = compileProofVerifierQueryCensus();
@@ -3447,6 +3449,32 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Public key-contribution corpus bytes before sharing and proofs',
                     formatCount(fixedModulusBfv.publicKeyCorpusBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Proof-field coefficient-fold bounds',
+        '',
+        'For radix B and reduction offset k, the first high limb is bounded by k^2+k-1. The second high limb is at most one. In the carry case the final high limb is at most k*(k^2+k-1)+k-1; otherwise it is already below B. These exact bounds justify the narrower intermediate types without changing the modulus, representatives or field product.',
+        '',
+        table(
+            ['Property', 'Bound'],
+            [
+                [
+                    'Largest small coefficient',
+                    formatCount(proofFieldReduction.maximumSmallFactor),
+                ],
+                [
+                    'First high limb',
+                    formatCount(proofFieldReduction.maximumFirstHigh),
+                ],
+                [
+                    'Second high limb',
+                    formatCount(proofFieldReduction.maximumSecondHigh),
+                ],
+                [
+                    'Final high limb when a second carry exists',
+                    formatCount(proofFieldReduction.maximumCarriedFinalHigh),
                 ],
             ],
         ),
