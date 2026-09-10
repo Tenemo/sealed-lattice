@@ -108,6 +108,11 @@ import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-co
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
+import {
+    unrevealedPointQueryBound,
+    undetectabilityCollectionViews,
+    idealCollectionPreimageBound,
+} from '#tests/unrevealed-point-query-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
@@ -1827,6 +1832,68 @@ export const renderDocumentationCensus = (): string => {
                         'Distinct complete views',
                         formatCount(value.views.length),
                     ],
+                ];
+            })(),
+        ),
+        '',
+        '## Unrevealed-point query bound',
+        '',
+        'For a Boolean oracle that is zero or has one uniformly random marked input, a q-query acceptance probability has degree at most 2q after Hamming-weight symmetrization. The integer square grid gives min(1, 5/(2 floor(N/(4q^2)))) when q is positive and the grid exists; zero queries give zero advantage. The location is not supplied separately, and initial advice and gate descriptions are independent of the hidden function. The earlier disclosed-point control does not satisfy these premises.',
+        '',
+        table(
+            ['Illustrative ideal undetectability operand', 'Value'],
+            (() => {
+                const hashQueries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const bits = compileStatelessSignatureWork().nodeBytes * 8n;
+                const point = unrevealedPointQueryBound(
+                    2n * hashQueries,
+                    1n << bits,
+                );
+                const preimage = idealCollectionPreimageBound(
+                    hashQueries,
+                    1n << bits,
+                );
+                return [
+                    ['Game public-hash queries', formatCount(hashQueries)],
+                    ['Hidden-point oracle queries', formatCount(point.queries)],
+                    [
+                        'Acceptance-polynomial degree bound',
+                        formatCount(point.degree),
+                    ],
+                    ['Integer-grid spacing', formatCount(point.spacing)],
+                    [
+                        'Derived advantage upper bound',
+                        `${point.bound.numerator}/${point.bound.denominator}`,
+                    ],
+                    [
+                        'Earlier standalone linear upper operand',
+                        `${12n * hashQueries}/${1n << (bits / 2n)}`,
+                    ],
+                    [
+                        'Ordinary preimage finding, ideal collection upper bound',
+                        `${preimage.bound.numerator}/${preimage.bound.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'The displayed query value is an evaluation point, not proof that the original adversary, honest simulation and post-disclosure work fit it. The random-collection argument requires the inspected preprocessing restriction, distinct target tweaks and no target/collection overlap. The ordinary-preimage row charges one extra verification query and supplies no preimage-opening interface. These bounds do not instantiate fixed hash functions or establish the full signature bound.',
+        '',
+        table(
+            ['Adaptive random-collection control', 'Value'],
+            (() => {
+                const value = undetectabilityCollectionViews();
+                return [
+                    [
+                        'Original samples per world',
+                        formatCount(value.originalSamples),
+                    ],
+                    [
+                        'Simulated samples per world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    ['Distinct full views', formatCount(value.views.length)],
                 ];
             })(),
         ),
