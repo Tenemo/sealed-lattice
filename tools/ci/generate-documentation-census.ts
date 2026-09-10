@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { adaptiveWotsBound } from '#tests/adaptive-wots-model.js';
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
 import {
     compileAuthenticationFrameWork,
@@ -2375,6 +2376,49 @@ export const renderDocumentationCensus = (): string => {
         ),
         '',
         'These terms assume the matching ideal keyed-function hop and fixed complete message before fresh private coins. They do not include public-label collisions, the rest of the signature reductions, vault integrity, fixed-XOF assumptions or the complete protocol advantage.',
+        '',
+        '## Adaptive WOTS endpoint accounting',
+        '',
+        'One distinct signed message per instance, independent chain seeds and separate hash tweaks for every chain step. Public endpoints may precede the message. The selected earlier chain is verified inside the compared executions; its queries are charged below. Compression, the complete signature reduction and concrete reduction time remain separate.',
+        '',
+        table(
+            ['Operand or term', 'Value'],
+            (() => {
+                const work = compileStatelessSignatureWork(),
+                    publicQueries =
+                        compileWideChallengeCompilerCensus().adversaryQueries,
+                    domain = 1n << (8n * work.nodeBytes),
+                    value = adaptiveWotsBound(
+                        publicQueries,
+                        work.winternitz - 1n,
+                        domain,
+                    );
+                return [
+                    [
+                        'Public-query evaluation operand',
+                        formatCount(publicQueries),
+                    ],
+                    [
+                        'Selected-chain verification allowance',
+                        formatCount(value.verificationQueries),
+                    ],
+                    ['Total query operand', formatCount(value.queries)],
+                    ['Chain value domain', formatCount(domain)],
+                    [
+                        'Common-success state term',
+                        `${value.stateError.numerator}/${value.stateError.denominator}`,
+                    ],
+                    [
+                        'Staged-search term',
+                        `${value.search.numerator}/${value.search.denominator}`,
+                    ],
+                    [
+                        'Ideal raw-endpoint bound',
+                        `${value.bound.numerator}/${value.bound.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
         '',
         '## ML-DSA theorem parameter screen',
         '',
