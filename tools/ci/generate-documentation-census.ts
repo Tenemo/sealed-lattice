@@ -61,6 +61,7 @@ import {
     interleavedTargetViews,
     stagedRowStateControl,
 } from '#tests/interleaved-target-model.js';
+import { keyedXofViews } from '#tests/keyed-xof-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import {
     mlDsa65Parameters,
@@ -1783,6 +1784,10 @@ export const renderDocumentationCensus = (): string => {
                     [
                         ['Key generation', value.keyGeneration],
                         [
+                            'Private-key import, root-reconstruction hash core',
+                            value.keyGeneration,
+                        ],
+                        [
                             'One current-purpose synthetic screen, upper bound',
                             value.ordinaryScreenUpper,
                         ],
@@ -1794,6 +1799,48 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(work.outputBytes),
                     formatCount(work.permutations),
                 ]);
+            })(),
+        ),
+        '',
+        '## Hidden-key XOF coupling',
+        '',
+        'An ideal XOF restricted to an injective secret-key/public-input encoding can be programmed with one hidden point and an independent keyed stream. Each public XOF query needs at most two Boolean queries; classical keyed-prefix replies need none. The key is not separately disclosed. This is a query bound and complete-view control, not a private-vault simulation, fixed-XOF assumption or full signature bound. Private-key import additionally recomputes the tree root; that hash core is counted above and does not authenticate the message-randomization seed.',
+        '',
+        table(
+            ['Control or operand', 'Value'],
+            (() => {
+                const value = keyedXofViews();
+                const bound = unrevealedPointQueryBound(
+                    2n * compileWideChallengeCompilerCensus().adversaryQueries,
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes),
+                );
+                return [
+                    ['Original keyed samples', formatCount(value.keyedSamples)],
+                    [
+                        'Original random-function samples',
+                        formatCount(value.randomSamples),
+                    ],
+                    [
+                        'Samples per simulated world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    [
+                        'Distinct complete views',
+                        formatCount(value.views.length),
+                    ],
+                    [
+                        'Key-disclosed matching replies in keyed world',
+                        `${value.disclosedKeyedMatches}/${value.disclosedKeyedSamples}`,
+                    ],
+                    [
+                        'Key-disclosed matching replies in random world',
+                        `${value.disclosedRandomMatches}/${value.disclosedRandomSamples}`,
+                    ],
+                    [
+                        'Illustrative single-key ideal advantage upper bound',
+                        `${bound.bound.numerator}/${bound.bound.denominator}`,
+                    ],
+                ];
             })(),
         ),
         '',
