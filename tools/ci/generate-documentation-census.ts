@@ -60,6 +60,10 @@ import {
     enumerateRandomizedEncodingViews,
 } from '#tests/polynomial-oracle-boundary-model.js';
 import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
+import {
+    compileProofHashWork,
+    proofHashProfiles,
+} from '#tests/proof-hash-work-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
@@ -1612,6 +1616,34 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(result.errorCoefficient),
                     formatCount(result.strictUpperBound),
                     formatCount(result.maximumAuxiliaryError),
+                ];
+            }),
+        ),
+        '',
+        '## Proof hash byte and permutation work',
+        '',
+        'Current uncached tree/transcript/context work: construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. These are logical hash queries, complete framed hash-input bytes, hash-output bytes and Keccak-f[1600] permutations, not quantum gates or a full participant total. Statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. The release row uses the existing numerical workload role; the protocol-derived release role is not yet implemented.',
+        '',
+        table(
+            [
+                'Role',
+                'Role bytes',
+                'Prover core hash input bytes',
+                'Prover core permutations',
+                'Verifier core hash input bytes',
+                'Verifier core permutations',
+                'One statement-digest pass permutations',
+            ],
+            proofHashProfiles().map((profile) => {
+                const value = compileProofHashWork(profile);
+                return [
+                    profile.role,
+                    formatCount(value.roleBytes),
+                    formatCount(value.proverCore.inputBytes),
+                    formatCount(value.proverCore.permutations),
+                    formatCount(value.verifierCore.inputBytes),
+                    formatCount(value.verifierCore.permutations),
+                    formatCount(value.statementDigestPass.permutations),
                 ];
             }),
         ),
