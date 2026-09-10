@@ -98,4 +98,40 @@ describe('proof hash work', () => {
         expect(() => compileProofHashWork(profile, 0n)).toThrow();
         expect(() => compileProofHashWork(profile, 1025n)).toThrow();
     });
+
+    it('charges cached prefix initialization while preserving logical queries and inputs', () => {
+        const values = proofHashProfiles().map((profile) =>
+            compileProofHashWork(profile),
+        );
+        expect(
+            values.map(
+                (value) =>
+                    value.proverCoreWithoutPrefixReuse.permutations -
+                    value.proverCore.permutations,
+            ),
+        ).toEqual([8387600n, 8387600n, 8387600n, 2096900n]);
+        for (const value of values) {
+            expect(value.proverCore.queries).toBe(
+                value.proverCoreWithoutPrefixReuse.queries,
+            );
+            expect(value.proverCore.inputBytes).toBe(
+                value.proverCoreWithoutPrefixReuse.inputBytes,
+            );
+            expect(value.proverCore.outputBytes).toBe(
+                value.proverCoreWithoutPrefixReuse.outputBytes,
+            );
+            expect(
+                value.groups.reduce(
+                    (sum, group) => sum + group.prefixReuse.initializations,
+                    0n,
+                ),
+            ).toBe(225n);
+            expect(
+                value.groups.reduce(
+                    (sum, group) => sum + group.prefixReuse.stateClones,
+                    0n,
+                ),
+            ).toBe(2097125n);
+        }
+    });
 });

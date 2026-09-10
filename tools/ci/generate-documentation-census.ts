@@ -1622,14 +1622,15 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof hash byte and permutation work',
         '',
-        'Current uncached tree/transcript/context work: construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. These are logical hash queries, complete framed hash-input bytes, hash-output bytes and Keccak-f[1600] permutations, not quantum gates or a full participant total. Statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. The release row uses the existing numerical workload role; the protocol-derived release role is not yet implemented.',
+        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the existing numerical workload role; the protocol-derived release role is not yet implemented.",
         '',
         table(
             [
                 'Role',
                 'Role bytes',
-                'Prover core hash input bytes',
-                'Prover core permutations',
+                'Prover core logical input bytes',
+                'Prover permutations without prefix reuse',
+                'Prover permutations with prefix reuse',
                 'Verifier core hash input bytes',
                 'Verifier core permutations',
                 'One statement-digest pass permutations',
@@ -1640,6 +1641,9 @@ export const renderDocumentationCensus = (): string => {
                     profile.role,
                     formatCount(value.roleBytes),
                     formatCount(value.proverCore.inputBytes),
+                    formatCount(
+                        value.proverCoreWithoutPrefixReuse.permutations,
+                    ),
                     formatCount(value.proverCore.permutations),
                     formatCount(value.verifierCore.inputBytes),
                     formatCount(value.verifierCore.permutations),

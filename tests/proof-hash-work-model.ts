@@ -200,13 +200,33 @@ export const compileProofHashWork = (
             salt,
             width,
         ]);
+        const leafPrefixPermutations =
+            framedProofHashBytes('bounded-proof/leaf', [roleBytes, 4n]) / 72n;
+        const nodePrefixPermutations =
+            framedProofHashBytes('bounded-proof/node', [roleBytes, 4n, 4n]) /
+            72n;
+        const levels = BigInt(Math.log2(group.length));
+        const savedPermutations =
+            BigInt(group.length - 1) * leafPrefixPermutations +
+            (BigInt(group.length - 1) - levels) * nodePrefixPermutations;
+        const proverWithoutPrefixReuse = total([
+            work(BigInt(group.length), leafInput, tag, 72n),
+            work(BigInt(group.length - 1), nodeInput, tag, 72n),
+        ]);
         return {
             length: group.length,
             width,
-            prover: total([
-                work(BigInt(group.length), leafInput, tag, 72n),
-                work(BigInt(group.length - 1), nodeInput, tag, 72n),
-            ]),
+            prover: {
+                ...proverWithoutPrefixReuse,
+                permutations:
+                    proverWithoutPrefixReuse.permutations - savedPermutations,
+            },
+            proverWithoutPrefixReuse,
+            prefixReuse: {
+                savedPermutations,
+                stateClones: 2n * BigInt(group.length) - 1n,
+                initializations: 1n + levels,
+            },
             verifier: total([
                 work(BigInt(group.maximumLeafQueries), leafInput, tag, 72n),
                 work(BigInt(group.maximumNodeQueries), nodeInput, tag, 72n),
@@ -291,6 +311,10 @@ export const compileProofHashWork = (
         groups,
         transcript,
         proverCore: total([transcript, ...groups.map((group) => group.prover)]),
+        proverCoreWithoutPrefixReuse: total([
+            transcript,
+            ...groups.map((group) => group.proverWithoutPrefixReuse),
+        ]),
         verifierCore: total([
             transcript,
             ...groups.map((group) => group.verifier),
