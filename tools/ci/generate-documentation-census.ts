@@ -76,6 +76,7 @@ import {
 } from '#tests/setup-randomness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
+import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
@@ -118,6 +119,7 @@ export const renderDocumentationCensus = (): string => {
     const participantVisits = compileParticipantVisitDependencyCensus();
     const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
     const certificationRelease = compileCertificationReleaseThresholdCensus();
+    const slotPublicationVisits = compileSlotPublicationVisitCensus();
     const participantCustody = compileParticipantCustodyCensus();
     const participantBallotCustody = compileParticipantBallotCustody();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
@@ -3828,6 +3830,53 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(value.honestPublicShares),
                 value.publicCertificateAvailable ? 'yes' : 'no',
                 value.everyContinuingSetCanDecrypt ? 'yes' : 'no',
+            ]),
+        ),
+        '',
+        '## Batched slot-publication visit comparison',
+        '',
+        'This conditional model gives each source one ballot-or-empty token and waits for all assigned source tokens before issuing one witness batch. It has no separate global close-report wave. Target certification still precedes release. The action bound covers these modeled honest one-shot purposes and the current preparation graph; it does not establish the unresolved corrupt-origin/publication mapping, quorum-only pre-boundary liveness, complete resources, runtime or qualification. Samples use cyclic sequential orders and all-cooperating valid actions.',
+        '',
+        table(
+            ['Property', 'Count'],
+            [
+                [
+                    'Maximum preparation visits',
+                    formatCount(slotPublicationVisits.preparationMaximum),
+                ],
+                [
+                    'Remaining one-shot action purposes',
+                    formatCount(
+                        slotPublicationVisits.continuationActions.length,
+                    ),
+                ],
+                [
+                    'Ordinary participant action bound',
+                    formatCount(slotPublicationVisits.ordinaryActionBound),
+                ],
+                [
+                    'Organizer action bound including separate close intent',
+                    formatCount(slotPublicationVisits.organizerActionBound),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Ballot authors',
+                'Invalid ballot authors',
+                'Sequential orders tested',
+                'Largest observed visit count',
+            ],
+            slotPublicationVisits.cases.map((value) => [
+                value.ballotAuthors.length === 0
+                    ? 'none'
+                    : value.ballotAuthors.join(', '),
+                value.invalidBallotAuthors.length === 0
+                    ? 'none'
+                    : value.invalidBallotAuthors.join(', '),
+                formatCount(value.scheduleCount),
+                formatCount(value.maximumObservedVisits),
             ]),
         ),
         '',
