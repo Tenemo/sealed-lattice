@@ -47,6 +47,11 @@ import {
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
+import {
+    mlDsa65Parameters,
+    publishedDilithiumComparison,
+    screenSelfTargetReduction,
+} from '#tests/ml-dsa-theorem-screen-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
@@ -1573,6 +1578,40 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotBody.maximumHashInputBytes),
                 ],
             ],
+        ),
+        '',
+        '## ML-DSA theorem parameter screen',
+        '',
+        'JMW24 Theorem 2, equations (38) and (41): the auxiliary MLWE error parameter must be a positive integer with 2*zeta*n*(k+l+1)*etaPrime < floor(q/32). The comparison uses the independently published middle parameter set from equation (48) and Table 2. Passing this numerical condition is not a complete theorem mapping or security level. Failure for ML-DSA-65 excludes this particular SelfTargetMSIS-to-MLWE reduction; it is not an attack on the primitive.',
+        '',
+        table(
+            [
+                'Parameters',
+                'Modulus',
+                'Degree',
+                'Signature vector bound',
+                'Error coefficient',
+                'Strict upper bound',
+                'Largest auxiliary error',
+            ],
+            [
+                { name: 'ML-DSA-65', parameters: mlDsa65Parameters },
+                {
+                    name: 'Published comparison',
+                    parameters: publishedDilithiumComparison,
+                },
+            ].map(({ name, parameters }) => {
+                const result = screenSelfTargetReduction(parameters);
+                return [
+                    name,
+                    formatCount(parameters.modulus),
+                    formatCount(parameters.polynomialDegree),
+                    formatCount(result.signatureVectorBound),
+                    formatCount(result.errorCoefficient),
+                    formatCount(result.strictUpperBound),
+                    formatCount(result.maximumAuxiliaryError),
+                ];
+            }),
         ),
         '',
         '## Proof verifier query bounds',
