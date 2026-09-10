@@ -87,6 +87,10 @@ describe('Stateless signature work screen', () => {
         expect(work.secretKeyBytes).toBe(128n);
         expect(work.chains).toBe(67n);
         expect(work.layerHeight).toBe(4n);
+        // FIPS 205 Algorithm 22: high bits from the forest message, followed
+        // by the tree word and the low bits of the final leaf-index byte.
+        expect(work.parsedDigestBits).toBe(35n * 9n + 64n + 4n);
+        expect(work.discardedDigestBits).toBe(5n + 4n);
     });
 
     it('matches a recursive enumeration of sibling subtrees and root recovery', () => {

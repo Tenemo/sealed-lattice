@@ -39,6 +39,13 @@ export const compileStatelessSignatureWork = () => {
         layerHeight,
         layerLeaves,
         forestLeaves,
+        parsedDigestBits:
+            parameters.totalHeight +
+            parameters.forestHeight * parameters.forestTrees,
+        discardedDigestBits:
+            8n * parameters.digestBytes -
+            parameters.totalHeight -
+            parameters.forestHeight * parameters.forestTrees,
         publicKeyBytes: 2n * parameters.nodeBytes,
         secretKeyBytes: 4n * parameters.nodeBytes,
         signatureBytes:

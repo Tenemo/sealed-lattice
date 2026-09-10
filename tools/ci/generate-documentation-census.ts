@@ -56,6 +56,11 @@ import {
 } from '#tests/full-word-proof-layout-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
+import {
+    interleavedTargetQueryBound,
+    interleavedTargetViews,
+    stagedRowStateControl,
+} from '#tests/interleaved-target-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import {
     mlDsa65Parameters,
@@ -1951,6 +1956,95 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.retainedSuccess),
                 ];
             }),
+        ),
+        '',
+        '## Interleaved target query bound',
+        '',
+        'The ideal model retains adaptive messages, fresh random target keys, earlier public queries and quantum state. It compares a fixed final function with staged row disclosure through a common-success norm argument, then bounds staged search using worst-case output coverage. Repeated keys, the state error and search are separate terms. These operands do not establish the concrete SHA2 message-compression mapping, lifetime populations, full reduction time or complete signature security.',
+        '',
+        table(
+            [
+                'Illustrative target requests',
+                'Covered output fraction, upper bound',
+                'Repeated-key term',
+                'State-error term',
+                'Staged-search term after comparison',
+                'Total upper bound',
+            ],
+            [0n, 1n, 6n].map((targets) => {
+                const parameters = compileStatelessSignatureWork();
+                const value = interleavedTargetQueryBound(
+                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    targets,
+                    1n << (8n * parameters.nodeBytes),
+                    1n << parameters.totalHeight,
+                    parameters.forestLeaves,
+                    parameters.forestTrees,
+                );
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    formatCount(targets),
+                    ratio(value.coverage),
+                    ratio(value.repeatedKey),
+                    ratio(value.stateError),
+                    ratio(value.search),
+                    ratio(value.bound),
+                ];
+            }),
+        ),
+        '',
+        table(
+            [
+                'Quantum control key space',
+                'Coupled cases',
+                'Squared-distance numerator',
+                'Common denominator',
+                'Cases with real success larger',
+                'Cases with staged success larger',
+            ],
+            ([16, 64] as const).map((keys) => {
+                const value = stagedRowStateControl(keys);
+                return [
+                    String(keys),
+                    formatCount(value.samples),
+                    formatCount(value.difference),
+                    formatCount(
+                        BigInt(value.samples) * BigInt(value.denominator),
+                    ),
+                    formatCount(value.positiveGaps),
+                    formatCount(value.negativeGaps),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Staged distribution control', 'Value'],
+            (() => {
+                const value = interleavedTargetViews();
+                return [
+                    [
+                        'Original staged samples',
+                        formatCount(value.stagedSamples),
+                    ],
+                    [
+                        'Deferred/search samples per world',
+                        formatCount(value.deferredSamples),
+                    ],
+                    ['Complete views', formatCount(value.views.length)],
+                    ['Early-stop samples', formatCount(value.early)],
+                    [
+                        'Successful new-pair search samples',
+                        formatCount(value.successes),
+                    ],
+                    [
+                        'Known target values without a search solution',
+                        formatCount(value.forcedWithoutSearch),
+                    ],
+                ];
+            })(),
         ),
         '',
         '## ML-DSA theorem parameter screen',
