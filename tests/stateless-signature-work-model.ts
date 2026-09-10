@@ -109,3 +109,25 @@ export const compileStatelessSignatureProofWork = (signingQueries: bigint) => {
         demandMessageOracleCallsUpper: signingQueries,
     };
 };
+
+// Independent model of the FIPS 205 WOTS message/checksum encoding used to
+// instantiate the formal antichain-encoding axiom. No hash is evaluated here.
+export const encodeStatelessSignatureChainMessage = (message: Uint8Array) => {
+    const work = compileStatelessSignatureWork();
+    if (message.length !== Number(work.nodeBytes))
+        throw new RangeError('Wrong WOTS message width.');
+    const digits = [...message].flatMap((byte) => [byte >>> 4, byte & 15]);
+    let checksum = digits.reduce(
+        (sum, digit) => sum + Number(work.winternitz) - 1 - digit,
+        0,
+    );
+    const checksumDigits = Array<number>(
+        Number(work.chains) - digits.length,
+    ).fill(0);
+    for (let index = checksumDigits.length - 1; index >= 0; index--) {
+        checksumDigits[index] = checksum % Number(work.winternitz);
+        checksum = Math.floor(checksum / Number(work.winternitz));
+    }
+    if (checksum !== 0) throw new Error('Checksum exceeded the derived width.');
+    return [...digits, ...checksumDigits];
+};

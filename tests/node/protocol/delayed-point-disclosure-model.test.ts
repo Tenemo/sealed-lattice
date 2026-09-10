@@ -2,11 +2,32 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileDelayedDisclosureBounds,
+    noPublicQuerySliceCoupling,
     delayedPointDisclosure,
     delayedSliceReprogramming,
 } from '#tests/delayed-point-disclosure-model.js';
 
 describe('Delayed disclosure of an oracle point', () => {
+    it('preserves every complete oracle view with only keyed preprocessing', () => {
+        const value = noPublicQuerySliceCoupling();
+        expect(value.views.length).toBe(512);
+        const collectionMessages = new Set<number>();
+        for (const entry of value.views) {
+            expect(entry.original * value.replacedSamples).toBe(
+                entry.replaced * value.originalSamples,
+            );
+            const [first, message, second, parameter, table] = JSON.parse(
+                entry.view,
+            ) as number[];
+            // Independently recover both keyed replies from the disclosed row.
+            const row = Math.floor(table / 16 ** parameter) % 16;
+            expect(first).toBe(row % 2);
+            expect(message).toBe(first);
+            expect(second).toBe(Math.floor(row / 2 ** (2 + message)) % 2);
+            collectionMessages.add(message);
+        }
+        expect([...collectionMessages].sort()).toEqual([0, 1]);
+    });
     it('violates the quadratic point bound with one ordinary XOR query', () => {
         for (let point = 0; point < 64; point++) {
             const value = delayedPointDisclosure(8, point);
@@ -85,7 +106,13 @@ describe('Delayed disclosure of an oracle point', () => {
         });
         expect(
             compileDelayedDisclosureBounds(0n, 0n, 4, 4).correctedSuccessUpper,
-        ).toEqual({ numerator: 1n, denominator: 1n });
+        ).toEqual({ numerator: 1n, denominator: 2n });
+        const noPreprocessing = compileDelayedDisclosureBounds(3n, 0n, 12, 10);
+        expect(noPreprocessing.squaredDistance.numerator).toBe(0n);
+        expect(noPreprocessing.correctedSuccessUpper).toEqual({
+            numerator: 49n,
+            denominator: 512n,
+        });
         expect(() => compileDelayedDisclosureBounds(1n, 2n, 256, 256)).toThrow(
             RangeError,
         );

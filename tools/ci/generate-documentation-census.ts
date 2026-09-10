@@ -37,6 +37,7 @@ import {
     delayedPointDisclosure,
     delayedSliceReprogramming,
     compileDelayedDisclosureBounds,
+    noPublicQuerySliceCoupling,
 } from '#tests/delayed-point-disclosure-model.js';
 import {
     exactRankingModelConstants,
@@ -1778,7 +1779,7 @@ export const renderDocumentationCensus = (): string => {
             })(),
         ),
         '',
-        'A common-success-projector argument instead gives twice the ideal search bound plus twice the squared state-distance bound. The following operands use the existing query screen and the candidate hash width; they remain conditional on the exact ideal random-function game. They are not fixed-hash, collection-wide or complete signature-security bounds.',
+        'A common-success-projector argument gives twice the ideal search bound plus twice the squared state-distance bound. With no public queries before disclosure and independent initial state, the ideal worlds coincide exactly and the search bound alone applies. The following operands use the existing query screen and the candidate hash width; they are not fixed-hash, collection-wide or complete signature-security bounds.',
         '',
         table(
             ['Operand', 'Exact rational upper bound'],
@@ -1799,10 +1800,34 @@ export const renderDocumentationCensus = (): string => {
                         ['Squared state distance', value.squaredDistance],
                         ['Ideal search success', value.idealSearch],
                         ['Corrected success', value.correctedSuccessUpper],
+                        [
+                            'No public preprocessing, exact-coupling success',
+                            compileDelayedDisclosureBounds(
+                                queries,
+                                0n,
+                                bits,
+                                bits,
+                            ).correctedSuccessUpper,
+                        ],
                     ] as const
                 ).map(([name, bound]) => {
                     return [name, `${bound.numerator}/${bound.denominator}`];
                 });
+            })(),
+        ),
+        '',
+        table(
+            ['Complete-view coupling control', 'Value'],
+            (() => {
+                const value = noPublicQuerySliceCoupling();
+                return [
+                    ['Original samples', formatCount(value.originalSamples)],
+                    ['Replacement samples', formatCount(value.replacedSamples)],
+                    [
+                        'Distinct complete views',
+                        formatCount(value.views.length),
+                    ],
+                ];
             })(),
         ),
         '',

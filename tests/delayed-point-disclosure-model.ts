@@ -180,11 +180,16 @@ export const compileDelayedDisclosureBounds = (
     );
     // A common final success projector gives p_real <= 2*p_ideal + 2*D^2.
     // Adding D^2 once would omit the interference cross term.
-    const upper = fraction(
-        2n * idealSearch.numerator * squaredDistance.denominator +
-            2n * squaredDistance.numerator * idealSearch.denominator,
-        idealSearch.denominator * squaredDistance.denominator,
-    );
+    // With no public query before disclosure the two ideal games coincide;
+    // the general two-term inequality need not lose its factor two there.
+    const upper =
+        precedingHashQueries === 0n
+            ? idealSearch
+            : fraction(
+                  2n * idealSearch.numerator * squaredDistance.denominator +
+                      2n * squaredDistance.numerator * idealSearch.denominator,
+                  idealSearch.denominator * squaredDistance.denominator,
+              );
     return {
         totalHashQueries,
         precedingHashQueries,
@@ -196,5 +201,51 @@ export const compileDelayedDisclosureBounds = (
             upper.numerator < upper.denominator
                 ? upper
                 : { numerator: 1n, denominator: 1n },
+    };
+};
+
+// Complete finite view, including the entire post-disclosure oracle table.
+// Two public parameters, two tweaks, two messages and one output bit. There
+// are no earlier public-oracle queries or oracle-correlated auxiliary state.
+export const noPublicQuerySliceCoupling = () => {
+    const views = new Map<string, { original: bigint; replaced: bigint }>();
+    const record = (
+        table: number,
+        parameter: number,
+        first: number,
+        second: number,
+        world: 'original' | 'replaced',
+    ) => {
+        const message = first;
+        const view = JSON.stringify([first, message, second, parameter, table]);
+        const count = views.get(view) ?? { original: 0n, replaced: 0n };
+        count[world]++;
+        views.set(view, count);
+    };
+    for (let parameter = 0; parameter < 2; parameter++)
+        for (let table = 0; table < 256; table++) {
+            const first = (table >> (4 * parameter)) & 1;
+            const second = (table >> (4 * parameter + 2 + first)) & 1;
+            record(table, parameter, first, second, 'original');
+            for (let slice = 0; slice < 16; slice++) {
+                // Obtain the adaptive preprocessing replies from the separate
+                // keyed slice before constructing the final public oracle.
+                const keyedFirst = slice & 1;
+                const keyedSecond = (slice >> (2 + keyedFirst)) & 1;
+                const shift = 4 * parameter;
+                const replaced = (table & ~(15 << shift)) | (slice << shift);
+                record(
+                    replaced,
+                    parameter,
+                    keyedFirst,
+                    keyedSecond,
+                    'replaced',
+                );
+            }
+        }
+    return {
+        originalSamples: 512n,
+        replacedSamples: 8192n,
+        views: [...views].map(([view, counts]) => ({ view, ...counts })),
     };
 };

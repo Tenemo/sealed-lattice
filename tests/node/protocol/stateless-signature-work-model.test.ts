@@ -3,9 +3,43 @@ import { describe, expect, it } from 'vitest';
 import {
     compileStatelessSignatureProofWork,
     compileStatelessSignatureWork,
+    encodeStatelessSignatureChainMessage,
 } from '#tests/stateless-signature-work-model.js';
 
 describe('Stateless signature work screen', () => {
+    it('instantiates the hash-free message encoding with the checksum order', () => {
+        const zero = new Uint8Array(32),
+            maximum = new Uint8Array(32).fill(255);
+        expect(encodeStatelessSignatureChainMessage(zero)).toEqual([
+            ...Array<number>(64).fill(0),
+            3,
+            12,
+            0,
+        ]);
+        expect(encodeStatelessSignatureChainMessage(maximum)).toEqual([
+            ...Array<number>(64).fill(15),
+            0,
+            0,
+            0,
+        ]);
+        const encodings = Array.from({ length: 256 }, (_, value) => {
+            const message = new Uint8Array(32);
+            message[31] = value;
+            return encodeStatelessSignatureChainMessage(message);
+        });
+        for (let left = 0; left < 256; left++)
+            for (let right = 0; right < 256; right++) {
+                if (left === right) continue;
+                expect(
+                    encodings[left].some(
+                        (value, index) => value < encodings[right][index],
+                    ),
+                ).toBe(true);
+            }
+        expect(() =>
+            encodeStatelessSignatureChainMessage(new Uint8Array(31)),
+        ).toThrow(RangeError);
+    });
     it('keeps full-space reduction initialization separate from demanded keys', () => {
         const empty = compileStatelessSignatureProofWork(0n);
         const six = compileStatelessSignatureProofWork(6n);
