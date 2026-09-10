@@ -72,6 +72,12 @@ import {
     publishedDilithiumComparison,
     screenSelfTargetReduction,
 } from '#tests/ml-dsa-theorem-screen-model.js';
+import {
+    multiKeyTargetBound,
+    multiKeyTargetStateControl,
+    multiKeyTargetViews,
+    randomizerInputCoupling,
+} from '#tests/multi-key-target-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
@@ -2259,6 +2265,116 @@ export const renderDocumentationCensus = (): string => {
                 ];
             })(),
         ),
+        '',
+        '## Multi-key message-target accounting',
+        '',
+        'Separate credential namespaces retain cross-key equal randomizers while forbidding cross-key coverage. The ideal state/search terms use the per-credential request cap; the within-credential repetition events sum over credentials. Hedged signing additionally charges repetition of a private-randomizer/message input through an unconditional first-bad coupling. No final-roster or lifetime cap is inferred from these example operands.',
+        '',
+        table(
+            [
+                'Illustrative credentials',
+                'Requests per credential',
+                'Private input repetition',
+                'Output-randomizer repetition',
+                'State error',
+                'Search after comparison',
+                'Hedged upper bound',
+            ],
+            [
+                [1n, 6n],
+                [10n, 10n],
+                [compileWideChallengeCompilerCensus().adversaryQueries, 10n],
+            ].map(([credentials, requestsPerCredential]) => {
+                const parameters = compileStatelessSignatureWork(),
+                    domain = 1n << (8n * parameters.nodeBytes);
+                const value = multiKeyTargetBound({
+                    publicQueries:
+                        compileWideChallengeCompilerCensus().adversaryQueries,
+                    credentials,
+                    requestsPerCredential,
+                    randomizerDomain: domain,
+                    coinDomain: domain,
+                    instances: 1n << parameters.totalHeight,
+                    leavesPerTree: parameters.forestLeaves,
+                    trees: parameters.forestTrees,
+                });
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    formatCount(credentials),
+                    formatCount(requestsPerCredential),
+                    ratio(value.coinInputRepetition),
+                    ratio(value.randomizerRepetition),
+                    ratio(value.stateError),
+                    ratio(value.search),
+                    ratio(value.hedgedBound),
+                ];
+            }),
+        ),
+        '',
+        table(
+            [
+                'Quantum randomizer domain',
+                'Coupled cases',
+                'Squared-distance numerator',
+                'Common denominator',
+                'Equal cross-key randomizer cases',
+                'Cross-key-only coverage observations',
+            ],
+            ([16, 64] as const).map((size) => {
+                const value = multiKeyTargetStateControl(size);
+                return [
+                    String(size),
+                    formatCount(value.samples),
+                    formatCount(value.distance),
+                    formatCount(
+                        BigInt(value.samples) * BigInt(value.denominator),
+                    ),
+                    formatCount(value.equalRandomizerCases),
+                    formatCount(value.crossKeyOnly),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Complete-view control', 'Value'],
+            (() => {
+                const value = multiKeyTargetViews(),
+                    coins = randomizerInputCoupling();
+                return [
+                    [
+                        'Original staged samples',
+                        formatCount(value.originalSamples),
+                    ],
+                    [
+                        'Deferred/search samples per world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    ['Complete views', formatCount(value.views.length)],
+                    ['Early-stop samples', formatCount(value.early)],
+                    [
+                        'Real private-input repetition samples',
+                        `${coins.realBad}/${coins.realSamples}`,
+                    ],
+                    [
+                        'Fresh-game repetition samples',
+                        `${coins.freshBad}/${coins.freshSamples}`,
+                    ],
+                    [
+                        'First-reply counts before conditioning',
+                        coins.allFirst.join(', '),
+                    ],
+                    [
+                        'First-reply counts among good histories',
+                        coins.goodFirst.join(', '),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'These terms assume the matching ideal keyed-function hop and fixed complete message before fresh private coins. They do not include public-label collisions, the rest of the signature reductions, vault integrity, fixed-XOF assumptions or the complete protocol advantage.',
         '',
         '## ML-DSA theorem parameter screen',
         '',
