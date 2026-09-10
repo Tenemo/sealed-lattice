@@ -1,8 +1,35 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileStatelessSignatureWork } from '#tests/stateless-signature-work-model.js';
+import {
+    compileStatelessSignatureProofWork,
+    compileStatelessSignatureWork,
+} from '#tests/stateless-signature-work-model.js';
 
 describe('Stateless signature work screen', () => {
+    it('keeps full-space reduction initialization separate from demanded keys', () => {
+        const empty = compileStatelessSignatureProofWork(0n);
+        const six = compileStatelessSignatureProofWork(6n);
+        // All forest positions in the source reduction exist before A.forge,
+        // including when A will never request a signature.
+        expect(empty.secretElements).toBe(six.secretElements);
+        expect(empty.forestSecretElements).toBe(35n * (1n << 77n));
+        // Independent geometric-series count for the WOTS instance population.
+        const chains = (67n * 16n * ((1n << 68n) - 1n)) / 15n;
+        expect(empty.chainSecretElements).toBe(chains);
+        expect(empty.secretPayloadBytes).toBe(
+            (35n * (1n << 77n) + chains) * 32n,
+        );
+        const work = compileStatelessSignatureWork();
+        let demanded = work.keyGeneration.pseudorandomFunction;
+        for (let signature = 0; signature < 6; signature++)
+            demanded += work.signing.pseudorandomFunction;
+        expect(six.demandSecretOracleCallsUpper).toBe(demanded);
+        expect(empty.demandSecretOracleCallsUpper).toBe(1072n);
+        expect(six.demandMessageOracleCallsUpper).toBe(6n);
+        expect(() => compileStatelessSignatureProofWork(-1n)).toThrow(
+            RangeError,
+        );
+    });
     it('derives the standard size and includes all authentication paths', () => {
         const work = compileStatelessSignatureWork();
         // Independently published FIPS 205 Table 2 size, not the formula output.

@@ -78,3 +78,34 @@ export const compileStatelessSignatureWork = () => {
         },
     };
 };
+
+// Literal initialization in the inspected formal reduction, not work done by
+// the deployed signature algorithm. Count symbolically; never allocate it.
+export const compileStatelessSignatureProofWork = (signingQueries: bigint) => {
+    if (signingQueries < 0n)
+        throw new RangeError('Negative signing-query count.');
+    const work = compileStatelessSignatureWork();
+    const forestInstances = 1n << work.totalHeight;
+    const forestSecretElements =
+        forestInstances * work.forestTrees * work.forestLeaves;
+    let chainSecretElements = 0n;
+    for (let layer = 0n; layer < work.layers; layer++) {
+        const instances = 1n << (work.totalHeight - layer * work.layerHeight);
+        chainSecretElements += instances * work.chains;
+    }
+    const secretElements = forestSecretElements + chainSecretElements;
+    return {
+        forestInstances,
+        forestSecretElements,
+        chainSecretElements,
+        secretElements,
+        secretPayloadBytes: secretElements * work.nodeBytes,
+        // A PRF-substitution hop with ordinary classical calls can follow the
+        // actual signing schedule. This does not rewrite the separate THF
+        // games whose target-registration phase ends before the public seed.
+        demandSecretOracleCallsUpper:
+            work.keyGeneration.pseudorandomFunction +
+            signingQueries * work.signing.pseudorandomFunction,
+        demandMessageOracleCallsUpper: signingQueries,
+    };
+};

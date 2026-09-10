@@ -94,7 +94,10 @@ import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
-import { compileStatelessSignatureWork } from '#tests/stateless-signature-work-model.js';
+import {
+    compileStatelessSignatureProofWork,
+    compileStatelessSignatureWork,
+} from '#tests/stateless-signature-work-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -1703,6 +1706,33 @@ export const renderDocumentationCensus = (): string => {
                     ...values.map((value) => formatCount(value as bigint)),
                 ]);
             })(),
+        ),
+        '',
+        '## Stateless signature reduction initialization',
+        '',
+        'The inspected formal reductions initialize every virtual FORS and WOTS secret before invoking the adversary. These are literal source counts and a payload lower bound, not signer runtime, a universal lower bound on reductions or a security level. The PRF-only demand comparison follows the actual bounded signer, with distinct first signing queries as its operand; it cannot automatically be applied to the separate two-stage tweakable-hash challenge games.',
+        '',
+        table(
+            ['Quantity', 'Value'],
+            Object.entries(compileStatelessSignatureProofWork(0n))
+                .filter(([name]) => !name.startsWith('demand'))
+                .map(([name, value]) => [name, formatCount(value)]),
+        ),
+        '',
+        table(
+            [
+                'Signing queries',
+                'Demanded secret PRF calls, upper bound',
+                'Demanded message PRF calls, upper bound',
+            ],
+            [0n, 1n, 6n].map((queries) => {
+                const value = compileStatelessSignatureProofWork(queries);
+                return [
+                    formatCount(queries),
+                    formatCount(value.demandSecretOracleCallsUpper),
+                    formatCount(value.demandMessageOracleCallsUpper),
+                ];
+            }),
         ),
         '',
         '## ML-DSA theorem parameter screen',
