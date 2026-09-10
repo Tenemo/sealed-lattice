@@ -53,6 +53,21 @@ describe('Stateless signature work screen', () => {
         expect(empty.secretPayloadBytes).toBe(
             (35n * (1n << 77n) + chains) * 32n,
         );
+        // Independent count by tree levels, omitting the supplied leaves.
+        let parentHashesPerForest = 0n;
+        for (let width = 256n; width > 0n; width /= 2n)
+            parentHashesPerForest += 35n * width;
+        expect(empty.openPreimageParentHashes).toBe(
+            parentHashesPerForest * (1n << 68n),
+        );
+        expect(empty.openPreimageForestCompressions).toBe(1n << 68n);
+        expect(empty.openPreimagePublicHashCalls).toBe(
+            (parentHashesPerForest + 1n) * (1n << 68n),
+        );
+        expect(empty.openPreimagePublicHashCalls).toBe(
+            six.openPreimagePublicHashCalls,
+        );
+        expect(empty.openPreimagePublicHashCalls).toBeGreaterThan(1n << 80n);
         const work = compileStatelessSignatureWork();
         let demanded = work.keyGeneration.pseudorandomFunction;
         for (let signature = 0; signature < 6; signature++)

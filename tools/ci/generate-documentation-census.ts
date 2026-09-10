@@ -1722,6 +1722,7 @@ export const renderDocumentationCensus = (): string => {
         '## Stateless signature reduction initialization',
         '',
         'The inspected formal reductions initialize every virtual FORS and WOTS secret before invoking the adversary. These are literal source counts and a payload lower bound, not signer runtime, a universal lower bound on reductions or a security level. The PRF-only demand comparison follows the actual bounded signer, with distinct first signing queries as its operand; it cannot automatically be applied to the separate two-stage tweakable-hash challenge games.',
+        'The open-preimage rows count a separate post-disclosure prefix: its literal finder reconstructs every forest root and compressed forest key after receiving the public seed and before invoking the original adversary. These H and T_k calls incur work even with no signing queries. They are a lower bound on that branch, excluding later signing, forgery verification and extraction. In an ideal collection their functions are independent of the challenged F function, so their count is not automatically the number of hidden-point-oracle queries; actual running time still includes them.',
         '',
         table(
             ['Quantity', 'Value'],

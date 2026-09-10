@@ -79,8 +79,8 @@ export const compileStatelessSignatureWork = () => {
     };
 };
 
-// Literal initialization in the inspected formal reduction, not work done by
-// the deployed signature algorithm. Count symbolically; never allocate it.
+// Literal work in the inspected formal reductions, not work done by the
+// deployed signature algorithm. Count symbolically; never allocate it.
 export const compileStatelessSignatureProofWork = (signingQueries: bigint) => {
     if (signingQueries < 0n)
         throw new RangeError('Negative signing-query count.');
@@ -100,6 +100,15 @@ export const compileStatelessSignatureProofWork = (signingQueries: bigint) => {
         chainSecretElements,
         secretElements,
         secretPayloadBytes: secretElements * work.nodeBytes,
+        // R_FSMDTOpenPRE_EUFCMA.find builds every forest root after receiving
+        // the public seed, before A.forge. The challenge supplies leaf digests;
+        // each internal node and forest compression is a public hash call.
+        openPreimageParentHashes:
+            forestInstances * work.forestTrees * (work.forestLeaves - 1n),
+        openPreimageForestCompressions: forestInstances,
+        openPreimagePublicHashCalls:
+            forestInstances *
+            (work.forestTrees * (work.forestLeaves - 1n) + 1n),
         // A PRF-substitution hop with ordinary classical calls can follow the
         // actual signing schedule. This does not rewrite the separate THF
         // games whose target-registration phase ends before the public seed.
