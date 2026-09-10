@@ -34,6 +34,11 @@ import { compileCompletedContributionStateCensus } from '#tests/completed-contri
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
+    delayedPointDisclosure,
+    delayedSliceReprogramming,
+    compileDelayedDisclosureBounds,
+} from '#tests/delayed-point-disclosure-model.js';
+import {
     exactRankingModelConstants,
     compilePackedRankingEvaluationGraph,
     verifyExactRankingModel,
@@ -1733,6 +1738,72 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.demandMessageOracleCallsUpper),
                 ];
             }),
+        ),
+        '',
+        '## Delayed point-disclosure controls',
+        '',
+        'Exact XOR-oracle and controlled-Hadamard measurement controls. The point is disclosed after the stored quantum query. Every measurement outcome is retained, with no postselection. These distinguish two oracle experiments; they do not forge a signature. The slice comparison counts its query before and after reprogramming.',
+        '',
+        table(
+            [
+                'Control',
+                'Domain size',
+                'Quantum queries',
+                'Distinguishing advantage',
+                'Proposed quadratic bound',
+            ],
+            (() => {
+                const point = delayedPointDisclosure(8, 0),
+                    slice = delayedSliceReprogramming(64, 0, 0);
+                const ratio = (value: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${value.numerator}/${value.denominator}`;
+                return [
+                    [
+                        'Point revealed after query',
+                        String(point.size),
+                        '1',
+                        ratio(point.advantage),
+                        ratio(point.proposedQuadraticBound),
+                    ],
+                    [
+                        'Random slice switched, point revealed',
+                        String(slice.size),
+                        String(slice.publicHashQueries),
+                        ratio(slice.advantage),
+                        ratio(slice.proposedQuadraticBound),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'A common-success-projector argument instead gives twice the ideal search bound plus twice the squared state-distance bound. The following operands use the existing query screen and the candidate hash width; they remain conditional on the exact ideal random-function game. They are not fixed-hash, collection-wide or complete signature-security bounds.',
+        '',
+        table(
+            ['Operand', 'Exact rational upper bound'],
+            (() => {
+                const queries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const bits = Number(
+                    compileStatelessSignatureWork().nodeBytes * 8n,
+                );
+                const value = compileDelayedDisclosureBounds(
+                    queries,
+                    queries,
+                    bits,
+                    bits,
+                );
+                return (
+                    [
+                        ['Squared state distance', value.squaredDistance],
+                        ['Ideal search success', value.idealSearch],
+                        ['Corrected success', value.correctedSuccessUpper],
+                    ] as const
+                ).map(([name, bound]) => {
+                    return [name, `${bound.numerator}/${bound.denominator}`];
+                });
+            })(),
         ),
         '',
         '## ML-DSA theorem parameter screen',
