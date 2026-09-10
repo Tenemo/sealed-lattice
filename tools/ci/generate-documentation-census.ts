@@ -94,6 +94,7 @@ import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
+import { compileStatelessSignatureWork } from '#tests/stateless-signature-work-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -1637,6 +1638,71 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.representativePermutations),
                 ];
             }),
+        ),
+        '',
+        '## Stateless signature resource screen',
+        '',
+        'FIPS 205 SLH-DSA-256f candidate only. The recursive algorithms bound the complete function-call schedule; these are calls to distinct hash/PRF constructions, not compression operations, quantum gates or complete participant work. The top signing layer omits public-key recovery, while every lower root is reconstructed. Chain hashing is an upper bound because its final signing and verification paths depend on message digits. No participant credential or authentication format is selected by this screen.',
+        '',
+        table(
+            ['Quantity', 'Value'],
+            Object.entries(compileStatelessSignatureWork())
+                .filter(
+                    (entry): entry is [string, bigint] =>
+                        typeof entry[1] === 'bigint',
+                )
+                .map(([name, value]) => [name, formatCount(value)]),
+        ),
+        '',
+        table(
+            [
+                'Operation',
+                'PRF',
+                'Chain hash upper bound',
+                'Parent hash',
+                'Chain compression',
+                'Forest compression',
+                'Message randomization',
+                'Message hash',
+            ],
+            (() => {
+                const work = compileStatelessSignatureWork();
+                return [
+                    [
+                        'Key generation',
+                        work.keyGeneration.pseudorandomFunction,
+                        work.keyGeneration.chainHash,
+                        work.keyGeneration.parentHash,
+                        work.keyGeneration.chainCompression,
+                        0n,
+                        0n,
+                        0n,
+                    ],
+                    [
+                        'Signing',
+                        work.signing.pseudorandomFunction,
+                        work.signing.chainHashUpper,
+                        work.signing.parentHash,
+                        work.signing.chainCompression,
+                        work.signing.forestCompression,
+                        work.signing.messageRandomization,
+                        work.signing.messageHash,
+                    ],
+                    [
+                        'Verification',
+                        0n,
+                        work.verification.chainHashUpper,
+                        work.verification.parentHash,
+                        work.verification.chainCompression,
+                        work.verification.forestCompression,
+                        0n,
+                        work.verification.messageHash,
+                    ],
+                ].map(([name, ...values]) => [
+                    String(name),
+                    ...values.map((value) => formatCount(value as bigint)),
+                ]);
+            })(),
         ),
         '',
         '## ML-DSA theorem parameter screen',
