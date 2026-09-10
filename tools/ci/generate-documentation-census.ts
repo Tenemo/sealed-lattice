@@ -2,6 +2,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
+import {
+    compileAuthenticationFrameWork,
+    compileCompletedAuthenticationCensus,
+} from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
@@ -1584,6 +1588,55 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotBody.maximumHashInputBytes),
                 ],
             ],
+        ),
+        '',
+        '## Authentication frames and completed prefix',
+        '',
+        'The pure FIPS 204 interface frames each application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. Its counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
+        '',
+        table(
+            [
+                'Purpose',
+                'Message bytes',
+                'FIPS frame bytes',
+                'Representative input bytes',
+                'Representative permutations',
+            ],
+            compileAuthenticationFrameWork().map((role) => [
+                role.purpose,
+                formatCount(role.messageBytes),
+                formatCount(role.frameBytes),
+                formatCount(role.representativeInputBytes),
+                formatCount(role.representativePermutations),
+            ]),
+        ),
+        '',
+        'The following completed, all-cooperating prefixes use the completion profile and one completed registration per roster participant. A signed ballot counts here even if it will fail inner verification. Additional registrations are an explicit census input. These public record counts are not lifetime honest-key or signing-oracle bounds; they exclude abandoned enrollment, additional intents, repeated evaluation, verification, recovery and the unimplemented closing/release purposes.',
+        '',
+        table(
+            [
+                'Signed ballots',
+                'Signed records',
+                'Signature bytes',
+                'Application message bytes',
+                'FIPS frame bytes',
+                'Representative permutations',
+            ],
+            [0, Number(fixedModulusBfv.participantCount)].map((ballots) => {
+                const value = compileCompletedAuthenticationCensus(
+                    Number(fixedModulusBfv.participantCount),
+                    fixedModulusBfv.participantCount,
+                    ballots,
+                );
+                return [
+                    formatCount(ballots),
+                    formatCount(value.signatures),
+                    formatCount(value.signatureBytes),
+                    formatCount(value.signingMessageBytes),
+                    formatCount(value.signingFrameBytes),
+                    formatCount(value.representativePermutations),
+                ];
+            }),
         ),
         '',
         '## ML-DSA theorem parameter screen',
