@@ -105,6 +105,7 @@ import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
+import { compileStatelessSignatureShakeWork } from '#tests/stateless-signature-shake-model.js';
 import {
     compileStatelessSignatureProofWork,
     compileStatelessSignatureWork,
@@ -1722,6 +1723,76 @@ export const renderDocumentationCensus = (): string => {
                 ].map(([name, ...values]) => [
                     String(name),
                     ...values.map((value) => formatCount(value as bigint)),
+                ]);
+            })(),
+        ),
+        '',
+        '## Stateless signature SHAKE input and work screen',
+        '',
+        'FIPS 205 SHAKE-256f comparison for the currently implemented pure-signature purpose/message frames. The table counts complete SHAKE calls and their Keccak permutations, including padding and wide tree-key inputs. Signing and verification are upper bounds where chains depend on the message. The frame-length and address-type separation applies to these inputs only; an unrestricted empty-message frame has an explicit overlap witness. No credential migration or complete-workflow timing is inferred.',
+        '',
+        table(
+            [
+                'Fixed hash role',
+                'Input bytes',
+                'Output bytes',
+                'Permutations per call',
+                'Generated address types',
+            ],
+            Object.entries(compileStatelessSignatureShakeWork().fixed).map(
+                ([name, value]) => [
+                    name,
+                    formatCount(value.inputBytes),
+                    formatCount(value.outputBytes),
+                    formatCount(value.permutations),
+                    value.addressTypes.join(', '),
+                ],
+            ),
+        ),
+        '',
+        table(
+            [
+                'Purpose',
+                'Pure frame bytes',
+                'Randomization input bytes',
+                'Message-hash input bytes',
+                'Signing permutations, upper bound',
+                'Verification permutations, upper bound',
+            ],
+            compileStatelessSignatureShakeWork().roles.map((value) => [
+                value.purpose,
+                formatCount(value.frameBytes),
+                formatCount(value.randomization.inputBytes),
+                formatCount(value.messageHash.inputBytes),
+                formatCount(value.signingUpper.permutations),
+                formatCount(value.verificationUpper.permutations),
+            ]),
+        ),
+        '',
+        table(
+            [
+                'Workload',
+                'Hash calls',
+                'Hash input bytes',
+                'Hash output bytes',
+                'Permutations',
+            ],
+            (() => {
+                const value = compileStatelessSignatureShakeWork();
+                return (
+                    [
+                        ['Key generation', value.keyGeneration],
+                        [
+                            'One current-purpose synthetic screen, upper bound',
+                            value.ordinaryScreenUpper,
+                        ],
+                    ] as const
+                ).map(([name, work]) => [
+                    name,
+                    formatCount(work.hashCalls),
+                    formatCount(work.inputBytes),
+                    formatCount(work.outputBytes),
+                    formatCount(work.permutations),
                 ]);
             })(),
         ),
