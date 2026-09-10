@@ -106,6 +106,11 @@ import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
+import {
+    stagedPreimageBound,
+    stagedPreimageStateControl,
+    stagedPreimageViews,
+} from '#tests/staged-preimage-model.js';
 import { compileStatelessSignatureShakeWork } from '#tests/stateless-signature-shake-model.js';
 import {
     compileStatelessSignatureProofWork,
@@ -119,8 +124,6 @@ import {
     unrevealedPointQueryBound,
     undetectabilityCollectionViews,
     idealCollectionPreimageBound,
-    idealCollectionOpenPreimageBound,
-    openPreimagePartitionViews,
 } from '#tests/unrevealed-point-query-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
@@ -2024,57 +2027,82 @@ export const renderDocumentationCensus = (): string => {
             })(),
         ),
         '',
-        '## Preimage-opening partition bound',
+        '## Staged preimage-opening bound',
         '',
-        'For the restricted length-preserving ideal collection, an undisclosed independent dyadic partition preserves a successful unopened target with probability at least 1/(3B), where B is the least power of two greater than the cap on distinct classical openings. Zero openings need no loss. The argument multiplies the ordinary-preimage bound above by this loss and clamps at one; its distinguisher still charges the extra verification query. No opening of a hidden target is simulated, and no participant protocol is permitted to abort by this proof-game rule.',
+        'Independent target preimages remain unused in the staged oracle until their classical opening. One common final-function success predicate gives separate search, state-error and unopened-point-guess terms. The bound has no multiplicative opening-count factor. Opening requests, target preparation and simulation still cost work; correlated preimages and unaccounted prior public queries do not satisfy the argument.',
+        '',
+        table(
+            ['Ideal bound operand', 'Value'],
+            (() => {
+                const queries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const size =
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes);
+                const value = stagedPreimageBound(queries, size, size);
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    ['Illustrative public queries', formatCount(queries)],
+                    ['Input and output domain size', formatCount(size)],
+                    ['Search term after comparison', ratio(value.search)],
+                    ['State-error term', ratio(value.stateError)],
+                    [
+                        'Unopened final-point guess term',
+                        ratio(value.finalPointGuess),
+                    ],
+                    ['Total upper bound', ratio(value.bound)],
+                ];
+            })(),
+        ),
         '',
         table(
             [
-                'Illustrative signing calls',
-                'Opening cap',
-                'Dyadic denominator',
-                'Loss upper bound',
-                'Ideal query-bound operand',
+                'Quantum control input domain',
+                'Coupled cases',
+                'Squared-distance numerator',
+                'Common denominator',
+                'Eligible staged-output numerator',
+                'Unopened-input-guess numerator',
             ],
-            [0n, 1n, 6n].map((signingCalls) => {
-                const value = idealCollectionOpenPreimageBound(
-                    compileWideChallengeCompilerCensus().adversaryQueries,
-                    1n << (8n * compileStatelessSignatureWork().nodeBytes),
-                    signingCalls * compileStatelessSignatureWork().forestTrees,
-                );
+            ([16, 64] as const).map((inputs) => {
+                const value = stagedPreimageStateControl(inputs);
                 return [
-                    formatCount(signingCalls),
-                    formatCount(value.maximumOpenings),
-                    formatCount(value.partitionSize),
-                    formatCount(value.loss),
-                    `${value.bound.numerator}/${value.bound.denominator}`,
+                    String(inputs),
+                    formatCount(value.samples),
+                    formatCount(value.difference),
+                    formatCount(
+                        BigInt(value.samples) * BigInt(value.denominator),
+                    ),
+                    formatCount(value.eligible),
+                    formatCount(value.guessSuccess),
                 ];
             }),
         ),
         '',
-        'The examples count at most one revealed forest input per tree and signing call. They do not bound lifetime signing calls, distinct credentials, complete reduction time or the full protocol advantage. Public target inputs must remain hidden except through the stated classical opening interface; the private partition is not adversary advice. Ideal helper work, fixed-function correspondence and message compression remain separate.',
-        '',
         table(
             [
-                'Adaptive openings',
-                'Original image samples',
-                'Independent-target samples',
-                'Samples per simulated world',
-                'Distinct full views',
-                'Retained successful image samples',
+                'Opening control',
+                'Samples',
+                'Eligible outputs',
+                'Final successes',
+                'Base-function matches',
+                'Unopened-input guesses',
+                'Successes missed by base-function matching',
             ],
-            ([0, 1, 2] as const).map((openings) => {
-                const value = openPreimagePartitionViews(openings);
-                return [
-                    String(openings),
-                    formatCount(value.imageSamples),
-                    formatCount(value.independentSamples),
-                    formatCount(value.simulatedSamples),
-                    formatCount(value.views.length),
-                    formatCount(value.retainedSuccess),
-                ];
-            }),
+            stagedPreimageViews().controls.map((value) => [
+                String(value.mode),
+                formatCount(value.samples),
+                formatCount(value.eligible),
+                formatCount(value.success),
+                formatCount(value.baseMatch),
+                formatCount(value.guess),
+                formatCount(value.guessOnly),
+            ]),
         ),
+        '',
+        'The controls include no openings, adaptive/repeated openings, every target opened, and an invalid opening index. Complete original-image, staged and search views agree under their stated couplings. The correlated-input control instead fixes a remaining input after another input opens. None of these models is a participant operation or a complete security bound.',
         '',
         '## Interleaved target query bound',
         '',
