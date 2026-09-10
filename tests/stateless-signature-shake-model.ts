@@ -1,4 +1,8 @@
-import { compileAuthenticationFrameWork } from '#tests/authentication-work-model.js';
+import {
+    authenticationContext,
+    compileAuthenticationFrameWork,
+    type AuthenticationPurpose,
+} from '#tests/authentication-work-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { compileStatelessSignatureWork } from '#tests/stateless-signature-work-model.js';
 
@@ -8,6 +12,71 @@ type Work = Readonly<{
     outputBytes: bigint;
     permutations: bigint;
 }>;
+
+// Candidate FIPS context: fixed purpose, one delimiter and the public seed
+// taken from the expected verification key. No caller-chosen label is added
+// to the signature carrier.
+export const labelledSignatureContext = (
+    purpose: AuthenticationPurpose,
+    publicSeed: Uint8Array,
+) => {
+    const parameters = compileStatelessSignatureWork();
+    if (publicSeed.length !== Number(parameters.nodeBytes))
+        throw new RangeError('Wrong public-seed width.');
+    const context = Buffer.concat([
+        Buffer.from(authenticationContext(purpose)),
+        Buffer.from([0]),
+        publicSeed,
+    ]);
+    if (context.length > 255)
+        throw new RangeError('FIPS signature context too long.');
+    return context;
+};
+
+// Public byte-domain routing used by the ideal-function argument. Returning
+// no route leaves an arbitrary XOF input in the independent base domain.
+export const labelledSignaturePrfRoute = (input: Uint8Array) => {
+    const seedBytes = Number(compileStatelessSignatureWork().nodeBytes);
+    if (input.length === 2 * seedBytes + 32) {
+        const type = new DataView(
+            input.buffer,
+            input.byteOffset,
+            input.byteLength,
+        ).getUint32(seedBytes + 16, false);
+        if (type === 5 || type === 6)
+            return {
+                kind: 'secret-element' as const,
+                publicSeed: new Uint8Array(input.subarray(0, seedBytes)),
+                secretOffset: seedBytes + 32,
+            };
+    }
+    for (const role of compileAuthenticationFrameWork()) {
+        const purpose = Buffer.from(role.context),
+            contextBytes = purpose.length + 1 + seedBytes;
+        if (
+            input.length !==
+            2 * seedBytes + 2 + contextBytes + Number(role.messageBytes)
+        )
+            continue;
+        const start = 2 * seedBytes;
+        if (input[start] !== 0 || input[start + 1] !== contextBytes) continue;
+        const context = start + 2;
+        if (
+            !purpose.every((byte, index) => input[context + index] === byte) ||
+            input[context + purpose.length] !== 0
+        )
+            continue;
+        const label = context + purpose.length + 1;
+        return {
+            kind: 'message-randomization' as const,
+            publicSeed: new Uint8Array(
+                input.subarray(label, label + seedBytes),
+            ),
+            secretOffset: 0,
+        };
+    }
+    return undefined;
+};
 const sum = (terms: readonly (readonly [bigint, Work])[]): Work =>
     terms.reduce(
         (total, [count, value]) => ({
@@ -20,7 +89,8 @@ const sum = (terms: readonly (readonly [bigint, Work])[]): Work =>
     );
 
 // FIPS 205 section 11.1, with the current application's actual pure-signature
-// frames. Length separation here is not a claim for unrestricted FIPS messages.
+// frames and the candidate public-seed context suffix. Length separation here
+// is not a claim for unrestricted FIPS messages or current participant state.
 export const compileStatelessSignatureShakeWork = () => {
     const parameters = compileStatelessSignatureWork(),
         n = parameters.nodeBytes;
@@ -60,11 +130,9 @@ export const compileStatelessSignatureShakeWork = () => {
         [parameters.keyGeneration.chainCompression, fixed.chainCompression],
     ]);
     const roles = compileAuthenticationFrameWork().map((role) => {
-        const randomization = hash(2n * n + role.frameBytes, n),
-            messageHash = hash(
-                3n * n + role.frameBytes,
-                parameters.digestBytes,
-            );
+        const frameBytes = role.frameBytes + 1n + n;
+        const randomization = hash(2n * n + frameBytes, n),
+            messageHash = hash(3n * n + frameBytes, parameters.digestBytes);
         const signingUpper = sum([
             [
                 parameters.signing.pseudorandomFunction,
@@ -89,7 +157,7 @@ export const compileStatelessSignatureShakeWork = () => {
         ]);
         return {
             purpose: role.purpose,
-            frameBytes: role.frameBytes,
+            frameBytes,
             randomization,
             messageHash,
             signingUpper,

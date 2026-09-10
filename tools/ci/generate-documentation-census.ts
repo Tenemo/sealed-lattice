@@ -62,6 +62,10 @@ import {
     stagedRowStateControl,
 } from '#tests/interleaved-target-model.js';
 import { keyedXofViews } from '#tests/keyed-xof-model.js';
+import {
+    labelledKeyedXofBound,
+    labelledKeyedXofViews,
+} from '#tests/labelled-keyed-xof-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import {
     mlDsa65Parameters,
@@ -1733,7 +1737,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Stateless signature SHAKE input and work screen',
         '',
-        'FIPS 205 SHAKE-256f comparison for the currently implemented pure-signature purpose/message frames. The table counts complete SHAKE calls and their Keccak permutations, including padding and wide tree-key inputs. Signing and verification are upper bounds where chains depend on the message. The frame-length and address-type separation applies to these inputs only; an unrestricted empty-message frame has an explicit overlap witness. No credential migration or complete-workflow timing is inferred.',
+        'FIPS 205 SHAKE-256f comparison using current purpose/message shapes and the candidate context suffix: a delimiter followed by the expected public-key seed. The table counts complete SHAKE calls and their Keccak permutations, including padding and wide tree-key inputs. Signing and verification are upper bounds where chains depend on the message. The frame-length and address-type separation applies to these inputs only; an unrestricted message has an explicit forest-compression overlap witness. No participant credential migration or complete-workflow timing is inferred.',
         '',
         table(
             [
@@ -1842,6 +1846,69 @@ export const renderDocumentationCensus = (): string => {
                     [
                         'Illustrative single-key ideal advantage upper bound',
                         `${bound.bound.numerator}/${bound.bound.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Labelled ideal keyed-function families',
+        '',
+        'Under distinct uniform public labels and publicly invertible disjoint byte domains, one hidden-point simulation covers independent secret roles across the labelled keys. Label collisions are charged separately. This primitive query bound is not the full multi-user signature theorem, actual vault simulation or fixed-XOF security claim. The key-population rows are evaluation operands, not an inferred lifetime cap.',
+        '',
+        table(
+            [
+                'Illustrative honest-key population',
+                'Public-label collision term',
+                'Shared hidden-point term',
+                'Combined upper bound',
+            ],
+            [
+                1n,
+                10n,
+                20n,
+                compileWideChallengeCompilerCensus().adversaryQueries,
+            ].map((keys) => {
+                const domain =
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes);
+                const value = labelledKeyedXofBound(
+                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    keys,
+                    domain,
+                    domain,
+                );
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    formatCount(keys),
+                    ratio(value.labelCollision),
+                    ratio(value.hiddenPoint.bound),
+                    ratio(value.bound),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Joint-function control', 'Value'],
+            (() => {
+                const value = labelledKeyedXofViews();
+                return [
+                    [
+                        'Original samples per world',
+                        formatCount(value.originalSamples),
+                    ],
+                    [
+                        'Simulated samples per world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    [
+                        'Distinct complete views',
+                        formatCount(value.views.length),
+                    ],
+                    [
+                        'Conflicting assignments when labels coincide',
+                        formatCount(value.collisions),
                     ],
                 ];
             })(),
