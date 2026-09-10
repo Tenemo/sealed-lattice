@@ -112,6 +112,8 @@ import {
     unrevealedPointQueryBound,
     undetectabilityCollectionViews,
     idealCollectionPreimageBound,
+    idealCollectionOpenPreimageBound,
+    openPreimagePartitionViews,
 } from '#tests/unrevealed-point-query-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
@@ -1897,6 +1899,58 @@ export const renderDocumentationCensus = (): string => {
                     ['Distinct full views', formatCount(value.views.length)],
                 ];
             })(),
+        ),
+        '',
+        '## Preimage-opening partition bound',
+        '',
+        'For the restricted length-preserving ideal collection, an undisclosed independent dyadic partition preserves a successful unopened target with probability at least 1/(3B), where B is the least power of two greater than the cap on distinct classical openings. Zero openings need no loss. The argument multiplies the ordinary-preimage bound above by this loss and clamps at one; its distinguisher still charges the extra verification query. No opening of a hidden target is simulated, and no participant protocol is permitted to abort by this proof-game rule.',
+        '',
+        table(
+            [
+                'Illustrative signing calls',
+                'Opening cap',
+                'Dyadic denominator',
+                'Loss upper bound',
+                'Ideal query-bound operand',
+            ],
+            [0n, 1n, 6n].map((signingCalls) => {
+                const value = idealCollectionOpenPreimageBound(
+                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes),
+                    signingCalls * compileStatelessSignatureWork().forestTrees,
+                );
+                return [
+                    formatCount(signingCalls),
+                    formatCount(value.maximumOpenings),
+                    formatCount(value.partitionSize),
+                    formatCount(value.loss),
+                    `${value.bound.numerator}/${value.bound.denominator}`,
+                ];
+            }),
+        ),
+        '',
+        'The examples count at most one revealed forest input per tree and signing call. They do not bound lifetime signing calls, distinct credentials, complete reduction time or the full protocol advantage. Public target inputs must remain hidden except through the stated classical opening interface; the private partition is not adversary advice. Ideal helper work, fixed-function correspondence and message compression remain separate.',
+        '',
+        table(
+            [
+                'Adaptive openings',
+                'Original image samples',
+                'Independent-target samples',
+                'Samples per simulated world',
+                'Distinct full views',
+                'Retained successful image samples',
+            ],
+            ([0, 1, 2] as const).map((openings) => {
+                const value = openPreimagePartitionViews(openings);
+                return [
+                    String(openings),
+                    formatCount(value.imageSamples),
+                    formatCount(value.independentSamples),
+                    formatCount(value.simulatedSamples),
+                    formatCount(value.views.length),
+                    formatCount(value.retainedSuccess),
+                ];
+            }),
         ),
         '',
         '## ML-DSA theorem parameter screen',

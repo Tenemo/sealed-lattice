@@ -66,6 +66,34 @@ export const idealCollectionPreimageBound = (
     };
 };
 
+// Private dyadic partition: at most R distinct classical openings must avoid
+// the hidden targets, while the unopened winning target must be hidden. The
+// mask is never disclosed. Its loss is at most 3B for the least power of two
+// B >= R+1; zero openings need no partition loss. This is an ideal-query bound,
+// not an implementation of a signature reduction or its full running time.
+export const idealCollectionOpenPreimageBound = (
+    publicQueries: bigint,
+    domainSize: bigint,
+    maximumOpenings: bigint,
+) => {
+    if (maximumOpenings < 0n) throw new RangeError('Negative opening bound.');
+    const preimage = idealCollectionPreimageBound(publicQueries, domainSize);
+    let partitionSize = 1n;
+    while (partitionSize <= maximumOpenings) partitionSize *= 2n;
+    const loss = maximumOpenings === 0n ? 1n : 3n * partitionSize;
+    const numerator = loss * preimage.bound.numerator;
+    return {
+        maximumOpenings,
+        partitionSize,
+        loss,
+        preimage,
+        bound:
+            numerator < preimage.bound.denominator
+                ? rational(numerator, preimage.bound.denominator)
+                : rational(1n, 1n),
+    };
+};
+
 // Exact Lagrange weights at x=1 for nodes 0, A, 4A, ..., d^2 A.
 // Only a small control grid is materialized; the cryptographic bound above
 // uses the analytic sum and never constructs a 2q-sized polynomial.
@@ -229,5 +257,183 @@ export const undetectabilityCollectionViews = () => {
         originalSamples: 256n,
         simulatedSamples: 2048n,
         views: [...views].map(([view, counts]) => ({ view, ...counts })),
+    };
+};
+
+// Complete joint distributions for three two-input, one-bit-output target
+// functions. Opening choices depend on public function values, target digests
+// and earlier opening replies. The full table and private mask are retained
+// only by the distribution check, not exposed by the reduction's interface.
+export const openPreimagePartitionViews = (openingLimit: 0 | 1 | 2) => {
+    const partitionSize = openingLimit === 0 ? 1 : openingLimit === 1 ? 2 : 4;
+    const bit = (table: number, tweak: number, input: number) =>
+        (table >> (2 * tweak + input)) & 1;
+    const replace = (
+        table: number,
+        tweak: number,
+        input: number,
+        value: number,
+    ) => {
+        const position = 2 * tweak + input;
+        return (table & ~(1 << position)) | (value << position);
+    };
+    type Counts = {
+        image: bigint;
+        independent: bigint;
+        one: bigint;
+        zero: bigint;
+    };
+    const views = new Map<string, Counts>();
+    let originalSuccess = 0n,
+        retainedSuccess = 0n,
+        simulatedSuccess = 0n;
+    const view = (
+        table: number,
+        targets: number[],
+        mask: number,
+        open: (index: number) => number,
+        filter: boolean,
+    ) => {
+        const opened: number[] = [],
+            replies: number[] = [];
+        let index = (targets[0] + 2 * targets[1] + bit(table, 2, 0)) % 3;
+        for (let query = 0; query < openingLimit; query++) {
+            if (filter && (mask >> index) & 1)
+                return {
+                    key: JSON.stringify([
+                        table,
+                        targets,
+                        mask,
+                        opened,
+                        replies,
+                        index,
+                        'stopped',
+                    ]),
+                    success: false,
+                };
+            opened.push(index);
+            replies.push(open(index));
+            const remaining = [0, 1, 2].filter(
+                (item) => !opened.includes(item),
+            );
+            index =
+                remaining[
+                    (replies[replies.length - 1] +
+                        targets[2] +
+                        bit(table, 0, 1)) %
+                        remaining.length
+                ];
+        }
+        const input = [0, 1].find(
+            (value) => bit(table, index, value) === targets[index],
+        );
+        const success =
+            input !== undefined &&
+            !opened.includes(index) &&
+            (!filter || !!((mask >> index) & 1));
+        return {
+            key: JSON.stringify([
+                table,
+                targets,
+                mask,
+                opened,
+                replies,
+                index,
+                input ?? null,
+            ]),
+            success,
+        };
+    };
+    const record = (key: string, world: keyof Counts, weight: bigint) => {
+        const counts = views.get(key) ?? {
+            image: 0n,
+            independent: 0n,
+            one: 0n,
+            zero: 0n,
+        };
+        counts[world] += weight;
+        views.set(key, counts);
+    };
+    for (let table = 0; table < 64; table++)
+        for (let inputs = 0; inputs < 8; inputs++)
+            for (let mask = 0; mask < 8; mask++) {
+                const hidden = [0, 1, 2].filter(
+                    (index) => (mask >> index) & 1,
+                ).length;
+                const weight = BigInt(partitionSize - 1) ** BigInt(3 - hidden);
+                if (weight === 0n) continue;
+                const originalTargets = [0, 1, 2].map((index) =>
+                    bit(table, index, (inputs >> index) & 1),
+                );
+                const original = view(
+                    table,
+                    originalTargets,
+                    mask,
+                    (index) => (inputs >> index) & 1,
+                    true,
+                );
+                record(original.key, 'image', weight);
+                if (original.success) retainedSuccess += weight;
+                if (
+                    view(
+                        table,
+                        originalTargets,
+                        mask,
+                        (index) => (inputs >> index) & 1,
+                        false,
+                    ).success
+                )
+                    originalSuccess += weight;
+                for (let digests = 0; digests < 8; digests++) {
+                    const targets = [0, 1, 2].map((index) =>
+                        (mask >> index) & 1
+                            ? (digests >> index) & 1
+                            : originalTargets[index],
+                    );
+                    const independent = view(
+                        table,
+                        targets,
+                        mask,
+                        (index) => (inputs >> index) & 1,
+                        true,
+                    );
+                    record(independent.key, 'independent', weight);
+                    // Simulated opening has no access to the unknown mark.
+                    const open = (index: number) => {
+                        if ((mask >> index) & 1)
+                            throw new Error('A hidden input was requested.');
+                        return (inputs >> index) & 1;
+                    };
+                    for (let mark = 0; mark < 2; mark++) {
+                        record(
+                            view(table, targets, mask, open, true).key,
+                            'zero',
+                            weight,
+                        );
+                        let programmed = table;
+                        for (let index = 0; index < 3; index++)
+                            if ((mask >> index) & 1)
+                                programmed = replace(
+                                    programmed,
+                                    index,
+                                    mark ^ ((inputs >> index) & 1),
+                                    targets[index],
+                                );
+                        const one = view(programmed, targets, mask, open, true);
+                        record(one.key, 'one', weight);
+                        if (one.success) simulatedSuccess += weight;
+                    }
+                }
+            }
+    return {
+        openingLimit,
+        partitionSize,
+        imageSamples: 512n * BigInt(partitionSize) ** 3n,
+        independentSamples: 4096n * BigInt(partitionSize) ** 3n,
+        simulatedSamples: 8192n * BigInt(partitionSize) ** 3n,
+        originalSuccess,
+        retainedSuccess,
+        simulatedSuccess,
+        views: [...views].map(([key, counts]) => ({ view: key, ...counts })),
     };
 };

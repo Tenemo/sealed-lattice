@@ -7,6 +7,8 @@ import {
     unrevealedPointQueryBound,
     undetectabilityCollectionViews,
     idealCollectionPreimageBound,
+    idealCollectionOpenPreimageBound,
+    openPreimagePartitionViews,
 } from '#tests/unrevealed-point-query-model.js';
 
 type Fraction = { numerator: bigint; denominator: bigint };
@@ -23,6 +25,121 @@ const atMost = (a: Fraction, b: Fraction) =>
     a.numerator * b.denominator <= b.numerator * a.denominator;
 
 describe('Unrevealed-point query bound', () => {
+    it('preserves complete opening views without knowing any hidden point', () => {
+        const expected = [
+            { openings: 0 as const, image: 512n, retained: 512n },
+            { openings: 1 as const, image: 4096n, retained: 1024n },
+            { openings: 2 as const, image: 32768n, retained: 4608n },
+        ];
+        for (const control of expected) {
+            const value = openPreimagePartitionViews(control.openings);
+            expect(value.originalSuccess).toBe(control.image);
+            expect(value.retainedSuccess).toBe(control.retained);
+            expect(value.simulatedSuccess * value.imageSamples).toBe(
+                value.retainedSuccess * value.simulatedSamples,
+            );
+            for (const world of [
+                'image',
+                'independent',
+                'one',
+                'zero',
+            ] as const)
+                expect(
+                    value.views.reduce(
+                        (total, view) => total + view[world],
+                        0n,
+                    ),
+                ).toBe(
+                    world === 'image'
+                        ? value.imageSamples
+                        : world === 'independent'
+                          ? value.independentSamples
+                          : value.simulatedSamples,
+                );
+            expect(
+                value.views.some(
+                    (view) => view.image === 0n && view.independent > 0n,
+                ),
+            ).toBe(true);
+            for (const view of value.views) {
+                expect(view.one * value.imageSamples).toBe(
+                    view.image * value.simulatedSamples,
+                );
+                expect(view.zero * value.independentSamples).toBe(
+                    view.independent * value.simulatedSamples,
+                );
+                const [table, targets, mask, opened, replies, index, input] =
+                    JSON.parse(view.view) as [
+                        number,
+                        number[],
+                        number,
+                        number[],
+                        number[],
+                        number,
+                        number | null | 'stopped',
+                    ];
+                expect(opened).not.toContain(index);
+                expect(opened.length).toBe(replies.length);
+                for (let step = 0; step < opened.length; step++) {
+                    expect((mask >> opened[step]) & 1).toBe(0);
+                    expect(
+                        (table >> (2 * opened[step] + replies[step])) & 1,
+                    ).toBe(targets[opened[step]]);
+                }
+                expect(
+                    input === 'stopped'
+                        ? ((mask >> index) & 1) === 1 &&
+                              opened.length < control.openings
+                        : opened.length === control.openings,
+                ).toBe(true);
+                expect(
+                    typeof input !== 'number' ||
+                        ((table >> (2 * index + input)) & 1) === targets[index],
+                ).toBe(true);
+            }
+        }
+    });
+    it('bounds the dyadic partition loss with bounded sampling', () => {
+        for (let openings = 1n; openings <= 128n; openings++) {
+            const value = idealCollectionOpenPreimageBound(
+                0n,
+                1n << 256n,
+                openings,
+            );
+            const base = value.partitionSize;
+            expect(base & (base - 1n)).toBe(0n);
+            expect(base).toBeGreaterThan(openings);
+            expect(base / 2n).toBeLessThanOrEqual(openings);
+            // Exact inverse survival probability: B^(r+1)/(B-1)^r.
+            expect(base ** (openings + 1n)).toBeLessThanOrEqual(
+                value.loss * (base - 1n) ** openings,
+            );
+            expect(value.loss).toBeLessThan(6n * (openings + 1n));
+        }
+        expect(idealCollectionOpenPreimageBound(1n, 4096n, 0n).bound).toEqual({
+            numerator: 29n,
+            denominator: 512n,
+        });
+        expect(idealCollectionOpenPreimageBound(1n, 4096n, 1n).bound).toEqual({
+            numerator: 87n,
+            denominator: 256n,
+        });
+        expect(idealCollectionOpenPreimageBound(1n, 4096n, 2n).bound).toEqual({
+            numerator: 87n,
+            denominator: 128n,
+        });
+        expect(idealCollectionOpenPreimageBound(1n, 4096n, 4n).bound).toEqual({
+            numerator: 1n,
+            denominator: 1n,
+        });
+        expect(
+            idealCollectionOpenPreimageBound(0n, 1n << 256n, 1n << 80n)
+                .partitionSize,
+        ).toBe(1n << 81n);
+        expect(() => idealCollectionOpenPreimageBound(0n, 16n, -1n)).toThrow(
+            RangeError,
+        );
+    });
     it('matches both undetectability worlds with adaptive collection preprocessing', () => {
         const value = undetectabilityCollectionViews();
         for (const view of value.views) {
