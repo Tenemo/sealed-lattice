@@ -56,6 +56,7 @@ import {
     compileLinkedReleaseWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
+import { hashGraphCollisionBound } from '#tests/hash-graph-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import {
     interleavedTargetQueryBound,
@@ -122,6 +123,7 @@ import {
     stagedPreimageStateControl,
     stagedPreimageViews,
 } from '#tests/staged-preimage-model.js';
+import { statelessSignatureSecurityScreen } from '#tests/stateless-signature-security-model.js';
 import { compileStatelessSignatureShakeWork } from '#tests/stateless-signature-shake-model.js';
 import {
     compileStatelessSignatureProofWork,
@@ -2419,6 +2421,64 @@ export const renderDocumentationCensus = (): string => {
                 ];
             })(),
         ),
+        '',
+        '## Conditional complete ideal signature screen',
+        '',
+        'Joint labelled keyed functions, interleaved message targets, acyclic tree/compression collisions, adaptive raw WOTS endpoints and unopened FORS preimages. Query operands cover the attack and wrapper including final verification; the WOTS row adds its own conservative selected-chain allowance. Credential and first-evaluated message counts remain separate. This sum requires the exact ideal event decomposition and matched domains; it is not fixed-XOF, vault, efficient-reduction or complete protocol security.',
+        '',
+        table(
+            [
+                'Total query operand',
+                'Credential operand',
+                'Messages per credential',
+                'Ideal bound',
+                'Floor security bits',
+            ],
+            (() => {
+                const queries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                return [
+                    [queries, 10n, 10n],
+                    [queries, 10n, 15n],
+                    [queries, 10n, 16n],
+                    [queries << 10n, 10n, 10n],
+                    [queries, queries, 10n],
+                ].map(([count, keys, messages]) => {
+                    const value = statelessSignatureSecurityScreen(
+                        count,
+                        keys,
+                        messages,
+                    );
+                    return [
+                        formatCount(count),
+                        formatCount(keys),
+                        formatCount(messages),
+                        `${value.bound.numerator}/${value.bound.denominator}`,
+                        formatCount(value.securityBits),
+                    ];
+                });
+            })(),
+        ),
+        '',
+        table(
+            ['Hash graph operand', 'Value'],
+            (() => {
+                const work = compileStatelessSignatureWork(),
+                    domain = 1n << (8n * work.nodeBytes),
+                    value = hashGraphCollisionBound(
+                        compileWideChallengeCompilerCensus().adversaryQueries,
+                        domain,
+                    );
+                return [
+                    [
+                        'Ideal new-input collision bound',
+                        `${value.numerator}/${value.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'Fixed acyclic graph, separate hash rows and independent base leaves. Graph-node populations do not multiply this ideal query bound. Full-graph advice in its proof does not supply a finite implementation or remove the actual quantum simulation cost. These signing-cap examples are sensitivity checks, not new protocol limits.',
         '',
         '## ML-DSA theorem parameter screen',
         '',
