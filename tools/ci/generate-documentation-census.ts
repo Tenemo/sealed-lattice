@@ -53,6 +53,7 @@ import {
     enumerateRandomizedEncodingViews,
 } from '#tests/polynomial-oracle-boundary-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
+import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
@@ -105,6 +106,7 @@ export const renderDocumentationCensus = (): string => {
     const smallLimbProofField = compileSmallLimbProofFieldCensus();
     const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
+    const proofVerifierQueries = compileProofVerifierQueryCensus();
     const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
     const closeRace = runPublicationCloseRaceModel(10, false);
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
@@ -1565,6 +1567,59 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotBody.maximumHashInputBytes),
                 ],
             ],
+        ),
+        '',
+        '## Proof verifier query bounds',
+        '',
+        'Logical hash queries for one canonical proof-core verification attempt under the current common-agreement profile. Expanded ancestors are hashed only once across canonical incremental openings. These bounds exclude statement reconstruction, fixed-matrix generation, outer authentication, additional attempts, hash input/output byte work, and the prover or simulator. They are neither a lifetime population nor a complete reduction runtime.',
+        '',
+        table(
+            ['Hash purpose', 'Maximum queries per attempt'],
+            [
+                [
+                    'Salted leaves',
+                    formatCount(proofVerifierQueries.maximumLeafQueries),
+                ],
+                [
+                    'Expanded tree parents',
+                    formatCount(proofVerifierQueries.maximumNodeQueries),
+                ],
+                [
+                    'Verifier messages',
+                    formatCount(proofVerifierQueries.verifierMessageQueries),
+                ],
+                [
+                    'Chain states',
+                    formatCount(proofVerifierQueries.chainStateQueries),
+                ],
+                [
+                    'Message roots',
+                    formatCount(proofVerifierQueries.messageRootQueries),
+                ],
+                [
+                    'Statement context',
+                    formatCount(proofVerifierQueries.contextQueries),
+                ],
+                [
+                    'Proof-core subtotal',
+                    formatCount(proofVerifierQueries.maximumCoreQueries),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Tree ordinal',
+                'Leaves',
+                'Maximum opened leaves',
+                'Maximum expanded parents',
+            ],
+            proofVerifierQueries.groups.map((group, index) => [
+                formatCount(index),
+                formatCount(group.length),
+                formatCount(group.maximumLeafQueries),
+                formatCount(group.maximumNodeQueries),
+            ]),
         ),
         '',
         '## Proof simulator randomness budgets',
