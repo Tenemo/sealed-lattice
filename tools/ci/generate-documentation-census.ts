@@ -17,6 +17,7 @@ import {
 import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
+import { compileCertificationReleaseThresholdCensus } from '#tests/certification-release-threshold-model.js';
 import {
     compareCommitmentEquivocationHybrids,
     compareDuplicateCommitmentInputs,
@@ -36,6 +37,7 @@ import {
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
+import { compileFixedPublicationWitnessCensus } from '#tests/fixed-publication-witness-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import {
     compileBallotWordProofLayout,
@@ -114,6 +116,8 @@ export const renderDocumentationCensus = (): string => {
         compileThresholdKeyAggregationResourceLowerBound();
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
     const participantVisits = compileParticipantVisitDependencyCensus();
+    const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
+    const certificationRelease = compileCertificationReleaseThresholdCensus();
     const participantCustody = compileParticipantCustodyCensus();
     const participantBallotCustody = compileParticipantBallotCustody();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
@@ -3776,6 +3780,86 @@ export const renderDocumentationCensus = (): string => {
                         : 'no',
                 ],
             ],
+        ),
+        '',
+        '## Combining target certification and ordinary release shares',
+        '',
+        'This comparison attaches ordinary threshold-decryption shares to target votes. Corrupt participants keep their own shares and withhold all their public responses. The table counts the honest public responses sufficient for private reconstruction. It does not model encrypted release capsules, an additional activation primitive, or the existing certificate-gated release path.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participant count',
+                    formatCount(certificationRelease.participantCount),
+                ],
+                [
+                    'Corrupt private shares',
+                    formatCount(certificationRelease.corruptCount),
+                ],
+                [
+                    'Public certificate threshold',
+                    formatCount(certificationRelease.certificateThreshold),
+                ],
+                [
+                    'Minimum share threshold delaying this trace until the public certificate',
+                    formatCount(
+                        certificationRelease.minimumThresholdDelayingThisTrace,
+                    ),
+                ],
+                [
+                    'Maximum share threshold for every continuing group',
+                    formatCount(
+                        certificationRelease.maximumThresholdForEveryContinuingSet,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Share threshold',
+                'Honest public responses before reconstruction',
+                'Public certificate available',
+                'Every continuing group can reconstruct',
+            ],
+            certificationRelease.cases.map((value) => [
+                formatCount(value.threshold),
+                formatCount(value.honestPublicShares),
+                value.publicCertificateAvailable ? 'yes' : 'no',
+                value.everyContinuingSetCanDecrypt ? 'yes' : 'no',
+            ]),
+        ),
+        '',
+        '## Fixed publication witness visit screen',
+        '',
+        'The cyclic fixed witness sets have the smallest size that guarantees an honest member under every allowed static corruption set. The trace grants instant durable publication, one witness message per ballot, and an ideal nonselective close. It retains the current preparation and post-close evidence, target certification, release and local retrieval dependencies. All participants cooperate and all enabled work coalesces. This is a completing counterexample to this composition, not a protocol implementation or a universal asynchronous lower bound.',
+        '',
+        table(
+            [
+                'Participant',
+                'Assigned publication witnesses',
+                'Productive visits',
+            ],
+            fixedPublicationWitnesses.participantVisits.map(
+                (visits, position) => [
+                    formatCount(position),
+                    formatCount(
+                        fixedPublicationWitnesses.assignments[position],
+                    ),
+                    formatCount(visits),
+                ],
+            ),
+        ),
+        '',
+        table(
+            ['First participant visit', 'Newly enabled work'],
+            fixedPublicationWitnesses.firstParticipantActions.map(
+                (actions, index) => [
+                    formatCount(index + 1),
+                    actions.join(', '),
+                ],
+            ),
         ),
         '',
         '## Participant visit dependency census',
