@@ -45,6 +45,10 @@ import {
     compilePackedRankingEvaluationGraph,
     verifyExactRankingModel,
 } from '#tests/exact-ranking-model.js';
+import {
+    excludedPrefixStreamControl,
+    fullXofPrefixControl,
+} from '#tests/excluded-prefix-stream-model.js';
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
@@ -2478,7 +2482,43 @@ export const renderDocumentationCensus = (): string => {
             })(),
         ),
         '',
-        'Fixed acyclic graph, separate hash rows and independent base leaves. Graph-node populations do not multiply this ideal query bound. Full-graph advice in its proof does not supply a finite implementation or remove the actual quantum simulation cost. These signing-cap examples are sensitivity checks, not new protocol limits.',
+        'Fixed acyclic graph, separate hash rows and independent base leaves. Graph-node populations do not multiply this ideal query bound. The information-theoretic comparison permits arbitrary finite auxiliary data independent of the search oracle; computational wrapper costs follow their actual call graph. These signing-cap examples are sensitivity checks, not new protocol limits.',
+        '',
+        '## Full XOF prefix and tail controls',
+        '',
+        'Reusing the excluded-prefix sample as the public tail fails the complete joint law. The independent-tail construction uses two Boolean search queries per variable-length XOF query, with clean scratch; the existing conservative query coefficients therefore remain unchanged.',
+        '',
+        table(
+            [
+                'Prefix bits',
+                'Sample bits',
+                'Reuse distinguishing probability',
+                'Marginal variation',
+            ],
+            excludedPrefixStreamControl().map((value) => [
+                formatCount(value.outputBits),
+                formatCount(value.sampleBits),
+                `${value.distinguishing.numerator}/${value.distinguishing.denominator}`,
+                `${value.marginalVariation.numerator}/${value.marginalVariation.denominator}`,
+            ]),
+        ),
+        '',
+        table(
+            ['Control', 'Value'],
+            (() => {
+                const value = fullXofPrefixControl();
+                return [
+                    [
+                        'Variable-length XOR basis cases',
+                        formatCount(value.basisCases),
+                    ],
+                    [
+                        'Boolean queries per XOF query',
+                        formatCount(value.booleanQueriesPerXof),
+                    ],
+                ];
+            })(),
+        ),
         '',
         '## ML-DSA theorem parameter screen',
         '',
