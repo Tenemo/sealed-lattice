@@ -5,7 +5,6 @@ import {
     killProcessTree,
     runCommandAndCaptureOutput,
 } from '#tools/ci/run-command';
-import { normalizeProcessStatus } from '#tools/ci/run-log-diagnostics';
 
 describe('command execution', () => {
     it('captures asynchronous output and a nonzero process status', async () => {
@@ -89,7 +88,7 @@ describe('command process cleanup', () => {
         expect(windowsTaskKiller).toHaveBeenCalledWith(
             'taskkill',
             ['/pid', '32102', '/t', '/f'],
-            { stdio: 'ignore' },
+            { stdio: 'ignore', windowsHide: true },
         );
         expect(childProcess.kill).not.toHaveBeenCalled();
         expect(result).toMatchObject({
@@ -150,26 +149,5 @@ describe('command process cleanup', () => {
         } finally {
             process.exitCode = originalExitCode;
         }
-    });
-});
-
-describe('process status normalization', () => {
-    it('retains raw crash status while naming the Windows failure', () => {
-        expect(normalizeProcessStatus(-1_073_741_502, null)).toMatchObject({
-            hexadecimalExitCode: '0xC0000142',
-            rawExitCode: -1_073_741_502,
-            symbolicStatus: 'STATUS_DLL_INIT_FAILED',
-            unsignedExitCode: 3_221_225_794,
-        });
-    });
-
-    it('marks shell signal decoding as inferred', () => {
-        expect(normalizeProcessStatus(143, null)).toMatchObject({
-            conventionalShellSignal: {
-                evidence: 'inferred-from-shell-convention',
-                signalName: 'SIGTERM',
-            },
-            rawExitCode: 143,
-        });
     });
 });

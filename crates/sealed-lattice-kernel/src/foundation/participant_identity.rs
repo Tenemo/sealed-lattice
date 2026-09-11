@@ -16,16 +16,8 @@ impl ParticipantIdentity {
     pub const BYTE_LENGTH: usize = PARTICIPANT_IDENTITY_BYTE_LENGTH;
     const LOWERCASE_HEX_LENGTH: usize = Self::BYTE_LENGTH * 2;
 
-    pub const fn from_bytes(bytes: [u8; Self::BYTE_LENGTH]) -> Self {
+    const fn from_bytes(bytes: [u8; Self::BYTE_LENGTH]) -> Self {
         Self(bytes)
-    }
-
-    pub const fn as_bytes(&self) -> &[u8; Self::BYTE_LENGTH] {
-        &self.0
-    }
-
-    pub const fn into_bytes(self) -> [u8; Self::BYTE_LENGTH] {
-        self.0
     }
 
     pub fn to_lowercase_hex(self) -> String {
@@ -87,6 +79,6 @@ mod tests {
         )
         .expect("identity hash");
 
-        assert_eq!(identity.into_bytes(), expected_hash.into_bytes());
+        assert_eq!(identity.to_lowercase_hex(), expected_hash.to_string());
     }
 }

@@ -10,21 +10,13 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
-        },
-        "./published-sdk": {
-            "types": "./dist/published-sdk.d.ts",
-            "import": "./dist/published-sdk.js"
         }
-    },
-    "dependencies": {
-        "@noble/hashes": "2.2.0",
-        "@sealed-lattice/types": "workspace:*"
     },
     "scripts": {
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts",
         "build": "del-cli dist && tsc --project tsconfig.json && pnpm run build:wasm"
     },
     "devDependencies": {
-        "vitest": "^4.1.4"
+        "vitest": "^4.1.11"
     }
 }

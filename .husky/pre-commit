@@ -1,1 +1,11 @@
+# Git hooks run in a non-login shell, so recover user-managed toolchains when needed.
+if ! command -v cargo >/dev/null 2>&1 && [ -d "$HOME/.cargo/bin" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+if ! command -v pnpm >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --shell bash --version-file-strategy recursive --log-level error)"
+    fnm use --silent-if-unchanged --log-level error >/dev/null
+fi
+
 pnpm run check

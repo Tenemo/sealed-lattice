@@ -1,23 +1,16 @@
 import { readFileSync } from 'node:fs';
 
-import { foundationProfile } from '@sealed-lattice/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
+import {
+    createMaximumAcceptedPollSpec,
+    maximumCanonicalManifestFixtureByteLength,
+} from '../maximum-manifest-fixture.js';
 
-import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
-type DeriveCollectiveBgvSetupRosterHash = (
-    entries: readonly Readonly<{
-        readonly rosterPosition: number;
-        readonly trusteeIdentity: string;
-        readonly signingPublicKeyHash: string;
-    }>[],
-) => string;
 type CreateCanonicalManifest = (input: {
     readonly options: readonly string[];
-    readonly pollId: string;
     readonly question: string;
-    readonly topOptionCount: number;
 }) => Promise<{
     readonly canonicalBytes: Uint8Array;
     readonly manifestHash: string;
@@ -30,8 +23,6 @@ type VerifyCanonicalManifest = (canonicalBytes: Uint8Array) => Promise<
     | Readonly<{ readonly isValid: false; readonly refusalReason: string }>
 >;
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
-const deriveCollectiveBgvSetupRosterHash =
-    publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
 const createCanonicalManifest =
     publicApiRuntimeRecord.createCanonicalManifest as CreateCanonicalManifest;
 const verifyCanonicalManifest =
@@ -40,14 +31,20 @@ const expectedPublicRuntimeExportNames = [
     'createCanonicalActionDefinition',
     'createCanonicalBoardPolicy',
     'createCanonicalManifest',
-    'deriveCollectiveBgvSetupRosterHash',
     'validatePollSpec',
     'verifyCanonicalActionContext',
     'verifyCanonicalActionDefinition',
     'verifyCanonicalBoardPolicy',
     'verifyCanonicalCeremonyContext',
     'verifyCanonicalManifest',
-    'verifyCanonicalSuiteRecord',
+] as const;
+const expectedPublicWasmExportNames = [
+    '__data_end',
+    '__heap_base',
+    'memory',
+    'sealed_lattice_allocate',
+    'sealed_lattice_deallocate',
+    'sealed_lattice_foundation_command_with_length',
 ] as const;
 
 describe('election foundation public package API in Node', () => {
@@ -63,68 +60,71 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('derives the setup roster hash used by setup package verification', () => {
-        const expectedSetupRosterHash = deriveCanonicalObjectHash({
-            objectType: 'CollectiveBgvSetupRoster',
-            rosterEntries: [
-                {
-                    objectType: 'CollectiveBgvSetupRosterEntry',
-                    rosterPosition: 0,
-                    trusteeIdentity: 'trustee-0',
-                    signingPublicKeyHash: 'a'.repeat(128),
-                },
-                {
-                    objectType: 'CollectiveBgvSetupRosterEntry',
-                    rosterPosition: 1,
-                    trusteeIdentity: 'trustee-1',
-                    signingPublicKeyHash: 'b'.repeat(128),
-                },
-            ],
-        });
+    it('ships a foundation-only WebAssembly export inventory', () => {
+        const module = new WebAssembly.Module(
+            readFileSync(
+                new URL(
+                    '../../dist/sealed-lattice-kernel.wasm',
+                    import.meta.url,
+                ),
+            ),
+        );
+        const exportNames = WebAssembly.Module.exports(module)
+            .map((entry) => entry.name)
+            .sort();
 
-        expect(
-            deriveCollectiveBgvSetupRosterHash([
-                {
-                    rosterPosition: 1,
-                    trusteeIdentity: 'trustee-1',
-                    signingPublicKeyHash: 'b'.repeat(128),
-                },
-                {
-                    rosterPosition: 0,
-                    trusteeIdentity: 'trustee-0',
-                    signingPublicKeyHash: 'a'.repeat(128),
-                },
-            ]),
-        ).toBe(expectedSetupRosterHash);
+        expect(exportNames).toEqual(expectedPublicWasmExportNames);
     });
 
-    it('creates and verifies canonical manifest bytes through the packaged kernel', async () => {
-        const manifest = await createCanonicalManifest({
-            options: Array.from(
-                { length: foundationProfile.optionCount },
-                (_value, optionIndex) => `Option ${String(optionIndex)}`,
-            ),
-            pollId: 'public-api-ceremony',
-            question: 'Choose priorities',
-            topOptionCount: 5,
-        });
+    it('creates and verifies canonical manifest bytes through one packaged kernel instance', async () => {
+        const instantiate = vi.spyOn(WebAssembly, 'instantiate');
+        try {
+            const manifest = await createCanonicalManifest({
+                options: Array.from(
+                    { length: 10 },
+                    (_value, optionIndex) => `Option ${String(optionIndex)}`,
+                ),
+                question: 'Choose priorities',
+            });
 
-        expect(manifest.canonicalBytes.byteLength).toBeGreaterThan(0);
+            expect(manifest.canonicalBytes.byteLength).toBeGreaterThan(0);
+            expect(
+                await verifyCanonicalManifest(manifest.canonicalBytes),
+            ).toEqual({
+                isValid: true,
+                value: { manifestHash: manifest.manifestHash },
+            });
+            expect(instantiate).toHaveBeenCalledTimes(1);
+        } finally {
+            instantiate.mockRestore();
+        }
+    });
+
+    it('creates and verifies the largest manifest admitted by poll validation', async () => {
+        const manifest = await createCanonicalManifest(
+            createMaximumAcceptedPollSpec(),
+        );
+
+        expect(manifest.canonicalBytes).toHaveLength(
+            maximumCanonicalManifestFixtureByteLength,
+        );
         expect(await verifyCanonicalManifest(manifest.canonicalBytes)).toEqual({
             isValid: true,
             value: { manifestHash: manifest.manifestHash },
         });
     });
 
-    it('publishes setup verification as a result-only operation', () => {
+    it('emits declarations for the foundation verification result', () => {
         const declarations = readFileSync(
             new URL('../../dist/index.d.ts', import.meta.url),
             'utf8',
         );
 
-        expect(declarations).not.toContain('derivePollSpecHash');
         expect(declarations).toContain(
-            'declare const createCanonicalManifest:',
+            'declare const verifyCanonicalManifest:',
+        );
+        expect(declarations).toContain(
+            'Promise<FoundationManifestVerification>',
         );
     });
 });
