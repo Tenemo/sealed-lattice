@@ -141,6 +141,11 @@ export function programmedOracleDomainWork(
         readonly prefixBits: bigint;
     }[],
 ) {
+    assert.ok(
+        replacements.every(
+            (value) => value.inputBits >= 0n && value.prefixBits >= 0n,
+        ),
+    );
     // Read the base prefix into private workspace and erase it with the same
     // base query after the clean replacement copy. The inner domain adapter
     // independently retains its own compute/copy/uncompute multiplier.

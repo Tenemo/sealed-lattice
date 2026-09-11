@@ -18,6 +18,23 @@ const bits = (value: number, width: number) =>
     );
 
 describe('Programmed oracle prefixes', () => {
+    it('validates retained records even when the query schedule is empty', () => {
+        expect(() =>
+            programmedOracleDomainWork([], 1n, [
+                { inputBits: -1n, prefixBits: 1n },
+            ]),
+        ).toThrow();
+        expect(() =>
+            programmedOracleDomainWork([], 1n, [
+                { inputBits: 1n, prefixBits: -1n },
+            ]),
+        ).toThrow();
+        const empty = programmedOracleDomainWork([], 1n, [
+            { inputBits: 3n, prefixBits: 4n },
+        ]);
+        expect(empty.queryGates).toBe(0n);
+        expect(empty.classicalRecordPayloadBits).toBe(7n);
+    });
     it('matches the modified compressed-oracle operator on every supported bounded database state', () => {
         for (const width of [1, 2]) {
             const result = verifyProgrammedLocalOracle(width);
