@@ -117,6 +117,10 @@ import {
     setupGaussianParameters,
 } from '#tests/setup-randomness-model.js';
 import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
+import {
+    compileSigningKeyRecoveryWork,
+    keyRecoveryChallengeControl,
+} from '#tests/signing-key-recovery-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -2519,6 +2523,52 @@ export const renderDocumentationCensus = (): string => {
                 ];
             })(),
         ),
+        '',
+        '## Signing vault key-recovery accounting',
+        '',
+        'A newly available valid private key matching the expected verification key yields a fresh signature in the fixed registration-message subset. This charges one local signing computation, not an additional response from the honest signing oracle. Existing import/validation and the actual vault wrapper remain separately charged.',
+        '',
+        table(
+            ['Operand', 'Value'],
+            (() => {
+                const value = compileSigningKeyRecoveryWork(15n),
+                    control = keyRecoveryChallengeControl();
+                return [
+                    ['Prior-frame evaluation operand', formatCount(15n)],
+                    ['Fixed message bytes', formatCount(value.messageBytes)],
+                    [
+                        'Maximum candidate messages examined',
+                        formatCount(value.maximumCandidates),
+                    ],
+                    [
+                        'Additional signing-oracle queries',
+                        formatCount(value.additionalSigningOracleQueries),
+                    ],
+                    [
+                        'Local signing evaluations',
+                        formatCount(value.localSigningEvaluations),
+                    ],
+                    [
+                        'Additional local hash-call upper bound',
+                        formatCount(value.localSigningWork.hashCalls),
+                    ],
+                    [
+                        'Additional local Keccak permutation upper bound',
+                        formatCount(value.localSigningWork.permutations),
+                    ],
+                    [
+                        'Wrong decoders in the finite challenge control',
+                        formatCount(control.decoders),
+                    ],
+                    [
+                        'Recovery mixture weights checked',
+                        formatCount(control.recoveryWeights),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'Wrapping-key recovery reduces to a fresh equal-length AEAD challenge with factor two and an unused-message collision term. The candidate key and target must be fixed before both independent challenge messages. Fresh nonce availability, actual key populations and the complete AEAD bound remain obligations; a tag under a replacement key does not establish original provenance.',
         '',
         '## ML-DSA theorem parameter screen',
         '',
