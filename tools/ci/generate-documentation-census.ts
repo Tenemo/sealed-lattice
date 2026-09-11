@@ -95,6 +95,7 @@ import {
     oracleDomainWork,
     programmedOracleDomainWork,
     prefixReplacementBaseQueriesPerAccess,
+    shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import {
@@ -4008,6 +4009,10 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionBody.senderPrefixBytes),
                 ],
                 [
+                    'Sender-and-salt prefix bytes',
+                    formatCount(contributionBody.senderSaltPrefixBytes),
+                ],
+                [
                     'Minimum commitment hash-input bytes',
                     formatCount(contributionBody.minimumHashInputBytes),
                 ],
@@ -4945,6 +4950,60 @@ export const renderDocumentationCensus = (): string => {
                     ].map(formatCount);
                 },
             ),
+        ),
+        '',
+        'The hidden-slice example keeps two independent shadows before one opening and one afterward. It preserves both databases and the programmed background across stages. Slice selection, nested background copies and all shadow calls are charged; record metadata, initialization and complete reduction-time conversion remain separate.',
+        '',
+        table(
+            [
+                'Background full-value calls',
+                'Shadow full-value calls',
+                'Slice-controller gates',
+                'Replacement-copy gates',
+                'Total query gates',
+                'Oracle qubit bound',
+                'Classical slice prefix bits',
+                'Maximum programming record payload bits',
+            ],
+            [
+                (() => {
+                    const work = shadowOracleDomainWork(
+                        [
+                            {
+                                count: 2n,
+                                inputCapacity: 4n,
+                                outputCapacity: 3n,
+                                activeShadows: [0, 1],
+                                replacements: [],
+                            },
+                            {
+                                count: 3n,
+                                inputCapacity: 4n,
+                                outputCapacity: 3n,
+                                activeShadows: [1],
+                                replacements: [
+                                    { inputBits: 4n, prefixBits: 2n },
+                                ],
+                            },
+                        ],
+                        2n,
+                        [2n, 3n],
+                    );
+                    return [
+                        work.base.fullValueQueries,
+                        work.shadows.reduce(
+                            (sum, value) => sum + value.fullValueQueries,
+                            0n,
+                        ),
+                        work.routingGates,
+                        work.copyGates,
+                        work.queryGates,
+                        work.maximumQubits,
+                        work.classicalSlicePrefixBits,
+                        work.maximumProgrammingRecordPayloadBits,
+                    ].map(formatCount);
+                })(),
+            ],
         ),
         '',
         '## Full-body commitment equivocation census',

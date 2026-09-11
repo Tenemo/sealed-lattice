@@ -46,6 +46,22 @@ export const matchesContributionSenderPrefix = (
     );
 };
 
+export const contributionSaltPrefix = (
+    publicKey: Uint8Array,
+    salt: Uint8Array,
+) => {
+    const saltBytes =
+        compileCommitmentEquivocationBound(
+            Number(fixedModulusBfvInputs.participantCount),
+        ).saltBitLength / 8n;
+    if (BigInt(salt.length) !== saltBytes)
+        throw new RangeError('Invalid commitment salt length.');
+    const header = Buffer.alloc(6);
+    header.writeUInt16LE(1, 0);
+    header.writeUInt32LE(salt.length, 2);
+    return Buffer.concat([contributionSenderPrefix(publicKey), header, salt]);
+};
+
 export const compileContributionBodyCensus = () => {
     const parameters = fixedModulusBfvInputs;
     const participantCount = Number(parameters.participantCount);
@@ -133,6 +149,11 @@ export const compileContributionBodyCensus = () => {
         senderKeyOffsetBytes,
         senderPrefixBytes:
             senderKeyOffsetBytes + registrationSigningPublicKeyBytes,
+        senderSaltPrefixBytes:
+            senderKeyOffsetBytes +
+            registrationSigningPublicKeyBytes +
+            6n +
+            saltBytes,
         minimumHashInputEnclosingBitExponent: enclosingExponent(
             8n * minimumHashInputBytes,
         ),

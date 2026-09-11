@@ -4,9 +4,27 @@ import {
     compileContributionBodyCensus,
     contributionSenderPrefix,
     matchesContributionSenderPrefix,
+    contributionSaltPrefix,
 } from '#tests/contribution-body-model.js';
 
 describe('complete contribution body encoding', () => {
+    it('masks the complete sender and salt slice without selecting a body suffix', () => {
+        const key = new Uint8Array(1952),
+            salt = Uint8Array.from({ length: 64 }, (_, index) => index),
+            sender = contributionSenderPrefix(key),
+            prefix = contributionSaltPrefix(key, salt);
+        expect(prefix.subarray(0, sender.length)).toEqual(sender);
+        expect(prefix.subarray(sender.length, sender.length + 6)).toEqual(
+            Buffer.from([1, 0, 64, 0, 0, 0]),
+        );
+        expect(prefix.subarray(sender.length + 6)).toEqual(Buffer.from(salt));
+        expect(BigInt(prefix.length)).toBe(
+            compileContributionBodyCensus().senderSaltPrefixBytes,
+        );
+        expect(() => contributionSaltPrefix(key, salt.subarray(1))).toThrow(
+            'salt length',
+        );
+    });
     it('matches the canonical domain and original key without granting body validity', () => {
         const key = Uint8Array.from(
                 { length: 1952 },

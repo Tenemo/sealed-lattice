@@ -4,6 +4,7 @@ import {
     compileOracleCellController,
     oracleCellControllerWork,
     oraclePrefixReplacementWork,
+    oracleSliceRoutingWork,
     prefixOracleWork,
     runOracleCellController,
 } from '#tests/compressed-oracle-model.js';
@@ -41,6 +42,96 @@ type QueryRun = {
 };
 
 export const prefixReplacementBaseQueriesPerAccess = 2n;
+
+type ShadowQueryRun = QueryRun & {
+    readonly activeShadows: readonly number[];
+    readonly replacements: readonly {
+        readonly inputBits: bigint;
+        readonly prefixBits: bigint;
+    }[];
+};
+
+export function shadowOracleDomainWork(
+    runs: readonly ShadowQueryRun[],
+    firstChunkBits: bigint,
+    prefixLengths: readonly bigint[],
+) {
+    assert.ok(prefixLengths.every((value) => value >= 0n));
+    const base = oracleDomainWork(
+        runs.map((run) => ({
+            ...run,
+            count: prefixReplacementBaseQueriesPerAccess * run.count,
+        })),
+        firstChunkBits,
+    );
+    let maximumProgrammingRecordPayloadBits = 0n;
+    let routingGates = 0n,
+        copyGates = 0n,
+        maximumRoutingQubits = 0n,
+        maximumCopyQubits = 0n;
+    for (const run of runs) {
+        assert.equal(new Set(run.activeShadows).size, run.activeShadows.length);
+        assert.ok(
+            run.activeShadows.every(
+                (index) =>
+                    Number.isSafeInteger(index) &&
+                    index >= 0 &&
+                    index < prefixLengths.length,
+            ),
+        );
+        const routing = oracleSliceRoutingWork(
+                run.inputCapacity,
+                run.outputCapacity,
+                run.activeShadows.map((index) => prefixLengths[index]),
+            ),
+            copy = oraclePrefixReplacementWork(
+                run.inputCapacity,
+                run.outputCapacity,
+                run.replacements,
+            );
+        const recordPayload = run.replacements.reduce(
+            (sum, value) => sum + value.inputBits + value.prefixBits,
+            0n,
+        );
+        if (recordPayload > maximumProgrammingRecordPayloadBits)
+            maximumProgrammingRecordPayloadBits = recordPayload;
+        routingGates += run.count * routing.computeAndUncomputeGates;
+        copyGates += run.count * copy.cleanCopyGates;
+        if (run.count > 0n) {
+            if (routing.routingQubits > maximumRoutingQubits)
+                maximumRoutingQubits = routing.routingQubits;
+            if (copy.copyQubits > maximumCopyQubits)
+                maximumCopyQubits = copy.copyQubits;
+        }
+    }
+    const shadows = prefixLengths.map((_prefix, index) =>
+        oracleDomainWork(
+            runs.filter((run) => run.activeShadows.includes(index)),
+            firstChunkBits,
+        ),
+    );
+    return {
+        base,
+        shadows,
+        routingGates,
+        copyGates,
+        queryGates:
+            base.queryGates +
+            routingGates +
+            copyGates +
+            shadows.reduce((sum, value) => sum + value.queryGates, 0n),
+        maximumQubits:
+            base.maximumQubits +
+            maximumRoutingQubits +
+            maximumCopyQubits +
+            shadows.reduce((sum, value) => sum + value.maximumQubits, 0n),
+        classicalSlicePrefixBits: prefixLengths.reduce(
+            (sum, value) => sum + value,
+            0n,
+        ),
+        maximumProgrammingRecordPayloadBits,
+    };
+}
 
 export function oracleDomainWork(
     runs: readonly QueryRun[],

@@ -1036,6 +1036,152 @@ export type OraclePrefixReplacement = {
     readonly prefix: Uint8Array;
 };
 
+export function oracleSliceRoutingWork(
+    inputCapacity: bigint,
+    outputCapacity: bigint,
+    prefixLengths: readonly bigint[],
+) {
+    assert.ok(
+        inputCapacity >= 0n &&
+            outputCapacity >= 0n &&
+            prefixLengths.every((length) => length >= 0n),
+    );
+    const inputLengthBits = integerWidth(inputCapacity),
+        outputLengthBits = integerWidth(outputCapacity),
+        cx = integerWidth(inputCapacity + 1n),
+        cy = integerWidth(outputCapacity + 1n);
+    let computeGates = 6n + 7n * cx + 7n * cy + outputLengthBits,
+        cleanWorkQubits = 5n + 4n * cx + 4n * cy + outputLengthBits;
+    for (const length of prefixLengths)
+        if (length <= inputCapacity) {
+            computeGates += 11n + 5n * length + 7n * cx + outputLengthBits;
+            cleanWorkQubits += 7n + 3n * length + 4n * cx + outputLengthBits;
+        }
+    const inputBits = inputCapacity + inputLengthBits + outputLengthBits,
+        outputBits = BigInt(prefixLengths.length + 1) * outputLengthBits;
+    return {
+        inputCapacity,
+        outputCapacity,
+        inputLengthBits,
+        outputLengthBits,
+        inputBits,
+        outputBits,
+        computeGates,
+        cleanWorkQubits,
+        computeAndUncomputeGates: 4n * computeGates + 2n * outputBits,
+        routingQubits: inputBits + outputBits + cleanWorkQubits,
+    };
+}
+
+export function compileOracleSliceRouting(
+    inputCapacity: number,
+    outputCapacity: number,
+    prefixes: readonly Uint8Array[],
+) {
+    assert.ok(
+        Number.isSafeInteger(inputCapacity) &&
+            Number.isSafeInteger(outputCapacity),
+    );
+    for (let index = 0; index < prefixes.length; index++) {
+        assert.ok(prefixes[index].every((bit) => bit <= 1));
+        for (let other = 0; other < index; other++) {
+            const length = Math.min(
+                prefixes[index].length,
+                prefixes[other].length,
+            );
+            assert.ok(
+                !prefixes[index]
+                    .subarray(0, length)
+                    .every(
+                        (bit, position) => bit === prefixes[other][position],
+                    ),
+                'Oracle slices overlap.',
+            );
+        }
+    }
+    const work = oracleSliceRoutingWork(
+            BigInt(inputCapacity),
+            BigInt(outputCapacity),
+            prefixes.map((value) => BigInt(value.length)),
+        ),
+        builder = new Builder(Number(work.inputBits)),
+        one = builder.not(builder.zero),
+        cx = Number(integerWidth(BigInt(inputCapacity + 1))),
+        cy = Number(integerWidth(BigInt(outputCapacity + 1))),
+        a = Number(work.inputLengthBits),
+        b = Number(work.outputLengthBits),
+        constant = (value: number, width: number) =>
+            Array.from({ length: width }, (_, bit) =>
+                Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
+            ),
+        inputLength = Array.from({ length: cx }, (_, bit) =>
+            bit < a ? inputCapacity + bit : builder.zero,
+        ),
+        outputLength = Array.from({ length: cy }, (_, bit) =>
+            bit < b ? inputCapacity + a + bit : builder.zero,
+        ),
+        valid = builder.and(
+            builder.less(inputLength, constant(inputCapacity + 1, cx)),
+            builder.less(outputLength, constant(outputCapacity + 1, cy)),
+        );
+    const outputs: number[][] = [];
+    let seen = builder.zero;
+    for (const prefix of prefixes) {
+        if (prefix.length > inputCapacity) {
+            outputs.push(Array<number>(b).fill(builder.zero));
+            continue;
+        }
+        const match = builder.and(
+            builder.equal(
+                Array.from({ length: prefix.length }, (_, bit) => bit),
+                Array.from(prefix, (bit) => (bit ? one : builder.zero)),
+            ),
+            builder.not(builder.less(inputLength, constant(prefix.length, cx))),
+        );
+        seen = builder.or(seen, match);
+        const selected = builder.and(valid, match);
+        outputs.push(
+            outputLength.slice(0, b).map((bit) => builder.and(selected, bit)),
+        );
+    }
+    const background = builder.and(valid, builder.not(seen));
+    const circuit = builder.finish([
+        ...outputLength.slice(0, b).map((bit) => builder.and(background, bit)),
+        ...outputs.flat(),
+    ]);
+    assert.equal(BigInt(circuit.gates.length), work.computeGates);
+    assert.equal(BigInt(circuit.wires - circuit.inputs), work.cleanWorkQubits);
+    return { work, circuit };
+}
+
+export function runOracleSliceRouting(
+    compiled: ReturnType<typeof compileOracleSliceRouting>,
+    data: Uint8Array,
+    inputLength: number,
+    outputLength: number,
+) {
+    const { work, circuit } = compiled,
+        controls = Uint8Array.from([
+            ...integerBits(inputLength, Number(work.inputLengthBits)),
+            ...integerBits(outputLength, Number(work.outputLengthBits)),
+        ]),
+        output = new Uint8Array(circuit.output.length);
+    applyClean(circuit, data, controls, output);
+    const values = Array.from(
+        { length: output.length / Number(work.outputLengthBits) },
+        (_, index) =>
+            fromBits(
+                output.subarray(
+                    index * Number(work.outputLengthBits),
+                    (index + 1) * Number(work.outputLengthBits),
+                ),
+            ),
+    );
+    applyClean(circuit, data, controls, output);
+    assert.ok(output.every((bit) => bit === 0));
+    return values;
+}
+
 export function oraclePrefixReplacementWork(
     inputCapacity: bigint,
     outputCapacity: bigint,
