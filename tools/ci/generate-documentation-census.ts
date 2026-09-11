@@ -6,6 +6,7 @@ import { archiveHolderRequirements } from '#tests/archive-availability-model.js'
 import {
     compileAuthenticationFrameWork,
     compileCompletedAuthenticationCensus,
+    compileCurrentCredentialIntentBounds,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
@@ -1659,6 +1660,21 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(role.frameBytes),
                 formatCount(role.representativeInputBytes),
                 formatCount(role.representativePermutations),
+            ]),
+        ),
+        '',
+        'For one original credential, the source-inductive one-shot argument bounds first-evaluated intents across the currently emitted purposes, including signatures never delivered. Repeated evaluation of retained coins consumes runtime but no new cached signing-oracle query. These conditional per-credential prefix bounds do not supply the total credential population, repeated-work bound, future close/release purposes or a complete signature-security claim.',
+        '',
+        table(
+            [
+                'Credential role',
+                'Current purposes',
+                'First-evaluated intent bound',
+            ],
+            compileCurrentCredentialIntentBounds().map((value) => [
+                value.role,
+                value.purposes.join(', '),
+                formatCount(value.firstEvaluatedIntentBound),
             ]),
         ),
         '',

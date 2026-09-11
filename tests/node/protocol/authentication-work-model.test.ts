@@ -5,10 +5,40 @@ import {
     authenticationPurposes,
     compileAuthenticationFrameWork,
     compileCompletedAuthenticationCensus,
+    compileCurrentCredentialIntentBounds,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
 
 describe('Authentication frame accounting', () => {
+    it('bounds first-evaluated intents separately from delivered ballot counts', () => {
+        const [organizer, participant] = compileCurrentCredentialIntentBounds();
+        expect(organizer.firstEvaluatedIntentBound).toBe(6n);
+        expect(participant.firstEvaluatedIntentBound).toBe(4n);
+        expect(participant.purposes).toEqual([
+            'registration',
+            'roster-confirmation',
+            'setup-opening',
+            'ballot-envelope',
+        ]);
+        for (let count = 3; count <= 20; count++) {
+            const intentBound =
+                organizer.firstEvaluatedIntentBound +
+                BigInt(count - 1) * participant.firstEvaluatedIntentBound;
+            expect(
+                compileCompletedAuthenticationCensus(
+                    count,
+                    BigInt(count),
+                    count,
+                ).signatures,
+            ).toBe(intentBound);
+            // An evaluated ballot signature may never be delivered. The bound
+            // cannot be reduced to the accepted or published ballot count.
+            expect(
+                compileCompletedAuthenticationCensus(count, BigInt(count), 0)
+                    .signatures,
+            ).toBeLessThan(intentBound);
+        }
+    });
     it('preserves the FIPS pure-mode prefix and unambiguous context boundary', () => {
         expect(pureSignatureFrame(Buffer.from('ab'), Buffer.from('c'))).toEqual(
             Buffer.from([0, 2, 97, 98, 99]),

@@ -18,6 +18,31 @@ export type AuthenticationPurpose = (typeof authenticationPurposes)[number];
 export const authenticationContext = (purpose: AuthenticationPurpose) =>
     `sealed-lattice/${purpose}/v1`;
 
+// One original credential through ballot completion, under the original-state
+// invariant. Each purpose has one fixed first-evaluated intent; repeated
+// evaluation of its retained coins is still work, but not another oracle query.
+// Closing/release purposes and the population of credential creations are absent.
+export const compileCurrentCredentialIntentBounds = () => {
+    const owners: Record<AuthenticationPurpose, 'organizer' | 'everyone'> = {
+        'poll-definition': 'organizer',
+        registration: 'everyone',
+        'roster-proposal': 'organizer',
+        'roster-confirmation': 'everyone',
+        'setup-opening': 'everyone',
+        'ballot-envelope': 'everyone',
+    };
+    return (['organizer', 'other participant'] as const).map((role) => {
+        const purposes = authenticationPurposes.filter(
+            (purpose) => role === 'organizer' || owners[purpose] === 'everyone',
+        );
+        return {
+            role,
+            purposes,
+            firstEvaluatedIntentBound: BigInt(purposes.length),
+        };
+    });
+};
+
 // FIPS 204 Algorithms 2 and 3 use the pure interface, even when the
 // application's message is already a foundation digest. This is not HashML-DSA.
 export const pureSignatureFrame = (
