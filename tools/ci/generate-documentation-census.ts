@@ -31,7 +31,10 @@ import {
 } from '#tests/commitment-equivocation-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
-import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
+import {
+    compileCommonMatrixSamplingCensus,
+    compileCommonMatrixInitializationCensus,
+} from '#tests/common-matrix-sampling-model.js';
 import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
 import {
     sparseRoutingWork,
@@ -4285,6 +4288,56 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(commonMatrixSampling.distanceBits),
                 ],
             ],
+        ),
+        '',
+        'Common-matrix XOF initialization reuses the fixed-work residue-fibre sampler. Each common polynomial is one fixed input with a complete output prefix; consecutive wide words encode its coefficients. The sampler makes one bounded draw per coefficient and adds its explicit modulo bias. It does not use a rejection-loop or exhaustion term.',
+        '',
+        table(
+            ['Property', 'Value'],
+            (() => {
+                const initialization =
+                    compileCommonMatrixInitializationCensus();
+                return [
+                    ['Programmed XOF inputs', initialization.programmedInputs],
+                    [
+                        'Programmed prefix bytes',
+                        initialization.programmedPrefixBytes,
+                    ],
+                    [
+                        'Extra fibre sampling bits',
+                        initialization.extraSamplingBits,
+                    ],
+                    ['Random bits consumed', initialization.randomBits],
+                    [
+                        'Byte-aligned random input bytes',
+                        initialization.randomBytes,
+                    ],
+                    ['Fibre bias numerator', initialization.biasNumerator],
+                    ['Fibre bias denominator', initialization.biasDenominator],
+                ].map(([label, value]) => [
+                    String(label),
+                    formatCount(value as bigint),
+                ]);
+            })(),
+        ),
+        '',
+        table(
+            [
+                'Common family',
+                'Polynomials',
+                'Coefficients',
+                'Random bits per coefficient',
+                'Programmed prefix bytes',
+            ],
+            compileCommonMatrixInitializationCensus().families.map((value) => [
+                value.name,
+                ...[
+                    value.polynomials,
+                    value.coefficients,
+                    value.randomBitsPerCoefficient,
+                    value.programmedPrefixBytes,
+                ].map(formatCount),
+            ]),
         ),
         '',
         '## Fixed sponge initialization census',

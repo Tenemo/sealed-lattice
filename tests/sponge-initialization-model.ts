@@ -1,35 +1,10 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
+import {
+    compileCommonMatrixSamplingCensus,
+    compileCommonMatrixInitializationCensus,
+} from '#tests/common-matrix-sampling-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-
-export const boundedResidueFiberWord = (
-    modulus: bigint,
-    wordBits: bigint,
-    residue: bigint,
-    randomWord: bigint,
-    randomBits: bigint,
-) => {
-    if (
-        wordBits < 1n ||
-        wordBits > 4096n ||
-        randomBits < 1n ||
-        randomBits > 8192n
-    )
-        throw new RangeError('Invalid finite sampling width.');
-    const space = 1n << wordBits;
-    if (
-        modulus < 2n ||
-        modulus > space ||
-        residue < 0n ||
-        residue >= modulus ||
-        randomWord < 0n ||
-        randomWord >= 1n << randomBits
-    )
-        throw new RangeError('Invalid residue-fiber input.');
-    const count = (space - 1n - residue) / modulus + 1n;
-    return residue + modulus * (randomWord % count);
-};
 
 export const forcePermutationMappings = (
     permutation: readonly number[],
@@ -157,8 +132,7 @@ export const compileFixedSpongeInitializationCensus = () => {
         ]);
     const prefix = Buffer.from('synthetic-full-setup-witness/1');
     const extraSamplingBits =
-        capacityBits / 2n +
-        BigInt((matrices.coefficientCount - 1n).toString(2).length);
+        compileCommonMatrixInitializationCensus().extraSamplingBits;
     const seeds = roles.map(({ label, degree: seedDegree, modulus }) => {
         const bytes = Buffer.from(label),
             length = Buffer.alloc(4);

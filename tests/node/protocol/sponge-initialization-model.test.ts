@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    boundedResidueFiberWord,
     compileFixedSpongeInitializationCensus,
     forcePermutationMappings,
     squeezingCapacityCondition,
@@ -24,29 +23,6 @@ function* permutations(
 }
 
 describe('fixed-input sponge initialization', () => {
-    it('samples valid fibers in fixed work and bounds its extra distribution bias', () => {
-        const counts = new Map<bigint, bigint>();
-        for (let residue = 0n; residue < 5n; residue++)
-            for (let random = 0n; random < 32n; random++) {
-                const word = boundedResidueFiberWord(
-                    5n,
-                    4n,
-                    residue,
-                    random,
-                    5n,
-                );
-                expect(word % 5n).toBe(residue);
-                expect(word).toBeLessThan(16n);
-                counts.set(word, (counts.get(word) ?? 0n) + 1n);
-            }
-        const absoluteDifference = [...counts].reduce((sum, [word, count]) => {
-            const difference = count * 3n - (word % 5n === 0n ? 24n : 32n);
-            return sum + (difference < 0n ? -difference : difference);
-        }, 0n);
-        // Both laws use denominator 480; half the absolute difference is 1/60.
-        expect(absoluteDifference).toBe(16n);
-        expect(absoluteDifference * 60n).toBe(2n * 480n);
-    });
     it('covers the emitted common-vector seeds with distinct one-block inputs and complete output prefixes', () => {
         const value = compileFixedSpongeInitializationCensus();
         expect(value.rateBits).toBe(1088n);

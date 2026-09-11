@@ -15,6 +15,97 @@ export const uniformWordResidueDistance = (modulus: bigint, bits: number) => {
     };
 };
 
+export const boundedResidueFiberWord = (
+    modulus: bigint,
+    wordBits: bigint,
+    residue: bigint,
+    randomWord: bigint,
+    randomBits: bigint,
+) => {
+    if (
+        wordBits < 1n ||
+        wordBits > 4096n ||
+        randomBits < 1n ||
+        randomBits > 8192n
+    )
+        throw new RangeError('Invalid finite sampling width.');
+    const space = 1n << wordBits;
+    if (
+        modulus < 2n ||
+        modulus > space ||
+        residue < 0n ||
+        residue >= modulus ||
+        randomWord < 0n ||
+        randomWord >= 1n << randomBits
+    )
+        throw new RangeError('Invalid residue-fiber input.');
+    const count = (space - 1n - residue) / modulus + 1n;
+    return residue + modulus * (randomWord % count);
+};
+
+export function compileCommonMatrixInitializationCensus() {
+    const matrix = compileCommonMatrixSamplingCensus();
+    // Preserve the previously analysed one-pass fibre sampler's extra width.
+    const extraSamplingBits =
+        256n + BigInt((matrix.coefficientCount - 1n).toString(2).length);
+    const families = [
+        {
+            name: 'FHE',
+            polynomials: matrix.fhePolynomialCount,
+            degree: fixedModulusBfvInputs.polynomialDegree,
+            modulus: fixedModulusBfvInputs.ciphertextModulus,
+        },
+        {
+            name: 'Sharing',
+            polynomials: 1n,
+            degree: fixedModulusBfvInputs.polynomialDegree,
+            modulus: compileSmallLimbProofFieldCensus().modulus * 998244353n,
+        },
+        {
+            name: 'Auxiliary',
+            polynomials: 1n,
+            degree: auxiliaryInputEncryptionParameters.degree,
+            modulus: auxiliaryInputEncryptionParameters.modulus,
+        },
+    ].map((family) => {
+        const maximumFibreSize =
+                ((1n << BigInt(matrix.bitsPerCoefficient)) +
+                    family.modulus -
+                    1n) /
+                family.modulus,
+            randomBitsPerCoefficient =
+                BigInt(maximumFibreSize.toString(2).length) + extraSamplingBits,
+            coefficients = family.polynomials * family.degree;
+        return {
+            ...family,
+            coefficients,
+            maximumFibreSize,
+            randomBitsPerCoefficient,
+            randomBits: coefficients * randomBitsPerCoefficient,
+            randomBytes: coefficients * ((randomBitsPerCoefficient + 7n) / 8n),
+            programmedPrefixBytes:
+                (coefficients * BigInt(matrix.bitsPerCoefficient)) / 8n,
+        };
+    });
+    return {
+        extraSamplingBits,
+        families,
+        coefficientCount: matrix.coefficientCount,
+        programmedInputs: families.reduce(
+            (sum, value) => sum + value.polynomials,
+            0n,
+        ),
+        programmedPrefixBytes: matrix.expandedSampleBytes,
+        randomBits: families.reduce((sum, value) => sum + value.randomBits, 0n),
+        randomBytes: families.reduce(
+            (sum, value) => sum + value.randomBytes,
+            0n,
+        ),
+        biasNumerator: matrix.coefficientCount,
+        biasDenominator: 4n << extraSamplingBits,
+    };
+}
+
 export const compileCommonMatrixSamplingCensus = () => {
     const bitsPerCoefficient = 1024;
     const degree = fixedModulusBfvInputs.polynomialDegree;
