@@ -1031,6 +1031,177 @@ export function runOracleCellController(
     return result;
 }
 
+export type OraclePrefixReplacement = {
+    readonly input: Uint8Array;
+    readonly prefix: Uint8Array;
+};
+
+export function oraclePrefixReplacementWork(
+    inputCapacity: bigint,
+    outputCapacity: bigint,
+    replacements: readonly {
+        readonly inputBits: bigint;
+        readonly prefixBits: bigint;
+    }[],
+) {
+    assert.ok(inputCapacity >= 0n && outputCapacity >= 0n);
+    const inputLengthBits = integerWidth(inputCapacity),
+        outputLengthBits = integerWidth(outputCapacity),
+        inputComparisonBits = integerWidth(inputCapacity + 1n),
+        outputComparisonBits = integerWidth(outputCapacity + 1n);
+    let computeGates =
+            3n +
+            7n * inputComparisonBits +
+            7n * outputComparisonBits +
+            outputCapacity * (7n * outputComparisonBits + 2n),
+        cleanWorkQubits =
+            3n +
+            4n * inputComparisonBits +
+            4n * outputComparisonBits +
+            outputCapacity * (4n * outputComparisonBits + 2n);
+    for (const replacement of replacements) {
+        assert.ok(replacement.inputBits >= 0n && replacement.prefixBits >= 0n);
+        if (replacement.inputBits > inputCapacity) continue;
+        const used =
+            replacement.prefixBits < outputCapacity
+                ? replacement.prefixBits
+                : outputCapacity;
+        computeGates +=
+            5n + 5n * (inputComparisonBits + replacement.inputBits) + 5n * used;
+        cleanWorkQubits +=
+            3n + 3n * (inputComparisonBits + replacement.inputBits) + 3n * used;
+    }
+    const inputBits =
+        inputCapacity + inputLengthBits + outputLengthBits + outputCapacity;
+    return {
+        inputCapacity,
+        outputCapacity,
+        inputLengthBits,
+        outputLengthBits,
+        inputComparisonBits,
+        outputComparisonBits,
+        inputBits,
+        computeGates,
+        cleanWorkQubits,
+        cleanCopyGates: 2n * computeGates + outputCapacity,
+        copyQubits: inputBits + outputCapacity + cleanWorkQubits,
+    };
+}
+
+export function compileOraclePrefixReplacement(
+    inputCapacity: number,
+    outputCapacity: number,
+    replacements: readonly OraclePrefixReplacement[],
+) {
+    assert.ok(
+        Number.isSafeInteger(inputCapacity) &&
+            Number.isSafeInteger(outputCapacity),
+    );
+    for (const replacement of replacements)
+        assert.ok(
+            replacement.input.every((bit) => bit <= 1) &&
+                replacement.prefix.every((bit) => bit <= 1),
+        );
+    const work = oraclePrefixReplacementWork(
+            BigInt(inputCapacity),
+            BigInt(outputCapacity),
+            replacements.map((replacement) => ({
+                inputBits: BigInt(replacement.input.length),
+                prefixBits: BigInt(replacement.prefix.length),
+            })),
+        ),
+        builder = new Builder(Number(work.inputBits)),
+        one = builder.not(builder.zero),
+        constant = (value: number, width: number) =>
+            Array.from({ length: width }, (_, bit) =>
+                Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
+            ),
+        cx = Number(work.inputComparisonBits),
+        cy = Number(work.outputComparisonBits),
+        inputLength = Array.from({ length: cx }, (_, bit) =>
+            bit < Number(work.inputLengthBits)
+                ? inputCapacity + bit
+                : builder.zero,
+        ),
+        outputLength = Array.from({ length: cy }, (_, bit) =>
+            bit < Number(work.outputLengthBits)
+                ? inputCapacity + Number(work.inputLengthBits) + bit
+                : builder.zero,
+        ),
+        valid = builder.and(
+            builder.less(inputLength, constant(inputCapacity + 1, cx)),
+            builder.less(outputLength, constant(outputCapacity + 1, cy)),
+        ),
+        sourceStart =
+            inputCapacity +
+            Number(work.inputLengthBits + work.outputLengthBits),
+        values = Array.from(
+            { length: outputCapacity },
+            (_, bit) => sourceStart + bit,
+        );
+    for (const replacement of replacements) {
+        if (replacement.input.length > inputCapacity) continue;
+        const match = builder.and(
+            builder.equal(inputLength, constant(replacement.input.length, cx)),
+            builder.equal(
+                Array.from(
+                    { length: replacement.input.length },
+                    (_, bit) => bit,
+                ),
+                Array.from(replacement.input, (bit) =>
+                    bit ? one : builder.zero,
+                ),
+            ),
+        );
+        for (
+            let bit = 0;
+            bit < Math.min(outputCapacity, replacement.prefix.length);
+            bit++
+        )
+            values[bit] = builder.select(
+                match,
+                replacement.prefix[bit] ? one : builder.zero,
+                values[bit],
+            );
+    }
+    const output = values.map((value, bit) =>
+            builder.and(
+                valid,
+                builder.and(
+                    builder.less(constant(bit, cy), outputLength),
+                    value,
+                ),
+            ),
+        ),
+        circuit = builder.finish(output);
+    assert.equal(BigInt(circuit.gates.length), work.computeGates);
+    assert.equal(BigInt(circuit.wires - circuit.inputs), work.cleanWorkQubits);
+    return { circuit, work };
+}
+
+export function runOraclePrefixReplacement(
+    compiled: ReturnType<typeof compileOraclePrefixReplacement>,
+    data: Uint8Array,
+    inputLength: number,
+    outputLength: number,
+    base: Uint8Array,
+    response: Uint8Array,
+) {
+    const { work, circuit } = compiled;
+    assert.equal(base.length, Number(work.outputCapacity));
+    const controls = Uint8Array.from([
+            ...integerBits(inputLength, Number(work.inputLengthBits)),
+            ...integerBits(outputLength, Number(work.outputLengthBits)),
+            ...base,
+        ]),
+        output = response.slice();
+    applyClean(circuit, data, controls, output);
+    const answer = output.slice();
+    applyClean(circuit, data, controls, output);
+    assert.deepEqual(output, response);
+    return answer;
+}
+
 export function prefixOracleWork(
     logicalQueries: bigint,
     inputBits: bigint,
@@ -1320,4 +1491,95 @@ export function verifyLocalOracleUpdate(outputBits: number) {
         retainedPresenceError,
         expectedPresenceError,
     };
+}
+
+export function verifyProgrammedLocalOracle(outputBits: number) {
+    assert.ok(
+        Number.isSafeInteger(outputBits) && outputBits >= 1 && outputBits <= 2,
+    );
+    const full = compileLocalOracleUpdate(outputBits),
+        size = 2 ** outputBits,
+        resultStart = full.qubits,
+        dimension = 2 ** (resultStart + outputBits),
+        index = (entry: number, result: number) =>
+            (entry < 0 ? 0 : 2 ** full.valid + entry) +
+            result * 2 ** resultStart,
+        coefficient = (out: number, input: number) =>
+            out < 0
+                ? input < 0
+                    ? 0
+                    : 1 / Math.sqrt(size)
+                : input < 0
+                  ? 1 / Math.sqrt(size)
+                  : (out === input ? 1 : 0) - 1 / size;
+    let cases = 0,
+        maximumError = 0;
+    for (let prefixBits = 0; prefixBits <= outputBits; prefixBits++)
+        for (
+            let replacement = 0;
+            replacement < 2 ** prefixBits;
+            replacement++
+        ) {
+            const copy = compileOraclePrefixReplacement(0, outputBits, [
+                {
+                    input: new Uint8Array(),
+                    prefix: integerBits(replacement, prefixBits),
+                },
+            ]);
+            for (let length = 0; length <= outputBits; length++) {
+                const masks = Array.from({ length: size }, (_, base) =>
+                    fromBits(
+                        runOraclePrefixReplacement(
+                            copy,
+                            new Uint8Array(),
+                            0,
+                            length,
+                            integerBits(base, outputBits),
+                            new Uint8Array(outputBits),
+                        ),
+                    ),
+                );
+                for (let entry = -1; entry < size; entry++)
+                    for (let response = 0; response < size; response++) {
+                        const actual = new Float64Array(dimension),
+                            expected = new Float64Array(dimension);
+                        actual[index(entry, response)] = 1;
+                        applyLocalGates(full.gates, actual);
+                        const copied = new Float64Array(dimension);
+                        for (let basis = 0; basis < dimension; basis++) {
+                            const base =
+                                Math.floor(basis / 2 ** full.accumulator) %
+                                size;
+                            copied[basis ^ (masks[base] * 2 ** resultStart)] =
+                                actual[basis];
+                        }
+                        applyLocalGates(full.gates, copied);
+                        for (
+                            let intermediate = -1;
+                            intermediate < size;
+                            intermediate++
+                        )
+                            for (let out = -1; out < size; out++) {
+                                const value =
+                                        intermediate < 0 ? 0 : intermediate,
+                                    patched =
+                                        (Math.floor(value / 2 ** prefixBits) *
+                                            2 ** prefixBits +
+                                            replacement) %
+                                        2 ** length;
+                                expected[index(out, response ^ patched)] +=
+                                    coefficient(intermediate, entry) *
+                                    coefficient(out, intermediate);
+                            }
+                        for (let basis = 0; basis < dimension; basis++)
+                            maximumError = Math.max(
+                                maximumError,
+                                Math.abs(copied[basis] - expected[basis]),
+                            );
+                        assert.ok(maximumError < 1e-12);
+                        cases++;
+                    }
+            }
+        }
+    return { outputBits, cases, maximumError };
 }

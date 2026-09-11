@@ -91,7 +91,11 @@ import {
     multiKeyTargetViews,
     randomizerInputCoupling,
 } from '#tests/multi-key-target-model.js';
-import { oracleDomainWork } from '#tests/oracle-domain-model.js';
+import {
+    oracleDomainWork,
+    programmedOracleDomainWork,
+    prefixReplacementBaseQueriesPerAccess,
+} from '#tests/oracle-domain-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import {
     compileParticipantCustodyCensus,
@@ -4688,30 +4692,42 @@ export const renderDocumentationCensus = (): string => {
         table(
             [
                 'Participants',
+                'Stream wrapper',
                 'Logical stream accesses',
                 'Simulated full-value queries',
                 'Quadratic-query coefficient',
                 'Combined failure exponent',
             ],
-            [10, 20].map((participants) => {
-                const logical =
-                        compileCommitmentExtractionBound(
-                            participants,
-                        ).quantumQueryCount,
-                    bound = compileCommitmentExtractionBound(
-                        participants,
-                        prefixOracleQueriesPerAccess * logical,
-                    );
-                return [
-                    formatCount(participants),
-                    formatCount(logical),
-                    formatCount(bound.quantumQueryCount),
-                    formatCount(bound.simulatorQuadraticQueryCoefficient),
-                    bound.combinedFailureExponent === undefined
-                        ? 'No extraction event'
-                        : formatCount(bound.combinedFailureExponent),
-                ];
-            }),
+            [10, 20].flatMap((participants) =>
+                [1n, prefixReplacementBaseQueriesPerAccess].map(
+                    (baseQueriesPerAccess) => {
+                        const logical =
+                                compileCommitmentExtractionBound(
+                                    participants,
+                                ).quantumQueryCount,
+                            bound = compileCommitmentExtractionBound(
+                                participants,
+                                baseQueriesPerAccess *
+                                    prefixOracleQueriesPerAccess *
+                                    logical,
+                            );
+                        return [
+                            formatCount(participants),
+                            baseQueriesPerAccess === 1n
+                                ? 'Base stream'
+                                : 'Programmed stream',
+                            formatCount(logical),
+                            formatCount(bound.quantumQueryCount),
+                            formatCount(
+                                bound.simulatorQuadraticQueryCoefficient,
+                            ),
+                            bound.combinedFailureExponent === undefined
+                                ? 'No extraction event'
+                                : formatCount(bound.combinedFailureExponent),
+                        ];
+                    },
+                ),
+            ),
         ),
         '',
         '## Compressed-oracle circuit work',
@@ -4885,6 +4901,50 @@ export const renderDocumentationCensus = (): string => {
                     ].map(formatCount),
                 ];
             }),
+        ),
+        '',
+        'A programmed-prefix read calls the complete base stream adapter twice around a clean replacement copy. The following bounded shape counts both layers and retains prior component capacity. Classical record payload excludes object metadata and dispatch work; neither is declared free.',
+        '',
+        table(
+            [
+                'Logical reads',
+                'Input capacity bits',
+                'Output capacity bits',
+                'Replacement input bits',
+                'Replacement prefix bits',
+                'Full-value calls',
+                'Replacement-copy gates',
+                'Total query gates',
+                'Oracle qubit bound',
+                'Classical record payload bits',
+            ],
+            [[3n, 4n, 5n, 3n, 4n]].map(
+                ([
+                    count,
+                    inputCapacity,
+                    outputCapacity,
+                    inputBits,
+                    prefixBits,
+                ]) => {
+                    const work = programmedOracleDomainWork(
+                        [{ count, inputCapacity, outputCapacity }],
+                        2n,
+                        [{ inputBits, prefixBits }],
+                    );
+                    return [
+                        count,
+                        inputCapacity,
+                        outputCapacity,
+                        inputBits,
+                        prefixBits,
+                        work.base.fullValueQueries,
+                        work.copyGates,
+                        work.queryGates,
+                        work.maximumQubits,
+                        work.classicalRecordPayloadBits,
+                    ].map(formatCount);
+                },
+            ),
         ),
         '',
         '## Full-body commitment equivocation census',

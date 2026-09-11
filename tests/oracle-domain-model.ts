@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     compileOracleCellController,
     oracleCellControllerWork,
+    oraclePrefixReplacementWork,
     prefixOracleWork,
     runOracleCellController,
 } from '#tests/compressed-oracle-model.js';
@@ -38,6 +39,8 @@ type QueryRun = {
     readonly inputCapacity: bigint;
     readonly outputCapacity: bigint;
 };
+
+export const prefixReplacementBaseQueriesPerAccess = 2n;
 
 export function oracleDomainWork(
     runs: readonly QueryRun[],
@@ -127,6 +130,48 @@ export function oracleDomainWork(
             maximumControllerQubits +
             maximumPrefixScratchQubits +
             maximumCallerQubits,
+    };
+}
+
+export function programmedOracleDomainWork(
+    runs: readonly QueryRun[],
+    firstChunkBits: bigint,
+    replacements: readonly {
+        readonly inputBits: bigint;
+        readonly prefixBits: bigint;
+    }[],
+) {
+    // Read the base prefix into private workspace and erase it with the same
+    // base query after the clean replacement copy. The inner domain adapter
+    // independently retains its own compute/copy/uncompute multiplier.
+    const base = oracleDomainWork(
+        runs.map((run) => ({
+            ...run,
+            count: prefixReplacementBaseQueriesPerAccess * run.count,
+        })),
+        firstChunkBits,
+    );
+    let copyGates = 0n,
+        maximumCopyQubits = 0n;
+    for (const run of runs) {
+        const work = oraclePrefixReplacementWork(
+            run.inputCapacity,
+            run.outputCapacity,
+            replacements,
+        );
+        copyGates += run.count * work.cleanCopyGates;
+        if (run.count > 0n && work.copyQubits > maximumCopyQubits)
+            maximumCopyQubits = work.copyQubits;
+    }
+    return {
+        base,
+        copyGates,
+        queryGates: base.queryGates + copyGates,
+        maximumQubits: base.maximumQubits + maximumCopyQubits,
+        classicalRecordPayloadBits: replacements.reduce(
+            (sum, value) => sum + value.inputBits + value.prefixBits,
+            0n,
+        ),
     };
 }
 
