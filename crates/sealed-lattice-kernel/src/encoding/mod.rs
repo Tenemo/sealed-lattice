@@ -3,6 +3,8 @@ use core::str;
 use crate::foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
 
 mod foundation_command;
+#[path = "public-archive-command.rs"]
+mod public_archive_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalErrorCode {

@@ -2,6 +2,8 @@ mod canonical_tuple;
 mod ceremony;
 mod hash;
 mod participant_identity;
+#[path = "public-archive.rs"]
+pub(crate) mod public_archive;
 mod refusal;
 mod schemas;
 mod text;

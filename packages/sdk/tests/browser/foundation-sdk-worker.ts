@@ -69,7 +69,40 @@ const run = async (participantCount: number, optionCount: number) => {
         submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
         topCount: 20,
     });
+    const archive = await sdk.createPublicArchive({
+        context: ceremony.value.ceremonyContextHash,
+        faultBound: 0,
+        // Structural record tests do not authenticate a replica receipt.
+        replicas: [
+            {
+                baseUrl: 'https://archive.example/',
+                verificationKey: new Uint8Array(1952),
+            },
+        ],
+        maximumRecords: 4,
+        maximumTotalBytes: 4096,
+    });
+    const archived = archive.encodeRecord(
+        'public-context',
+        [],
+        Uint8Array.of(1, 2, 3),
+    );
+    const archivedRecord = archive.readRecord(
+        archived.reference,
+        archived.bytes,
+    );
+    const changedArchive = Uint8Array.from(archived.bytes);
+    changedArchive[changedArchive.length - 1] ^= 1;
+    let archiveRefusal: string | undefined;
+    try {
+        archive.readRecord(archived.reference, changedArchive);
+    } catch (error) {
+        archiveRefusal =
+            error instanceof Error ? error.message : 'Unknown archive failure';
+    }
     return {
+        archivedRecord,
+        archiveRefusal,
         manifest: await sdk.verifyCanonicalManifest(manifest.canonicalBytes),
         definition: await sdk.verifyCanonicalActionDefinition(
             definition.canonicalBytes,

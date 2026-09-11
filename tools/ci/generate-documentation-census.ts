@@ -121,6 +121,7 @@ import {
 } from '#tests/proof-hash-work-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
+import { compilePublicArchiveResourceCensus } from '#tests/public-archive-resource-model.js';
 import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
 import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
@@ -4514,6 +4515,17 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
             ],
+        ),
+        '',
+        '## Public archive resource census',
+        '',
+        'Independent sizes for the maintained archive record and acknowledgement commands. Replica responses are concurrent to avoid a silent replica blocking an available one. These are buffer and wire bounds, not complete participant memory or workflow costs.',
+        '',
+        table(
+            ['Property', 'Value'],
+            Object.entries(compilePublicArchiveResourceCensus()).map(
+                ([property, value]) => [property, formatCount(value)],
+            ),
         ),
         '',
         '## Certificate custody census',

@@ -53,6 +53,14 @@ describe('public SDK foundation flow in a browser worker', () => {
             const response = await runWorker(participants, options);
             expect(response.error).toBeUndefined();
             const result = response.result!;
+            expect(result.archivedRecord.purpose).toBe('public-context');
+            expect(Array.from(result.archivedRecord.payload)).toEqual([
+                1, 2, 3,
+            ]);
+            expect(result.archivedRecord.dependencies).toEqual([]);
+            expect(result.archiveRefusal).toContain(
+                'archive bytes do not match',
+            );
             for (const verified of [
                 result.manifest,
                 result.definition,

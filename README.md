@@ -27,7 +27,8 @@ The public package exposes construction-neutral foundation operations only:
 - poll validation;
 - canonical poll, action, and board-policy encoding;
 - canonical manifest, action, ceremony-context, and action-context verification;
-- bounded Rust/WebAssembly parsing and hashing; and
+- bounded Rust/WebAssembly parsing and hashing;
+- content-addressed public-data retention and retrieval with authenticated replica acknowledgements; and
 - reproducible package assembly and public-export checks.
 
 It does not expose ballot encryption, distributed setup, tally evaluation, finality signing, decryption shares, or result reconstruction. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
@@ -72,6 +73,14 @@ console.log(manifest.manifestHash, manifest.canonicalBytes);
 ```
 
 `validatePollSpec` handles pre-protocol user input. Protocol identity starts with the canonical bytes and hash produced by the Rust/WebAssembly kernel. Import public APIs from the package root; workspace internals are not public API.
+
+### Public archive
+
+`createPublicArchive` accepts an expected context, trusted replica endpoints and ML-DSA verification keys, an explicit replica fault bound, and closure size limits. It encodes bounded public records, checks their exact bytes and dependencies, transfers a complete declared closure, and authenticates the replicas' retention acknowledgements. `retrieve` checks cached records again and restores missing or corrupted public bytes. Its store interface contains only public records; it does not restore participant credentials or signing authority.
+
+`discover` yields untrusted root hints as replicas reply. A returned hint, an empty reply, a record purpose, or a storage acknowledgement never establishes ballot order, acceptance, closing, or a result. The protocol's owning verifier must check that every semantic predecessor is present. Future availability depends on the configured replica fault and retention assumptions; different URLs or keys do not establish independent physical fault domains.
+
+The repository's `tools/archive/public-archive-replica.ts` provides a local storage host exercised by the archive tests. It binds only loopback, verifies records before writing, flushes and reads staged files before replacement, and signs a retention acknowledgement only after checking the complete closure and retaining its discovery entry. Deployment, independent fault domains, power-loss durability, and long-term retention have not been qualified.
 
 ## Development
 

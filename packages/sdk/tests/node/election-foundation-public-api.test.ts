@@ -31,6 +31,7 @@ const expectedPublicRuntimeExportNames = [
     'createCanonicalActionDefinition',
     'createCanonicalBoardPolicy',
     'createCanonicalManifest',
+    'createPublicArchive',
     'validatePollSpec',
     'verifyCanonicalActionContext',
     'verifyCanonicalActionDefinition',

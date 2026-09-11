@@ -18,6 +18,18 @@ import {
     type PollSpecValidation,
     validatePollSpec as validatePollSpecInternal,
 } from './poll-spec.js';
+import {
+    openPublicArchive,
+    type PublicArchive,
+    type PublicArchiveOptions,
+} from './public-archive.js';
+export type {
+    ArchiveRecord,
+    ArchiveReference,
+    PublicArchive,
+    PublicArchiveOptions,
+    PublicArchiveStore,
+} from './public-archive.js';
 
 const foundationKernelUrl = new URL(
     './sealed-lattice-kernel.wasm',
@@ -31,6 +43,12 @@ const loadFoundationCeremonyRuntime: () => Promise<FoundationCeremonyRuntime> =
                 ? undefined
                 : __SEALED_LATTICE_KERNEL_SHA256_HEX__,
     });
+
+/** Public-byte custody and retrieval only; this does not authorize a poll transition. */
+export const createPublicArchive = async (
+    options: PublicArchiveOptions,
+): Promise<PublicArchive> =>
+    openPublicArchive(await loadFoundationCeremonyRuntime(), options);
 
 export type {
     PollSpec,

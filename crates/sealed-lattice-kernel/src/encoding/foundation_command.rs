@@ -26,6 +26,7 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
         VERIFY_BOARD_POLICY => verify_board_policy(&mut reader),
         VERIFY_CEREMONY_CONTEXT => verify_ceremony_context(&mut reader),
         VERIFY_ACTION_CONTEXT => verify_action_context(&mut reader),
+        command @ 9..=12 => super::public_archive_command::run(command, &mut reader),
         command => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidEnum,
             format!("unsupported foundation command: {command}"),
