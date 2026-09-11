@@ -33,6 +33,10 @@ import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-b
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
+import {
+    sparseRoutingWork,
+    labelledHashExtractionWork,
+} from '#tests/compressed-oracle-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
@@ -4650,6 +4654,96 @@ export const renderDocumentationCensus = (): string => {
                         : formatCount(bound.combinedFailureExponent),
                 ];
             }),
+        ),
+        '',
+        '## Compressed-oracle circuit work',
+        '',
+        "The declared gate basis is X, CNOT, Toffoli and controlled-H, each acting on at most three qubits. The sorted database uses one spare tuple while routing the queried value to a separate register. Clean computation includes inverse evaluation and register swaps. These bounded examples verify the circuit family; they are not the protocol's full input domain or query population.",
+        '',
+        table(
+            [
+                'Prior queries',
+                'Input bits',
+                'Hash bits',
+                'Removal compute gates',
+                'Insertion compute gates',
+                'Clean routing gates',
+                'Oracle-call gates',
+                'Oracle qubits',
+            ],
+            [
+                [0n, 2n, 1n],
+                [1n, 2n, 1n],
+                [2n, 2n, 1n],
+                [1n, 1n, 2n],
+            ].map(([prior, input, output]) => {
+                const work = sparseRoutingWork(prior, input, output);
+                return [
+                    prior,
+                    input,
+                    output,
+                    work.removeGates,
+                    work.insertGates,
+                    work.routingGates,
+                    work.roundTripRoutingGates + work.localUpdateGates,
+                    work.routingQubits + output,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        table(
+            [
+                'Local hash output bits',
+                'Controlled-H gates',
+                'X gates',
+                'CNOT gates',
+                'Toffoli gates',
+                'Total local update gates',
+            ],
+            [1n, 2n, 3n, 512n].map((bits) => {
+                const work = sparseRoutingWork(0n, 1n, bits);
+                return [
+                    bits,
+                    work.localUpdate.controlledHadamard,
+                    work.localUpdate.not,
+                    work.localUpdate.cnot,
+                    work.localUpdate.toffoli,
+                    work.localUpdateGates,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'Classical extraction computes the first matching active entry into a fresh output and cleans all predicate work before measuring that output. The following labelled-hash examples include their predicate computation; a different sender parser needs its actual relation circuit. Other adversary registers, circuit-generation work, full oracle routing and computational-assumption advantages remain separate.',
+        '',
+        table(
+            [
+                'Database capacity',
+                'Input bits',
+                'Hash bits',
+                'Label bits',
+                'Classical extraction gates',
+                'Measured output qubits',
+                'Extraction qubits',
+            ],
+            [
+                [0n, 2n, 1n, 1n],
+                [1n, 2n, 1n, 1n],
+                [2n, 2n, 1n, 1n],
+                [3n, 64n, 512n, 16n],
+            ].map(([capacity, input, output, label]) =>
+                [
+                    capacity,
+                    input,
+                    output,
+                    label,
+                    labelledHashExtractionWork(capacity, input, output, label)
+                        .extractionGates,
+                    labelledHashExtractionWork(capacity, input, output, label)
+                        .measuredQubits,
+                    labelledHashExtractionWork(capacity, input, output, label)
+                        .extractionQubits,
+                ].map(formatCount),
+            ),
         ),
         '',
         '## Full-body commitment equivocation census',
