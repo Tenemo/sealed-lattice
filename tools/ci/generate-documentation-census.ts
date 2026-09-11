@@ -91,6 +91,7 @@ import {
     multiKeyTargetViews,
     randomizerInputCoupling,
 } from '#tests/multi-key-target-model.js';
+import { oracleDomainWork } from '#tests/oracle-domain-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import {
     compileParticipantCustodyCensus,
@@ -4830,6 +4831,59 @@ export const renderDocumentationCensus = (): string => {
                     work.queryGates,
                     work.maximumQubits,
                 ].map(formatCount);
+            }),
+        ),
+        '',
+        'The domain adapter below visits every eligible input-length class and output chunk for each declared query shape. Cells retain their databases across shape changes. Counts include clean length/sentinel controllers and all prefix calls. These are supplied-shape circuit bounds; extraction, other algorithm registers and classical circuit generation/dispatch remain separate. The full contribution row uses its actual maximum emitted input length for one honest query and does not bound adversarial queries.',
+        '',
+        table(
+            [
+                'Query shape',
+                'Logical queries',
+                'Input capacity bits',
+                'Output capacity bits',
+                'First chunk bits',
+                'Cells',
+                'Full-value calls',
+                'Controller gates',
+                'Total query gates',
+                'Database qubits',
+                'Oracle qubit bound',
+            ],
+            [
+                {
+                    name: 'Small correspondence',
+                    count: 3n,
+                    inputCapacity: 3n,
+                    outputCapacity: 5n,
+                    firstChunkBits: 2n,
+                },
+                {
+                    name: 'Complete contribution input',
+                    count: 1n,
+                    inputCapacity:
+                        8n *
+                        compileContributionBodyCensus().maximumHashInputBytes,
+                    outputCapacity: 512n,
+                    firstChunkBits: 512n,
+                },
+            ].map(({ name, firstChunkBits, ...run }) => {
+                const work = oracleDomainWork([run], firstChunkBits);
+                return [
+                    name,
+                    ...[
+                        run.count,
+                        run.inputCapacity,
+                        run.outputCapacity,
+                        firstChunkBits,
+                        BigInt(work.cells.length),
+                        work.fullValueQueries,
+                        work.controllerGates,
+                        work.queryGates,
+                        work.databaseQubits,
+                        work.maximumQubits,
+                    ].map(formatCount),
+                ];
             }),
         ),
         '',

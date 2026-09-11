@@ -27,7 +27,7 @@ class Builder {
         return target;
     }
     and(left: number, right: number) {
-        return this.gate([left, right]);
+        return this.gate(left === right ? [left] : [left, right]);
     }
     xor(left: number, right: number) {
         const target = this.gate([left]);
@@ -819,6 +819,217 @@ export function compilePrefixCopy(outputBits: number) {
 }
 
 export const prefixOracleQueriesPerAccess = 2n;
+
+const integerWidth = (value: bigint) => {
+    let width = 1n;
+    while (1n << width <= value) width++;
+    return width;
+};
+
+export function oracleCellControllerWork(
+    inputCapacity: bigint,
+    outputCapacity: bigint,
+    inputClassUpper: bigint,
+    outputStart: bigint,
+    outputSize: bigint,
+) {
+    assert.ok(
+        inputCapacity >= 0n &&
+            outputCapacity >= 0n &&
+            inputClassUpper >= 1n &&
+            (inputClassUpper & (inputClassUpper - 1n)) === 0n &&
+            outputStart >= 0n &&
+            outputSize >= 1n,
+    );
+    const maximum = (a: bigint, b: bigint) => (a > b ? a : b),
+        inputLengthBits = integerWidth(inputCapacity),
+        outputLengthBits = integerWidth(outputCapacity),
+        inputComparisonBits = maximum(
+            integerWidth(inputCapacity + 1n),
+            integerWidth(inputClassUpper + 1n),
+        ),
+        outputComparisonBits = maximum(
+            integerWidth(outputCapacity + 1n),
+            integerWidth(outputStart + outputSize),
+        ),
+        prefixLengthBits = integerWidth(outputSize);
+    const dataBits =
+            inputCapacity < inputClassUpper + 1n
+                ? inputCapacity
+                : inputClassUpper + 1n,
+        markerBits = inputCapacity <= inputClassUpper ? 1n : 0n;
+    const computeGates =
+        12n +
+        21n * inputComparisonBits +
+        32n * outputComparisonBits +
+        6n * prefixLengthBits +
+        dataBits * (9n + 12n * inputComparisonBits) +
+        markerBits * (3n + 5n * inputComparisonBits);
+    const cleanWorkQubits =
+        9n +
+        12n * inputComparisonBits +
+        19n * outputComparisonBits +
+        4n * prefixLengthBits +
+        dataBits * (6n + 7n * inputComparisonBits) +
+        markerBits * (2n + 3n * inputComparisonBits);
+    const outputBits = inputClassUpper + 1n + prefixLengthBits,
+        inputBits = inputCapacity + inputLengthBits + outputLengthBits;
+    return {
+        inputCapacity,
+        outputCapacity,
+        inputClassUpper,
+        outputStart,
+        outputSize,
+        inputLengthBits,
+        outputLengthBits,
+        inputComparisonBits,
+        outputComparisonBits,
+        prefixLengthBits,
+        computeGates,
+        cleanWorkQubits,
+        inputBits,
+        outputBits,
+        computeAndUncomputeGates: 4n * computeGates + 2n * outputBits,
+        controllerQubits: inputBits + outputBits + cleanWorkQubits,
+    };
+}
+
+export function compileOracleCellController(
+    inputCapacity: number,
+    outputCapacity: number,
+    inputClassUpper: number,
+    outputStart: number,
+    outputSize: number,
+) {
+    assert.ok(
+        [
+            inputCapacity,
+            outputCapacity,
+            inputClassUpper,
+            outputStart,
+            outputSize,
+            outputStart + outputSize,
+        ].every(Number.isSafeInteger),
+    );
+    const work = oracleCellControllerWork(
+        BigInt(inputCapacity),
+        BigInt(outputCapacity),
+        BigInt(inputClassUpper),
+        BigInt(outputStart),
+        BigInt(outputSize),
+    );
+    const inputLengthBits = Number(work.inputLengthBits),
+        outputLengthBits = Number(work.outputLengthBits),
+        cx = Number(work.inputComparisonBits),
+        cy = Number(work.outputComparisonBits),
+        prefixLengthBits = Number(work.prefixLengthBits),
+        builder = new Builder(Number(work.inputBits)),
+        one = builder.not(builder.zero);
+    const constant = (value: number, width: number) =>
+        Array.from({ length: width }, (_, bit) =>
+            Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
+        );
+    const inputLength = Array.from({ length: cx }, (_, bit) =>
+            bit < inputLengthBits ? inputCapacity + bit : builder.zero,
+        ),
+        outputLength = Array.from({ length: cy }, (_, bit) =>
+            bit < outputLengthBits
+                ? inputCapacity + inputLengthBits + bit
+                : builder.zero,
+        );
+    const lower = inputClassUpper === 1 ? 0 : inputClassUpper / 2 + 1;
+    const validInput = builder.less(
+            inputLength,
+            constant(inputCapacity + 1, cx),
+        ),
+        aboveLower = builder.not(
+            builder.less(inputLength, constant(lower, cx)),
+        ),
+        belowUpper = builder.less(
+            inputLength,
+            constant(inputClassUpper + 1, cx),
+        ),
+        inside = builder.and(builder.and(validInput, aboveLower), belowUpper);
+    const key = [];
+    for (let bit = 0; bit <= inputClassUpper; bit++) {
+        if (bit < inputCapacity) {
+            const atEnd = builder.equal(inputLength, constant(bit, cx)),
+                beforeEnd = builder.less(constant(bit, cx), inputLength);
+            key.push(
+                builder.and(
+                    inside,
+                    builder.or(atEnd, builder.and(bit, beforeEnd)),
+                ),
+            );
+        } else if (bit === inputCapacity)
+            key.push(
+                builder.and(
+                    inside,
+                    builder.equal(inputLength, constant(bit, cx)),
+                ),
+            );
+        else key.push(builder.zero);
+    }
+    const validOutput = builder.less(
+            outputLength,
+            constant(outputCapacity + 1, cy),
+        ),
+        pastEnd = builder.not(
+            builder.less(outputLength, constant(outputStart + outputSize, cy)),
+        ),
+        start = constant(outputStart, cy),
+        difference: number[] = [];
+    let borrow = builder.zero;
+    for (let bit = 0; bit < cy; bit++) {
+        difference.push(
+            builder.xor(builder.xor(outputLength[bit], start[bit]), borrow),
+        );
+        borrow = builder.or(
+            builder.and(
+                builder.not(outputLength[bit]),
+                builder.or(start[bit], borrow),
+            ),
+            builder.and(start[bit], borrow),
+        );
+    }
+    const active = builder.and(
+            builder.and(inside, validOutput),
+            builder.not(borrow),
+        ),
+        size = constant(outputSize, prefixLengthBits),
+        length = Array.from({ length: prefixLengthBits }, (_, bit) =>
+            builder.and(
+                active,
+                builder.select(pastEnd, size[bit], difference[bit]),
+            ),
+        );
+    const circuit = builder.finish([...key, ...length]);
+    assert.equal(BigInt(circuit.gates.length), work.computeGates);
+    assert.equal(BigInt(circuit.wires - circuit.inputs), work.cleanWorkQubits);
+    return { circuit, work };
+}
+
+export function runOracleCellController(
+    compiled: ReturnType<typeof compileOracleCellController>,
+    data: Uint8Array,
+    inputLength: number,
+    outputLength: number,
+) {
+    const { work, circuit } = compiled,
+        controls = Uint8Array.from([
+            ...integerBits(inputLength, Number(work.inputLengthBits)),
+            ...integerBits(outputLength, Number(work.outputLengthBits)),
+        ]),
+        out = new Uint8Array(circuit.output.length);
+    applyClean(circuit, data, controls, out);
+    const result = {
+        encodedInput: out.slice(0, Number(work.inputClassUpper) + 1),
+        prefixLength: fromBits(out.subarray(Number(work.inputClassUpper) + 1)),
+    };
+    applyClean(circuit, data, controls, out);
+    assert.ok(out.every((value) => value === 0));
+    return result;
+}
 
 export function prefixOracleWork(
     logicalQueries: bigint,
