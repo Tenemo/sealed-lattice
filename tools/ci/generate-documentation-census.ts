@@ -85,7 +85,10 @@ import {
     randomizerInputCoupling,
 } from '#tests/multi-key-target-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
-import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
+import {
+    compileParticipantCustodyCensus,
+    compileParticipantVaultKeyClasses,
+} from '#tests/participant-custody-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
     createFalseBinaryRelationTable,
@@ -4094,6 +4097,33 @@ export const renderDocumentationCensus = (): string => {
                 ],
             ],
         ),
+        '',
+        '## Participant vault key work',
+        '',
+        'These per-key upper bounds follow the emitted fixed-nonce AES-GCM layouts. Initial intent and completion share one key with distinct nonces; every later root and child record uses a fresh key. Corpus counts exclude aborted writes, abandoned enrollment and recovery. They are not lifetime key limits. Later-root counts and every lifetime encryption/read population remain unmeasured; repeated reads add work even when they reuse existing block inputs. The root nonce in a single-use class is normalized because its value does not change these per-key counts.',
+        '',
+        table(
+            [
+                'Key class',
+                'Maximum keys per completed corpus',
+                'Encryption calls per key',
+                'Maximum AES inputs for encryption',
+                'Algorithmic encryption AES call bound',
+                'Maximum GHASH degree',
+            ],
+            compileParticipantVaultKeyClasses().map((value) => [
+                value.name,
+                value.maximumPerCompletedCorpus === null
+                    ? 'Unmeasured'
+                    : formatCount(value.maximumPerCompletedCorpus),
+                formatCount(value.encryptionWork.invocations),
+                formatCount(value.encryptionWork.distinctAesInputUpperBound),
+                formatCount(value.encryptionWork.algorithmicAesCallUpperBound),
+                formatCount(value.encryptionWork.maximumHashDegree),
+            ]),
+        ),
+        '',
+        'For a supplied complete per-key history, the work model separately counts encryption and verification invocations, repeated block computations and the union of block inputs. Its statistical numerators are conditional on the stated secret-key PRP replacement; the AES assumption, full populations and whole-protocol advantage are additional obligations.',
         '',
         '## Contribution authentication census',
         '',
