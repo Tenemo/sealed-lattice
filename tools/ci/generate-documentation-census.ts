@@ -7,6 +7,8 @@ import {
     compileAuthenticationFrameWork,
     compileCompletedAuthenticationCensus,
     compileCurrentCredentialIntentBounds,
+    compileCurrentSignatureHashInputs,
+    compileCurrentSignatureSamplingBounds,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
@@ -1675,6 +1677,43 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(role.frameBytes),
                 formatCount(role.representativeInputBytes),
                 formatCount(role.representativePermutations),
+            ]),
+        ),
+        '',
+        'The current pure ML-DSA-65 internal calls have the following input shapes. A missing literal output cap is recorded for each rejection sampler. This does not bound arbitrary adversary queries or future protocol purposes.',
+        '',
+        table(
+            ['Purpose', 'Primitive', 'Input bytes', 'Literal output bytes'],
+            compileCurrentSignatureHashInputs().rows.map((row) => [
+                row.purpose,
+                row.family,
+                formatCount(row.inputBytes),
+                row.outputBytes === null
+                    ? 'No source cap'
+                    : formatCount(row.outputBytes),
+            ]),
+        ),
+        '',
+        'The following ideal-XOF bad-event bounds union over the entire sampler seed space before adaptive input selection. Analytical output caps do not change the library. Subsequent preservation requires the stated oracle-programming chronology; the main signing rejection event and complete time conversion remain separate.',
+        '',
+        table(
+            [
+                'Sampler',
+                'Seed bytes',
+                'Candidate positions',
+                'Required rejections',
+                'Analytical output cap bytes',
+                'All-seed failure exponent',
+            ],
+            compileCurrentSignatureSamplingBounds().map((row) => [
+                row.purpose,
+                ...[
+                    row.inputBytes,
+                    row.candidatePositions,
+                    row.requiredRejections,
+                    row.outputBytes,
+                    row.failureExponent,
+                ].map(formatCount),
             ]),
         ),
         '',

@@ -4,10 +4,52 @@ import { compileRegistrationWordProofLayout } from '#tests/full-word-proof-layou
 import {
     bufferedFieldSamplingFailure,
     compileProofRandomnessBudgets,
+    rejectionSubsetBound,
 } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 
 describe('bounded randomness for complete proof simulation', () => {
+    it('bounds a stopping event by fixed rejected-position subsets', () => {
+        const bound = rejectionSubsetBound({
+            candidatePositions: 4n,
+            requiredRejections: 3n,
+            rejectedValues: 1n,
+            sampleBits: 2n,
+            inputCount: 1n,
+        });
+        let failures = 0n;
+        for (let tape = 0; tape < 256; tape++) {
+            let encoded = tape,
+                rejections = 0;
+            for (let index = 0; index < 4; index++) {
+                if (encoded % 4 === 0) rejections++;
+                encoded = Math.floor(encoded / 4);
+            }
+            if (rejections >= 3) failures++;
+        }
+        expect(failures).toBe(13n);
+        expect(failures * (1n << bound.denominatorBits)).toBeLessThanOrEqual(
+            bound.numerator * 256n,
+        );
+        expect(
+            rejectionSubsetBound({
+                candidatePositions: 4n,
+                requiredRejections: 5n,
+                rejectedValues: 1n,
+                sampleBits: 2n,
+                inputCount: 1n,
+            }).numerator,
+        ).toBe(0n);
+        expect(() =>
+            rejectionSubsetBound({
+                candidatePositions: 4n,
+                requiredRejections: 3n,
+                rejectedValues: 5n,
+                sampleBits: 2n,
+                inputCount: 1n,
+            }),
+        ).toThrow();
+    });
     it('matches the independently encoded registration proof shape', () => {
         expect(
             compileRegistrationWordProofLayout().maximumMultiproofBytes,

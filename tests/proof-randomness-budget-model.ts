@@ -15,6 +15,39 @@ const binomial = (population: bigint, count: bigint) => {
     return result;
 };
 
+export const rejectionSubsetBound = (input: {
+    candidatePositions: bigint;
+    requiredRejections: bigint;
+    rejectedValues: bigint;
+    sampleBits: bigint;
+    inputCount: bigint;
+}) => {
+    const {
+        candidatePositions,
+        requiredRejections,
+        rejectedValues,
+        sampleBits,
+        inputCount,
+    } = input;
+    if (
+        candidatePositions < 0n ||
+        requiredRejections < 0n ||
+        sampleBits < 1n ||
+        sampleBits > 4096n ||
+        rejectedValues < 0n ||
+        rejectedValues > 1n << sampleBits ||
+        inputCount < 0n
+    )
+        throw new RangeError('Invalid rejection-subset population.');
+    return {
+        numerator:
+            inputCount *
+            binomial(candidatePositions, requiredRejections) *
+            rejectedValues ** requiredRejections,
+        denominatorBits: sampleBits * requiredRejections,
+    };
+};
+
 // Each extra buffered read requires at least one rejected candidate. This
 // union deliberately counts salts, discarded tails and the fresh programmed
 // message as candidate positions. All calls are sample-byte aligned.
@@ -56,11 +89,13 @@ export const bufferedFieldSamplingFailure = (input: {
         maximumBytes,
         candidatePositions,
         requiredRejections,
-        numerator:
-            invocations *
-            binomial(candidatePositions, requiredRejections) *
-            rejectedValues ** requiredRejections,
-        denominatorBits: sampleBits * requiredRejections,
+        ...rejectionSubsetBound({
+            candidatePositions,
+            requiredRejections,
+            rejectedValues,
+            sampleBits,
+            inputCount: invocations,
+        }),
     };
 };
 

@@ -6,10 +6,101 @@ import {
     compileAuthenticationFrameWork,
     compileCompletedAuthenticationCensus,
     compileCurrentCredentialIntentBounds,
+    compileCurrentSignatureHashInputs,
+    compileCurrentSignatureSamplingBounds,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
+import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import {
+    framedProofHashBytes,
+    proofHashProfiles,
+} from '#tests/proof-hash-work-model.js';
+import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
+import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 describe('Authentication frame accounting', () => {
+    it('bounds all seed inputs before adaptive selection without a lifetime invocation cap', () => {
+        const rows = compileCurrentSignatureSamplingBounds();
+        expect(rows.map((row) => row.outputBytes)).toEqual([
+            1536n,
+            1024n,
+            520n,
+        ]);
+        for (const row of rows) {
+            expect(row.inputCount).toBe(1n << (8n * row.inputBytes));
+            expect(row.requiredRejections).toBe(
+                row.candidatePositions - row.requiredSuccesses + 1n,
+            );
+            expect(row.numerator << 80n).toBeLessThan(
+                1n << row.denominatorBits,
+            );
+        }
+    });
+    it('checks the fixed-threshold domination for the increasing challenge sampler', () => {
+        for (let tape = 0; tape < 8 ** 5; tape++) {
+            let encoded = tape,
+                actualSuccesses = 0,
+                fixedSuccesses = 0;
+            for (let draw = 0; draw < 5; draw++) {
+                const value = encoded % 8;
+                encoded = Math.floor(encoded / 8);
+                if (value <= 5) fixedSuccesses++;
+                if (actualSuccesses < 3 && value <= 5 + actualSuccesses)
+                    actualSuccesses++;
+            }
+            expect(actualSuccesses).toBeGreaterThanOrEqual(
+                Math.min(3, fixedSuccesses),
+            );
+        }
+    });
+    it('keeps exact standard hash-input shapes and leaves unbounded sampler output explicit', () => {
+        const signature = compileCurrentSignatureHashInputs();
+        expect(signature.highBitEncodingBytes).toBe(768n);
+        expect(
+            signature.rows.slice(0, 8).map((value) => value.inputBytes),
+        ).toEqual([34n, 1952n, 128n, 832n, 48n, 66n, 66n, 34n]);
+        expect(
+            signature.rows
+                .filter((value) => value.outputBytes === null)
+                .map((value) => value.purpose),
+        ).toEqual([
+            'Challenge polynomial sampling',
+            'Secret polynomial sampling',
+            'Matrix polynomial sampling',
+        ]);
+        expect(signature.maximumInputBytes).toBeLessThan(
+            compileContributionBodyCensus().senderPrefixBytes,
+        );
+        const messageBytes = BigInt(
+            compileWideChallengeCompilerCensus().challengeBytes,
+        );
+        for (const profile of proofHashProfiles())
+            expect(signature.maximumInputBytes).toBeLessThan(
+                framedProofHashBytes('bounded-proof/verifier-message', [
+                    profile.roleBytes,
+                    64n,
+                    messageBytes,
+                    4n,
+                ]),
+            );
+    });
+    it('retains literal matrix-input overlap with the standard challenge sampler', () => {
+        const signature = compileCurrentSignatureHashInputs(),
+            challenge = signature.rows.find(
+                (value) => value.purpose === 'Challenge polynomial sampling',
+            )!;
+        const aliases = compileFixedSpongeInitializationCensus().seeds.filter(
+            (seed) => BigInt(seed.message.length) === challenge.inputBytes,
+        );
+        expect(aliases.map((seed) => seed.label)).toEqual(
+            Array.from({ length: 6 }, (_, gadget) =>
+                ['a', 'u', 'k'].map((role) => `common-fhe-${role}-${gadget}`),
+            ).flat(),
+        );
+        expect(challenge.family).toBe('SHAKE256');
+        // These are permitted sampler inputs. This does not produce a valid
+        // signature or make the common matrices independent oracle functions.
+    });
     it('bounds first-evaluated intents separately from delivered ballot counts', () => {
         const [organizer, participant] = compileCurrentCredentialIntentBounds();
         expect(organizer.firstEvaluatedIntentBound).toBe(6n);
