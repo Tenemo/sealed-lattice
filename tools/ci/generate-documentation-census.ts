@@ -144,6 +144,7 @@ import {
     compileSigningKeyRecoveryWork,
     keyRecoveryChallengeControl,
 } from '#tests/signing-key-recovery-model.js';
+import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -1767,6 +1768,31 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value),
                 ]);
             })(),
+        ),
+        '',
+        'FIPS 204 Appendix C uses a geometric repetition estimate. The official potential-update supplement corrects the mean and minimum loop limit. The following exponents are exact calculations within that source model, not established implementation failure probabilities or security levels; mean alone does not imply the geometric tail. The inspected counter remains above both source limits.',
+        '',
+        table(
+            [
+                'Source model',
+                'Mean numerator',
+                'Mean denominator',
+                'Source minimum iterations',
+                'Estimated exponent at source limit',
+                'Estimated exponent at original limit',
+                'Estimated exponent at checked counter',
+            ],
+            compileSigningLoopSourceComparison().map((row) => [
+                row.source,
+                ...[
+                    row.meanNumerator,
+                    row.meanDenominator,
+                    row.minimumIterations,
+                    row.atSourceLimit.failureExponent,
+                    row.atOriginalLimit.failureExponent,
+                    row.atCheckedCounter.failureExponent,
+                ].map(formatCount),
+            ]),
         ),
         '',
         'The following completed, all-cooperating prefixes use the completion profile and one completed registration per roster participant. A signed ballot counts here even if it will fail inner verification. Additional registrations are an explicit census input. These public record counts are not lifetime honest-key or signing-oracle bounds; they exclude abandoned enrollment, additional intents, repeated evaluation, verification, recovery and the unimplemented closing/release purposes.',
