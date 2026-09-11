@@ -2,11 +2,49 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { compileCommitmentEquivocationBound } from '#tests/commitment-equivocation-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import {
+    compileRegistrationEnrollmentCensus,
+    registrationSigningPublicKeyBytes,
+} from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 
 export const contributionBodyHeaderBytes = 4n + 8n;
+const commitmentDomain = Buffer.from(
+    'sealed-lattice/setup-commitment/v1',
+    'ascii',
+);
+
+// Independent byte-level extractor label, checked against the actual Rust
+// canonical encoder and streaming hasher. It creates no verified body value.
+export const contributionSenderPrefix = (publicKey: Uint8Array) => {
+    if (BigInt(publicKey.length) !== registrationSigningPublicKeyBytes)
+        throw new RangeError('Invalid sender key length.');
+    const offset = 8 + 6 + 4 + commitmentDomain.length + 6,
+        prefix = Buffer.alloc(offset + publicKey.length);
+    prefix.writeUInt16LE(1, 0);
+    prefix.writeUInt16LE(1, 2);
+    prefix.writeUInt32LE(5, 4);
+    prefix.writeUInt16LE(2, 8);
+    prefix.writeUInt32LE(4 + commitmentDomain.length, 10);
+    prefix.writeUInt32LE(commitmentDomain.length, 14);
+    commitmentDomain.copy(prefix, 18);
+    prefix.writeUInt16LE(1, 18 + commitmentDomain.length);
+    prefix.writeUInt32LE(publicKey.length, 20 + commitmentDomain.length);
+    prefix.set(publicKey, offset);
+    return prefix;
+};
+
+export const matchesContributionSenderPrefix = (
+    preimage: Uint8Array,
+    publicKey: Uint8Array,
+) => {
+    const prefix = contributionSenderPrefix(publicKey);
+    return (
+        preimage.length >= prefix.length &&
+        prefix.every((value, index) => value === preimage[index])
+    );
+};
 
 export const compileContributionBodyCensus = () => {
     const parameters = fixedModulusBfvInputs;
@@ -68,6 +106,18 @@ export const compileContributionBodyCensus = () => {
         4n +
         roster.roleBytes +
         4n;
+    const senderKeyOffsetBytes = 24n + BigInt(commitmentDomain.length);
+    const minimumHashInputBytes =
+        hashPrefixBytes +
+        headerBytes +
+        polynomialPayloadBytes +
+        proof.headerBytes;
+    const maximumHashInputBytes = hashPrefixBytes + maximumBodyBytes;
+    const enclosingExponent = (value: bigint) => {
+        let bits = 0n;
+        while (1n << bits < value) bits++;
+        return bits;
+    };
     return {
         participantCount,
         polynomials,
@@ -78,7 +128,17 @@ export const compileContributionBodyCensus = () => {
         maximumBodyBytes,
         saltBytes,
         hashPrefixBytes,
-        maximumHashInputBytes: hashPrefixBytes + maximumBodyBytes,
+        minimumHashInputBytes,
+        maximumHashInputBytes,
+        senderKeyOffsetBytes,
+        senderPrefixBytes:
+            senderKeyOffsetBytes + registrationSigningPublicKeyBytes,
+        minimumHashInputEnclosingBitExponent: enclosingExponent(
+            8n * minimumHashInputBytes,
+        ),
+        maximumHashInputEnclosingBitExponent: enclosingExponent(
+            8n * maximumHashInputBytes,
+        ),
         maximumAllContributorBodies:
             parameters.participantCount * maximumBodyBytes,
     };

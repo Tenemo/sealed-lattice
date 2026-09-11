@@ -3995,8 +3995,32 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionBody.hashPrefixBytes),
                 ],
                 [
+                    'Sender-key byte offset',
+                    formatCount(contributionBody.senderKeyOffsetBytes),
+                ],
+                [
+                    'Sender-prefix bytes',
+                    formatCount(contributionBody.senderPrefixBytes),
+                ],
+                [
+                    'Minimum commitment hash-input bytes',
+                    formatCount(contributionBody.minimumHashInputBytes),
+                ],
+                [
                     'Maximum commitment hash-input bytes',
                     formatCount(contributionBody.maximumHashInputBytes),
+                ],
+                [
+                    'Minimum input enclosing bit exponent',
+                    formatCount(
+                        contributionBody.minimumHashInputEnclosingBitExponent,
+                    ),
+                ],
+                [
+                    'Maximum input enclosing bit exponent',
+                    formatCount(
+                        contributionBody.maximumHashInputEnclosingBitExponent,
+                    ),
                 ],
                 [
                     'Maximum all-contributor body payload bytes',

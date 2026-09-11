@@ -1,7 +1,9 @@
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 
+export const registrationSigningPublicKeyBytes = 1952n;
+
 const registrationEnrollmentInputs = {
-    signingPublicKeyBytes: 1952n,
+    signingPublicKeyBytes: registrationSigningPublicKeyBytes,
     mailboxPublicKeyBytes: 1184n,
     signatureBytes: 3309n,
     maximumUsernameBytes: 128n,
