@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
+import { prefixOracleQueriesPerAccess } from '#tests/compressed-oracle-model.js';
 
 describe('early full-body commitment extraction bounds', () => {
+    it('charges the full-value oracle calls used by a SHAKE prefix query', () => {
+        const logicalQueries = 1n << 80n,
+            fullQueries = prefixOracleQueriesPerAccess * logicalQueries;
+        const prefix = compileCommitmentExtractionBound(10),
+            stream = compileCommitmentExtractionBound(10, fullQueries);
+        expect(stream.quantumQueryCount).toBe(1n << 81n);
+        expect(stream.simulatorQuadraticQueryCoefficient).toBe(1n << 162n);
+        expect(stream.combinedFailureNumerator).toBeGreaterThan(
+            prefix.combinedFailureNumerator,
+        );
+        expect(stream.combinedFailureExponent).toBeGreaterThanOrEqual(80n);
+        expect(() => compileCommitmentExtractionBound(10, -1n)).toThrow();
+    });
     it('dominates both exact DFMS error terms without floating-point logarithms', () => {
         // Sum through 3! and bound the tail geometrically by (1/4!)/(1-1/5).
         expect(96 + 96 + 48 + 16 + 5).toBe(3 * 87);

@@ -538,9 +538,10 @@ export function compileLabelledHashExtraction(
     inputBits: number,
     outputBits: number,
     labelBits: number,
+    hashPrefixBits = outputBits,
 ) {
     assert.ok(
-        [capacity, inputBits, outputBits, labelBits].every(
+        [capacity, inputBits, outputBits, labelBits, hashPrefixBits].every(
             Number.isSafeInteger,
         ),
     );
@@ -549,9 +550,11 @@ export function compileLabelledHashExtraction(
             inputBits >= 1 &&
             outputBits >= 1 &&
             labelBits >= 0 &&
-            labelBits <= inputBits,
+            labelBits <= inputBits &&
+            hashPrefixBits >= 1 &&
+            hashPrefixBits <= outputBits,
     );
-    const targetBits = labelBits + outputBits,
+    const targetBits = labelBits + hashPrefixBits,
         width = inputBits + outputBits + 1,
         builder = new Builder(targetBits + capacity * width),
         target = Array.from({ length: targetBits }, (_, index) => index),
@@ -565,7 +568,7 @@ export function compileLabelledHashExtraction(
         builder.and(
             builder.equal(row.slice(0, labelBits), target.slice(0, labelBits)),
             builder.equal(
-                row.slice(inputBits, inputBits + outputBits),
+                row.slice(inputBits, inputBits + hashPrefixBits),
                 target.slice(labelBits),
             ),
         ),
@@ -575,7 +578,7 @@ export function compileLabelledHashExtraction(
     );
     assert.equal(
         circuit.gates.length,
-        capacity * (14 + 5 * (labelBits + outputBits) + 3 * inputBits),
+        capacity * (14 + 5 * (labelBits + hashPrefixBits) + 3 * inputBits),
     );
     return circuit;
 }
@@ -585,33 +588,41 @@ export function labelledHashExtractionWork(
     inputBits: bigint,
     outputBits: bigint,
     labelBits: bigint,
+    hashPrefixBits = outputBits,
 ) {
     assert.ok(
         capacity >= 0n &&
             inputBits >= 1n &&
             outputBits >= 1n &&
             labelBits >= 0n &&
-            labelBits <= inputBits,
+            labelBits <= inputBits &&
+            hashPrefixBits >= 1n &&
+            hashPrefixBits <= outputBits,
     );
     return {
         capacity,
         inputBits,
         outputBits,
         labelBits,
+        hashPrefixBits,
         extractionGates:
             2n *
                 capacity *
-                (14n + 5n * (labelBits + outputBits) + 3n * inputBits) +
+                (14n + 5n * (labelBits + hashPrefixBits) + 3n * inputBits) +
             inputBits +
             1n,
         measuredQubits: inputBits + 1n,
         extractionQubits:
             labelBits +
-            outputBits +
+            hashPrefixBits +
             inputBits +
             2n +
             capacity *
-                (10n + 3n * labelBits + 4n * outputBits + 3n * inputBits),
+                (10n +
+                    3n * labelBits +
+                    3n * hashPrefixBits +
+                    outputBits +
+                    3n * inputBits),
     };
 }
 
@@ -620,12 +631,14 @@ export function verifyLabelledHashExtraction(
     inputBits: number,
     outputBits: number,
     labelBits: number,
+    hashPrefixBits = outputBits,
 ) {
     const circuit = compileLabelledHashExtraction(
         capacity,
         inputBits,
         outputBits,
         labelBits,
+        hashPrefixBits,
     );
     let cases = 0;
     const enumerate = (entries: Entry[], next: number) => {
@@ -636,17 +649,17 @@ export function verifyLabelledHashExtraction(
             outputBits,
         );
         for (let label = 0; label < 2 ** labelBits; label++)
-            for (let hash = 0; hash < 2 ** outputBits; hash++) {
+            for (let hash = 0; hash < 2 ** hashPrefixBits; hash++) {
                 const target = Uint8Array.from([
                         ...integerBits(label, labelBits),
-                        ...integerBits(hash, outputBits),
+                        ...integerBits(hash, hashPrefixBits),
                     ]),
                     out = new Uint8Array(inputBits + 1);
                 applyClean(circuit, target, database, out);
                 const expected = entries.find(
                     (entry) =>
                         entry.input % 2 ** labelBits === label &&
-                        entry.output === hash,
+                        entry.output % 2 ** hashPrefixBits === hash,
                 );
                 assert.equal(out[inputBits], expected ? 1 : 0);
                 assert.equal(
@@ -786,6 +799,223 @@ export function compileLocalOracleUpdate(outputBits: number) {
     return { gates, valid, accumulator, qubits };
 }
 
+export function compilePrefixCopy(outputBits: number) {
+    assert.ok(Number.isSafeInteger(outputBits) && outputBits >= 1);
+    const lengthBits = Math.ceil(Math.log2(outputBits + 1)),
+        builder = new Builder(outputBits + lengthBits),
+        one = builder.not(builder.zero),
+        length = Array.from(
+            { length: lengthBits },
+            (_, bit) => outputBits + bit,
+        ),
+        out = [];
+    for (let bit = 0; bit < outputBits; bit++) {
+        const ordinal = Array.from({ length: lengthBits }, (_item, index) =>
+            Math.floor(bit / 2 ** index) % 2 ? one : builder.zero,
+        );
+        out.push(builder.and(bit, builder.less(ordinal, length)));
+    }
+    return { circuit: builder.finish(out), lengthBits };
+}
+
+export const prefixOracleQueriesPerAccess = 2n;
+
+export function prefixOracleWork(
+    logicalQueries: bigint,
+    inputBits: bigint,
+    outputBits: bigint,
+) {
+    assert.ok(logicalQueries >= 0n && inputBits >= 1n && outputBits >= 1n);
+    let lengthBits = 0n;
+    while (1n << lengthBits < outputBits + 1n) lengthBits++;
+    const copyGates = 4n + outputBits * (14n * lengthBits + 3n),
+        copyWorkQubits = 2n + outputBits * (4n * lengthBits + 1n),
+        fullValueQueries = prefixOracleQueriesPerAccess * logicalQueries;
+    const full = sparseOracleQuerySchedule(
+            fullValueQueries,
+            inputBits,
+            outputBits,
+        ),
+        databaseQubits = fullValueQueries * (inputBits + outputBits + 1n);
+    const duringQuery = full.maximumQubits + outputBits + lengthBits,
+        duringCopy =
+            inputBits +
+            databaseQubits +
+            2n * outputBits +
+            lengthBits +
+            copyWorkQubits;
+    return {
+        logicalQueries,
+        inputBits,
+        outputBits,
+        lengthBits,
+        fullValueQueries,
+        copyGates,
+        copyWorkQubits,
+        queryGates: full.queryGates + logicalQueries * copyGates,
+        maximumQubits:
+            logicalQueries === 0n
+                ? 0n
+                : duringQuery > duringCopy
+                  ? duringQuery
+                  : duringCopy,
+    };
+}
+
+export function verifyPrefixOracleWrapper(outputBits: number) {
+    assert.ok(
+        Number.isSafeInteger(outputBits) && outputBits >= 1 && outputBits <= 2,
+    );
+    const full = compileLocalOracleUpdate(outputBits),
+        copy = compilePrefixCopy(outputBits),
+        size = 2 ** outputBits,
+        resultStart = full.qubits,
+        lengthStart = resultStart + outputBits,
+        dimension = 2 ** (lengthStart + copy.lengthBits);
+    let copyCases = 0;
+    for (let value = 0; value < size; value++)
+        for (let length = 0; length <= outputBits; length++)
+            for (let result = 0; result < size; result++) {
+                const out = integerBits(result, outputBits);
+                applyClean(
+                    copy.circuit,
+                    integerBits(value, outputBits),
+                    integerBits(length, copy.lengthBits),
+                    out,
+                );
+                assert.equal(
+                    fromBits(out),
+                    result ^ (value & (2 ** length - 1)),
+                );
+                copyCases++;
+            }
+    const index = (entry: number, result: number, length: number) =>
+        (entry < 0 ? 0 : 2 ** full.valid + entry) +
+        result * 2 ** resultStart +
+        length * 2 ** lengthStart;
+    const coefficient = (out: number, input: number) =>
+        out < 0
+            ? input < 0
+                ? 0
+                : 1 / Math.sqrt(size)
+            : input < 0
+              ? 1 / Math.sqrt(size)
+              : (out === input ? 1 : 0) - 1 / size;
+    let cases = 0,
+        maximumError = 0,
+        fullValueQueries = 0;
+    const oracle = (state: Float64Array) => {
+        fullValueQueries++;
+        applyLocalGates(full.gates, state);
+    };
+    for (let entry = -1; entry < size; entry++)
+        for (let result = 0; result < size; result++)
+            for (let length = 0; length <= outputBits; length++) {
+                const actual = new Float64Array(dimension),
+                    expected = new Float64Array(dimension);
+                actual[index(entry, result, length)] = 1;
+                oracle(actual);
+                // The independently checked clean copy circuit has this phase-free
+                // action on its logical registers; all its work qubits are zero.
+                for (let bit = 0; bit < outputBits; bit++)
+                    for (let basis = 0; basis < dimension; basis++)
+                        if (
+                            (basis & (2 ** (resultStart + bit))) === 0 &&
+                            ((basis >> lengthStart) &
+                                (2 ** copy.lengthBits - 1)) >
+                                bit &&
+                            (basis & (2 ** (full.accumulator + bit))) !== 0
+                        ) {
+                            const other = basis | (2 ** (resultStart + bit)),
+                                value = actual[basis];
+                            actual[basis] = actual[other];
+                            actual[other] = value;
+                        }
+                oracle(actual);
+                for (let intermediate = -1; intermediate < size; intermediate++)
+                    for (let out = -1; out < size; out++)
+                        expected[
+                            index(
+                                out,
+                                result ^
+                                    (intermediate < 0
+                                        ? 0
+                                        : intermediate & (2 ** length - 1)),
+                                length,
+                            )
+                        ] +=
+                            coefficient(intermediate, entry) *
+                            coefficient(out, intermediate);
+                for (let basis = 0; basis < dimension; basis++)
+                    maximumError = Math.max(
+                        maximumError,
+                        Math.abs(actual[basis] - expected[basis]),
+                    );
+                assert.ok(maximumError < 1e-12);
+                cases++;
+            }
+    const work = prefixOracleWork(1n, 1n, BigInt(outputBits));
+    assert.equal(
+        work.copyGates,
+        BigInt(2 * copy.circuit.gates.length + outputBits),
+    );
+    assert.equal(
+        work.copyWorkQubits,
+        BigInt(copy.circuit.wires - copy.circuit.inputs),
+    );
+    const discardedTail = [];
+    for (let requested = 0; requested < outputBits; requested++) {
+        let unequalTails = 0;
+        for (let first = 0; first < size; first++)
+            for (let second = 0; second < size; second++)
+                if (
+                    Math.floor(first / 2 ** requested) !==
+                    Math.floor(second / 2 ** requested)
+                )
+                    unequalTails++;
+        const badMinusProbability = unequalTails / (2 * size * size);
+        assert.equal(
+            badMinusProbability,
+            (1 - 2 ** -(outputBits - requested)) / 2,
+        );
+        discardedTail.push({ requested, badMinusProbability });
+    }
+    return {
+        outputBits,
+        copyCases,
+        cases,
+        maximumError,
+        fullValueQueriesPerLogicalQuery: fullValueQueries / cases,
+        copyGates: 2 * copy.circuit.gates.length + outputBits,
+        discardedTail,
+    };
+}
+
+function applyLocalGates(
+    gates: ReturnType<typeof compileLocalOracleUpdate>['gates'],
+    actual: Float64Array,
+) {
+    for (const gate of gates) {
+        const target = 2 ** gate.target;
+        for (let basis = 0; basis < actual.length; basis++)
+            if (
+                (basis & target) === 0 &&
+                gate.controls.every((control) => (basis & (2 ** control)) !== 0)
+            ) {
+                const other = basis | target,
+                    left = actual[basis],
+                    right = actual[other];
+                if (gate.kind === 'controlledHadamard') {
+                    actual[basis] = (left + right) / Math.sqrt(2);
+                    actual[other] = (left - right) / Math.sqrt(2);
+                } else {
+                    actual[basis] = right;
+                    actual[other] = left;
+                }
+            }
+    }
+}
+
 export function verifyLocalOracleUpdate(outputBits: number) {
     assert.ok(
         Number.isSafeInteger(outputBits) && outputBits >= 1 && outputBits <= 3,
@@ -804,29 +1034,7 @@ export function verifyLocalOracleUpdate(outputBits: number) {
             : input < 0
               ? 1 / Math.sqrt(size)
               : (out === input ? 1 : 0) - 1 / size;
-    const apply = (actual: Float64Array) => {
-        for (const gate of gates) {
-            const target = 2 ** gate.target;
-            for (let basis = 0; basis < dimension; basis++)
-                if (
-                    (basis & target) === 0 &&
-                    gate.controls.every(
-                        (control) => (basis & (2 ** control)) !== 0,
-                    )
-                ) {
-                    const other = basis | target,
-                        left = actual[basis],
-                        right = actual[other];
-                    if (gate.kind === 'controlledHadamard') {
-                        actual[basis] = (left + right) / Math.sqrt(2);
-                        actual[other] = (left - right) / Math.sqrt(2);
-                    } else {
-                        actual[basis] = right;
-                        actual[other] = left;
-                    }
-                }
-        }
-    };
+    const apply = (actual: Float64Array) => applyLocalGates(gates, actual);
     let cases = 0,
         maximumError = 0;
     for (let entry = -1; entry < size; entry++)

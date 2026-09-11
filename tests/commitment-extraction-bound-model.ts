@@ -1,14 +1,20 @@
 // DFMS21 Corollary 4.8 for f(x,y)=(sender(x),y) on full-body commitments.
-// Gamma=Gamma'=1. This is a QROM loss calculation, not a fixed-hash theorem.
-export const compileCommitmentExtractionBound = (participantCount: number) => {
+// A fixed output has Gamma=Gamma'=1. A wider stream with this matched prefix
+// has the same normalized ratios by DFMS21 Remark 4.2. Count the simulator's
+// full-value queries explicitly. This is not a fixed-hash theorem.
+export const compileCommitmentExtractionBound = (
+    participantCount: number,
+    quantumQueryCount = 1n << 80n,
+) => {
     if (
         !Number.isSafeInteger(participantCount) ||
         participantCount < 3 ||
         participantCount > 20
     )
         throw new RangeError('Unsupported participant count.');
+    if (quantumQueryCount < 0n)
+        throw new RangeError('Negative oracle-query budget.');
     const corruptParticipantCount = Math.floor((participantCount - 1) / 3);
-    const quantumQueryCount = 1n << 80n;
     const hashOutputBitLength = 512n;
     // Each honest participant freezes at most one contribution inventory.
     // Fixed-suite public matrices require no seed opening. Count losing views.

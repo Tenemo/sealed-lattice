@@ -36,6 +36,8 @@ import { compileCompletedContributionStateCensus } from '#tests/completed-contri
 import {
     sparseRoutingWork,
     labelledHashExtractionWork,
+    prefixOracleWork,
+    prefixOracleQueriesPerAccess,
 } from '#tests/compressed-oracle-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
@@ -4656,6 +4658,37 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
+        'The fixed-output rows above are the baseline. A coherent SHAKE prefix wrapper computes a complete finite stream value, copies only the requested prefix and uncomputes the complete value. The following stream rows charge its full-value oracle calls and retain the same normalized prefix-match ratios from DFMS21 Remark 4.2. The finite stream width remains a separate resource operand; a fixed body/hash width does not bound every adversarial input or output.',
+        '',
+        table(
+            [
+                'Participants',
+                'Logical stream accesses',
+                'Simulated full-value queries',
+                'Quadratic-query coefficient',
+                'Combined failure exponent',
+            ],
+            [10, 20].map((participants) => {
+                const logical =
+                        compileCommitmentExtractionBound(
+                            participants,
+                        ).quantumQueryCount,
+                    bound = compileCommitmentExtractionBound(
+                        participants,
+                        prefixOracleQueriesPerAccess * logical,
+                    );
+                return [
+                    formatCount(participants),
+                    formatCount(logical),
+                    formatCount(bound.quantumQueryCount),
+                    formatCount(bound.simulatorQuadraticQueryCoefficient),
+                    bound.combinedFailureExponent === undefined
+                        ? 'No extraction event'
+                        : formatCount(bound.combinedFailureExponent),
+                ];
+            }),
+        ),
+        '',
         '## Compressed-oracle circuit work',
         '',
         "The declared gate basis is X, CNOT, Toffoli and controlled-H, each acting on at most three qubits. The sorted database uses one spare tuple while routing the queried value to a separate register. Clean computation includes inverse evaluation and register swaps. These bounded examples verify the circuit family; they are not the protocol's full input domain or query population.",
@@ -4744,6 +4777,36 @@ export const renderDocumentationCensus = (): string => {
                         .extractionQubits,
                 ].map(formatCount),
             ),
+        ),
+        '',
+        'The following supplied-width prefix examples include both full-value calls, clean prefix-copy work and its extra workspace. They do not assign a maximum stream width or a complete participant/reduction total.',
+        '',
+        table(
+            [
+                'Logical accesses',
+                'Input bits',
+                'Maximum stream bits',
+                'Full-value queries',
+                'Clean prefix-copy gates per access',
+                'Query gates',
+                'Oracle qubit bound',
+            ],
+            [
+                [1n, 2n, 1n],
+                [1n, 2n, 2n],
+                [3n, 64n, 512n],
+            ].map(([queries, input, output]) => {
+                const work = prefixOracleWork(queries, input, output);
+                return [
+                    queries,
+                    input,
+                    output,
+                    work.fullValueQueries,
+                    work.copyGates,
+                    work.queryGates,
+                    work.maximumQubits,
+                ].map(formatCount);
+            }),
         ),
         '',
         '## Full-body commitment equivocation census',

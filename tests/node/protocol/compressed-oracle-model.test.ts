@@ -2,19 +2,67 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileLocalOracleUpdate,
+    compilePrefixCopy,
     compileLabelledHashExtraction,
     compileSparseRouting,
     sparseExtractionWork,
     sparseOracleQuerySchedule,
     sparseRoutingWork,
+    prefixOracleWork,
+    prefixOracleQueriesPerAccess,
     labelledHashExtractionWork,
     verifyLocalOracleUpdate,
     verifySparseRouting,
     verifySparseSelection,
+    verifyPrefixOracleWrapper,
     verifyLabelledHashExtraction,
 } from '#tests/compressed-oracle-model.js';
 
 describe('Compressed oracle implementation', () => {
+    it('preserves coherent prefix reads and clears all unrequested output', () => {
+        for (const bits of [1, 2]) {
+            const result = verifyPrefixOracleWrapper(bits);
+            expect(result.maximumError).toBeLessThan(1e-12);
+            expect(BigInt(result.fullValueQueriesPerLogicalQuery)).toBe(
+                prefixOracleQueriesPerAccess,
+            );
+            expect(
+                result.discardedTail.every(
+                    (value) => value.badMinusProbability >= 0.25,
+                ),
+            ).toBe(true);
+        }
+        const copy = compilePrefixCopy(512),
+            work = prefixOracleWork(3n, 64n, 512n);
+        expect(work.copyGates).toBe(
+            BigInt(2 * copy.circuit.gates.length + 512),
+        );
+        expect(work.copyWorkQubits).toBe(
+            BigInt(copy.circuit.wires - copy.circuit.inputs),
+        );
+        expect(work.fullValueQueries).toBe(6n);
+        expect(work.queryGates).toBe(
+            sparseOracleQuerySchedule(6n, 64n, 512n).queryGates +
+                3n * work.copyGates,
+        );
+    });
+
+    it('extracts the committed prefix while retaining the entire stream value', () => {
+        const result = verifyLabelledHashExtraction(2, 2, 2, 1, 1);
+        expect(result.cases).toBeGreaterThan(0);
+        const emitted = compileLabelledHashExtraction(2, 2, 2, 1, 1),
+            work = labelledHashExtractionWork(2n, 2n, 2n, 1n, 1n);
+        expect(BigInt(result.extractionGates)).toBe(work.extractionGates);
+        expect(BigInt(emitted.wires + emitted.output.length)).toBe(
+            work.extractionQubits,
+        );
+        // The predicate ignores one output bit, so each accepted prefix has
+        // two full-value preimages. Its normalized probability is unchanged.
+        for (let prefix = 0; prefix < 2; prefix++)
+            expect(
+                [0, 1, 2, 3].filter((value) => value % 2 === prefix),
+            ).toHaveLength(2);
+    });
     it('cleans lookup work and preserves canonical arrays across every bounded insertion and deletion', () => {
         for (const [capacity, inputBits, outputBits] of [
             [0, 2, 1],
