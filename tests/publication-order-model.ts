@@ -35,6 +35,37 @@ export const publicationOriginOrderViews = () => {
     ] as const;
 };
 
+// Even restricting the slot to one proof-valid body cannot authenticate an
+// earlier privately sent invalid attempt. Only the received body is visible.
+export const singleValidBodyOriginViews = () => {
+    const invalid: Envelope = {
+        ...first,
+        body: 'invalid-body',
+        signature: 'signature-of-invalid-body',
+    };
+    const view = {
+        records: [first],
+        honestDeliveries: [0, 1, 2].map((participant) => ({
+            participant,
+            messages: [first],
+        })),
+        durablePublishedRecords: [first],
+        closeIntent: { organizer: 0, action: 'close' },
+    };
+    return [
+        {
+            origins: [invalid, first],
+            proofValidBodies: [first.body],
+            view: structuredClone(view),
+        },
+        {
+            origins: [first],
+            proofValidBodies: [first.body],
+            view: structuredClone(view),
+        },
+    ] as const;
+};
+
 export const unorderedPublicationClassifications = () =>
     [null, first.body, second.body].map((answer) => ({
         answer,

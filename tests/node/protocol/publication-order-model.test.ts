@@ -4,11 +4,32 @@ import {
     delayedArchiveDiscoveryViews,
     orderedPublicationReference,
     publicationOriginOrderViews,
+    singleValidBodyOriginViews,
     retainPublishedValue,
     unorderedPublicationClassifications,
 } from '#tests/publication-order-model.js';
 
 describe('observable publication and non-revocation', () => {
+    it('cannot recover an unseen invalid first attempt even with only one valid body', () => {
+        const [hiddenAttempt, soleAttempt] = singleValidBodyOriginViews();
+        expect(hiddenAttempt.view).toEqual(soleAttempt.view);
+        expect(hiddenAttempt.proofValidBodies).toEqual(
+            soleAttempt.proofValidBodies,
+        );
+        expect(hiddenAttempt.proofValidBodies).toHaveLength(1);
+        expect(hiddenAttempt.proofValidBodies).not.toContain(
+            hiddenAttempt.origins[0].body,
+        );
+        expect(soleAttempt.proofValidBodies).toContain(
+            soleAttempt.origins[0].body,
+        );
+        expect(hiddenAttempt.view.durablePublishedRecords).toEqual([
+            hiddenAttempt.origins[1],
+        ]);
+        expect(hiddenAttempt.view.records).not.toContainEqual(
+            hiddenAttempt.origins[0],
+        );
+    });
     it('cannot recover corrupt origin order from identical authenticated views', () => {
         const [left, right] = publicationOriginOrderViews();
         expect(left.view).toEqual(right.view);
