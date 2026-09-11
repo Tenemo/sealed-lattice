@@ -8,6 +8,8 @@ import {
     compileCurrentCredentialIntentBounds,
     compileCurrentSignatureHashInputs,
     compileCurrentSignatureSamplingBounds,
+    compileSignatureCounterBoundary,
+    compileBallotSignatureHashWork,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
@@ -19,6 +21,43 @@ import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initializa
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 describe('Authentication frame accounting', () => {
+    it('derives the checked counter boundary by enumerating nonce blocks', () => {
+        const boundary = compileSignatureCounterBoundary();
+        let full = 0n,
+            partial = 0n;
+        for (let start = 0n; start < 65536n; start += 5n) {
+            let used = 0n;
+            for (
+                let position = 0n;
+                position < 5n && start + position < 65536n;
+                position++
+            )
+                used++;
+            if (used === 5n) full++;
+            else partial = used;
+        }
+        expect(boundary.fullIterations).toBe(full);
+        expect(boundary.partialMaskCalls).toBe(partial);
+        expect(full * boundary.masksPerIteration + partial).toBe(
+            boundary.nonceCapacity,
+        );
+        const work = compileBallotSignatureHashWork(full, partial);
+        expect(
+            work.rows.find((row) => row.purpose === 'Mask expansion')?.calls,
+        ).toBe(65536n);
+        expect(
+            work.rows.find(
+                (row) => row.purpose === 'Matrix polynomial sampling',
+            )?.calls,
+        ).toBe(60n);
+        expect(work.hashCalls).toBe(75n + 7n * full + partial);
+        expect(compileBallotSignatureHashWork(2n).hashCalls).toBe(89n);
+        expect(() => compileBallotSignatureHashWork(full + 1n)).toThrow();
+        expect(() =>
+            compileBallotSignatureHashWork(full, partial + 1n),
+        ).toThrow();
+        expect(() => compileBallotSignatureHashWork(-1n)).toThrow();
+    });
     it('bounds all seed inputs before adaptive selection without a lifetime invocation cap', () => {
         const rows = compileCurrentSignatureSamplingBounds();
         expect(rows.map((row) => row.outputBytes)).toEqual([

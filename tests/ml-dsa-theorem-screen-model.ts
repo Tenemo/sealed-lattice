@@ -13,6 +13,8 @@ type SignatureParameters = Readonly<{
 // FIPS 204 Table 1, ML-DSA-65. These independently maintained operands are
 // checked against the deployed fips204 source by the research audit.
 export const mlDsa65ChallengeSeedBytes = 192n / 4n;
+// The pinned implementation uses a u16 nonce in FIPS 204 ExpandMask.
+export const mlDsa65MaskNonceBytes = 2n;
 export const mlDsa65Parameters: SignatureParameters = {
     modulus: 8380417n,
     polynomialDegree: 256n,

@@ -9,6 +9,8 @@ import {
     compileCurrentCredentialIntentBounds,
     compileCurrentSignatureHashInputs,
     compileCurrentSignatureSamplingBounds,
+    compileSignatureCounterBoundary,
+    compileBallotSignatureHashWork,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
@@ -1730,6 +1732,41 @@ export const renderDocumentationCensus = (): string => {
                 value.purposes.join(', '),
                 formatCount(value.firstEvaluatedIntentBound),
             ]),
+        ),
+        '',
+        'One native ballot-signing evaluation regenerates the original ML-DSA key, then Sign expands the public matrix again. The checked-counter boundary below is conditional on the declared overflow-checking build and the sampler read event. It bounds work until success or the arithmetic boundary; it does not bound the probability of signing failure. Hash-permutation work applies when executing the concrete SHAKE implementation; a simulated oracle instead needs its own circuit cost.',
+        '',
+        table(
+            ['Property', 'Value'],
+            (() => {
+                const boundary = compileSignatureCounterBoundary(),
+                    work = compileBallotSignatureHashWork(
+                        boundary.fullIterations,
+                        boundary.partialMaskCalls,
+                    );
+                const rows: [string, bigint][] = [
+                    ['Distinct mask nonces', boundary.nonceCapacity],
+                    [
+                        'Complete mask-vector iterations',
+                        boundary.fullIterations,
+                    ],
+                    ['Partial final mask calls', boundary.partialMaskCalls],
+                    ['Hash calls including key regeneration', work.hashCalls],
+                    ['Cumulative hash input bytes', work.inputBytes],
+                    [
+                        'Cumulative hash output byte bound',
+                        work.outputBytesUpperBound,
+                    ],
+                    [
+                        'Concrete SHAKE permutation bound',
+                        work.permutationsUpperBound,
+                    ],
+                ];
+                return rows.map(([label, value]) => [
+                    label,
+                    formatCount(value),
+                ]);
+            })(),
         ),
         '',
         'The following completed, all-cooperating prefixes use the completion profile and one completed registration per roster participant. A signed ballot counts here even if it will fail inner verification. Additional registrations are an explicit census input. These public record counts are not lifetime honest-key or signing-oracle bounds; they exclude abandoned enrollment, additional intents, repeated evaluation, verification, recovery and the unimplemented closing/release purposes.',

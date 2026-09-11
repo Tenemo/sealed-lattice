@@ -9,7 +9,7 @@ import {
 
 describe('proof hash work', () => {
     it('matches explicit suffix padding and block-by-block squeezing', () => {
-        for (const rate of [72, 136])
+        for (const rate of [72, 136, 168])
             for (let input = 0; input <= 2 * rate + 1; input++)
                 for (const output of [
                     0,

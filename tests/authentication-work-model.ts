@@ -1,6 +1,7 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import {
     mlDsa65ChallengeSeedBytes,
+    mlDsa65MaskNonceBytes,
     mlDsa65Parameters,
 } from '#tests/ml-dsa-theorem-screen-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
@@ -220,6 +221,104 @@ export const compileCurrentSignatureSamplingBounds = () => {
             failureExponent,
         };
     });
+};
+
+export const compileSignatureCounterBoundary = () => {
+    const nonceCapacity = 1n << (8n * mlDsa65MaskNonceBytes),
+        masksPerIteration = mlDsa65Parameters.columnCount;
+    return {
+        nonceCapacity,
+        masksPerIteration,
+        fullIterations: nonceCapacity / masksPerIteration,
+        partialMaskCalls: nonceCapacity % masksPerIteration,
+    };
+};
+
+// One original ballot signing evaluation regenerates its ML-DSA key and then
+// invokes Sign, which expands the public matrix again. Counts include a
+// possible partial final mask vector in the declared overflow-checked build.
+export const compileBallotSignatureHashWork = (
+    fullIterations: bigint,
+    partialMaskCalls = 0n,
+) => {
+    const boundary = compileSignatureCounterBoundary();
+    if (
+        fullIterations < 0n ||
+        fullIterations > boundary.fullIterations ||
+        partialMaskCalls < 0n ||
+        partialMaskCalls >= boundary.masksPerIteration ||
+        (fullIterations === boundary.fullIterations &&
+            partialMaskCalls > boundary.partialMaskCalls)
+    )
+        throw new RangeError('Invalid checked signing-loop prefix.');
+    const inputs = new Map(
+            compileCurrentSignatureHashInputs().rows.map((row) => [
+                row.purpose,
+                row,
+            ]),
+        ),
+        caps = new Map(
+            compileCurrentSignatureSamplingBounds().map((row) => [
+                row.purpose,
+                row.outputBytes,
+            ]),
+        );
+    const counts: [string, bigint][] = [
+        ['Key expansion', 1n],
+        ['Public key digest', 1n],
+        [
+            'Secret polynomial sampling',
+            mlDsa65Parameters.rowCount + mlDsa65Parameters.columnCount,
+        ],
+        [
+            'Matrix polynomial sampling',
+            2n * mlDsa65Parameters.rowCount * mlDsa65Parameters.columnCount,
+        ],
+        ['ballot-envelope', 1n],
+        ['Private mask seed', 1n],
+        [
+            'Mask expansion',
+            boundary.masksPerIteration * fullIterations + partialMaskCalls,
+        ],
+        ['Challenge digest', fullIterations],
+        ['Challenge polynomial sampling', fullIterations],
+    ];
+    const rows = counts.map(([purpose, calls]) => {
+        const input = inputs.get(purpose);
+        if (!input) throw new Error('Missing signature hash shape.');
+        const outputBytes = input.outputBytes ?? caps.get(purpose);
+        if (outputBytes === undefined)
+            throw new Error('Missing signature sampler bound.');
+        return {
+            ...input,
+            outputBytes,
+            calls,
+            inputBytesTotal: calls * input.inputBytes,
+            outputBytesUpperBound: calls * outputBytes,
+            permutationsUpperBound:
+                calls *
+                byteAlignedSpongePermutations(
+                    input.inputBytes,
+                    outputBytes,
+                    input.family === 'SHAKE128' ? 168n : 136n,
+                ),
+        };
+    });
+    return {
+        fullIterations,
+        partialMaskCalls,
+        rows,
+        hashCalls: rows.reduce((sum, row) => sum + row.calls, 0n),
+        inputBytes: rows.reduce((sum, row) => sum + row.inputBytesTotal, 0n),
+        outputBytesUpperBound: rows.reduce(
+            (sum, row) => sum + row.outputBytesUpperBound,
+            0n,
+        ),
+        permutationsUpperBound: rows.reduce(
+            (sum, row) => sum + row.permutationsUpperBound,
+            0n,
+        ),
+    };
 };
 
 // One completed, all-cooperating prefix through ballot signing. Enrollment

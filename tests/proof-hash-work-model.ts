@@ -21,8 +21,12 @@ export const byteAlignedSpongePermutations = (
     outputBytes: bigint,
     rateBytes: bigint,
 ) => {
-    if (inputBytes < 0n || outputBytes < 0n || ![72n, 136n].includes(rateBytes))
-        throw new RangeError('Invalid SHA3-512 or SHAKE256 byte count.');
+    if (
+        inputBytes < 0n ||
+        outputBytes < 0n ||
+        ![72n, 136n, 168n].includes(rateBytes)
+    )
+        throw new RangeError('Invalid SHA3 or SHAKE byte count.');
     // FIPS 202 Algorithm 8 and its byte-aligned SHA-3/SHAKE suffixes.
     const absorption = inputBytes / rateBytes + 1n;
     const outputBlocks = (outputBytes + rateBytes - 1n) / rateBytes;
