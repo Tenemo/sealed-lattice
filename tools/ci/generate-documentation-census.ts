@@ -147,6 +147,7 @@ import {
 } from '#tests/signing-key-recovery-model.js';
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
+import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
@@ -5485,6 +5486,27 @@ export const renderDocumentationCensus = (): string => {
                 value.publicCertificateAvailable ? 'yes' : 'no',
                 value.everyContinuingSetCanDecrypt ? 'yes' : 'no',
             ]),
+        ),
+        '',
+        '## Slot-publication wire census',
+        '',
+        'Metadata for the complete source, close and witness messages. Distinct corrupt witness carriers may be needed by different already completed slot certificates. These bounds exclude setup and ballot body bytes, target evaluation, target signatures, release, archive framing and private storage.',
+        '',
+        table(
+            ['Property', 'Completion profile', 'Largest roster'],
+            Object.entries(compileSlotPublicationResourceCensus(10)).map(
+                ([property, value]) => [
+                    property,
+                    formatCount(value),
+                    formatCount(
+                        compileSlotPublicationResourceCensus(20)[
+                            property as keyof ReturnType<
+                                typeof compileSlotPublicationResourceCensus
+                            >
+                        ],
+                    ),
+                ],
+            ),
         ),
         '',
         '## Batched slot-publication visit comparison',
