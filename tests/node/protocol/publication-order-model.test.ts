@@ -10,6 +10,27 @@ import {
 } from '#tests/publication-order-model.js';
 
 describe('observable publication and non-revocation', () => {
+    it('gives a hidden unpublished send no effect on the public slot', () => {
+        const histories = [false, true].map((hiddenSend) => {
+            const model = orderedPublicationReference(4, 0);
+            if (hiddenSend) model.registerFixture(3, 'hidden-invalid', false);
+            const firstPublished = model.registerFixture(
+                3,
+                'public-valid',
+                true,
+            );
+            expect(model.linearize(firstPublished)).toBe(true);
+            return model.close(0);
+        });
+        expect(histories[0]).toEqual(histories[1]);
+        expect(histories[0]?.inventory).toEqual([
+            {
+                author: 3,
+                identity: JSON.stringify([3, 'public-valid']),
+                classification: 'accepted',
+            },
+        ]);
+    });
     it('cannot recover an unseen invalid first attempt even with only one valid body', () => {
         const [hiddenAttempt, soleAttempt] = singleValidBodyOriginViews();
         expect(hiddenAttempt.view).toEqual(soleAttempt.view);

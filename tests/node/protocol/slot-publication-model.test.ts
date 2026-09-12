@@ -16,6 +16,22 @@ const publish = (model: Model, token: Token) => {
 };
 
 describe('permanent per-slot publication decisions', () => {
+    it('retains honest local consumption before an invalid attempt is published', () => {
+        const model = createSlotPublicationModel(4, [], 'poll-a');
+        model.fixture('invalid-first', false);
+        model.fixture('replacement', true);
+        expect(model.beginAttempt(1, 'invalid-first')).toBe(true);
+        expect(model.beginAttempt(1, 'replacement')).toBe(false);
+        expect(model.originate(1, 'replacement')).toBeUndefined();
+        model.requestClose(0);
+        model.observeClose(1);
+        expect(model.originate(1, null)).toBeUndefined();
+        const original = model.originate(1, 'invalid-first');
+        expect(original?.body).toBe('invalid-first');
+        expect(model.verifyCertificate(model.certificate(original!))).toBe(
+            false,
+        );
+    });
     it('includes every honest first attempt and classifies only authenticated bodies', () => {
         const model = createSlotPublicationModel(10, [], 'poll-a');
         model.fixture('default-ballot', true);
@@ -100,7 +116,7 @@ describe('permanent per-slot publication decisions', () => {
         expect(other.verifyCertificate(certificate)).toBe(false);
     });
 
-    it('exposes the remaining origin-to-publication gap before any honest witness acts', () => {
+    it('distinguishes corrupt message origins from different completed publication histories', () => {
         const make = (choice: 'first' | 'second' | null) => {
             const model = createSlotPublicationModel(10, [0, 1, 2], 'poll-a');
             model.fixture('first', true);
@@ -116,12 +132,19 @@ describe('permanent per-slot publication decisions', () => {
                 model.observeClose(author);
                 values.push(publish(model, model.originate(author, null)!));
             }
-            return { prefix, inventory: model.close(values)! };
+            return {
+                prefix,
+                publishedIdentity: selected.identity,
+                inventory: model.close(values)!,
+            };
         };
         const variants = [make('first'), make('second'), make(null)];
         expect(variants.map((value) => value.prefix)).toEqual(
             Array(3).fill(variants[0].prefix),
         );
+        expect(
+            new Set(variants.map((value) => value.publishedIdentity)).size,
+        ).toBe(3);
         expect(variants.map((value) => value.inventory[0].body)).toEqual([
             'first',
             'second',
