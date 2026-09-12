@@ -50,6 +50,19 @@ export const compileSlotPublicationResourceCensus = (
     // requiring a newly coherent global row from that corrupt participant.
     const maximumWitnessCarrierBytes =
         participants * otherWitnesses * (witnessBodyBytes + signatureBytes);
+    const entryPrefixBytes = 6n;
+    const closePacketBytes = 4n + closeBodyBytes + signatureBytes;
+    const completedCloseStateBytes =
+        entryPrefixBytes + closeBodyBytes + signatureBytes;
+    const completedEmptyStateBytes =
+        entryPrefixBytes + emptyBodyBytes + closePacketBytes + signatureBytes;
+    const completedWitnessStateBytes =
+        otherWitnesses === 0n
+            ? 0n
+            : entryPrefixBytes +
+              witnessBodyBytes +
+              closePacketBytes +
+              signatureBytes;
     return {
         participantCount: participants,
         otherWitnesses,
@@ -70,5 +83,14 @@ export const compileSlotPublicationResourceCensus = (
             closedBodyBytes,
         ordinarySignatureEvaluations:
             1n + participants + (otherWitnesses === 0n ? 0n : participants),
+        // A signing intent keeps 32 coins instead of its larger signature.
+        // The empty-source and completed-ballot paths cannot coexist.
+        maximumParticipantStateBytes:
+            6n +
+            completedCloseStateBytes +
+            completedEmptyStateBytes +
+            completedWitnessStateBytes,
+        maximumVotedParticipantStateBytes:
+            6n + completedCloseStateBytes + completedWitnessStateBytes,
     };
 };

@@ -5490,7 +5490,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Slot-publication wire census',
         '',
-        'Metadata for the complete source, close and witness messages. Distinct corrupt witness carriers may be needed by different already completed slot certificates. These bounds exclude setup and ballot body bytes, target evaluation, target signatures, release, archive framing and private storage.',
+        'Metadata for the complete source, close and witness messages, including the original participant root suffix. Distinct corrupt witness carriers may be needed by different already completed slot certificates. These bounds exclude setup and ballot body bytes, target evaluation, target signatures, release, archive framing and storage-engine overhead.',
         '',
         table(
             ['Property', 'Completion profile', 'Largest roster'],

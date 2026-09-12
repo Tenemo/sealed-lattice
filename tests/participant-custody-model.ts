@@ -5,6 +5,7 @@ import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoi
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 
 export const compileParticipantCustodyCensus = () => {
     const body = compileContributionBodyCensus();
@@ -63,9 +64,34 @@ export const compileParticipantCustodyCensus = () => {
         4n + 64n + 64n * BigInt(body.polynomials.length);
     const maximumWithBallot =
         maximumCompletedMetadataBytes + 4n + ballot.maximumStateBytes;
+    const completedBallotBytes = ballot.phaseBytes.find(
+        (value) => value.phase === 17,
+    )!.bytes;
+    const publication = compileSlotPublicationResourceCensus(
+        body.participantCount,
+    );
+    const maximumWithVotedPublication =
+        maximumCompletedMetadataBytes +
+        4n +
+        completedBallotBytes +
+        4n +
+        publication.maximumVotedParticipantStateBytes;
+    const maximumWithEmptyPublication =
+        maximumCompletedMetadataBytes +
+        4n +
+        4n +
+        publication.maximumParticipantStateBytes;
+    const maximumWithPublication =
+        maximumWithVotedPublication > maximumWithEmptyPublication
+            ? maximumWithVotedPublication
+            : maximumWithEmptyPublication;
+    const maximumWithLaterWork =
+        maximumWithPublication > maximumWithBallot
+            ? maximumWithPublication
+            : maximumWithBallot;
     const maximumCombinedMetadata =
-        maximumWithBallot > maximumMetadataBytes
-            ? maximumWithBallot
+        maximumWithLaterWork > maximumMetadataBytes
+            ? maximumWithLaterWork
             : maximumMetadataBytes;
     const maximumRootBytes =
         enrollment.manifestPrefixBytes +
@@ -103,6 +129,7 @@ export const compileParticipantCustodyCensus = () => {
         maximumRootRecords,
         setupReferenceBytes,
         maximumRootBytes,
+        maximumPublicationStateBytes: publication.maximumParticipantStateBytes,
         maximumPublicBodyCiphertextBytes,
         maximumSigningPlaintextBytes,
         maximumRetainedPayloadBytes,
