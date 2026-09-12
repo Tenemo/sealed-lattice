@@ -223,7 +223,10 @@ export const openPublicArchive = (
             }),
         readRecord: checked,
         publish: async (rootInput, source, signal) => {
-            const root = { ...rootInput };
+            const root = {
+                identity: rootInput.identity,
+                byteLength: rootInput.byteLength,
+            };
             const controller = new AbortController();
             const combined =
                 signal === undefined
@@ -378,39 +381,55 @@ export const openPublicArchive = (
                 signal === undefined
                     ? controller.signal
                     : AbortSignal.any([signal, controller.signal]);
+            const page = (position: number, after: string, seen: number) =>
+                (async () => {
+                    const bytes = await readResponse(
+                        await fetch(
+                            endpoint(
+                                position,
+                                'discovery/' + context + '?after=' + after,
+                            ),
+                            {
+                                signal: combined,
+                                credentials: 'omit',
+                                redirect: 'error',
+                            },
+                        ),
+                        maximumRecordBytes,
+                    );
+                    const value: unknown = JSON.parse(
+                        new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+                    );
+                    if (
+                        !Array.isArray(value) ||
+                        value.length > maximumRecords - seen ||
+                        !value.every(isReference)
+                    )
+                        throw new Error('Malformed archive discovery reply.');
+                    let previous = after;
+                    for (const reference of value) {
+                        if (reference.identity <= previous)
+                            throw new Error(
+                                'Archive discovery cursor did not advance.',
+                            );
+                        previous = reference.identity;
+                    }
+                    return {
+                        position,
+                        roots: value,
+                        after: previous,
+                        seen: seen + value.length,
+                    };
+                })().catch(() => ({
+                    position,
+                    roots: [] as ArchiveReference[],
+                    after,
+                    seen,
+                }));
             const pending = new Map(
                 replicas.map((_replica, position) => [
                     position,
-                    (async () => {
-                        const bytes = await readResponse(
-                            await fetch(
-                                endpoint(position, 'discovery/' + context),
-                                {
-                                    signal: combined,
-                                    credentials: 'omit',
-                                    redirect: 'error',
-                                },
-                            ),
-                            maximumRecordBytes,
-                        );
-                        const value: unknown = JSON.parse(
-                            new TextDecoder('utf-8', { fatal: true }).decode(
-                                bytes,
-                            ),
-                        );
-                        if (
-                            !Array.isArray(value) ||
-                            value.length > maximumRecords ||
-                            !value.every(isReference)
-                        )
-                            throw new Error(
-                                'Malformed archive discovery reply.',
-                            );
-                        return { position, roots: value };
-                    })().catch(() => ({
-                        position,
-                        roots: [] as ArchiveReference[],
-                    })),
+                    page(position, '', 0),
                 ]),
             );
             try {
@@ -418,7 +437,13 @@ export const openPublicArchive = (
                     const reply = await Promise.race(pending.values());
                     pending.delete(reply.position);
                     signal?.throwIfAborted();
-                    yield reply.roots;
+                    if (reply.roots.length > 0) {
+                        yield reply.roots;
+                        pending.set(
+                            reply.position,
+                            page(reply.position, reply.after, reply.seen),
+                        );
+                    }
                 }
             } finally {
                 controller.abort();

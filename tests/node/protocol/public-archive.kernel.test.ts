@@ -5,7 +5,15 @@ import {
     sign,
     verify,
 } from 'node:crypto';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import {
+    mkdir,
+    mkdtemp,
+    readFile,
+    realpath,
+    rmdir,
+    unlink,
+    writeFile,
+} from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 
@@ -70,6 +78,212 @@ beforeAll(async () => {
 });
 
 describe('public archive through the real scalar kernel and local storage hosts', () => {
+    it('keeps replica cursors separate and stops replayed discovery pages', async () => {
+        const first = '01'.repeat(64),
+            second = '02'.repeat(64),
+            forged = 'ff'.repeat(64);
+        const queries: string[][] = [[], [], []];
+        const server = createServer((request, response) => {
+            const url = new URL(request.url ?? '', 'http://127.0.0.1');
+            const position = Number(url.pathname.split('/')[2]);
+            const after = url.searchParams.get('after') ?? '';
+            queries[position].push(after);
+            const roots =
+                position === 0
+                    ? [{ identity: forged, byteLength: 100 }]
+                    : position === 1 && after !== second
+                      ? [
+                            {
+                                identity: after === '' ? first : second,
+                                byteLength: 100,
+                            },
+                        ]
+                      : [];
+            response
+                .writeHead(200, { 'Content-Type': 'application/json' })
+                .end(JSON.stringify(roots));
+        });
+        await new Promise<void>((resolve) => {
+            server.listen(0, '127.0.0.1', resolve);
+        });
+        const address = server.address();
+        if (address === null || typeof address === 'string')
+            throw new Error('Discovery fixture has no address.');
+        try {
+            const archive = await createPublicArchive({
+                context,
+                faultBound: 1,
+                replicas: policy.verificationKeys.map(
+                    (verificationKey, position) => ({
+                        baseUrl: `http://127.0.0.1:${String(address.port)}/replica/${String(position)}/`,
+                        verificationKey,
+                    }),
+                ),
+                maximumRecords: 4,
+                maximumTotalBytes: 4096,
+            });
+            const found: string[] = [];
+            for await (const roots of archive.discover(
+                AbortSignal.timeout(10_000),
+            ))
+                found.push(...roots.map((root) => root.identity));
+            expect(found).toContain(first);
+            expect(found).toContain(second);
+            expect(queries).toEqual([['', forged], ['', first, second], ['']]);
+        } finally {
+            server.closeAllConnections();
+            await new Promise<void>((resolve) => {
+                server.close(() => resolve());
+            });
+        }
+    });
+
+    it('discovers a retained record across the maximum response boundary', async () => {
+        const census = compilePublicArchiveResourceCensus();
+        const record = (position: number) => {
+            const payload = new Uint8Array(8);
+            new DataView(payload.buffer).setBigUint64(
+                0,
+                BigInt(position),
+                true,
+            );
+            return runtime.encodeArchiveRecord({
+                context,
+                purpose: 'public-record',
+                dependencies: [],
+                payload,
+            });
+        };
+        const sample = record(0);
+        const referenceBytes = Buffer.byteLength(
+            JSON.stringify(sample.reference),
+        );
+        const count =
+            Math.floor(
+                (Number(census.maximumRecordBytes) - 1) / (referenceBytes + 1),
+            ) + 1;
+        const directory = await mkdtemp(
+            path.resolve('temp/public-archive-listing-'),
+        );
+        const recordsDirectory = path.join(directory, 'records'),
+            discoveryDirectory = path.join(directory, 'discovery', context);
+        await mkdir(recordsDirectory);
+        await mkdir(discoveryDirectory, { recursive: true });
+        const references: { identity: string; byteLength: number }[] = [];
+        for (let offset = 0; offset < count; offset += 32) {
+            await Promise.all(
+                Array.from(
+                    { length: Math.min(32, count - offset) },
+                    async (_unused, index) => {
+                        const value = record(offset + index);
+                        references.push(value.reference);
+                        await writeFile(
+                            path.join(
+                                recordsDirectory,
+                                value.reference.identity,
+                            ),
+                            value.bytes,
+                            { flag: 'wx' },
+                        );
+                        await writeFile(
+                            path.join(
+                                discoveryDirectory,
+                                value.reference.identity,
+                            ),
+                            JSON.stringify(value.reference),
+                            { flag: 'wx' },
+                        );
+                    },
+                ),
+            );
+        }
+        expect(Buffer.byteLength(JSON.stringify(references))).toBeGreaterThan(
+            Number(census.maximumRecordBytes),
+        );
+        const host = await startPublicArchiveReplica({
+            directory,
+            context,
+            policy: {
+                faultBound: 0,
+                verificationKeys: [policy.verificationKeys[0]],
+            },
+            replicaPosition: 0,
+            privateKey: keys[0],
+            runtime,
+            maximumRecords: Number(census.maximumRecords),
+            maximumTotalBytes: 4_294_967_291,
+        });
+        let passed = false;
+        try {
+            const archive = await createPublicArchive({
+                context,
+                faultBound: 0,
+                replicas: [
+                    {
+                        baseUrl: host.baseUrl,
+                        verificationKey: policy.verificationKeys[0],
+                    },
+                ],
+                maximumRecords: Number(census.maximumRecords),
+                maximumTotalBytes: 4_294_967_291,
+            });
+            const control = record(count);
+            references.push(control.reference);
+            const source = store();
+            await source.storage.put(control.reference.identity, control.bytes);
+            expect(
+                await archive.publish(control.reference, source.storage),
+            ).toEqual([0]);
+            source.records.clear();
+            let pages = 0;
+            const found = new Set<string>();
+            for await (const page of archive.discover(
+                AbortSignal.timeout(60_000),
+            )) {
+                pages++;
+                expect(
+                    Buffer.byteLength(JSON.stringify(page)),
+                ).toBeLessThanOrEqual(Number(census.maximumRecordBytes));
+                for (const reference of page) found.add(reference.identity);
+            }
+            expect(pages).toBe(2);
+            expect(found).toEqual(
+                new Set(references.map((reference) => reference.identity)),
+            );
+            expect(
+                await archive.retrieve(control.reference, source.storage),
+            ).toEqual({ recordCount: 1, byteLength: control.bytes.length });
+            expect(source.records.get(control.reference.identity)).toEqual(
+                control.bytes,
+            );
+            passed = true;
+        } finally {
+            await host.close();
+            if (!passed)
+                process.stderr.write(
+                    `Public archive fixture retained at ${directory}\n`,
+                );
+        }
+        const workspace = await realpath(process.cwd()),
+            resolved = await realpath(directory);
+        if (!resolved.startsWith(path.join(workspace, 'temp') + path.sep))
+            throw new Error('Archive fixture cleanup escaped the workspace.');
+        for (let offset = 0; offset < references.length; offset += 32)
+            await Promise.all(
+                references.slice(offset, offset + 32).map(async (reference) => {
+                    await unlink(
+                        path.join(discoveryDirectory, reference.identity),
+                    );
+                    await unlink(
+                        path.join(recordsDirectory, reference.identity),
+                    );
+                }),
+            );
+        await rmdir(discoveryDirectory);
+        await rmdir(path.dirname(discoveryDirectory));
+        await rmdir(recordsDirectory);
+        await rmdir(directory);
+    });
     it('finishes publication, discovery and retrieval while one replica never replies', async () => {
         const directory = await mkdtemp(
             path.resolve('temp/public-archive-silent-'),

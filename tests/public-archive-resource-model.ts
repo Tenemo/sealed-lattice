@@ -4,6 +4,7 @@ const publicArchiveResourceInputs = {
     maximumPurposeBytes: 128n,
     maximumDependencies: 4_096n,
     maximumReplicas: 32n,
+    maximumRecords: 65_536n,
     verificationKeyBytes: 1_952n,
     signatureBytes: 3_309n,
 } as const;
@@ -76,6 +77,20 @@ export const compilePublicArchiveResourceCensus = () => {
         72n +
         2n +
         input.maximumReplicas * (2n + 4n + input.signatureBytes);
+    const maximumDiscoveryReferenceBytes = BigInt(
+        Buffer.byteLength(
+            JSON.stringify({
+                identity: 'f'.repeat(128),
+                byteLength: Number(input.maximumRecordBytes),
+            }),
+        ),
+    );
+    const minimumFullDiscoveryPageRecords =
+        (input.maximumRecordBytes - 1n) / (maximumDiscoveryReferenceBytes + 1n);
+    const maximumStaticDiscoveryRequestsPerReplica =
+        (input.maximumRecords + minimumFullDiscoveryPageRecords - 1n) /
+            minimumFullDiscoveryPageRecords +
+        1n;
     return {
         ...input,
         maximumEncodedRecordBytes,
@@ -83,6 +98,15 @@ export const compilePublicArchiveResourceCensus = () => {
         maximumReadRequestBytes,
         maximumReadResponseBytes,
         maximumAcknowledgementRequestBytes,
+        maximumDiscoveryReferenceBytes,
+        minimumFullDiscoveryPageRecords,
+        maximumStaticDiscoveryRequestsPerReplica,
+        maximumConcurrentDiscoveryRequestsPerReplica: input.maximumRecords + 1n,
+        maximumDiscoverySuffixBytes: BigInt(
+            Buffer.byteLength(
+                'discovery/' + 'f'.repeat(128) + '?after=' + 'f'.repeat(128),
+            ),
+        ),
         maximumSimultaneousResponseBufferBytes:
             input.maximumReplicas * input.maximumRecordBytes,
     };

@@ -184,6 +184,11 @@ export const startPublicArchiveReplica = async (
             try {
                 const url = request.url ?? '';
                 const recordMatch = /^\/records\/([a-f0-9]{128})$/u.exec(url);
+                const discoveryMatch = new RegExp(
+                    '^/discovery/' +
+                        context +
+                        '(?:\\?after=([a-f0-9]{128})?)?$',
+                ).exec(url);
                 if (recordMatch !== null && request.method === 'PUT') {
                     const bytes = await body(request, maximumRecordBytes);
                     input.runtime.readArchiveRecord(
@@ -247,7 +252,10 @@ export const startPublicArchiveReplica = async (
                         throw new Error(
                             'Wrong archive retention context or root.',
                         );
-                    const root = requestBody.root;
+                    const root = {
+                        identity: requestBody.root.identity,
+                        byteLength: requestBody.root.byteLength,
+                    };
                     await checkClosure(root);
                     await persist(
                         path.join(
@@ -276,7 +284,7 @@ export const startPublicArchiveReplica = async (
                         })
                         .end(signature);
                 } else if (
-                    url === '/discovery/' + context &&
+                    discoveryMatch !== null &&
                     request.method === 'GET'
                 ) {
                     const names = (
@@ -295,11 +303,14 @@ export const startPublicArchiveReplica = async (
                             'Archive discovery exceeds host limits.',
                         );
                     const roots: ArchiveReference[] = [];
-                    for (const name of names) {
+                    const after = discoveryMatch[1] ?? '';
+                    let responseBytes = 2;
+                    for (const name of names.sort()) {
                         if (!isProtocolHash(name))
                             throw new Error(
                                 'Malformed stored discovery identity.',
                             );
+                        if (name <= after) continue;
                         const file = path.join(
                             directory,
                             'discovery',
@@ -315,8 +326,21 @@ export const startPublicArchiveReplica = async (
                         );
                         if (!isReference(root) || root.identity !== name)
                             throw new Error('Malformed stored discovery root.');
+                        const reference = {
+                            identity: root.identity,
+                            byteLength: root.byteLength,
+                        };
+                        const additionalBytes =
+                            Buffer.byteLength(JSON.stringify(reference)) +
+                            (roots.length === 0 ? 0 : 1);
+                        if (
+                            additionalBytes >
+                            maximumRecordBytes - responseBytes
+                        )
+                            break;
                         await checkClosure(root);
-                        roots.push(root);
+                        roots.push(reference);
+                        responseBytes += additionalBytes;
                     }
                     response
                         .writeHead(200, { 'Content-Type': 'application/json' })
