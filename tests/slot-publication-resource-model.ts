@@ -37,19 +37,24 @@ export const compileSlotPublicationResourceCensus = (
     const ballotEnvelopeBytes = 4n + 64n + 64n + 2n + 8n + 64n;
     const maximumSourceMetadataBytes =
         participants *
-        ((emptyBodyBytes > ballotEnvelopeBytes
-            ? emptyBodyBytes
-            : ballotEnvelopeBytes) +
+        (1n +
+            (4n + emptyBodyBytes > ballotEnvelopeBytes
+                ? 4n + emptyBodyBytes
+                : ballotEnvelopeBytes) +
             signatureBytes);
     const ordinaryWitnessBytes =
         otherWitnesses === 0n
             ? 0n
-            : participants * (witnessBodyBytes + signatureBytes);
+            : participants * (4n + witnessBodyBytes + signatureBytes);
     // A corrupt witness may have used different valid batches in different
     // completed slot certificates. Preserve each required carrier rather than
     // requiring a newly coherent global row from that corrupt participant.
     const maximumWitnessCarrierBytes =
-        participants * otherWitnesses * (witnessBodyBytes + signatureBytes);
+        participants *
+        otherWitnesses *
+        (4n + witnessBodyBytes + signatureBytes);
+    const witnessCarrierSelectionBytes =
+        2n + 2n * participants * otherWitnesses;
     const entryPrefixBytes = 6n;
     const closePacketBytes = 4n + closeBodyBytes + signatureBytes;
     const completedCloseStateBytes =
@@ -75,11 +80,12 @@ export const compileSlotPublicationResourceCensus = (
         maximumSourceMetadataBytes,
         ordinaryWitnessBytes,
         maximumWitnessCarrierBytes,
+        witnessCarrierSelectionBytes,
         maximumEvidenceMetadataBytes:
-            closeBodyBytes +
-            signatureBytes +
+            closePacketBytes +
             maximumSourceMetadataBytes +
             maximumWitnessCarrierBytes +
+            witnessCarrierSelectionBytes +
             closedBodyBytes,
         ordinarySignatureEvaluations:
             1n + participants + (otherWitnesses === 0n ? 0n : participants),
