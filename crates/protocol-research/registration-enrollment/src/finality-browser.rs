@@ -1,0 +1,91 @@
+use super::{INPUT_BYTES, SESSION, Session};
+use registration_credentials::{Error, target_signing::TARGET_VOTE_BYTES};
+use zeroize::{Zeroize, Zeroizing};
+
+fn field<'a>(bytes: &mut &'a [u8], maximum: usize) -> Result<&'a [u8], Error> {
+    if bytes.len() < 4 {
+        return Err(Error::Shape);
+    }
+    let length = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+    if length > maximum || length > bytes.len() - 4 {
+        return Err(Error::Shape);
+    }
+    let value = &bytes[4..4 + length];
+    *bytes = &bytes[4 + length..];
+    Ok(value)
+}
+
+fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8>, Error> {
+    let publication = session.publication.as_ref().ok_or(Error::Context)?;
+    match operation {
+        0 => {
+            if session.finality.is_some() {
+                return Err(Error::Consumed);
+            }
+            let mut remaining = input;
+            let source = field(&mut remaining, 1 + 4 + 2048 + 3309)?;
+            let witness = field(&mut remaining, 4 + 2048 + 3309)?;
+            if !remaining.is_empty() || source.is_empty() {
+                return Err(Error::Shape);
+            }
+            let target = evaluation_target::verified_browser_target().ok_or(Error::Context)?;
+            let work = crate::finality_work::FinalityWork::new(
+                publication.owner(),
+                target,
+                source,
+                (!witness.is_empty()).then_some(witness),
+            )?;
+            let body = work.body().to_vec();
+            session.finality = Some(work);
+            Ok(body)
+        }
+        1 => {
+            if !(33..=2048 + 32).contains(&input.len()) {
+                return Err(Error::Shape);
+            }
+            let body_length = input.len() - 32;
+            let work = session.finality.as_ref().ok_or(Error::Context)?;
+            let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
+            work.sign(
+                &mut enrollment.credential,
+                &input[..body_length],
+                input[body_length..].try_into().unwrap(),
+            )
+            .map(|vote| vote.encode())
+        }
+        2 => {
+            if session.finality.is_some() {
+                return Err(Error::Consumed);
+            }
+            let mut remaining = input;
+            let body = field(&mut remaining, 2048)?;
+            if remaining.len() != TARGET_VOTE_BYTES {
+                return Err(Error::Shape);
+            }
+            let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
+            publication.restore_target(&mut enrollment.credential, body, remaining)?;
+            Ok(Vec::new())
+        }
+        _ => Err(Error::Shape),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn participant_finality_command(operation: u32, length: usize) -> u32 {
+    SESSION.with(|session| {
+        let mut session = session.borrow_mut();
+        session.contribution_output.clear();
+        if length > INPUT_BYTES {
+            return 1;
+        }
+        let input = Zeroizing::new(session.input[..length].to_vec());
+        session.input[..length].zeroize();
+        match command(&mut session, operation, &input) {
+            Ok(output) => {
+                session.contribution_output = output;
+                0
+            }
+            Err(_) => 1,
+        }
+    })
+}

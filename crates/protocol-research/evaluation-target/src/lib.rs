@@ -1,6 +1,14 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #[cfg(all(target_arch = "wasm32", feature = "browser"))]
 mod browser;
+#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+pub fn verified_browser_target() -> Option<std::sync::Arc<target::VerifiedEvaluationTarget>> {
+    browser::verified_target()
+}
+#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+pub fn verified_browser_release_context() -> Option<std::sync::Arc<release::ReleaseContext>> {
+    completion_browser::verified_context()
+}
 pub mod certification;
 #[cfg(all(target_arch = "wasm32", feature = "browser"))]
 #[path = "completion-browser.rs"]

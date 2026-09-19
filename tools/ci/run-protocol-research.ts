@@ -255,6 +255,9 @@ await runWithLocalRunLog(
                 'registration-enrollment',
                 'registration-credentials',
                 'evaluation-target',
+                'contribution-prover',
+                'setup-aggregate',
+                'opened-contribution',
             ];
             await execute(
                 'cargo',
@@ -274,6 +277,7 @@ await runWithLocalRunLog(
                     'clippy',
                     '--offline',
                     '--locked',
+                    '--no-default-features',
                     ...members.flatMap((name) => ['-p', name]),
                     '--all-targets',
                     '--',
@@ -305,8 +309,14 @@ await runWithLocalRunLog(
                     '--offline',
                     '--locked',
                     '--release',
-                    '-p',
-                    'native-ceremony',
+                    '--no-default-features',
+                    ...[
+                        'native-ceremony',
+                        'contribution-prover',
+                        'setup-aggregate',
+                        'opened-contribution',
+                    ].flatMap((name) => ['-p', name]),
+                    '--bins',
                 ],
                 'build-native',
             );

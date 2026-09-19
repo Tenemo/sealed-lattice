@@ -9,6 +9,10 @@ autobins = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "verify-opened-contribution"
+path = "src/verify-opened-contribution.rs"
+
 [features]
 default = ["bridge"]
 bridge = []

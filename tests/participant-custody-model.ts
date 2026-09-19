@@ -3,9 +3,11 @@ import { compileContributionAuthenticationCensus } from '#tests/contribution-aut
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
+import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
 export const compileParticipantCustodyCensus = () => {
     const body = compileContributionBodyCensus();
@@ -85,9 +87,15 @@ export const compileParticipantCustodyCensus = () => {
         maximumWithVotedPublication > maximumWithEmptyPublication
             ? maximumWithVotedPublication
             : maximumWithEmptyPublication;
+    const targetSigning = compileTargetSigningStateCensus();
+    const maximumWithTargetSigning =
+        maximumWithPublication + 4n + targetSigning.maximumStateBytes;
+    const release = compileParticipantReleaseCustody();
+    const maximumWithRelease =
+        maximumWithTargetSigning + 4n + release.maximumStateBytes;
     const maximumWithLaterWork =
-        maximumWithPublication > maximumWithBallot
-            ? maximumWithPublication
+        maximumWithRelease > maximumWithBallot
+            ? maximumWithRelease
             : maximumWithBallot;
     const maximumCombinedMetadata =
         maximumWithLaterWork > maximumMetadataBytes
@@ -119,6 +127,7 @@ export const compileParticipantCustodyCensus = () => {
         maximumSigningPlaintextBytes +
         5n * 16n;
     return {
+        maximumReleaseStateBytes: release.maximumStateBytes,
         participants: body.participantCount,
         publicRecords,
         checkpointLengths,
@@ -130,6 +139,7 @@ export const compileParticipantCustodyCensus = () => {
         setupReferenceBytes,
         maximumRootBytes,
         maximumPublicationStateBytes: publication.maximumParticipantStateBytes,
+        maximumTargetSigningStateBytes: targetSigning.maximumStateBytes,
         maximumPublicBodyCiphertextBytes,
         maximumSigningPlaintextBytes,
         maximumRetainedPayloadBytes,

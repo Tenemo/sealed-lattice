@@ -9,6 +9,10 @@ autobins = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "verify-setup-aggregate"
+path = "src/verify-setup-aggregate.rs"
+
 [features]
 default = ["bridge"]
 bridge = []

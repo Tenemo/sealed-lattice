@@ -237,6 +237,9 @@ impl State {
     }
 }
 thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
+pub(crate) fn verified_context() -> Option<Arc<ReleaseContext>> {
+    STATE.with(|state| state.borrow().context.clone())
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn completion_input_pointer() -> usize {
     STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)

@@ -9,6 +9,10 @@ autobins = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "public-contribution-inputs"
+path = "src/public-contribution-inputs.rs"
+
 [features]
 default = ["bridge"]
 bridge = []

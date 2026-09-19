@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// Original-key signing beneath the authenticated browser root. Public source
 /// inputs pass the owning setup, envelope, and complete-body verifiers first.
 pub struct PublicationWork {
-    owner: RetainedBallotOwner,
+    owner: Arc<RetainedBallotOwner>,
     setup: Arc<VerifiedSetupAggregate>,
     context: PublicationContext,
     close: Option<AuthenticatedClose>,
@@ -55,7 +55,7 @@ impl PublicationWork {
         }
         let context = PublicationContext::new(poll, setup.clone()).map_err(|_| Error::Context)?;
         Ok(Self {
-            owner,
+            owner: Arc::new(owner),
             setup,
             context,
             close: None,
@@ -63,6 +63,28 @@ impl PublicationWork {
             pending: None,
             prepared: None,
         })
+    }
+    pub fn owner(&self) -> Arc<RetainedBallotOwner> {
+        self.owner.clone()
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn setup(&self) -> &Arc<VerifiedSetupAggregate> {
+        &self.setup
+    }
+    pub fn restore_target(
+        &self,
+        credential: &mut Credential,
+        body: &[u8],
+        packet: &[u8],
+    ) -> Result<(), Error> {
+        let count = self.setup.inventory().confirmations().len();
+        let message = registration_credentials::target_signing::TargetMessage::parse(body, count)?;
+        credential.restore_target(
+            &self.owner,
+            self.setup.inventory().proposal(),
+            &message,
+            packet,
+        )
     }
     fn next_author(&self) -> Result<usize, Error> {
         self.context

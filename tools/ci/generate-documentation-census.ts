@@ -109,6 +109,7 @@ import {
     compileParticipantCustodyCensus,
     compileParticipantVaultKeyClasses,
 } from '#tests/participant-custody-model.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
     createFalseBinaryRelationTable,
@@ -211,6 +212,7 @@ export const renderDocumentationCensus = (): string => {
     const slotPublicationVisits = compileSlotPublicationVisitCensus();
     const participantCustody = compileParticipantCustodyCensus();
     const participantBallotCustody = compileParticipantBallotCustody();
+    const participantReleaseCustody = compileParticipantReleaseCustody();
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus();
     const fixedSpongeInitialization = compileFixedSpongeInitializationCensus();
@@ -2965,6 +2967,58 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
+        '## Participant release custody',
+        '',
+        'Bounds for one original-key release under the retained certified target. Repeated execution replays the same finite journal. These bounds exclude the earlier participant state and do not establish the complete security reduction or measured browser costs.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Independent noise bytes',
+                    formatCount(participantReleaseCustody.noiseBytes),
+                ],
+                [
+                    'Maximum proof randomness bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumProofRandomBytes,
+                    ),
+                ],
+                [
+                    'Additional proof random reads',
+                    formatCount(participantReleaseCustody.extraProofReads),
+                ],
+                [
+                    'Journal exhaustion allocation bits',
+                    formatCount(
+                        participantReleaseCustody.exhaustionAllocationBits,
+                    ),
+                ],
+                [
+                    'Total journal bytes',
+                    formatCount(participantReleaseCustody.totalRandomBytes),
+                ],
+                [
+                    'Journal records',
+                    formatCount(participantReleaseCustody.journalRecords),
+                ],
+                [
+                    'Maximum body bytes',
+                    formatCount(participantReleaseCustody.maximumBodyBytes),
+                ],
+                [
+                    'Maximum encrypted journal and body bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumJournalAndBodyBytes,
+                    ),
+                ],
+                ...participantReleaseCustody.phaseBytes.map((value) => [
+                    'Phase ' + value.phase + ' state bytes',
+                    formatCount(value.bytes),
+                ]),
+            ],
+        ),
+        '',
         '## Linked release relation census',
         '',
         'The recipient-key, encrypted aggregate-decryption, and dense partial-release equations use the same hidden share and original recipient secret. These are exact integer-lifting and layout values; the emitted proof and target capability remain separate.',
@@ -4233,6 +4287,16 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum encrypted participant root bytes',
                     formatCount(participantCustody.maximumRootBytes),
+                ],
+                [
+                    'Maximum release state bytes',
+                    formatCount(participantCustody.maximumReleaseStateBytes),
+                ],
+                [
+                    'Maximum target-signing state bytes',
+                    formatCount(
+                        participantCustody.maximumTargetSigningStateBytes,
+                    ),
                 ],
                 [
                     'Maximum participant root records',

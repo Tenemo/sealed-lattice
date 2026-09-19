@@ -27,9 +27,11 @@ This case supplies a nonconsecutive quorum of votes and a nonconsecutive release
 
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
-All sources, parameters, toolchain selection and third-party code needed by this workspace are tracked. `temp/` contains only run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to the native generation case. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.
+All sources, parameters, toolchain selection and third-party code needed by the native generation case are tracked. That case uses `temp/` only for run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.
 
 The public verifier and scalar bridge are library consumers of the same owning Rust verifiers. Target certification alone does not establish archive availability. The complete reduction argument, independent adversarial review, supported-profile coverage, resource qualification and physical qualification remain outstanding.
+
+The original participant bridge also exposes target signing and certified release in the same scalar instance. New release work requires the actual certificate-derived context and original recipient key; an unsigned retained body passes the owning verifier before signing. Completed-message restoration verifies its original signature and exact body digest and restores consumed authority only. The experimental worker connects encrypted journal and root transitions, but its complete target/release browser fault gate remains open. These interfaces are not exported by the published SDK.
 
 ## Third-party sources
 

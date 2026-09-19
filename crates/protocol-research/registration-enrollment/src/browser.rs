@@ -7,6 +7,10 @@ use registration_credentials::{
 };
 use std::{cell::RefCell, sync::Arc};
 use zeroize::{Zeroize, Zeroizing};
+#[path = "finality-browser.rs"]
+mod finality_browser;
+#[path = "release-browser.rs"]
+mod release_browser;
 const INPUT_BYTES: usize = 128 + 4 + 4096 + 128 + 64 + 65536 * 21 + 532 + 52 + 1;
 struct Session {
     input: Vec<u8>,
@@ -23,8 +27,10 @@ struct Session {
     retained_context: Option<RetainedContributionContext>,
     ballot: Option<crate::ballot::BallotWork>,
     publication: Option<crate::publication_work::PublicationWork>,
+    finality: Option<crate::finality_work::FinalityWork>,
+    release: Option<release_browser::ReleaseState>,
 }
-thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,publication:None});}
+thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,publication:None,finality:None,release:None});}
 #[unsafe(no_mangle)]
 pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)

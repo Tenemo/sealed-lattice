@@ -20,7 +20,7 @@ zeroize = "=1.8.2"
 ballot-proof = { path = "../ballot-proof", default-features = false }
 ballot-encryption = { path = "../ballot-encryption", default-features = false }
 setup-aggregate = { path = "../setup-aggregate", default-features = false, features = ["bridge"] }
-evaluation-target = { path = "../evaluation-target" }
+evaluation-target = { path = "../evaluation-target", features = ["browser"] }
 linked-release-proof = { path = "../linked-release-proof", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
