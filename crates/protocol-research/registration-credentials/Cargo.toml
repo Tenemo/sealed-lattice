@@ -5,6 +5,10 @@ edition = "2024"
 publish = false
 autobins = false
 
+[[bin]]
+name = "verify-registration-record"
+path = "src/bin/verify-registration-record.rs"
+
 
 [lib]
 crate-type = ["rlib", "cdylib"]

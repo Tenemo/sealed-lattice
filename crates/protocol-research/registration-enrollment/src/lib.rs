@@ -20,6 +20,9 @@ pub mod release_work;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
+#[cfg(target_arch = "wasm32")]
+#[path = "own-verification.rs"]
+mod own_verification;
 
 pub struct Enrollment {
     pub key: RegistrationKey,

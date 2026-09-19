@@ -11,6 +11,7 @@ const INPUT_BYTES: usize = 128 + 4 + 4096 + 128 + 64 + 65536 * 21 + 532 + 52 + 1
 struct Session {
     input: Vec<u8>,
     started: bool,
+    restored: bool,
     enrollment: Option<Enrollment>,
     poll_identity: [u8; 64],
     roster: Option<RosterInputVerifier>,
@@ -23,7 +24,7 @@ struct Session {
     ballot: Option<crate::ballot::BallotWork>,
     publication: Option<crate::publication_work::PublicationWork>,
 }
-thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,publication:None});}
+thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,publication:None});}
 #[unsafe(no_mangle)]
 pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
@@ -211,9 +212,13 @@ pub extern "C" fn prepare_join(length: usize) -> u32 {
 pub extern "C" fn restore(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if state.started || !(132..=INPUT_BYTES).contains(&length) {
+        if state.restored
+            || (state.started && state.enrollment.is_none())
+            || !(132..=INPUT_BYTES).contains(&length)
+        {
             return 1;
         }
+        state.restored = true;
         state.started = true;
         let input = Zeroizing::new(state.input[..length].to_vec());
         state.input[..length].zeroize();
@@ -243,6 +248,16 @@ pub extern "C" fn restore(length: usize) -> u32 {
         if input[length - 1] > 1 {
             return 1;
         }
+        let Some(verified) = crate::own_verification::verified() else {
+            return 1;
+        };
+        if verified.header().encode().ok().as_deref() != Some(&input[132..132 + header_length])
+            || verified.proof_hash() != proof_hash
+            || verified.body_digest() != body_digest
+            || verified.public_key() != &input[public_start..capsule_start]
+        {
+            return 1;
+        }
         let Ok(mut enrollment) = Enrollment::restore(
             &header,
             &input[public_start..capsule_start],
@@ -257,7 +272,19 @@ pub extern "C" fn restore(length: usize) -> u32 {
         if input[length - 1] == 1 {
             enrollment.credential.consume_proposal_signing();
         }
-        state.enrollment = Some(enrollment);
+        if let Some(original) = state.enrollment.as_ref() {
+            // A newly created instance retains its actual consumed authority.
+            // Reopening validates the saved capsules without replacing it.
+            if input[length - 1] != 0
+                || state.poll_identity != header.poll
+                || original.credential.signing_public() != enrollment.credential.signing_public()
+                || original.key.public_key() != enrollment.key.public_key()
+            {
+                return 1;
+            }
+        } else {
+            state.enrollment = Some(enrollment);
+        }
         state.poll_identity = header.poll;
         0
     })

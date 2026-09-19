@@ -469,7 +469,9 @@ await runWithLocalRunLog(
                             networkTransfers: null,
                             recoveryWork: null,
                         },
-                        scope: 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, archive availability, security admission or physical qualification.',
+                        scope: selected.empty
+                            ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, archive availability, security admission or physical qualification.'
+                            : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, archive availability, security admission or physical qualification.',
                     },
                     null,
                     2,

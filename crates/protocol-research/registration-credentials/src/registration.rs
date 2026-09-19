@@ -10,6 +10,7 @@ const KEY_BYTES: usize = 65536 * 21;
 pub struct VerifiedRegistration {
     header: RegistrationHeader,
     body_digest: [u8; 64],
+    proof_hash: [u8; 64],
     public_key: Vec<u8>,
 }
 impl VerifiedRegistration {
@@ -18,6 +19,9 @@ impl VerifiedRegistration {
     }
     pub fn body_digest(&self) -> [u8; 64] {
         self.body_digest
+    }
+    pub fn proof_hash(&self) -> [u8; 64] {
+        self.proof_hash
     }
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
@@ -31,6 +35,7 @@ pub struct RegistrationVerifier {
     key: Vec<u8>,
     proof_prefix: Vec<u8>,
     proof: Option<Verifier>,
+    proof_hash: Sha3_512,
     key_finished: bool,
     failed: bool,
 }
@@ -48,6 +53,7 @@ impl RegistrationVerifier {
             key: Vec::with_capacity(KEY_BYTES),
             proof_prefix: Vec::with_capacity(HEADER_LENGTH),
             proof: None,
+            proof_hash: Sha3_512::new(),
             key_finished: false,
             failed: false,
         })
@@ -91,6 +97,7 @@ impl RegistrationVerifier {
             return Err(Error::Shape);
         }
         self.body.as_mut().ok_or(Error::Consumed)?.absorb(bytes)?;
+        self.proof_hash.update(bytes);
         if self.proof_prefix.len() < HEADER_LENGTH {
             let count = bytes.len().min(HEADER_LENGTH - self.proof_prefix.len());
             self.proof_prefix.extend(&bytes[..count]);
@@ -142,6 +149,7 @@ impl RegistrationVerifier {
         Ok(VerifiedRegistration {
             header: self.header,
             body_digest,
+            proof_hash: self.proof_hash.finalize().into(),
             public_key: self.key,
         })
     }
