@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import { sumProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
-import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
+import {
+    selectProtocolResearchCase,
+    selectPublicCompletionCase,
+} from '#tools/ci/protocol-research-registry.js';
 
 describe('guarded protocol research entry', () => {
+    it('requires an explicit public case and a nonempty fixture', () => {
+        for (const values of [
+            [],
+            ['available-records'],
+            ['available-records', ''],
+            ['unknown', 'fixture'],
+        ])
+            expect(() => selectPublicCompletionCase(values)).toThrow();
+        expect(
+            selectPublicCompletionCase(['available-records', 'fixture']),
+        ).toEqual({ name: 'available-records', source: 'fixture' });
+    });
     it('refuses empty, unknown and ambiguous case selectors', () => {
         for (const values of [
             [],

@@ -51,38 +51,71 @@ pub fn verify(
     }
     let count = target.inventory().setup().inventory().confirmations().len();
     let mut votes = CertificateCollector::new(target.clone());
+    let mut unavailable_votes = Vec::new();
+    let mut invalid_votes = Vec::new();
     for position in 0..count {
-        let packet = bounded(
+        if votes.accepted() >= votes.threshold() {
+            break;
+        }
+        let packet = match bounded(
             directory.join(format!("target-vote-{position}.bin")),
             3375,
             work,
-        )?;
-        if position == 0 {
-            if packet.len() != 3375 {
-                return Err(refusal("vote framing"));
+        ) {
+            Ok(packet) => packet,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                unavailable_votes.push(position);
+                continue;
             }
-            let mut corrupt = packet.clone();
-            corrupt[100] ^= 1;
-            assert!(votes.insert(&corrupt).is_err());
-            assert!(votes.certificate().is_err());
+            Err(_) => {
+                invalid_votes.push(position);
+                continue;
+            }
+        };
+        let accepted_before = votes.accepted();
+        if votes.insert(&packet).is_err() {
+            invalid_votes.push(position);
+            assert_eq!(votes.accepted(), accepted_before);
+            continue;
         }
-        assert!(votes.insert(&packet).map_err(refusal)?);
         assert!(!votes.insert(&packet).map_err(refusal)?);
-        if position + 1 < votes.threshold() {
-            assert!(votes.certificate().is_err());
-        }
     }
-    let certificate = Arc::new(votes.certificate().map_err(refusal)?);
+    let certificate = Arc::new(votes.certificate().map_err(|_| {
+        io::Error::new(io::ErrorKind::WouldBlock, "Insufficient valid target votes")
+    })?);
+    let certificate_authors: Vec<_> = certificate
+        .votes()
+        .iter()
+        .map(|vote| vote.position())
+        .collect();
     if target.ciphertext().is_none() {
         assert!(ReleaseCollector::new(certificate.clone()).is_err());
         verify_no_result(certificate).map_err(refusal)?;
-        return Ok("{\"kind\":\"no-result\"}".to_owned());
+        return Ok(format!(
+            "{{\"kind\":\"no-result\",\"certificateAuthors\":{certificate_authors:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?}}}"
+        ));
     }
     assert!(verify_no_result(certificate.clone()).is_err());
     let mut collector = ReleaseCollector::new(certificate.clone()).map_err(refusal)?;
-    let mut shares = Vec::new();
+    let mut unavailable_releases = Vec::new();
+    let mut invalid_releases = Vec::new();
     let mut buffer = vec![0; CHUNK_BYTES];
     for position in 0..count {
+        let packet = match bounded(
+            directory.join(format!("release-envelope-{position}.bin")),
+            RELEASE_ENVELOPE_BYTES + 3309,
+            work,
+        ) {
+            Ok(packet) => packet,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                unavailable_releases.push(position);
+                continue;
+            }
+            Err(_) => {
+                invalid_releases.push(position);
+                continue;
+            }
+        };
         let context = Arc::new(
             ReleaseContext::new(
                 certificate.clone(),
@@ -92,81 +125,97 @@ pub fn verify(
             )
             .map_err(refusal)?,
         );
-        let packet = bounded(
-            directory.join(format!("release-envelope-{position}.bin")),
-            RELEASE_ENVELOPE_BYTES + 3309,
-            work,
-        )?;
-        let authentication = context.authenticate(&packet).map_err(refusal)?;
+        let authentication = match context.authenticate(&packet) {
+            Ok(value) => value,
+            Err(_) => {
+                invalid_releases.push(position);
+                continue;
+            }
+        };
         let mut wrong = packet.clone();
         wrong[132] ^= 1;
         assert!(context.authenticate(&wrong).is_err());
-        let mut file = File::open(directory.join(format!("release-{position}.bin")))?;
-        if file.metadata()?.len() != authentication.envelope().body_length() as u64 {
-            return Err(refusal("published release body length differs"));
-        }
-        let mut header = [0; RELEASE_BODY_HEADER_BYTES];
-        work.read(&mut file, &mut header)?;
-        let mut verifier = ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?;
-        let mut hostile = if position == 0 {
-            let incomplete = ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?;
-            assert!(incomplete.finish().is_err());
-            let mut changed = header;
-            changed[144] ^= 1;
-            assert!(ReleaseBodyVerifier::new(context.clone(), &changed).is_err());
-            Some(ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?)
-        } else {
-            None
+        let mut file = match File::open(directory.join(format!("release-{position}.bin"))) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                unavailable_releases.push(position);
+                continue;
+            }
+            Err(_) => {
+                invalid_releases.push(position);
+                continue;
+            }
         };
-        let mut received = header.len();
-        let expected_length = authentication.envelope().body_length();
-        while received < expected_length {
-            let count = buffer.len().min(expected_length - received);
-            work.read(&mut file, &mut buffer[..count])?;
-            received += count;
-            verifier.push(&buffer[..count]).map_err(refusal)?;
-            if let Some(mut negative) = hostile.take() {
-                if received == expected_length {
-                    buffer[count - 1] ^= 1;
-                    let result = negative.push(&buffer[..count]);
-                    assert!(result.is_err() || negative.finish().is_err());
-                } else {
-                    negative.push(&buffer[..count]).map_err(refusal)?;
-                    hostile = Some(negative);
+        let verified = (|| {
+            if file.metadata()?.len() != authentication.envelope().body_length() as u64 {
+                return Err(refusal("published release body length differs"));
+            }
+            let mut header = [0; RELEASE_BODY_HEADER_BYTES];
+            work.read(&mut file, &mut header)?;
+            let mut verifier =
+                ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?;
+            let mut hostile = if position == 0 {
+                let incomplete =
+                    ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?;
+                assert!(incomplete.finish().is_err());
+                let mut changed = header;
+                changed[144] ^= 1;
+                assert!(ReleaseBodyVerifier::new(context.clone(), &changed).is_err());
+                Some(ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?)
+            } else {
+                None
+            };
+            let mut received = header.len();
+            let expected_length = authentication.envelope().body_length();
+            while received < expected_length {
+                let count = buffer.len().min(expected_length - received);
+                work.read(&mut file, &mut buffer[..count])?;
+                received += count;
+                verifier.push(&buffer[..count]).map_err(refusal)?;
+                if let Some(mut negative) = hostile.take() {
+                    if received == expected_length {
+                        buffer[count - 1] ^= 1;
+                        let result = negative.push(&buffer[..count]);
+                        assert!(result.is_err() || negative.finish().is_err());
+                    } else {
+                        negative.push(&buffer[..count]).map_err(refusal)?;
+                        hostile = Some(negative);
+                    }
                 }
             }
-        }
-        end(&mut file)?;
-        let share = Arc::new(
-            verifier
-                .finish()
-                .map_err(refusal)?
-                .authenticate(authentication)
-                .map_err(refusal)?,
-        );
+            end(&mut file)?;
+            Ok(Arc::new(
+                verifier
+                    .finish()
+                    .map_err(refusal)?
+                    .authenticate(authentication)
+                    .map_err(refusal)?,
+            ))
+        })();
+        let share = match verified {
+            Ok(share) => share,
+            Err(error) => {
+                invalid_releases.push(position);
+                eprintln!("Ignored invalid public release at position {position}: {error}");
+                continue;
+            }
+        };
         assert!(collector.insert(share.clone()).map_err(refusal)?);
         assert!(!collector.insert(share.clone()).map_err(refusal)?);
-        shares.push(share);
-        if position < 3 {
-            assert!(collector.result().is_err());
+        match collector.result() {
+            Ok(result) => {
+                return Ok(format!(
+                    "{{\"kind\":\"result\",\"identifiers\":{:?},\"certificateAuthors\":{certificate_authors:?},\"releaseAuthors\":{:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?},\"unavailableReleases\":{unavailable_releases:?},\"invalidReleases\":{invalid_releases:?}}}",
+                    result.identifiers(),
+                    result.participants(),
+                ));
+            }
+            Err(evaluation_target::release::Error::Incomplete) => {}
+            Err(error) => return Err(refusal(error)),
         }
     }
-    let result = collector.result().map_err(refusal)?;
-    // The independent process has only public files. Exercise a later retriever
-    // using four survivors after the original generator and author are absent.
-    let mut survivors = ReleaseCollector::new(certificate).map_err(refusal)?;
-    for position in [6, 7, 8, 9] {
-        survivors
-            .insert(shares[position].clone())
-            .map_err(refusal)?;
-    }
-    assert_eq!(
-        survivors.result().map_err(refusal)?.identifiers(),
-        result.identifiers()
-    );
-    Ok(format!(
-        "{{\"kind\":\"result\",\"identifiers\":{:?},\"releaseAuthors\":{},\"survivingAuthors\":[6,7,8,9]}}",
-        result.identifiers(),
-        shares.len()
+    Err(io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "Insufficient valid release shares",
     ))
 }

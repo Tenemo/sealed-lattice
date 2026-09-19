@@ -21,3 +21,17 @@ export const selectProtocolResearchCase = (arguments_: readonly string[]) => {
         ...protocolResearchCases[name as keyof typeof protocolResearchCases],
     };
 };
+
+export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
+    const values = arguments_.filter((value) => value !== '--');
+    if (
+        values.length !== 2 ||
+        values[0] !== 'available-records' ||
+        !values[1]?.trim()
+    ) {
+        throw new Error(
+            'Select available-records and supply one passed public completion run.',
+        );
+    }
+    return { name: values[0], source: values[1] };
+};

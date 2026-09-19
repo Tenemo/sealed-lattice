@@ -17,6 +17,14 @@ pnpm run research:protocol -- native-result
 pnpm run research:protocol -- native-empty
 ```
 
+For focused retrieval checks, an existing passed public completion run can supply archived public fixtures:
+
+```text
+pnpm run research:protocol:public -- available-records <public-completion-run>
+```
+
+This case supplies a nonconsecutive quorum of votes and a nonconsecutive release subset, leaves other files absent, and injects corrupt extras. It recomputes setup and evaluation before consuming completion records. This is a retrieval test after generation; it does not demonstrate participants disappearing before their later actions.
+
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
 All sources, parameters, toolchain selection and third-party code needed by this workspace are tracked. `temp/` contains only run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to the native generation case. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.

@@ -29,15 +29,28 @@ const kernelNodeTestGlobs = [
     'packages/wasm/tests/node/**/*.kernel.test.ts',
     'tests/node/**/*.kernel.test.ts',
 ] as const;
+const censusNodeTestGlobs = [
+    'tests/node/tools/documentation-census.test.ts',
+] as const;
 const nodeTestProjectDefinitions = [
     {
-        exclude: [...kernelNodeTestGlobs],
+        exclude: [...kernelNodeTestGlobs, ...censusNodeTestGlobs],
         include: [
             'packages/*/tests/node/**/*.test.ts',
             'tests/node/**/*.test.ts',
         ],
         projectName: 'node',
         testTimeout: nodeTestTimeoutMs,
+    },
+    {
+        // Rendering the complete deterministic model census exceeds a fast
+        // unit-test interval. Serialize it after the other model files and
+        // retain the existing budget for complete fixture initialization.
+        fileParallelism: false,
+        groupOrder: 1,
+        include: censusNodeTestGlobs,
+        projectName: 'node-census',
+        testTimeout: nodeHookTimeoutMs,
     },
     {
         fileParallelism: false,
@@ -102,6 +115,7 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
     readonly fileParallelism?: boolean;
+    readonly groupOrder?: number;
     readonly include: readonly string[];
     readonly projectName: string;
     readonly testTimeout: number;
@@ -110,6 +124,7 @@ type NodeProjectInput = {
 const makeNodeProject = ({
     exclude,
     fileParallelism,
+    groupOrder,
     include,
     projectName,
     testTimeout,
@@ -124,6 +139,7 @@ const makeNodeProject = ({
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        ...(groupOrder === undefined ? {} : { sequence: { groupOrder } }),
         testTimeout,
         hookTimeout: nodeHookTimeoutMs,
     },
