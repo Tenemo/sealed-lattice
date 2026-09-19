@@ -18,6 +18,7 @@
         "build:verify-reproducible": "tsx ./tools/ci/verify-build-reproducibility.ts",
         "check": "tsx ./tools/ci/run-check.ts",
         "check:desktop": "tsx ./tools/ci/run-check.ts --include-desktop-browser",
+        "research:protocol": "tsx ./tools/ci/run-protocol-research.ts",
         "docs:census": "tsx ./tools/ci/generate-documentation-census.ts",
         "docs:verify-sources": "tsx ./tools/ci/verify-source-manifest.ts",
         "release:version": "tsx ./tools/ci/release-version.ts",

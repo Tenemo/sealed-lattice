@@ -1,0 +1,17 @@
+[package]
+name = "rns-arithmetic-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+
+[dependencies]
+fhe-math = { path = "../vendor/fhe-rs/crates/fhe-math", default-features = false, features = ["scalar-only"] }
+num-bigint = "=0.5.1"
+num-traits = "=0.2.19"
+sha2 = "=0.11.0"

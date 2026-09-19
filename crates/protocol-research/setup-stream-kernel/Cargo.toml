@@ -1,0 +1,18 @@
+[package]
+name = "setup-stream-kernel"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+
+[dependencies]
+sha3 = "=0.10.9"

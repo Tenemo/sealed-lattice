@@ -33,6 +33,8 @@ The public package exposes construction-neutral foundation operations only:
 
 It does not expose ballot encryption, distributed setup, tally evaluation, finality signing, decryption shares, or result reconstruction. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
 
+The separate [protocol research workspace](crates/protocol-research/README.md) contains the executable native construction and its guarded runner. It is not part of the published SDK. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
+
 `sealed-vote` is the host application responsible for registration, invitations, poll management, notifications, and the user interface. Anyone with the poll link may register until the organizer closes registration. Participants use the displayed public usernames to confirm the same ordered username-to-credential roster before it is frozen and supplied to `sealed-lattice`. Public usernames do not establish real-world identity, and duplicate-person prevention, coercion resistance, and endpoint security remain outside this library.
 
 ## Install

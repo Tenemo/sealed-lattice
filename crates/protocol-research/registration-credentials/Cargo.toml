@@ -1,0 +1,29 @@
+[package]
+name = "registration-credentials"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[dependencies]
+aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
+aes = { version = "=0.8.4", features = ["zeroize"] }
+fips203 = { version = "=0.4.3", default-features = false, features = ["ml-kem-768"] }
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
+sha3 = "=0.10.9"
+unicode-normalization = "=0.1.25"
+zeroize = "=1.8.2"
+registration-proof = { path = "../registration-proof", default-features = false }
+registration-verifier = { path = "../registration-verifier", default-features = false }
+linked-release-proof = { path = "../linked-release-proof", default-features = false }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "=0.3.3"

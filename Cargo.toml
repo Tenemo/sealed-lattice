@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/sealed-lattice-kernel"]
+exclude = ["crates/protocol-research"]
 resolver = "3"
 
 [profile.test]

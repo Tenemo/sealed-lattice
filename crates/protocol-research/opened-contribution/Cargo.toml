@@ -1,0 +1,25 @@
+[package]
+name = "opened-contribution"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[dependencies]
+registration-credentials = { path = "../registration-credentials", default-features = false }
+setup-witness = { path = "../setup-witness" }
+word-verifier = { path = "../word-verifier", default-features = false }
+num-bigint = "=0.5.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
+stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false }
+word-proof = { path = "../word-proof", default-features = false }

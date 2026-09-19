@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "native-ceremony",
+    "registration-enrollment",
+    "registration-credentials",
+    "registration-proof",
+    "registration-verifier",
+    "setup-witness",
+    "word-proof",
+    "word-verifier",
+    "setup-stream-kernel",
+    "setup-aggregate",
+    "opened-contribution",
+    "ballot-encryption",
+    "ballot-proof",
+    "evaluation-target",
+    "linked-release-proof",
+    "rns-arithmetic-probe",
+    "proof-lookup-table",
+    "contribution-prover",
+]
+exclude = ["vendor/fhe-rs", "vendor/keccak"]
+resolver = "3"
+
+[patch.crates-io]
+keccak = { path = "vendor/keccak" }
+
+[profile.test]
+opt-level = 3
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+overflow-checks = true

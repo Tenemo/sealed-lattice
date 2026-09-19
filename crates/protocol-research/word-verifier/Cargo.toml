@@ -1,0 +1,19 @@
+[package]
+name = "word-verifier"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[dependencies]
+proof-lookup-table = { path = "../proof-lookup-table" }
+sha3 = "=0.10.9"
+setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }

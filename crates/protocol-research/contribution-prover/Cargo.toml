@@ -1,0 +1,24 @@
+[package]
+name = "contribution-prover"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[dependencies]
+registration-credentials = { path = "../registration-credentials", default-features = false }
+setup-witness = { path = "../setup-witness" }
+word-proof = { path = "../word-proof", default-features = false }
+num-bigint = "=0.5.1"
+num-traits = "=0.2.19"
+sha3 = "=0.10.9"
+stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
+zeroize = "=1.8.2"

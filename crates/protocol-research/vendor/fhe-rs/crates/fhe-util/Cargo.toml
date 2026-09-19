@@ -1,0 +1,21 @@
+[package]
+name = "fhe-util"
+description = "Utilities for the fhe.rs library"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version = "0.1.1"
+
+[lints]
+workspace = true
+
+[dependencies]
+num-bigint-dig = { workspace = true, features = ["prime"] }
+num-traits.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+itertools.workspace = true
+proptest.workspace = true
