@@ -34,6 +34,8 @@ pnpm run research:protocol:public -- terminal-records <public-target-run> <publi
 
 Both modes recompute setup, classification and the target. The certificate mode needs only a valid quorum of target votes and does not request release messages; the terminal mode additionally verifies sufficient release shares when the target is encrypted. Neither mode establishes durable publication by itself.
 
+The public reader retains the accepted target-vote packets in its output's `certificate-records/` directory, using each authenticated author's position. The run report identifies that directory for archive construction. Candidate file positions are transport labels and need not match the author encoded in a vote; archive extraction must use the retained packets. Retrieval still requires the owning certificate verifier.
+
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
 All sources, parameters, toolchain selection and third-party code needed by the native generation case are tracked. That case uses `temp/` only for run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.

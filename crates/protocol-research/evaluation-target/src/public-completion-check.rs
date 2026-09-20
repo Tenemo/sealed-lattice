@@ -50,6 +50,7 @@ pub fn verify(
     target: Arc<VerifiedEvaluationTarget>,
     directory: &Path,
     aggregate: &Path,
+    certificate_records: &Path,
     work: &mut Work,
     stage: Stage,
 ) -> io::Result<String> {
@@ -95,6 +96,15 @@ pub fn verify(
         .iter()
         .map(|vote| vote.position())
         .collect();
+    // A transport position need not equal the authenticated author. Retain
+    // the exact accepted packets instead of locating them again by filename.
+    std::fs::create_dir(certificate_records)?;
+    for vote in certificate.votes() {
+        work.save(
+            &certificate_records.join(format!("target-vote-{}.bin", vote.position())),
+            &vote.encode(),
+        )?;
+    }
     if stage == Stage::Certificate {
         let encrypted = target.ciphertext().is_some();
         if !encrypted {

@@ -531,6 +531,7 @@ fn main() -> io::Result<()> {
             Arc::new(target),
             Path::new(directory),
             &aggregate,
+            &output.join("certificate-records"),
             &mut work,
             stage,
         )?;

@@ -395,6 +395,10 @@ await runWithLocalRunLog(
                         stage: selected.stage,
                         output,
                         completionDirectory: directory,
+                        certificateRecordsDirectory: path.join(
+                            output,
+                            'certificate-records',
+                        ),
                         publicConfiguration: prior.publicConfiguration,
                         maximumBodyBytes: prior.maximumBodyBytes,
                         ...(selected.stage === 'certificate'
