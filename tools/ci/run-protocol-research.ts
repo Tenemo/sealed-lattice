@@ -258,6 +258,7 @@ await runWithLocalRunLog(
                 'contribution-prover',
                 'setup-aggregate',
                 'opened-contribution',
+                'ballot-proof',
             ];
             await execute(
                 'cargo',
@@ -315,6 +316,7 @@ await runWithLocalRunLog(
                         'contribution-prover',
                         'setup-aggregate',
                         'opened-contribution',
+                        'ballot-proof',
                     ].flatMap((name) => ['-p', name]),
                     '--bins',
                 ],

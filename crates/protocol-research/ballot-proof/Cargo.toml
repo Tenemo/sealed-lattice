@@ -9,6 +9,10 @@ autobins = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[[bin]]
+name = "verify-participant-ballot"
+path = "src/bin/verify-participant-ballot.rs"
+
 [features]
 default = ["bridge"]
 bridge = ["ballot-encryption/bridge", "setup-aggregate/bridge"]
