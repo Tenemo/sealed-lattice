@@ -30,7 +30,7 @@ type PublicCompletionRun = {
         inventoryIdentity: string;
         polynomials: { index: number; bytes: number; width: number }[];
     };
-    terminal: { kind: string; identifiers: string[] };
+    terminal?: { kind: string; identifiers: string[] };
 };
 type TerminalResult = {
     kind: string;
@@ -41,15 +41,24 @@ type TerminalResult = {
     invalidVotes: number[];
     invalidReleases: number[];
 };
+type CertificateResult = {
+    kind: 'certified-target';
+    encrypted: boolean;
+    certificateAuthors: number[];
+};
 
 const selected = selectPublicCompletionCase(process.argv.slice(2)),
     source = path.resolve(selected.source);
 await runWithLocalRunLog(
     {
-        commandLineArguments: [selected.name, source],
-        lanes: [
-            'Public reader with physically absent and invalid completion records',
+        commandLineArguments: [
+            selected.name,
+            source,
+            ...(selected.completionDirectory
+                ? [selected.completionDirectory]
+                : []),
         ],
+        lanes: ['Independent public setup, target and completion verification'],
         scriptName: 'research:protocol:public',
     },
     async (log) => {
@@ -69,56 +78,67 @@ await runWithLocalRunLog(
             const prior = JSON.parse(
                 await readFile(path.join(source, 'result.json'), 'utf8'),
             ) as PublicCompletionRun;
-            assert.equal(prior.completedNative, true);
-            assert.equal(prior.emptyCase, false);
-            const producer = JSON.parse(
-                    await readFile(
-                        path.join(prior.source, 'result.json'),
-                        'utf8',
-                    ),
-                ) as { output: string },
-                original = path.join(producer.output, 'completion');
-            const directory = path.join(
-                log.runDirectoryPath,
-                'available-completion',
-            );
-            await mkdir(directory);
-            const files = [
-                'target.bin',
-                ...[2, 3, 4, 5, 6, 7, 9].map(
-                    (index) => 'target-vote-' + index + '.bin',
-                ),
-                ...[1, 4, 6, 8].flatMap((index) => [
-                    'release-envelope-' + index + '.bin',
-                    'release-' + index + '.bin',
-                ]),
-            ];
-            for (const file of files)
-                await copyFile(
-                    path.join(original, file),
-                    path.join(directory, file),
+            let directory: string;
+            if (selected.name === 'available-records') {
+                assert.equal(prior.completedNative, true);
+                assert.equal(prior.emptyCase, false);
+                const producer = JSON.parse(
+                        await readFile(
+                            path.join(prior.source, 'result.json'),
+                            'utf8',
+                        ),
+                    ) as { output: string },
+                    original = path.join(producer.output, 'completion');
+                directory = path.join(
+                    log.runDirectoryPath,
+                    'available-completion',
                 );
-            // A bad extra vote and a bad extra share precede later valid evidence.
-            const badVote = await readFile(
-                path.join(original, 'target-vote-0.bin'),
-            );
-            badVote[100] ^= 1;
-            await writeFile(
-                path.join(directory, 'target-vote-0.bin'),
-                badVote,
-                { flag: 'wx' },
-            );
-            await copyFile(
-                path.join(original, 'release-envelope-2.bin'),
-                path.join(directory, 'release-envelope-2.bin'),
-            );
-            const badBody = await readFile(
-                path.join(original, 'release-2.bin'),
-            );
-            badBody[badBody.length - 1] ^= 1;
-            await writeFile(path.join(directory, 'release-2.bin'), badBody, {
-                flag: 'wx',
-            });
+                await mkdir(directory);
+                const files = [
+                    'target.bin',
+                    ...[2, 3, 4, 5, 6, 7, 9].map(
+                        (index) => 'target-vote-' + index + '.bin',
+                    ),
+                    ...[1, 4, 6, 8].flatMap((index) => [
+                        'release-envelope-' + index + '.bin',
+                        'release-' + index + '.bin',
+                    ]),
+                ];
+                for (const file of files)
+                    await copyFile(
+                        path.join(original, file),
+                        path.join(directory, file),
+                    );
+                // A bad extra vote and a bad extra share precede later valid evidence.
+                const badVote = await readFile(
+                    path.join(original, 'target-vote-0.bin'),
+                );
+                badVote[100] ^= 1;
+                await writeFile(
+                    path.join(directory, 'target-vote-0.bin'),
+                    badVote,
+                    { flag: 'wx' },
+                );
+                await copyFile(
+                    path.join(original, 'release-envelope-2.bin'),
+                    path.join(directory, 'release-envelope-2.bin'),
+                );
+                const badBody = await readFile(
+                    path.join(original, 'release-2.bin'),
+                );
+                badBody[badBody.length - 1] ^= 1;
+                await writeFile(
+                    path.join(directory, 'release-2.bin'),
+                    badBody,
+                    {
+                        flag: 'wx',
+                    },
+                );
+            } else {
+                assert.ok(selected.completionDirectory);
+                directory = path.resolve(selected.completionDirectory);
+                assert.ok((await stat(directory)).isDirectory());
+            }
             const paths = (
                 await readFile(path.join(source, 'public-paths.txt'), 'utf8')
             )
@@ -219,7 +239,14 @@ await runWithLocalRunLog(
                 [
                     {
                         command: executable,
-                        args: [manifest, output, directory],
+                        args: [
+                            manifest,
+                            output,
+                            directory,
+                            ...(selected.stage === 'certificate'
+                                ? ['certificate']
+                                : []),
+                        ],
                         env: environment,
                         workingDirectoryPath: workspace,
                         description: 'Verify only available completion records',
@@ -285,56 +312,106 @@ await runWithLocalRunLog(
             );
             assert.equal(exitCode, 0);
             assert.ok(samples > 0);
-            const terminal = JSON.parse(
-                await readFile(path.join(output, 'terminal.json'), 'utf8'),
-            ) as TerminalResult;
-            assert.equal(terminal.kind, 'result');
-            assert.deepEqual(terminal.identifiers, prior.terminal.identifiers);
-            assert.deepEqual(
-                terminal.certificateAuthors,
-                [2, 3, 4, 5, 6, 7, 9],
+            const verified = JSON.parse(
+                await readFile(
+                    path.join(
+                        output,
+                        selected.stage === 'certificate'
+                            ? 'certificate.json'
+                            : 'terminal.json',
+                    ),
+                    'utf8',
+                ),
+            ) as TerminalResult | CertificateResult;
+            const report = JSON.parse(
+                await readFile(path.join(output, 'result.json'), 'utf8'),
+            ) as Record<string, unknown>;
+            const emptyCase = report.ciphertextSha512 === '';
+            assert.ok(
+                verified.certificateAuthors.length >=
+                    prior.publicConfiguration.participantCount -
+                        Math.floor(
+                            (prior.publicConfiguration.participantCount - 1) /
+                                3,
+                        ),
             );
-            assert.deepEqual(terminal.releaseAuthors, [1, 4, 6, 8]);
-            assert.deepEqual(terminal.unavailableVotes, [1, 8]);
-            assert.deepEqual(terminal.invalidVotes, [0]);
-            assert.ok(terminal.invalidReleases.includes(2));
-            for (const file of [
-                'target-vote-1.bin',
-                'target-vote-8.bin',
-                'release-0.bin',
-                'release-3.bin',
-                'release-5.bin',
-                'release-7.bin',
-                'release-9.bin',
-            ])
-                await assert.rejects(stat(path.join(directory, file)), {
-                    code: 'ENOENT',
-                });
+            if (selected.stage === 'certificate') {
+                assert.equal(verified.kind, 'certified-target');
+                assert.equal(
+                    (verified as CertificateResult).encrypted,
+                    !emptyCase,
+                );
+            } else {
+                assert.equal(verified.kind, emptyCase ? 'no-result' : 'result');
+                if (prior.terminal) {
+                    assert.equal(verified.kind, prior.terminal.kind);
+                    if (!emptyCase)
+                        assert.deepEqual(
+                            verified.identifiers,
+                            prior.terminal.identifiers,
+                        );
+                }
+            }
+            if (selected.name === 'available-records') {
+                const terminal = verified as TerminalResult;
+                assert.equal(terminal.kind, 'result');
+                assert.ok(prior.terminal);
+                assert.deepEqual(
+                    terminal.identifiers,
+                    prior.terminal.identifiers,
+                );
+                assert.deepEqual(
+                    terminal.certificateAuthors,
+                    [2, 3, 4, 5, 6, 7, 9],
+                );
+                assert.deepEqual(terminal.releaseAuthors, [1, 4, 6, 8]);
+                assert.deepEqual(terminal.unavailableVotes, [1, 8]);
+                assert.deepEqual(terminal.invalidVotes, [0]);
+                assert.ok(terminal.invalidReleases.includes(2));
+                for (const file of [
+                    'target-vote-1.bin',
+                    'target-vote-8.bin',
+                    'release-0.bin',
+                    'release-3.bin',
+                    'release-5.bin',
+                    'release-7.bin',
+                    'release-9.bin',
+                ])
+                    await assert.rejects(stat(path.join(directory, file)), {
+                        code: 'ENOENT',
+                    });
+            }
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
                     {
-                        source: prior.source,
+                        source:
+                            selected.name === 'available-records'
+                                ? prior.source
+                                : source,
                         publicCompletionBaseline: source,
                         completedNative: true,
-                        emptyCase: false,
+                        emptyCase,
+                        stage: selected.stage,
                         output,
                         completionDirectory: directory,
                         publicConfiguration: prior.publicConfiguration,
                         maximumBodyBytes: prior.maximumBodyBytes,
-                        terminal,
+                        ...(selected.stage === 'certificate'
+                            ? { certificate: verified }
+                            : { terminal: verified }),
                         peakMemory,
                         samples,
                         executableSha512: createHash('sha512')
                             .update(await readFile(executable))
                             .digest('hex'),
-                        scope: 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.',
-                        result: JSON.parse(
-                            await readFile(
-                                path.join(output, 'result.json'),
-                                'utf8',
-                            ),
-                        ) as Record<string, unknown>,
+                        scope:
+                            selected.name === 'available-records'
+                                ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
+                                : selected.stage === 'certificate'
+                                  ? 'Public setup, source classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
+                                  : 'Public setup, source classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
+                        result: report,
                     },
                     null,
                     2,

@@ -13,11 +13,33 @@ describe('guarded protocol research entry', () => {
             ['available-records'],
             ['available-records', ''],
             ['unknown', 'fixture'],
+            ['certificate-records', 'fixture'],
+            ['terminal-records', 'fixture', ''],
+            ['certificate-records', '', 'records'],
+            ['terminal-records', 'fixture', 'records', 'extra'],
         ])
             expect(() => selectPublicCompletionCase(values)).toThrow();
         expect(
             selectPublicCompletionCase(['available-records', 'fixture']),
-        ).toEqual({ name: 'available-records', source: 'fixture' });
+        ).toEqual({
+            name: 'available-records',
+            source: 'fixture',
+            stage: 'terminal',
+            completionDirectory: undefined,
+        });
+        for (const [name, stage] of [
+            ['certificate-records', 'certificate'],
+            ['terminal-records', 'terminal'],
+        ]) {
+            expect(
+                selectPublicCompletionCase(['--', name, 'fixture', 'records']),
+            ).toEqual({
+                name,
+                stage,
+                source: 'fixture',
+                completionDirectory: 'records',
+            });
+        }
     });
     it('refuses empty, unknown and ambiguous case selectors', () => {
         for (const values of [

@@ -25,13 +25,35 @@ export const selectProtocolResearchCase = (arguments_: readonly string[]) => {
 export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
     const values = arguments_.filter((value) => value !== '--');
     if (
+        values.length === 3 &&
+        (values[0] === 'certificate-records' ||
+            values[0] === 'terminal-records') &&
+        values[1]?.trim() &&
+        values[2]?.trim()
+    ) {
+        return {
+            name: values[0],
+            source: values[1],
+            completionDirectory: values[2],
+            stage:
+                values[0] === 'certificate-records'
+                    ? ('certificate' as const)
+                    : ('terminal' as const),
+        };
+    }
+    if (
         values.length !== 2 ||
         values[0] !== 'available-records' ||
         !values[1]?.trim()
     ) {
         throw new Error(
-            'Select available-records and supply one passed public completion run.',
+            'Select available-records with a passed completion run, or certificate-records/terminal-records with a passed public target and public-record directory.',
         );
     }
-    return { name: values[0], source: values[1] };
+    return {
+        name: values[0],
+        source: values[1],
+        completionDirectory: undefined,
+        stage: 'terminal' as const,
+    };
 };

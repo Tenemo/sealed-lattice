@@ -12,6 +12,12 @@ use registration_credentials::release_signing::{
 use setup_aggregate::{CHUNK_BYTES, ModulusKind, VerifiedAggregatePolynomial};
 use std::{fs::File, io, path::Path, sync::Arc};
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Stage {
+    Certificate,
+    Terminal,
+}
+
 fn read_operand(
     target: &VerifiedEvaluationTarget,
     directory: &Path,
@@ -45,6 +51,7 @@ pub fn verify(
     directory: &Path,
     aggregate: &Path,
     work: &mut Work,
+    stage: Stage,
 ) -> io::Result<String> {
     if bounded(directory.join("target.bin"), 2048, work)? != target.body() {
         return Err(refusal("published target differs from recomputation"));
@@ -88,6 +95,15 @@ pub fn verify(
         .iter()
         .map(|vote| vote.position())
         .collect();
+    if stage == Stage::Certificate {
+        let encrypted = target.ciphertext().is_some();
+        if !encrypted {
+            verify_no_result(certificate).map_err(refusal)?;
+        }
+        return Ok(format!(
+            "{{\"kind\":\"certified-target\",\"encrypted\":{encrypted},\"certificateAuthors\":{certificate_authors:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?}}}"
+        ));
+    }
     if target.ciphertext().is_none() {
         assert!(ReleaseCollector::new(certificate.clone()).is_err());
         verify_no_result(certificate).map_err(refusal)?;

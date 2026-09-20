@@ -25,6 +25,15 @@ pnpm run research:protocol:public -- available-records <public-completion-run>
 
 This case supplies a nonconsecutive quorum of votes and a nonconsecutive release subset, leaves other files absent, and injects corrupt extras. It recomputes setup and evaluation before consuming completion records. This is a retrieval test after generation; it does not demonstrate participants disappearing before their later actions.
 
+An independently verified public target can also be checked against a directory containing actual participant messages:
+
+```text
+pnpm run research:protocol:public -- certificate-records <public-target-run> <public-record-directory>
+pnpm run research:protocol:public -- terminal-records <public-target-run> <public-record-directory>
+```
+
+Both modes recompute setup, classification and the target. The certificate mode needs only a valid quorum of target votes and does not request release messages; the terminal mode additionally verifies sufficient release shares when the target is encrypted. Neither mode establishes durable publication by itself.
+
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
 All sources, parameters, toolchain selection and third-party code needed by the native generation case are tracked. That case uses `temp/` only for run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.

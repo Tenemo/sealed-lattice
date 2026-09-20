@@ -179,9 +179,11 @@ impl WorkingStore for Spool {
 }
 fn main() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    if !(2..=3).contains(&arguments.len()) {
+    if !(2..=4).contains(&arguments.len())
+        || arguments.get(3).is_some_and(|value| value != "certificate")
+    {
         return Err(refusal(
-            "supply public path manifest, new result directory and optional public completion directory",
+            "supply public path manifest, new result directory, optional public completion directory and optional certificate selector",
         ));
     }
     let started = Instant::now();
@@ -520,13 +522,24 @@ fn main() -> io::Result<()> {
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     if let Some(directory) = arguments.get(2) {
+        let stage = if arguments.get(3).is_some() {
+            completion::Stage::Certificate
+        } else {
+            completion::Stage::Terminal
+        };
         let terminal = completion::verify(
             Arc::new(target),
             Path::new(directory),
             &aggregate,
             &mut work,
+            stage,
         )?;
-        work.save(&output.join("terminal.json"), terminal.as_bytes())?;
+        let name = if stage == completion::Stage::Certificate {
+            "certificate.json"
+        } else {
+            "terminal.json"
+        };
+        work.save(&output.join(name), terminal.as_bytes())?;
     }
     let report = format!(
         "{{\"accepted\":{accepted:?},\"targetIdentity\":\"{identity}\",\"ciphertextSha512\":\"{ciphertext_identity}\",\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
