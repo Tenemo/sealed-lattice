@@ -4,10 +4,35 @@ use linked_release_proof::{
     statement::{self, PublicStatement},
 };
 use num_bigint::{BigInt, Sign};
+use registration_credentials::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
 use std::sync::Arc;
 
-pub const RELEASE_PROOF_ROLE: &[u8] = b"sealed-lattice/certified-release/v1";
+/// Canonical public role bytes; this encoding alone grants no release authority.
+pub fn encode_release_proof_role(
+    poll: [u8; 64],
+    runtime: [u8; 64],
+    inventory: [u8; 64],
+    target: [u8; 64],
+    position: usize,
+) -> Result<Vec<u8>, Error> {
+    let position = u16::try_from(position).map_err(|_| Error::Context)?;
+    CanonicalTuple::new(
+        1,
+        1,
+        vec![
+            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v1")
+                .map_err(|_| Error::Encoding)?,
+            CanonicalItem::hash512(poll),
+            CanonicalItem::hash512(runtime),
+            CanonicalItem::hash512(inventory),
+            CanonicalItem::hash512(target),
+            CanonicalItem::unsigned16(position),
+        ],
+    )
+    .encode()
+    .map_err(|_| Error::Encoding)
+}
 #[derive(Debug)]
 pub enum Error {
     Context,
@@ -114,6 +139,17 @@ impl ReleaseContext {
     pub fn certificate(&self) -> &Arc<VerifiedTargetCertificate> {
         &self.certificate
     }
+    pub fn proof_role(&self) -> Result<Vec<u8>, Error> {
+        let target = self.certificate.target();
+        let inventory = target.inventory();
+        encode_release_proof_role(
+            inventory.poll().identity(),
+            inventory.poll().runtime(),
+            inventory.setup().inventory().identity(),
+            *target.identity(),
+            self.position,
+        )
+    }
     pub fn public_key(&self) -> &[BigInt] {
         &self.public_key
     }
@@ -150,5 +186,27 @@ impl ReleaseContext {
             header: self.header.to_vec(),
             polynomials,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proof_role_separates_every_verified_context_input() {
+        let original = encode_release_proof_role([1; 64], [2; 64], [3; 64], [4; 64], 0).unwrap();
+        for changed in [
+            encode_release_proof_role([9; 64], [2; 64], [3; 64], [4; 64], 0),
+            encode_release_proof_role([1; 64], [9; 64], [3; 64], [4; 64], 0),
+            encode_release_proof_role([1; 64], [2; 64], [9; 64], [4; 64], 0),
+            encode_release_proof_role([1; 64], [2; 64], [3; 64], [9; 64], 0),
+            encode_release_proof_role([1; 64], [2; 64], [3; 64], [4; 64], 1),
+        ] {
+            assert_ne!(changed.unwrap(), original);
+        }
+        assert!(original.len() <= 1024);
+        assert_eq!(original.len(), 341);
+        assert!(encode_release_proof_role([1; 64], [2; 64], [3; 64], [4; 64], usize::MAX).is_err());
     }
 }

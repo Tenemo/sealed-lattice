@@ -4,6 +4,14 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
+export const participantReleaseProofRoleBytes =
+    8n +
+    6n * 6n +
+    4n +
+    BigInt(Buffer.byteLength('sealed-lattice/certified-release/v1')) +
+    4n * 64n +
+    2n;
+
 // A finite journal of independent bytes for one original-key release. The
 // proof budget bounds rejection-sampling exhaustion; it is not a PRG claim.
 export const compileParticipantReleaseCustody = () => {
@@ -93,6 +101,7 @@ export const compileParticipantReleaseCustody = () => {
         },
     ];
     return {
+        proofRoleBytes: participantReleaseProofRoleBytes,
         readBytes,
         recordBytes,
         exhaustionAllocationBits,

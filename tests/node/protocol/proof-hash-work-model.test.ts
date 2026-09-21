@@ -66,7 +66,7 @@ describe('proof hash work', () => {
             282n,
             272n,
             266n,
-            40n,
+            341n,
         ]);
         for (const profile of profiles) {
             const costs = compileProofHashWork(profile);
@@ -103,13 +103,31 @@ describe('proof hash work', () => {
         const values = proofHashProfiles().map((profile) =>
             compileProofHashWork(profile),
         );
+        // First, second and linear trees, followed by the emitted FRI trees.
+        // Each tree reuses a leaf prefix after the first leaf and a node
+        // prefix after the first node of each level.
+        const exponents = [
+            18,
+            18,
+            18,
+            ...Array.from({ length: 16 }, (_, index) => 17 - index),
+        ];
+        const reusedPrefixes = exponents.reduce(
+            (sum, exponent) =>
+                sum + 2n * ((1n << BigInt(exponent)) - 1n) - BigInt(exponent),
+            0n,
+        );
         expect(
             values.map(
                 (value) =>
                     value.proverCoreWithoutPrefixReuse.permutations -
                     value.proverCore.permutations,
             ),
-        ).toEqual([8387600n, 8387600n, 8387600n, 2096900n]);
+        ).toEqual(
+            [4n, 4n, 4n, 5n].map(
+                (prefixBlocks) => reusedPrefixes * prefixBlocks,
+            ),
+        );
         for (const value of values) {
             expect(value.proverCore.queries).toBe(
                 value.proverCoreWithoutPrefixReuse.queries,

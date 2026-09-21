@@ -34,3 +34,7 @@ path = "src/bin/check-target.rs"
 [[bin]]
 name = "check-program"
 path = "src/bin/check-program.rs"
+
+[[bin]]
+name = "emit-release-proof-role"
+path = "src/bin/emit-release-proof-role.rs"

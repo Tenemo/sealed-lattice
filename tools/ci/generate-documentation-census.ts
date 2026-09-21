@@ -2975,6 +2975,10 @@ export const renderDocumentationCensus = (): string => {
             ['Property', 'Value'],
             [
                 [
+                    'Authenticated proof role bytes',
+                    formatCount(participantReleaseCustody.proofRoleBytes),
+                ],
+                [
                     'Independent noise bytes',
                     formatCount(participantReleaseCustody.noiseBytes),
                 ],

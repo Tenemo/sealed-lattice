@@ -8,6 +8,7 @@ import {
     compileRegistrationWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
+import { participantReleaseProofRoleBytes } from '#tests/participant-release-custody-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
@@ -127,8 +128,6 @@ export const proofHashProfiles = () => {
             relationTag: 'linked-scored-ballot/1',
             roleBytes: ballotBody.proofRoleBytes,
         },
-        // The complete authenticated release role is not implemented. This row
-        // uses the actual numerical workload role, not a production substitute.
         {
             role: 'release',
             layout: compileLinkedReleaseWordProofLayout(),
@@ -149,9 +148,7 @@ export const proofHashProfiles = () => {
                 fixedModulusBfvInputs.polynomialDegree *
                     (4n * (shareBytes + 1n) + 2n * (releaseBytes + 1n)),
             relationTag: 'linked-threshold-release/1',
-            roleBytes: BigInt(
-                Buffer.byteLength('sealed-lattice/linked-release-workload/1'),
-            ),
+            roleBytes: participantReleaseProofRoleBytes,
         },
     ];
     return rows.map((row) => {

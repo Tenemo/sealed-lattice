@@ -62,6 +62,7 @@ const nodeTestProjectDefinitions = [
 
 const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
+    'tests/browser/**/*.browser.test.ts',
 ] as const;
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
 const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
@@ -97,6 +98,10 @@ const rootPrivateAliases = [
     {
         find: '#tests',
         replacement: resolveFromRepoRoot('tests'),
+    },
+    {
+        find: '#tools',
+        replacement: resolveFromRepoRoot('tools'),
     },
 ] as const;
 

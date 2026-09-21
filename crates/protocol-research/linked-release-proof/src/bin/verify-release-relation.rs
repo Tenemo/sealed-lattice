@@ -8,12 +8,22 @@ use std::{
 
 fn main() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    if arguments.len() != 1 {
+    if !(1..=2).contains(&arguments.len()) {
         return Err(io::Error::other(
-            "Supply a public statement/proof directory.",
+            "Supply a public statement/proof directory and optional public role file.",
         ));
     }
     let directory = PathBuf::from(&arguments[0]);
+    let role = if let Some(file) = arguments.get(1) {
+        let mut bytes = Vec::new();
+        File::open(file)?.take(1025).read_to_end(&mut bytes)?;
+        if !(1..=1024).contains(&bytes.len()) {
+            return Err(io::Error::other("Public proof role length differs."));
+        }
+        bytes
+    } else {
+        b"sealed-lattice/linked-release-workload/1".to_vec()
+    };
     let mut statement = File::open(directory.join("statement.bin"))?;
     if statement.metadata()?.len() != linked_release_proof::parameters::STATEMENT_BYTES as u64 {
         return Err(io::Error::other("Statement length differs."));
@@ -33,12 +43,8 @@ fn main() -> io::Result<()> {
     }
     let mut header = vec![0; HEADER_LENGTH];
     proof.read_exact(&mut header)?;
-    let mut verifier = Verifier::new(
-        b"sealed-lattice/linked-release-workload/1",
-        hash.finalize().into(),
-        &header,
-    )
-    .map_err(|_| io::Error::other("Proof header refused."))?;
+    let mut verifier = Verifier::new(&role, hash.finalize().into(), &header)
+        .map_err(|_| io::Error::other("Proof header refused."))?;
     let mut statement = File::open(directory.join("statement.bin"))?;
     loop {
         let count = statement.read(&mut buffer)?;

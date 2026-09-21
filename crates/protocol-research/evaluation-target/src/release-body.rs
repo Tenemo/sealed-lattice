@@ -1,4 +1,4 @@
-use crate::release::{Error, RELEASE_PROOF_ROLE, ReleaseContext};
+use crate::release::{Error, ReleaseContext};
 use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier as SignatureVerifier},
@@ -120,9 +120,12 @@ impl ReleaseBodyVerifier {
             bytes = &bytes[count..];
             if self.proof_prefix.len() == HEADER_LENGTH {
                 let statement = self.context.statement(&self.partial)?;
-                let mut verifier =
-                    Verifier::new(RELEASE_PROOF_ROLE, statement.digest(), &self.proof_prefix)
-                        .map_err(|_| Error::Proof)?;
+                let mut verifier = Verifier::new(
+                    &self.context.proof_role()?,
+                    statement.digest(),
+                    &self.proof_prefix,
+                )
+                .map_err(|_| Error::Proof)?;
                 for values in std::iter::once(&statement.header).chain(&statement.polynomials) {
                     for chunk in values.chunks(CHUNK_LIMIT) {
                         verifier.push_statement(chunk).map_err(|_| Error::Proof)?;

@@ -1,4 +1,4 @@
-use evaluation_target::release::{RELEASE_PROOF_ROLE, ReleaseContext};
+use evaluation_target::release::ReleaseContext;
 use linked_release_proof::{proof::ReleaseRelationProof, statement::PublicStatement};
 use registration_credentials::{
     Credential, Error, ballot_authentication::RetainedBallotOwner, target_signing::TargetMessage,
@@ -52,7 +52,8 @@ impl ReleaseWork {
                 self.context.target_linear().to_vec(),
             )
             .map_err(|_| Error::Crypto)?;
-        let (statement, proof) = ReleaseRelationProof::from_prepared(RELEASE_PROOF_ROLE, prepared);
+        let role = self.context.proof_role().map_err(|_| Error::Context)?;
+        let (statement, proof) = ReleaseRelationProof::from_prepared(&role, prepared);
         let expected = self
             .context
             .statement(&statement.polynomials[5])
