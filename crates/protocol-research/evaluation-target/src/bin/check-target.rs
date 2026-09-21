@@ -180,10 +180,12 @@ impl WorkingStore for Spool {
 fn main() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if !(2..=4).contains(&arguments.len())
-        || arguments.get(3).is_some_and(|value| value != "certificate")
+        || arguments
+            .get(3)
+            .is_some_and(|value| value != "certificate" && value != "release")
     {
         return Err(refusal(
-            "supply public path manifest, new result directory, optional public completion directory and optional certificate selector",
+            "supply public path manifest, new result directory, optional public completion directory and optional certificate or release selector",
         ));
     }
     let started = Instant::now();
@@ -522,10 +524,10 @@ fn main() -> io::Result<()> {
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     if let Some(directory) = arguments.get(2) {
-        let stage = if arguments.get(3).is_some() {
-            completion::Stage::Certificate
-        } else {
-            completion::Stage::Terminal
+        let stage = match arguments.get(3).map(String::as_str) {
+            Some("certificate") => completion::Stage::Certificate,
+            Some("release") => completion::Stage::Release,
+            _ => completion::Stage::Terminal,
         };
         let terminal = completion::verify(
             Arc::new(target),
@@ -535,10 +537,10 @@ fn main() -> io::Result<()> {
             &mut work,
             stage,
         )?;
-        let name = if stage == completion::Stage::Certificate {
-            "certificate.json"
-        } else {
-            "terminal.json"
+        let name = match stage {
+            completion::Stage::Certificate => "certificate.json",
+            completion::Stage::Release => "release.json",
+            completion::Stage::Terminal => "terminal.json",
         };
         work.save(&output.join(name), terminal.as_bytes())?;
     }

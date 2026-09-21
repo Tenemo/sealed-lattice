@@ -29,10 +29,11 @@ An independently verified public target can also be checked against a directory 
 
 ```text
 pnpm run research:protocol:public -- certificate-records <public-target-run> <public-record-directory>
+pnpm run research:protocol:public -- release-records <public-target-run> <public-record-directory>
 pnpm run research:protocol:public -- terminal-records <public-target-run> <public-record-directory>
 ```
 
-Both modes recompute setup, classification and the target. The certificate mode needs only a valid quorum of target votes and does not request release messages; the terminal mode additionally verifies sufficient release shares when the target is encrypted. Neither mode establishes durable publication by itself.
+All three modes recompute setup, classification and the target. The certificate mode needs only a valid quorum of target votes and does not request release messages. The release mode additionally verifies one available release message and runs wrong-target, incomplete-proof, altered-proof and duplicate controls at its actual author; it requires an encrypted target and emits no result identifiers. The terminal mode verifies sufficient release shares when the target is encrypted. These checks do not establish durable publication by themselves.
 
 The public reader retains the accepted target-vote packets in its output's `certificate-records/` directory, using each authenticated author's position. The run report identifies that directory for archive construction. Candidate file positions are transport labels and need not match the author encoded in a vote; archive extraction must use the retained packets. Retrieval still requires the owning certificate verifier.
 

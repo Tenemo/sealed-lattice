@@ -27,6 +27,7 @@ export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
     if (
         values.length === 3 &&
         (values[0] === 'certificate-records' ||
+            values[0] === 'release-records' ||
             values[0] === 'terminal-records') &&
         values[1]?.trim() &&
         values[2]?.trim()
@@ -38,7 +39,9 @@ export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
             stage:
                 values[0] === 'certificate-records'
                     ? ('certificate' as const)
-                    : ('terminal' as const),
+                    : values[0] === 'release-records'
+                      ? ('release' as const)
+                      : ('terminal' as const),
         };
     }
     if (
@@ -47,7 +50,7 @@ export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
         !values[1]?.trim()
     ) {
         throw new Error(
-            'Select available-records with a passed completion run, or certificate-records/terminal-records with a passed public target and public-record directory.',
+            'Select available-records with a passed completion run, or certificate-records/release-records/terminal-records with a passed public target and public-record directory.',
         );
     }
     return {

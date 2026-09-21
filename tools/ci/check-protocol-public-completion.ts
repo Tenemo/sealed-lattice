@@ -33,7 +33,7 @@ type PublicCompletionRun = {
     terminal?: { kind: string; identifiers: string[] };
 };
 type TerminalResult = {
-    kind: string;
+    kind: 'result' | 'no-result';
     identifiers: string[];
     certificateAuthors: number[];
     releaseAuthors: number[];
@@ -44,6 +44,11 @@ type TerminalResult = {
 type CertificateResult = {
     kind: 'certified-target';
     encrypted: boolean;
+    certificateAuthors: number[];
+};
+type ReleaseResult = {
+    kind: 'verified-release';
+    releaseAuthor: number;
     certificateAuthors: number[];
 };
 
@@ -243,8 +248,8 @@ await runWithLocalRunLog(
                             manifest,
                             output,
                             directory,
-                            ...(selected.stage === 'certificate'
-                                ? ['certificate']
+                            ...(selected.stage !== 'terminal'
+                                ? [selected.stage]
                                 : []),
                         ],
                         env: environment,
@@ -314,15 +319,10 @@ await runWithLocalRunLog(
             assert.ok(samples > 0);
             const verified = JSON.parse(
                 await readFile(
-                    path.join(
-                        output,
-                        selected.stage === 'certificate'
-                            ? 'certificate.json'
-                            : 'terminal.json',
-                    ),
+                    path.join(output, selected.stage + '.json'),
                     'utf8',
                 ),
-            ) as TerminalResult | CertificateResult;
+            ) as TerminalResult | CertificateResult | ReleaseResult;
             const report = JSON.parse(
                 await readFile(path.join(output, 'result.json'), 'utf8'),
             ) as Record<string, unknown>;
@@ -336,12 +336,21 @@ await runWithLocalRunLog(
                         ),
             );
             if (selected.stage === 'certificate') {
-                assert.equal(verified.kind, 'certified-target');
-                assert.equal(
-                    (verified as CertificateResult).encrypted,
-                    !emptyCase,
+                assert.ok(verified.kind === 'certified-target');
+                assert.equal(verified.encrypted, !emptyCase);
+            } else if (selected.stage === 'release') {
+                assert.ok(verified.kind === 'verified-release');
+                assert.equal(emptyCase, false);
+                assert.ok(
+                    Number.isInteger(verified.releaseAuthor) &&
+                        verified.releaseAuthor >= 0 &&
+                        verified.releaseAuthor <
+                            prior.publicConfiguration.participantCount,
                 );
             } else {
+                assert.ok(
+                    verified.kind === 'result' || verified.kind === 'no-result',
+                );
                 assert.equal(verified.kind, emptyCase ? 'no-result' : 'result');
                 if (prior.terminal) {
                     assert.equal(verified.kind, prior.terminal.kind);
@@ -401,9 +410,7 @@ await runWithLocalRunLog(
                         ),
                         publicConfiguration: prior.publicConfiguration,
                         maximumBodyBytes: prior.maximumBodyBytes,
-                        ...(selected.stage === 'certificate'
-                            ? { certificate: verified }
-                            : { terminal: verified }),
+                        [selected.stage]: verified,
                         peakMemory,
                         samples,
                         executableSha512: createHash('sha512')
@@ -414,7 +421,9 @@ await runWithLocalRunLog(
                                 ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
                                 : selected.stage === 'certificate'
                                   ? 'Public setup, source classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
-                                  : 'Public setup, source classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
+                                  : selected.stage === 'release'
+                                    ? 'One supplied release message passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct a terminal. This is component evidence, not terminal availability or a complete security argument.'
+                                    : 'Public setup, source classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
                         result: report,
                     },
                     null,

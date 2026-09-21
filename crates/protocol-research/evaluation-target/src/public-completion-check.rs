@@ -15,6 +15,7 @@ use std::{fs::File, io, path::Path, sync::Arc};
 #[derive(Clone, Copy, PartialEq)]
 pub enum Stage {
     Certificate,
+    Release,
     Terminal,
 }
 
@@ -115,6 +116,9 @@ pub fn verify(
         ));
     }
     if target.ciphertext().is_none() {
+        if stage == Stage::Release {
+            return Err(refusal("A no-result target has no release share"));
+        }
         assert!(ReleaseCollector::new(certificate.clone()).is_err());
         verify_no_result(certificate).map_err(refusal)?;
         return Ok(format!(
@@ -180,7 +184,7 @@ pub fn verify(
             work.read(&mut file, &mut header)?;
             let mut verifier =
                 ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?;
-            let mut hostile = if position == 0 {
+            let mut hostile = if stage == Stage::Release || position == 0 {
                 let incomplete =
                     ReleaseBodyVerifier::new(context.clone(), &header).map_err(refusal)?;
                 assert!(incomplete.finish().is_err());
@@ -228,6 +232,15 @@ pub fn verify(
         };
         assert!(collector.insert(share.clone()).map_err(refusal)?);
         assert!(!collector.insert(share.clone()).map_err(refusal)?);
+        if stage == Stage::Release {
+            assert!(matches!(
+                collector.result(),
+                Err(evaluation_target::release::Error::Incomplete)
+            ));
+            return Ok(format!(
+                "{{\"kind\":\"verified-release\",\"releaseAuthor\":{position},\"certificateAuthors\":{certificate_authors:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?},\"unavailableReleases\":{unavailable_releases:?},\"invalidReleases\":{invalid_releases:?}}}"
+            ));
+        }
         match collector.result() {
             Ok(result) => {
                 return Ok(format!(

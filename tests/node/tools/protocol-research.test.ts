@@ -14,6 +14,8 @@ describe('guarded protocol research entry', () => {
             ['available-records', ''],
             ['unknown', 'fixture'],
             ['certificate-records', 'fixture'],
+            ['release-records', 'fixture'],
+            ['release-records', 'fixture', ''],
             ['terminal-records', 'fixture', ''],
             ['certificate-records', '', 'records'],
             ['terminal-records', 'fixture', 'records', 'extra'],
@@ -29,6 +31,7 @@ describe('guarded protocol research entry', () => {
         });
         for (const [name, stage] of [
             ['certificate-records', 'certificate'],
+            ['release-records', 'release'],
             ['terminal-records', 'terminal'],
         ]) {
             expect(
