@@ -6,12 +6,16 @@ use std::collections::BTreeSet;
 
 #[path = "ranking-plaintext.rs"]
 mod plaintext;
+#[path = "requested-output-probe.rs"]
+mod requested_output;
+pub use requested_output::probe as requested_output_probe;
 
 #[cfg(target_arch = "wasm32")]
 #[path = "ranking-browser.rs"]
 mod browser;
 
 pub const DEGREE: usize = 65_536;
+const OPTION_COUNT: usize = 10;
 pub const COEFFICIENT_BYTES: usize = 109;
 pub const STORED_COEFFICIENT_BYTES: usize = 112;
 pub type Ciphertext = [Vec<[u64; 14]>; 2];
@@ -84,6 +88,7 @@ impl Engine {
         let mut instructions = Vec::with_capacity(count);
         let mut input_positions = BTreeSet::new();
         let mut remaining_uses = vec![0; count];
+        let mut top_count = None;
         for (index, bytes) in program[16..].chunks_exact(16).enumerate() {
             let operation = word(&bytes[..4]);
             let arity = match operation {
@@ -110,12 +115,32 @@ impl Engine {
                 0 => parameter < 10 && input_positions.insert(parameter),
                 1 | 2 | 6 => parameter == 0,
                 3 => (1..=181).contains(&parameter) && parameter % 2 == 1,
-                4 => (1..=9).contains(&parameter),
-                5 => parameter <= 2,
+                4 => {
+                    parameter < (OPTION_COUNT * OPTION_COUNT) as u32
+                        && !parameter.is_multiple_of(OPTION_COUNT as u32)
+                }
+                5 => parameter < (OPTION_COUNT + 2) as u32,
                 _ => false,
             };
             if !valid {
                 return Err(Refusal::Program);
+            }
+            let declared_top_count = match operation {
+                4 => Some(match parameter as usize / OPTION_COUNT {
+                    0 => OPTION_COUNT,
+                    value => value,
+                }),
+                5 if parameter >= 2 => Some(match parameter {
+                    2 => OPTION_COUNT,
+                    value => value as usize - 2,
+                }),
+                _ => None,
+            };
+            if let Some(declared) = declared_top_count {
+                if top_count.is_some_and(|existing| existing != declared) {
+                    return Err(Refusal::Program);
+                }
+                top_count = Some(declared);
             }
             instructions.push(Instruction {
                 operation,
@@ -127,7 +152,8 @@ impl Engine {
             return Err(Refusal::Program);
         }
         remaining_uses[count - 1] = 1;
-        let (comparison_coefficients, ranking_coefficients, input_offset) = plaintext::parameters();
+        let (comparison_coefficients, ranking_coefficients, input_offset) =
+            plaintext::parameters(top_count.unwrap_or(OPTION_COUNT));
         Ok(Self {
             arithmetic: Arithmetic::new(DEGREE),
             program_hash: expected_hash,
@@ -439,7 +465,7 @@ impl Engine {
                 }
                 4 => {
                     let plaintext: Polynomial = self.ranking_coefficients
-                        [instruction.parameter as usize]
+                        [instruction.parameter as usize % OPTION_COUNT]
                         .iter()
                         .map(|value| self.arithmetic.normalize(BigInt::from(*value)))
                         .collect();
@@ -454,7 +480,9 @@ impl Engine {
                         constant[0] = self.comparison_coefficients[0];
                         self.add_plaintext(left, &constant)
                     }
-                    2 => self.add_plaintext(left, &self.ranking_coefficients[0]),
+                    parameter if parameter < (OPTION_COUNT + 2) as u32 => {
+                        self.add_plaintext(left, &self.ranking_coefficients[0])
+                    }
                     _ => return Err(Refusal::Program),
                 },
                 6 => {

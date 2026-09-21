@@ -34,11 +34,20 @@ import {
 
 type NativeResult = {
     kind: string;
-    accepted: number[];
+    accepted?: number[];
     releaseSubsets?: number;
     departureSets?: number;
+    cases?: {
+        milliseconds: number;
+        result: {
+            topCount: number;
+            inputIdentity: string;
+            optionPositions: number[];
+        };
+    }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
+const prefixCase = selected.name === 'native-prefix';
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
 const memoryLimit = 1_073_741_824;
@@ -49,7 +58,11 @@ await runWithLocalRunLog(
         lanes: [
             'Pinned protocol research build',
             ...(selected.execution
-                ? ['Native original-credential completion']
+                ? [
+                      prefixCase
+                          ? 'Encrypted requested-output gates'
+                          : 'Native original-credential completion',
+                  ]
                 : []),
         ],
         scriptName: 'research:protocol',
@@ -260,6 +273,7 @@ await runWithLocalRunLog(
                 'opened-contribution',
                 'ballot-proof',
                 'linked-release-proof',
+                'rns-arithmetic-probe',
             ];
             await execute(
                 'cargo',
@@ -301,6 +315,8 @@ await runWithLocalRunLog(
                     'evaluation-target',
                     '-p',
                     'linked-release-proof',
+                    '-p',
+                    'rns-arithmetic-probe',
                     '--lib',
                 ],
                 'unit-verification',
@@ -320,6 +336,7 @@ await runWithLocalRunLog(
                         'setup-aggregate',
                         'opened-contribution',
                         'ballot-proof',
+                        'rns-arithmetic-probe',
                     ].flatMap((name) => ['-p', name]),
                     '--bins',
                 ],
@@ -327,7 +344,10 @@ await runWithLocalRunLog(
             );
             const executable = path.join(
                 workspace,
-                'target/release/native-ceremony' +
+                'target/release/' +
+                    (prefixCase
+                        ? 'check-requested-output'
+                        : 'native-ceremony') +
                     (process.platform === 'win32' ? '.exe' : ''),
             );
             const runtime = createHash('sha512')
@@ -353,10 +373,13 @@ await runWithLocalRunLog(
             }
             const runtimeFile = path.join(log.runDirectoryPath, 'runtime.bin');
             await writeFile(runtimeFile, runtime, { flag: 'wx' });
-            const scratch = await mkdtemp(
-                path.join(root, 'temp/protocol-research-'),
+            const scratch = prefixCase
+                ? undefined
+                : await mkdtemp(path.join(root, 'temp/protocol-research-'));
+            const output = path.join(
+                log.runDirectoryPath,
+                prefixCase ? 'requested-output' : 'ceremony',
             );
-            const output = path.join(log.runDirectoryPath, 'ceremony');
             const controller = new AbortController();
             let active = false,
                 monitor: Promise<void> | undefined,
@@ -369,15 +392,18 @@ await runWithLocalRunLog(
                     [
                         {
                             command: executable,
-                            args: [
-                                output,
-                                runtimeFile,
-                                scratch,
-                                ...(selected.empty ? ['empty'] : []),
-                            ],
+                            args: prefixCase
+                                ? [output]
+                                : [
+                                      output,
+                                      runtimeFile,
+                                      scratch!,
+                                      ...(selected.empty ? ['empty'] : []),
+                                  ],
                             env: environment,
-                            description:
-                                'Execute original credentials through terminal verification',
+                            description: prefixCase
+                                ? 'Verify encrypted requested-output coefficients'
+                                : 'Execute original credentials through terminal verification',
                             logFileSlug: 'completion',
                         },
                     ],
@@ -439,13 +465,36 @@ await runWithLocalRunLog(
             assert.ok(samples > 0);
             const result = JSON.parse(
                 await readFile(
-                    path.join(output, 'completion/result.json'),
+                    path.join(
+                        output,
+                        prefixCase ? 'result.json' : 'completion/result.json',
+                    ),
                     'utf8',
                 ),
             ) as NativeResult;
-            assert.equal(result.kind, selected.empty ? 'no-result' : 'result');
-            assert.deepEqual(result.accepted, selected.empty ? [] : [0]);
-            if (!selected.empty) {
+            if (prefixCase) {
+                assert.equal(result.kind, 'requested-output');
+                assert.ok(result.cases);
+                assert.deepEqual(
+                    result.cases.map((value) => value.result.topCount),
+                    [10, 3],
+                );
+                assert.equal(
+                    result.cases[0].result.inputIdentity,
+                    result.cases[1].result.inputIdentity,
+                );
+                assert.deepEqual(
+                    result.cases[1].result.optionPositions,
+                    [4, 1, 8],
+                );
+            } else {
+                assert.equal(
+                    result.kind,
+                    selected.empty ? 'no-result' : 'result',
+                );
+                assert.deepEqual(result.accepted, selected.empty ? [] : [0]);
+            }
+            if (!prefixCase && !selected.empty) {
                 assert.equal(result.releaseSubsets, 210);
                 assert.equal(result.departureSets, 176);
             }
@@ -462,7 +511,10 @@ await runWithLocalRunLog(
                 return bytes;
             };
             const publicDiagnosticBytes = await countFiles(output);
-            assert.ok(BigInt(publicDiagnosticBytes) <= diagnosticBound);
+            assert.ok(
+                BigInt(publicDiagnosticBytes) <=
+                    (prefixCase ? 16_384n : diagnosticBound),
+            );
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -484,9 +536,11 @@ await runWithLocalRunLog(
                             networkTransfers: null,
                             recoveryWork: null,
                         },
-                        scope: selected.empty
-                            ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, archive availability, security admission or physical qualification.'
-                            : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, archive availability, security admission or physical qualification.',
+                        scope: prefixCase
+                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
+                            : selected.empty
+                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, archive availability, security admission or physical qualification.'
+                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, archive availability, security admission or physical qualification.',
                     },
                     null,
                     2,

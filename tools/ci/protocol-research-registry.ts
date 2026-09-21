@@ -2,6 +2,7 @@ const protocolResearchCases = {
     check: { execution: false, empty: false },
     'native-result': { execution: true, empty: false },
     'native-empty': { execution: true, empty: true },
+    'native-prefix': { execution: true, empty: false },
 } as const;
 
 export const selectProtocolResearchCase = (arguments_: readonly string[]) => {

@@ -59,6 +59,11 @@ describe('guarded protocol research entry', () => {
             empty: true,
         });
         expect(selectProtocolResearchCase(['check']).execution).toBe(false);
+        expect(selectProtocolResearchCase(['native-prefix'])).toEqual({
+            name: 'native-prefix',
+            execution: true,
+            empty: false,
+        });
     });
 
     it('charges descendants independent of enumeration order without charging unrelated processes', () => {

@@ -6,6 +6,8 @@ This workspace versions the executable threshold-FHE research construction. It i
 
 The current native case uses ten participants, ten options and all ten result identifiers. It generates fresh original credentials, proves and verifies setup, classifies signed sources, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction. The empty case verifies a certified no-result target. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
 
+The evaluator and terminal decoder support every requested result length for the ten-participant, ten-option profile. The encrypted computation clears omitted ranks; the decoder rejects a plaintext containing them. The complete-ordering program keeps its existing bytes. Other participant and option counts remain explicitly unsupported by this arithmetic profile.
+
 ## Build and run
 
 Prerequisites are Node.js satisfying the repository's engine requirement, the pinned pnpm version, Rust 1.95.0 with rustfmt, Clippy and the `wasm32-unknown-unknown` target, and Protocol Buffers compiler 36.1. Install protoc from the official Protocol Buffers release and put it on `PATH`, or set `PROTOC` to that executable. The runner checks both compiler versions and records the native executable digest; it does not search an ignored checkout. Cargo's lockfile pins registry dependency versions and checksums. Before an offline run, populate the Cargo cache with:
@@ -16,6 +18,14 @@ pnpm run research:protocol -- check
 pnpm run research:protocol -- native-result
 pnpm run research:protocol -- native-empty
 ```
+
+The focused numerical case checks complete and shorter output prefixes using the same deterministic BFV ciphertext inputs:
+
+```text
+pnpm run research:protocol -- native-prefix
+```
+
+It exercises the coefficient-selection gates and checks every decrypted coefficient with a test-only secret and an independent interpolation oracle. It creates no participants, ballots, certificate or protocol terminal.
 
 For focused retrieval checks, an existing passed public completion run can supply archived public fixtures:
 

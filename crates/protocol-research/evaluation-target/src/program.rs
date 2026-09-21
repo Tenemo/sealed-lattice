@@ -142,7 +142,7 @@ impl RankingProgram {
         options: usize,
         top_count: usize,
     ) -> Result<Self, Error> {
-        if (participants, options, top_count) != (10, 10, 10) {
+        if (participants, options) != (10, 10) || !(1..=options).contains(&top_count) {
             return Err(Error::UnsupportedProfile);
         }
         let mut builder = Builder {
@@ -163,14 +163,26 @@ impl RankingProgram {
         }
         let mut powers = vec![None; 10];
         powers[1] = Some(rank);
+        // Family zero retains the complete-ordering encoding. Other families
+        // contain rank-equality coefficients only for the requested prefix.
+        let coefficient_base = if top_count == options {
+            0
+        } else {
+            (options * top_count) as u32
+        };
         let terms: Vec<_> = (1..10)
             .map(|exponent| {
                 let power = builder.power(&mut powers, exponent);
-                builder.append(4, &[power], exponent as u32)
+                builder.append(4, &[power], coefficient_base + exponent as u32)
             })
             .collect();
         let sum = builder.sum(&terms);
-        let result = builder.append(5, &[sum], 2);
+        let constant = if top_count == options {
+            2
+        } else {
+            2 + top_count as u32
+        };
+        let result = builder.append(5, &[sum], constant);
         let bytes = builder.encode(result);
         let identity = Sha512::digest(&bytes).into();
         Ok(Self { bytes, identity })
@@ -180,5 +192,99 @@ impl RankingProgram {
     }
     pub fn identity(&self) -> &[u8; 64] {
         &self.identity
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
+        let complete = RankingProgram::for_profile(10, 10, 10).unwrap();
+        // Pinned identity of the independently emitted pre-extension schedule.
+        assert_eq!(
+            complete
+                .identity()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+            "c3872177b99208361bc96dd4127b169a0985dffa819fd648aa8f1d65f7fa93e14230168efbcae815b970d5993edb00587b70a14dc46d5aaf85af0585f0eb3042"
+        );
+        for top_count in 1..10 {
+            let selected = RankingProgram::for_profile(10, 10, top_count).unwrap();
+            assert_eq!(selected.bytes().len(), complete.bytes().len());
+            assert_eq!(selected.bytes()[..16], complete.bytes()[..16]);
+            for (before, after) in complete.bytes()[16..]
+                .chunks_exact(16)
+                .zip(selected.bytes()[16..].chunks_exact(16))
+            {
+                assert_eq!(before[..12], after[..12]);
+                let operation = u32::from_le_bytes(before[..4].try_into().unwrap());
+                let parameter = u32::from_le_bytes(before[12..].try_into().unwrap());
+                if operation != 4 && !(operation == 5 && parameter == 2) {
+                    assert_eq!(before, after);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_requested_result_length_has_an_executable_program() {
+        for top_count in 1..=10 {
+            let program = RankingProgram::for_profile(10, 10, top_count)
+                .expect("A supported requested result length needs its own encrypted program");
+            assert!(
+                rns_arithmetic_probe::ranking::Engine::new(program.bytes(), *program.identity())
+                    .is_ok()
+            );
+        }
+        for (participants, options, top_count) in
+            [(10, 10, 0), (10, 10, 11), (9, 10, 1), (10, 9, 1)]
+        {
+            assert!(matches!(
+                RankingProgram::for_profile(participants, options, top_count),
+                Err(Error::UnsupportedProfile)
+            ));
+        }
+    }
+
+    #[test]
+    fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
+        let program = RankingProgram::for_profile(10, 10, 3).unwrap();
+        let weighted = program.bytes()[16..]
+            .chunks_exact(16)
+            .position(|bytes| u32::from_le_bytes(bytes[..4].try_into().unwrap()) == 4)
+            .unwrap();
+        let parameter_offset = 16 + 16 * weighted + 12;
+        let original = u32::from_le_bytes(
+            program.bytes()[parameter_offset..parameter_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+        for parameter in [original + 10, 0, 100, u32::MAX] {
+            let mut changed = program.bytes().to_vec();
+            changed[parameter_offset..parameter_offset + 4]
+                .copy_from_slice(&parameter.to_le_bytes());
+            assert!(
+                rns_arithmetic_probe::ranking::Engine::new(
+                    &changed,
+                    Sha512::digest(&changed).into()
+                )
+                .is_err()
+            );
+        }
+        for constant in [2u32, 12, u32::MAX] {
+            let mut changed = program.bytes().to_vec();
+            let offset = changed.len() - 4;
+            changed[offset..].copy_from_slice(&constant.to_le_bytes());
+            assert!(
+                rns_arithmetic_probe::ranking::Engine::new(
+                    &changed,
+                    Sha512::digest(&changed).into()
+                )
+                .is_err()
+            );
+        }
     }
 }

@@ -16,7 +16,17 @@ fn main() {
     for participants in 3..=20 {
         for options in 2..=20 {
             for top_count in 1..=options {
-                if (participants, options, top_count) == (10, 10, 10) {
+                if (participants, options) == (10, 10) {
+                    let selected = RankingProgram::for_profile(participants, options, top_count)
+                        .expect("supported requested result length");
+                    assert_eq!(selected.bytes().len(), reference.len());
+                    assert!(
+                        rns_arithmetic_probe::ranking::Engine::new(
+                            selected.bytes(),
+                            *selected.identity()
+                        )
+                        .is_ok()
+                    );
                     continue;
                 }
                 assert!(matches!(

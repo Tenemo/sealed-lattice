@@ -15,3 +15,7 @@ fhe-math = { path = "../vendor/fhe-rs/crates/fhe-math", default-features = false
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha2 = "=0.11.0"
+
+[[bin]]
+name = "check-requested-output"
+path = "src/bin/check-requested-output.rs"

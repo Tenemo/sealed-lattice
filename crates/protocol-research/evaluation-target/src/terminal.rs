@@ -23,8 +23,9 @@ fn power(mut value: u32, mut exponent: u32) -> u32 {
     }
     result
 }
-fn selected_positions(coefficients: &[u32]) -> Result<Vec<usize>, Error> {
-    if coefficients.len() != SYSTEMATIC
+fn selected_positions(coefficients: &[u32], top_count: usize) -> Result<Vec<usize>, Error> {
+    if !(1..=10).contains(&top_count)
+        || coefficients.len() != SYSTEMATIC
         || coefficients.iter().any(|value| *value >= PRIME)
         || coefficients
             .iter()
@@ -68,7 +69,7 @@ fn selected_positions(coefficients: &[u32]) -> Result<Vec<usize>, Error> {
         }
         width *= 2;
     }
-    let mut selected = vec![None; 10];
+    let mut selected = vec![None; top_count];
     let mut used = vec![false; length];
     let mut exponent = 1;
     for slot in 0..SYSTEMATIC / 4 {
@@ -76,7 +77,7 @@ fn selected_positions(coefficients: &[u32]) -> Result<Vec<usize>, Error> {
         used[index] = true;
         let value = values[index];
         exponent = 5 * exponent % SYSTEMATIC;
-        if slot < 1600 && slot % 16 == 0 {
+        if slot < 1600 && slot % 16 == 0 && slot / 16 % 10 < top_count {
             if value > 1 {
                 return Err(Error::Encoding);
             }
@@ -156,7 +157,7 @@ impl ReleaseCollector {
         }
         if target.inventory().setup().inventory().confirmations().len() != 10
             || target.inventory().poll().manifest().option_count() != 10
-            || target.inventory().poll().top_count() != 10
+            || !(1..=10).contains(&target.inventory().poll().top_count())
         {
             return Err(Error::Context);
         }
@@ -240,7 +241,10 @@ impl ReleaseCollector {
                 multiply(value, inverse_plain_four)
             })
             .collect();
-        let ordered = selected_positions(&plaintext)?;
+        let ordered = selected_positions(
+            &plaintext,
+            usize::from(self.certificate.target().inventory().poll().top_count()),
+        )?;
         let options = self
             .certificate
             .target()
@@ -291,7 +295,7 @@ mod decoder_tests {
             .1[0] as usize;
         (exponent - 1) / 2
     }
-    fn entries(order: &[usize; 10]) -> Vec<(usize, u32)> {
+    fn entries(order: &[usize]) -> Vec<(usize, u32)> {
         order
             .iter()
             .enumerate()
@@ -305,10 +309,16 @@ mod decoder_tests {
             [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
             [4, 1, 8, 0, 7, 2, 9, 5, 3, 6],
         ] {
-            assert_eq!(
-                selected_positions(&encode_evaluations(&entries(&order))).unwrap(),
-                order
-            );
+            for top_count in 1..=10 {
+                assert_eq!(
+                    selected_positions(
+                        &encode_evaluations(&entries(&order[..top_count])),
+                        top_count,
+                    )
+                    .unwrap(),
+                    order[..top_count]
+                );
+            }
         }
     }
     #[test]
@@ -332,17 +342,38 @@ mod decoder_tests {
         }
         variants.push(entries(&[0, 0, 2, 3, 4, 5, 6, 7, 8, 9]));
         for changed in variants {
-            assert!(selected_positions(&encode_evaluations(&changed)).is_err());
+            assert!(selected_positions(&encode_evaluations(&changed), 10).is_err());
         }
         let valid = encode_evaluations(&original);
         for (index, value) in [(1, 1), (0, 65_537)] {
             let mut changed = valid.clone();
             changed[index] = value;
-            assert!(selected_positions(&changed).is_err());
+            assert!(selected_positions(&changed, 10).is_err());
         }
-        assert!(selected_positions(&valid[..valid.len() - 1]).is_err());
+        assert!(selected_positions(&valid[..valid.len() - 1], 10).is_err());
         let mut changed = valid;
         changed.push(0);
-        assert!(selected_positions(&changed).is_err());
+        assert!(selected_positions(&changed, 10).is_err());
+    }
+
+    #[test]
+    fn shorter_outputs_reject_omitted_ranks_in_the_plaintext() {
+        let order = [4, 1, 8, 0, 7, 2, 9, 5, 3, 6];
+        let complete = encode_evaluations(&entries(&order));
+        for top_count in 1..10 {
+            assert!(selected_positions(&complete, top_count).is_err());
+            let mut extra = entries(&order[..top_count]);
+            extra.push((
+                evaluation_index((order[top_count] * 10 + top_count) * 16),
+                1,
+            ));
+            assert!(selected_positions(&encode_evaluations(&extra), top_count).is_err());
+            let mut missing = entries(&order[..top_count]);
+            missing.pop();
+            assert!(selected_positions(&encode_evaluations(&missing), top_count).is_err());
+        }
+        for top_count in [0, 11, usize::MAX] {
+            assert!(selected_positions(&complete, top_count).is_err());
+        }
     }
 }

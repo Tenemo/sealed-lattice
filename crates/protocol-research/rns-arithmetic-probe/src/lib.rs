@@ -183,3 +183,14 @@ pub extern "C" fn run_encrypted_probe(log_degree: u32) -> u32 {
     OUTPUT.with(|state| *state.borrow_mut() = output);
     length
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn run_requested_output_probe(top_count: u32) -> u32 {
+    let Ok(output) = ranking::requested_output_probe(top_count as usize) else {
+        return 0;
+    };
+    let output = output.into_bytes();
+    let length = output.len() as u32;
+    OUTPUT.with(|state| *state.borrow_mut() = output);
+    length
+}
