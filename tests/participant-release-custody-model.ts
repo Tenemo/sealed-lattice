@@ -103,6 +103,11 @@ export const compileParticipantReleaseCustody = () => {
         maximumProofRandomBytes,
         totalRandomBytes,
         journalRecords,
+        wasmEntropyInputBytes: recordBytes,
+        wasmEntropyOutputBytes: readBytes,
+        maximumWasmEntropyPayloadBytes:
+            totalRandomBytes + recordBytes + readBytes,
+        maximumLiveDecryptedJournalRecordBytes: recordBytes,
         bodyHeaderBytes,
         partialBytes,
         minimumBodyBytes,

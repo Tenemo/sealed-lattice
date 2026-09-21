@@ -259,6 +259,7 @@ await runWithLocalRunLog(
                 'setup-aggregate',
                 'opened-contribution',
                 'ballot-proof',
+                'linked-release-proof',
             ];
             await execute(
                 'cargo',
@@ -298,6 +299,8 @@ await runWithLocalRunLog(
                     'registration-credentials',
                     '-p',
                     'evaluation-target',
+                    '-p',
+                    'linked-release-proof',
                     '--lib',
                 ],
                 'unit-verification',

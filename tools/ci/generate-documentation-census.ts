@@ -2969,7 +2969,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Participant release custody',
         '',
-        'Bounds for one original-key release under the retained certified target. Repeated execution replays the same finite journal. These bounds exclude the earlier participant state and do not establish the complete security reduction or measured browser costs.',
+        'Bounds for one original-key release under the retained certified target. Repeated execution replays the same finite journal. The volatile entropy payload shares the existing scalar memory ceiling and excludes allocator metadata, capacity rounding and the rest of the prover. The live decrypted-record bound excludes garbage awaiting collection and browser cryptographic internals. These bounds exclude the earlier participant state and do not establish the complete security reduction or measured browser costs.',
         '',
         table(
             ['Property', 'Value'],
@@ -2977,6 +2977,30 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Independent noise bytes',
                     formatCount(participantReleaseCustody.noiseBytes),
+                ],
+                [
+                    'Wasm entropy input bytes',
+                    formatCount(
+                        participantReleaseCustody.wasmEntropyInputBytes,
+                    ),
+                ],
+                [
+                    'Wasm entropy output bytes',
+                    formatCount(
+                        participantReleaseCustody.wasmEntropyOutputBytes,
+                    ),
+                ],
+                [
+                    'Maximum Wasm entropy payload bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumWasmEntropyPayloadBytes,
+                    ),
+                ],
+                [
+                    'Maximum live decrypted journal record bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumLiveDecryptedJournalRecordBytes,
+                    ),
                 ],
                 [
                     'Maximum proof randomness bytes',

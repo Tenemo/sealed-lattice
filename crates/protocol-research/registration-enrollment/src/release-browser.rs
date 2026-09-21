@@ -50,6 +50,9 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if input != context.certificate().target().body() {
                 return Err(Error::Context);
             }
+            if !linked_release_proof::release_entropy::ready() {
+                return Err(Error::Context);
+            }
             let work = crate::release_work::ReleaseWork::new(owner, context)?;
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
             let (context, statement, proof) =

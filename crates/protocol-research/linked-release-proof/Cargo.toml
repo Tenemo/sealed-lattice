@@ -26,3 +26,7 @@ setup-stream-kernel = { path = "../setup-stream-kernel", default-features = fals
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "=0.3.3"
+
+[[bin]]
+name = "verify-release-relation"
+path = "src/bin/verify-release-relation.rs"

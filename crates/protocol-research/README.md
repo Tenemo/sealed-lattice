@@ -45,6 +45,8 @@ The public verifier and scalar bridge are library consumers of the same owning R
 
 The original participant bridge also exposes target signing and certified release in the same scalar instance. New release work requires the actual certificate-derived context and original recipient key; an unsigned retained body passes the owning verifier before signing. Completed-message restoration verifies its original signature and exact body digest and restores consumed authority only. The experimental worker connects encrypted journal and root transitions, but its complete target/release browser fault gate remains open. These interfaces are not exported by the published SDK.
 
+The worker authenticates release-journal records before staging them in the scalar byte buffer. Consumed records are retired inside the existing memory limit; the buffer supplies no release authority. The numerical proof verifier uses a dedicated workload role; actual certified messages must pass the public release-records case above.
+
 ## Third-party sources
 
 `vendor/fhe-rs` contains the used arithmetic, utility and trait crates from `tlepoint/fhe.rs` at `e248cd288c754e5cca9a54d4b7df505058a539ed`, plus the previously verified scalar execution and dependency-pin changes. The imported local revision is `877151d0f2484aef379c2253fb5bb0d380eb528a`. Its MIT license is retained. The existing Protobuf schema and build remain unchanged.
