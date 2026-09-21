@@ -5344,27 +5344,37 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Full-body commitment equivocation census',
         '',
-        'The original whole-message extension uses a separate hidden salt slice for each honest sender, with one commitment per sender scope. Its bound sums the single-sender one-way-to-hiding hybrids and does not multiply by the body bit length. The count of controlled oracle calls excludes the simulator cost of processing each query and every queried input/output byte; the complete reduction-time and fixed-function obligations remain open.',
+        'The original whole-message extension uses a separate hidden salt slice for each potential honest credential, with one commitment per sender scope. The fixed credential tape also charges unused credentials, preserving adaptive activation inside the wrapper. These supplied scope caps are conditional operands, not derived lifetime limits. Its bound sums the single-sender one-way-to-hiding hybrids and does not multiply by the body bit length. The ideal-XOF credential-collision term accounts separately for equal original seeds and equal public matrix-seed prefixes. Controlled oracle calls exclude credential generation, routing, input/output processing and actual oracle-simulator cost; complete reduction time and fixed-function correspondence remain open.',
         '',
         table(
             [
                 'Participants',
-                'Honest commitment bound',
+                'Potential credential scope cap',
                 'Salt bits',
                 'Quantum query bound',
                 'Failure exponent',
                 'Controlled oracle call bound',
+                'Ideal credential-collision numerator',
+                'Ideal credential-collision denominator',
             ],
-            [10, 20].map((participantCount) => {
-                const bound =
-                    compileCommitmentEquivocationBound(participantCount);
+            [
+                [10, 10n],
+                [10, 30n],
+                [20, 20n],
+            ].map(([participantCount, scopes]) => {
+                const bound = compileCommitmentEquivocationBound(
+                    Number(participantCount),
+                    BigInt(scopes),
+                );
                 return [
                     formatCount(participantCount),
-                    formatCount(bound.honestCommitmentCount),
+                    formatCount(bound.credentialScopeCount),
                     formatCount(bound.saltBitLength),
                     formatCount(bound.quantumQueryCount),
                     formatCount(bound.failureExponent),
                     formatCount(bound.maximumControlledOracleCalls),
+                    formatCount(bound.credentialCollisionNumerator),
+                    formatCount(bound.credentialCollisionDenominator),
                 ];
             }),
         ),

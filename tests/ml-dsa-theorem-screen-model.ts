@@ -15,6 +15,9 @@ type SignatureParameters = Readonly<{
 export const mlDsa65ChallengeSeedBytes = 192n / 4n;
 // The pinned implementation uses a u16 nonce in FIPS 204 ExpandMask.
 export const mlDsa65MaskNonceBytes = 2n;
+// FIPS 204 Algorithm 6: independent key-generation seed and public rho.
+export const mlDsa65KeySeedBytes = 32n;
+export const mlDsa65PublicMatrixSeedBytes = 32n;
 export const mlDsa65Parameters: SignatureParameters = {
     modulus: 8380417n,
     polynomialDegree: 256n,

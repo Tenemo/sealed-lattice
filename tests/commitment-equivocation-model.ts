@@ -1,10 +1,15 @@
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
+import {
+    mlDsa65KeySeedBytes,
+    mlDsa65PublicMatrixSeedBytes,
+} from '#tests/ml-dsa-theorem-screen-model.js';
 
 // Whole-message extension of ABKK22 Theorem 5.12's single-sender hybrid.
 // The coefficient two is from AHU19 Theorem 3 (one-way to hiding).
 // This models an ideal oracle; it does not establish the joint fixed-hash claim.
 export const compileCommitmentEquivocationBound = (
     participantCount: number,
+    credentialScopeCount = BigInt(participantCount),
 ) => {
     if (
         !Number.isSafeInteger(participantCount) ||
@@ -12,26 +17,42 @@ export const compileCommitmentEquivocationBound = (
         participantCount > 20
     )
         throw new RangeError('Unsupported participant count.');
+    if (
+        typeof credentialScopeCount !== 'bigint' ||
+        credentialScopeCount < BigInt(participantCount)
+    )
+        throw new RangeError('Credential scope cap must cover the roster.');
     const { quantumQueryCount } =
         compileCommitmentExtractionBound(participantCount);
     const saltBitLength = 512n;
-    const honestCommitmentCount = BigInt(participantCount);
-    // Apply the single-sender hybrid once per honest one-shot commitment.
-    const numerator = 2n * honestCommitmentCount * quantumQueryCount;
+    // Charge every potential honest credential, including unused entries in
+    // the fixed tape. The default is a conditional one-cohort allocation,
+    // not a derived lifetime cap for the host or registration interface.
+    const numerator = 2n * credentialScopeCount * quantumQueryCount;
     const denominator = 1n << (saltBitLength / 2n);
     let failureExponent = 0n;
     while (numerator << (failureExponent + 1n) <= denominator)
         failureExponent++;
+    const seedBits = 8n * mlDsa65KeySeedBytes;
+    const publicSeedBits = 8n * mlDsa65PublicMatrixSeedBytes;
+    const credentialCollisionDenominator =
+        1n << (seedBits > publicSeedBits ? seedBits : publicSeedBits);
+    const credentialCollisionNumerator =
+        ((credentialScopeCount * (credentialScopeCount - 1n)) / 2n) *
+        ((credentialCollisionDenominator >> seedBits) +
+            (credentialCollisionDenominator >> publicSeedBits));
     return {
-        honestCommitmentCount,
+        credentialScopeCount,
         quantumQueryCount,
         saltBitLength,
         numerator,
         denominator,
         failureExponent,
+        credentialCollisionNumerator,
+        credentialCollisionDenominator,
         // One background oracle and one independent shadow oracle per sender.
         maximumControlledOracleCalls:
-            (honestCommitmentCount + 1n) * quantumQueryCount,
+            (credentialScopeCount + 1n) * quantumQueryCount,
     };
 };
 
