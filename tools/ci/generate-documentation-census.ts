@@ -4,7 +4,8 @@ import path from 'node:path';
 import { adaptiveWotsBound } from '#tests/adaptive-wots-model.js';
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
 import {
-    compileAuthenticationFrameWork,
+    compileCompleteAuthenticationFrameWork,
+    compileCompleteCredentialIntentBounds,
     compileCompletedAuthenticationCensus,
     compileCurrentCredentialIntentBounds,
     compileCurrentSignatureHashInputs,
@@ -1674,7 +1675,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Authentication frames and completed prefix',
         '',
-        'The pure FIPS 204 interface frames each application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. Its counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
+        'The pure FIPS 204 interface frames each participant application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. These rows cover participant credentials; public-archive receipt credentials have their own population. The counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
         '',
         table(
             [
@@ -1684,7 +1685,7 @@ export const renderDocumentationCensus = (): string => {
                 'Representative input bytes',
                 'Representative permutations',
             ],
-            compileAuthenticationFrameWork().map((role) => [
+            compileCompleteAuthenticationFrameWork().map((role) => [
                 role.purpose,
                 formatCount(role.messageBytes),
                 formatCount(role.frameBytes),
@@ -1730,7 +1731,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'For one original credential, the source-inductive one-shot argument bounds first-evaluated intents across the currently emitted purposes, including signatures never delivered. Repeated evaluation of retained coins consumes runtime but no new cached signing-oracle query. These conditional per-credential prefix bounds do not supply the total credential population, repeated-work bound, future close/release purposes or a complete signature-security claim.',
+        'The preserved through-ballot prefix counts first-evaluated intents, including signatures never delivered. Repeated evaluation of retained coins consumes runtime but no new cached signing-oracle query. Keep this prefix separate from the full-action branches below; neither table supplies a lifetime credential population, repeated-work bound or complete signature-security claim.',
         '',
         table(
             [
@@ -1741,6 +1742,27 @@ export const renderDocumentationCensus = (): string => {
             compileCurrentCredentialIntentBounds().map((value) => [
                 value.role,
                 value.purposes.join(', '),
+                formatCount(value.firstEvaluatedIntentBound),
+            ]),
+        ),
+        '',
+        "For one original credential/action under the retained-state invariant, the source choice is ballot or empty, never both; a pending ballot also blocks an empty declaration. Each witness batch consumes one purpose. No-result omits release. Encrypted release may omit the participant's own target vote, but cannot bypass a pending target intent or start target signing after release begins. The no-result row is a maximum allowing an own target vote, not a claim that every participant supplies one.",
+        '',
+        table(
+            [
+                'Participants',
+                'Branch',
+                'Credential role',
+                'Fixed purposes',
+                'Exclusive source alternatives',
+                'First-evaluated intent bound',
+            ],
+            compileCompleteCredentialIntentBounds().map((value) => [
+                formatCount(value.participantCount),
+                value.branch,
+                value.role,
+                value.fixedPurposes.join(', '),
+                value.sourceAlternatives.join(' or '),
                 formatCount(value.firstEvaluatedIntentBound),
             ]),
         ),

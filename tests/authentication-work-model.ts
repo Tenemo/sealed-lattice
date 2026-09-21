@@ -1,12 +1,15 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     mlDsa65ChallengeSeedBytes,
     mlDsa65MaskNonceBytes,
     mlDsa65Parameters,
 } from '#tests/ml-dsa-theorem-screen-model.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 const envelopeBytes = compileBallotBodyCensus().envelopeBytes;
 const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
@@ -20,8 +23,18 @@ export const authenticationPurposes = [
     'ballot-envelope',
 ] as const;
 export type AuthenticationPurpose = (typeof authenticationPurposes)[number];
+const completeAuthenticationPurposes = [
+    ...authenticationPurposes,
+    'ballot-close',
+    'empty-slot',
+    'slot-witness',
+    'target-certification',
+    'release-envelope',
+] as const;
+type CompleteAuthenticationPurpose =
+    (typeof completeAuthenticationPurposes)[number];
 
-export const authenticationContext = (purpose: AuthenticationPurpose) =>
+export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
     `sealed-lattice/${purpose}/v1`;
 
 // One original credential through ballot completion, under the original-state
@@ -60,31 +73,87 @@ export const pureSignatureFrame = (
     return Buffer.concat([Buffer.from([0, context.length]), context, message]);
 };
 
-export const compileAuthenticationFrameWork = () =>
-    authenticationPurposes.map((purpose) => {
-        const context = authenticationContext(purpose);
-        const messageBytes =
-            purpose === 'ballot-envelope' ? envelopeBytes : 64n;
-        const frameBytes =
-            2n + BigInt(Buffer.byteLength(context)) + messageBytes;
-        // Sign_internal and Verify_internal hash tr || M'. Other ML-DSA
-        // hashes, key expansion and rejection-loop work are separate operands.
-        const representativeInputBytes = 64n + frameBytes;
-        return {
-            purpose,
-            context,
-            messageBytes,
-            frameBytes,
+const authenticationFrameWork = <Purpose extends CompleteAuthenticationPurpose>(
+    purpose: Purpose,
+) => {
+    const context = authenticationContext(purpose);
+    const messageBytes =
+        purpose === 'ballot-envelope'
+            ? envelopeBytes
+            : purpose === 'release-envelope'
+              ? compileParticipantReleaseCustody().envelopeBytes
+              : 64n;
+    const frameBytes = 2n + BigInt(Buffer.byteLength(context)) + messageBytes;
+    // Sign_internal and Verify_internal hash tr || M'. Other ML-DSA
+    // hashes, key expansion and rejection-loop work are separate operands.
+    const representativeInputBytes = 64n + frameBytes;
+    return {
+        purpose,
+        context,
+        messageBytes,
+        frameBytes,
+        representativeInputBytes,
+        representativePermutations: byteAlignedSpongePermutations(
             representativeInputBytes,
-            representativePermutations: byteAlignedSpongePermutations(
-                representativeInputBytes,
-                64n,
-                136n,
-            ),
-        };
-    });
+            64n,
+            136n,
+        ),
+    };
+};
 
-// Complete hash input shapes of the current pure ML-DSA-65 callers. A null
+export const compileAuthenticationFrameWork = () =>
+    authenticationPurposes.map(authenticationFrameWork);
+export const compileCompleteAuthenticationFrameWork = () =>
+    completeAuthenticationPurposes.map(authenticationFrameWork);
+
+// Per original honest credential/action in the selected arithmetic profile,
+// assuming current authenticated state and the one-shot locks. Re-evaluating
+// a retained intent still incurs work.
+// These maxima do not bound verification, lifetime keys or signing failures.
+export const compileCompleteCredentialIntentBounds = () => {
+    const participantCount = Number(fixedModulusBfvInputs.participantCount);
+    const hasWitnessBatch =
+        compileThresholdCompletionProfile(participantCount)
+            .maximumCorruptParticipantCount > 0;
+    const branches = [
+        {
+            name: 'Encrypted result with own target vote',
+            target: true,
+            release: true,
+        },
+        { name: 'No result', target: true, release: false },
+        {
+            name: 'Encrypted release without own target vote',
+            target: false,
+            release: true,
+        },
+    ] as const;
+    return branches.flatMap((branch) =>
+        compileCurrentCredentialIntentBounds().map((participant) => {
+            const fixedPurposes: CompleteAuthenticationPurpose[] = [
+                ...participant.purposes.filter(
+                    (purpose) => purpose !== 'ballot-envelope',
+                ),
+                ...(participant.role === 'organizer'
+                    ? ['ballot-close' as const]
+                    : []),
+                ...(hasWitnessBatch ? ['slot-witness' as const] : []),
+                ...(branch.target ? ['target-certification' as const] : []),
+                ...(branch.release ? ['release-envelope' as const] : []),
+            ];
+            return {
+                participantCount,
+                branch: branch.name,
+                role: participant.role,
+                fixedPurposes,
+                sourceAlternatives: ['ballot-envelope', 'empty-slot'] as const,
+                firstEvaluatedIntentBound: BigInt(fixedPurposes.length) + 1n,
+            };
+        }),
+    );
+};
+
+// Participant-credential hash input shapes for pure ML-DSA-65. A null
 // output length denotes a source-level rejection sampler, not zero work.
 export const compileCurrentSignatureHashInputs = () => {
     const parameters = mlDsa65Parameters;
@@ -145,7 +214,7 @@ export const compileCurrentSignatureHashInputs = () => {
             inputBytes: 32n + 2n,
             outputBytes: null,
         },
-        ...compileAuthenticationFrameWork().map((frame) => ({
+        ...compileCompleteAuthenticationFrameWork().map((frame) => ({
             purpose: frame.purpose,
             family: 'SHAKE256',
             inputBytes: frame.representativeInputBytes,
