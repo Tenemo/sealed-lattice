@@ -4,7 +4,7 @@ research direction
 
 This workspace versions the executable threshold-FHE research construction. It is separate from the published SDK and is not enabled by its foundation API. End-to-end post-quantum security is unestablished. Use synthetic data only.
 
-The current native case uses ten participants, ten options and all ten result identifiers. It generates fresh original credentials, proves and verifies setup, classifies signed sources, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction. The empty case verifies a certified no-result target. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
+The current native case uses ten participants, ten options and all ten result identifiers. It generates fresh original credentials, proves and verifies setup, classifies signed sources, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction. The no-result cases cover all-empty sources and one authenticated invalid ballot with the remaining sources empty. The latter preserves a valid body header and consumes the classification operands before rejecting its malformed proof. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
 
 The evaluator and terminal decoder support every requested result length for the ten-participant, ten-option profile. The encrypted computation clears omitted ranks; the decoder rejects a plaintext containing them. The complete-ordering program keeps its existing bytes. Other participant and option counts remain explicitly unsupported by this arithmetic profile.
 
@@ -17,6 +17,7 @@ cargo +1.95.0 fetch --locked --manifest-path crates/protocol-research/Cargo.toml
 pnpm run research:protocol -- check
 pnpm run research:protocol -- native-result
 pnpm run research:protocol -- native-empty
+pnpm run research:protocol -- native-invalid-only
 ```
 
 The focused numerical case checks complete and shorter output prefixes using the same deterministic BFV ciphertext inputs:

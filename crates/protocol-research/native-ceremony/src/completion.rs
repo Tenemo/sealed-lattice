@@ -154,6 +154,17 @@ pub fn run(
             }
         }
     }
+    let invalid: Vec<_> = classifications
+        .iter()
+        .enumerate()
+        .filter_map(|(author, value)| {
+            matches!(
+                value,
+                Some(ballot_proof::body::BallotBodyClassification::Invalid(_))
+            )
+            .then_some(author)
+        })
+        .collect();
     let classified =
         ClassifiedClosedInventory::new(poll.clone(), setup.clone(), closed, classifications)
             .unwrap();
@@ -275,7 +286,7 @@ pub fn run(
         crate::write(
             directory.join("result.json"),
             format!(
-                "{{\"kind\":\"no-result\",\"accepted\":{accepted:?},\"milliseconds\":{}}}\n",
+                "{{\"kind\":\"no-result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"milliseconds\":{}}}\n",
                 started.elapsed().as_secs_f64() * 1000.0
             )
             .as_bytes(),
@@ -396,7 +407,7 @@ pub fn run(
         assert_eq!(result.result().unwrap().identifiers(), expected);
         departures += 1;
     }
-    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
+    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
     println!(
         "Verified original ballot-to-result path, every release subset and bounded departure set"
     );

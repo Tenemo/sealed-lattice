@@ -50,19 +50,26 @@ describe('guarded protocol research entry', () => {
             ['--'],
             ['unknown'],
             ['native-result', 'native-empty'],
+            ['native-invalid-only', 'native-empty'],
+            ['invalid-only'],
         ]) {
             expect(() => selectProtocolResearchCase(values)).toThrow();
         }
         expect(selectProtocolResearchCase(['--', 'native-empty'])).toEqual({
             name: 'native-empty',
             execution: true,
-            empty: true,
+            noResult: true,
+        });
+        expect(selectProtocolResearchCase(['native-invalid-only'])).toEqual({
+            name: 'native-invalid-only',
+            execution: true,
+            noResult: true,
         });
         expect(selectProtocolResearchCase(['check']).execution).toBe(false);
         expect(selectProtocolResearchCase(['native-prefix'])).toEqual({
             name: 'native-prefix',
             execution: true,
-            empty: false,
+            noResult: false,
         });
     });
 

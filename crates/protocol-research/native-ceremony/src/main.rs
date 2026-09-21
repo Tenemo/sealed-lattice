@@ -1,8 +1,8 @@
 mod aggregate;
 mod completion;
 mod contribution;
-#[path = "empty-publication.rs"]
-mod empty_publication;
+#[path = "no-result-publication.rs"]
+mod no_result_publication;
 #[path = "public-output.rs"]
 mod public_output;
 mod publication;
@@ -77,7 +77,10 @@ impl<'a> EnrollmentOutput<'a> {
 }
 fn main() {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    assert!(arguments.len() == 3 || (arguments.len() == 4 && arguments[3] == "empty"));
+    assert!(
+        arguments.len() == 3
+            || (arguments.len() == 4 && matches!(arguments[3].as_str(), "empty" | "invalid-only"))
+    );
     let scratch = PathBuf::from(&arguments[2]);
     assert!(scratch.is_dir());
     let output = PathBuf::from(&arguments[0]);
@@ -265,13 +268,14 @@ fn main() {
         &openings,
         &output.join("aggregates"),
     ));
-    if arguments.get(3).is_some_and(|value| value == "empty") {
-        let closed = empty_publication::run(
+    if let Some(mode) = arguments.get(3) {
+        let closed = no_result_publication::run(
             &output,
             poll.clone(),
             setup.clone(),
             &mut enrollments,
             &openings,
+            mode == "invalid-only",
         );
         completion::run(
             &output,

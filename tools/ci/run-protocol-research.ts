@@ -35,6 +35,7 @@ import {
 type NativeResult = {
     kind: string;
     accepted?: number[];
+    invalid?: number[];
     releaseSubsets?: number;
     departureSets?: number;
     cases?: {
@@ -398,7 +399,12 @@ await runWithLocalRunLog(
                                       output,
                                       runtimeFile,
                                       scratch!,
-                                      ...(selected.empty ? ['empty'] : []),
+                                      ...(selected.name ===
+                                      'native-invalid-only'
+                                          ? ['invalid-only']
+                                          : selected.noResult
+                                            ? ['empty']
+                                            : []),
                                   ],
                             env: environment,
                             description: prefixCase
@@ -490,11 +496,19 @@ await runWithLocalRunLog(
             } else {
                 assert.equal(
                     result.kind,
-                    selected.empty ? 'no-result' : 'result',
+                    selected.noResult ? 'no-result' : 'result',
                 );
-                assert.deepEqual(result.accepted, selected.empty ? [] : [0]);
+                assert.deepEqual(result.accepted, selected.noResult ? [] : [0]);
+                assert.deepEqual(
+                    result.invalid,
+                    selected.name === 'native-invalid-only'
+                        ? [0]
+                        : selected.noResult
+                          ? []
+                          : [1, 2],
+                );
             }
-            if (!prefixCase && !selected.empty) {
+            if (!prefixCase && !selected.noResult) {
                 assert.equal(result.releaseSubsets, 210);
                 assert.equal(result.departureSets, 176);
             }
@@ -538,7 +552,7 @@ await runWithLocalRunLog(
                         },
                         scope: prefixCase
                             ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
-                            : selected.empty
+                            : selected.noResult
                               ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, archive availability, security admission or physical qualification.'
                               : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, archive availability, security admission or physical qualification.',
                     },
