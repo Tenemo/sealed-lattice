@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { validateParticipantPredecessor } from '#tools/ci/protocol-participant-predecessor.js';
+import {
+    type ParticipantStoredRecord,
+    validateParticipantPredecessor,
+} from '#tools/ci/protocol-participant-predecessor.js';
 import { commitParticipantState } from '#tools/ci/protocol-participant-state-transaction.js';
 
 const stores = ['head', 'root', 'key', 'stopped', 'data', 'journal'];
@@ -101,7 +104,7 @@ const fixture = async () => {
                 byteLength: journal.length,
                 encryption: { key: rawKey, additionalData },
             },
-        ],
+        ] as ParticipantStoredRecord[],
     };
     const commit = () =>
         commitParticipantState({
@@ -132,7 +135,7 @@ const fixture = async () => {
                 database.transaction('head').objectStore('head').get(0),
             )) as typeof head
         ).generation;
-    return { commit, mutate, generation, expected, journal };
+    return { commit, mutate, generation, expected, journal, root };
 };
 
 afterEach(async () => {
@@ -143,10 +146,58 @@ afterEach(async () => {
 });
 
 describe('required predecessor records', () => {
+    it('checks both the retained ciphertext hash and its encryption binding', async () => {
+        const value = await fixture();
+        value.expected.records[1] = {
+            ...value.expected.records[1],
+            sha512: await hash(value.journal),
+        };
+        await value.commit();
+        expect(await value.generation()).toBe(17);
+    });
+
+    it.each(['hash', 'key', 'context'])(
+        'independently refuses a wrong %s on a doubly bound record',
+        async (fault) => {
+            const value = await fixture();
+            value.expected.records[1] = {
+                ...value.expected.records[1],
+                sha512: await hash(value.journal),
+            };
+            const record = value.expected.records[1];
+            if (fault === 'hash') record.sha512![0] ^= 1;
+            if (fault === 'key') record.encryption!.key[0] ^= 1;
+            if (fault === 'context') record.encryption!.additionalData[0] ^= 1;
+            await expect(value.commit()).rejects.toThrow();
+            expect(await value.generation()).toBe(16);
+        },
+    );
     it('authenticates old ciphertexts and hashes before retiring the journal', async () => {
         const value = await fixture();
         await value.commit();
         expect(await value.generation()).toBe(17);
+    });
+
+    it('hashes and decrypts exactly a stored root view with nonzero offset', async () => {
+        const value = await fixture();
+        const allocation = new Uint8Array(value.root.length + 6).fill(211);
+        allocation.set(value.root, 3);
+        await value.mutate('root', (store) =>
+            store.put(allocation.subarray(3, allocation.length - 3), 0),
+        );
+        await value.commit();
+        expect(await value.generation()).toBe(17);
+    });
+
+    it('rejects a shifted root view even when its backing allocation contains the original', async () => {
+        const value = await fixture();
+        const allocation = new Uint8Array(value.root.length + 6).fill(223);
+        allocation.set(value.root, 3);
+        await value.mutate('root', (store) =>
+            store.put(allocation.subarray(2, allocation.length - 4), 0),
+        );
+        await expect(value.commit()).rejects.toThrow('authority changed');
+        expect(await value.generation()).toBe(16);
     });
 
     it.each([

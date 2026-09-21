@@ -47,8 +47,7 @@ export async function validateParticipantPredecessor(
             !Number.isSafeInteger(record.byteLength) ||
             record.byteLength <= 0 ||
             record.byteLength > 1_572_864 ||
-            (record.sha512 === undefined) ===
-                (record.encryption === undefined) ||
+            (record.sha512 === undefined && record.encryption === undefined) ||
             (record.sha512 !== undefined && record.sha512.length !== 64) ||
             (record.encryption !== undefined &&
                 (record.encryption.key.length !== 32 ||
@@ -118,8 +117,9 @@ export async function validateParticipantPredecessor(
             if (record.sha512 !== undefined) {
                 if (!equal(await digest(bytes), record.sha512))
                     throw new Error('Predecessor record bytes changed.');
-            } else {
-                const encryption = record.encryption!;
+            }
+            if (record.encryption !== undefined) {
+                const encryption = record.encryption;
                 const recordKey = await crypto.subtle.importKey(
                     'raw',
                     new Uint8Array(encryption.key),
