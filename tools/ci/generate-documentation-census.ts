@@ -132,6 +132,7 @@ import { compileRegistrationCustodyCensus } from '#tests/registration-custody-mo
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
+import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
@@ -200,6 +201,11 @@ export const renderDocumentationCensus = (): string => {
     const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
     const proofVerifierQueries = compileProofVerifierQueryCensus();
+    const releaseVerification = compileReleaseVerificationWorkload({
+        replayedCandidates: 1n,
+        changedEnvelopes: 0n,
+        changedProofBodies: 0n,
+    });
     const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
     const closeRace = runPublicationCloseRaceModel(10, false);
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
@@ -2746,7 +2752,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof hash byte and permutation work',
         '',
-        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the existing numerical workload role; the protocol-derived release role is not yet implemented.",
+        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.",
         '',
         table(
             [
@@ -2774,6 +2780,54 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.statementDigestPass.permutations),
                 ];
             }),
+        ),
+        '',
+        '## Release verification attempts',
+        '',
+        'A valid relation body paired with a correctly signed envelope claiming the wrong body identity is rejected only after complete proof verification. The public context survives that rejection. These counts apply per complete attempt with that context already verified; multiply by the number of attempts. Exact replay, changed envelopes with a fixed proof, and changed proof bodies remain separate populations. Executed calls do not establish distinct oracle points, a simulator lower bound, a lifetime limit or a full reduction cost. The comparisons assign the entire conditional verification allocation to this core alone, before subtracting any other charged work. Signature work, common-polynomial expansion and any additional predecessor reload remain separately chargeable.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Mandatory proof-core calls excluding Merkle work',
+                    formatCount(
+                        releaseVerification.perAttempt.minimumProofCoreQueries,
+                    ),
+                ],
+                [
+                    'Plain statement-digest passes outside the core',
+                    formatCount(
+                        releaseVerification.perAttempt
+                            .plainStatementDigestPasses,
+                    ),
+                ],
+                [
+                    'Completed release-body digest passes outside the core',
+                    formatCount(
+                        releaseVerification.perAttempt
+                            .completedBodyDigestPasses,
+                    ),
+                ],
+                [
+                    'Known calls excluding Merkle, signature and common-polynomial work',
+                    formatCount(
+                        releaseVerification.perAttempt.minimumKnownHashCalls,
+                    ),
+                ],
+                [
+                    'Full attempts covered by the conditional core allocation using the core upper bound',
+                    formatCount(
+                        releaseVerification.maximumAttemptsCoveredByCoreUpperBound,
+                    ),
+                ],
+                [
+                    'First attempt count exceeding the allocation from mandatory core calls alone',
+                    formatCount(
+                        releaseVerification.firstAttemptCountExceedingCoreLowerBound,
+                    ),
+                ],
+            ],
         ),
         '',
         '## Proof verifier query bounds',
