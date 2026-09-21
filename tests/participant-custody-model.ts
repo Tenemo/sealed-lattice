@@ -229,6 +229,7 @@ export const compileParticipantVaultKeyClasses = () => {
     const checkpoint = compileFirstOracleCheckpointCensus();
     const ballot = compileParticipantBallotCustody();
     const randomness = compileBallotRandomnessBudget();
+    const release = compileParticipantReleaseCustody();
     const authentication = compileContributionAuthenticationCensus(
         body.participantCount,
     );
@@ -255,6 +256,17 @@ export const compileParticipantVaultKeyClasses = () => {
         ) +
         3n * 64n +
         2n +
+        1n +
+        2n +
+        4n;
+    const releaseAssociatedBytes =
+        BigInt(
+            Buffer.byteLength('sealed-lattice/participant-release-record/v1'),
+        ) +
+        3n * 64n +
+        2n +
+        4n +
+        compileTargetSigningStateCensus().maximumBodyBytes +
         1n +
         2n +
         4n;
@@ -347,6 +359,20 @@ export const compileParticipantVaultKeyClasses = () => {
             maximumPerCompletedCorpus: ballot.maximumBodyRecords,
             encryptions: [
                 invocation(randomness.recordBytes, ballotAssociatedBytes),
+            ],
+        },
+        {
+            name: 'Release journal record',
+            maximumPerCompletedCorpus: release.journalRecords,
+            encryptions: [
+                invocation(release.recordBytes, releaseAssociatedBytes),
+            ],
+        },
+        {
+            name: 'Release body record',
+            maximumPerCompletedCorpus: release.maximumBodyRecords,
+            encryptions: [
+                invocation(release.recordBytes, releaseAssociatedBytes),
             ],
         },
     ];

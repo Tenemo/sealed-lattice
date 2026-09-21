@@ -7,6 +7,7 @@ import {
     compileParticipantCustodyCensus,
     compileParticipantVaultKeyClasses,
 } from '#tests/participant-custody-model.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 
 describe('shared participant custody', () => {
@@ -118,6 +119,8 @@ describe('shared participant custody', () => {
             'Contribution signing record',
             'Ballot journal record',
             'Ballot body record',
+            'Release journal record',
+            'Release body record',
         ]);
         expect(
             classes.every(
@@ -137,5 +140,42 @@ describe('shared participant custody', () => {
                 .every((value) => value.encryptionWork.invocations === 1n),
         ).toBe(true);
         expect(classes[3].encryptionWork.distinctAesInputUpperBound).toBe(5n);
+    });
+
+    it('includes target-bound release records without turning corpus maxima into lifetime limits', () => {
+        const classes = compileParticipantVaultKeyClasses();
+        const release = compileParticipantReleaseCustody();
+        const associatedBytes = Buffer.concat([
+            Buffer.from('sealed-lattice/participant-release-record/v1'),
+            Buffer.alloc(64),
+            Buffer.alloc(64),
+            Buffer.alloc(64),
+            Buffer.alloc(2),
+            Buffer.alloc(4),
+            Buffer.alloc(2048),
+            Buffer.alloc(1),
+            Buffer.alloc(2),
+            Buffer.alloc(4),
+        ]);
+        for (const [name, maximumRecords] of [
+            ['Release journal record', release.journalRecords],
+            ['Release body record', release.maximumBodyRecords],
+        ] as const) {
+            const value = classes.find((entry) => entry.name === name);
+            expect(value, name).toBeDefined();
+            expect(value!.maximumPerCompletedCorpus).toBe(maximumRecords);
+            expect(value!.encryptions).toEqual([
+                {
+                    nonce: 0n,
+                    plaintextBytes: 1_048_576n,
+                    associatedBytes: BigInt(associatedBytes.length),
+                },
+            ]);
+            expect(value!.encryptionWork.maximumHashDegree).toBe(
+                65_536n + BigInt(Math.ceil(associatedBytes.length / 16)) + 1n,
+            );
+            expect(value!.lifetimeKeys).toBeNull();
+            expect(value!.lifetimeVerifications).toBeNull();
+        }
     });
 });
