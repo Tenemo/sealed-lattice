@@ -153,6 +153,7 @@ import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowled
 import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
 import {
@@ -2902,6 +2903,33 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(group.length),
                 formatCount(group.maximumLeafQueries),
                 formatCount(group.maximumNodeQueries),
+            ]),
+        ),
+        '',
+        '## Sparse-support sampling comparison',
+        '',
+        'This proof-only comparison caps each existing balanced sparse sampler at twice its support size on the same random tape. Before completion, each conditional rejection probability is at most (support - 1) / degree; a rejected-position union gives the per-call bound (4 * (support - 1) / degree)^support, capped at one. These are not new runtime limits or permissions to retry. Count every invocation in the relevant execution, including failed operations. The browser columns charge complete fresh reader fills, including discarded tails; native draws request only their examined words. Other sampling, provider failures and complete generation/work populations remain separate.',
+        '',
+        table(
+            [
+                'Sampler',
+                'Degree',
+                'Support',
+                'Calls per named operation',
+                'Comparison draw cap',
+                'Maximum examined bytes',
+                'Maximum browser RNG bytes',
+                'Per-call failure bits',
+            ],
+            compileSparseSupportSamplingCensus().map((value) => [
+                value.role,
+                formatCount(value.degree),
+                formatCount(value.support),
+                formatCount(value.callsPerOperation),
+                formatCount(value.maximumDraws),
+                formatCount(value.maximumExaminedBytes),
+                formatCount(value.maximumBrowserRandomBytes),
+                formatCount(value.failureBits),
             ]),
         ),
         '',
