@@ -1,19 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import {
-    copyFile,
-    mkdir,
-    readFile,
-    writeFile,
-    stat,
-    open,
-    unlink,
-} from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { freemem } from 'node:os';
 import path from 'node:path';
 
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
 import {
     runCommandAndCaptureOutput,
@@ -67,13 +60,10 @@ await runWithLocalRunLog(
         scriptName: 'research:protocol:public',
     },
     async (log) => {
-        const lockPath = path.resolve('temp/protocol-research.lock'),
-            lock = await open(lockPath, 'wx'),
-            lockValue = JSON.stringify({
-                pid: process.pid,
-                run: log.runDirectoryPath,
-            });
-        await lock.writeFile(lockValue);
+        const releaseLock = await acquireProtocolResearchLock(
+            log.runDirectoryPath,
+            process.cwd(),
+        );
         try {
             assert.ok(freemem() >= 2147483648);
             const summary = JSON.parse(
@@ -433,9 +423,7 @@ await runWithLocalRunLog(
             );
             process.stdout.write(log.runDirectoryPath + '\n');
         } finally {
-            await lock.close();
-            assert.equal(await readFile(lockPath, 'utf8'), lockValue);
-            await unlink(lockPath);
+            await releaseLock();
         }
     },
 );

@@ -3,11 +3,9 @@ import { createHash } from 'node:crypto';
 import {
     mkdir,
     mkdtemp,
-    open,
     readFile,
     readdir,
     stat,
-    unlink,
     writeFile,
 } from 'node:fs/promises';
 import { freemem } from 'node:os';
@@ -26,6 +24,7 @@ import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-
 import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import {
     runCommandAndCaptureOutput,
@@ -69,14 +68,10 @@ await runWithLocalRunLog(
         scriptName: 'research:protocol',
     },
     async (log) => {
-        await mkdir(path.join(root, 'temp'), { recursive: true });
-        const lockPath = path.join(root, 'temp/protocol-research.lock');
-        const lock = await open(lockPath, 'wx');
-        const lockValue = JSON.stringify({
-            pid: process.pid,
-            run: log.runDirectoryPath,
-        });
-        await lock.writeFile(lockValue);
+        const releaseLock = await acquireProtocolResearchLock(
+            log.runDirectoryPath,
+            root,
+        );
         try {
             const environment = {
                 ...process.env,
@@ -563,9 +558,7 @@ await runWithLocalRunLog(
             );
             process.stdout.write(log.runDirectoryPath + '\n');
         } finally {
-            await lock.close();
-            assert.equal(await readFile(lockPath, 'utf8'), lockValue);
-            await unlink(lockPath);
+            await releaseLock();
         }
     },
 );
