@@ -628,10 +628,12 @@ describe('public archive through the real scalar kernel and local storage hosts'
                     0,
                 ),
             });
-            for (const record of [...leaves, root])
-                expect(
-                    destination.records.get(record.reference.identity),
-                ).toEqual(record.bytes);
+            const initiallyRetrieved = [...leaves, root].map((record) => ({
+                record,
+                bytes: destination.records
+                    .get(record.reference.identity)
+                    ?.slice(),
+            }));
             let discovered = false;
             for await (const roots of reader.discover(
                 AbortSignal.timeout(10_000),
@@ -661,6 +663,11 @@ describe('public archive through the real scalar kernel and local storage hosts'
                     AbortSignal.timeout(10_000),
                 ),
             ).rejects.toThrow('bound');
+            // Large equality diagnostics block Node's shared event loop. Check
+            // the bytes after network work so they cannot delay keepalive timers
+            // while the next request is trying to reuse an idle connection.
+            for (const { record, bytes } of initiallyRetrieved)
+                expect(bytes).toEqual(record.bytes);
         } finally {
             for (const host of hosts) await host.close();
         }

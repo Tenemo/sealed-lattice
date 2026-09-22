@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { adaptiveWotsBound } from '#tests/adaptive-wots-model.js';
+import { compileArchiveAuthenticationWork } from '#tests/archive-authentication-model.js';
 import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
 import {
     compileCompleteAuthenticationFrameWork,
@@ -4722,6 +4723,20 @@ export const renderDocumentationCensus = (): string => {
             ['Property', 'Value'],
             Object.entries(compilePublicArchiveResourceCensus()).map(
                 ([property, value]) => [property, formatCount(value)],
+            ),
+        ),
+        '',
+        '## Archive authentication call bounds',
+        '',
+        'Receipt signing uses the pure FIPS 204 frame under its separate archive context. The default table uses the maximum configured replica count. SDK request bounds count issued attempts, not adversarial replay or total host requests. The host signs each successful retention request, including retries for an unchanged root. Cumulative acknowledgement batches revisit earlier signatures; duplicate authors in a direct verification call are checked before distinct valid signers are counted. These per-call bounds supply no lifetime key, signing or verification cap and exclude closure/policy hashing, other signing work and provider failures.',
+        '',
+        table(
+            ['Property', 'Value'],
+            Object.entries(compileArchiveAuthenticationWork()).map(
+                ([property, value]) => [
+                    property,
+                    typeof value === 'bigint' ? formatCount(value) : value,
+                ],
             ),
         ),
         '',
