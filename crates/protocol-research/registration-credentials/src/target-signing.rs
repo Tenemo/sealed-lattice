@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error,
+    Credential, Error, SigningPurpose,
     ballot_authentication::RetainedBallotOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -234,6 +234,7 @@ impl Credential {
     ) -> Result<TargetVote, Error> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
+        self.check_unlocked(SigningPurpose::Target)?;
         if self.target_signed {
             return Err(Error::Consumed);
         }

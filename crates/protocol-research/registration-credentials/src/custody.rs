@@ -7,6 +7,27 @@ use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
 use zeroize::Zeroizing;
 
 const SEALED_BYTES: usize = 4 + 32 + 16;
+
+/// Signing purposes that a restored credential withholds until the
+/// authenticated participant root unlocks those its records show unused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SigningPurpose {
+    Proposal,
+    Confirmation,
+    Opening,
+    Ballot,
+    Close,
+    Witness,
+    Target,
+    Release,
+}
+impl SigningPurpose {
+    pub const fn mask(self) -> u16 {
+        1 << self as u16
+    }
+}
+const ALL_SIGNING_PURPOSES: u16 = (SigningPurpose::Release.mask() << 1) - 1;
+
 fn associated(body: [u8; 64]) -> Vec<u8> {
     let mut bytes = Vec::from(b"registration-signing-seed/1".as_slice());
     bytes.extend(body);
@@ -67,11 +88,28 @@ impl Credential {
             release_started: false,
             release_signed: false,
             confirmation: None,
+            locked_purposes: ALL_SIGNING_PURPOSES,
         };
         if !value.check_retained() {
             return Err(Error::Crypto);
         }
         Ok(value)
+    }
+    /// Unlocks the purposes that the authenticated participant root has shown
+    /// unused. Completed messages are restored from their verified records
+    /// instead, so a purpose left locked signs nothing new.
+    pub fn unlock_unused_purposes(&mut self, mask: u16) -> Result<(), Error> {
+        if mask & !ALL_SIGNING_PURPOSES != 0 {
+            return Err(Error::Shape);
+        }
+        self.locked_purposes &= !mask;
+        Ok(())
+    }
+    pub(crate) fn check_unlocked(&self, purpose: SigningPurpose) -> Result<(), Error> {
+        if self.locked_purposes & purpose.mask() != 0 {
+            return Err(Error::Consumed);
+        }
+        Ok(())
     }
 }
 
@@ -83,7 +121,7 @@ mod tests {
         foundation::{RegistrationHeader, normalize_username},
     };
     #[test]
-    fn restored_signing_keys_cannot_recreate_registration_signing_authority() {
+    fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
         let mut original = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
         let data_key = [11; 32];
         assert!(original.seal_complete(&data_key).is_err());
@@ -119,6 +157,39 @@ mod tests {
         assert!(restored.check_retained());
         assert!(restored.sign_registration(for_repeat, [12; 32]).is_err());
         assert!(restored.seal_complete(&data_key).is_err());
+        let purposes = [
+            SigningPurpose::Proposal,
+            SigningPurpose::Confirmation,
+            SigningPurpose::Opening,
+            SigningPurpose::Ballot,
+            SigningPurpose::Close,
+            SigningPurpose::Witness,
+            SigningPurpose::Target,
+            SigningPurpose::Release,
+        ];
+        for purpose in purposes {
+            assert!(original.check_unlocked(purpose).is_ok());
+            assert!(matches!(
+                restored.check_unlocked(purpose),
+                Err(Error::Consumed)
+            ));
+        }
+        for undefined in [1 << 8, u16::MAX] {
+            assert!(matches!(
+                restored.unlock_unused_purposes(undefined),
+                Err(Error::Shape)
+            ));
+        }
+        restored.unlock_unused_purposes(0).unwrap();
+        restored
+            .unlock_unused_purposes(SigningPurpose::Ballot.mask() | SigningPurpose::Witness.mask())
+            .unwrap();
+        for purpose in purposes {
+            assert_eq!(
+                restored.check_unlocked(purpose).is_ok(),
+                matches!(purpose, SigningPurpose::Ballot | SigningPurpose::Witness)
+            );
+        }
         let mut changed = sealed.clone();
         changed[20] ^= 1;
         assert!(

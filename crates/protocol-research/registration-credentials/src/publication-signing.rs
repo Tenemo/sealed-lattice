@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error,
+    Credential, Error, SigningPurpose,
     ballot_authentication::RetainedBallotOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -157,11 +157,13 @@ impl Credential {
         let tuple = checked_body(owner, roster, purpose, body)?;
         match purpose {
             PublicationPurpose::Close => {
+                self.check_unlocked(SigningPurpose::Close)?;
                 if self.ballot_close_signed {
                     return Err(Error::Consumed);
                 }
             }
             PublicationPurpose::Empty => {
+                self.check_unlocked(SigningPurpose::Ballot)?;
                 if self.ballot_signed || self.ballot_attempted {
                     return Err(Error::Consumed);
                 }
@@ -186,6 +188,7 @@ impl Credential {
                 }
             }
             PublicationPurpose::Witness => {
+                self.check_unlocked(SigningPurpose::Witness)?;
                 if self.slot_witness_signed {
                     return Err(Error::Consumed);
                 }

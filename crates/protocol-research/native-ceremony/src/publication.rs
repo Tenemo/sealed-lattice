@@ -479,6 +479,27 @@ pub fn run(
             .verify_slot(sources[2].clone(), changed_carriers)
             .is_err()
     );
+    // The second fork stays locked, so it cannot sign even the witness batch
+    // that its original already published.
+    assert!(matches!(
+        restored.sign_publication_message(
+            &owners[3],
+            roster,
+            PublicationPurpose::Witness,
+            batches[3].body(),
+            None,
+            *crate::random::<32>(),
+        ),
+        Err(registration_credentials::Error::Consumed)
+    ));
+    // Restoring the completed messages consumes their purposes even after an
+    // unlock.
+    restored
+        .unlock_unused_purposes(
+            registration_credentials::SigningPurpose::Ballot.mask()
+                | registration_credentials::SigningPurpose::Witness.mask(),
+        )
+        .unwrap();
     if let SourceValue::Empty { body, signature } = sources[3].value() {
         let mut bad = *signature;
         bad[0] ^= 1;

@@ -1,4 +1,4 @@
-use crate::{Credential, Error, roster_authentication::OrganizerSignedRoster};
+use crate::{Credential, Error, SigningPurpose, roster_authentication::OrganizerSignedRoster};
 use crate::{poll::VerifiedPoll, roster::RetainedContributionContext};
 use fips204::{
     ml_dsa_65,
@@ -112,6 +112,7 @@ impl Credential {
     /// public publication and cannot restore unused authority.
     pub fn reserve_ballot_attempt(&mut self, owner: &RetainedBallotOwner) -> Result<(), Error> {
         self.check_ballot_owner(owner)?;
+        self.check_unlocked(SigningPurpose::Ballot)?;
         if self.ballot_signed {
             return Err(Error::Consumed);
         }
@@ -235,6 +236,7 @@ impl Credential {
         envelope: &BallotEnvelope,
         coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
+        self.check_unlocked(SigningPurpose::Ballot)?;
         if self.ballot_signed {
             return Err(Error::Consumed);
         }

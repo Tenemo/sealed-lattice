@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, ballot_authentication::RetainedBallotOwner,
+    Credential, Error, SigningPurpose, ballot_authentication::RetainedBallotOwner,
     foundation::hash::StreamingFoundationTupleHash512,
     roster_authentication::OrganizerSignedRoster, target_signing::TargetMessage,
 };
@@ -180,6 +180,7 @@ impl Credential {
     ) -> Result<(), Error> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
+        self.check_unlocked(SigningPurpose::Release)?;
         if !message.encrypted()
             || self.release_started
             || self

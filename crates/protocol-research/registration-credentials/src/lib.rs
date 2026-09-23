@@ -9,6 +9,7 @@ pub mod contribution_authentication;
 #[path = "contribution-commitment.rs"]
 pub mod contribution_commitment;
 mod custody;
+pub use custody::SigningPurpose;
 pub mod foundation;
 pub mod poll;
 #[path = "publication-signing.rs"]
@@ -70,6 +71,7 @@ pub struct Credential {
     release_started: bool,
     release_signed: bool,
     confirmation: Option<contribution_authentication::ConfirmationLock>,
+    locked_purposes: u16,
 }
 impl Credential {
     pub fn from_seeds(
@@ -101,6 +103,7 @@ impl Credential {
             release_started: false,
             release_signed: false,
             confirmation: None,
+            locked_purposes: 0,
         }
     }
     pub fn signing_public(&self) -> &[u8; 1952] {

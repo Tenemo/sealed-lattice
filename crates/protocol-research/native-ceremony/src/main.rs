@@ -749,6 +749,16 @@ fn main() {
     let changed_envelope =
         registration_credentials::ballot_authentication::BallotEnvelope::decode(&changed_envelope)
             .unwrap();
+    // The restored credential signs nothing new until its authenticated root
+    // unlocks a purpose that the root's records show unused.
+    assert!(matches!(
+        restored.sign_retained_ballot_envelope(&restored_owner, &changed_envelope, *random::<32>()),
+        Err(registration_credentials::Error::Consumed)
+    ));
+    // Restoring the completed ballot consumes the purpose even after an unlock.
+    restored
+        .unlock_unused_purposes(registration_credentials::SigningPurpose::Ballot.mask())
+        .unwrap();
     assert!(
         restored
             .restore_retained_ballot_signing(&restored_owner, &changed_envelope, &signature)
@@ -981,7 +991,15 @@ fn main() {
         )
         .unwrap()
     };
-    let corrupt_credentials = [restore_corrupt(), restore_corrupt()];
+    // A corrupt participant's own root may unlock any purpose on its fork.
+    let mut corrupt_fork = restore_corrupt();
+    corrupt_fork
+        .unlock_unused_purposes(
+            registration_credentials::SigningPurpose::Ballot.mask()
+                | registration_credentials::SigningPurpose::Witness.mask(),
+        )
+        .unwrap();
+    let corrupt_credentials = [corrupt_fork, restore_corrupt()];
     let mut ballots = vec![None; enrollments.len()];
     ballots[0] = Some((&envelope, &signature, body_path.as_path()));
     ballots[1] = Some((

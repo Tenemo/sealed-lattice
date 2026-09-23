@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error,
+    Credential, Error, SigningPurpose,
     contribution_commitment::ComputedContributionCommitment,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -158,6 +158,7 @@ impl Credential {
         &self,
         context: &RetainedContributionContext,
     ) -> Result<(), Error> {
+        self.check_unlocked(SigningPurpose::Confirmation)?;
         if self.confirmation.is_some() {
             return Err(Error::Consumed);
         }
@@ -186,7 +187,17 @@ impl Credential {
         let body = self.retained_confirmation_body(context, &computed)?;
         self.sign_computed_confirmation(body, computed, coins)
     }
+    /// Checks the signing position before any commitment work. Restoration
+    /// uses the same owner checks without requiring an unlocked purpose.
     pub fn validate_confirmation_position(
+        &self,
+        proposal: &OrganizerSignedRoster,
+        position: usize,
+    ) -> Result<(), Error> {
+        self.check_unlocked(SigningPurpose::Confirmation)?;
+        self.check_confirmation_position(proposal, position)
+    }
+    fn check_confirmation_position(
         &self,
         proposal: &OrganizerSignedRoster,
         position: usize,
@@ -214,7 +225,7 @@ impl Credential {
         if computed.proposal != proposal.proposal().identity() {
             return Err(Error::Context);
         }
-        self.validate_confirmation_position(proposal, computed.position)
+        self.check_confirmation_position(proposal, computed.position)
     }
     pub fn confirmation_body(
         &self,
@@ -249,6 +260,7 @@ impl Credential {
         computed: ComputedContributionCommitment,
         coins: [u8; 32],
     ) -> Result<SignedConfirmation, Error> {
+        self.check_unlocked(SigningPurpose::Confirmation)?;
         let message = identity("sealed-lattice/roster-confirmation-id/v1", &body)?;
         self.confirmation = Some(ConfirmationLock {
             proposal: computed.proposal,
@@ -429,6 +441,7 @@ impl Credential {
         inventory: &CommitmentInventory,
         coins: [u8; 32],
     ) -> Result<SignedOpening, Error> {
+        self.check_unlocked(SigningPurpose::Opening)?;
         let body = self.opening_body(inventory)?;
         let message = identity("sealed-lattice/setup-opening-id/v1", &body)?;
         self.confirmation.as_mut().ok_or(Error::Consumed)?.opened = true;

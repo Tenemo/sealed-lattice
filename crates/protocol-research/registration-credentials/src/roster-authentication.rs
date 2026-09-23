@@ -1,4 +1,4 @@
-use crate::{Credential, Error, roster::RosterProposal};
+use crate::{Credential, Error, SigningPurpose, roster::RosterProposal};
 use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
@@ -21,10 +21,8 @@ impl OrganizerSignedRoster {
 }
 
 impl Credential {
-    pub fn consume_proposal_signing(&mut self) {
-        self.proposal_signed = true;
-    }
     pub fn validate_roster_proposal_target(&self, proposal: &RosterProposal) -> Result<(), Error> {
+        self.check_unlocked(SigningPurpose::Proposal)?;
         if self.proposal_signed {
             return Err(Error::Consumed);
         }

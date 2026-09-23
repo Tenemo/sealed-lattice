@@ -11,7 +11,7 @@ use zeroize::{Zeroize, Zeroizing};
 mod finality_browser;
 #[path = "release-browser.rs"]
 mod release_browser;
-const INPUT_BYTES: usize = 128 + 4 + 4096 + 128 + 64 + 65536 * 21 + 532 + 52 + 1;
+const INPUT_BYTES: usize = 128 + 4 + 4096 + 128 + 64 + 65536 * 21 + 532 + 52 + 2;
 struct Session {
     input: Vec<u8>,
     started: bool,
@@ -230,7 +230,7 @@ pub extern "C" fn restore(length: usize) -> u32 {
         state.input[..length].zeroize();
         let header_length = u32::from_le_bytes(input[128..132].try_into().unwrap()) as usize;
         if header_length > 4096
-            || length != 132 + header_length + 128 + 64 + 65536 * 21 + 532 + 52 + 1
+            || length != 132 + header_length + 128 + 64 + 65536 * 21 + 532 + 52 + 2
         {
             return 1;
         }
@@ -251,9 +251,10 @@ pub extern "C" fn restore(length: usize) -> u32 {
         let data_keys = input[start + 128..start + 192].try_into().unwrap();
         let public_start = start + 192;
         let capsule_start = public_start + 65536 * 21;
-        if input[length - 1] > 1 {
-            return 1;
-        }
+        // The authenticated participant root names the purposes its records
+        // show unused. Every other purpose of the restored credential stays
+        // locked; completed messages are restored from their own records.
+        let unused = u16::from_le_bytes(input[length - 2..].try_into().unwrap());
         let Some(verified) = crate::own_verification::verified() else {
             return 1;
         };
@@ -271,17 +272,14 @@ pub extern "C" fn restore(length: usize) -> u32 {
             body_digest,
             data_keys,
             &input[capsule_start..capsule_start + 532],
-            &input[capsule_start + 532..length - 1],
+            &input[capsule_start + 532..length - 2],
         ) else {
             return 1;
         };
-        if input[length - 1] == 1 {
-            enrollment.credential.consume_proposal_signing();
-        }
         if let Some(original) = state.enrollment.as_ref() {
             // A newly created instance retains its actual consumed authority.
             // Reopening validates the saved capsules without replacing it.
-            if input[length - 1] != 0
+            if unused != 0
                 || state.poll_identity != header.poll
                 || original.credential.signing_public() != enrollment.credential.signing_public()
                 || original.key.public_key() != enrollment.key.public_key()
@@ -289,6 +287,13 @@ pub extern "C" fn restore(length: usize) -> u32 {
                 return 1;
             }
         } else {
+            if enrollment
+                .credential
+                .unlock_unused_purposes(unused)
+                .is_err()
+            {
+                return 1;
+            }
             state.enrollment = Some(enrollment);
         }
         state.poll_identity = header.poll;
