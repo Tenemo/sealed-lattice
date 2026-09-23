@@ -69,6 +69,9 @@ describe('persistent Windows counter transport', () => {
         for (const response of [
             "process.stdout.write(JSON.stringify({id:request.id+1,rows:[]})+'\\n');",
             "process.stdout.write(JSON.stringify({id:request.id,rows:[{Id:1,ProcessName:'chrome',Started:'100',PrivateMemorySize64:5,PeakPagedMemorySize64:4}]})+'\\n');",
+            "process.stdout.write(JSON.stringify({id:request.id,rows:[{Id:1,ProcessName:null,Started:'100',PrivateMemorySize64:5,PeakPagedMemorySize64:5}]})+'\\n');",
+            "process.stdout.write(JSON.stringify({id:request.id,rows:[{Id:1,ProcessName:'chrome',Started:null,PrivateMemorySize64:5,PeakPagedMemorySize64:5}]})+'\\n');",
+            "process.stdout.write(JSON.stringify({id:request.id,rows:[{Id:1,ProcessName:'chrome',Started:'100',PrivateMemorySize64:null,PeakPagedMemorySize64:5}]})+'\\n');",
             "process.stdout.write(JSON.stringify({id:request.id,error:'AccessDenied'})+'\\n');",
         ]) {
             const { reader, closed } = fixture(response);

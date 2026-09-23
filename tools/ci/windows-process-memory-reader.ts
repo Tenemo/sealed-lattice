@@ -21,17 +21,21 @@ while ($null -ne ($line = [Console]::ReadLine())) {
             try {
                 $process = [System.Diagnostics.Process]::GetProcessById([int]$identifier)
                 $process.Refresh()
+                # Property access suppresses getter exceptions in PowerShell.
+                # Invoke getters so an exit during sampling reaches the catches.
                 $rows.Add([pscustomobject]@{
-                    Id = $process.Id
-                    ProcessName = $process.ProcessName
-                    Started = $process.StartTime.ToUniversalTime().Ticks.ToString()
-                    PrivateMemorySize64 = $process.PrivateMemorySize64
-                    PeakPagedMemorySize64 = $process.PeakPagedMemorySize64
+                    Id = $process.get_Id()
+                    ProcessName = $process.get_ProcessName()
+                    Started = $process.get_StartTime().ToUniversalTime().Ticks.ToString()
+                    PrivateMemorySize64 = $process.get_PrivateMemorySize64()
+                    PeakPagedMemorySize64 = $process.get_PeakPagedMemorySize64()
                 })
             } catch [System.ArgumentException] {
                 # A requested process has exited.
+                if ($null -ne $process) { throw }
             } catch [System.InvalidOperationException] {
                 # It exited between obtaining and reading its handle.
+                if ($null -eq $process -or -not $process.get_HasExited()) { throw }
             } finally {
                 if ($null -ne $process) { $process.Dispose() }
             }
