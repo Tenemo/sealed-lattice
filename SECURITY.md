@@ -21,10 +21,11 @@ Do not attach real election data, private keys, ballots, shares, witnesses, auth
 - The compromised participants and every relay may collude, equivocate, replay, reorder, delay, omit, replace, or withhold messages. Invalid actions are ignored. If too few valid actions remain, the poll stays unresolved.
 - Completion assumes eventual delivery among cooperating honest participants. Permanent suppression of every communication path may prevent completion.
 - The protocol protects scores, totals, margins, intermediate comparisons, and ranks. Public ballot information is limited to the frozen roster, submission authorship, acceptance, whether any ballot was accepted, and the requested terminal result.
-- The organizer may request ballot closing but has no special cryptographic key, inventory choice, tally authority, or result authority.
-- Every accepted pre-close ballot must be counted exactly once. Invalid, missing, and late ballots do not count and do not abort the poll.
+- The organizer may request ballot closing, sets its public close time, and proposes the closed inventory from participants' close responses. It has no special cryptographic key, tally authority, or result authority, and its choice of close responses is limited to the bounded omission below.
+- Every accepted ballot must be counted exactly once. Invalid, missing, and late ballots do not count and do not abort the poll. A ballot is late when its signed ballot time is after the close time. The close time is public, so a backdated close is visible but not prevented.
+- For ten participants, closing completes from the close responses of the organizer and any six others, so a participant who never votes and leaves cannot block it. The cost is bounded omission: a malicious relay, alone or with the organizer, can omit up to three on-time ballots that it kept from every participant whose response is used. A ballot held by at least four honest participants, or by an honest organizer, when they respond is always counted. Each affected voter is shown that its ballot was not included but cannot prove who omitted it. When at most four honest participants vote, the omission can expose one voter's ranking through the result.
 - The application and library must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or any path that bypasses certified target-bound result release.
-- For ten participants, seven matching signatures must certify the complete inventory and exact result target before the disappearance guarantee begins. After that boundary, any four valid target-bound release shares must suffice, even after any three participants disappear.
+- For ten participants, seven matching signatures must certify the closed inventory and exact result target before the disappearance guarantee begins. After that boundary, any four valid target-bound release shares must suffice, even after any three participants disappear.
 - Missing, stale, inconsistent, or corrupt local state stops that participant. It never enables a retry, replacement, roster change, threshold reduction, alternate target, or unverified result.
 - A verified result or no-result transcript must be independently retrievable and verifiable without another participant returning.
 
@@ -32,7 +33,7 @@ These are requirements, not claims about the current package.
 
 ## Current implementation boundary
 
-The package implements bounded canonical foundation encodings, context verification, and hashing in Rust/WebAssembly, together with TypeScript poll validation and package integrity checks. It does not implement or expose distributed key generation, ballot encryption, ballot proofs, reliable publication, inventory finality, homomorphic tallying, release shares, or terminal decoding. Any future construction API remains subject to the prohibition on raw decryption, secret export, and bypassing authorized release.
+The package implements bounded canonical foundation encodings, context verification, and hashing in Rust/WebAssembly, together with TypeScript poll validation and package integrity checks. It does not implement or expose distributed key generation, ballot encryption, ballot proofs, ballot closing, inventory finality, homomorphic tallying, release shares, or terminal decoding. Any future construction API remains subject to the prohibition on raw decryption, secret export, and bypassing authorized release.
 
 Removed construction formats are not accepted as compatibility inputs or fallback modes. Passing tests for the retained foundation establish only the tested encoding and verification behavior.
 
@@ -41,7 +42,7 @@ Removed construction formats are not accepted as compatibility inputs or fallbac
 The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
 
 - a malicious, dealerless, fixed-roster BFV/BGV setup that creates threshold secret shares and every evaluation key without participant removal or retry;
-- reliable ballot publication and an asynchronous close rule that prevents a malicious relay or organizer from selecting the accepted set;
+- an asynchronous close rule that completes from any seven of ten participants, including the organizer, and limits a malicious relay or organizer to the bounded omission above;
 - a publicly verifiable ballot proof for complete `1..10` score vectors with exact QPT extraction and zero knowledge;
 - deterministic encrypted ranking that reveals only the requested option identifiers and has exact FHE correctness and security parameters;
 - publicly verifiable, chosen-ciphertext-safe release shares for only the certified target, with any four valid shares reconstructing identically;

@@ -8,15 +8,16 @@ Use synthetic data only. The project has no complete voting construction, indepe
 
 - A poll has 3 through 20 participants and 2 through 20 ordered options.
 - A valid ballot gives every option an integer score from 1 through 10. Every score defaults to 1, and there is no abstention action.
-- A participant may submit at most one ballot. Invalid and late submissions are ignored, and the organizer cannot choose which valid ballots count.
-- The organizer may close voting without waiting for every participant to cast a ballot. Closing must create one verifiable inventory of every authoritatively published pre-close submission, including invalid submissions with their deterministic classification and the exact accepted subset. Every accepted ballot is counted exactly once.
+- A participant may submit at most one ballot. Invalid and late submissions are ignored; a submission is late when its signed ballot time is after the organizer's public close time.
+- The organizer may close voting without waiting for every participant to cast a ballot. Closing completes once the organizer and enough other participants respond (seven of ten), so a participant who never votes and leaves cannot block it. Closing creates one verifiable inventory of on-time submissions, including invalid submissions with their deterministic classification and the exact accepted subset. Every accepted ballot is counted exactly once.
+- Neither the organizer nor a relay can choose which valid ballots count, with one bounded exception. For ten participants, a malicious relay, alone or with the organizer, can omit up to three ballots that it hid from the other participants before the close. Each affected voter is shown that its ballot was not included, and a ballot that reached at least four honest participants or an honest organizer is always counted. The [security policy](SECURITY.md#intended-security-model) describes the consequences.
 - The result reveals only the requested ordered option identifiers. Totals, margins, comparisons, ranks, and individual scores remain private.
 - If no ballot is accepted, the protocol returns a public, verifiable no-result outcome.
 - After the certified inventory exists, the required disappearance and release guarantees apply without a named participant.
 
 The [security policy](SECURITY.md#intended-security-model) summarizes the adversary, completion boundary, and derived thresholds. Those thresholds are necessary constraints, not a complete protocol.
 
-The leading research direction combines exact threshold homomorphic encryption, public ballot proofs, reliable ballot publication, deterministic encrypted ranking, and target-bound threshold release. Malicious distributed key generation, the publication/close theorem, exact quantum-secure proofs, concrete parameters, composition, and browser feasibility remain open.
+The leading research direction combines exact threshold homomorphic encryption, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. Malicious distributed key generation, the closing theorem, exact quantum-secure proofs, concrete parameters, composition, and browser feasibility remain open.
 
 The application and library must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or a bypass around certified target-bound result release. Any future result-related interface may return only positively verified protocol capabilities and the authorized terminal result.
 
