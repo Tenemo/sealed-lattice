@@ -553,7 +553,26 @@ fn main() {
         work.command(&mut enrollments[0].credential, 3, 0, &[])
             .unwrap();
     }
-    work.command(&mut enrollments[0].credential, 4, 0, &HONEST_BALLOTS[0].1)
+    // Refused score vectors consume neither the ballot attempt nor the keys
+    // already delivered to this session.
+    let valid = HONEST_BALLOTS[0].1;
+    let mut refused = vec![
+        Vec::new(),
+        valid[..9].to_vec(),
+        valid.iter().copied().chain([1]).collect(),
+    ];
+    for (index, score) in [(0, 0), (9, 11)] {
+        let mut scores = valid.to_vec();
+        scores[index] = score;
+        refused.push(scores);
+    }
+    for scores in refused {
+        assert!(matches!(
+            work.command(&mut enrollments[0].credential, 4, 0, &scores),
+            Err(registration_credentials::Error::Shape)
+        ));
+    }
+    work.command(&mut enrollments[0].credential, 4, 0, &valid)
         .unwrap();
     let encoded = work
         .command(&mut enrollments[0].credential, 10, 0, &[])

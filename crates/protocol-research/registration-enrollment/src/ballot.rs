@@ -1,4 +1,4 @@
-use ballot_encryption::context::BallotComputationContext;
+use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
 use registration_credentials::{
     Credential, Error,
     ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
@@ -106,7 +106,9 @@ impl BallotWork {
         let result = self.command_inner(credential, operation, argument, input);
         // Public key delivery failures preserve no parsed operand; the current
         // worker must refetch in a fresh private session under the same root.
-        if result.is_err() && matches!(operation, 1..=7) {
+        // Ballot creation refuses its scores before consuming the attempt, so
+        // that refusal leaves the delivered keys usable.
+        if result.is_err() && matches!(operation, 1..=7) && (operation != 4 || self.consumed) {
             self.failed = true;
         }
         result
@@ -160,6 +162,8 @@ impl BallotWork {
                 if argument != 0 || self.consumed || self.keys.len() != 2 || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
+                let context = self.context.as_ref().ok_or(Error::Consumed)?;
+                check_ballot_scores(context.poll(), input).map_err(|_| Error::Shape)?;
                 credential.reserve_ballot_attempt(&self.owner)?;
                 self.consumed = true;
                 let scores = Zeroizing::new(input.to_vec());

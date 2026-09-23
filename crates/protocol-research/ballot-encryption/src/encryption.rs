@@ -257,6 +257,15 @@ pub struct LinkedBallotWitness {
     pub fhe: EncryptionWitness,
     pub auxiliary: EncryptionWitness,
 }
+/// Refuses scores outside the poll's ballot domain. Callers check them before
+/// consuming any one-time ballot authority.
+pub fn check_ballot_scores(poll: &VerifiedPoll, scores: &[u8]) -> Result<(), Refusal> {
+    if scores.len() != poll.manifest().option_count() {
+        return Err(Refusal::Scores);
+    }
+    crate::packing::check_scores(scores).map_err(|_| Refusal::Scores)
+}
+
 impl LinkedBallotWitness {
     pub fn into_context(self) -> BallotComputationContext {
         self.context
@@ -286,9 +295,7 @@ impl LinkedBallotWitness {
         {
             return Err(Refusal::Context);
         }
-        if scores.len() != context.poll().manifest().option_count() {
-            return Err(Refusal::Scores);
-        }
+        check_ballot_scores(context.poll(), scores)?;
         let packing = PackingWitness::new(scores).map_err(|_| Refusal::Scores)?;
         let mut random = Random::new();
         let fhe = EncryptionWitness::create(fhe_key, packing.message(), &mut random)?;

@@ -140,13 +140,18 @@ fn inverse_transform(values: &mut [u32], root: u32) {
 pub fn encode(scores: &[u8]) -> Result<Vec<i32>, Refusal> {
     encode_with_degree(scores, DEGREE)
 }
-fn encode_with_degree(scores: &[u8], degree: usize) -> Result<Vec<i32>, Refusal> {
+/// Refuses option counts and scores outside the supported packing domain.
+pub fn check_scores(scores: &[u8]) -> Result<(), Refusal> {
     if !(2..=20).contains(&scores.len()) {
         return Err(Refusal::Options);
     }
     if scores.iter().any(|score| !(1..=10).contains(score)) {
         return Err(Refusal::Scores);
     }
+    Ok(())
+}
+fn encode_with_degree(scores: &[u8], degree: usize) -> Result<Vec<i32>, Refusal> {
+    check_scores(scores)?;
     if !degree.is_power_of_two() || !(16..=DEGREE).contains(&degree) {
         return Err(Refusal::Capacity);
     }
@@ -292,10 +297,15 @@ mod tests {
     #[test]
     fn refuses_invalid_scores_counts_and_capacity() {
         for scores in [vec![], vec![1], vec![1; 21]] {
+            assert_eq!(check_scores(&scores), Err(Refusal::Options));
             assert_eq!(encode(&scores), Err(Refusal::Options));
         }
-        for scores in [[0, 1], [1, 11]] {
+        for scores in [vec![0, 1], vec![1, 11], vec![10, 10, 10, 0]] {
+            assert_eq!(check_scores(&scores), Err(Refusal::Scores));
             assert_eq!(encode(&scores), Err(Refusal::Scores));
+        }
+        for scores in [vec![1, 10], vec![10; 20]] {
+            assert_eq!(check_scores(&scores), Ok(()));
         }
         assert_eq!(encode_with_degree(&[1, 10], 32), Err(Refusal::Capacity));
         assert!(encode_with_degree(&[1, 10], 64).is_ok());

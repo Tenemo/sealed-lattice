@@ -1,4 +1,4 @@
-use crate::encryption::LinkedBallotWitness;
+use crate::encryption::{LinkedBallotWitness, check_ballot_scores};
 use num_bigint::Sign;
 use setup_aggregate::{VerifiedAggregatePolynomial, setup_browser};
 use std::cell::RefCell;
@@ -73,11 +73,8 @@ pub extern "C" fn ballot_encryption_create(length: usize) -> u32 {
         let count = u16::from_le_bytes(value.input[66..68].try_into().unwrap()) as usize;
         if value.input[..64] != setup.inventory().identity()
             || position >= setup.inventory().confirmations().len()
-            || count != poll.manifest().option_count()
             || length != 68 + count
-            || value.input[68..length]
-                .iter()
-                .any(|score| !(1..=10).contains(score))
+            || check_ballot_scores(&poll, &value.input[68..length]).is_err()
         {
             return 1;
         }
