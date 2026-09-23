@@ -366,14 +366,14 @@ await runWithLocalRunLog(
                         'ballot-proof',
                         'rns-arithmetic-probe',
                     ].flatMap((name) => ['-p', name]),
-                    '--bins',
-                ],
                     ...(prefixCase
                         ? [
                               '--features',
                               'rns-arithmetic-probe/numerical-probes',
                           ]
                         : []),
+                    '--bins',
+                ],
                 'build-native',
             );
             const executable = path.join(
