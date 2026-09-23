@@ -26,7 +26,7 @@ The focused numerical case checks complete and shorter output prefixes using the
 pnpm run research:protocol -- native-prefix
 ```
 
-It exercises the coefficient-selection gates and checks every decrypted coefficient with a test-only secret and an independent interpolation oracle. It creates no participants, ballots, certificate or protocol terminal.
+It exercises the coefficient-selection gates and checks every decrypted coefficient with a test-only secret and an independent interpolation oracle. Because these numerical probes decrypt synthetic test ciphertexts, they compile only with the `numerical-probes` feature, which this case enables; evaluation modules neither contain nor export them. It creates no participants, ballots, certificate or protocol terminal.
 
 For focused retrieval checks, an existing passed public completion run can supply archived public fixtures:
 

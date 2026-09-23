@@ -307,6 +307,27 @@ await runWithLocalRunLog(
                 ],
                 'clippy',
             );
+            // The numerical probes decrypt synthetic test ciphertexts, so only
+            // their explicit feature compiles them; lint that build as well.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'clippy',
+                    '--offline',
+                    '--locked',
+                    '--no-default-features',
+                    '-p',
+                    'rns-arithmetic-probe',
+                    '--features',
+                    'numerical-probes',
+                    '--all-targets',
+                    '--',
+                    '-D',
+                    'warnings',
+                ],
+                'clippy-numerical-probes',
+            );
             await execute(
                 'cargo',
                 [
@@ -347,6 +368,12 @@ await runWithLocalRunLog(
                     ].flatMap((name) => ['-p', name]),
                     '--bins',
                 ],
+                    ...(prefixCase
+                        ? [
+                              '--features',
+                              'rns-arithmetic-probe/numerical-probes',
+                          ]
+                        : []),
                 'build-native',
             );
             const executable = path.join(

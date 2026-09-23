@@ -6,8 +6,10 @@ use std::collections::BTreeSet;
 
 #[path = "ranking-plaintext.rs"]
 mod plaintext;
+#[cfg(feature = "numerical-probes")]
 #[path = "requested-output-probe.rs"]
 mod requested_output;
+#[cfg(feature = "numerical-probes")]
 pub use requested_output::probe as requested_output_probe;
 
 #[cfg(target_arch = "wasm32")]

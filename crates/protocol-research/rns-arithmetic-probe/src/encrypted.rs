@@ -1,6 +1,7 @@
 use fhe_math::{ntt::NttOperator, rns::RnsContext, zq::Modulus};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{ToPrimitive, Zero};
+#[cfg(feature = "numerical-probes")]
 use sha2::{Digest, Sha512};
 
 #[path = "ranking.rs"]
@@ -10,6 +11,7 @@ type Coefficient = [u64; 14];
 type Polynomial = Vec<Coefficient>;
 type Transformed = Vec<Vec<u64>>;
 
+#[cfg(feature = "numerical-probes")]
 fn next(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
@@ -110,6 +112,7 @@ impl Arithmetic {
         }
         pack(value.magnitude())
     }
+    #[cfg(feature = "numerical-probes")]
     fn uniform(&self, mut seed: u64) -> Polynomial {
         (0..self.degree)
             .map(|_| {
@@ -120,6 +123,7 @@ impl Arithmetic {
             })
             .collect()
     }
+    #[cfg(feature = "numerical-probes")]
     fn small(&self, values: &[i16]) -> Polynomial {
         assert_eq!(values.len(), self.degree);
         values
@@ -281,6 +285,7 @@ impl Arithmetic {
             *target = pack(&((unpack(target) + unpack(other)) % &self.modulus));
         }
     }
+    #[cfg(feature = "numerical-probes")]
     fn affine(
         &self,
         base: &Polynomial,
@@ -297,6 +302,7 @@ impl Arithmetic {
             })
             .collect()
     }
+    #[cfg(feature = "numerical-probes")]
     fn decode(&self, ciphertext: &[Polynomial; 2], secret: &Polynomial) -> Vec<u64> {
         let mut phase = self.multiply(secret, &ciphertext[1], false);
         self.add(&mut phase, &ciphertext[0]);
@@ -312,6 +318,7 @@ impl Arithmetic {
     }
 }
 
+#[cfg(feature = "numerical-probes")]
 fn secret(degree: usize, weight: usize, mut seed: u64) -> Vec<i16> {
     let mut result = vec![0; degree];
     for _ in 0..10 {
@@ -329,6 +336,7 @@ fn secret(degree: usize, weight: usize, mut seed: u64) -> Vec<i16> {
     result
 }
 
+#[cfg(feature = "numerical-probes")]
 fn ephemeral(degree: usize, weight: usize, mut seed: u64) -> Vec<i16> {
     let mut result = vec![0; degree];
     let mut count = 0;
@@ -342,6 +350,7 @@ fn ephemeral(degree: usize, weight: usize, mut seed: u64) -> Vec<i16> {
     result
 }
 
+#[cfg(feature = "numerical-probes")]
 pub fn probe(log_degree: u32) -> String {
     assert!((3..=16).contains(&log_degree));
     let degree = 1usize << log_degree;
