@@ -150,6 +150,7 @@ import {
     keyRecoveryChallengeControl,
 } from '#tests/signing-key-recovery-model.js';
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
+import { compileProgrammedSignatureSamplerBounds } from '#tests/signing-programmed-prefix-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
@@ -1855,6 +1856,31 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.representativePermutations),
                 ];
             }),
+        ),
+        '',
+        '## Fresh signature-prefix sampling bounds',
+        '',
+        'A proof game that replaces short SHAKE prefixes cannot silently reuse an earlier all-input sampling event under a preservation premise. The mask-family row charges every nonce under one newly programmed seed and requires the new prefix itself to finish the secret sampler, making the unchanged tail irrelevant. The challenge row charges one newly sampled challenge-expansion prefix. Add these bounds per actual refresh to the base-function bad event; repeated use of the same retained family is not a refresh. These are conditional proof-game operands, not runtime modifications or an established deployed signing-failure bound.',
+        '',
+        table(
+            [
+                'Refresh',
+                'Input bytes',
+                'Prefix bytes',
+                'Refreshed points',
+                'Candidate positions',
+                'Required rejections',
+                'Conservative failure exponent',
+            ],
+            compileProgrammedSignatureSamplerBounds().map((row) => [
+                row.purpose,
+                formatCount(row.inputBytes),
+                formatCount(row.prefixBytes),
+                formatCount(row.refreshedPoints),
+                formatCount(row.candidatePositions),
+                formatCount(row.requiredRejections),
+                formatCount(row.failureExponent),
+            ]),
         ),
         '',
         '## Stateless signature resource screen',
