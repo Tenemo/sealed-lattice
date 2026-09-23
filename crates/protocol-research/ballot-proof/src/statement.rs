@@ -97,7 +97,6 @@ pub struct Operator {
 struct Builder {
     alpha: Element,
     options: usize,
-    top: usize,
     coefficients: Vec<Vec<Element>>,
     target: Element,
     consumed: usize,
@@ -147,7 +146,6 @@ impl Builder {
         Ok(Self {
             alpha,
             options: header[134] as usize,
-            top: header[135] as usize,
             coefficients: vec![vec![ZERO; SYSTEMATIC]; COLUMNS],
             target: ZERO,
             consumed: 0,
@@ -236,7 +234,7 @@ impl Builder {
         self.add_geometric(20, packing_weight, SYSTEMATIC);
         self.add_geometric(31, field::scale(packing_weight, 65536), SYSTEMATIC);
         self.add_geometric(21, field::scale(packing_weight, signed(-65537)), SYSTEMATIC);
-        let matrix = PackingMatrix::new(self.options, self.top).map_err(|_| Error::Shape)?;
+        let matrix = PackingMatrix::new(self.options).map_err(|_| Error::Shape)?;
         let geometric = powers(self.alpha, SYSTEMATIC);
         for option in 0..self.options {
             let column = matrix.column(option).map_err(|_| Error::Shape)?;

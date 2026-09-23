@@ -13,7 +13,7 @@ pub extern "C" fn ballot_input_pointer() -> usize {
     SESSION.with(|value| value.borrow_mut().input.as_mut_ptr() as usize)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn ballot_pack(count: usize, top_count: usize) -> u32 {
+pub extern "C" fn ballot_pack(count: usize) -> u32 {
     SESSION.with(|value| {
         let mut value = value.borrow_mut();
         value.coefficients = Zeroizing::new(Vec::new());
@@ -21,7 +21,7 @@ pub extern "C" fn ballot_pack(count: usize, top_count: usize) -> u32 {
             value.input.fill(0);
             return 1;
         }
-        let packed = packing::encode(&value.input[..count], top_count);
+        let packed = packing::encode(&value.input[..count]);
         value.input.fill(0);
         let Ok(coefficients) = packed else {
             return 1;

@@ -356,6 +356,94 @@ mod decoder_tests {
         assert!(selected_positions(&changed, 10).is_err());
     }
 
+    // Direct evaluation at one packing slot, independent of every transform.
+    fn slot_value(coefficients: &[u32], slot: usize) -> u32 {
+        let exponent = BigInt::from(5u32)
+            .modpow(&BigInt::from(slot), &BigInt::from(65_536u32))
+            .to_u64_digits()
+            .1[0] as u32;
+        let point = u64::from(power(3, exponent));
+        coefficients
+            .iter()
+            .step_by(2)
+            .rev()
+            .fold(0u64, |sum, value| {
+                (sum * point + u64::from(*value)) % u64::from(PRIME)
+            }) as u32
+    }
+    #[test]
+    fn packed_ballots_decode_through_every_requested_result_length() {
+        // Totals tie twice, so the canonical tie rule decides two positions.
+        let ballots: [[u8; 10]; 5] = [
+            [3, 9, 9, 1, 7, 2, 10, 5, 4, 6],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+            [5, 5, 5, 5, 5, 5, 10, 5, 5, 5],
+            [2, 8, 8, 1, 9, 3, 10, 4, 6, 7],
+        ];
+        let mut sum = vec![0u32; 65_536];
+        for scores in &ballots {
+            let packed = ballot_encryption::packing::encode(scores).unwrap();
+            for (total, value) in sum.iter_mut().zip(packed) {
+                *total = (*total + value.rem_euclid(PRIME as i32) as u32) % PRIME;
+            }
+        }
+        let totals: Vec<i64> = (0..10)
+            .map(|option| ballots.iter().map(|scores| i64::from(scores[option])).sum())
+            .collect();
+        let centered = |value: u32| {
+            if value > PRIME / 2 {
+                i64::from(value) - i64::from(PRIME)
+            } else {
+                i64::from(value)
+            }
+        };
+        // Every rank window the evaluator reads holds the same comparisons,
+        // whatever result length the poll requests.
+        let mut ranks = [0; 10];
+        for option in 0..10 {
+            for rank in 0..10 {
+                let mut ahead = 0;
+                for lane in 0..16 {
+                    let difference = centered(slot_value(&sum, (option * 10 + rank) * 16 + lane));
+                    let expected = if lane < 10 {
+                        2 * (totals[lane] - totals[option])
+                    } else {
+                        0
+                    };
+                    assert_eq!(
+                        difference, expected,
+                        "option={option}, rank={rank}, lane={lane}"
+                    );
+                    // The evaluator's tie bias favours the lower canonical opponent.
+                    let bias = if lane < option { 1 } else { -1 };
+                    ahead += usize::from(difference + bias > 0);
+                }
+                if rank == 0 {
+                    ranks[option] = ahead;
+                }
+                assert_eq!(ahead, ranks[option]);
+            }
+            assert_eq!(i64::from(slot_value(&sum, 1600 + option)), totals[option]);
+        }
+        for padding in [1610, 16_383] {
+            assert_eq!(slot_value(&sum, padding), 0);
+        }
+        let mut order: Vec<usize> = (0..10).collect();
+        order.sort_by_key(|option| (std::cmp::Reverse(totals[*option]), *option));
+        assert_eq!(order, [6, 1, 2, 4, 9, 8, 7, 0, 5, 3]);
+        for top_count in 1..=10 {
+            let output: Vec<_> = (0..10)
+                .filter(|option| ranks[*option] < top_count)
+                .map(|option| (evaluation_index((option * 10 + ranks[option]) * 16), 1))
+                .collect();
+            assert_eq!(
+                selected_positions(&encode_evaluations(&output), top_count).unwrap(),
+                order[..top_count]
+            );
+        }
+    }
+
     #[test]
     fn shorter_outputs_reject_omitted_ranks_in_the_plaintext() {
         let order = [4, 1, 8, 0, 7, 2, 9, 5, 3, 6];

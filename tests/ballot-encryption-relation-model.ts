@@ -204,13 +204,11 @@ const inverseTransform = (values: number[], root: number) => {
     return values.map((value) => fieldReduce(value * inverseDegree));
 };
 
-const packingMatrix = (
-    degree: number,
-    optionCount: number,
-    topCount: number,
-) => {
+// Every option has one comparison window for every rank, whatever result
+// length the poll requests.
+const packingMatrix = (degree: number, optionCount: number) => {
     const window = 2 ** Math.ceil(Math.log2(optionCount));
-    const activeSlots = optionCount * topCount * window;
+    const activeSlots = optionCount * optionCount * window;
     assert.ok(activeSlots + optionCount < degree / 4);
     const root = fieldPower(3, (fieldModulus - 1) / degree);
     const orbit = Array.from({ length: degree / 4 }, () => 0);
@@ -222,9 +220,9 @@ const packingMatrix = (
     const columns = Array.from({ length: optionCount }, (_unused, selected) => {
         const slots = Array.from({ length: degree / 4 }, () => 0);
         for (let option = 0; option < optionCount; option++)
-            for (let rank = 0; rank < topCount; rank++)
+            for (let rank = 0; rank < optionCount; rank++)
                 for (let opponent = 0; opponent < optionCount; opponent++)
-                    slots[(option * topCount + rank) * window + opponent] =
+                    slots[(option * optionCount + rank) * window + opponent] =
                         2 * Number(opponent === selected) -
                         2 * Number(option === selected);
         slots[activeSlots + selected] = 1;
@@ -286,7 +284,7 @@ export const createBallotEncryptionRelationModel = (
     assert.equal(auxiliaryScores.length, scores.length);
     const degree = 64,
         auxiliaryDegree = 8;
-    const packing = packingMatrix(degree, scores.length, scores.length);
+    const packing = packingMatrix(degree, scores.length);
     const scoreWords = scores.map((score) => score - 1n);
     const integerPlaintext = Array.from(
         { length: degree },

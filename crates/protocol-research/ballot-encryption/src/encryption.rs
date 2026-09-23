@@ -289,8 +289,7 @@ impl LinkedBallotWitness {
         if scores.len() != context.poll().manifest().option_count() {
             return Err(Refusal::Scores);
         }
-        let packing = PackingWitness::new(scores, usize::from(context.poll().top_count()))
-            .map_err(|_| Refusal::Scores)?;
+        let packing = PackingWitness::new(scores).map_err(|_| Refusal::Scores)?;
         let mut random = Random::new();
         let fhe = EncryptionWitness::create(fhe_key, packing.message(), &mut random)?;
         let mut literal = Zeroizing::new(vec![0i32; 4096]);
