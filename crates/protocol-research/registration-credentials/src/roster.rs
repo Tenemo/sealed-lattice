@@ -102,7 +102,9 @@ impl RosterProposal {
         poll: &VerifiedPoll,
         records: Vec<Arc<VerifiedRegistration>>,
     ) -> Result<Self, Error> {
-        if !(3..=20).contains(&records.len()) {
+        // The research arithmetic profile supports ten participants, so a
+        // roster of another size is refused before any preparation starts.
+        if records.len() != 10 {
             return Err(Error::Shape);
         }
         let mut entries = Vec::with_capacity(records.len());
@@ -182,7 +184,7 @@ impl RosterProposal {
         self.organizer_position
     }
     pub fn contribution_role(&self, position: usize) -> Result<Vec<u8>, Error> {
-        if self.records.len() != 10 || position >= self.records.len() {
+        if position >= self.records.len() {
             return Err(Error::Shape);
         }
         contribution_role_from_context(self.poll, self.runtime, self.identity, position)

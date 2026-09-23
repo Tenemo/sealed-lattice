@@ -21,7 +21,10 @@ pub struct PollDraft {
     top_count: u16,
 }
 fn validate_fields(manifest: &Manifest, top_count: u16) -> Result<(), Error> {
-    if top_count == 0
+    // The research arithmetic profile evaluates exactly ten options, so a
+    // poll with another option count is refused when it is created.
+    if manifest.option_count() != 10
+        || top_count == 0
         || usize::from(top_count) > manifest.option_count()
         || manifest.display_title().as_str().is_empty()
     {
@@ -219,20 +222,28 @@ pub fn verify_poll(
 mod tests {
     use super::*;
     use crate::foundation::{StabilizedDisplayText, ceremony::OptionDefinition};
+    fn label(value: &str) -> StabilizedDisplayText {
+        StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap()
+    }
+    fn manifest(title: &str, first: &str, second: &str, count: u16) -> Manifest {
+        let mut options = vec![
+            OptionDefinition::new(0, "first".to_owned(), label(first)).unwrap(),
+            OptionDefinition::new(1, "second".to_owned(), label(second)).unwrap(),
+        ];
+        for index in 2..count {
+            options.push(
+                OptionDefinition::new(
+                    index,
+                    format!("option-{index}"),
+                    label(&format!("Option {index}")),
+                )
+                .unwrap(),
+            );
+        }
+        Manifest::new(label(title), options).unwrap()
+    }
     fn draft(top_count: u16) -> Result<PollDraft, Error> {
-        let name =
-            |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
-        PollDraft::new(
-            Manifest::new(
-                name("Question"),
-                vec![
-                    OptionDefinition::new(0, "first".to_owned(), name("First")).unwrap(),
-                    OptionDefinition::new(1, "second".to_owned(), name("Second")).unwrap(),
-                ],
-            )
-            .unwrap(),
-            top_count,
-        )
+        PollDraft::new(manifest("Question", "First", "Second", 10), top_count)
     }
     #[test]
     fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
@@ -244,7 +255,7 @@ mod tests {
         let verified =
             verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
         assert_eq!(verified.organizer(), &original);
-        assert_eq!(verified.manifest().option_count(), 2);
+        assert_eq!(verified.manifest().option_count(), 10);
         assert_eq!(verified.top_count(), 2);
         assert!(
             creator
@@ -256,7 +267,19 @@ mod tests {
         *changed.last_mut().unwrap() ^= 1;
         assert!(verify_poll(packet.identity, [2; 64], &changed, &packet.signature).is_err());
         assert!(draft(0).is_err());
-        assert!(draft(3).is_err());
+        assert!(draft(10).is_ok());
+        assert!(draft(11).is_err());
+    }
+
+    #[test]
+    fn option_counts_outside_the_research_profile_are_refused_at_creation() {
+        for count in [2, 9, 11, 20] {
+            assert!(matches!(
+                PollDraft::new(manifest("Question", "First", "Second", count), 1),
+                Err(Error::Shape)
+            ));
+        }
+        assert!(PollDraft::new(manifest("Question", "First", "Second", 10), 1).is_ok());
     }
 
     #[test]
@@ -277,25 +300,18 @@ mod tests {
             assert!(verify_poll(digest, [2; 64], &body, &signature).is_err());
         };
         let mut top = original.clone();
-        top.items[5] = CanonicalItem::unsigned16(3);
+        top.items[5] = CanonicalItem::unsigned16(11);
         signed_refusal(top);
-        let label =
-            |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
-        let options = |first: &str, second: &str| {
-            vec![
-                OptionDefinition::new(0, "first".to_owned(), label(first)).unwrap(),
-                OptionDefinition::new(1, "second".to_owned(), label(second)).unwrap(),
-            ]
-        };
-        let empty = Manifest::new(label(""), options("First", "Second")).unwrap();
-        let mut empty_body = original.clone();
-        empty_body.items[4] = CanonicalItem::variable_bytes(empty.encode().unwrap()).unwrap();
-        signed_refusal(empty_body);
-        let duplicates = Manifest::new(label("Question"), options("\u{e9}", "e\u{301}")).unwrap();
-        let mut duplicate_body = original.clone();
-        duplicate_body.items[4] =
-            CanonicalItem::variable_bytes(duplicates.encode().unwrap()).unwrap();
-        signed_refusal(duplicate_body);
+        for changed in [
+            manifest("", "First", "Second", 10),
+            manifest("Question", "\u{e9}", "e\u{301}", 10),
+            manifest("Question", "First", "Second", 9),
+            manifest("Question", "First", "Second", 11),
+        ] {
+            let mut body = original.clone();
+            body.items[4] = CanonicalItem::variable_bytes(changed.encode().unwrap()).unwrap();
+            signed_refusal(body);
+        }
         let mut wrong_runtime = original;
         wrong_runtime.items[1] = CanonicalItem::hash512([9; 64]);
         signed_refusal(wrong_runtime);
