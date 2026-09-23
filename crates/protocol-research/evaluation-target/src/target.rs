@@ -9,7 +9,7 @@ use registration_credentials::{
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
     foundation::{CanonicalItem, CanonicalTuple, hash_foundation_tuple_512},
     poll::VerifiedPoll,
-    target_signing::TargetMessage,
+    target_signing::{TargetMessage, minimum_turnout},
 };
 use rns_arithmetic_probe::ranking::{COEFFICIENT_BYTES, Ciphertext, DEGREE, Engine};
 use setup_aggregate::verified::VerifiedSetupAggregate;
@@ -141,7 +141,7 @@ impl ClassifiedClosedInventory {
         ])
     }
     pub fn start(self) -> Result<EvaluationSession, Error> {
-        let program = if self.accepted_authors().next().is_none() {
+        let program = if self.accepted_authors().count() < minimum_turnout(self.accepted.len()) {
             None
         } else {
             Some(
@@ -354,8 +354,9 @@ fn read_ballot(
     ])
 }
 
-/// Only completed deterministic evaluation (or an actually empty accepted
-/// set) creates this value. Target signatures and durable handoff are separate.
+/// Only completed deterministic evaluation (or an accepted set below the
+/// minimum turnout) creates this value. Target signatures and durable handoff
+/// are separate.
 pub struct VerifiedEvaluationTarget {
     inventory: ClassifiedClosedInventory,
     body: Vec<u8>,

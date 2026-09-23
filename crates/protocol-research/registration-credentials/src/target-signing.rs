@@ -18,6 +18,13 @@ pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-id/v1
 pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification/v1";
 pub const TARGET_VOTE_BYTES: usize = 2 + 64 + 3309;
 
+/// A result needs at least `f+2` accepted ballots, where `f = floor((n-1)/3)`
+/// bounds the compromised participants, so every result combines at least two
+/// honest ballots. A smaller accepted set takes the no-result branch.
+pub fn minimum_turnout(participants: usize) -> usize {
+    participants.saturating_sub(1) / 3 + 2
+}
+
 /// Canonical signing data only. Parsing this value never verifies evaluation,
 /// the source inventory, certification or authority to release a share.
 pub struct TargetMessage {
@@ -72,9 +79,11 @@ impl TargetMessage {
                 .try_into()
                 .map_err(|_| Error::Shape)?,
         );
+        let accepted = classifications.iter().filter(|value| **value == 2).count();
+        let evaluated = accepted >= minimum_turnout(participants);
         match branch {
-            0 if items.len() == 6 && !classifications.contains(&2) => {}
-            1 if items.len() == 9 && classifications.contains(&2) => {
+            0 if items.len() == 6 && !evaluated => {}
+            1 if items.len() == 9 && evaluated => {
                 if items[6..8]
                     .iter()
                     .any(|item| item.item_type() != CanonicalItemType::Hash512)
@@ -273,20 +282,26 @@ impl Credential {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn body(participants: usize, accepted: bool) -> Vec<u8> {
-        let mut classifications = vec![0; participants];
-        if accepted {
-            classifications[0] = 2;
-        }
+    // Invalid classifications alternate with empty slots after the accepted ones.
+    fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
+        let classifications: Vec<u8> = (0..participants)
+            .map(|position| {
+                if position < accepted {
+                    2
+                } else {
+                    position as u8 % 2
+                }
+            })
+            .collect();
         let mut items = vec![
             CanonicalItem::nonempty_ascii(TARGET_PURPOSE).unwrap(),
             CanonicalItem::hash512([1; 64]),
             CanonicalItem::hash512([2; 64]),
             CanonicalItem::hash512([3; 64]),
             CanonicalItem::variable_bytes(&classifications).unwrap(),
-            CanonicalItem::unsigned16(u16::from(accepted)),
+            CanonicalItem::unsigned16(u16::from(evaluated)),
         ];
-        if accepted {
+        if evaluated {
             items.extend([
                 CanonicalItem::hash512([4; 64]),
                 CanonicalItem::hash512([5; 64]),
@@ -296,10 +311,35 @@ mod tests {
         CanonicalTuple::new(1, 1, items).encode().unwrap()
     }
     #[test]
+    fn minimum_turnout_is_two_more_than_the_compromise_bound() {
+        for (participants, turnout) in [(3, 2), (4, 3), (6, 3), (7, 4), (10, 5), (13, 6), (20, 8)] {
+            assert_eq!(minimum_turnout(participants), turnout);
+        }
+    }
+    #[test]
+    fn only_the_minimum_turnout_selects_the_evaluated_branch() {
+        for participants in 3..=20 {
+            let minimum = minimum_turnout(participants);
+            for accepted in 0..=participants {
+                let evaluated = accepted >= minimum;
+                let message =
+                    TargetMessage::parse(&body(participants, accepted, evaluated), participants)
+                        .unwrap();
+                assert_eq!(message.encrypted(), evaluated);
+                assert!(
+                    TargetMessage::parse(&body(participants, accepted, !evaluated), participants)
+                        .is_err(),
+                    "participants={participants}, accepted={accepted}"
+                );
+            }
+        }
+    }
+    #[test]
     fn signing_data_is_canonical_and_cannot_switch_branch_or_roster_shape() {
         for participants in 3..=20 {
-            for accepted in [false, true] {
-                let bytes = body(participants, accepted);
+            for evaluated in [false, true] {
+                let accepted = if evaluated { participants } else { 0 };
+                let bytes = body(participants, accepted, evaluated);
                 let message = TargetMessage::parse(&bytes, participants).unwrap();
                 assert_eq!(message.body(), bytes);
                 assert!(
@@ -318,7 +358,7 @@ mod tests {
                 assert!(TargetMessage::parse(&excess, participants).is_err());
                 let mut tuple =
                     CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
-                tuple.items[5] = CanonicalItem::unsigned16(u16::from(!accepted));
+                tuple.items[5] = CanonicalItem::unsigned16(u16::from(!evaluated));
                 assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
             }
         }

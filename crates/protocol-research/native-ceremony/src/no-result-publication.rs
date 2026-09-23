@@ -51,7 +51,7 @@ fn invalid_source(
 ) -> (AuthenticatedSource, Vec<u8>) {
     let directory = output.join("ballot");
     std::fs::create_dir(&directory).unwrap();
-    let path = directory.join("body.bin");
+    let path = crate::ballot_body_path(&directory, 0);
     let mut relation = Vec::from(b"LBS1".as_slice());
     relation.extend(poll.identity());
     relation.extend(setup.inventory().identity());

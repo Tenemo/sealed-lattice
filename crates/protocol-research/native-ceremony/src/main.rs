@@ -7,17 +7,19 @@ mod no_result_publication;
 mod public_output;
 mod publication;
 use registration_credentials::{
-    contribution_authentication::{CommitmentInventory, verify_confirmation},
+    ballot_authentication::BallotEnvelope,
+    contribution_authentication::{CommitmentInventory, SignedOpening, verify_confirmation},
     foundation::{
         StabilizedDisplayText,
         ceremony::{Manifest, OptionDefinition},
     },
-    poll::{PollDraft, verify_poll},
+    poll::{PollDraft, SignedPoll, VerifiedPoll, verify_poll},
     registration::RegistrationVerifier,
-    roster::RosterProposal,
+    roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::verify_roster_proposal,
 };
 use registration_enrollment::Enrollment;
+use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
     fs::{self, File},
     io::{Read, Write},
@@ -25,6 +27,17 @@ use std::{
     sync::Arc,
 };
 use zeroize::Zeroizing;
+
+/// Honest ballots in the result case, enough for the minimum turnout of five
+/// with ten participants. Positions one to three form the fixed corrupt set;
+/// one and two submit authenticated invalid ballots.
+const HONEST_BALLOTS: [(usize, [u8; 10]); 5] = [
+    (0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+    (4, [3, 9, 9, 1, 7, 2, 10, 5, 4, 6]),
+    (5, [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]),
+    (6, [5, 5, 5, 5, 5, 5, 10, 5, 5, 5]),
+    (7, [2, 8, 8, 1, 9, 3, 10, 4, 6, 7]),
+];
 
 fn write(path: impl AsRef<Path>, bytes: &[u8]) {
     let mut output = public_output::PublicOutput::create(path).unwrap();
@@ -35,6 +48,121 @@ fn random<const N: usize>() -> Zeroizing<[u8; N]> {
     let mut bytes = Zeroizing::new([0; N]);
     getrandom::fill(&mut *bytes).unwrap();
     bytes
+}
+/// The public body file of each ballot source. The wrong-position source of
+/// position one reuses position zero's body.
+fn ballot_body_path(directory: &Path, author: usize) -> PathBuf {
+    directory.join(match author {
+        0 | 1 => "body.bin".to_owned(),
+        2 => "invalid-proof-body.bin".to_owned(),
+        _ => format!("body-{author}.bin"),
+    })
+}
+/// Public inputs shared by every honest participant's private ballot commands.
+struct BallotInputs<'a> {
+    poll: &'a Arc<VerifiedPoll>,
+    setup: &'a Arc<VerifiedSetupAggregate>,
+    definition: &'a SignedPoll,
+    retained_record: &'a [u8],
+    final_keys: &'a Path,
+    directory: &'a Path,
+}
+impl BallotInputs<'_> {
+    /// Casts one honest ballot through the enrollment-owned private commands,
+    /// then accepts it through the public classification path.
+    fn cast(
+        &self,
+        enrollment: &mut Enrollment,
+        opening: &SignedOpening,
+        position: usize,
+        scores: &[u8],
+    ) -> (BallotEnvelope, [u8; 3309], PathBuf) {
+        let proposal = RetainedContributionContext::parse(
+            self.poll.identity(),
+            self.poll.runtime(),
+            position,
+            self.setup.inventory().proposal().proposal().body(),
+        )
+        .unwrap();
+        let opening_packet = [
+            (opening.body().len() as u32).to_le_bytes().as_slice(),
+            opening.body(),
+            opening.signature(),
+        ]
+        .concat();
+        let control = [
+            self.poll.identity().as_slice(),
+            self.poll.runtime().as_slice(),
+            (self.definition.body.len() as u32).to_le_bytes().as_slice(),
+            self.definition.body.as_slice(),
+            self.definition.signature.as_slice(),
+            self.setup.inventory().identity().as_slice(),
+            (opening_packet.len() as u32).to_le_bytes().as_slice(),
+            opening_packet.as_slice(),
+            self.retained_record,
+        ]
+        .concat();
+        let credential = &mut enrollment.credential;
+        let mut work =
+            registration_enrollment::ballot::BallotWork::new(credential, &proposal, &control)
+                .unwrap();
+        for index in [1, 74] {
+            let kind = setup_aggregate::ModulusKind::for_contribution_polynomial(index).unwrap();
+            let chunk =
+                setup_aggregate::CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
+            let values =
+                fs::read(self.final_keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
+            work.command(credential, 1, index, &[]).unwrap();
+            for (ordinal, bytes) in values.chunks(chunk).enumerate() {
+                work.command(credential, 2, ordinal * chunk, bytes).unwrap();
+            }
+            work.command(credential, 3, 0, &[]).unwrap();
+        }
+        work.command(credential, 4, 0, scores).unwrap();
+        let envelope =
+            BallotEnvelope::decode(&work.command(credential, 10, 0, &[]).unwrap()).unwrap();
+        let path = ballot_body_path(self.directory, position);
+        let mut body = public_output::PublicOutput::create(&path).unwrap();
+        for offset in (0..envelope.body_length()).step_by(1 << 20) {
+            let length = ((1 << 20).min(envelope.body_length() - offset)) as u32;
+            body.write_all(
+                &work
+                    .command(credential, 11, offset, &length.to_le_bytes())
+                    .unwrap(),
+            )
+            .unwrap();
+        }
+        body.finish().unwrap();
+        let coins = random::<32>();
+        let signing = [envelope.bytes().as_slice(), coins.as_slice()].concat();
+        work.command(credential, 8, 0, &signing).unwrap();
+        let signature: [u8; 3309] = work
+            .command(credential, 12, 0, &[])
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert!(matches!(
+            aggregate::classify_ballot(
+                self.poll.clone(),
+                self.setup.clone(),
+                envelope.bytes(),
+                &signature,
+                &path,
+                self.final_keys,
+                "valid",
+            ),
+            Ok(ballot_proof::body::BallotBodyClassification::Valid(_))
+        ));
+        write(
+            self.directory.join(format!("envelope-{position}.bin")),
+            envelope.bytes(),
+        );
+        write(
+            self.directory.join(format!("signature-{position}.bin")),
+            &signature,
+        );
+        (envelope, signature, path)
+    }
 }
 struct EnrollmentOutput<'a> {
     files: Vec<public_output::PublicOutput>,
@@ -425,13 +553,8 @@ fn main() {
         work.command(&mut enrollments[0].credential, 3, 0, &[])
             .unwrap();
     }
-    work.command(
-        &mut enrollments[0].credential,
-        4,
-        0,
-        &(1..=10).collect::<Vec<_>>(),
-    )
-    .unwrap();
+    work.command(&mut enrollments[0].credential, 4, 0, &HONEST_BALLOTS[0].1)
+        .unwrap();
     let encoded = work
         .command(&mut enrollments[0].credential, 10, 0, &[])
         .unwrap();
@@ -439,7 +562,7 @@ fn main() {
         registration_credentials::ballot_authentication::BallotEnvelope::decode(&encoded).unwrap();
     let ballot_directory = output.join("ballot");
     fs::create_dir(&ballot_directory).unwrap();
-    let body_path = ballot_directory.join("body.bin");
+    let body_path = ballot_body_path(&ballot_directory, 0);
     let mut body_file = public_output::PublicOutput::create(&body_path).unwrap();
     for offset in (0..computed_envelope.body_length()).step_by(1 << 20) {
         let length = ((1 << 20).min(computed_envelope.body_length() - offset)) as u32;
@@ -701,7 +824,7 @@ fn main() {
         &wrong_position_signature,
     );
     assert!(ballot_proof::submission::verify_submission(body, &setup, authentication).is_err());
-    let invalid_proof_path = ballot_directory.join("invalid-proof-body.bin");
+    let invalid_proof_path = ballot_body_path(&ballot_directory, 2);
     let mut source = File::open(&body_path).unwrap();
     let mut modified_header = [0; registration_credentials::ballot_body::HEADER_BYTES];
     source.read_exact(&mut modified_header).unwrap();
@@ -807,6 +930,27 @@ fn main() {
     println!(
         "Original retained owner and private setup inputs verified without a public capability shortcut"
     );
+    let ballot_inputs = BallotInputs {
+        poll: &poll,
+        setup: &setup,
+        definition: &packet,
+        retained_record: &retained_record,
+        final_keys: &final_keys,
+        directory: &ballot_directory,
+    };
+    let additional: Vec<_> = HONEST_BALLOTS[1..]
+        .iter()
+        .map(|(position, scores)| {
+            let ballot = ballot_inputs.cast(
+                &mut enrollments[*position],
+                &openings[*position],
+                *position,
+                scores,
+            );
+            println!("Cast and accepted honest ballot {position}");
+            (*position, ballot)
+        })
+        .collect();
     let corrupt_record = &setup.inventory().proposal().proposal().records()[3];
     let restore_corrupt = || {
         registration_credentials::Credential::open_complete(
@@ -819,6 +963,21 @@ fn main() {
         .unwrap()
     };
     let corrupt_credentials = [restore_corrupt(), restore_corrupt()];
+    let mut ballots = vec![None; enrollments.len()];
+    ballots[0] = Some((&envelope, &signature, body_path.as_path()));
+    ballots[1] = Some((
+        &wrong_position,
+        &wrong_position_signature,
+        body_path.as_path(),
+    ));
+    ballots[2] = Some((
+        &invalid_proof_envelope,
+        &invalid_proof_signature,
+        invalid_proof_path.as_path(),
+    ));
+    for (position, (envelope, signature, path)) in &additional {
+        ballots[*position] = Some((envelope, signature, path.as_path()));
+    }
     let closed = publication::run(
         &output,
         poll.clone(),
@@ -826,19 +985,7 @@ fn main() {
         &mut enrollments,
         &openings,
         corrupt_credentials,
-        [
-            (&envelope, &signature, body_path.as_path()),
-            (
-                &wrong_position,
-                &wrong_position_signature,
-                body_path.as_path(),
-            ),
-            (
-                &invalid_proof_envelope,
-                &invalid_proof_signature,
-                invalid_proof_path.as_path(),
-            ),
-        ],
+        &ballots,
     );
     completion::run(
         &output,

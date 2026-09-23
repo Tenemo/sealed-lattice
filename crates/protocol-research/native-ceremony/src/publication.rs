@@ -18,7 +18,7 @@ pub fn run(
     enrollments: &mut [Enrollment],
     openings: &[SignedOpening],
     corrupt_credentials: [Credential; 2],
-    ballots: [(&BallotEnvelope, &[u8; 3309], &Path); 3],
+    ballots: &[Option<(&BallotEnvelope, &[u8; 3309], &Path)>],
 ) -> ballot_proof::publication::VerifiedClosedSlots {
     let [mut corrupt_fork, mut restored] = corrupt_credentials;
     let began = Instant::now();
@@ -153,48 +153,49 @@ pub fn run(
         )
         .unwrap();
     }
+    assert_eq!(ballots.len(), enrollments.len());
     let mut sources: Vec<AuthenticatedSource> = Vec::new();
     let mut authenticated_body_bytes = 0usize;
-    for (envelope, signature, path) in ballots {
-        let authenticate = || authenticate_envelope(&setup, envelope.bytes(), signature).unwrap();
-        let mut body = BallotBodyAuthentication::new(authenticate()).unwrap();
-        let mut corrupted = BallotBodyAuthentication::new(authenticate()).unwrap();
-        let mut file = File::open(path).unwrap();
-        let mut buffer = vec![0u8; 1 << 20];
-        let mut offset = 0;
-        loop {
-            let length = file.read(&mut buffer).unwrap();
-            if length == 0 {
-                break;
+    for position in 0..enrollments.len() {
+        if let Some((envelope, signature, path)) = ballots[position] {
+            let authenticate =
+                || authenticate_envelope(&setup, envelope.bytes(), signature).unwrap();
+            let mut body = BallotBodyAuthentication::new(authenticate()).unwrap();
+            let mut corrupted = BallotBodyAuthentication::new(authenticate()).unwrap();
+            let mut file = File::open(path).unwrap();
+            let mut buffer = vec![0u8; 1 << 20];
+            let mut offset = 0;
+            loop {
+                let length = file.read(&mut buffer).unwrap();
+                if length == 0 {
+                    break;
+                }
+                body.push(&buffer[..length]).unwrap();
+                if offset == 0 {
+                    buffer[0] ^= 1;
+                }
+                corrupted.push(&buffer[..length]).unwrap();
+                offset += length;
             }
-            body.push(&buffer[..length]).unwrap();
-            if offset == 0 {
-                buffer[0] ^= 1;
-            }
-            corrupted.push(&buffer[..length]).unwrap();
-            offset += length;
+            assert!(corrupted.finish().is_err());
+            authenticated_body_bytes += offset;
+            sources.push(context.ballot_source(body.finish().unwrap()).unwrap());
+            let empty = context.empty_body(&close, position).unwrap();
+            assert!(
+                enrollments[position]
+                    .credential
+                    .sign_publication_message(
+                        &owners[position],
+                        roster,
+                        PublicationPurpose::Empty,
+                        &empty,
+                        Some(&close_signature),
+                        *crate::random::<32>()
+                    )
+                    .is_err()
+            );
+            continue;
         }
-        assert!(corrupted.finish().is_err());
-        authenticated_body_bytes += offset;
-        sources.push(context.ballot_source(body.finish().unwrap()).unwrap());
-    }
-    for position in 0..3 {
-        let empty = context.empty_body(&close, position).unwrap();
-        assert!(
-            enrollments[position]
-                .credential
-                .sign_publication_message(
-                    &owners[position],
-                    roster,
-                    PublicationPurpose::Empty,
-                    &empty,
-                    Some(&close_signature),
-                    *crate::random::<32>()
-                )
-                .is_err()
-        );
-    }
-    for position in 3..enrollments.len() {
         let body = context.empty_body(&close, position).unwrap();
         assert!(
             enrollments[position]
@@ -293,7 +294,7 @@ pub fn run(
                     works[position]
                         .command(&mut enrollments[position].credential, 3, 0, &control)
                         .unwrap();
-                    let mut file = File::open(ballots[*author].2).unwrap();
+                    let mut file = File::open(ballots[*author].unwrap().2).unwrap();
                     let mut buffer = vec![0u8; 1 << 20];
                     loop {
                         let length = file.read(&mut buffer).unwrap();
@@ -407,7 +408,7 @@ pub fn run(
     );
     // Participant three is in the fixed corrupt set {1, 2, 3}. Forking that
     // participant's own state models permitted corruption, not honest recovery.
-    let original_body = ballots[0];
+    let original_body = ballots[0].unwrap();
     let alternate_envelope = BallotEnvelope::new(
         poll.identity(),
         setup.inventory().identity(),

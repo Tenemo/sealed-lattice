@@ -40,9 +40,10 @@ impl PublicInputs for Inputs {
                 .map_err(|_| Error::PublicInput)?,
         ))
     }
-    fn ballot(&mut self, _author: usize) -> Result<Box<dyn Read + '_>, Error> {
+    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error> {
         Ok(Box::new(
-            File::open(&self.ballot).map_err(|_| Error::PublicInput)?,
+            File::open(crate::ballot_body_path(&self.ballot, author))
+                .map_err(|_| Error::PublicInput)?,
         ))
     }
 }
@@ -130,11 +131,7 @@ pub fn run(
             }
             SourceValue::Ballot(body) => {
                 let authentication = body.authentication();
-                let path = ballot.join(if author == 2 {
-                    "invalid-proof-body.bin"
-                } else {
-                    "body.bin"
-                });
+                let path = crate::ballot_body_path(&ballot, author);
                 classifications.push(Some(
                     crate::aggregate::classify_ballot(
                         poll.clone(),
@@ -180,7 +177,7 @@ pub fn run(
             .evaluate(
                 &mut Inputs {
                     aggregate: aggregate.clone(),
-                    ballot: ballot.join("body.bin"),
+                    ballot: ballot.clone(),
                 },
                 &mut spool,
             )
@@ -295,6 +292,10 @@ pub fn run(
         return;
     }
     assert!(verify_no_result(certificate.clone()).is_err());
+    assert_eq!(
+        accepted,
+        crate::HONEST_BALLOTS.map(|(position, _)| position)
+    );
     let mut shares = Vec::new();
     for position in 0..enrollments.len() {
         let context = Arc::new(
@@ -367,12 +368,19 @@ pub fn run(
         );
         println!("Verified original-key release share {position}");
     }
-    let expected: Vec<_> = poll
-        .manifest()
-        .options()
-        .iter()
-        .rev()
-        .map(|option| option.option_identifier().to_owned())
+    // A sorting oracle over the cast scores, with ties to the lower position.
+    let mut totals = [0u32; 10];
+    for (_, scores) in crate::HONEST_BALLOTS {
+        for (total, score) in totals.iter_mut().zip(scores) {
+            *total += u32::from(score);
+        }
+    }
+    let mut order: Vec<usize> = (0..10).collect();
+    order.sort_by_key(|option| (std::cmp::Reverse(totals[*option]), *option));
+    let options = poll.manifest().options();
+    let expected: Vec<_> = order
+        .into_iter()
+        .map(|option| options[option].option_identifier().to_owned())
         .collect();
     let mut subsets = 0;
     for a in 0..10 {

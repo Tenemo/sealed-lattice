@@ -35,6 +35,7 @@ type NativeResult = {
     kind: string;
     accepted?: number[];
     invalid?: number[];
+    identifiers?: string[];
     releaseSubsets?: number;
     departureSets?: number;
     cases?: {
@@ -48,6 +49,9 @@ type NativeResult = {
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
 const prefixCase = selected.name === 'native-prefix';
+// The result case reaches the minimum turnout of five with these honest
+// ballots; positions one and two submit authenticated invalid ballots.
+const honestBallotAuthors = [0, 4, 5, 6, 7];
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
 const memoryLimit = 1_073_741_824;
@@ -165,7 +169,11 @@ await runWithLocalRunLog(
                 64n +
                 enrollment.signingPublicKeyBytes +
                 ballot.envelopeBytes +
-                enrollment.signatureBytes;
+                enrollment.signatureBytes +
+                BigInt(honestBallotAuthors.length - 1) *
+                    (ballot.maximumSignedBodyBytes +
+                        ballot.envelopeBytes +
+                        enrollment.signatureBytes);
             const publicPayloadBound =
                 sourceBound +
                 2048n +
@@ -496,7 +504,10 @@ await runWithLocalRunLog(
                     result.kind,
                     selected.noResult ? 'no-result' : 'result',
                 );
-                assert.deepEqual(result.accepted, selected.noResult ? [] : [0]);
+                assert.deepEqual(
+                    result.accepted,
+                    selected.noResult ? [] : honestBallotAuthors,
+                );
                 assert.deepEqual(
                     result.invalid,
                     selected.name === 'native-invalid-only'
@@ -507,6 +518,14 @@ await runWithLocalRunLog(
                 );
             }
             if (!prefixCase && !selected.noResult) {
+                // Totals 21, 33, 33, 18, 32, 21, 41, 25, 26 and 29; ties go to
+                // the lower option position.
+                assert.deepEqual(
+                    result.identifiers,
+                    [6, 1, 2, 4, 9, 8, 7, 0, 5, 3].map(
+                        (option) => `option-${option}`,
+                    ),
+                );
                 assert.equal(result.releaseSubsets, 210);
                 assert.equal(result.departureSets, 176);
             }
