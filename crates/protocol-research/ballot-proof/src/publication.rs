@@ -319,6 +319,15 @@ impl PublicationContext {
             signature: proof,
         })
     }
+    /// Adds an authenticated witness batch to those collected for slot
+    /// verification. An exact duplicate is ignored.
+    pub fn collect_witness_batch(
+        &self,
+        batches: &mut Vec<AuthenticatedWitnessBatch>,
+        batch: AuthenticatedWitnessBatch,
+    ) -> Result<(), Error> {
+        collect_witness_batch(self.participant_count(), batches, batch)
+    }
     fn check_source(&self, source: &AuthenticatedSource) -> Result<(), Error> {
         match &source.value {
             SourceValue::Ballot(body) => {
@@ -423,6 +432,29 @@ fn assignments(count: usize, witness: usize) -> Result<Vec<usize>, Error> {
     Ok((0..count)
         .filter(|author| *author != witness && (witness + count - author) % count <= fault_bound)
         .collect())
+}
+/// The slots use at most one of a signer's batches for each source assigned
+/// to that signer. Equivocation therefore fills only the signer's own share
+/// and cannot displace other witnesses' batches.
+fn collect_witness_batch(
+    count: usize,
+    batches: &mut Vec<AuthenticatedWitnessBatch>,
+    batch: AuthenticatedWitnessBatch,
+) -> Result<(), Error> {
+    if batches.iter().any(|prior| prior.body == batch.body) {
+        return Ok(());
+    }
+    let share = assignments(count, batch.signer)?.len();
+    if batches
+        .iter()
+        .filter(|prior| prior.signer == batch.signer)
+        .count()
+        >= share
+    {
+        return Err(Error::Context);
+    }
+    batches.push(batch);
+    Ok(())
 }
 fn witnesses(count: usize, author: usize) -> Result<Vec<usize>, Error> {
     if !(3..=20).contains(&count) || author >= count {
@@ -563,6 +595,47 @@ mod tests {
             assert!(witnesses(count, count).is_err());
             assert!(assignments(count, count).is_err());
         }
+    }
+
+    #[test]
+    fn equivocating_signers_fill_only_their_own_witness_share() {
+        let batch = |signer: usize, variant: u8| AuthenticatedWitnessBatch {
+            signer,
+            identities: Vec::new(),
+            body: vec![signer as u8, variant],
+            signature: [0; 3309],
+        };
+        // With ten participants each signer is assigned three sources. The
+        // corrupt signers attempt as many distinct batches as the former
+        // pool-wide bound admitted.
+        let mut batches = Vec::new();
+        for signer in [1, 2, 3] {
+            for variant in 0..10 {
+                let result = collect_witness_batch(10, &mut batches, batch(signer, variant));
+                if variant < 3 {
+                    result.unwrap();
+                } else {
+                    assert_eq!(result, Err(Error::Context));
+                }
+            }
+            // An exact duplicate is ignored even when the share is full.
+            collect_witness_batch(10, &mut batches, batch(signer, 0)).unwrap();
+        }
+        assert_eq!(batches.len(), 9);
+        for signer in [0, 4, 5, 6, 7, 8, 9] {
+            collect_witness_batch(10, &mut batches, batch(signer, 0)).unwrap();
+        }
+        assert_eq!(batches.len(), 16);
+        // Three participants need no witnesses, and a signer must be a
+        // roster position.
+        assert_eq!(
+            collect_witness_batch(3, &mut Vec::new(), batch(0, 0)),
+            Err(Error::Context)
+        );
+        assert_eq!(
+            collect_witness_batch(10, &mut Vec::new(), batch(10, 0)),
+            Err(Error::Context)
+        );
     }
 
     #[test]

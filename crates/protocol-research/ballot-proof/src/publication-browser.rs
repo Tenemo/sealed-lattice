@@ -117,22 +117,13 @@ impl Session {
                 self.sources.push(source);
             }
             7 => {
-                let maximum = context.participant_count() * ((context.participant_count() - 1) / 3);
                 let (body, signature) = packet(bytes)?;
                 let batch = context
                     .authenticate_witness(body, signature)
                     .map_err(|_| ())?;
-                if self
-                    .batches
-                    .iter()
-                    .any(|prior| prior.body() == batch.body())
-                {
-                    return Ok(());
-                }
-                if self.batches.len() >= maximum {
-                    return Err(());
-                }
-                self.batches.push(batch);
+                context
+                    .collect_witness_batch(&mut self.batches, batch)
+                    .map_err(|_| ())?;
             }
             8 => {
                 let others = (context.participant_count() - 1) / 3;

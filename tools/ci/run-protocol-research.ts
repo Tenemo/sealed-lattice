@@ -344,6 +344,8 @@ await runWithLocalRunLog(
                     '-p',
                     'linked-release-proof',
                     '-p',
+                    'ballot-proof',
+                    '-p',
                     'rns-arithmetic-probe',
                     '--lib',
                 ],
