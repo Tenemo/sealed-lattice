@@ -134,8 +134,15 @@ impl Manifest {
                 "manifest option count is outside the configurable range",
             ));
         }
+        if self.display_title().as_str().is_empty() {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongTypeOrLength,
+                "manifest display title must be nonempty",
+            ));
+        }
         CanonicalItem::display_text(self.display_title())?;
         let mut option_identifiers = BTreeSet::new();
+        let mut display_labels = BTreeSet::new();
         for (option_position, option) in self.options().iter().enumerate() {
             option.validate()?;
             if usize::from(option.option_index) != option_position {
@@ -148,6 +155,14 @@ impl Manifest {
                 return Err(FoundationSchemaError::new(
                     RefusalReason::DuplicateIdentity,
                     "manifest option identifiers must be unique",
+                ));
+            }
+            // Stabilized labels are NFC, so canonically equivalent input
+            // spellings compare equal here.
+            if !display_labels.insert(option.display_label.as_str()) {
+                return Err(FoundationSchemaError::new(
+                    RefusalReason::DuplicateIdentity,
+                    "manifest option display labels must be unique",
                 ));
             }
         }
@@ -621,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_rejects_wrong_count_order_duplicate_identifiers_and_empty_labels() {
+    fn manifest_rejects_wrong_count_order_duplicates_and_empty_text() {
         let too_few = manifest_for_option_count(MINIMUM_CONFIGURABLE_OPTION_COUNT)
             .options
             .into_iter()
@@ -651,6 +666,45 @@ mod tests {
                 .expect_err("duplicate option identifier must refuse")
                 .refusal_reason,
             RefusalReason::DuplicateIdentity
+        );
+
+        let mut equivalent_labels = sample_manifest().options;
+        equivalent_labels[2].display_label = display_text("\u{e9}");
+        equivalent_labels[7].display_label = display_text("e\u{301}");
+        assert_eq!(
+            Manifest::new(display_text("Title"), equivalent_labels.clone())
+                .expect_err("canonically equivalent display labels must refuse")
+                .refusal_reason,
+            RefusalReason::DuplicateIdentity
+        );
+        let unchecked_bytes = CanonicalTuple::new(
+            MANIFEST_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::display_text(&display_text("Title")).expect("title encodes"),
+                CanonicalItem::nested_tuple_list(
+                    &equivalent_labels
+                        .iter()
+                        .map(|option| option.canonical_tuple().expect("option encodes"))
+                        .collect::<Vec<_>>(),
+                )
+                .expect("options encode"),
+            ],
+        )
+        .encode()
+        .expect("unchecked manifest encodes");
+        assert_eq!(
+            Manifest::decode(&unchecked_bytes, &CanonicalDecodeLimits::default())
+                .expect_err("decoded duplicate display labels must refuse")
+                .refusal_reason,
+            RefusalReason::DuplicateIdentity
+        );
+
+        assert_eq!(
+            Manifest::new(display_text(""), sample_manifest().options)
+                .expect_err("empty display title must refuse")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
         );
 
         assert_eq!(

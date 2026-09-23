@@ -77,6 +77,21 @@ describe('poll input validation', () => {
         ).toEqual(['EmptyOptionLabel']);
     });
 
+    it('compares labels in the normalized form the kernel stores', () => {
+        expect(
+            errorCodes({
+                question: 'Question',
+                options: ['caf\u00e9', 'cafe\u0301', 'other'],
+            }),
+        ).toEqual(['DuplicateOptionLabel']);
+        expect(
+            validatePollSpec({
+                question: 'Question',
+                options: ['caf\u00e9', 'cafe', 'Caf\u00e9'],
+            }).isValid,
+        ).toBe(true);
+    });
+
     it('reserves the command response framing at the exact display-text ceiling', () => {
         const exactPollSpec = createMaximumAcceptedPollSpec();
 
@@ -87,5 +102,19 @@ describe('poll input validation', () => {
                 question: `${exactPollSpec.question}Q`,
             }),
         ).toEqual(['UnsupportedHashCriticalText']);
+        // U+0958 has three UTF-8 bytes but six under NFC, so the question
+        // leaves too little of the budget for the final two labels.
+        const expanded = validatePollSpec({
+            ...exactPollSpec,
+            question: `${exactPollSpec.question.slice(3)}\u0958`,
+        });
+        expect(
+            expanded.isValid
+                ? []
+                : expanded.errors.map(({ code, field }) => [code, field]),
+        ).toEqual([
+            ['UnsupportedHashCriticalText', 'options[8]'],
+            ['UnsupportedHashCriticalText', 'options[9]'],
+        ]);
     });
 });

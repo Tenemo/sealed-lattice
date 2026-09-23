@@ -74,8 +74,12 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     let remainingDisplayTextByteLength =
         maximumCanonicalFoundationManifestByteLength -
         canonicalManifestNonDisplayByteLength(framedOptionCount);
+    // The kernel stores display text in Unicode NFC, so budgets and label
+    // equality use that form.
     const consumeDisplayTextBytes = (value: string): boolean => {
-        const byteLength = textEncoder.encode(value).byteLength;
+        const byteLength = textEncoder.encode(
+            value.normalize('NFC'),
+        ).byteLength;
         if (byteLength > remainingDisplayTextByteLength) {
             return false;
         }
@@ -134,7 +138,8 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             });
             continue;
         }
-        if (optionLabels.has(optionLabel)) {
+        const stabilizedLabel = optionLabel.normalize('NFC');
+        if (optionLabels.has(stabilizedLabel)) {
             errors.push({
                 code: 'DuplicateOptionLabel',
                 field: `options[${optionIndex}]`,
@@ -142,7 +147,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             });
         }
 
-        optionLabels.add(optionLabel);
+        optionLabels.add(stabilizedLabel);
         validatedOptions.push(optionLabel);
     }
 

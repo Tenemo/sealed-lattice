@@ -23,18 +23,12 @@ pub struct PollDraft {
 fn validate_fields(manifest: &Manifest, top_count: u16) -> Result<(), Error> {
     // The research arithmetic profile evaluates exactly ten options, so a
     // poll with another option count is refused when it is created.
+    // The manifest itself owns the nonempty title and distinct labels.
     if manifest.option_count() != 10
         || top_count == 0
         || usize::from(top_count) > manifest.option_count()
-        || manifest.display_title().as_str().is_empty()
     {
         return Err(Error::Shape);
-    }
-    let mut labels = std::collections::BTreeSet::new();
-    for option in manifest.options() {
-        if !labels.insert(option.display_label().as_str()) {
-            return Err(Error::Shape);
-        }
     }
     Ok(())
 }
@@ -303,8 +297,6 @@ mod tests {
         top.items[5] = CanonicalItem::unsigned16(11);
         signed_refusal(top);
         for changed in [
-            manifest("", "First", "Second", 10),
-            manifest("Question", "\u{e9}", "e\u{301}", 10),
             manifest("Question", "First", "Second", 9),
             manifest("Question", "First", "Second", 11),
         ] {
