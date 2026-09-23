@@ -12,6 +12,8 @@ describe('threshold completion model', () => {
             maximumCorruptParticipantCount: 3,
             inventoryCertificateThreshold: 7,
             resultReleaseThreshold: 4,
+            minimumTurnout: 5,
+            noResultForceableAtFullHonestTurnout: true,
             setupReceiptThreshold: 10,
             guaranteedHonestResponderCount: 4,
             minimumHonestVerifiedShareCountAfterDisappearance: 4,
@@ -22,6 +24,23 @@ describe('threshold completion model', () => {
             certificateSetCount: 120n,
             orderedCertificatePairCount: 14_400n,
             bruteForceCrossChecked: true,
+        });
+    });
+
+    it('derives release and turnout thresholds at the roster extremes', () => {
+        expect(compileThresholdCompletionProfile(3)).toMatchObject({
+            maximumCorruptParticipantCount: 0,
+            inventoryCertificateThreshold: 3,
+            resultReleaseThreshold: 2,
+            minimumTurnout: 2,
+            noResultForceableAtFullHonestTurnout: false,
+            mandatoryReleaseParticipantCount: 0,
+        });
+        expect(compileThresholdCompletionProfile(20)).toMatchObject({
+            maximumCorruptParticipantCount: 6,
+            resultReleaseThreshold: 7,
+            minimumTurnout: 8,
+            noResultForceableAtFullHonestTurnout: false,
         });
     });
 
@@ -50,6 +69,17 @@ describe('threshold completion model', () => {
                 profile.maximumCorruptParticipantCount,
             );
             expect(profile.mandatoryReleaseParticipantCount).toBe(0);
+            expect(profile.resultReleaseThreshold).toBeGreaterThanOrEqual(2);
+            expect(profile.resultReleaseThreshold).toBeLessThan(
+                profile.participantCount,
+            );
+            expect(
+                profile.minimumTurnout - profile.maximumCorruptParticipantCount,
+            ).toBe(2);
+            expect(profile.noResultForceableAtFullHonestTurnout).toBe(
+                profile.participantCount ===
+                    3 * profile.maximumCorruptParticipantCount + 1,
+            );
         }
     });
 

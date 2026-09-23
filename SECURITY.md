@@ -18,14 +18,16 @@ Do not attach real election data, private keys, ballots, shares, witnesses, auth
 ## Intended security model
 
 - For a frozen roster of `n` participants, let `f = floor((n - 1) / 3)`, the largest whole number below one third of `n`. The adversary is quantum polynomial time and statically compromises at most `f` participants in total; active and passive compromise are one budget.
+- The security argument may model SHAKE as an ideal random function and rely on the standard assumptions of the NIST post-quantum algorithms it uses. These are stated assumptions; every other assumption remains an open gap until it is reduced or removed.
 - The compromised participants and every relay may collude, equivocate, replay, reorder, delay, omit, replace, or withhold messages. Invalid actions are ignored. If too few valid actions remain, the poll stays unresolved.
-- Completion assumes eventual delivery among cooperating honest participants. Permanent suppression of every communication path may prevent completion.
-- The protocol protects scores, totals, margins, intermediate comparisons, and ranks. Public ballot information is limited to the frozen roster, submission authorship, acceptance, whether any ballot was accepted, and the requested terminal result.
+- Completion assumes eventual delivery among cooperating honest participants and that published records remain retrievable through at least one path after their authors leave. Permanent suppression of every communication path may prevent completion.
+- The protocol protects scores, totals, margins, intermediate comparisons, and ranks. Public ballot information is limited to the frozen roster, submission authorship, signed ballot times, the close time, which participants reported holding each submission, acceptance, whether enough ballots were accepted for a result, and the requested terminal result.
 - The organizer may request ballot closing, sets its public close time, and proposes the closed inventory from participants' close responses. It has no special cryptographic key, tally authority, or result authority, and its choice of close responses is limited to the bounded omission below.
-- Every accepted ballot must be counted exactly once. Invalid, missing, and late ballots do not count and do not abort the poll. A ballot is late when its signed ballot time is after the close time. The close time is public, so a backdated close is visible but not prevented.
-- Closing completes once `n-f` participants, including the organizer, have sent close responses, so up to `f` participants who never vote and leave cannot block it. When `f` is zero, closing needs every participant, as the inventory certificate already does. The cost is bounded omission: a malicious relay, alone or with the organizer, can omit up to `f` on-time ballots that it kept from every participant whose response is used. A ballot held by at least `f+1` honest participants, or by an honest organizer, when they respond is always counted. Each affected voter is shown that its ballot was not included but cannot prove who omitted it. When at most `f+1` honest participants vote, the omission can expose one voter's ranking through the result.
+- When a result is released, every accepted ballot must be counted exactly once. Invalid, missing, and late ballots do not count and do not abort the poll. A ballot is late when its signed ballot time is after the close time. The organizer can choose a close time earlier than the moment it closes, which excludes every ballot timed after it; the close time is public, but this cannot be prevented. An honest voter whose clock runs ahead can also be classified late.
+- Closing completes once `n-f` participants, including the organizer, have sent close responses, so up to `f` participants in total who leave, lose their state, or refuse cannot block it. When `f` is zero, closing needs every participant, as the inventory certificate already does. The cost is bounded omission: up to `f` on-time ballots can be left out, by a malicious relay, alone or with the organizer, or by ordinary delays, and only ballots kept from every participant whose response is used. A ballot held by at least `f+1` honest participants, or by an honest organizer, when they respond is always included. Each affected voter is shown that its ballot was not included but cannot prove who omitted it.
+- A result is released only when at least `f+2` ballots are accepted. At most `f` accepted ballots can be the adversary's, so every result combines at least two honest ballots and cannot isolate one voter's ranking. The cost is that a malicious relay working with compromised participants who do not vote can push a poll below that minimum and force the no-result outcome; when `n = 3f + 1`, this works even if every honest participant votes.
 - The application and library must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or any path that bypasses certified target-bound result release.
-- Before the disappearance guarantee begins, `n-f` matching signatures must certify the closed inventory and exact result target. After that boundary, any `f+1` valid target-bound release shares must suffice, even after any `f` participants disappear.
+- Before the disappearance guarantee begins, `n-f` matching signatures must certify the closed inventory and exact result target. After that boundary, any `max(f+1, 2)` valid target-bound release shares must suffice, even after any `f` participants disappear, and no single participant can decrypt anything.
 - Missing, stale, inconsistent, or corrupt local state stops that participant. It never enables a retry, replacement, roster change, threshold reduction, alternate target, or unverified result.
 - A verified result or no-result transcript must be independently retrievable and verifiable without another participant returning.
 
@@ -45,7 +47,7 @@ The current research direction cannot advance beyond research status until all o
 - an asynchronous close rule that completes from the close responses of any `n-f` participants including the organizer and limits a malicious relay or organizer to the bounded omission above;
 - a publicly verifiable ballot proof for complete `1..10` score vectors with exact QPT extraction and zero knowledge;
 - deterministic encrypted ranking that reveals only the requested option identifiers and has exact FHE correctness and security parameters;
-- publicly verifiable, chosen-ciphertext-safe release shares for only the certified target, with any `f+1` valid shares reconstructing identically;
+- publicly verifiable, chosen-ciphertext-safe release shares for only the certified target, with any `max(f+1, 2)` valid shares reconstructing identically;
 - one chronological composition argument covering setup, publication, proofs, encryption, finality, release, forks, replay, and unresolved behavior in a consistent QPT model;
 - concrete security and failure accounting meeting the end-to-end target;
 - production-derived resource, storage, restart, and visit bounds for scalar browser WebAssembly;
@@ -59,7 +61,7 @@ A lattice or hash primitive does not make the composed protocol post-quantum sec
 The security target does not cover:
 
 - later or adaptive compromise;
-- compromised participant devices or malicious delivered application code;
+- compromised devices beyond the compromised participants above, or malicious delivered application code;
 - data already available on a compromised device;
 - coercion resistance, receipt freeness, real-world identity verification, or duplicate-person prevention;
 - complete browser-profile copying or coherent rollback;

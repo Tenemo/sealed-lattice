@@ -50,7 +50,12 @@ describe('documentation census generator', () => {
         ]) {
             expect(rendered).toContain(`\n${heading}\n`);
         }
-        expect(rendered).toContain('| 10 | 3 | 7 | 4 | 10 | 4 | 4 | 6 | 0 |');
+        expect(rendered).toContain(
+            '| 10 | 3 | 7 | 4 | 5 | yes | 10 | 4 | 4 | 6 | 0 |',
+        );
+        expect(rendered).toContain(
+            '| 3 | 0 | 3 | 2 | 2 | no | 3 | 3 | 3 | 0 | 0 |',
+        );
         expect(rendered).toContain(
             '| Authorized release subsets checked | `210` |',
         );

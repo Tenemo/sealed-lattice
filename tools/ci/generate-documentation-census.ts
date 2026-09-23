@@ -311,7 +311,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](non-forking-state.md#release-threshold-under-the-candidate-availability-model); its responder floor is not an additional mandatory fault budget.',
         '',
-        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, and result-release threshold `d = f + 1`. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
+        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, and minimum turnout `m = f + 2` accepted ballots. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
         '',
         table(
             [
@@ -319,6 +319,8 @@ export const renderDocumentationCensus = (): string => {
                 'Maximum corrupt',
                 'Inventory certificate',
                 'Result release',
+                'Minimum turnout',
+                'No result forceable at full honest turnout',
                 'Setup receipts',
                 'Guaranteed honest responders / publication waiters',
                 'Minimum certificate intersection',
@@ -333,6 +335,8 @@ export const renderDocumentationCensus = (): string => {
                 String(profile.maximumCorruptParticipantCount),
                 String(profile.inventoryCertificateThreshold),
                 String(profile.resultReleaseThreshold),
+                String(profile.minimumTurnout),
+                profile.noResultForceableAtFullHonestTurnout ? 'yes' : 'no',
                 String(profile.setupReceiptThreshold),
                 String(profile.guaranteedHonestResponderCount),
                 String(profile.minimumCertificateIntersection),

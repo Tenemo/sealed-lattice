@@ -209,6 +209,8 @@ export type ThresholdCompletionProfile = Readonly<{
     maximumCorruptParticipantCount: number;
     inventoryCertificateThreshold: number;
     resultReleaseThreshold: number;
+    minimumTurnout: number;
+    noResultForceableAtFullHonestTurnout: boolean;
     setupReceiptThreshold: number;
     guaranteedHonestResponderCount: number;
     minimumHonestVerifiedShareCountAfterDisappearance: number;
@@ -243,7 +245,11 @@ export const compileThresholdCompletionProfile = (
     );
     const inventoryCertificateThreshold =
         participantCount - maximumCorruptParticipantCount;
-    const resultReleaseThreshold = maximumCorruptParticipantCount + 1;
+    const resultReleaseThreshold = Math.max(
+        maximumCorruptParticipantCount + 1,
+        2,
+    );
+    const minimumTurnout = maximumCorruptParticipantCount + 2;
     const setupReceiptThreshold = participantCount;
     const mandatoryReleaseParticipantCount =
         binomial(participantCount - 1, resultReleaseThreshold) === 0n
@@ -262,8 +268,16 @@ export const compileThresholdCompletionProfile = (
         2 * maximumCorruptParticipantCount;
     const minimumCertificateIntersection =
         2 * inventoryCertificateThreshold - participantCount;
+    // With every honest participant voting, the adversary can omit f honest
+    // ballots while every corrupt participant abstains.
+    const noResultForceableAtFullHonestTurnout =
+        participantCount - 2 * maximumCorruptParticipantCount < minimumTurnout;
 
     if (
+        resultReleaseThreshold < 2 ||
+        resultReleaseThreshold >= participantCount ||
+        minimumTurnout - maximumCorruptParticipantCount < 2 ||
+        participantCount - maximumCorruptParticipantCount < minimumTurnout ||
         maximumCorruptParticipantCount >= resultReleaseThreshold ||
         guaranteedHonestResponderCount < resultReleaseThreshold ||
         minimumHonestVerifiedShareCountAfterDisappearance <
@@ -352,6 +366,8 @@ export const compileThresholdCompletionProfile = (
         maximumCorruptParticipantCount,
         inventoryCertificateThreshold,
         resultReleaseThreshold,
+        minimumTurnout,
+        noResultForceableAtFullHonestTurnout,
         setupReceiptThreshold,
         guaranteedHonestResponderCount,
         minimumHonestVerifiedShareCountAfterDisappearance,
