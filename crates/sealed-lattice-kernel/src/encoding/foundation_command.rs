@@ -81,9 +81,7 @@ fn verify_manifest(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
 
 fn encode_action_definition(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
     let top_count = reader.read_u16()?;
-    let submission_cutoff_unix_milliseconds = reader.read_u64()?;
-    let action_definition = ActionDefinition::new(top_count, submission_cutoff_unix_milliseconds)
-        .map_err(schema_error)?;
+    let action_definition = ActionDefinition::new(top_count).map_err(schema_error)?;
     let canonical_bytes = action_definition.encode().map_err(schema_error)?;
     let action_definition_hash = action_definition
         .action_definition_hash()
@@ -191,8 +189,7 @@ fn verify_action_context(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u
         response.write_fixed(context.ceremony_context_hash().as_bytes())?;
         response.write_fixed(context.action_definition_hash().as_bytes())?;
         response.write_fixed(context.board_policy_hash().as_bytes())?;
-        response.write_fixed(context.context_hash().as_bytes())?;
-        response.write_fixed(context.submission_cutoff_hash().as_bytes())
+        response.write_fixed(context.context_hash().as_bytes())
     })
 }
 

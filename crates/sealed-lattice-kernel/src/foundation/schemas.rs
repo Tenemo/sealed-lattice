@@ -392,13 +392,6 @@ pub(super) fn read_u16(item: &CanonicalItem) -> SchemaResult<u16> {
     Ok(u16::from_le_bytes(bytes))
 }
 
-pub(super) fn read_u64(item: &CanonicalItem) -> SchemaResult<u64> {
-    let bytes: [u8; 8] = read_item(item, CanonicalItemType::Unsigned64)?
-        .try_into()
-        .map_err(|_| FoundationSchemaError::new(RefusalReason::MalformedEncoding, "u64 length"))?;
-    Ok(u64::from_le_bytes(bytes))
-}
-
 pub(super) fn read_ascii(item: &CanonicalItem) -> SchemaResult<&str> {
     str::from_utf8(read_variable_item(item, CanonicalItemType::Ascii)?).map_err(|_| {
         FoundationSchemaError::new(RefusalReason::MalformedEncoding, "ASCII item is invalid")

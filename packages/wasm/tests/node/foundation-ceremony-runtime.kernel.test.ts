@@ -137,7 +137,6 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
     it('roundtrips action and board values through the binary command boundary', async () => {
         const runtime = await loadRuntime();
         const actionDefinition = runtime.encodeActionDefinition({
-            submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
             topCount: 2,
         });
         expect(
@@ -162,7 +161,6 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
         const runtime = await loadRuntime();
         const manifest = runtime.encodeManifest(manifestInput(2));
         const actionDefinition = runtime.encodeActionDefinition({
-            submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
             topCount: 2,
         });
         const boardPolicy = runtime.encodeBoardPolicy({

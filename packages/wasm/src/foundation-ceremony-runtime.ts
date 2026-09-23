@@ -70,14 +70,12 @@ export type FoundationActionContextVerification = VerificationResult<{
     readonly boardPolicyHash: ProtocolHash;
     readonly ceremonyContextHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly submissionCutoffHash: ProtocolHash;
     readonly suiteId: ProtocolHash;
 }>;
 
 export type FoundationCeremonyRuntime = PublicArchiveRuntime &
     Readonly<{
         encodeActionDefinition(input: {
-            readonly submissionCutoffUnixMilliseconds: bigint;
             readonly topCount: number;
         }): CanonicalFoundationActionDefinition;
         encodeBoardPolicy(input: {
@@ -471,10 +469,6 @@ export const openFoundationCeremonyRuntime = (
         const request = new BinaryWriter();
         request.writeU8(encodeActionDefinitionCommand);
         request.writeU16(input.topCount, 'topCount');
-        request.writeU64(
-            input.submissionCutoffUnixMilliseconds,
-            'submissionCutoffUnixMilliseconds',
-        );
         return executeCommand(kernel, request, (reader) => ({
             canonicalBytes: Uint8Array.from(reader.readBytes()),
             actionDefinitionHash: readHash(reader),
@@ -570,7 +564,6 @@ export const openFoundationCeremonyRuntime = (
                 actionDefinitionHash: readHash(response),
                 boardPolicyHash: readHash(response),
                 actionContextHash: readHash(response),
-                submissionCutoffHash: readHash(response),
             })),
         );
     },

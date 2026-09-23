@@ -95,7 +95,6 @@ export const verifyCanonicalManifest = async (
     (await loadFoundationCeremonyRuntime()).verifyManifest(canonicalBytes);
 
 export const createCanonicalActionDefinition = async (input: {
-    readonly submissionCutoffUnixMilliseconds: bigint;
     readonly topCount: number;
 }): Promise<CanonicalFoundationActionDefinition> =>
     (await loadFoundationCeremonyRuntime()).encodeActionDefinition(input);

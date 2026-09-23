@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::{
-    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_u64,
-    read_variable_item, require_header,
+    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_variable_item,
+    require_header,
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -24,7 +24,6 @@ const ACTION_DEFINITION_HASH_DOMAIN: &str = "sealed-lattice/foundation/action-de
 const BOARD_POLICY_HASH_DOMAIN: &str = "sealed-lattice/foundation/board-policy/v1";
 const CEREMONY_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/foundation/ceremony-context/v1";
 const ACTION_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/foundation/action-context/v1";
-const SUBMISSION_CUTOFF_HASH_DOMAIN: &str = "sealed-lattice/foundation/submission-cutoff/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptionDefinition {
@@ -226,31 +225,24 @@ impl Manifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionDefinition {
     top_count: u16,
-    submission_cutoff_unix_milliseconds: u64,
 }
 
 impl ActionDefinition {
-    pub fn new(top_count: u16, submission_cutoff_unix_milliseconds: u64) -> SchemaResult<Self> {
+    pub fn new(top_count: u16) -> SchemaResult<Self> {
         if top_count == 0 || top_count > MAXIMUM_CONFIGURABLE_OPTION_COUNT {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "action top count is outside the supported profile",
             ));
         }
-        Ok(Self {
-            top_count,
-            submission_cutoff_unix_milliseconds,
-        })
+        Ok(Self { top_count })
     }
 
     fn canonical_tuple(self) -> CanonicalTuple {
         CanonicalTuple::new(
             ACTION_DEFINITION_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.top_count),
-                CanonicalItem::unsigned64(self.submission_cutoff_unix_milliseconds),
-            ],
+            vec![CanonicalItem::unsigned16(self.top_count)],
         )
     }
 
@@ -260,8 +252,8 @@ impl ActionDefinition {
 
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, ACTION_DEFINITION_SCHEMA_IDENTIFIER, 2)?;
-        Self::new(read_u16(&tuple.items[0])?, read_u64(&tuple.items[1])?)
+        require_header(&tuple, ACTION_DEFINITION_SCHEMA_IDENTIFIER, 1)?;
+        Self::new(read_u16(&tuple.items[0])?)
     }
 
     pub fn action_definition_hash(self) -> SchemaResult<Hash512> {
@@ -386,7 +378,6 @@ pub struct ActionContext {
     action_definition_hash: Hash512,
     board_policy_hash: Hash512,
     context_hash: Hash512,
-    submission_cutoff_hash: Hash512,
 }
 
 impl ActionContext {
@@ -414,13 +405,6 @@ impl ActionContext {
                 CanonicalItem::hash512(board_policy_hash.into_bytes()),
             ],
         )?;
-        let submission_cutoff_hash = hash_foundation_tuple_512(
-            SUBMISSION_CUTOFF_HASH_DOMAIN,
-            &[
-                CanonicalItem::hash512(context_hash.into_bytes()),
-                CanonicalItem::unsigned64(action_definition.submission_cutoff_unix_milliseconds),
-            ],
-        )?;
         Ok(Self {
             suite_id: ceremony_context.suite_id,
             roster_hash: ceremony_context.roster_hash,
@@ -428,7 +412,6 @@ impl ActionContext {
             action_definition_hash,
             board_policy_hash,
             context_hash,
-            submission_cutoff_hash,
         })
     }
 
@@ -454,10 +437,6 @@ impl ActionContext {
 
     pub const fn context_hash(&self) -> Hash512 {
         self.context_hash
-    }
-
-    pub const fn submission_cutoff_hash(&self) -> Hash512 {
-        self.submission_cutoff_hash
     }
 }
 
@@ -724,8 +703,7 @@ mod tests {
     #[test]
     fn action_and_board_values_round_trip_and_reject_genuine_boundary_errors() {
         for top_count in [1, MAXIMUM_CONFIGURABLE_OPTION_COUNT] {
-            let action =
-                ActionDefinition::new(top_count, u64::MAX).expect("boundary top count is valid");
+            let action = ActionDefinition::new(top_count).expect("boundary top count is valid");
             assert_eq!(
                 ActionDefinition::decode(
                     &action.encode().expect("action encodes"),
@@ -737,12 +715,24 @@ mod tests {
         }
         for top_count in [0, MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1] {
             assert_eq!(
-                ActionDefinition::new(top_count, 0)
+                ActionDefinition::new(top_count)
                     .expect_err("out-of-range top count must refuse")
                     .refusal_reason,
                 RefusalReason::OutsideSupportedProfile
             );
         }
+        // The definition carries no clock; the former cutoff item is refused.
+        let with_cutoff = CanonicalTuple::new(
+            ACTION_DEFINITION_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned16(2),
+                CanonicalItem::unsigned64(1_800_000_000_000),
+            ],
+        )
+        .encode()
+        .expect("two-item action tuple encodes");
+        assert!(ActionDefinition::decode(&with_cutoff, &CanonicalDecodeLimits::default()).is_err());
 
         let board_policy =
             BoardPolicy::new("https://board.example".to_owned()).expect("board policy is valid");
@@ -774,7 +764,7 @@ mod tests {
             ActionContext::new(
                 &ceremony,
                 "too-wide-action".to_owned(),
-                ActionDefinition::new(PROTOTYPE_OPTION_COUNT, 0)
+                ActionDefinition::new(PROTOTYPE_OPTION_COUNT)
                     .expect("top count remains structurally bounded"),
                 &board_policy,
             )
@@ -792,8 +782,7 @@ mod tests {
         let ceremony =
             CeremonyContext::new(suite_id, &manifest, &roster, "ceremony-2026".to_owned())
                 .expect("schema-level ceremony context derives");
-        let action_definition =
-            ActionDefinition::new(7, 1_800_000_000_000).expect("action definition is valid");
+        let action_definition = ActionDefinition::new(7).expect("action definition is valid");
         let board_policy =
             BoardPolicy::new("board.example".to_owned()).expect("board policy is valid");
         let action = ActionContext::new(
@@ -834,10 +823,6 @@ mod tests {
         )
         .expect("changed action context derives");
         assert_ne!(changed_action.context_hash(), action.context_hash());
-        assert_ne!(
-            changed_action.submission_cutoff_hash(),
-            action.submission_cutoff_hash()
-        );
 
         for invalid_identifier in [
             String::new(),

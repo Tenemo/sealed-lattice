@@ -11,7 +11,6 @@ const run = async (participantCount: number, optionCount: number) => {
         ),
     });
     const definition = await sdk.createCanonicalActionDefinition({
-        submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
         topCount: optionCount,
     });
     const policy = await sdk.createCanonicalBoardPolicy({
@@ -66,7 +65,6 @@ const run = async (participantCount: number, optionCount: number) => {
     );
     const afterInvalid = await sdk.verifyCanonicalActionContext(actionInput);
     const oversizedResult = await sdk.createCanonicalActionDefinition({
-        submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
         topCount: 20,
     });
     const archive = await sdk.createPublicArchive({
