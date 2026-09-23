@@ -154,3 +154,73 @@ impl RegistrationVerifier {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Credential,
+        foundation::{
+            StabilizedDisplayText,
+            ceremony::{Manifest, OptionDefinition},
+            normalize_username,
+        },
+        poll::{PollDraft, verify_poll},
+        roster::RosterProposal,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn roster_sizes_outside_the_research_profile_are_refused_at_proposal() {
+        let text =
+            |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
+        let options = (0..10)
+            .map(|index| {
+                OptionDefinition::new(
+                    index,
+                    format!("option-{index}"),
+                    text(&format!("Option {index}")),
+                )
+                .unwrap()
+            })
+            .collect();
+        let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1).unwrap();
+        let mut organizer = Credential::from_seeds([1; 32], [2; 32], [3; 32]);
+        let packet = organizer
+            .create_poll(draft, [4; 64], [5; 32], [6; 32])
+            .unwrap();
+        let poll = verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap();
+        // A roster proposal reads only the verified headers and body digests,
+        // so these records need no registration proof.
+        let record = |credential: &Credential| {
+            Arc::new(VerifiedRegistration {
+                header: RegistrationHeader {
+                    username: normalize_username(b"Participant").unwrap(),
+                    poll: poll.identity(),
+                    runtime: poll.runtime(),
+                    signing_public: *credential.signing_public(),
+                    mailbox_public: *credential.mailbox_public(),
+                    recipient_key_hash: [0; 64],
+                    proof_length: 0,
+                },
+                body_digest: [0; 64],
+                proof_hash: [0; 64],
+                public_key: Vec::new(),
+            })
+        };
+        let members: Vec<_> = (10..29)
+            .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))
+            .collect();
+        let proposal = |size: usize| {
+            let records = std::iter::once(&organizer)
+                .chain(&members[..size - 1])
+                .map(record)
+                .collect();
+            RosterProposal::new(&poll, records)
+        };
+        for size in [3, 9, 11, 20] {
+            assert!(matches!(proposal(size), Err(Error::Shape)));
+        }
+        assert!(proposal(10).is_ok());
+    }
+}
