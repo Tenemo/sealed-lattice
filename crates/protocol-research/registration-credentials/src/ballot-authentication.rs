@@ -4,10 +4,13 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
+use stateful_sha3::{Digest, Sha3_512};
 use zeroize::Zeroizing;
 
 pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
 pub const ENVELOPE_BYTES: usize = 4 + 64 + 64 + 2 + 8 + 64;
+pub const RETAINED_SETUP_TAG_BYTES: usize = 64;
+const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v1";
 
 /// Original credential correspondence beneath the authenticated participant root.
 /// This creates no public roster, setup, ballot, or unspent-attempt capability.
@@ -100,6 +103,43 @@ impl BallotEnvelope {
 }
 
 impl Credential {
+    /// Keys a retained setup reference to this credential's secret seed. Only
+    /// the transition that consumes the owning setup verifier requests a tag, so
+    /// a later private operation can refuse references it did not produce. The
+    /// tag is local custody evidence, not a public setup capability.
+    pub fn retained_setup_tag(
+        &self,
+        poll: &VerifiedPoll,
+        reference: &[u8],
+    ) -> [u8; RETAINED_SETUP_TAG_BYTES] {
+        let mut hash = Sha3_512::new();
+        hash.update((RETAINED_SETUP_TAG_LABEL.len() as u64).to_le_bytes());
+        hash.update(RETAINED_SETUP_TAG_LABEL);
+        hash.update(self.signing_seed.as_slice());
+        hash.update(poll.identity());
+        hash.update(poll.runtime());
+        hash.update((reference.len() as u64).to_le_bytes());
+        hash.update(reference);
+        hash.finalize().into()
+    }
+    pub fn check_retained_setup_tag(
+        &self,
+        poll: &VerifiedPoll,
+        reference: &[u8],
+        tag: &[u8],
+    ) -> Result<(), Error> {
+        let expected = self.retained_setup_tag(poll, reference);
+        if tag.len() != expected.len()
+            || tag
+                .iter()
+                .zip(expected)
+                .fold(0, |difference, (left, right)| difference | (left ^ right))
+                != 0
+        {
+            return Err(Error::Crypto);
+        }
+        Ok(())
+    }
     pub(crate) fn check_ballot_owner(&self, owner: &RetainedBallotOwner) -> Result<(), Error> {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
@@ -300,6 +340,86 @@ pub fn verify_ballot_signature(
 mod tests {
     use super::*;
     use crate::ballot_body::*;
+    use crate::foundation::{
+        StabilizedDisplayText,
+        ceremony::{Manifest, OptionDefinition},
+    };
+    use crate::poll::{PollDraft, verify_poll};
+    fn verified_poll(runtime: [u8; 64]) -> VerifiedPoll {
+        let label =
+            |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
+        let options = (0..10)
+            .map(|index| {
+                OptionDefinition::new(
+                    index,
+                    format!("option-{index}"),
+                    label(&format!("O{index}")),
+                )
+                .unwrap()
+            })
+            .collect();
+        let draft = PollDraft::new(Manifest::new(label("Question"), options).unwrap(), 10).unwrap();
+        let packet = Credential::from_seeds([20; 32], [21; 32], [22; 32])
+            .create_poll(draft, runtime, [3; 32], [4; 32])
+            .unwrap();
+        verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap()
+    }
+    #[test]
+    fn retained_setup_tags_bind_the_credential_poll_and_exact_reference() {
+        let participant = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let same_seed = Credential::from_seeds([7; 32], [11; 32], [12; 32]);
+        let other = Credential::from_seeds([10; 32], [8; 32], [9; 32]);
+        let poll = verified_poll([2; 64]);
+        let reference = [b"SAV1".as_slice(), &[5; 64], &[6; 128]].concat();
+        let tag = participant.retained_setup_tag(&poll, &reference);
+        assert!(
+            participant
+                .check_retained_setup_tag(&poll, &reference, &tag)
+                .is_ok()
+        );
+        // The key is the signing seed alone, so a restored credential accepts
+        // its earlier tag while every other credential refuses it.
+        assert!(
+            same_seed
+                .check_retained_setup_tag(&poll, &reference, &tag)
+                .is_ok()
+        );
+        assert!(
+            other
+                .check_retained_setup_tag(&poll, &reference, &tag)
+                .is_err()
+        );
+        assert!(
+            participant
+                .check_retained_setup_tag(&verified_poll([9; 64]), &reference, &tag)
+                .is_err()
+        );
+        let mut changed = reference.clone();
+        changed[70] ^= 1;
+        let extended = [reference.as_slice(), &[0]].concat();
+        for candidate in [&changed[..], &reference[..reference.len() - 1], &extended] {
+            assert!(
+                participant
+                    .check_retained_setup_tag(&poll, candidate, &tag)
+                    .is_err()
+            );
+        }
+        let mut forged = tag;
+        forged[RETAINED_SETUP_TAG_BYTES - 1] ^= 1;
+        let long_tag = [tag.as_slice(), &[0]].concat();
+        for candidate in [
+            &forged[..],
+            &tag[..RETAINED_SETUP_TAG_BYTES - 1],
+            &long_tag,
+            &[],
+        ] {
+            assert!(
+                participant
+                    .check_retained_setup_tag(&poll, &reference, candidate)
+                    .is_err()
+            );
+        }
+    }
     #[test]
     fn envelope_lengths_and_positions_are_bounded_before_body_work() {
         let minimum = HEADER_BYTES + CIPHERTEXT_BYTES + MINIMUM_PROOF_BYTES;

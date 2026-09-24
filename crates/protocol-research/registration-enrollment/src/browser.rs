@@ -794,6 +794,30 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
     })
 }
 
+/// Emits the retained setup reference from this instance's completed owning
+/// setup verifier, keyed to the restored credential. No caller-supplied digest
+/// or status can enter it.
+#[unsafe(no_mangle)]
+pub extern "C" fn retain_setup() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.contribution_output.clear();
+        let Some(enrollment) = state.enrollment.as_ref() else {
+            return 1;
+        };
+        let Some((poll, setup)) = setup_aggregate::setup_browser::context() else {
+            return 1;
+        };
+        let Ok(reference) =
+            crate::ballot::retained_setup_reference(&enrollment.credential, &poll, &setup)
+        else {
+            return 1;
+        };
+        state.contribution_output = reference;
+        0
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn retained_proposal_identity_pointer() -> usize {
     SESSION.with(|state| {

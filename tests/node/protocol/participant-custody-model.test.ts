@@ -17,9 +17,10 @@ describe('shared participant custody', () => {
         expect(value.maximumRootRecords).toBe(
             compileRegistrationEnrollmentCensus().maximumRecords + 1n,
         );
-        expect(value.setupReferenceBytes).toBe(
-            4n + 64n + 64n * BigInt(body.polynomials.length),
-        );
+        // The marker, inventory identity, and SHA-512 digests of the 45
+        // aggregate polynomials, followed by a 64-byte SHA3-512 tag.
+        expect(body.polynomials).toHaveLength(45);
+        expect(value.setupReferenceBytes).toBe(4n + 64n + 45n * 64n + 64n);
         expect(value.publicRecords.some((record) => record.object === 0)).toBe(
             false,
         );

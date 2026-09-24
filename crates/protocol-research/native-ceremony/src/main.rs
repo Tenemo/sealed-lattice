@@ -7,7 +7,7 @@ mod no_result_publication;
 mod public_output;
 mod publication;
 use registration_credentials::{
-    ballot_authentication::BallotEnvelope,
+    ballot_authentication::{BallotEnvelope, RETAINED_SETUP_TAG_BYTES},
     contribution_authentication::{CommitmentInventory, SignedOpening, verify_confirmation},
     foundation::{
         StabilizedDisplayText,
@@ -63,7 +63,6 @@ struct BallotInputs<'a> {
     poll: &'a Arc<VerifiedPoll>,
     setup: &'a Arc<VerifiedSetupAggregate>,
     definition: &'a SignedPoll,
-    retained_record: &'a [u8],
     final_keys: &'a Path,
     directory: &'a Path,
 }
@@ -90,6 +89,12 @@ impl BallotInputs<'_> {
             opening.signature(),
         ]
         .concat();
+        let retained_reference = registration_enrollment::ballot::retained_setup_reference(
+            &enrollment.credential,
+            self.poll,
+            self.setup,
+        )
+        .unwrap();
         let control = [
             self.poll.identity().as_slice(),
             self.poll.runtime().as_slice(),
@@ -99,7 +104,7 @@ impl BallotInputs<'_> {
             self.setup.inventory().identity().as_slice(),
             (opening_packet.len() as u32).to_le_bytes().as_slice(),
             opening_packet.as_slice(),
-            self.retained_record,
+            retained_reference.as_slice(),
         ]
         .concat();
         let credential = &mut enrollment.credential;
@@ -484,14 +489,16 @@ fn main() {
             )
             .is_err()
     );
-    let mut retained_record = Vec::from(b"SAV1".as_slice());
-    retained_record.extend(inventory.identity());
-    for polynomial in setup.polynomials() {
-        retained_record.extend(polynomial.digest());
-    }
+    let retained_reference = registration_enrollment::ballot::retained_setup_reference(
+        &enrollments[0].credential,
+        &poll,
+        &setup,
+    )
+    .unwrap();
+    let retained_record =
+        &retained_reference[..retained_reference.len() - RETAINED_SETUP_TAG_BYTES];
     let inputs =
-        setup_aggregate::RetainedSetupInputs::parse(&retained_record, inventory.identity())
-            .unwrap();
+        setup_aggregate::RetainedSetupInputs::parse(retained_record, inventory.identity()).unwrap();
     let private_context = ballot_encryption::context::BallotComputationContext::from_retained(
         poll.clone(),
         &owner,
@@ -508,18 +515,41 @@ fn main() {
         openings[0].signature(),
     ]
     .concat();
-    let ballot_control = [
-        poll.identity().as_slice(),
-        poll.runtime().as_slice(),
-        (packet.body.len() as u32).to_le_bytes().as_slice(),
-        packet.body.as_slice(),
-        packet.signature.as_slice(),
-        inventory.identity().as_slice(),
-        (opening_packet.len() as u32).to_le_bytes().as_slice(),
-        opening_packet.as_slice(),
-        retained_record.as_slice(),
-    ]
-    .concat();
+    let control_with_reference = |reference: &[u8]| {
+        [
+            poll.identity().as_slice(),
+            poll.runtime().as_slice(),
+            (packet.body.len() as u32).to_le_bytes().as_slice(),
+            packet.body.as_slice(),
+            packet.signature.as_slice(),
+            inventory.identity().as_slice(),
+            (opening_packet.len() as u32).to_le_bytes().as_slice(),
+            opening_packet.as_slice(),
+            reference,
+        ]
+        .concat()
+    };
+    // A reference keyed to another credential, a changed digest under the
+    // original tag, and an untagged record are all refused before any work.
+    let foreign_reference = registration_enrollment::ballot::retained_setup_reference(
+        &enrollments[1].credential,
+        &poll,
+        &setup,
+    )
+    .unwrap();
+    let mut changed_digest = retained_reference.clone();
+    changed_digest[4 + 64] ^= 1;
+    for reference in [&foreign_reference[..], &changed_digest, retained_record] {
+        assert!(
+            registration_enrollment::ballot::BallotWork::new(
+                &enrollments[0].credential,
+                &retained_proposal,
+                &control_with_reference(reference),
+            )
+            .is_err()
+        );
+    }
+    let ballot_control = control_with_reference(&retained_reference);
     let mut work = registration_enrollment::ballot::BallotWork::new(
         &enrollments[0].credential,
         &retained_proposal,
@@ -963,7 +993,6 @@ fn main() {
         poll: &poll,
         setup: &setup,
         definition: &packet,
-        retained_record: &retained_record,
         final_keys: &final_keys,
         directory: &ballot_directory,
     };

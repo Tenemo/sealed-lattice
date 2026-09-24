@@ -1,13 +1,31 @@
 use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
 use registration_credentials::{
     Credential, Error,
-    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
-    poll::verify_poll,
+    ballot_authentication::{
+        BallotEnvelope, ENVELOPE_BYTES, RETAINED_SETUP_TAG_BYTES, RetainedBallotOwner,
+    },
+    poll::{VerifiedPoll, verify_poll},
     roster::RetainedContributionContext,
 };
-use setup_aggregate::{RetainedAggregatePolynomial, RetainedPolynomialReader, RetainedSetupInputs};
+use setup_aggregate::{
+    RetainedAggregatePolynomial, RetainedPolynomialReader, RetainedSetupInputs,
+    verified::VerifiedSetupAggregate,
+};
 use std::sync::Arc;
 use zeroize::Zeroizing;
+
+/// The only producer of a retained setup reference: it encodes the owning
+/// setup verifier's result and keys it to the participant's credential.
+pub fn retained_setup_reference(
+    credential: &Credential,
+    poll: &VerifiedPoll,
+    setup: &VerifiedSetupAggregate,
+) -> Result<Vec<u8>, Error> {
+    let mut reference = RetainedSetupInputs::reference(setup).map_err(|_| Error::Context)?;
+    let tag = credential.retained_setup_tag(poll, &reference);
+    reference.extend(tag);
+    Ok(reference)
+}
 
 /// Volatile private operations beneath the authenticated parent's ballot phases.
 /// No operation loads a public setup capability from saved records.
@@ -74,8 +92,16 @@ impl BallotWork {
             &input[offset + 4 + opening_length..offset + packet_length],
         )?;
         offset += packet_length;
+        let retained = &input[offset..];
+        let (reference, tag) = retained.split_at(
+            retained
+                .len()
+                .checked_sub(RETAINED_SETUP_TAG_BYTES)
+                .ok_or(Error::Shape)?,
+        );
+        credential.check_retained_setup_tag(&poll, reference, tag)?;
         let inputs =
-            RetainedSetupInputs::parse(&input[offset..], inventory).map_err(|_| Error::Context)?;
+            RetainedSetupInputs::parse(reference, inventory).map_err(|_| Error::Context)?;
         let context = BallotComputationContext::from_retained(poll, &owner, &inputs)
             .map_err(|_| Error::Context)?;
         Ok(Self {

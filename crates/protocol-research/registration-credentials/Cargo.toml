@@ -16,6 +16,7 @@ aes = { version = "=0.8.4", features = ["zeroize"] }
 fips203 = { version = "=0.4.3", default-features = false, features = ["ml-kem-768"] }
 fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
 sha3 = "=0.10.9"
+stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
 unicode-normalization = "=0.1.25"
 zeroize = "=1.8.2"
 registration-proof = { path = "../registration-proof", default-features = false }

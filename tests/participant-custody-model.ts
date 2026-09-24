@@ -62,8 +62,10 @@ export const compileParticipantCustodyCensus = () => {
             : maximumCompletedMetadataBytes;
     const maximumRootRecords = enrollment.maximumRecords + 1n;
     const ballot = compileParticipantBallotCustody();
+    // Marker, inventory identity, one digest per aggregate polynomial, and the
+    // credential-keyed SHA3-512 tag that the ballot step checks before parsing.
     const setupReferenceBytes =
-        4n + 64n + 64n * BigInt(body.polynomials.length);
+        4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
     const maximumWithBallot =
         maximumCompletedMetadataBytes + 4n + ballot.maximumStateBytes;
     const completedBallotBytes = ballot.phaseBytes.find(

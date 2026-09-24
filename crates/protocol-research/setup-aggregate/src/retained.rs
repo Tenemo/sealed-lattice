@@ -1,6 +1,6 @@
 use crate::{
     CHUNK_BYTES, ModulusKind, PolynomialAdder,
-    verified::{AggregatePolynomial, Refusal},
+    verified::{AggregatePolynomial, Refusal, VerifiedSetupAggregate},
 };
 use num_bigint::BigInt;
 use sha2::{Digest, Sha512};
@@ -40,17 +40,39 @@ impl From<VerifiedAggregatePolynomial> for RetainedAggregatePolynomial {
     }
 }
 
-/// Parsed local references only. The current participant root must authenticate
-/// their provenance; an arbitrary public copy supplies no such premise.
+fn contribution_polynomial_indices() -> Vec<usize> {
+    (0..75)
+        .filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
+        .collect()
+}
+
+/// Parsed local references only. Their provenance is the owning setup verifier's
+/// result, keyed to the participant's credential when retained; the consumer
+/// checks that key before parsing, so an arbitrary copy supplies no premise.
 pub struct RetainedSetupInputs {
     inventory: [u8; 64],
     polynomials: Vec<AggregatePolynomial>,
 }
 impl RetainedSetupInputs {
+    /// Encodes the reference from the owning verifier's result in the fixed
+    /// contribution-polynomial order that `parse` consumes.
+    pub fn reference(setup: &VerifiedSetupAggregate) -> Result<Vec<u8>, Refusal> {
+        let mut bytes = Vec::from(b"SAV1".as_slice());
+        bytes.extend(setup.inventory().identity());
+        let indices = contribution_polynomial_indices();
+        if setup.polynomials().len() != indices.len() {
+            return Err(Refusal::Incomplete);
+        }
+        for (index, polynomial) in indices.into_iter().zip(setup.polynomials()) {
+            if polynomial.index() != index {
+                return Err(Refusal::Order);
+            }
+            bytes.extend(polynomial.digest());
+        }
+        Ok(bytes)
+    }
     pub fn parse(bytes: &[u8], expected_inventory: [u8; 64]) -> Result<Self, Refusal> {
-        let indices: Vec<_> = (0..75)
-            .filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
-            .collect();
+        let indices = contribution_polynomial_indices();
         if bytes.len() != 4 + 64 + 64 * indices.len()
             || &bytes[..4] != b"SAV1"
             || bytes[4..68] != expected_inventory
