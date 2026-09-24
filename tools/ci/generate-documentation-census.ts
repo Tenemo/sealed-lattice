@@ -1,0 +1,6592 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { adaptiveWotsBound } from '#tests/adaptive-wots-model.js';
+import { compileArchiveAuthenticationWork } from '#tests/archive-authentication-model.js';
+import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
+import {
+    compileCompleteAuthenticationFrameWork,
+    compileCompleteCredentialIntentBounds,
+    compileCompletedAuthenticationCensus,
+    compileCurrentCredentialIntentBounds,
+    compileCurrentSignatureHashInputs,
+    compileCurrentSignatureSamplingBounds,
+    compileSignatureCounterBoundary,
+    compileBallotSignatureHashWork,
+} from '#tests/authentication-work-model.js';
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
+import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
+import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
+import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
+import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
+import {
+    compileBrowserWordProverResources,
+    compileContributionGenerationResources,
+} from '#tests/browser-word-prover-resource-model.js';
+import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
+import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
+import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
+import { compileCertificationReleaseThresholdCensus } from '#tests/certification-release-threshold-model.js';
+import { compileCloseResponseCensus } from '#tests/close-response-model.js';
+import { compileCloseWireCensus } from '#tests/close-wire-model.js';
+import {
+    compareCommitmentEquivocationHybrids,
+    compareDuplicateCommitmentInputs,
+    compileCommitmentEquivocationBound,
+} from '#tests/commitment-equivocation-model.js';
+import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import {
+    compileCommonMatrixSamplingCensus,
+    compileCommonMatrixInitializationCensus,
+} from '#tests/common-matrix-sampling-model.js';
+import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
+import {
+    ceilingLog2,
+    compileComposedSecurityLedger,
+    compileReductionWork,
+    compileUnitCallCostSensitivity,
+    keccakReferenceCost,
+} from '#tests/composed-security-ledger-model.js';
+import {
+    sparseRoutingWork,
+    labelledHashExtractionWork,
+    prefixOracleWork,
+    prefixOracleQueriesPerAccess,
+} from '#tests/compressed-oracle-model.js';
+import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
+import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import {
+    delayedPointDisclosure,
+    delayedSliceReprogramming,
+    compileDelayedDisclosureBounds,
+    noPublicQuerySliceCoupling,
+} from '#tests/delayed-point-disclosure-model.js';
+import {
+    exactRankingModelConstants,
+    compilePackedRankingEvaluationGraph,
+    verifyExactRankingModel,
+} from '#tests/exact-ranking-model.js';
+import {
+    excludedPrefixStreamControl,
+    fullXofPrefixControl,
+} from '#tests/excluded-prefix-stream-model.js';
+import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
+import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
+import { compileFixedPublicationWitnessCensus } from '#tests/fixed-publication-witness-model.js';
+import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
+import {
+    compileBallotWordProofLayout,
+    compileFullWordProofLayout,
+    compileLinkedReleaseWordProofLayout,
+} from '#tests/full-word-proof-layout-model.js';
+import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
+import { hashGraphCollisionBound } from '#tests/hash-graph-model.js';
+import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
+import {
+    interleavedTargetQueryBound,
+    interleavedTargetViews,
+    stagedRowStateControl,
+} from '#tests/interleaved-target-model.js';
+import { keyedXofViews } from '#tests/keyed-xof-model.js';
+import {
+    labelledKeyedXofBound,
+    labelledKeyedXofViews,
+} from '#tests/labelled-keyed-xof-model.js';
+import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
+import {
+    mlDsa65Parameters,
+    publishedDilithiumComparison,
+    screenSelfTargetReduction,
+} from '#tests/ml-dsa-theorem-screen-model.js';
+import {
+    multiKeyTargetBound,
+    multiKeyTargetStateControl,
+    multiKeyTargetViews,
+    randomizerInputCoupling,
+} from '#tests/multi-key-target-model.js';
+import {
+    oracleDomainWork,
+    programmedOracleDomainWork,
+    prefixReplacementBaseQueriesPerAccess,
+    shadowOracleDomainWork,
+} from '#tests/oracle-domain-model.js';
+import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
+import {
+    compileParticipantCustodyCensus,
+    compileParticipantVaultKeyClasses,
+} from '#tests/participant-custody-model.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
+import {
+    createFalseBinaryRelationTable,
+    enumerateRandomizedEncodingViews,
+} from '#tests/polynomial-oracle-boundary-model.js';
+import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
+import {
+    compileProofHashWork,
+    proofHashProfiles,
+} from '#tests/proof-hash-work-model.js';
+import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
+import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
+import { compilePublicArchiveResourceCensus } from '#tests/public-archive-resource-model.js';
+import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
+import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
+import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
+import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
+import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
+import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
+import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
+import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
+import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
+import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
+import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import {
+    compileSetupRandomnessCensus,
+    setupGaussianParameters,
+} from '#tests/setup-randomness-model.js';
+import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
+import {
+    compileSigningKeyRecoveryWork,
+    keyRecoveryChallengeControl,
+} from '#tests/signing-key-recovery-model.js';
+import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
+import { compileProgrammedSignatureSamplerBounds } from '#tests/signing-programmed-prefix-model.js';
+import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
+import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
+import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
+import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
+import {
+    stagedPreimageBound,
+    stagedPreimageStateControl,
+    stagedPreimageViews,
+} from '#tests/staged-preimage-model.js';
+import { statelessSignatureSecurityScreen } from '#tests/stateless-signature-security-model.js';
+import { compileStatelessSignatureShakeWork } from '#tests/stateless-signature-shake-model.js';
+import {
+    compileStatelessSignatureProofWork,
+    compileStatelessSignatureWork,
+} from '#tests/stateless-signature-work-model.js';
+import { compileSupportedProfileCensus } from '#tests/supported-profile-model.js';
+import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
+import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
+import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
+import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
+import {
+    unrevealedPointQueryBound,
+    undetectabilityCollectionViews,
+    idealCollectionPreimageBound,
+} from '#tests/unrevealed-point-query-model.js';
+import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+
+const formatCount = (value: bigint | number): string =>
+    `\`${value.toLocaleString('en-US')}\``;
+
+const table = (
+    header: readonly string[],
+    rows: readonly (readonly string[])[],
+): string =>
+    [
+        `| ${header.join(' | ')} |`,
+        `| ${header.map(() => '---').join(' | ')} |`,
+        ...rows.map((row) => `| ${row.join(' | ')} |`),
+    ].join('\n');
+
+export const renderDocumentationCensus = (): string => {
+    const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
+    const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
+    const boundedLinearProof = compileBoundedLinearPolynomialProofCensus();
+    const boundedLookup = compileBoundedLookupCensus();
+    const byteCarryLifting = compileByteCarryLiftingCensus();
+    const smallLimbProofField = compileSmallLimbProofFieldCensus();
+    const proofFieldReduction = compileProofFieldReductionCensus();
+    const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
+    const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
+    const proofVerifierQueries = compileProofVerifierQueryCensus();
+    const releaseVerification = compileReleaseVerificationWorkload({
+        replayedCandidates: 1n,
+        changedEnvelopes: 0n,
+        changedProofBodies: 0n,
+    });
+    const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
+    const closeRace = runPublicationCloseRaceModel(10, false);
+    const closeResponses = compileCloseResponseCensus();
+    const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
+    const thresholdKeyResources =
+        compileThresholdKeyAggregationResourceLowerBound();
+    const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
+    const participantVisits = compileParticipantVisitDependencyCensus();
+    const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
+    const certificationRelease = compileCertificationReleaseThresholdCensus();
+    const participantCustody = compileParticipantCustodyCensus();
+    const participantBallotCustody = compileParticipantBallotCustody();
+    const participantReleaseCustody = compileParticipantReleaseCustody();
+    const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
+    const commonMatrixSampling = compileCommonMatrixSamplingCensus();
+    const fixedSpongeInitialization = compileFixedSpongeInitializationCensus();
+    const wideChallengeCompiler = compileWideChallengeCompilerCensus();
+    const fullWordProof = compileFullWordProofLayout();
+    const ballotWordProof = compileBallotWordProofLayout();
+    const ballotBody = compileBallotBodyCensus();
+    const ballotRandomness = compileBallotRandomnessBudget();
+    const browserWordProver = compileBrowserWordProverResources();
+    const contributionGeneration = compileContributionGenerationResources();
+    const contributionBody = compileContributionBodyCensus();
+    const setupAggregate = compileSetupAggregateResources();
+    const contributionSigning = compileContributionAuthenticationCensus(
+        contributionBody.participantCount,
+    );
+    const setupRandomness = compileSetupRandomnessCensus();
+    const registrationKey = compileRegistrationKeyRelationCensus();
+    const registrationCustody = compileRegistrationCustodyCensus();
+    const registrationEnrollment = compileRegistrationEnrollmentCensus();
+    const hashRowCheckpoint = compileHashRowCheckpointCensus();
+    const firstOracleCheckpoint = compileFirstOracleCheckpointCensus();
+    const selectedOpeningTransform = compileSelectedOpeningTransformCensus();
+    const completedContribution = compileCompletedContributionStateCensus();
+    const commitmentEquivocation = compareCommitmentEquivocationHybrids(
+        3,
+        2,
+        'complete-slice',
+    );
+    const commitmentPrefix = compareCommitmentEquivocationHybrids(
+        2,
+        2,
+        'complete-slice',
+        2,
+        1,
+    );
+    const duplicateCommitmentInputs = compareDuplicateCommitmentInputs(false);
+    const rosterProposals = thresholdProfiles.map((profile) =>
+        compileRosterProposalCensus(profile.participantCount),
+    );
+    const contributionAuthentication = thresholdProfiles.map((profile) =>
+        compileContributionAuthenticationCensus(profile.participantCount),
+    );
+    const commonAgreement = compileCommonAgreementDegreeCensus();
+    const rnsArithmetic = compileRnsArithmeticResourceCensus();
+    const setupRelation = compileSetupContributionRelationCensus();
+    const linkedRelease = compileLinkedReleaseRelationCensus();
+    const linkedReleaseProof = compileLinkedReleaseWordProofLayout();
+    const ballotRelation = compileBallotEncryptionRelationCensus();
+    const spongePaths = compileSpongePathExtractionCensus();
+    const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
+    const publicEncryptedSharingProof =
+        compilePublicEncryptedSharingProofResourceCensus();
+    const shareEncryptionCrossModulus =
+        compileShareEncryptionCrossModulusCensus();
+    const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
+    const fixedModulusBfv = compileFixedModulusBfvCensus();
+    const supportedProfiles = compileSupportedProfileCensus();
+    const securityLedger = compileComposedSecurityLedger();
+    const populationLedger = compileComposedSecurityLedger(
+        securityLedger.maximumCredentialPopulation,
+    );
+    const largestLedgerProfile =
+        securityLedger.profiles[securityLedger.profiles.length - 1];
+    const largestRosterWork = compileReductionWork(
+        largestLedgerProfile.potentialCredentialCount,
+        largestLedgerProfile.extractedCommitmentCount,
+    );
+    const unitCallCost = compileUnitCallCostSensitivity();
+    const signedExponent = (exponent: bigint): string =>
+        `\`${exponent < 0n ? '-' : ''}${(exponent < 0n ? -exponent : exponent).toLocaleString('en-US')}\``;
+    const distinctJoined = (values: readonly (bigint | number)[]): string =>
+        [...new Set(values.map((value) => value.toString()))]
+            .map((value) => formatCount(BigInt(value)))
+            .join(', ');
+    const certificateCustody = compileCertificateCustodyCensus();
+    const publicationCut = compilePublicationCutCensus();
+    const wideShareLifting = compileWideShareLiftingCensus();
+    const releaseShareLifting = compileReleaseShareLiftingCensus();
+    const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
+    const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
+    const falseRelation = createFalseBinaryRelationTable();
+    const genericProofResources =
+        compileGenericCommitAndOpenProofResourceCensus();
+    if (
+        thresholdKeyAggregation.maximumScaledReconstructionCoefficientOneNorm !==
+            thresholdReleaseNoise.exactMaximumScaledReconstructionCoefficientOneNorm ||
+        thresholdKeyAggregation.maximumSimulationCoefficientOneNorm !==
+            thresholdReleaseNoise.exactMaximumSimulationCoefficientOneNorm
+    ) {
+        throw new Error(
+            'Independent modular and rational interpolation models disagree.',
+        );
+    }
+    const rankingCensus = verifyExactRankingModel();
+    const completionGraph = compilePackedRankingEvaluationGraph(10, 10, 10);
+    const maximumGraph = compilePackedRankingEvaluationGraph(20, 20, 20);
+
+    return `${[
+        '# Documentation census',
+        '',
+        'Generated by `pnpm run docs:census` from the independent TypeScript models under `tests/`. Do not edit by hand. These are model-derived development values, not a protocol theorem, concrete FHE parameter approval, browser measurement, or supported-phone qualification.',
+        '',
+        '## Threshold completion census',
+        '',
+        'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](non-forking-state.md#release-threshold-under-the-candidate-availability-model); its responder floor is not an additional mandatory fault budget.',
+        '',
+        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, and minimum turnout `m = f + 2` accepted ballots. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
+        '',
+        table(
+            [
+                'Participants',
+                'Maximum corrupt',
+                'Inventory certificate',
+                'Result release',
+                'Minimum turnout',
+                'No result forceable at full honest turnout',
+                'Setup receipts',
+                'Guaranteed honest responders / publication waiters',
+                'Minimum certificate intersection',
+                'Maximum post-close publication signers',
+                'Mandatory release positions',
+                'Corruption/disappearance/refusal cases',
+                'Ordered certificate pairs',
+                'Brute-force cross-check',
+            ],
+            thresholdProfiles.map((profile) => [
+                String(profile.participantCount),
+                String(profile.maximumCorruptParticipantCount),
+                String(profile.inventoryCertificateThreshold),
+                String(profile.resultReleaseThreshold),
+                String(profile.minimumTurnout),
+                profile.noResultForceableAtFullHonestTurnout ? 'yes' : 'no',
+                String(profile.setupReceiptThreshold),
+                String(profile.guaranteedHonestResponderCount),
+                String(profile.minimumCertificateIntersection),
+                String(profile.maximumPostClosePublicationSignerCount),
+                String(profile.mandatoryReleaseParticipantCount),
+                formatCount(profile.corruptionDisappearanceRefusalCaseCount),
+                formatCount(profile.orderedCertificatePairCount),
+                profile.bruteForceCrossChecked ? 'yes' : 'class-counted',
+            ]),
+        ),
+        '',
+        '## Threshold key-aggregation structural census',
+        '',
+        'This finite-ring model checks that independently generated linear encryption, relinearization, and rotation-key contributions aggregate under one global secret, while degree-three Shamir redistributions at the KLLPS-style monomial points reconstruct from every four-position subset. It also checks the target-dependent flooded partial-decryption equation for every subset. It omits commitments, proofs, encryption of private shares, rounding correctness, and security reductions.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participant count',
+                    formatCount(thresholdKeyAggregation.participantCount),
+                ],
+                [
+                    'Release threshold',
+                    formatCount(thresholdKeyAggregation.releaseThreshold),
+                ],
+                [
+                    'Authorized release subsets checked',
+                    formatCount(
+                        thresholdKeyAggregation.authorizedReleaseSetCount,
+                    ),
+                ],
+                [
+                    'Monomial interpolation points',
+                    formatCount(
+                        thresholdKeyAggregation.monomialInterpolationPointCount,
+                    ),
+                ],
+                [
+                    'Linear aggregate key equations checked',
+                    formatCount(
+                        thresholdKeyAggregation.aggregatePublicKeyEquationCount,
+                    ),
+                ],
+                [
+                    'Flooded release equations checked',
+                    formatCount(thresholdKeyAggregation.releaseEquationCount),
+                ],
+                [
+                    'Tampered share changed reconstruction',
+                    thresholdKeyAggregation.tamperedShareChangedReconstruction
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Wrong target changed partial decryption',
+                    thresholdKeyAggregation.wrongTargetChangedPartialDecryption
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Experiment coefficient modulus',
+                    formatCount(thresholdKeyAggregation.coefficientModulus),
+                ],
+                [
+                    'Experiment ring degree',
+                    formatCount(thresholdKeyAggregation.ringDegree),
+                ],
+                [
+                    'Experiment gadget length',
+                    formatCount(thresholdKeyAggregation.gadgetLength),
+                ],
+            ],
+        ),
+        '',
+        '## Public encrypted-sharing structural census',
+        '',
+        'This independent finite-ring model generates one additive share-encryption key per recipient, encrypts every contributor-recipient evaluation of a degree-three Shamir polynomial, adds ciphertexts by recipient, decrypts each aggregate, and reconstructs the common secret from every four-position subset. Its production bound assumes ternary key and ciphertext witnesses and derives a zero-failure coefficient scale from exact convolution bounds. It does not establish Ring-LWE security, public-key witness uniqueness, proof soundness or zero knowledge, the production ring mapping, or browser feasibility.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Toy ring degree',
+                    formatCount(publicEncryptedSharing.toyRingDegree),
+                ],
+                [
+                    'Contributor-recipient ciphertexts checked',
+                    formatCount(
+                        publicEncryptedSharing.contributorRecipientCiphertextsChecked,
+                    ),
+                ],
+                [
+                    'Aggregate ciphertexts checked',
+                    formatCount(
+                        publicEncryptedSharing.aggregateCiphertextsChecked,
+                    ),
+                ],
+                [
+                    'Authorized reconstruction subsets checked',
+                    formatCount(
+                        publicEncryptedSharing.authorizedReconstructionSubsetsChecked,
+                    ),
+                ],
+                [
+                    'Tampered ciphertext changed aggregate share',
+                    publicEncryptedSharing.tamperedCiphertextChangedShare
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Production single-ciphertext noise coefficient bound',
+                    formatCount(
+                        publicEncryptedSharing.productionSingleCiphertextNoiseCoefficientBound,
+                    ),
+                ],
+                [
+                    'Production aggregate noise coefficient bound',
+                    formatCount(
+                        publicEncryptedSharing.productionAggregateNoiseCoefficientBound,
+                    ),
+                ],
+                [
+                    'Production share-encoding scale',
+                    formatCount(
+                        publicEncryptedSharing.productionShareEncodingScale,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Bounded-integer sharing privacy census',
+        '',
+        'For every corrupt three-position set, this exact reduced-ring model constructs the integral degree-three basis polynomial that equals one at the secret point and zero at the corrupt evaluation points. It exhausts every extreme secret-difference block, lifts the maximum translation across the production ring and ten hybrid steps, and chooses the smallest power-of-two coefficient bound meeting the stated uniform-cube statistical-distance inequality. It then searches a deterministic Proth sequence for a prime above the centered aggregate-share span and verifies the exact Proth witness and transform congruence. The resulting plaintext and share-encryption moduli are arithmetic bounds, not a complete privacy proof, Ring-LWE parameter approval, or implementation.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Corrupt subsets checked',
+                    formatCount(boundedIntegerSharing.corruptSubsetsChecked),
+                ],
+                [
+                    'Reduced-ring blocks',
+                    formatCount(boundedIntegerSharing.reducedRingBlockCount),
+                ],
+                [
+                    'Production interpolation-point exponent stride',
+                    formatCount(
+                        boundedIntegerSharing.productionInterpolationPointExponentStride,
+                    ),
+                ],
+                [
+                    'Maximum nonconstant basis one-norm',
+                    formatCount(
+                        boundedIntegerSharing.maximumBasisNonconstantOneNorm,
+                    ),
+                ],
+                [
+                    'Maximum translation one-norm per reduced block',
+                    formatCount(
+                        boundedIntegerSharing.maximumBlockTranslationOneNorm,
+                    ),
+                ],
+                [
+                    'Maximum production translation per contribution',
+                    formatCount(
+                        boundedIntegerSharing.maximumProductionTranslationOneNormPerContribution,
+                    ),
+                ],
+                [
+                    'Maximum ten-hybrid translation',
+                    formatCount(
+                        boundedIntegerSharing.maximumHybridTranslationOneNorm,
+                    ),
+                ],
+                [
+                    'Statistical privacy bits',
+                    formatCount(
+                        boundedIntegerSharing.statisticalPrivacyBitLength,
+                    ),
+                ],
+                [
+                    'Sharing-coefficient sampling bound',
+                    formatCount(boundedIntegerSharing.coefficientSamplingBound),
+                ],
+                [
+                    'Aggregate share coefficient bound',
+                    formatCount(
+                        boundedIntegerSharing.aggregateShareCoefficientBound,
+                    ),
+                ],
+                [
+                    'Share plaintext-span bits',
+                    formatCount(
+                        boundedIntegerSharing.sharePlaintextSpanBitLength,
+                    ),
+                ],
+                [
+                    'Share plaintext prime',
+                    formatCount(boundedIntegerSharing.sharePlaintextModulus),
+                ],
+                [
+                    'Share plaintext prime bits',
+                    formatCount(
+                        boundedIntegerSharing.sharePlaintextModulusBitLength,
+                    ),
+                ],
+                [
+                    'Share plaintext prime Proth multiplier',
+                    formatCount(
+                        boundedIntegerSharing.sharePlaintextPrimeMultiplier,
+                    ),
+                ],
+                [
+                    'Share plaintext prime Proth exponent',
+                    formatCount(
+                        boundedIntegerSharing.sharePlaintextTransformExponent,
+                    ),
+                ],
+                [
+                    'Share plaintext prime Proth witness',
+                    formatCount(
+                        boundedIntegerSharing.sharePlaintextPrimeWitness,
+                    ),
+                ],
+                [
+                    'Proth candidates checked',
+                    formatCount(
+                        boundedIntegerSharing.sharePlaintextPrimeCandidateCount,
+                    ),
+                ],
+                [
+                    'Share-encryption modulus bits',
+                    formatCount(
+                        boundedIntegerSharing.shareEncryptionModulusBitLength,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Threshold key-aggregation resource floor',
+        '',
+        'This lower bound screens a depth-sized BGV layout at polynomial modulus degree 32,768. It retains three approximately 55-bit primes after the qualification graph, assigns one approximately 34-bit prime to each consumed multiplication level, and accounts separately for two approximately 60-bit auxiliary evaluation-key primes. The rejected private-opening representation commits to each of four sharing coefficients separately with the smallest computationally hiding BDLOP18 layout and sends one evaluation plus its three-element opening to each remote recipient. The replacement public encrypted-sharing floor uses the certified bounded-integer plaintext prime and model-derived 21-bit zero-failure encoding scale, one common-matrix public-key ring element per recipient, and two ciphertext ring elements for every contributor-recipient pair. It counts the exact KLSW (b,d,v,h) contribution: encryption reuses b[0] and one automorphism uses one h vector. Common vectors are regenerated and their runtime work is omitted. It assumes compact bit-packed transfer elements, and omits every proof, framing byte, scratch allocation, and JavaScript/WebAssembly copy. The tuple is a resource falsifier informed by native development and attack-estimator probes, not a security parameter approval or browser result.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Candidate ciphertext-modulus bits',
+                    formatCount(
+                        thresholdKeyResources.candidateCiphertextModulusBitLength,
+                    ),
+                ],
+                [
+                    'Candidate auxiliary-modulus bits',
+                    formatCount(
+                        thresholdKeyResources.auxiliaryModulusBitLength,
+                    ),
+                ],
+                [
+                    'Candidate combined-modulus bits',
+                    formatCount(
+                        thresholdKeyResources.candidateCombinedModulusBitLength,
+                    ),
+                ],
+                [
+                    'Ciphertext RNS limbs',
+                    formatCount(
+                        thresholdKeyResources.ciphertextModulusLimbCount,
+                    ),
+                ],
+                [
+                    'Serialized ring element',
+                    formatCount(
+                        thresholdKeyResources.oneSerializedRingElementByteLength,
+                    ),
+                ],
+                [
+                    'Ring elements in one public-key contribution',
+                    formatCount(
+                        thresholdKeyResources.publicKeyContributionRingElementCount,
+                    ),
+                ],
+                [
+                    'One public-key contribution',
+                    formatCount(
+                        thresholdKeyResources.onePublicKeyContributionByteLength,
+                    ),
+                ],
+                [
+                    'Ten public-key contributions',
+                    formatCount(
+                        thresholdKeyResources.publicKeyContributionCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Ring elements in four coefficient commitments per contributor',
+                    formatCount(
+                        thresholdKeyResources.coefficientCommitmentRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Four coefficient commitments per contributor',
+                    formatCount(
+                        thresholdKeyResources.coefficientCommitmentByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Ten coefficient commitments',
+                    formatCount(
+                        thresholdKeyResources.coefficientCommitmentCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Ring elements in one remote private carrier',
+                    formatCount(
+                        thresholdKeyResources.minimumPrivateCarrierRingElementCount,
+                    ),
+                ],
+                [
+                    'Remote raw-share payload floor',
+                    formatCount(
+                        thresholdKeyResources.minimumRemoteSharePayloadByteLength,
+                    ),
+                ],
+                [
+                    'Private-opening overhead',
+                    formatCount(
+                        thresholdKeyResources.privateOpeningOverheadByteLength,
+                    ),
+                ],
+                [
+                    'Remote private-sharing payload floor',
+                    formatCount(
+                        thresholdKeyResources.minimumRemotePrivateSharingPayloadByteLength,
+                    ),
+                ],
+                [
+                    'Compact-opening proof budget before the variance ceiling',
+                    formatCount(
+                        thresholdKeyResources.availableCompactOpeningProofCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Compact-opening proof budget per remote carrier',
+                    formatCount(
+                        thresholdKeyResources.availableCompactOpeningProofPerCarrierByteLength,
+                    ),
+                ],
+                [
+                    'Share-encryption aggregate noise coefficient bound',
+                    formatCount(
+                        thresholdKeyResources.shareEncryptionAggregateNoiseCoefficientBound,
+                    ),
+                ],
+                [
+                    'Share-encoding scale',
+                    formatCount(thresholdKeyResources.shareEncodingScale),
+                ],
+                [
+                    'Share-encryption modulus bits',
+                    formatCount(
+                        thresholdKeyResources.shareEncryptionModulusBitLength,
+                    ),
+                ],
+                [
+                    'Serialized share-encryption ring element',
+                    formatCount(
+                        thresholdKeyResources.oneSerializedShareEncryptionRingElementByteLength,
+                    ),
+                ],
+                [
+                    'Ten share-encryption public keys',
+                    formatCount(
+                        thresholdKeyResources.shareEncryptionPublicKeyCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Ring elements in one optimistic public encrypted share',
+                    formatCount(
+                        thresholdKeyResources.minimumPublicEncryptedShareCiphertextRingElementCount,
+                    ),
+                ],
+                [
+                    'Public encrypted-share corpus floor',
+                    formatCount(
+                        thresholdKeyResources.minimumPublicEncryptedShareCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Public encrypted-sharing setup floor before proofs',
+                    formatCount(
+                        thresholdKeyResources.minimumPublicEncryptedSharingSetupCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Public encrypted-sharing proof budget before the variance ceiling',
+                    formatCount(
+                        thresholdKeyResources.availablePublicEncryptedSharingProofBudgetByteLength,
+                    ),
+                ],
+                [
+                    'Public encrypted-sharing proof budget per contributor',
+                    formatCount(
+                        thresholdKeyResources.availablePublicEncryptedSharingProofPerContributorByteLength,
+                    ),
+                ],
+                [
+                    'Setup transfer corpus floor',
+                    formatCount(
+                        thresholdKeyResources.minimumSetupTransferCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Setup transfer variance ceiling',
+                    formatCount(
+                        thresholdKeyResources.setupTransferVarianceCeilingByteLength,
+                    ),
+                ],
+                [
+                    'Above setup-transfer variance ceiling',
+                    thresholdKeyResources.exceedsSetupTransferVarianceCeiling
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Completion evaluation data live set',
+                    formatCount(
+                        thresholdKeyResources.completionEvaluationDataLiveByteLength,
+                    ),
+                ],
+                [
+                    'Aggregate relinearization key live set',
+                    formatCount(
+                        thresholdKeyResources.aggregateRelinearizationKeyLiveByteLength,
+                    ),
+                ],
+                [
+                    'Evaluation plus relinearization floor',
+                    formatCount(
+                        thresholdKeyResources.minimumEvaluationLiveByteLengthWithRelinearizationKey,
+                    ),
+                ],
+                [
+                    'One aggregate unit-rotation key',
+                    formatCount(
+                        thresholdKeyResources.aggregateUnitRotationKeyLiveByteLength,
+                    ),
+                ],
+                [
+                    'Evaluation plus all required evaluation keys floor',
+                    formatCount(
+                        thresholdKeyResources.minimumEvaluationLiveByteLengthWithAllEvaluationKeys,
+                    ),
+                ],
+                [
+                    'Ciphertexts plus current streamed evaluation-key floor',
+                    formatCount(
+                        thresholdKeyResources.scheduledPeakCiphertextAndCurrentEvaluationKeyByteLength,
+                    ),
+                ],
+                [
+                    'Streaming headroom before scratch and copies',
+                    formatCount(
+                        thresholdKeyResources.streamingMemoryHeadroomBeforeScratchByteLength,
+                    ),
+                ],
+                [
+                    'One-key-pass-per-operation local reads',
+                    formatCount(
+                        thresholdKeyResources.oneKeyPassPerOperationReadByteLength,
+                    ),
+                ],
+                [
+                    'WebAssembly absolute memory bound',
+                    formatCount(
+                        thresholdKeyResources.webAssemblyAbsoluteMemoryBoundByteLength,
+                    ),
+                ],
+                [
+                    'Fully resident evaluation plus relinearization above the absolute bound',
+                    thresholdKeyResources.exceedsWebAssemblyAbsoluteMemoryBound
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Fully resident evaluation plus all keys above the absolute bound',
+                    thresholdKeyResources.exceedsWebAssemblyAbsoluteMemoryBoundWithAllEvaluationKeys
+                        ? 'yes'
+                        : 'no',
+                ],
+            ],
+        ),
+        '',
+        '## Public encrypted-sharing proof screen',
+        '',
+        "This optimistic direct-Ligero screen counts two multiplication constraints for each ternary coefficient, one binary constraint for every shifted-encoding bit, the exact upper-endpoint constraint, and one constraint for each linear ring-coordinate equation. It then searches the discrete power-of-two code dimensions in the exact AHIV22 Section 5.3 communication expression, including Merkle authentication paths. The soundness and random-oracle exponents compensate the CMS19 quadratic and cubic losses for an assumed quantum-query bound plus a component margin, but omit the theorem's asymptotic constant. The screen also omits complete modulus conversion, proof framing and roots, a fixed-hash instantiation, release proofs, and every implementation allocation. Expanded witness and encoded-oracle bytes are proof-field representations, not measured live sets.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Ternary ring elements per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.ternaryRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Sharing-coefficient decomposition bits',
+                    formatCount(
+                        publicEncryptedSharingProof.sharingCoefficientDecompositionBitLength,
+                    ),
+                ],
+                [
+                    'Binary-decomposition ring elements per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.binaryDecompositionRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Bounded ring elements per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.boundedRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Bounded coefficients per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.boundedCoefficientCountPerContributor,
+                    ),
+                ],
+                [
+                    'Ternary constraints per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.ternaryConstraintCountPerContributor,
+                    ),
+                ],
+                [
+                    'Binary-decomposition constraints per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.binaryDecompositionConstraintCountPerContributor,
+                    ),
+                ],
+                [
+                    'Binary endpoint constraints per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.binaryEndpointConstraintCountPerContributor,
+                    ),
+                ],
+                [
+                    'Linear constraints per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.linearConstraintCountPerContributor,
+                    ),
+                ],
+                [
+                    'Optimistic circuit constraints per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.optimisticCircuitConstraintCountPerContributor,
+                    ),
+                ],
+                [
+                    'Proof field-element bits',
+                    formatCount(
+                        publicEncryptedSharingProof.proofFieldElementBitLength,
+                    ),
+                ],
+                [
+                    'Interactive soundness bits after query-loss compensation',
+                    formatCount(
+                        publicEncryptedSharingProof.interactiveSoundnessBitLength,
+                    ),
+                ],
+                [
+                    'Random-oracle output bits after query-loss compensation',
+                    formatCount(
+                        publicEncryptedSharingProof.randomOracleOutputBitLength,
+                    ),
+                ],
+                [
+                    'Ligero query count',
+                    formatCount(publicEncryptedSharingProof.ligeroQueryCount),
+                ],
+                [
+                    'Ligero repetition count',
+                    formatCount(
+                        publicEncryptedSharingProof.ligeroRepetitionCount,
+                    ),
+                ],
+                [
+                    'Ligero message block length',
+                    formatCount(
+                        publicEncryptedSharingProof.ligeroMessageBlockLength,
+                    ),
+                ],
+                [
+                    'Ligero code dimension',
+                    formatCount(
+                        publicEncryptedSharingProof.ligeroCodeDimension,
+                    ),
+                ],
+                [
+                    'Ligero code length',
+                    formatCount(publicEncryptedSharingProof.ligeroCodeLength),
+                ],
+                [
+                    'Ligero witness rows',
+                    formatCount(
+                        publicEncryptedSharingProof.ligeroWitnessRowCount,
+                    ),
+                ],
+                [
+                    'Optimistic Ligero proof per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.optimisticLigeroProofByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Optimistic ten-proof corpus',
+                    formatCount(
+                        publicEncryptedSharingProof.optimisticTenProofCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Proof budget remaining per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.proofBudgetRemainingByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Fits setup proof budget before fixed hash and lifting constant',
+                    publicEncryptedSharingProof.fitsSetupProofBudgetBeforeFixedHashAndLiftingConstant
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Expanded bounded witness per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.expandedBoundedWitnessByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Public input per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.publicInputByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Public input plus expanded witness per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.publicInputPlusExpandedWitnessByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Encoded proof-oracle field elements per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.encodedProofOracleFieldElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Encoded proof oracle per contributor',
+                    formatCount(
+                        publicEncryptedSharingProof.encodedProofOracleByteLengthPerContributor,
+                    ),
+                ],
+                [
+                    'Encoded proof oracle above setup-storage variance ceiling',
+                    publicEncryptedSharingProof.exceedsSetupStorageVarianceCeiling
+                        ? 'yes'
+                        : 'no',
+                ],
+            ],
+        ),
+        '',
+        '## Candidate setup-proof field census',
+        '',
+        "This arithmetic model verifies the exact power-form modulus, factors its base completely, checks one Pocklington witness for every distinct prime divisor of the factored modulus-minus-one, and verifies the production negacyclic-transform congruence. Pocklington's theorem therefore certifies the candidate as prime without relying on a probabilistic primality test. Its exact value also exceeds every bounded direct FHE key residual, including the quotient term. Packed transfer and uint64-limb storage are separate quantities. This selects a field for proof experiments only; it does not prove PIOP security, approve the FHE tuple, or establish browser feasibility.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Proof-field modulus',
+                    formatCount(candidateSetupProofField.modulus),
+                ],
+                [
+                    'Proof-field modulus bits',
+                    formatCount(candidateSetupProofField.modulusBitLength),
+                ],
+                [
+                    'Canonical field-element bytes',
+                    formatCount(candidateSetupProofField.modulusByteLength),
+                ],
+                [
+                    'Field element in uint64 limbs',
+                    formatCount(candidateSetupProofField.limbByteLength),
+                ],
+                [
+                    'Minimum field modulus for direct FHE key embedding',
+                    formatCount(fheKeyEmbedding.minimumProofFieldModulus),
+                ],
+                [
+                    'FHE key quotient ring elements per contributor',
+                    formatCount(
+                        fheKeyEmbedding.quotientRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'FHE key quotient magnitude bound',
+                    formatCount(fheKeyEmbedding.maximumQuotientMagnitude),
+                ],
+                ['Power base', formatCount(candidateSetupProofField.powerBase)],
+                [
+                    'Power exponent',
+                    formatCount(candidateSetupProofField.powerExponent),
+                ],
+                [
+                    'Base prime factors certified',
+                    formatCount(candidateSetupProofField.basePrimeFactorCount),
+                ],
+                [
+                    'Pocklington witnesses checked',
+                    formatCount(
+                        candidateSetupProofField.pocklingtonWitnessCount,
+                    ),
+                ],
+                [
+                    'Required transform order',
+                    formatCount(candidateSetupProofField.transformOrder),
+                ],
+            ],
+        ),
+        '',
+        '## Share-encryption cross-modulus census',
+        '',
+        'This exact arithmetic model embeds the composite share-encryption congruences into the much larger candidate setup-proof field. It derives centered numerator bounds, one integer quotient bound for the share-encryption public-key equation and each ciphertext component, and the minimum proof-field width that prevents a false field equality from wrapping. A separate reduced-ring execution constructs valid quotients and rejects a changed public residue. These results establish only the integer embedding and its witness floor; they do not prove the surrounding PIOP, Ring-LWE security, or browser feasibility.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Share-encryption modulus',
+                    formatCount(
+                        shareEncryptionCrossModulus.shareEncryptionModulus,
+                    ),
+                ],
+                [
+                    'Per-contribution share coefficient bound',
+                    formatCount(
+                        shareEncryptionCrossModulus.perContributionShareCoefficientBound,
+                    ),
+                ],
+                [
+                    'Public-key quotient bound',
+                    formatCount(
+                        shareEncryptionCrossModulus.shareEncryptionKeyQuotientBound,
+                    ),
+                ],
+                [
+                    'Ciphertext-first quotient bound',
+                    formatCount(
+                        shareEncryptionCrossModulus.ciphertextFirstQuotientBound,
+                    ),
+                ],
+                [
+                    'Ciphertext-second quotient bound',
+                    formatCount(
+                        shareEncryptionCrossModulus.ciphertextSecondQuotientBound,
+                    ),
+                ],
+                [
+                    'Quotient ring elements per contributor',
+                    formatCount(
+                        shareEncryptionCrossModulus.quotientRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Quotient norm decomposition length',
+                    formatCount(
+                        shareEncryptionCrossModulus.quotientNormDecompositionLength,
+                    ),
+                ],
+                [
+                    'Signed quotient storage bits per coefficient',
+                    formatCount(
+                        shareEncryptionCrossModulus.quotientSignedEncodingBitLength,
+                    ),
+                ],
+                [
+                    'Quotient norm digit ring elements',
+                    formatCount(
+                        shareEncryptionCrossModulus.quotientNormDigitRingElementCountPerContributor,
+                    ),
+                ],
+                [
+                    'Minimum no-wrap proof-field bits',
+                    formatCount(
+                        shareEncryptionCrossModulus.minimumProofFieldElementBitLength,
+                    ),
+                ],
+                [
+                    'Candidate proof-field bits',
+                    formatCount(
+                        shareEncryptionCrossModulus.candidateProofFieldElementBitLength,
+                    ),
+                ],
+                [
+                    'Reduced-ring coefficient equations checked',
+                    formatCount(
+                        shareEncryptionCrossModulus.toyCoefficientEquationCount,
+                    ),
+                ],
+                [
+                    'Changed residue rejected',
+                    shareEncryptionCrossModulus.toyTamperRejected
+                        ? 'yes'
+                        : 'no',
+                ],
+            ],
+        ),
+        '',
+        '## Polynomial oracle boundary census',
+        '',
+        'These exact finite-field counterexamples reject the one-mask, reused-query projection and bare-table compilation. Sufficient independent masks repair only the displayed witness-query marginal; low-degree binding, all auxiliary-polynomial views, QROM compilation, and a complete regeneration schedule remain unproved. No proof-size or streaming-feasibility claim is derived from these examples.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'One-mask support per witness after two distinct queries',
+                    formatCount(firstMaskedView.size),
+                ],
+                [
+                    'Shared views between the two one-mask witnesses',
+                    formatCount(
+                        [...firstMaskedView.keys()].filter((view) =>
+                            secondMaskedView.has(view),
+                        ).length,
+                    ),
+                ],
+                [
+                    'Two-mask support per witness after two queries',
+                    formatCount(
+                        enumerateRandomizedEncodingViews(0, 2, [2, 3]).size,
+                    ),
+                ],
+                [
+                    'False binary relation table checks passed',
+                    formatCount(falseRelation.entries.length),
+                ],
+                [
+                    'Required quotient maximum degree',
+                    formatCount(falseRelation.claimedQuotientMaximumDegree),
+                ],
+            ],
+        ),
+        '',
+        '## Recipient-key uniqueness census',
+        '',
+        'For an ideal uniformly sampled common ring element, a determinant and union bound limits the event that any public key has two bounded witnesses. The event covers every recipient public key at once. The exponent below bounds this statistical bad-matrix event only; it is not a computational-security level and does not cover the real SHAKE common-string generator, selective completion conditioning, or proof composition.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Current registration ring degree',
+                    formatCount(recipientKeyUniqueness.polynomialModulusDegree),
+                ],
+                [
+                    'Current registration modulus prime factor',
+                    formatCount(recipientKeyUniqueness.primeModulus),
+                ],
+                [
+                    'Recipient secret coefficient bound',
+                    formatCount(recipientKeyUniqueness.secretCoefficientBound),
+                ],
+                [
+                    'Recipient error coefficient bound',
+                    formatCount(recipientKeyUniqueness.errorCoefficientBound),
+                ],
+                [
+                    'Secret difference values per coefficient',
+                    formatCount(
+                        recipientKeyUniqueness.secretDifferenceValueCount,
+                    ),
+                ],
+                [
+                    'Error difference values per coefficient',
+                    formatCount(
+                        recipientKeyUniqueness.errorDifferenceValueCount,
+                    ),
+                ],
+                [
+                    'Squared determinant-union base numerator',
+                    formatCount(
+                        recipientKeyUniqueness.squaredFailureBaseNumerator,
+                    ),
+                ],
+                [
+                    'Uniform-matrix failure exponent',
+                    formatCount(
+                        recipientKeyUniqueness.uniformMatrixFailureExponent,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Bounded polynomial proof census',
+        '',
+        'Finite encoded-proof and lookup experiments. Degree membership is checked by complete interpolation in the linear experiment. These counts do not instantiate a committed ordinary IOP.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Linear experiment field order',
+                    formatCount(boundedLinearProof.prime),
+                ],
+                [
+                    'Systematic domain size',
+                    formatCount(boundedLinearProof.systematicSize),
+                ],
+                [
+                    'Evaluation domain size',
+                    formatCount(boundedLinearProof.domainSize),
+                ],
+                [
+                    'Mask coefficient count',
+                    formatCount(boundedLinearProof.maskDimension),
+                ],
+                [
+                    'Maximum witness degree',
+                    formatCount(boundedLinearProof.witnessDegree),
+                ],
+                [
+                    'Maximum masked-sum degree',
+                    formatCount(boundedLinearProof.sumDegree),
+                ],
+                [
+                    'Independent sum-mask degree',
+                    formatCount(boundedLinearProof.sumMaskDegree),
+                ],
+                [
+                    'Short-mask joint views checked',
+                    formatCount(boundedLinearProof.shortMaskViews.checkedViews),
+                ],
+                [
+                    'Short-mask joint observation dimension',
+                    formatCount(
+                        boundedLinearProof.shortMaskViews.observationCount,
+                    ),
+                ],
+                [
+                    'Minimum short-mask observation rank',
+                    formatCount(boundedLinearProof.shortMaskViews.minimumRank),
+                ],
+                [
+                    'Maximum rank without the quotient mask',
+                    formatCount(
+                        boundedLinearProof.shortMaskViews
+                            .maximumRankWithoutQuotientMask,
+                    ),
+                ],
+                [
+                    'Accepted valid challenge pairs',
+                    formatCount(boundedLinearProof.trueAcceptanceCount),
+                ],
+                [
+                    'Accepted invalid challenge pairs',
+                    formatCount(boundedLinearProof.falseAcceptanceCount),
+                ],
+                [
+                    'Accepting simulated challenge pairs',
+                    formatCount(
+                        boundedLinearProof.simulatedFalseAcceptanceCount,
+                    ),
+                ],
+                [
+                    'False range-quotient table degree',
+                    formatCount(boundedLinearProof.invalidNormTableDegree),
+                ],
+                [
+                    'Tampered witness table degree',
+                    formatCount(boundedLinearProof.tamperedWitnessTableDegree),
+                ],
+                [
+                    'Lookup base-field characteristic',
+                    formatCount(boundedLookup.basePrime),
+                ],
+                [
+                    'Lookup extension degree',
+                    formatCount(boundedLookup.extensionDegree),
+                ],
+                [
+                    'Lookup challenge count',
+                    formatCount(boundedLookup.challengeCount),
+                ],
+                [
+                    'Valid lookup acceptances',
+                    formatCount(boundedLookup.validAcceptances),
+                ],
+                [
+                    'Targeted invalid lookup acceptances',
+                    formatCount(boundedLookup.invalidAcceptances),
+                ],
+                [
+                    'Invalid acceptances when the occurrence count wraps',
+                    formatCount(boundedLookup.characteristicWrapAcceptances),
+                ],
+            ],
+        ),
+        '',
+        '## Byte and carry lifting census',
+        '',
+        'The scalar residual bound covers every accepted signed quotient and carry for the experimental FHE key equation. The finite ring checks positive integer rows and a false large-modulus equation that becomes an alias without the carry bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Finite experiment ring degree',
+                    formatCount(byteCarryLifting.degree),
+                ],
+                [
+                    'Public coefficient limb count',
+                    formatCount(byteCarryLifting.limbCount),
+                ],
+                ['Limb radix', formatCount(byteCarryLifting.radix)],
+                [
+                    'Signed quotient magnitude bound',
+                    formatCount(byteCarryLifting.quotientBound),
+                ],
+                [
+                    'Signed carry magnitude bound',
+                    formatCount(byteCarryLifting.carryBound),
+                ],
+                [
+                    'Maximum accepted per-limb residual bound',
+                    formatCount(byteCarryLifting.residualBound),
+                ],
+                ['Proof-field modulus', formatCount(byteCarryLifting.field)],
+                [
+                    'Positive integer equations checked',
+                    formatCount(byteCarryLifting.positiveIntegerEquations),
+                ],
+                [
+                    'Maximum carry in finite positive cases',
+                    formatCount(byteCarryLifting.maximumCarry),
+                ],
+                [
+                    'Maximum quotient in finite positive cases',
+                    formatCount(byteCarryLifting.maximumQuotient),
+                ],
+                [
+                    'Carry required by the field alias',
+                    formatCount(byteCarryLifting.largestCheatingCarry),
+                ],
+                [
+                    'Out-of-range alias carries',
+                    formatCount(byteCarryLifting.outOfRangeCarries),
+                ],
+            ],
+        ),
+        '',
+        '## Wide sharing and release lifting census',
+        '',
+        'Candidate bounds for byte-aligned integer sharing and the dense release relation. The finite experiments independently construct the integer products, decrypt encrypted evaluations, and reproduce the out-of-range modular aliases. They do not implement the complete public proof or admit a distribution.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Share-encryption scale', formatCount(wideShareLifting.scale)],
+                [
+                    'Share-encryption modulus',
+                    formatCount(wideShareLifting.modulus),
+                ],
+                [
+                    'Nonconstant sharing coefficient radius',
+                    formatCount(wideShareLifting.sharingRadius),
+                ],
+                [
+                    'Nonconstant sharing coefficient bits',
+                    formatCount(wideShareLifting.sharingCoefficientBits),
+                ],
+                [
+                    'Share-encryption secret support weight',
+                    formatCount(wideShareLifting.encryptionSupportWeight),
+                ],
+                [
+                    'Shared FHE secret support weight',
+                    formatCount(wideShareLifting.sharedSecretSupportWeight),
+                ],
+                [
+                    'Joint sharing-translation numerator',
+                    formatCount(wideShareLifting.privacyNumerator),
+                ],
+                [
+                    'Aggregate sharing coefficient bound',
+                    formatCount(wideShareLifting.aggregateSharingMaximum),
+                ],
+                ['Sharing limb radix', formatCount(wideShareLifting.radix)],
+                [
+                    'Sharing quotient magnitude bound',
+                    formatCount(wideShareLifting.quotientBound),
+                ],
+                [
+                    'Sharing carry magnitude bound',
+                    formatCount(wideShareLifting.carryBound),
+                ],
+                [
+                    'Complete sharing limb residual bound',
+                    formatCount(wideShareLifting.residualBound),
+                ],
+                [
+                    'Sharing equations checked',
+                    formatCount(wideShareLifting.checkedEquations),
+                ],
+                [
+                    'Carry needed by the false sharing equation',
+                    formatCount(wideShareLifting.aliasCarry),
+                ],
+                [
+                    'Dense release limb radix',
+                    formatCount(releaseShareLifting.radix),
+                ],
+                [
+                    'Dense release carry magnitude bound',
+                    formatCount(releaseShareLifting.carryBound),
+                ],
+                [
+                    'Complete dense release limb residual bound',
+                    formatCount(releaseShareLifting.residualBound),
+                ],
+                [
+                    'Dense release equations checked',
+                    formatCount(releaseShareLifting.checkedEquations),
+                ],
+                [
+                    'Carry needed by the false release equation',
+                    formatCount(releaseShareLifting.aliasCarry),
+                ],
+            ],
+        ),
+        '',
+        '## Sponge-path extraction census',
+        '',
+        'The finite model checks change counts of the shortest complete sponge-path label on injective compression blocks, in both permutation directions and with truncated tags. It tests a proposed local commutator premise; it is not an online extraction theorem or a fixed-Keccak claim.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Forward compression blocks checked',
+                    formatCount(spongePaths.checkedForwardStars),
+                ],
+                [
+                    'Inverse compression blocks checked',
+                    formatCount(spongePaths.checkedInverseStars),
+                ],
+                [
+                    'Changed path labels across both directions',
+                    formatCount(spongePaths.changedPaths),
+                ],
+            ],
+        ),
+        '',
+        '## Linked ballot encryption census',
+        '',
+        'The model links a complete bounded score vector to the exact FHE comparison-window packing, literal FHE score tail, and auxiliary score encryption. Every integer quotient, carry, and centered plaintext endpoint is explicit. The auxiliary scheme is for simulator input recovery; it has no participant decryption action.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Auxiliary ring degree',
+                    formatCount(auxiliaryInputEncryptionParameters.degree),
+                ],
+                [
+                    'Auxiliary ciphertext modulus',
+                    formatCount(auxiliaryInputEncryptionParameters.modulus),
+                ],
+                [
+                    'Auxiliary plaintext modulus',
+                    formatCount(
+                        auxiliaryInputEncryptionParameters.plaintextModulus,
+                    ),
+                ],
+                [
+                    'Auxiliary plaintext scale',
+                    formatCount(auxiliaryInputEncryptionParameters.scale),
+                ],
+                [
+                    'Auxiliary secret and ephemeral support',
+                    formatCount(auxiliaryInputEncryptionParameters.support),
+                ],
+                [
+                    'Accepted auxiliary encryption noise',
+                    formatCount(ballotRelation.auxiliaryNoiseBound),
+                ],
+                ['FHE integer limbs', formatCount(ballotRelation.limbs)],
+                [
+                    'Honest FHE encryption quotient bound',
+                    formatCount(ballotRelation.trueQuotientBound),
+                ],
+                [
+                    'Honest FHE encryption carry bound',
+                    formatCount(ballotRelation.trueCarryBound),
+                ],
+                [
+                    'Accepted FHE limb residual bound',
+                    formatCount(ballotRelation.residualBound),
+                ],
+                [
+                    'Honest packing quotient bound',
+                    formatCount(ballotRelation.packingQuotientBound),
+                ],
+                [
+                    'Accepted packing residual bound',
+                    formatCount(ballotRelation.packingResidualBound),
+                ],
+                [
+                    'Accepted auxiliary residual bound',
+                    formatCount(ballotRelation.auxiliaryResidualBound),
+                ],
+                ['Word columns', formatCount(ballotRelation.wordColumns)],
+                ['Boolean columns', formatCount(ballotRelation.booleanColumns)],
+                [
+                    'Additional quadratic constraints',
+                    formatCount(ballotRelation.additionalQuadraticConstraints),
+                ],
+                [
+                    'Maximum simultaneously retained product input columns',
+                    formatCount(ballotRelation.maximumLiveProductColumns),
+                ],
+                [
+                    'Two-coset product input cache payload bytes',
+                    formatCount(ballotRelation.zeroProductCacheBytes),
+                ],
+                [
+                    'Proof header bytes',
+                    formatCount(ballotWordProof.headerBytes),
+                ],
+                [
+                    'First oracle row bytes',
+                    formatCount(ballotWordProof.firstWidth),
+                ],
+                [
+                    'Second oracle row bytes',
+                    formatCount(ballotWordProof.secondWidth),
+                ],
+                [
+                    'Maximum incremental proof bytes',
+                    formatCount(ballotWordProof.maximumMultiproofBytes),
+                ],
+                [
+                    'Maximum cached node digest bytes',
+                    formatCount(ballotWordProof.maximumCachedNodeDigestBytes),
+                ],
+                [
+                    'Retained leaf salt bytes',
+                    formatCount(ballotWordProof.leafSaltBytes),
+                ],
+                [
+                    'Prover mask bytes',
+                    formatCount(ballotWordProof.proverMaskBytes),
+                ],
+                [
+                    'Minimum requested proof randomness bytes before field-sampling rejection',
+                    formatCount(ballotWordProof.minimumRequestedRandomBytes),
+                ],
+                [
+                    'Resident public operator payload bytes',
+                    formatCount(ballotWordProof.residentPublicOperatorBytes),
+                ],
+                [
+                    'Additional narrow memberships',
+                    formatCount(ballotRelation.narrowMemberships),
+                ],
+                [
+                    'Single-entry inverse columns',
+                    formatCount(ballotRelation.lookupEntries),
+                ],
+                [
+                    'Full-profile affine rows',
+                    formatCount(ballotRelation.affineRows),
+                ],
+            ],
+        ),
+        '',
+        '## Ballot body census',
+        '',
+        "The framed body carries the bound context, both ciphertext pairs, and the exact proof. Common matrices and certified public keys are reconstructed from the verifier's setup. Framing alone supplies no signature, publication, or ballot authority.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Context bytes', formatCount(ballotBody.contextBytes)],
+                [
+                    'Protocol proof role bytes',
+                    formatCount(ballotBody.proofRoleBytes),
+                ],
+                ['Body header bytes', formatCount(ballotBody.headerBytes)],
+                [
+                    'Ciphertext payload bytes',
+                    formatCount(ballotBody.ciphertextBytes),
+                ],
+                [
+                    'Reconstructed public input bytes',
+                    formatCount(ballotBody.reconstructedInputBytes),
+                ],
+                [
+                    'Minimum proof bytes',
+                    formatCount(ballotBody.minimumProofBytes),
+                ],
+                [
+                    'Maximum proof bytes',
+                    formatCount(ballotBody.maximumProofBytes),
+                ],
+                ['Signature bytes', formatCount(ballotBody.signatureBytes)],
+                [
+                    'Envelope header bytes',
+                    formatCount(ballotBody.envelopeBytes),
+                ],
+                [
+                    'Maximum body bytes',
+                    formatCount(ballotBody.maximumBodyBytes),
+                ],
+                [
+                    'Maximum signed body bytes',
+                    formatCount(ballotBody.maximumSignedBodyBytes),
+                ],
+                [
+                    'Body identity hash prefix bytes',
+                    formatCount(ballotBody.hashPrefixBytes),
+                ],
+                [
+                    'Maximum body identity hash input bytes',
+                    formatCount(ballotBody.maximumHashInputBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Authentication frames and completed prefix',
+        '',
+        'The pure FIPS 204 interface frames each participant application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. These rows cover participant credentials; public-archive receipt credentials have their own population. The counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
+        '',
+        table(
+            [
+                'Purpose',
+                'Message bytes',
+                'FIPS frame bytes',
+                'Representative input bytes',
+                'Representative permutations',
+            ],
+            compileCompleteAuthenticationFrameWork().map((role) => [
+                role.purpose,
+                formatCount(role.messageBytes),
+                formatCount(role.frameBytes),
+                formatCount(role.representativeInputBytes),
+                formatCount(role.representativePermutations),
+            ]),
+        ),
+        '',
+        'The current pure ML-DSA-65 internal calls have the following input shapes. A missing literal output cap is recorded for each rejection sampler. This does not bound arbitrary adversary queries or future protocol purposes.',
+        '',
+        table(
+            ['Purpose', 'Primitive', 'Input bytes', 'Literal output bytes'],
+            compileCurrentSignatureHashInputs().rows.map((row) => [
+                row.purpose,
+                row.family,
+                formatCount(row.inputBytes),
+                row.outputBytes === null
+                    ? 'No source cap'
+                    : formatCount(row.outputBytes),
+            ]),
+        ),
+        '',
+        'The following ideal-XOF bad-event bounds union over the entire sampler seed space before adaptive input selection. Analytical output caps do not change the library. Subsequent preservation requires the stated oracle-programming chronology; the main signing rejection event and complete time conversion remain separate.',
+        '',
+        table(
+            [
+                'Sampler',
+                'Seed bytes',
+                'Candidate positions',
+                'Required rejections',
+                'Analytical output cap bytes',
+                'All-seed failure exponent',
+            ],
+            compileCurrentSignatureSamplingBounds().map((row) => [
+                row.purpose,
+                ...[
+                    row.inputBytes,
+                    row.candidatePositions,
+                    row.requiredRejections,
+                    row.outputBytes,
+                    row.failureExponent,
+                ].map(formatCount),
+            ]),
+        ),
+        '',
+        'The preserved through-ballot prefix counts first-evaluated intents, including signatures never delivered. Repeated evaluation of retained coins consumes runtime but no new cached signing-oracle query. Keep this prefix separate from the full-action branches below; neither table supplies a lifetime credential population, repeated-work bound or complete signature-security claim.',
+        '',
+        table(
+            [
+                'Credential role',
+                'Current purposes',
+                'First-evaluated intent bound',
+            ],
+            compileCurrentCredentialIntentBounds().map((value) => [
+                value.role,
+                value.purposes.join(', '),
+                formatCount(value.firstEvaluatedIntentBound),
+            ]),
+        ),
+        '',
+        "For one original credential/action under the retained-state invariant, the ballot is optional and at most one; the close intent blocks a new ballot attempt. Every participant signs one close response, and the organizer also its close intent and proposal. No-result omits release. Encrypted release may omit the participant's own target vote, but cannot bypass a pending target intent or start target signing after release begins. The no-result row is a maximum allowing an own target vote, not a claim that every participant supplies one.",
+        '',
+        table(
+            [
+                'Participants',
+                'Branch',
+                'Credential role',
+                'Fixed purposes',
+                'Optional purposes',
+                'First-evaluated intent bound',
+            ],
+            compileCompleteCredentialIntentBounds().map((value) => [
+                formatCount(value.participantCount),
+                value.branch,
+                value.role,
+                value.fixedPurposes.join(', '),
+                value.optionalPurposes.join(', '),
+                formatCount(value.firstEvaluatedIntentBound),
+            ]),
+        ),
+        '',
+        'One native ballot-signing evaluation regenerates the original ML-DSA key, then Sign expands the public matrix again. The checked-counter boundary below is conditional on the declared overflow-checking build and the sampler read event. It bounds work until success or the arithmetic boundary; it does not bound the probability of signing failure. Hash-permutation work applies when executing the concrete SHAKE implementation; a simulated oracle instead needs its own circuit cost.',
+        '',
+        table(
+            ['Property', 'Value'],
+            (() => {
+                const boundary = compileSignatureCounterBoundary(),
+                    work = compileBallotSignatureHashWork(
+                        boundary.fullIterations,
+                        boundary.partialMaskCalls,
+                    );
+                const rows: [string, bigint][] = [
+                    ['Distinct mask nonces', boundary.nonceCapacity],
+                    [
+                        'Complete mask-vector iterations',
+                        boundary.fullIterations,
+                    ],
+                    ['Partial final mask calls', boundary.partialMaskCalls],
+                    ['Hash calls including key regeneration', work.hashCalls],
+                    ['Cumulative hash input bytes', work.inputBytes],
+                    [
+                        'Cumulative hash output byte bound',
+                        work.outputBytesUpperBound,
+                    ],
+                    [
+                        'Concrete SHAKE permutation bound',
+                        work.permutationsUpperBound,
+                    ],
+                ];
+                return rows.map(([label, value]) => [
+                    label,
+                    formatCount(value),
+                ]);
+            })(),
+        ),
+        '',
+        'FIPS 204 Appendix C uses a geometric repetition estimate. The official potential-update supplement corrects the mean and minimum loop limit. The following exponents are exact calculations within that source model, not established implementation failure probabilities or security levels; mean alone does not imply the geometric tail. The inspected counter remains above both source limits.',
+        '',
+        table(
+            [
+                'Source model',
+                'Mean numerator',
+                'Mean denominator',
+                'Source minimum iterations',
+                'Estimated exponent at source limit',
+                'Estimated exponent at original limit',
+                'Estimated exponent at checked counter',
+            ],
+            compileSigningLoopSourceComparison().map((row) => [
+                row.source,
+                ...[
+                    row.meanNumerator,
+                    row.meanDenominator,
+                    row.minimumIterations,
+                    row.atSourceLimit.failureExponent,
+                    row.atOriginalLimit.failureExponent,
+                    row.atCheckedCounter.failureExponent,
+                ].map(formatCount),
+            ]),
+        ),
+        '',
+        'The following completed, all-cooperating prefixes use the completion profile and one completed registration per roster participant. A signed ballot counts here even if it will fail inner verification. Additional registrations are an explicit census input. These public record counts are not lifetime honest-key or signing-oracle bounds; they exclude abandoned enrollment, additional intents, repeated evaluation, verification, recovery and the unimplemented closing/release purposes.',
+        '',
+        table(
+            [
+                'Signed ballots',
+                'Signed records',
+                'Signature bytes',
+                'Application message bytes',
+                'FIPS frame bytes',
+                'Representative permutations',
+            ],
+            [0, Number(fixedModulusBfv.participantCount)].map((ballots) => {
+                const value = compileCompletedAuthenticationCensus(
+                    Number(fixedModulusBfv.participantCount),
+                    fixedModulusBfv.participantCount,
+                    ballots,
+                );
+                return [
+                    formatCount(ballots),
+                    formatCount(value.signatures),
+                    formatCount(value.signatureBytes),
+                    formatCount(value.signingMessageBytes),
+                    formatCount(value.signingFrameBytes),
+                    formatCount(value.representativePermutations),
+                ];
+            }),
+        ),
+        '',
+        '## Fresh signature-prefix sampling bounds',
+        '',
+        'A proof game that replaces short SHAKE prefixes cannot silently reuse an earlier all-input sampling event under a preservation premise. The mask-family row charges every nonce under one newly programmed seed and requires the new prefix itself to finish the secret sampler, making the unchanged tail irrelevant. The challenge row charges one newly sampled challenge-expansion prefix. Add these bounds per actual refresh to the base-function bad event; repeated use of the same retained family is not a refresh. These are conditional proof-game operands, not runtime modifications or an established deployed signing-failure bound.',
+        '',
+        table(
+            [
+                'Refresh',
+                'Input bytes',
+                'Prefix bytes',
+                'Refreshed points',
+                'Candidate positions',
+                'Required rejections',
+                'Conservative failure exponent',
+            ],
+            compileProgrammedSignatureSamplerBounds().map((row) => [
+                row.purpose,
+                formatCount(row.inputBytes),
+                formatCount(row.prefixBytes),
+                formatCount(row.refreshedPoints),
+                formatCount(row.candidatePositions),
+                formatCount(row.requiredRejections),
+                formatCount(row.failureExponent),
+            ]),
+        ),
+        '',
+        '## Stateless signature resource screen',
+        '',
+        'FIPS 205 SLH-DSA-256f candidate only. The recursive algorithms bound the complete function-call schedule; these are calls to distinct hash/PRF constructions, not compression operations, quantum gates or complete participant work. The top signing layer omits public-key recovery, while every lower root is reconstructed. Chain hashing is an upper bound because its final signing and verification paths depend on message digits. No participant credential or authentication format is selected by this screen.',
+        '',
+        table(
+            ['Quantity', 'Value'],
+            Object.entries(compileStatelessSignatureWork())
+                .filter(
+                    (entry): entry is [string, bigint] =>
+                        typeof entry[1] === 'bigint',
+                )
+                .map(([name, value]) => [name, formatCount(value)]),
+        ),
+        '',
+        table(
+            [
+                'Operation',
+                'PRF',
+                'Chain hash upper bound',
+                'Parent hash',
+                'Chain compression',
+                'Forest compression',
+                'Message randomization',
+                'Message hash',
+            ],
+            (() => {
+                const work = compileStatelessSignatureWork();
+                return [
+                    [
+                        'Key generation',
+                        work.keyGeneration.pseudorandomFunction,
+                        work.keyGeneration.chainHash,
+                        work.keyGeneration.parentHash,
+                        work.keyGeneration.chainCompression,
+                        0n,
+                        0n,
+                        0n,
+                    ],
+                    [
+                        'Signing',
+                        work.signing.pseudorandomFunction,
+                        work.signing.chainHashUpper,
+                        work.signing.parentHash,
+                        work.signing.chainCompression,
+                        work.signing.forestCompression,
+                        work.signing.messageRandomization,
+                        work.signing.messageHash,
+                    ],
+                    [
+                        'Verification',
+                        0n,
+                        work.verification.chainHashUpper,
+                        work.verification.parentHash,
+                        work.verification.chainCompression,
+                        work.verification.forestCompression,
+                        0n,
+                        work.verification.messageHash,
+                    ],
+                ].map(([name, ...values]) => [
+                    String(name),
+                    ...values.map((value) => formatCount(value as bigint)),
+                ]);
+            })(),
+        ),
+        '',
+        '## Stateless signature SHAKE input and work screen',
+        '',
+        'FIPS 205 SHAKE-256f comparison using current purpose/message shapes and the candidate context suffix: a delimiter followed by the expected public-key seed. The table counts complete SHAKE calls and their Keccak permutations, including padding and wide tree-key inputs. Signing and verification are upper bounds where chains depend on the message. The frame-length and address-type separation applies to these inputs only; an unrestricted message has an explicit forest-compression overlap witness. No participant credential migration or complete-workflow timing is inferred.',
+        '',
+        table(
+            [
+                'Fixed hash role',
+                'Input bytes',
+                'Output bytes',
+                'Permutations per call',
+                'Generated address types',
+            ],
+            Object.entries(compileStatelessSignatureShakeWork().fixed).map(
+                ([name, value]) => [
+                    name,
+                    formatCount(value.inputBytes),
+                    formatCount(value.outputBytes),
+                    formatCount(value.permutations),
+                    value.addressTypes.join(', '),
+                ],
+            ),
+        ),
+        '',
+        table(
+            [
+                'Purpose',
+                'Pure frame bytes',
+                'Randomization input bytes',
+                'Message-hash input bytes',
+                'Signing permutations, upper bound',
+                'Verification permutations, upper bound',
+            ],
+            compileStatelessSignatureShakeWork().roles.map((value) => [
+                value.purpose,
+                formatCount(value.frameBytes),
+                formatCount(value.randomization.inputBytes),
+                formatCount(value.messageHash.inputBytes),
+                formatCount(value.signingUpper.permutations),
+                formatCount(value.verificationUpper.permutations),
+            ]),
+        ),
+        '',
+        table(
+            [
+                'Workload',
+                'Hash calls',
+                'Hash input bytes',
+                'Hash output bytes',
+                'Permutations',
+            ],
+            (() => {
+                const value = compileStatelessSignatureShakeWork();
+                return (
+                    [
+                        ['Key generation', value.keyGeneration],
+                        [
+                            'Private-key import, root-reconstruction hash core',
+                            value.keyGeneration,
+                        ],
+                        [
+                            'One current-purpose synthetic screen, upper bound',
+                            value.ordinaryScreenUpper,
+                        ],
+                    ] as const
+                ).map(([name, work]) => [
+                    name,
+                    formatCount(work.hashCalls),
+                    formatCount(work.inputBytes),
+                    formatCount(work.outputBytes),
+                    formatCount(work.permutations),
+                ]);
+            })(),
+        ),
+        '',
+        '## Hidden-key XOF coupling',
+        '',
+        'An ideal XOF restricted to an injective secret-key/public-input encoding can be programmed with one hidden point and an independent keyed stream. Each public XOF query needs at most two Boolean queries; classical keyed-prefix replies need none. The key is not separately disclosed. This is a query bound and complete-view control, not a private-vault simulation, fixed-XOF assumption or full signature bound. Private-key import additionally recomputes the tree root; that hash core is counted above and does not authenticate the message-randomization seed.',
+        '',
+        table(
+            ['Control or operand', 'Value'],
+            (() => {
+                const value = keyedXofViews();
+                const bound = unrevealedPointQueryBound(
+                    2n * compileWideChallengeCompilerCensus().adversaryQueries,
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes),
+                );
+                return [
+                    ['Original keyed samples', formatCount(value.keyedSamples)],
+                    [
+                        'Original random-function samples',
+                        formatCount(value.randomSamples),
+                    ],
+                    [
+                        'Samples per simulated world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    [
+                        'Distinct complete views',
+                        formatCount(value.views.length),
+                    ],
+                    [
+                        'Key-disclosed matching replies in keyed world',
+                        `${value.disclosedKeyedMatches}/${value.disclosedKeyedSamples}`,
+                    ],
+                    [
+                        'Key-disclosed matching replies in random world',
+                        `${value.disclosedRandomMatches}/${value.disclosedRandomSamples}`,
+                    ],
+                    [
+                        'Illustrative single-key ideal advantage upper bound',
+                        `${bound.bound.numerator}/${bound.bound.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Labelled ideal keyed-function families',
+        '',
+        'Under distinct uniform public labels and publicly invertible disjoint byte domains, one hidden-point simulation covers independent secret roles across the labelled keys. Label collisions are charged separately. This primitive query bound is not the full multi-user signature theorem, actual vault simulation or fixed-XOF security claim. The key-population rows are evaluation operands, not an inferred lifetime cap.',
+        '',
+        table(
+            [
+                'Illustrative honest-key population',
+                'Public-label collision term',
+                'Shared hidden-point term',
+                'Combined upper bound',
+            ],
+            [
+                1n,
+                10n,
+                20n,
+                compileWideChallengeCompilerCensus().adversaryQueries,
+            ].map((keys) => {
+                const domain =
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes);
+                const value = labelledKeyedXofBound(
+                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    keys,
+                    domain,
+                    domain,
+                );
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    formatCount(keys),
+                    ratio(value.labelCollision),
+                    ratio(value.hiddenPoint.bound),
+                    ratio(value.bound),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Joint-function control', 'Value'],
+            (() => {
+                const value = labelledKeyedXofViews();
+                return [
+                    [
+                        'Original samples per world',
+                        formatCount(value.originalSamples),
+                    ],
+                    [
+                        'Simulated samples per world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    [
+                        'Distinct complete views',
+                        formatCount(value.views.length),
+                    ],
+                    [
+                        'Conflicting assignments when labels coincide',
+                        formatCount(value.collisions),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Stateless signature reduction initialization',
+        '',
+        'The inspected formal reductions initialize every virtual FORS and WOTS secret before invoking the adversary. These are literal source counts and a payload lower bound, not signer runtime, a universal lower bound on reductions or a security level. The PRF-only demand comparison follows the actual bounded signer, with distinct first signing queries as its operand; it cannot automatically be applied to the separate two-stage tweakable-hash challenge games.',
+        'The open-preimage rows count a separate post-disclosure prefix: its literal finder reconstructs every forest root and compressed forest key after receiving the public seed and before invoking the original adversary. These H and T_k calls incur work even with no signing queries. They are a lower bound on that branch, excluding later signing, forgery verification and extraction. In an ideal collection their functions are independent of the challenged F function, so their count is not automatically the number of hidden-point-oracle queries; actual running time still includes them.',
+        '',
+        table(
+            ['Quantity', 'Value'],
+            Object.entries(compileStatelessSignatureProofWork(0n))
+                .filter(([name]) => !name.startsWith('demand'))
+                .map(([name, value]) => [name, formatCount(value)]),
+        ),
+        '',
+        table(
+            [
+                'Signing queries',
+                'Demanded secret PRF calls, upper bound',
+                'Demanded message PRF calls, upper bound',
+            ],
+            [0n, 1n, 6n].map((queries) => {
+                const value = compileStatelessSignatureProofWork(queries);
+                return [
+                    formatCount(queries),
+                    formatCount(value.demandSecretOracleCallsUpper),
+                    formatCount(value.demandMessageOracleCallsUpper),
+                ];
+            }),
+        ),
+        '',
+        '## Delayed point-disclosure controls',
+        '',
+        'Exact XOR-oracle and controlled-Hadamard measurement controls. The point is disclosed after the stored quantum query. Every measurement outcome is retained, with no postselection. These distinguish two oracle experiments; they do not forge a signature. The slice comparison counts its query before and after reprogramming.',
+        '',
+        table(
+            [
+                'Control',
+                'Domain size',
+                'Quantum queries',
+                'Distinguishing advantage',
+                'Proposed quadratic bound',
+            ],
+            (() => {
+                const point = delayedPointDisclosure(8, 0),
+                    slice = delayedSliceReprogramming(64, 0, 0);
+                const ratio = (value: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${value.numerator}/${value.denominator}`;
+                return [
+                    [
+                        'Point revealed after query',
+                        String(point.size),
+                        '1',
+                        ratio(point.advantage),
+                        ratio(point.proposedQuadraticBound),
+                    ],
+                    [
+                        'Random slice switched, point revealed',
+                        String(slice.size),
+                        String(slice.publicHashQueries),
+                        ratio(slice.advantage),
+                        ratio(slice.proposedQuadraticBound),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'A common-success-projector argument gives twice the ideal search bound plus twice the squared state-distance bound. With no public queries before disclosure and independent initial state, the ideal worlds coincide exactly and the search bound alone applies. The following operands use the existing query screen and the candidate hash width; they are not fixed-hash, collection-wide or complete signature-security bounds.',
+        '',
+        table(
+            ['Operand', 'Exact rational upper bound'],
+            (() => {
+                const queries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const bits = Number(
+                    compileStatelessSignatureWork().nodeBytes * 8n,
+                );
+                const value = compileDelayedDisclosureBounds(
+                    queries,
+                    queries,
+                    bits,
+                    bits,
+                );
+                return (
+                    [
+                        ['Squared state distance', value.squaredDistance],
+                        ['Ideal search success', value.idealSearch],
+                        ['Corrected success', value.correctedSuccessUpper],
+                        [
+                            'No public preprocessing, exact-coupling success',
+                            compileDelayedDisclosureBounds(
+                                queries,
+                                0n,
+                                bits,
+                                bits,
+                            ).correctedSuccessUpper,
+                        ],
+                    ] as const
+                ).map(([name, bound]) => {
+                    return [name, `${bound.numerator}/${bound.denominator}`];
+                });
+            })(),
+        ),
+        '',
+        table(
+            ['Complete-view coupling control', 'Value'],
+            (() => {
+                const value = noPublicQuerySliceCoupling();
+                return [
+                    ['Original samples', formatCount(value.originalSamples)],
+                    ['Replacement samples', formatCount(value.replacedSamples)],
+                    [
+                        'Distinct complete views',
+                        formatCount(value.views.length),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Unrevealed-point query bound',
+        '',
+        'For a Boolean oracle that is zero or has one uniformly random marked input, a q-query acceptance probability has degree at most 2q after Hamming-weight symmetrization. The integer square grid gives min(1, 5/(2 floor(N/(4q^2)))) when q is positive and the grid exists; zero queries give zero advantage. The location is not supplied separately, and initial advice and gate descriptions are independent of the hidden function. The earlier disclosed-point control does not satisfy these premises.',
+        '',
+        table(
+            ['Illustrative ideal undetectability operand', 'Value'],
+            (() => {
+                const hashQueries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const bits = compileStatelessSignatureWork().nodeBytes * 8n;
+                const point = unrevealedPointQueryBound(
+                    2n * hashQueries,
+                    1n << bits,
+                );
+                const preimage = idealCollectionPreimageBound(
+                    hashQueries,
+                    1n << bits,
+                );
+                return [
+                    ['Game public-hash queries', formatCount(hashQueries)],
+                    ['Hidden-point oracle queries', formatCount(point.queries)],
+                    [
+                        'Acceptance-polynomial degree bound',
+                        formatCount(point.degree),
+                    ],
+                    ['Integer-grid spacing', formatCount(point.spacing)],
+                    [
+                        'Derived advantage upper bound',
+                        `${point.bound.numerator}/${point.bound.denominator}`,
+                    ],
+                    [
+                        'Earlier standalone linear upper operand',
+                        `${12n * hashQueries}/${1n << (bits / 2n)}`,
+                    ],
+                    [
+                        'Ordinary preimage finding, ideal collection upper bound',
+                        `${preimage.bound.numerator}/${preimage.bound.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'The displayed query value is an evaluation point, not proof that the original adversary, honest simulation and post-disclosure work fit it. The random-collection argument requires the inspected preprocessing restriction, distinct target tweaks and no target/collection overlap. The ordinary-preimage row charges one extra verification query and supplies no preimage-opening interface. These bounds do not instantiate fixed hash functions or establish the full signature bound.',
+        '',
+        table(
+            ['Adaptive random-collection control', 'Value'],
+            (() => {
+                const value = undetectabilityCollectionViews();
+                return [
+                    [
+                        'Original samples per world',
+                        formatCount(value.originalSamples),
+                    ],
+                    [
+                        'Simulated samples per world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    ['Distinct full views', formatCount(value.views.length)],
+                ];
+            })(),
+        ),
+        '',
+        '## Staged preimage-opening bound',
+        '',
+        'Independent target preimages remain unused in the staged oracle until their classical opening. One common final-function success predicate gives separate search, state-error and unopened-point-guess terms. The bound has no multiplicative opening-count factor. Opening requests, target preparation and simulation still cost work; correlated preimages and unaccounted prior public queries do not satisfy the argument.',
+        '',
+        table(
+            ['Ideal bound operand', 'Value'],
+            (() => {
+                const queries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const size =
+                    1n << (8n * compileStatelessSignatureWork().nodeBytes);
+                const value = stagedPreimageBound(queries, size, size);
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    ['Illustrative public queries', formatCount(queries)],
+                    ['Input and output domain size', formatCount(size)],
+                    ['Search term after comparison', ratio(value.search)],
+                    ['State-error term', ratio(value.stateError)],
+                    [
+                        'Unopened final-point guess term',
+                        ratio(value.finalPointGuess),
+                    ],
+                    ['Total upper bound', ratio(value.bound)],
+                ];
+            })(),
+        ),
+        '',
+        table(
+            [
+                'Quantum control input domain',
+                'Coupled cases',
+                'Squared-distance numerator',
+                'Common denominator',
+                'Eligible staged-output numerator',
+                'Unopened-input-guess numerator',
+            ],
+            ([16, 64] as const).map((inputs) => {
+                const value = stagedPreimageStateControl(inputs);
+                return [
+                    String(inputs),
+                    formatCount(value.samples),
+                    formatCount(value.difference),
+                    formatCount(
+                        BigInt(value.samples) * BigInt(value.denominator),
+                    ),
+                    formatCount(value.eligible),
+                    formatCount(value.guessSuccess),
+                ];
+            }),
+        ),
+        '',
+        table(
+            [
+                'Opening control',
+                'Samples',
+                'Eligible outputs',
+                'Final successes',
+                'Base-function matches',
+                'Unopened-input guesses',
+                'Successes missed by base-function matching',
+            ],
+            stagedPreimageViews().controls.map((value) => [
+                String(value.mode),
+                formatCount(value.samples),
+                formatCount(value.eligible),
+                formatCount(value.success),
+                formatCount(value.baseMatch),
+                formatCount(value.guess),
+                formatCount(value.guessOnly),
+            ]),
+        ),
+        '',
+        'The controls include no openings, adaptive/repeated openings, every target opened, and an invalid opening index. Complete original-image, staged and search views agree under their stated couplings. The correlated-input control instead fixes a remaining input after another input opens. None of these models is a participant operation or a complete security bound.',
+        '',
+        '## Interleaved target query bound',
+        '',
+        'The ideal model retains adaptive messages, fresh random target keys, earlier public queries and quantum state. It compares a fixed final function with staged row disclosure through a common-success norm argument, then bounds staged search using worst-case output coverage. Repeated keys, the state error and search are separate terms. These operands do not establish the concrete SHA2 message-compression mapping, lifetime populations, full reduction time or complete signature security.',
+        '',
+        table(
+            [
+                'Illustrative target requests',
+                'Covered output fraction, upper bound',
+                'Repeated-key term',
+                'State-error term',
+                'Staged-search term after comparison',
+                'Total upper bound',
+            ],
+            [0n, 1n, 6n].map((targets) => {
+                const parameters = compileStatelessSignatureWork();
+                const value = interleavedTargetQueryBound(
+                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    targets,
+                    1n << (8n * parameters.nodeBytes),
+                    1n << parameters.totalHeight,
+                    parameters.forestLeaves,
+                    parameters.forestTrees,
+                );
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    formatCount(targets),
+                    ratio(value.coverage),
+                    ratio(value.repeatedKey),
+                    ratio(value.stateError),
+                    ratio(value.search),
+                    ratio(value.bound),
+                ];
+            }),
+        ),
+        '',
+        table(
+            [
+                'Quantum control key space',
+                'Coupled cases',
+                'Squared-distance numerator',
+                'Common denominator',
+                'Cases with real success larger',
+                'Cases with staged success larger',
+            ],
+            ([16, 64] as const).map((keys) => {
+                const value = stagedRowStateControl(keys);
+                return [
+                    String(keys),
+                    formatCount(value.samples),
+                    formatCount(value.difference),
+                    formatCount(
+                        BigInt(value.samples) * BigInt(value.denominator),
+                    ),
+                    formatCount(value.positiveGaps),
+                    formatCount(value.negativeGaps),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Staged distribution control', 'Value'],
+            (() => {
+                const value = interleavedTargetViews();
+                return [
+                    [
+                        'Original staged samples',
+                        formatCount(value.stagedSamples),
+                    ],
+                    [
+                        'Deferred/search samples per world',
+                        formatCount(value.deferredSamples),
+                    ],
+                    ['Complete views', formatCount(value.views.length)],
+                    ['Early-stop samples', formatCount(value.early)],
+                    [
+                        'Successful new-pair search samples',
+                        formatCount(value.successes),
+                    ],
+                    [
+                        'Known target values without a search solution',
+                        formatCount(value.forcedWithoutSearch),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Multi-key message-target accounting',
+        '',
+        'Separate credential namespaces retain cross-key equal randomizers while forbidding cross-key coverage. The ideal state/search terms use the per-credential request cap; the within-credential repetition events sum over credentials. Hedged signing additionally charges repetition of a private-randomizer/message input through an unconditional first-bad coupling. No final-roster or lifetime cap is inferred from these example operands.',
+        '',
+        table(
+            [
+                'Illustrative credentials',
+                'Requests per credential',
+                'Private input repetition',
+                'Output-randomizer repetition',
+                'State error',
+                'Search after comparison',
+                'Hedged upper bound',
+            ],
+            [
+                [1n, 6n],
+                [10n, 10n],
+                [compileWideChallengeCompilerCensus().adversaryQueries, 10n],
+            ].map(([credentials, requestsPerCredential]) => {
+                const parameters = compileStatelessSignatureWork(),
+                    domain = 1n << (8n * parameters.nodeBytes);
+                const value = multiKeyTargetBound({
+                    publicQueries:
+                        compileWideChallengeCompilerCensus().adversaryQueries,
+                    credentials,
+                    requestsPerCredential,
+                    randomizerDomain: domain,
+                    coinDomain: domain,
+                    instances: 1n << parameters.totalHeight,
+                    leavesPerTree: parameters.forestLeaves,
+                    trees: parameters.forestTrees,
+                });
+                const ratio = (term: {
+                    numerator: bigint;
+                    denominator: bigint;
+                }) => `${term.numerator}/${term.denominator}`;
+                return [
+                    formatCount(credentials),
+                    formatCount(requestsPerCredential),
+                    ratio(value.coinInputRepetition),
+                    ratio(value.randomizerRepetition),
+                    ratio(value.stateError),
+                    ratio(value.search),
+                    ratio(value.hedgedBound),
+                ];
+            }),
+        ),
+        '',
+        table(
+            [
+                'Quantum randomizer domain',
+                'Coupled cases',
+                'Squared-distance numerator',
+                'Common denominator',
+                'Equal cross-key randomizer cases',
+                'Cross-key-only coverage observations',
+            ],
+            ([16, 64] as const).map((size) => {
+                const value = multiKeyTargetStateControl(size);
+                return [
+                    String(size),
+                    formatCount(value.samples),
+                    formatCount(value.distance),
+                    formatCount(
+                        BigInt(value.samples) * BigInt(value.denominator),
+                    ),
+                    formatCount(value.equalRandomizerCases),
+                    formatCount(value.crossKeyOnly),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Complete-view control', 'Value'],
+            (() => {
+                const value = multiKeyTargetViews(),
+                    coins = randomizerInputCoupling();
+                return [
+                    [
+                        'Original staged samples',
+                        formatCount(value.originalSamples),
+                    ],
+                    [
+                        'Deferred/search samples per world',
+                        formatCount(value.simulatedSamples),
+                    ],
+                    ['Complete views', formatCount(value.views.length)],
+                    ['Early-stop samples', formatCount(value.early)],
+                    [
+                        'Real private-input repetition samples',
+                        `${coins.realBad}/${coins.realSamples}`,
+                    ],
+                    [
+                        'Fresh-game repetition samples',
+                        `${coins.freshBad}/${coins.freshSamples}`,
+                    ],
+                    [
+                        'First-reply counts before conditioning',
+                        coins.allFirst.join(', '),
+                    ],
+                    [
+                        'First-reply counts among good histories',
+                        coins.goodFirst.join(', '),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'These terms assume the matching ideal keyed-function hop and fixed complete message before fresh private coins. They do not include public-label collisions, the rest of the signature reductions, vault integrity, fixed-XOF assumptions or the complete protocol advantage.',
+        '',
+        '## Adaptive WOTS endpoint accounting',
+        '',
+        'One distinct signed message per instance, independent chain seeds and separate hash tweaks for every chain step. Public endpoints may precede the message. The selected earlier chain is verified inside the compared executions; its queries are charged below. Compression, the complete signature reduction and concrete reduction time remain separate.',
+        '',
+        table(
+            ['Operand or term', 'Value'],
+            (() => {
+                const work = compileStatelessSignatureWork(),
+                    publicQueries =
+                        compileWideChallengeCompilerCensus().adversaryQueries,
+                    domain = 1n << (8n * work.nodeBytes),
+                    value = adaptiveWotsBound(
+                        publicQueries,
+                        work.winternitz - 1n,
+                        domain,
+                    );
+                return [
+                    [
+                        'Public-query evaluation operand',
+                        formatCount(publicQueries),
+                    ],
+                    [
+                        'Selected-chain verification allowance',
+                        formatCount(value.verificationQueries),
+                    ],
+                    ['Total query operand', formatCount(value.queries)],
+                    ['Chain value domain', formatCount(domain)],
+                    [
+                        'Common-success state term',
+                        `${value.stateError.numerator}/${value.stateError.denominator}`,
+                    ],
+                    [
+                        'Staged-search term',
+                        `${value.search.numerator}/${value.search.denominator}`,
+                    ],
+                    [
+                        'Ideal raw-endpoint bound',
+                        `${value.bound.numerator}/${value.bound.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Conditional complete ideal signature screen',
+        '',
+        'Joint labelled keyed functions, interleaved message targets, acyclic tree/compression collisions, adaptive raw WOTS endpoints and unopened FORS preimages. Query operands cover the attack and wrapper including final verification; the WOTS row adds its own conservative selected-chain allowance. Credential and first-evaluated message counts remain separate. This sum requires the exact ideal event decomposition and matched domains; it is not fixed-XOF, vault, efficient-reduction or complete protocol security.',
+        '',
+        table(
+            [
+                'Total query operand',
+                'Credential operand',
+                'Messages per credential',
+                'Ideal bound',
+                'Floor security bits',
+            ],
+            (() => {
+                const queries =
+                    compileWideChallengeCompilerCensus().adversaryQueries;
+                return [
+                    [queries, 10n, 10n],
+                    [queries, 10n, 15n],
+                    [queries, 10n, 16n],
+                    [queries << 10n, 10n, 10n],
+                    [queries, queries, 10n],
+                ].map(([count, keys, messages]) => {
+                    const value = statelessSignatureSecurityScreen(
+                        count,
+                        keys,
+                        messages,
+                    );
+                    return [
+                        formatCount(count),
+                        formatCount(keys),
+                        formatCount(messages),
+                        `${value.bound.numerator}/${value.bound.denominator}`,
+                        formatCount(value.securityBits),
+                    ];
+                });
+            })(),
+        ),
+        '',
+        table(
+            ['Hash graph operand', 'Value'],
+            (() => {
+                const work = compileStatelessSignatureWork(),
+                    domain = 1n << (8n * work.nodeBytes),
+                    value = hashGraphCollisionBound(
+                        compileWideChallengeCompilerCensus().adversaryQueries,
+                        domain,
+                    );
+                return [
+                    [
+                        'Ideal new-input collision bound',
+                        `${value.numerator}/${value.denominator}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'Fixed acyclic graph, separate hash rows and independent base leaves. Graph-node populations do not multiply this ideal query bound. The information-theoretic comparison permits arbitrary finite auxiliary data independent of the search oracle; computational wrapper costs follow their actual call graph. These signing-cap examples are sensitivity checks, not new protocol limits.',
+        '',
+        '## Full XOF prefix and tail controls',
+        '',
+        'Reusing the excluded-prefix sample as the public tail fails the complete joint law. The independent-tail construction uses two Boolean search queries per variable-length XOF query, with clean scratch; the existing conservative query coefficients therefore remain unchanged.',
+        '',
+        table(
+            [
+                'Prefix bits',
+                'Sample bits',
+                'Reuse distinguishing probability',
+                'Marginal variation',
+            ],
+            excludedPrefixStreamControl().map((value) => [
+                formatCount(value.outputBits),
+                formatCount(value.sampleBits),
+                `${value.distinguishing.numerator}/${value.distinguishing.denominator}`,
+                `${value.marginalVariation.numerator}/${value.marginalVariation.denominator}`,
+            ]),
+        ),
+        '',
+        table(
+            ['Control', 'Value'],
+            (() => {
+                const value = fullXofPrefixControl();
+                return [
+                    [
+                        'Variable-length XOR basis cases',
+                        formatCount(value.basisCases),
+                    ],
+                    [
+                        'Boolean queries per XOF query',
+                        formatCount(value.booleanQueriesPerXof),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        '## Signing vault key-recovery accounting',
+        '',
+        'A newly available valid private key matching the expected verification key yields a fresh signature in the fixed registration-message subset. This charges one local signing computation, not an additional response from the honest signing oracle. Existing import/validation and the actual vault wrapper remain separately charged.',
+        '',
+        table(
+            ['Operand', 'Value'],
+            (() => {
+                const value = compileSigningKeyRecoveryWork(15n),
+                    control = keyRecoveryChallengeControl();
+                return [
+                    ['Prior-frame evaluation operand', formatCount(15n)],
+                    ['Fixed message bytes', formatCount(value.messageBytes)],
+                    [
+                        'Maximum candidate messages examined',
+                        formatCount(value.maximumCandidates),
+                    ],
+                    [
+                        'Additional signing-oracle queries',
+                        formatCount(value.additionalSigningOracleQueries),
+                    ],
+                    [
+                        'Local signing evaluations',
+                        formatCount(value.localSigningEvaluations),
+                    ],
+                    [
+                        'Additional local hash-call upper bound',
+                        formatCount(value.localSigningWork.hashCalls),
+                    ],
+                    [
+                        'Additional local Keccak permutation upper bound',
+                        formatCount(value.localSigningWork.permutations),
+                    ],
+                    [
+                        'Wrong decoders in the finite challenge control',
+                        formatCount(control.decoders),
+                    ],
+                    [
+                        'Recovery mixture weights checked',
+                        formatCount(control.recoveryWeights),
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'Wrapping-key recovery reduces to a fresh equal-length AEAD challenge with factor two and an unused-message collision term. The candidate key and target must be fixed before both independent challenge messages. Fresh nonce availability, actual key populations and the complete AEAD bound remain obligations; a tag under a replacement key does not establish original provenance.',
+        '',
+        '## ML-DSA theorem parameter screen',
+        '',
+        'JMW24 Theorem 2, equations (38) and (41): the auxiliary MLWE error parameter must be a positive integer with 2*zeta*n*(k+l+1)*etaPrime < floor(q/32). The comparison uses the independently published middle parameter set from equation (48) and Table 2. Passing this numerical condition is not a complete theorem mapping or security level. Failure for ML-DSA-65 excludes this particular SelfTargetMSIS-to-MLWE reduction; it is not an attack on the primitive.',
+        '',
+        table(
+            [
+                'Parameters',
+                'Modulus',
+                'Degree',
+                'Signature vector bound',
+                'Error coefficient',
+                'Strict upper bound',
+                'Largest auxiliary error',
+            ],
+            [
+                { name: 'ML-DSA-65', parameters: mlDsa65Parameters },
+                {
+                    name: 'Published comparison',
+                    parameters: publishedDilithiumComparison,
+                },
+            ].map(({ name, parameters }) => {
+                const result = screenSelfTargetReduction(parameters);
+                return [
+                    name,
+                    formatCount(parameters.modulus),
+                    formatCount(parameters.polynomialDegree),
+                    formatCount(result.signatureVectorBound),
+                    formatCount(result.errorCoefficient),
+                    formatCount(result.strictUpperBound),
+                    formatCount(result.maximumAuxiliaryError),
+                ];
+            }),
+        ),
+        '',
+        '## Proof hash byte and permutation work',
+        '',
+        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.",
+        '',
+        table(
+            [
+                'Role',
+                'Role bytes',
+                'Prover core logical input bytes',
+                'Prover permutations without prefix reuse',
+                'Prover permutations with prefix reuse',
+                'Verifier core hash input bytes',
+                'Verifier core permutations',
+                'One statement-digest pass permutations',
+            ],
+            proofHashProfiles().map((profile) => {
+                const value = compileProofHashWork(profile);
+                return [
+                    profile.role,
+                    formatCount(value.roleBytes),
+                    formatCount(value.proverCore.inputBytes),
+                    formatCount(
+                        value.proverCoreWithoutPrefixReuse.permutations,
+                    ),
+                    formatCount(value.proverCore.permutations),
+                    formatCount(value.verifierCore.inputBytes),
+                    formatCount(value.verifierCore.permutations),
+                    formatCount(value.statementDigestPass.permutations),
+                ];
+            }),
+        ),
+        '',
+        '## Release verification attempts',
+        '',
+        'A valid relation body paired with a correctly signed envelope claiming the wrong body identity is rejected only after complete proof verification. The public context survives that rejection. These counts apply per complete attempt with that context already verified; multiply by the number of attempts. Exact replay, changed envelopes with a fixed proof, and changed proof bodies remain separate populations. Executed calls do not establish distinct oracle points, a simulator lower bound, a lifetime limit or a full reduction cost. The comparisons assign the entire conditional verification allocation to this core alone, before subtracting any other charged work. Signature work, common-polynomial expansion and any additional predecessor reload remain separately chargeable.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Mandatory proof-core calls excluding Merkle work',
+                    formatCount(
+                        releaseVerification.perAttempt.minimumProofCoreQueries,
+                    ),
+                ],
+                [
+                    'Plain statement-digest passes outside the core',
+                    formatCount(
+                        releaseVerification.perAttempt
+                            .plainStatementDigestPasses,
+                    ),
+                ],
+                [
+                    'Completed release-body digest passes outside the core',
+                    formatCount(
+                        releaseVerification.perAttempt
+                            .completedBodyDigestPasses,
+                    ),
+                ],
+                [
+                    'Known calls excluding Merkle, signature and common-polynomial work',
+                    formatCount(
+                        releaseVerification.perAttempt.minimumKnownHashCalls,
+                    ),
+                ],
+                [
+                    'Full attempts covered by the conditional core allocation using the core upper bound',
+                    formatCount(
+                        releaseVerification.maximumAttemptsCoveredByCoreUpperBound,
+                    ),
+                ],
+                [
+                    'First attempt count exceeding the allocation from mandatory core calls alone',
+                    formatCount(
+                        releaseVerification.firstAttemptCountExceedingCoreLowerBound,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Proof verifier query bounds',
+        '',
+        'Logical hash queries for one canonical proof-core verification attempt under the current common-agreement profile. Expanded ancestors are hashed only once across canonical incremental openings. These bounds exclude statement reconstruction, fixed-matrix generation, outer authentication, additional attempts, hash input/output byte work, and the prover or simulator. They are neither a lifetime population nor a complete reduction runtime.',
+        '',
+        table(
+            ['Hash purpose', 'Maximum queries per attempt'],
+            [
+                [
+                    'Salted leaves',
+                    formatCount(proofVerifierQueries.maximumLeafQueries),
+                ],
+                [
+                    'Expanded tree parents',
+                    formatCount(proofVerifierQueries.maximumNodeQueries),
+                ],
+                [
+                    'Verifier messages',
+                    formatCount(proofVerifierQueries.verifierMessageQueries),
+                ],
+                [
+                    'Chain states',
+                    formatCount(proofVerifierQueries.chainStateQueries),
+                ],
+                [
+                    'Message roots',
+                    formatCount(proofVerifierQueries.messageRootQueries),
+                ],
+                [
+                    'Statement context',
+                    formatCount(proofVerifierQueries.contextQueries),
+                ],
+                [
+                    'Proof-core subtotal',
+                    formatCount(proofVerifierQueries.maximumCoreQueries),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Tree ordinal',
+                'Leaves',
+                'Maximum opened leaves',
+                'Maximum expanded parents',
+            ],
+            proofVerifierQueries.groups.map((group, index) => [
+                formatCount(index),
+                formatCount(group.length),
+                formatCount(group.maximumLeafQueries),
+                formatCount(group.maximumNodeQueries),
+            ]),
+        ),
+        '',
+        '## Sparse-support sampling comparison',
+        '',
+        'This proof-only comparison caps each existing balanced sparse sampler at twice its support size on the same random tape. Before completion, each conditional rejection probability is at most (support - 1) / degree; a rejected-position union gives the per-call bound (4 * (support - 1) / degree)^support, capped at one. These are not new runtime limits or permissions to retry. Count every invocation in the relevant execution, including failed operations. The browser columns charge complete fresh reader fills, including discarded tails; native draws request only their examined words. Other sampling, provider failures and complete generation/work populations remain separate.',
+        '',
+        table(
+            [
+                'Sampler',
+                'Degree',
+                'Support',
+                'Calls per named operation',
+                'Comparison draw cap',
+                'Maximum examined bytes',
+                'Maximum browser RNG bytes',
+                'Per-call failure bits',
+            ],
+            compileSparseSupportSamplingCensus().map((value) => [
+                value.role,
+                formatCount(value.degree),
+                formatCount(value.support),
+                formatCount(value.callsPerOperation),
+                formatCount(value.maximumDraws),
+                formatCount(value.maximumExaminedBytes),
+                formatCount(value.maximumBrowserRandomBytes),
+                formatCount(value.failureBits),
+            ]),
+        ),
+        '',
+        '## Proof simulator randomness budgets',
+        '',
+        'These limits cover each complete word-proof role and one fresh programmed wide verifier message. Extra buffered reads are charged by the rejected-field-word event bound, including the stated conditional invocation cap. That cap is not a derived lifetime population for the unfinished protocol. Witness/key generation, participant lifecycle and other primitive samplers remain separate.',
+        '',
+        table(
+            [
+                'Role',
+                'Ordinary proof baseline bytes',
+                'Programmed-message bytes',
+                'Extra buffered reads',
+                'Maximum simulator bytes',
+                'Conditional invocation cap',
+                'Failure allocation bits',
+            ],
+            compileProofRandomnessBudgets().map((value) => [
+                value.role,
+                formatCount(value.ordinaryBaselineBytes),
+                formatCount(value.programmedMessageBytes),
+                formatCount(value.extraReads),
+                formatCount(value.failure.maximumBytes),
+                formatCount(value.invocationCap),
+                formatCount(value.failureAllocationBits),
+            ]),
+        ),
+        '',
+        '## Ballot randomness budget',
+        '',
+        'Finite independent random-byte budgets for the replay experiment. These bounds cover exhaustion of the existing samplers, not journal custody, deterministic replay, or complete protocol security.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Sampler read bytes', formatCount(ballotRandomness.readBytes)],
+                [
+                    'Additional proof reads',
+                    formatCount(ballotRandomness.extraProofReads),
+                ],
+                [
+                    'Proof random-byte budget',
+                    formatCount(ballotRandomness.maximumProofBytes),
+                ],
+                [
+                    'Encryption random-byte budget',
+                    formatCount(ballotRandomness.maximumEncryptionBytes),
+                ],
+                [
+                    'Total private random bytes',
+                    formatCount(ballotRandomness.totalRandomBytes),
+                ],
+                [
+                    'Exhaustion allocation bits',
+                    formatCount(ballotRandomness.exhaustionAllocationBits),
+                ],
+                [
+                    'All-ballot exhaustion bound bits',
+                    formatCount(ballotRandomness.exhaustionBits),
+                ],
+            ],
+        ),
+        '',
+        table(
+            ['Journal storage operand', 'Value'],
+            [
+                [
+                    'Maximum plaintext record bytes',
+                    formatCount(ballotRandomness.recordBytes),
+                ],
+                [
+                    'Encrypted records',
+                    formatCount(ballotRandomness.recordCount),
+                ],
+                [
+                    'Encrypted journal payload bytes',
+                    formatCount(ballotRandomness.encryptedJournalBytes),
+                ],
+                [
+                    'Maximum encrypted root bytes',
+                    formatCount(ballotRandomness.maximumRootCiphertextBytes),
+                ],
+                [
+                    'Root keys in uninterrupted preparation',
+                    formatCount(ballotRandomness.uninterruptedRootKeyCreations),
+                ],
+                [
+                    'Record keys in uninterrupted preparation',
+                    formatCount(
+                        ballotRandomness.uninterruptedRecordKeyCreations,
+                    ),
+                ],
+                [
+                    'Maximum distinct AES inputs per record key',
+                    formatCount(
+                        ballotRandomness.maximumDistinctGcmBlocksPerRecordKey,
+                    ),
+                ],
+                [
+                    'Maximum distinct AES inputs per root key',
+                    formatCount(
+                        ballotRandomness.maximumDistinctGcmBlocksPerRootKey,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Participant ballot custody',
+        '',
+        'Private ballot suffix and payload bounds, excluding the already retained participant root and its earlier records. The encoded suffix supplies no verification or signing authority by itself.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Maximum ballot state bytes',
+                    formatCount(participantBallotCustody.maximumStateBytes),
+                ],
+                [
+                    'Maximum body records',
+                    formatCount(participantBallotCustody.maximumBodyRecords),
+                ],
+                [
+                    'Maximum encrypted body bytes',
+                    formatCount(
+                        participantBallotCustody.maximumEncryptedBodyBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained journal and body bytes',
+                    formatCount(
+                        participantBallotCustody.maximumJournalAndBodyBytes,
+                    ),
+                ],
+                ...participantBallotCustody.phaseBytes.map((value) => [
+                    'Phase ' + value.phase + ' state bytes',
+                    formatCount(value.bytes),
+                ]),
+            ],
+        ),
+        '',
+        '## Participant release custody',
+        '',
+        'Bounds for one original-key release under the retained certified target. Repeated execution replays the same finite journal. The volatile entropy payload shares the existing scalar memory ceiling and excludes allocator metadata, capacity rounding and the rest of the prover. The live decrypted-record bound excludes garbage awaiting collection and browser cryptographic internals. These bounds exclude the earlier participant state and do not establish the complete security reduction or measured browser costs.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Authenticated proof role bytes',
+                    formatCount(participantReleaseCustody.proofRoleBytes),
+                ],
+                [
+                    'Independent noise bytes',
+                    formatCount(participantReleaseCustody.noiseBytes),
+                ],
+                [
+                    'Wasm entropy input bytes',
+                    formatCount(
+                        participantReleaseCustody.wasmEntropyInputBytes,
+                    ),
+                ],
+                [
+                    'Wasm entropy output bytes',
+                    formatCount(
+                        participantReleaseCustody.wasmEntropyOutputBytes,
+                    ),
+                ],
+                [
+                    'Maximum Wasm entropy payload bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumWasmEntropyPayloadBytes,
+                    ),
+                ],
+                [
+                    'Maximum live decrypted journal record bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumLiveDecryptedJournalRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum proof randomness bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumProofRandomBytes,
+                    ),
+                ],
+                [
+                    'Additional proof random reads',
+                    formatCount(participantReleaseCustody.extraProofReads),
+                ],
+                [
+                    'Journal exhaustion allocation bits',
+                    formatCount(
+                        participantReleaseCustody.exhaustionAllocationBits,
+                    ),
+                ],
+                [
+                    'Total journal bytes',
+                    formatCount(participantReleaseCustody.totalRandomBytes),
+                ],
+                [
+                    'Journal records',
+                    formatCount(participantReleaseCustody.journalRecords),
+                ],
+                [
+                    'Maximum body bytes',
+                    formatCount(participantReleaseCustody.maximumBodyBytes),
+                ],
+                [
+                    'Maximum encrypted journal and body bytes',
+                    formatCount(
+                        participantReleaseCustody.maximumJournalAndBodyBytes,
+                    ),
+                ],
+                ...participantReleaseCustody.phaseBytes.map((value) => [
+                    'Phase ' + value.phase + ' state bytes',
+                    formatCount(value.bytes),
+                ]),
+            ],
+        ),
+        '',
+        '## Linked release relation census',
+        '',
+        'The recipient-key, encrypted aggregate-decryption, and dense partial-release equations use the same hidden share and original recipient secret. These are exact integer-lifting and layout values; the emitted proof and target capability remain separate.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Hidden aggregate-share bits',
+                    formatCount(linkedRelease.shareBits),
+                ],
+                [
+                    'Aggregate decoding-error bits',
+                    formatCount(linkedRelease.decodingErrorBits),
+                ],
+                [
+                    'Aggregate decoding-quotient bits',
+                    formatCount(linkedRelease.decodingQuotientBits),
+                ],
+                [
+                    'Aggregate decoding-carry bits',
+                    formatCount(linkedRelease.decodingCarryBits),
+                ],
+                [
+                    'Honest decoding quotient bound',
+                    formatCount(linkedRelease.trueDecodingQuotientBound),
+                ],
+                [
+                    'Honest decoding carry bound',
+                    formatCount(linkedRelease.trueDecodingCarryBound),
+                ],
+                [
+                    'Accepted decoding residual bound',
+                    formatCount(linkedRelease.decodingResidualBound),
+                ],
+                ['Word columns', formatCount(linkedRelease.wordColumns)],
+                [
+                    'Additional narrow memberships',
+                    formatCount(linkedRelease.narrowMemberships),
+                ],
+                ['Boolean columns', formatCount(linkedRelease.booleanColumns)],
+                [
+                    'Single-entry inverse columns',
+                    formatCount(linkedRelease.lookupEntries),
+                ],
+                [
+                    'Full-profile affine rows',
+                    formatCount(linkedRelease.affineRows),
+                ],
+                [
+                    'First release-oracle row bytes',
+                    formatCount(linkedReleaseProof.firstWidth),
+                ],
+                [
+                    'Second release-oracle row bytes',
+                    formatCount(linkedReleaseProof.secondWidth),
+                ],
+                [
+                    'Maximum canonical release-proof bytes',
+                    formatCount(linkedReleaseProof.maximumMultiproofBytes),
+                ],
+                [
+                    'Resident release affine-operator bytes',
+                    formatCount(linkedReleaseProof.residentPublicOperatorBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Setup contribution operator census',
+        '',
+        'The complete reduced-ring model exercises every key, encrypted-share, auxiliary-key, range, and support relation. Full-profile affine rows scale those same equation families to their actual ring degrees. Unused auxiliary padding has no public meaning and needs no zero constraint; support sums read only active coefficients.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Word columns', formatCount(setupRelation.wordColumns)],
+                ['Boolean columns', formatCount(setupRelation.booleanColumns)],
+                [
+                    'Additional narrow-error memberships',
+                    formatCount(setupRelation.errorColumns),
+                ],
+                [
+                    'Disjoint positive/negative pairs',
+                    formatCount(setupRelation.disjointPairs),
+                ],
+                [
+                    'Exact support-sum rows',
+                    formatCount(setupRelation.supportRows),
+                ],
+                [
+                    'Full-profile affine rows',
+                    formatCount(setupRelation.affineRows),
+                ],
+                [
+                    'Single-entry inverse columns',
+                    formatCount(setupRelation.lookupEntries),
+                ],
+                [
+                    'Full resident affine coefficient bytes',
+                    formatCount(setupRelation.fullAffineCoefficientByteLength),
+                ],
+                [
+                    'One public adjoint coefficient vector bytes',
+                    formatCount(
+                        setupRelation.singlePublicAdjointCoefficientByteLength,
+                    ),
+                ],
+                [
+                    'Largest signed public polynomial bytes',
+                    formatCount(
+                        setupRelation.largestPublicPolynomialByteLength,
+                    ),
+                ],
+                [
+                    'Maximum public polynomial query points',
+                    formatCount(setupRelation.maximumPublicQueryCount),
+                ],
+                [
+                    'One public polynomial query-value bytes',
+                    formatCount(setupRelation.publicQueryValueByteLength),
+                ],
+                [
+                    'All affine coefficients at query points bytes',
+                    formatCount(setupRelation.fullAffineQueryValueByteLength),
+                ],
+                [
+                    'Query-transform vectors and twiddles bytes',
+                    formatCount(
+                        setupRelation.publicQueryTransformVectorByteLength,
+                    ),
+                ],
+                [
+                    'Full-ring query cosets',
+                    formatCount(setupRelation.fullRingQueryCosets),
+                ],
+                [
+                    'Auxiliary-ring query cosets',
+                    formatCount(setupRelation.auxiliaryQueryCosets),
+                ],
+                [
+                    'Expanded statement polynomials',
+                    formatCount(setupRelation.expandedStatementPolynomialCount),
+                ],
+                [
+                    'Expanded statement header bytes',
+                    formatCount(
+                        setupRelation.expandedStatementHeaderByteLength,
+                    ),
+                ],
+                [
+                    'Expanded statement bytes',
+                    formatCount(setupRelation.expandedStatementByteLength),
+                ],
+                [
+                    'Maximum encoded queried-operator bytes',
+                    formatCount(setupRelation.maximumEncodedOperatorByteLength),
+                ],
+                [
+                    'Maximum exact integer limb-convolution magnitude',
+                    formatCount(
+                        setupRelation.maximumIntegerLimbConvolutionMagnitude,
+                    ),
+                ],
+                [
+                    'Synthetic witness header bytes',
+                    formatCount(setupRelation.syntheticWitnessHeaderByteLength),
+                ],
+                [
+                    'Synthetic witness bytes',
+                    formatCount(setupRelation.syntheticWitnessByteLength),
+                ],
+            ],
+        ),
+        '',
+        'The query-transform subtotal includes the coefficient and scratch vectors, one base-field twiddle table, and the queried output vector. It excludes input chunks, parser records, query-index groups, allocator behavior, stack, JavaScript, and the rest of proof verification. The experimental expanded statement repeats common matrices and recipient public keys in the verifier input; its length is not the contributor upload size. The encoded operator includes the statement digest, target, final row weight, and queried coefficients.',
+        '',
+        '## Exact RNS arithmetic census',
+        '',
+        'The recursive-context floor comes from the pinned library allocation structure. The alternative uses flat scalar transform plans and sufficiently wide auxiliary integer residues, then exact CRT lifting and rounding under the existing cryptographic modulus. Cached public transforms and scheduled ciphertexts remain separate live-set costs.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Polynomial degree', formatCount(rnsArithmetic.degree)],
+                [
+                    'Base primes in the wrapper screen',
+                    formatCount(rnsArithmetic.basePrimes),
+                ],
+                [
+                    'Extended primes in the wrapper screen',
+                    formatCount(rnsArithmetic.multiplicationPrimes),
+                ],
+                [
+                    'Transform-table bytes per prime',
+                    formatCount(rnsArithmetic.tableBytesPerPrime),
+                ],
+                [
+                    'Recursive extended-context transform tables alone',
+                    formatCount(rnsArithmetic.recursiveTableBytes),
+                ],
+                [
+                    'Auxiliary primes for exact integer products',
+                    formatCount(rnsArithmetic.exactProductPrimes),
+                ],
+                [
+                    'Flat transform-table bytes',
+                    formatCount(rnsArithmetic.flatTableBytes),
+                ],
+                [
+                    'Machine words per canonical cryptographic coefficient',
+                    formatCount(rnsArithmetic.coefficientWords),
+                ],
+                [
+                    'Canonical polynomial working bytes',
+                    formatCount(rnsArithmetic.canonicalPolynomialBytes),
+                ],
+                [
+                    'All transformed multiplication-key working bytes',
+                    formatCount(rnsArithmetic.cachedMultiplicationKeyBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Common-agreement degree census',
+        '',
+        'The direct ordinary-IOP argument uses one common agreement set for every original, shifted, and virtual oracle. Individual proximity is insufficient. The candidate stays inside the proven unique-decoding FRI radius and requires more common points than the complete degree and rational-identity bounds.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Systematic domain size',
+                    formatCount(commonAgreement.systematicSize),
+                ],
+                [
+                    'Reed-Solomon code dimension',
+                    formatCount(commonAgreement.codeDimension),
+                ],
+                [
+                    'Evaluation domain size',
+                    formatCount(commonAgreement.domainSize),
+                ],
+                [
+                    'Distance numerator',
+                    formatCount(commonAgreement.distanceNumerator),
+                ],
+                [
+                    'Distance denominator',
+                    formatCount(commonAgreement.distanceDenominator),
+                ],
+                [
+                    'Minimum common agreement points',
+                    formatCount(commonAgreement.minimumAgreementPoints),
+                ],
+                [
+                    'Smallest declared degree in the shifted stack',
+                    formatCount(commonAgreement.minimumDeclaredDegree),
+                ],
+                [
+                    'Largest degree-shift identity degree',
+                    formatCount(commonAgreement.maximumShiftIdentityDegree),
+                ],
+                [
+                    'Largest relation-identity degree in the word profile',
+                    formatCount(commonAgreement.maximumRelationIdentityDegree),
+                ],
+                [
+                    'Independent query pairs',
+                    formatCount(commonAgreement.queries),
+                ],
+                [
+                    'Joint masking dimension',
+                    formatCount(commonAgreement.maskDimension),
+                ],
+            ],
+        ),
+        '',
+        '## Wide-challenge compiler census',
+        '',
+        'Conditional soundness screen for the full word-layout shape under the prefix-BCS lemma. The underlying IOP must separately establish its common-agreement and algebraic transition bounds, and the implementation must meet the charged query, verification, and role budgets. This does not include setup privacy, proof zero knowledge, lattice assumptions, fixed-function assumptions, or phone qualification.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Field elements in the largest verifier message',
+                    formatCount(wideChallengeCompiler.fieldElements),
+                ],
+                [
+                    'Base-field samples in that message',
+                    formatCount(wideChallengeCompiler.baseFieldSamples),
+                ],
+                [
+                    'Complete verifier-message bytes',
+                    formatCount(wideChallengeCompiler.challengeBytes),
+                ],
+                [
+                    'Merkle and message-root tag bits',
+                    formatCount(wideChallengeCompiler.tagBits),
+                ],
+                [
+                    'Leaf and message salt bits',
+                    formatCount(wideChallengeCompiler.saltBits),
+                ],
+                [
+                    'Relative hash-balance exponent',
+                    formatCount(wideChallengeCompiler.relativeBalanceBits),
+                ],
+                [
+                    'Non-salt input bit-length bound',
+                    formatCount(wideChallengeCompiler.maximumNonSaltInputBits),
+                ],
+                [
+                    'Committed-node budget per proof',
+                    formatCount(wideChallengeCompiler.committedNodeBudget),
+                ],
+                [
+                    'Conditional Merkle-privacy exponent after the role union',
+                    formatCount(wideChallengeCompiler.merklePrivacyBits),
+                ],
+                [
+                    'Programmed verifier-message budget',
+                    formatCount(wideChallengeCompiler.programmedMessageBudget),
+                ],
+                [
+                    'Conditional adaptive-reprogramming exponent',
+                    formatCount(wideChallengeCompiler.reprogrammingBits),
+                ],
+                [
+                    'Independent final query pairs',
+                    formatCount(wideChallengeCompiler.queryCount),
+                ],
+                [
+                    'Adversarial oracle-query budget',
+                    formatCount(wideChallengeCompiler.adversaryQueries),
+                ],
+                [
+                    'Verification and expansion oracle budget',
+                    formatCount(wideChallengeCompiler.verificationBudget),
+                ],
+                [
+                    'Queries after prefix and role routing',
+                    formatCount(wideChallengeCompiler.chargedQueries),
+                ],
+                [
+                    'Proof-role union budget',
+                    formatCount(wideChallengeCompiler.roleBudget),
+                ],
+                [
+                    'Lookup entry count',
+                    formatCount(wideChallengeCompiler.lookupEntryCount),
+                ],
+                [
+                    'Lookup residual root-degree bound',
+                    formatCount(wideChallengeCompiler.lookupRootDegree),
+                ],
+                [
+                    'Lookup challenge-space size',
+                    formatCount(wideChallengeCompiler.lookupChallengeSpace),
+                ],
+                [
+                    'Affine residual root-degree bound',
+                    formatCount(wideChallengeCompiler.affineRootDegree),
+                ],
+                [
+                    'Correlated batching rows',
+                    formatCount(wideChallengeCompiler.correlatedRowCount),
+                ],
+                [
+                    'Batching and first-fold numerator',
+                    formatCount(
+                        wideChallengeCompiler.batchingAndFirstFoldNumerator,
+                    ),
+                ],
+                [
+                    'Uniform-field algebraic event numerator',
+                    formatCount(
+                        wideChallengeCompiler.ordinaryAlgebraicNumerator,
+                    ),
+                ],
+                [
+                    'Conditional QROM soundness exponent',
+                    formatCount(wideChallengeCompiler.failureBits),
+                ],
+            ],
+        ),
+        '',
+        '## Full word-proof encoding census',
+        '',
+        'The emitted full-size prototype retains the complete verification domain. The smaller prover interpolation set is an honest-computation optimization justified by the degree bound, not a verifier relaxation. Canonical incremental Merkle multiproofs authenticate each leaf against the first previously verified subtree and omit already known path hashes. Cache payload counts exclude map/allocation overhead, which requires measurement.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'FRI folds to the terminal constant',
+                    formatCount(fullWordProof.foldCount),
+                ],
+                [
+                    'Fixed proof header bytes',
+                    formatCount(fullWordProof.headerBytes),
+                ],
+                [
+                    'First-oracle leaf payload bytes',
+                    formatCount(fullWordProof.firstWidth),
+                ],
+                [
+                    'Second-oracle leaf payload bytes',
+                    formatCount(fullWordProof.secondWidth),
+                ],
+                [
+                    'Maximum proof bytes with independent paths',
+                    formatCount(fullWordProof.maximumProofBytes),
+                ],
+                [
+                    'Maximum proof bytes with incremental multiproofs',
+                    formatCount(fullWordProof.maximumMultiproofBytes),
+                ],
+                [
+                    'Maximum cached node-digest bytes',
+                    formatCount(fullWordProof.maximumCachedNodeDigestBytes),
+                ],
+                [
+                    'Prover combination interpolation points',
+                    formatCount(fullWordProof.proverInterpolationPoints),
+                ],
+                [
+                    'Expanded first-oracle bytes hashed',
+                    formatCount(fullWordProof.expandedFirstOracleBytes),
+                ],
+                [
+                    'Expanded second-oracle bytes hashed',
+                    formatCount(fullWordProof.expandedSecondOracleBytes),
+                ],
+                [
+                    'Retained leaf-salt bytes',
+                    formatCount(fullWordProof.leafSaltBytes),
+                ],
+                [
+                    'Uniform prover-mask bytes',
+                    formatCount(fullWordProof.proverMaskBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Browser word-prover resource census',
+        '',
+        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. These conservative allocation allowances describe the experimental live-data schedule. They are not measurements of browser-private memory, authenticated checkpoints, a complete action, or phone qualification.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Full-degree common-polynomial adjoints',
+                    formatCount(browserWordProver.fullDegreeCommonPolynomials),
+                ],
+                [
+                    'Prepared adjoint bytes',
+                    formatCount(browserWordProver.preparedAdjointBytes),
+                ],
+                [
+                    'Enforced maximum bytes per opaque hasher',
+                    formatCount(browserWordProver.maximumHasherBytes),
+                ],
+                [
+                    'Metadata and allocator allowance bytes',
+                    formatCount(
+                        browserWordProver.metadataAndAllocatorAllowance,
+                    ),
+                ],
+                ...browserWordProver.stages.map((stage) => [
+                    `Allocation allowance: ${stage.stage}`,
+                    formatCount(stage.bytes),
+                ]),
+            ],
+        ),
+        '',
+        '## Contribution generation and sampling census',
+        '',
+        'The combined browser path keeps witness columns inside Rust, regenerates fixed common polynomials, and retains the remaining public statement and proof as bounded local blobs. Allocation allowances require measured closure. The sampling bound charges finite-word quantization and the omitted Gaussian tails for preparation; it is not a lattice-security or composed-protocol bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Gaussian density parameter numerator',
+                    formatCount(setupGaussianParameters.sigmaNumerator),
+                ],
+                [
+                    'Gaussian density parameter denominator',
+                    formatCount(setupGaussianParameters.sigmaDenominator),
+                ],
+                [
+                    'Gaussian sample bits',
+                    formatCount(setupGaussianParameters.sampleBits),
+                ],
+                [
+                    'Encoded nonterminal cumulative thresholds',
+                    formatCount(setupRandomness.thresholdCount),
+                ],
+                [
+                    'Cumulative table bytes',
+                    formatCount(setupRandomness.encodedThresholdBytes),
+                ],
+                [
+                    'Error samples per contribution',
+                    formatCount(setupRandomness.samplesPerContribution),
+                ],
+                [
+                    'Error samples across preparation and registration',
+                    formatCount(setupRandomness.samplesPerPreparation),
+                ],
+                [
+                    'Uniform sample bytes per contribution',
+                    formatCount(setupRandomness.contributionSampleBytes),
+                ],
+                [
+                    'Preparation sampling-distance exponent',
+                    formatCount(setupRandomness.preparationSamplingBits),
+                ],
+                [
+                    'Witness-generation allocation allowance bytes',
+                    formatCount(contributionGeneration.generationAllowance),
+                ],
+                [
+                    'Combined allocation allowance bytes',
+                    formatCount(contributionGeneration.combinedAllowance),
+                ],
+                [
+                    'Retained verified-roster payload bytes',
+                    formatCount(
+                        contributionGeneration.retainedRosterPayloadBytes,
+                    ),
+                ],
+                [
+                    'Additional roster input-buffer bytes',
+                    formatCount(
+                        contributionGeneration.additionalInputBufferBytes,
+                    ),
+                ],
+                [
+                    'Public coefficient allocation allowance bytes',
+                    formatCount(
+                        contributionGeneration.publicCoefficientAllowance,
+                    ),
+                ],
+                [
+                    'Expanded public working bytes',
+                    formatCount(
+                        contributionGeneration.expandedPublicWorkingBytes,
+                    ),
+                ],
+                [
+                    'Regenerated common-polynomial bytes',
+                    formatCount(contributionGeneration.regeneratedCommonBytes),
+                ],
+                [
+                    'Reused verified recipient-key bytes',
+                    formatCount(contributionGeneration.reusedRecipientBytes),
+                ],
+                [
+                    'Retained public working bytes',
+                    formatCount(contributionGeneration.publicWorkingBytes),
+                ],
+                [
+                    'Maximum public emission batch bytes',
+                    formatCount(
+                        contributionGeneration.maximumPublicEmissionBatch,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Registration key relation census',
+        '',
+        'The recipient-key relation binds the original balanced sparse secret to its fixed-suite common polynomial and public key. It uses distinct statement/proof domains and the same full verification domain as the contribution proof. The bounds below cover both radix equations and the exact support rows; key ownership, signatures, private-state sealing, and whole-protocol security remain separate obligations.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Polynomial degree', formatCount(registrationKey.degree)],
+                ['Ciphertext modulus', formatCount(registrationKey.modulus)],
+                ['Secret support', formatCount(registrationKey.support)],
+                ['Word columns', formatCount(registrationKey.wordColumns)],
+                [
+                    'Boolean columns',
+                    formatCount(registrationKey.booleanColumns),
+                ],
+                ['Lookup memberships', formatCount(registrationKey.lookups)],
+                ['Affine rows', formatCount(registrationKey.affineRows)],
+                [
+                    'Original oracles',
+                    formatCount(registrationKey.originalOracles),
+                ],
+                [
+                    'Virtual constraint oracles',
+                    formatCount(registrationKey.virtualOracles),
+                ],
+                [
+                    'Honest quotient magnitude bound',
+                    formatCount(registrationKey.honestQuotient),
+                ],
+                [
+                    'Honest carry magnitude bound',
+                    formatCount(registrationKey.honestCarry),
+                ],
+                [
+                    'Maximum accepted integer limb residual magnitude',
+                    formatCount(registrationKey.maximumLimbResidual),
+                ],
+                [
+                    'Canonical public-key bytes',
+                    formatCount(registrationKey.publicKeyBytes),
+                ],
+                [
+                    'Expanded statement bytes',
+                    formatCount(registrationKey.statementBytes),
+                ],
+                [
+                    'First-oracle leaf bytes',
+                    formatCount(registrationKey.firstLeafBytes),
+                ],
+                [
+                    'Second-oracle leaf bytes',
+                    formatCount(registrationKey.secondLeafBytes),
+                ],
+                [
+                    'Proof header bytes',
+                    formatCount(registrationKey.proofHeaderBytes),
+                ],
+                [
+                    'Maximum encoded proof bytes',
+                    formatCount(registrationKey.maximumProofBytes),
+                ],
+                [
+                    'Maximum public coefficient query bytes',
+                    formatCount(registrationKey.maximumCoefficientQueryBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Registration custody census',
+        '',
+        'This completed-key capsule retains sorted secret positions and a bounded encrypted manifest over every staged public record. Payload totals exclude IndexedDB metadata and the browser-managed CryptoKey representation. The AES block and hash-polynomial counts describe this fixed sealing schedule; they do not establish a primitive-security bound or general checkpoint protocol.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Secret index bytes',
+                    formatCount(registrationCustody.indexBytes),
+                ],
+                [
+                    'Private capsule plaintext bytes',
+                    formatCount(registrationCustody.secretPlaintextBytes),
+                ],
+                [
+                    'Encrypted capsule bytes',
+                    formatCount(registrationCustody.capsuleBytes),
+                ],
+                [
+                    'Maximum retained data records',
+                    formatCount(registrationCustody.recordCount),
+                ],
+                [
+                    'Manifest prefix bytes',
+                    formatCount(registrationCustody.manifestPrefixBytes),
+                ],
+                [
+                    'Record reference bytes',
+                    formatCount(registrationCustody.recordReferenceBytes),
+                ],
+                [
+                    'Maximum manifest plaintext bytes',
+                    formatCount(registrationCustody.maximumManifestBytes),
+                ],
+                [
+                    'Maximum encrypted root bytes',
+                    formatCount(registrationCustody.maximumRootBytes),
+                ],
+                [
+                    'Maximum root associated-data bytes',
+                    formatCount(registrationCustody.maximumRootAssociatedBytes),
+                ],
+                [
+                    'Maximum capsule associated-data bytes',
+                    formatCount(
+                        registrationCustody.maximumCapsuleAssociatedBytes,
+                    ),
+                ],
+                [
+                    'Maximum restoration input bytes',
+                    formatCount(registrationCustody.maximumRestoreInputBytes),
+                ],
+                [
+                    'Maximum retained payload bytes',
+                    formatCount(registrationCustody.retainedPayloadBytes),
+                ],
+                [
+                    'Capsule seal invocations',
+                    formatCount(registrationCustody.capsuleSealInvocations),
+                ],
+                [
+                    'Root seal invocations',
+                    formatCount(registrationCustody.rootSealInvocations),
+                ],
+                [
+                    'Distinct capsule AES block inputs',
+                    formatCount(registrationCustody.capsuleDistinctBlockInputs),
+                ],
+                [
+                    'Distinct root AES block inputs',
+                    formatCount(registrationCustody.rootDistinctBlockInputs),
+                ],
+                [
+                    'Maximum capsule authentication polynomial degree',
+                    formatCount(registrationCustody.maximumCapsuleHashDegree),
+                ],
+                [
+                    'Maximum root authentication polynomial degree',
+                    formatCount(registrationCustody.maximumRootHashDegree),
+                ],
+            ],
+        ),
+        '',
+        '## Registration enrollment census',
+        '',
+        'The combined enrollment record binds a canonical public username, actual credentials, and the complete recipient-key proof. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. Payload counts exclude database metadata and browser-managed root-key storage.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Signing public-key bytes',
+                    formatCount(registrationEnrollment.signingPublicKeyBytes),
+                ],
+                [
+                    'Mailbox public-key bytes',
+                    formatCount(registrationEnrollment.mailboxPublicKeyBytes),
+                ],
+                [
+                    'Signature bytes',
+                    formatCount(registrationEnrollment.signatureBytes),
+                ],
+                [
+                    'Maximum canonical username bytes',
+                    formatCount(registrationEnrollment.maximumUsernameBytes),
+                ],
+                [
+                    'Maximum poll-definition bytes',
+                    formatCount(
+                        registrationEnrollment.maximumPollDefinitionBytes,
+                    ),
+                ],
+                [
+                    'Poll-definition framing bytes',
+                    formatCount(
+                        registrationEnrollment.pollDefinitionOverheadBytes,
+                    ),
+                ],
+                [
+                    'Maximum creator input bytes',
+                    formatCount(
+                        registrationEnrollment.maximumCreatorInputBytes,
+                    ),
+                ],
+                [
+                    'Maximum join input bytes',
+                    formatCount(registrationEnrollment.maximumJoinInputBytes),
+                ],
+                [
+                    'Maximum username ingress bytes',
+                    formatCount(
+                        registrationEnrollment.maximumUsernameIngressBytes,
+                    ),
+                ],
+                [
+                    'Maximum encoded header bytes',
+                    formatCount(registrationEnrollment.maximumHeaderBytes),
+                ],
+                [
+                    'Maximum header input bytes',
+                    formatCount(registrationEnrollment.maximumHeaderInputBytes),
+                ],
+                [
+                    'Proof-role bytes',
+                    formatCount(registrationEnrollment.proofRoleBytes),
+                ],
+                [
+                    'Recipient-key capsule bytes',
+                    formatCount(registrationEnrollment.recipientCapsuleBytes),
+                ],
+                [
+                    'Signing-seed capsule bytes',
+                    formatCount(registrationEnrollment.signingCapsuleBytes),
+                ],
+                [
+                    'Maximum enrollment records before proposal signing',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentRecords,
+                    ),
+                ],
+                [
+                    'Maximum retained records',
+                    formatCount(registrationEnrollment.maximumRecords),
+                ],
+                [
+                    'Manifest prefix bytes',
+                    formatCount(registrationEnrollment.manifestPrefixBytes),
+                ],
+                [
+                    'Maximum completed-enrollment manifest plaintext bytes',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentManifestBytes,
+                    ),
+                ],
+                [
+                    'Maximum locked-proposal manifest plaintext bytes',
+                    formatCount(
+                        registrationEnrollment.maximumProposalIntentManifestBytes,
+                    ),
+                ],
+                [
+                    'Maximum manifest plaintext bytes',
+                    formatCount(registrationEnrollment.maximumManifestBytes),
+                ],
+                [
+                    'Maximum encrypted root bytes',
+                    formatCount(registrationEnrollment.maximumRootBytes),
+                ],
+                [
+                    'Recipient capsule associated-data bytes',
+                    formatCount(
+                        registrationEnrollment.recipientAssociatedBytes,
+                    ),
+                ],
+                [
+                    'Signing capsule associated-data bytes',
+                    formatCount(registrationEnrollment.signingAssociatedBytes),
+                ],
+                [
+                    'Root associated-data bytes',
+                    formatCount(registrationEnrollment.rootAssociatedBytes),
+                ],
+                [
+                    'Maximum restoration input bytes',
+                    formatCount(
+                        registrationEnrollment.maximumRestoreInputBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained payload bytes',
+                    formatCount(
+                        registrationEnrollment.maximumRetainedPayloadBytes,
+                    ),
+                ],
+                [
+                    'Distinct initial root-key AES block inputs',
+                    formatCount(
+                        registrationEnrollment.initialRootDistinctBlockInputs,
+                    ),
+                ],
+                [
+                    'Maximum distinct AES block inputs per proposal root key',
+                    formatCount(registrationEnrollment.rootDistinctBlockInputs),
+                ],
+                [
+                    'Distinct signing-capsule AES block inputs',
+                    formatCount(
+                        registrationEnrollment.signingDistinctBlockInputs,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Hash-row checkpoint census',
+        '',
+        'The bounded experiment serializes one live proof-row hash array and seals it in ordered chunks. These counts cover one array and one data key; they exclude the remaining prover state, authenticated root, database overhead, key wrapping, repeated checkpoints, retries, and session unions. The primitive-input and authentication-degree operands are not an end-to-end security bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Proof-domain rows', formatCount(hashRowCheckpoint.rowCount)],
+                [
+                    'Serialized hash-state bytes per row',
+                    formatCount(hashRowCheckpoint.serializedStateBytes),
+                ],
+                ['Rows per chunk', formatCount(hashRowCheckpoint.rowsPerChunk)],
+                ['Encrypted chunks', formatCount(hashRowCheckpoint.chunkCount)],
+                [
+                    'Maximum chunk plaintext bytes',
+                    formatCount(hashRowCheckpoint.maximumPlaintextChunkBytes),
+                ],
+                [
+                    'Maximum sealed chunk bytes',
+                    formatCount(hashRowCheckpoint.maximumSealedChunkBytes),
+                ],
+                [
+                    'Complete plaintext bytes',
+                    formatCount(hashRowCheckpoint.plaintextBytes),
+                ],
+                [
+                    'Complete sealed bytes',
+                    formatCount(hashRowCheckpoint.sealedBytes),
+                ],
+                [
+                    'Associated-data bytes per chunk',
+                    formatCount(hashRowCheckpoint.associatedBytes),
+                ],
+                [
+                    'Distinct AES block inputs per array key',
+                    formatCount(hashRowCheckpoint.distinctAesBlockInputs),
+                ],
+                [
+                    'Maximum authentication polynomial degree',
+                    formatCount(
+                        hashRowCheckpoint.maximumAuthenticationPolynomialDegree,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## First-oracle checkpoint census',
+        '',
+        'The complete first-oracle checkpoint retains the actual witness, masks, salts, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. Counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
+        '',
+        table(
+            ['Private field', 'Plaintext bytes', 'Encrypted records'],
+            firstOracleCheckpoint.fields.map((field) => [
+                field.name,
+                formatCount(field.plaintextBytes),
+                formatCount(field.recordCount),
+            ]),
+        ),
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Private encrypted records',
+                    formatCount(firstOracleCheckpoint.recordCount),
+                ],
+                [
+                    'Private checkpoint plaintext bytes',
+                    formatCount(firstOracleCheckpoint.plaintextBytes),
+                ],
+                [
+                    'Private checkpoint ciphertext bytes',
+                    formatCount(firstOracleCheckpoint.ciphertextBytes),
+                ],
+                [
+                    'Private record key bytes',
+                    formatCount(firstOracleCheckpoint.dataKeyBytes),
+                ],
+                [
+                    'Private record hash bytes',
+                    formatCount(firstOracleCheckpoint.recordHashBytes),
+                ],
+                [
+                    'Maximum private plaintext record bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumPlaintextRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum private ciphertext record bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumCiphertextRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum checkpoint header bytes',
+                    formatCount(firstOracleCheckpoint.maximumHeaderBytes),
+                ],
+                [
+                    'Encrypted public-input records',
+                    formatCount(firstOracleCheckpoint.publicRecordCount),
+                ],
+                [
+                    'Public-input plaintext bytes',
+                    formatCount(firstOracleCheckpoint.publicPlaintextBytes),
+                ],
+                [
+                    'Public-input ciphertext bytes',
+                    formatCount(firstOracleCheckpoint.publicCiphertextBytes),
+                ],
+                [
+                    'Maximum browser root plaintext bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumRootPlaintextBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained checkpoint payload bytes',
+                    formatCount(
+                        firstOracleCheckpoint.maximumRetainedPayloadBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Selected opening transform census',
+        '',
+        'The forward transform follows only branches needed by the public opening indices. Bounds allow all selected indices to occupy one coset and count additions, subtractions, and scalar multiplications separately by the same branch ceiling. The full coefficient buffer, inverse transform, coset preparation, existing proof records, allocator overhead, and tree data remain additional. Index pairs use the scalar WebAssembly word width.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Transform length',
+                    formatCount(selectedOpeningTransform.transformLength),
+                ],
+                [
+                    'Maximum selected outputs in one coset',
+                    formatCount(selectedOpeningTransform.maximumSelected),
+                ],
+                [
+                    'Transform levels',
+                    formatCount(selectedOpeningTransform.levels),
+                ],
+                [
+                    'Full forward butterflies',
+                    formatCount(selectedOpeningTransform.fullButterflies),
+                ],
+                [
+                    'Maximum selected operations of each butterfly kind',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectedBranches,
+                    ),
+                ],
+                [
+                    'Maximum live selection-pair bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectionPairBytes,
+                    ),
+                ],
+                [
+                    'Maximum selection-index bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectionIndexBytes,
+                    ),
+                ],
+                [
+                    'Maximum selected base-output bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectedBaseOutputBytes,
+                    ),
+                ],
+                [
+                    'Maximum selected extension-output bytes',
+                    formatCount(
+                        selectedOpeningTransform.maximumSelectedExtensionOutputBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Completed contribution state census',
+        '',
+        'Completion retains encrypted generated public inputs and proof records, with their keys and hashes in the authenticated root. The completed root omits the retired private checkpoint and its progress header. The staged bound includes the old checkpoint, proof records, and pending completion root before the atomic retirement transaction. Database and key-storage overhead remain measured quantities.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Maximum proof records',
+                    formatCount(completedContribution.maximumProofRecords),
+                ],
+                [
+                    'Maximum retained public records',
+                    formatCount(completedContribution.maximumPublicRecords),
+                ],
+                [
+                    'Maximum root plaintext bytes',
+                    formatCount(
+                        completedContribution.maximumRootPlaintextBytes,
+                    ),
+                ],
+                [
+                    'Maximum encrypted proof bytes',
+                    formatCount(
+                        completedContribution.maximumProofCiphertextBytes,
+                    ),
+                ],
+                [
+                    'Maximum completed retained payload bytes',
+                    formatCount(
+                        completedContribution.maximumRetainedPayloadBytes,
+                    ),
+                ],
+                [
+                    'Maximum staged payload before checkpoint retirement',
+                    formatCount(
+                        completedContribution.maximumStagedPayloadBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Contribution body census',
+        '',
+        'The active profile frames one complete contribution as a fixed header, its owned public polynomials in the compiled statement order, and its complete proof. Fixed common inputs, the statement header, and previously verified recipient keys are reconstructed from predecessors. The body is a virtual concatenation of bounded records; these payload counts do not allocate another whole-body copy or include checkpoint, database, signature, or archive overhead.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participants',
+                    formatCount(contributionBody.participantCount),
+                ],
+                [
+                    'Owned public polynomials',
+                    formatCount(contributionBody.polynomials.length),
+                ],
+                [
+                    'Body header bytes',
+                    formatCount(contributionBody.headerBytes),
+                ],
+                [
+                    'Owned polynomial payload bytes',
+                    formatCount(contributionBody.polynomialPayloadBytes),
+                ],
+                [
+                    'Minimum proof framing bytes',
+                    formatCount(contributionBody.minimumProofBytes),
+                ],
+                [
+                    'Maximum proof bytes',
+                    formatCount(contributionBody.maximumProofBytes),
+                ],
+                [
+                    'Maximum complete body bytes',
+                    formatCount(contributionBody.maximumBodyBytes),
+                ],
+                [
+                    'Commitment salt bytes',
+                    formatCount(contributionBody.saltBytes),
+                ],
+                [
+                    'Commitment hash-prefix bytes',
+                    formatCount(contributionBody.hashPrefixBytes),
+                ],
+                [
+                    'Sender-key byte offset',
+                    formatCount(contributionBody.senderKeyOffsetBytes),
+                ],
+                [
+                    'Sender-prefix bytes',
+                    formatCount(contributionBody.senderPrefixBytes),
+                ],
+                [
+                    'Sender-and-salt prefix bytes',
+                    formatCount(contributionBody.senderSaltPrefixBytes),
+                ],
+                [
+                    'Minimum commitment hash-input bytes',
+                    formatCount(contributionBody.minimumHashInputBytes),
+                ],
+                [
+                    'Maximum commitment hash-input bytes',
+                    formatCount(contributionBody.maximumHashInputBytes),
+                ],
+                [
+                    'Minimum input enclosing bit exponent',
+                    formatCount(
+                        contributionBody.minimumHashInputEnclosingBitExponent,
+                    ),
+                ],
+                [
+                    'Maximum input enclosing bit exponent',
+                    formatCount(
+                        contributionBody.maximumHashInputEnclosingBitExponent,
+                    ),
+                ],
+                [
+                    'Maximum all-contributor body payload bytes',
+                    formatCount(contributionBody.maximumAllContributorBodies),
+                ],
+            ],
+        ),
+        '',
+        '## Setup aggregate cache census',
+        '',
+        'The public aggregator retains the previous accepted generation and one provisional generation. Coefficient-aligned reads return one immutable polynomial only after its complete digest matches the owning setup reference. Counts below cover canonical polynomial payload and successful cache traffic; they exclude proof verification, database journals, allocation overhead, failed candidates, participant private state, and archive replication.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Canonical aggregate bytes',
+                    formatCount(setupAggregate.aggregateBytes),
+                ],
+                [
+                    'Aggregate coefficients',
+                    formatCount(setupAggregate.coefficients),
+                ],
+                [
+                    'Chunks per cache generation',
+                    formatCount(setupAggregate.cacheChunks),
+                ],
+                [
+                    'Maximum cache read bytes',
+                    formatCount(setupAggregate.maximumReadBytes),
+                ],
+                [
+                    'Largest complete polynomial bytes',
+                    formatCount(setupAggregate.maximumPolynomialBytes),
+                ],
+                [
+                    'Two-generation cache payload bytes',
+                    formatCount(
+                        setupAggregate.maximumTwoGenerationPayloadBytes,
+                    ),
+                ],
+                [
+                    'Contribution polynomial read bytes',
+                    formatCount(setupAggregate.contributionReadBytes),
+                ],
+                [
+                    'Previous-generation cache read bytes',
+                    formatCount(setupAggregate.previousCacheReadBytes),
+                ],
+                [
+                    'Provisional cache write bytes',
+                    formatCount(setupAggregate.provisionalCacheWriteBytes),
+                ],
+                [
+                    'Complete final readback bytes',
+                    formatCount(setupAggregate.completeReadbackBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Shared participant custody census',
+        '',
+        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. Fixed statement framing is regenerated rather than retained as another contribution record. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Participants', formatCount(participantCustody.participants)],
+                [
+                    'Owned polynomial records',
+                    formatCount(participantCustody.publicRecords.length),
+                ],
+                [
+                    'Private checkpoint records',
+                    formatCount(participantCustody.checkpointLengths.length),
+                ],
+                [
+                    'Contribution metadata prefix bytes',
+                    formatCount(participantCustody.metadataPrefixBytes),
+                ],
+                [
+                    'Maximum checkpoint metadata bytes',
+                    formatCount(
+                        participantCustody.maximumCheckpointMetadataBytes,
+                    ),
+                ],
+                [
+                    'Maximum completed metadata bytes',
+                    formatCount(
+                        participantCustody.maximumCompletedMetadataBytes,
+                    ),
+                ],
+                [
+                    'Maximum encrypted participant root bytes',
+                    formatCount(participantCustody.maximumRootBytes),
+                ],
+                [
+                    'Maximum release state bytes',
+                    formatCount(participantCustody.maximumReleaseStateBytes),
+                ],
+                [
+                    'Maximum close state bytes',
+                    formatCount(participantCustody.maximumCloseStateBytes),
+                ],
+                [
+                    'Maximum target-signing state bytes',
+                    formatCount(
+                        participantCustody.maximumTargetSigningStateBytes,
+                    ),
+                ],
+                [
+                    'Maximum participant root records',
+                    formatCount(participantCustody.maximumRootRecords),
+                ],
+                [
+                    'Retained setup reference bytes',
+                    formatCount(participantCustody.setupReferenceBytes),
+                ],
+                [
+                    'Maximum public body ciphertext bytes',
+                    formatCount(
+                        participantCustody.maximumPublicBodyCiphertextBytes,
+                    ),
+                ],
+                [
+                    'Maximum signing plaintext payload bytes',
+                    formatCount(
+                        participantCustody.maximumSigningPlaintextBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained payload and overlap bytes',
+                    formatCount(participantCustody.maximumRetainedPayloadBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Participant vault key work',
+        '',
+        'These per-key upper bounds follow the emitted fixed-nonce AES-GCM layouts. Initial intent and completion share one key with distinct nonces; every later root and child record uses a fresh key. Corpus counts exclude aborted writes, abandoned enrollment and recovery. They are not lifetime key limits. Later-root counts and every lifetime encryption/read population remain unmeasured; repeated reads add work even when they reuse existing block inputs. The root nonce in a single-use class is normalized because its value does not change these per-key counts.',
+        '',
+        table(
+            [
+                'Key class',
+                'Maximum keys per completed corpus',
+                'Encryption calls per key',
+                'Maximum AES inputs for encryption',
+                'Algorithmic encryption AES call bound',
+                'Maximum GHASH degree',
+            ],
+            compileParticipantVaultKeyClasses().map((value) => [
+                value.name,
+                value.maximumPerCompletedCorpus === null
+                    ? 'Unmeasured'
+                    : formatCount(value.maximumPerCompletedCorpus),
+                formatCount(value.encryptionWork.invocations),
+                formatCount(value.encryptionWork.distinctAesInputUpperBound),
+                formatCount(value.encryptionWork.algorithmicAesCallUpperBound),
+                formatCount(value.encryptionWork.maximumHashDegree),
+            ]),
+        ),
+        '',
+        'For a supplied complete per-key history, the work model separately counts encryption and verification invocations, repeated block computations and the union of block inputs. Its statistical numerators are conditional on the stated secret-key PRP replacement; the AES assumption, full populations and whole-protocol advantage are additional obligations.',
+        '',
+        '## Contribution authentication census',
+        '',
+        'Canonical confirmation bodies bind the proposal, position, and commitment. Opening headers bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing, archive replication, and local custody.',
+        '',
+        table(
+            [
+                'Participants',
+                'Confirmation body bytes',
+                'Opening header bytes',
+                'Inventory body bytes',
+                'All signed confirmation payload bytes',
+                'All signed opening-header payload bytes',
+            ],
+            contributionAuthentication.map((value) => [
+                String(value.participants),
+                formatCount(value.confirmationBodyBytes),
+                formatCount(value.openingBodyBytes),
+                formatCount(value.inventoryBodyBytes),
+                formatCount(value.allConfirmationPayloadBytes),
+                formatCount(value.allOpeningHeaderPayloadBytes),
+            ]),
+        ),
+        '',
+        table(
+            ['Original-credential command frame', 'Bytes'],
+            [
+                [
+                    'Complete-body control',
+                    formatCount(contributionSigning.bodyControlBytes),
+                ],
+                [
+                    'Signing identity and retained coins',
+                    formatCount(contributionSigning.signingControlBytes),
+                ],
+                [
+                    'Signed confirmation packet',
+                    formatCount(contributionSigning.confirmationPacketBytes),
+                ],
+                [
+                    'Signed opening packet',
+                    formatCount(contributionSigning.openingPacketBytes),
+                ],
+                [
+                    'Maximum polynomial input with offset',
+                    formatCount(
+                        contributionSigning.maximumPolynomialCommandBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Roster proposal census',
+        '',
+        'The proposal binds the ordered complete registration-body identities under an authenticated poll. Its public corpus includes every recipient key and proof, registration header and signature, and one signed poll definition. The contribution generator consumes the verified records directly and has no caller-supplied key-digest carrier. Retained payload counts exclude allocator and verifier scratch. These public input records do not supply organizer authorization or participant confirmation.',
+        '',
+        table(
+            [
+                'Participants',
+                'Proposal bytes',
+                'Contribution role bytes',
+                'Retained recipient-key bytes',
+                'Canonical roster bytes',
+                'Retained record payload bytes',
+                'Maximum public corpus bytes',
+            ],
+            rosterProposals.map((proposal) => [
+                String(proposal.participantCount),
+                formatCount(proposal.proposalBytes),
+                formatCount(proposal.roleBytes),
+                formatCount(proposal.retainedRecipientKeyBytes),
+                formatCount(proposal.canonicalRosterBytes),
+                formatCount(proposal.retainedRecordPayloadBytes),
+                formatCount(proposal.maximumPublicCorpusBytes),
+            ]),
+        ),
+        '',
+        '## Common-matrix sampling census',
+        '',
+        'A fixed admitted suite label selects independent ideal-oracle words. Exact modulo-law enumeration checks the residue distance and the corresponding conditional full-oracle law. The complete bound includes all FHE, sharing, and auxiliary common polynomials. Caller-selected labels, adaptive parameter grinding, the fixed SHAKE implementation, and cryptographic security of the resulting keys are not established by this sampling calculation.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Sample bits per coefficient',
+                    formatCount(commonMatrixSampling.bitsPerCoefficient),
+                ],
+                [
+                    'FHE common polynomials',
+                    formatCount(commonMatrixSampling.fhePolynomialCount),
+                ],
+                [
+                    'Common coefficients across all roles',
+                    formatCount(commonMatrixSampling.coefficientCount),
+                ],
+                [
+                    'Expanded common-matrix sampling bytes',
+                    formatCount(commonMatrixSampling.expandedSampleBytes),
+                ],
+                [
+                    'Complete oracle-distribution distance exponent',
+                    formatCount(commonMatrixSampling.distanceBits),
+                ],
+            ],
+        ),
+        '',
+        'Common-matrix XOF initialization reuses the fixed-work residue-fibre sampler. Each common polynomial is one fixed input with a complete output prefix; consecutive wide words encode its coefficients. The sampler makes one bounded draw per coefficient and adds its explicit modulo bias. It does not use a rejection-loop or exhaustion term.',
+        '',
+        table(
+            ['Property', 'Value'],
+            (() => {
+                const initialization =
+                    compileCommonMatrixInitializationCensus();
+                return [
+                    ['Programmed XOF inputs', initialization.programmedInputs],
+                    [
+                        'Programmed prefix bytes',
+                        initialization.programmedPrefixBytes,
+                    ],
+                    [
+                        'Extra fibre sampling bits',
+                        initialization.extraSamplingBits,
+                    ],
+                    ['Random bits consumed', initialization.randomBits],
+                    [
+                        'Byte-aligned random input bytes',
+                        initialization.randomBytes,
+                    ],
+                    ['Fibre bias numerator', initialization.biasNumerator],
+                    ['Fibre bias denominator', initialization.biasDenominator],
+                ].map(([label, value]) => [
+                    String(label),
+                    formatCount(value as bigint),
+                ]);
+            })(),
+        ),
+        '',
+        table(
+            [
+                'Common family',
+                'Polynomials',
+                'Coefficients',
+                'Random bits per coefficient',
+                'Programmed prefix bytes',
+            ],
+            compileCommonMatrixInitializationCensus().families.map((value) => [
+                value.name,
+                ...[
+                    value.polynomials,
+                    value.coefficients,
+                    value.randomBitsPerCoefficient,
+                    value.programmedPrefixBytes,
+                ].map(formatCount),
+            ]),
+        ),
+        '',
+        '## Fixed sponge initialization census',
+        '',
+        'These counts instantiate the conditional fixed-input initialization lemma for the current common-vector seed encoding. Each unique seed and its longest required output prefix are counted once. The distance includes residue-word sampling, capacity conditioning, one-pass capacity-sampling failure, and bounded fiber-sampling bias in an ideal permutation; it is not fixed-Keccak or end-to-end security.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Distinct fixed seeds',
+                    formatCount(fixedSpongeInitialization.seeds.length),
+                ],
+                [
+                    'Maximum unpadded seed bytes',
+                    formatCount(fixedSpongeInitialization.maximumSeedBytes),
+                ],
+                ['Rate bits', formatCount(fixedSpongeInitialization.rateBits)],
+                [
+                    'Capacity bits',
+                    formatCount(fixedSpongeInitialization.capacityBits),
+                ],
+                [
+                    'Permutation output blocks across fixed prefixes',
+                    formatCount(fixedSpongeInitialization.outputBlocks),
+                ],
+                [
+                    'Capacity-conditioning distance exponent',
+                    formatCount(
+                        fixedSpongeInitialization.conditioningFailureExponent,
+                    ),
+                ],
+                [
+                    'Extra random bits for bounded fiber sampling',
+                    formatCount(fixedSpongeInitialization.extraSamplingBits),
+                ],
+                [
+                    'Maximum random bits per simulated fiber word',
+                    formatCount(
+                        fixedSpongeInitialization.maximumFiberRandomBits,
+                    ),
+                ],
+                [
+                    'Combined initialization distance exponent',
+                    formatCount(
+                        fixedSpongeInitialization.combinedInitializationFailureExponent,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Publication cut census',
+        '',
+        "The freeze-and-union model retains complete ECHO certificates inside each honest READY sender's close report. The intersection census checks every named completed-publication quorum, close quorum, and maximum corruption set. It establishes the required honest reporter, not a complete protocol or a visit bound.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Participants', formatCount(publicationCut.participantCount)],
+                [
+                    'Publication and close quorum',
+                    formatCount(publicationCut.quorum),
+                ],
+                [
+                    'Named intersections checked',
+                    formatCount(publicationCut.checkedIntersections),
+                ],
+                [
+                    'Minimum honest reporters of every completed publication',
+                    formatCount(
+                        publicationCut.minimumHonestPublicationReporters,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Public archive resource census',
+        '',
+        'Independent sizes for the maintained archive record and acknowledgement commands. Replica responses are concurrent to avoid a silent replica blocking an available one. These are buffer and wire bounds, not complete participant memory or workflow costs.',
+        '',
+        table(
+            ['Property', 'Value'],
+            Object.entries(compilePublicArchiveResourceCensus()).map(
+                ([property, value]) => [property, formatCount(value)],
+            ),
+        ),
+        '',
+        '## Archive authentication call bounds',
+        '',
+        'Receipt signing uses the pure FIPS 204 frame under its separate archive context. The default table uses the maximum configured replica count. SDK request bounds count issued attempts, not adversarial replay or total host requests. The host signs each successful retention request, including retries for an unchanged root. Cumulative acknowledgement batches revisit earlier signatures; duplicate authors in a direct verification call are checked before distinct valid signers are counted. These per-call bounds supply no lifetime key, signing or verification cap and exclude closure/policy hashing, other signing work and provider failures.',
+        '',
+        table(
+            ['Property', 'Value'],
+            Object.entries(compileArchiveAuthenticationWork()).map(
+                ([property, value]) => [
+                    property,
+                    typeof value === 'bigint' ? formatCount(value) : value,
+                ],
+            ),
+        ),
+        '',
+        '## Certificate custody census',
+        '',
+        "The counterexample delivers all continuing honest participants' messages but permits suppression of earlier sends from participants who disappeared. Full holders possess the entire certificate and every required predecessor; individual signers do not establish that premise.",
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Full-holder threshold examined',
+                    formatCount(certificateCustody.fullHolderThreshold),
+                ],
+                [
+                    'Named custody configurations checked',
+                    formatCount(certificateCustody.checkedConfigurations),
+                ],
+                [
+                    'Minimum surviving honest full holders',
+                    formatCount(
+                        certificateCustody.minimumSurvivingHonestFullHolders,
+                    ),
+                ],
+                [
+                    'Recoverable signatures in the unique-collector counterexample',
+                    formatCount(
+                        certificateCustody.counterexample.recoverableSignatures,
+                    ),
+                ],
+                [
+                    'Required target signatures',
+                    formatCount(certificateCustody.counterexample.quorum),
+                ],
+                [
+                    'Full-copy holders sufficient without ledger delivery',
+                    formatCount(
+                        archiveHolderRequirements(
+                            certificateCustody.participantCount,
+                            certificateCustody.corruptCount,
+                            certificateCustody.corruptCount,
+                            1,
+                        ).requiredHolders,
+                    ),
+                ],
+                [
+                    'Coded holders sufficient at the release reconstruction threshold',
+                    formatCount(
+                        archiveHolderRequirements(
+                            certificateCustody.participantCount,
+                            certificateCustody.corruptCount,
+                            certificateCustody.corruptCount,
+                            certificateCustody.corruptCount + 1,
+                        ).requiredHolders,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Fixed-modulus BFV noise census',
+        '',
+        'Exact worst-case noise screen for the uniform comparison and duplicated ranking-window candidate. The full integer tensor-rounding and KLSW relinearization equations are checked independently. This screen does not establish the circular-key assumption, complete proof compiler, browser cost, or protocol admission.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Participants', formatCount(fixedModulusBfv.participantCount)],
+                ['Options', formatCount(fixedModulusBfv.optionCount)],
+                [
+                    'Ciphertext polynomial degree',
+                    formatCount(fixedModulusBfv.polynomialDegree),
+                ],
+                [
+                    'Plaintext subring degree',
+                    formatCount(fixedModulusBfv.plaintextSubringDegree),
+                ],
+                [
+                    'Plaintext modulus',
+                    formatCount(fixedModulusBfv.plaintextModulus),
+                ],
+                [
+                    'Ciphertext modulus',
+                    formatCount(fixedModulusBfv.ciphertextModulus),
+                ],
+                [
+                    'Release modulus',
+                    formatCount(fixedModulusBfv.releaseModulus),
+                ],
+                [
+                    'Per-contributor secret support weight',
+                    formatCount(fixedModulusBfv.secretSupportWeight),
+                ],
+                [
+                    'Accepted error magnitude bound',
+                    formatCount(fixedModulusBfv.errorBound),
+                ],
+                ['Gadget base', formatCount(fixedModulusBfv.gadgetBase)],
+                [
+                    'Gadget coordinates',
+                    formatCount(fixedModulusBfv.gadgetLength),
+                ],
+                [
+                    'Comparison block width',
+                    formatCount(fixedModulusBfv.comparisonBlockWidth),
+                ],
+                [
+                    'Ciphertext multiplications',
+                    formatCount(fixedModulusBfv.multiplications),
+                ],
+                [
+                    'Ciphertext additions',
+                    formatCount(fixedModulusBfv.additions),
+                ],
+                [
+                    'Scalar plaintext products',
+                    formatCount(fixedModulusBfv.scalarProducts),
+                ],
+                [
+                    'Vector plaintext products',
+                    formatCount(fixedModulusBfv.plaintextProducts),
+                ],
+                ['Unit rotations', formatCount(fixedModulusBfv.rotations)],
+                [
+                    'Separately rounded tensor-coordinate products',
+                    formatCount(fixedModulusBfv.tensorProducts),
+                ],
+                [
+                    'Relinearization external products',
+                    formatCount(
+                        fixedModulusBfv.relinearizationExternalProducts,
+                    ),
+                ],
+                [
+                    'Relinearization gadget decompositions',
+                    formatCount(
+                        fixedModulusBfv.relinearizationGadgetDecompositions,
+                    ),
+                ],
+                [
+                    'Rotation external products including the common vector',
+                    formatCount(fixedModulusBfv.rotationExternalProducts),
+                ],
+                [
+                    'Rotation gadget decompositions',
+                    formatCount(fixedModulusBfv.rotationGadgetDecompositions),
+                ],
+                [
+                    'Total polynomial products inside gadget external products',
+                    formatCount(fixedModulusBfv.gadgetPolynomialProducts),
+                ],
+                [
+                    'Final modulus-switch coefficient roundings',
+                    formatCount(fixedModulusBfv.finalModulusSwitchCoefficients),
+                ],
+                [
+                    'Plaintext additions',
+                    formatCount(fixedModulusBfv.plaintextAdditions),
+                ],
+                [
+                    'Comparison multiplicative depth',
+                    formatCount(fixedModulusBfv.comparisonDepth),
+                ],
+                [
+                    'Ranking multiplicative depth',
+                    formatCount(fixedModulusBfv.rankingDepth),
+                ],
+                [
+                    'Comparison error bound bits',
+                    formatCount(fixedModulusBfv.comparisonErrorBits),
+                ],
+                [
+                    'Ranking error bound bits',
+                    formatCount(fixedModulusBfv.rankingErrorBits),
+                ],
+                [
+                    'Error after final modulus switch',
+                    formatCount(fixedModulusBfv.releaseError),
+                ],
+                [
+                    'Signed uniform release-noise bits',
+                    formatCount(fixedModulusBfv.releaseNoiseBits),
+                ],
+                [
+                    'Statistical target bits',
+                    formatCount(fixedModulusBfv.statisticalBits),
+                ],
+                [
+                    'Joint translated-cube bound holds',
+                    fixedModulusBfv.jointStatisticalBoundHolds ? 'yes' : 'no',
+                ],
+                [
+                    'Complete release correctness inequality holds',
+                    fixedModulusBfv.releaseCorrect ? 'yes' : 'no',
+                ],
+                [
+                    'Public key-contribution corpus bytes before sharing and proofs',
+                    formatCount(fixedModulusBfv.publicKeyCorpusBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Supported profile census',
+        '',
+        'Parameters of every supported participant and option count under the derivation rules owned by the construction analysis. Thresholds come from the threshold completion rules; the interpolation norms are exact maxima over every subset; each share-lifting width is the widest sound limb; the ciphertext and release moduli are the smallest lengths of the fixed prime form that decode the ranking graph and satisfy the flooded release and its lifting. These are arithmetic derivations, not attack estimates, resource bounds, an implementation or admission.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corrupt bound',
+                'Inventory threshold',
+                'Release threshold',
+                'Minimum turnout',
+                'Interpolation ring degree',
+                'Clearing factor',
+                'Scaled reconstruction one-norm',
+                'Simulation one-norm',
+                'Joint simulation sum',
+                'Sharing coefficient bits',
+                'Share limb bits',
+                'Share carry bits',
+                'Release share bits',
+                'Release quotient bits',
+            ],
+            supportedProfiles.profiles.map((row) => {
+                const [first] = row;
+                return [
+                    formatCount(first.participantCount),
+                    formatCount(first.maximumCorruptParticipantCount),
+                    formatCount(first.inventoryCertificateThreshold),
+                    formatCount(first.releaseThreshold),
+                    formatCount(first.minimumTurnout),
+                    formatCount(first.interpolation.interpolationRingDegree),
+                    formatCount(first.interpolation.clearingFactor),
+                    formatCount(
+                        first.interpolation.maximumScaledReconstructionOneNorm,
+                    ),
+                    formatCount(first.interpolation.maximumSimulationOneNorm),
+                    formatCount(
+                        first.interpolation.maximumJointSimulationOneNormSum,
+                    ),
+                    formatCount(first.shareLifting.sharingCoefficientBits),
+                    formatCount(first.shareLifting.limbBits),
+                    formatCount(first.shareLifting.carryBits),
+                    distinctJoined(
+                        row.map((profile) => profile.releaseLifting.shareBits),
+                    ),
+                    distinctJoined(
+                        row.map(
+                            (profile) => profile.releaseLifting.quotientBits,
+                        ),
+                    ),
+                ];
+            }),
+        ),
+        '',
+        'Ciphertext modulus bits by participant count (rows) and option count (columns):',
+        '',
+        table(
+            [
+                'Participants',
+                ...supportedProfiles.optionCounts.map((count) => String(count)),
+            ],
+            supportedProfiles.profiles.map((row) => [
+                formatCount(row[0].participantCount),
+                ...row.map((profile) => formatCount(profile.ciphertext.bits)),
+            ]),
+        ),
+        '',
+        table(
+            [
+                'Modulus',
+                'Bits',
+                'Odd factor over the plaintext modulus',
+                'Proth witness',
+                'Gadget coordinates',
+                'Profiles',
+            ],
+            [
+                ...supportedProfiles.ciphertextModuli.map((prime) => [
+                    'Ciphertext',
+                    formatCount(prime.bits),
+                    formatCount(
+                        prime.oddFactor / fixedModulusBfv.plaintextModulus,
+                    ),
+                    formatCount(prime.witness),
+                    formatCount(prime.gadgetLength),
+                    formatCount(prime.profileCount),
+                ]),
+                ...supportedProfiles.releaseModuli.map((prime) => [
+                    'Release',
+                    formatCount(prime.bits),
+                    formatCount(
+                        prime.oddFactor / fixedModulusBfv.plaintextModulus,
+                    ),
+                    formatCount(prime.witness),
+                    'none',
+                    formatCount(supportedProfiles.profiles.flat().length),
+                ]),
+            ],
+        ),
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Supported profiles',
+                    formatCount(supportedProfiles.profiles.flat().length),
+                ],
+                [
+                    'Smallest ciphertext modulus bits',
+                    formatCount(supportedProfiles.minimumCiphertextModulusBits),
+                ],
+                [
+                    'Largest ciphertext modulus bits',
+                    formatCount(supportedProfiles.maximumCiphertextModulusBits),
+                ],
+                [
+                    'Release-noise bits range',
+                    supportedProfiles.releaseNoiseBitRange
+                        .map((value) => formatCount(value))
+                        .join(' to '),
+                ],
+                [
+                    'Largest ranking multiplicative depth',
+                    formatCount(supportedProfiles.maximumRankingDepth),
+                ],
+                [
+                    'Largest ranking error bound bits',
+                    formatCount(supportedProfiles.maximumRankingErrorBits),
+                ],
+            ],
+        ),
+        '',
+        '## Composed security ledger',
+        '',
+        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler; roster-dependent terms take the largest roster and the others keep their ten-participant models. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        '',
+        table(
+            ['Statistical term', 'Bound exponent'],
+            [
+                ...securityLedger.statistical.terms.map((term) => [
+                    term.name,
+                    signedExponent(
+                        ceilingLog2({
+                            numerator: term.numerator,
+                            denominator:
+                                1n <<
+                                securityLedger.statistical.denominatorBits,
+                        }),
+                    ),
+                ]),
+                [
+                    'Subtotal',
+                    signedExponent(securityLedger.statistical.subtotalExponent),
+                ],
+            ],
+        ),
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Security target bits',
+                    formatCount(securityLedger.securityTargetBits),
+                ],
+                ['Budget groups', formatCount(securityLedger.groups.length)],
+                [
+                    'Budget bits per group',
+                    formatCount(securityLedger.budgetBits),
+                ],
+                [
+                    'Permutation charge gates',
+                    formatCount(keccakReferenceCost.permutationCharge),
+                ],
+                [
+                    'Widest SHAKE rate bits',
+                    formatCount(keccakReferenceCost.widestRateBits),
+                ],
+                [
+                    'Extraction routing coefficient exponent, per squared cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.quadraticCoefficient),
+                    ),
+                ],
+                [
+                    'Cell routing coefficient exponent, per cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.linearCoefficient),
+                    ),
+                ],
+                [
+                    'Extraction selection coefficient exponent, per cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.extractionCoefficient),
+                    ),
+                ],
+                [
+                    'Plain reduction coefficient exponent at the largest roster, per cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.plainCoefficient),
+                    ),
+                ],
+                [
+                    'Largest honest credential population for ML-DSA-65',
+                    formatCount(securityLedger.maximumCredentialPopulation),
+                ],
+                [
+                    'Identity collision exponent, per cost',
+                    signedExponent(securityLedger.identityCollisionExponent),
+                ],
+                [
+                    'FHE Ring-LWE requirement if every call cost one gate',
+                    formatCount(unitCallCost.requiredBits),
+                ],
+            ],
+        ),
+        '',
+        'Required bits by participant count, with one potential honest credential per participant:',
+        '',
+        table(
+            [
+                'Participants',
+                'Extracted commitments',
+                ...largestLedgerProfile.hybrids.map(
+                    (row) =>
+                        `${row.assumption}, ${row.reduction === 'plain' ? 'without' : 'with'} extraction`,
+                ),
+            ],
+            securityLedger.profiles.map((profile) => [
+                formatCount(profile.participantCount),
+                formatCount(profile.extractedCommitmentCount),
+                ...profile.hybrids.map((row) => formatCount(row.requiredBits)),
+            ]),
+        ),
+        '',
+        table(
+            [
+                'Assumption',
+                'Required bits, one credential per participant',
+                'Required bits at the largest credential population',
+            ],
+            securityLedger.maximumRequiredBits.map((row) => [
+                row.assumption,
+                formatCount(row.requiredBits),
+                formatCount(
+                    populationLedger.maximumRequiredBits.find(
+                        (value) => value.assumption === row.assumption,
+                    )!.requiredBits,
+                ),
+            ]),
+        ),
+        '',
+        '## Proof-field coefficient-fold bounds',
+        '',
+        'For radix B and reduction offset k, the first high limb is bounded by k^2+k-1. The second high limb is at most one. In the carry case the final high limb is at most k*(k^2+k-1)+k-1; otherwise it is already below B. These exact bounds justify the narrower intermediate types without changing the modulus, representatives or field product.',
+        '',
+        table(
+            ['Property', 'Bound'],
+            [
+                [
+                    'Largest small coefficient',
+                    formatCount(proofFieldReduction.maximumSmallFactor),
+                ],
+                [
+                    'First high limb',
+                    formatCount(proofFieldReduction.maximumFirstHigh),
+                ],
+                [
+                    'Second high limb',
+                    formatCount(proofFieldReduction.maximumSecondHigh),
+                ],
+                [
+                    'Final high limb when a second carry exists',
+                    formatCount(proofFieldReduction.maximumCarriedFinalHigh),
+                ],
+            ],
+        ),
+        '',
+        '## Small-limb proof-field census',
+        '',
+        'Proth-certified base field and certified cubic extension for the lookup direction. Large-modulus equations require a separate integer limb-and-carry compiler with complete bounds.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Base-field modulus',
+                    formatCount(smallLimbProofField.modulus),
+                ],
+                ['Word radix', formatCount(smallLimbProofField.wordRadix)],
+                [
+                    'Reduction offset',
+                    formatCount(smallLimbProofField.reductionOffset),
+                ],
+                [
+                    'Proth odd factor',
+                    formatCount(smallLimbProofField.oddFactor),
+                ],
+                [
+                    'Proth witness',
+                    formatCount(smallLimbProofField.prothWitness),
+                ],
+                [
+                    'Cubic nonresidue',
+                    formatCount(smallLimbProofField.cubicNonresidue),
+                ],
+                [
+                    'Field bits',
+                    formatCount(smallLimbProofField.modulusBitLength),
+                ],
+                [
+                    'Packed base-field bytes',
+                    formatCount(
+                        smallLimbProofField.packedFieldElementByteLength,
+                    ),
+                ],
+                [
+                    'Packed extension-field bytes',
+                    formatCount(
+                        smallLimbProofField.packedExtensionElementByteLength,
+                    ),
+                ],
+                [
+                    'Certified transform order',
+                    formatCount(smallLimbProofField.transformOrder),
+                ],
+                [
+                    'Certified transform root',
+                    formatCount(smallLimbProofField.transformRoot),
+                ],
+            ],
+        ),
+        '',
+        '## Simulator recipient-key availability',
+        '',
+        'An encryption reduction with one unknown honest recipient key uses other honest recipient keys for corrupt-contribution interpolation. These are combinatorial availability counts only; the actual sharing scheme, decryption correctness and ciphertext/proof contracts remain separate. More than one unknown key is not silently assumed to satisfy the same count.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corruption bound',
+                'Required evaluations',
+                'Known honest keys with one challenge',
+                'Maximum unknown honest keys from the count alone',
+            ],
+            compileSimulatorKeyKnowledgeCensus().map((value) => [
+                formatCount(value.participants),
+                formatCount(value.faults),
+                formatCount(value.threshold),
+                formatCount(value.knownHonestWithOneChallenge),
+                formatCount(value.maximumUnknownHonestKeys),
+            ]),
+        ),
+        '',
+        '## Early commitment extraction census',
+        '',
+        'DFMS21 Corollary 4.8 for full-body contribution commitments, including losing frozen inventory views. Fixed-suite public matrices remove the former seed-commitment stage. The sum charges both simulator disturbance and valid-opening mismatch. Theorem 4.3 additionally gives O(Q*E*Time[f] + Q^2): the displayed coefficients do not instantiate its constants, reversible gate costs, or the rest of the reduction. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
+        '',
+        table(
+            [
+                'Participants',
+                'Relevant commitments',
+                'Hash output bits',
+                'Quantum query bound',
+                'Relation-evaluation coefficient Q*E',
+                'Quadratic-query coefficient Q^2',
+                'Combined failure exponent',
+            ],
+            [10, 20].map((participantCount) => {
+                const bound =
+                    compileCommitmentExtractionBound(participantCount);
+                return [
+                    formatCount(participantCount),
+                    formatCount(bound.extractedCommitmentCount),
+                    formatCount(bound.hashOutputBitLength),
+                    formatCount(bound.quantumQueryCount),
+                    formatCount(bound.simulatorRelationEvaluationCoefficient),
+                    formatCount(bound.simulatorQuadraticQueryCoefficient),
+                    bound.combinedFailureExponent === undefined
+                        ? 'No extraction event'
+                        : formatCount(bound.combinedFailureExponent),
+                ];
+            }),
+        ),
+        '',
+        'The fixed-output rows above are the baseline. A coherent SHAKE prefix wrapper computes a complete finite stream value, copies only the requested prefix and uncomputes the complete value. The following stream rows charge its full-value oracle calls and retain the same normalized prefix-match ratios from DFMS21 Remark 4.2. The finite stream width remains a separate resource operand; a fixed body/hash width does not bound every adversarial input or output.',
+        '',
+        table(
+            [
+                'Participants',
+                'Stream wrapper',
+                'Logical stream accesses',
+                'Simulated full-value queries',
+                'Quadratic-query coefficient',
+                'Combined failure exponent',
+            ],
+            [10, 20].flatMap((participants) =>
+                [1n, prefixReplacementBaseQueriesPerAccess].map(
+                    (baseQueriesPerAccess) => {
+                        const logical =
+                                compileCommitmentExtractionBound(
+                                    participants,
+                                ).quantumQueryCount,
+                            bound = compileCommitmentExtractionBound(
+                                participants,
+                                baseQueriesPerAccess *
+                                    prefixOracleQueriesPerAccess *
+                                    logical,
+                            );
+                        return [
+                            formatCount(participants),
+                            baseQueriesPerAccess === 1n
+                                ? 'Base stream'
+                                : 'Programmed stream',
+                            formatCount(logical),
+                            formatCount(bound.quantumQueryCount),
+                            formatCount(
+                                bound.simulatorQuadraticQueryCoefficient,
+                            ),
+                            bound.combinedFailureExponent === undefined
+                                ? 'No extraction event'
+                                : formatCount(bound.combinedFailureExponent),
+                        ];
+                    },
+                ),
+            ),
+        ),
+        '',
+        '## Compressed-oracle circuit work',
+        '',
+        "The declared gate basis is X, CNOT, Toffoli and controlled-H, each acting on at most three qubits. The sorted database uses one spare tuple while routing the queried value to a separate register. Clean computation includes inverse evaluation and register swaps. These bounded examples verify the circuit family; they are not the protocol's full input domain or query population.",
+        '',
+        table(
+            [
+                'Prior queries',
+                'Input bits',
+                'Hash bits',
+                'Removal compute gates',
+                'Insertion compute gates',
+                'Clean routing gates',
+                'Oracle-call gates',
+                'Oracle qubits',
+            ],
+            [
+                [0n, 2n, 1n],
+                [1n, 2n, 1n],
+                [2n, 2n, 1n],
+                [1n, 1n, 2n],
+            ].map(([prior, input, output]) => {
+                const work = sparseRoutingWork(prior, input, output);
+                return [
+                    prior,
+                    input,
+                    output,
+                    work.removeGates,
+                    work.insertGates,
+                    work.routingGates,
+                    work.roundTripRoutingGates + work.localUpdateGates,
+                    work.routingQubits + output,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        table(
+            [
+                'Local hash output bits',
+                'Controlled-H gates',
+                'X gates',
+                'CNOT gates',
+                'Toffoli gates',
+                'Total local update gates',
+            ],
+            [1n, 2n, 3n, 512n].map((bits) => {
+                const work = sparseRoutingWork(0n, 1n, bits);
+                return [
+                    bits,
+                    work.localUpdate.controlledHadamard,
+                    work.localUpdate.not,
+                    work.localUpdate.cnot,
+                    work.localUpdate.toffoli,
+                    work.localUpdateGates,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'Classical extraction computes the first matching active entry into a fresh output and cleans all predicate work before measuring that output. The following labelled-hash examples include their predicate computation; a different sender parser needs its actual relation circuit. Other adversary registers, circuit-generation work, full oracle routing and computational-assumption advantages remain separate.',
+        '',
+        table(
+            [
+                'Database capacity',
+                'Input bits',
+                'Hash bits',
+                'Label bits',
+                'Classical extraction gates',
+                'Measured output qubits',
+                'Extraction qubits',
+            ],
+            [
+                [0n, 2n, 1n, 1n],
+                [1n, 2n, 1n, 1n],
+                [2n, 2n, 1n, 1n],
+                [3n, 64n, 512n, 16n],
+            ].map(([capacity, input, output, label]) =>
+                [
+                    capacity,
+                    input,
+                    output,
+                    label,
+                    labelledHashExtractionWork(capacity, input, output, label)
+                        .extractionGates,
+                    labelledHashExtractionWork(capacity, input, output, label)
+                        .measuredQubits,
+                    labelledHashExtractionWork(capacity, input, output, label)
+                        .extractionQubits,
+                ].map(formatCount),
+            ),
+        ),
+        '',
+        'The following supplied-width prefix examples include both full-value calls, clean prefix-copy work and its extra workspace. They do not assign a maximum stream width or a complete participant/reduction total.',
+        '',
+        table(
+            [
+                'Logical accesses',
+                'Input bits',
+                'Maximum stream bits',
+                'Full-value queries',
+                'Clean prefix-copy gates per access',
+                'Query gates',
+                'Oracle qubit bound',
+            ],
+            [
+                [1n, 2n, 1n],
+                [1n, 2n, 2n],
+                [3n, 64n, 512n],
+            ].map(([queries, input, output]) => {
+                const work = prefixOracleWork(queries, input, output);
+                return [
+                    queries,
+                    input,
+                    output,
+                    work.fullValueQueries,
+                    work.copyGates,
+                    work.queryGates,
+                    work.maximumQubits,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'The domain adapter below visits every eligible input-length class and output chunk for each declared query shape. Cells retain their databases across shape changes. Counts include clean length/sentinel controllers and all prefix calls. These are supplied-shape circuit bounds; extraction, other algorithm registers and classical circuit generation/dispatch remain separate. The full contribution row uses its actual maximum emitted input length for one honest query and does not bound adversarial queries.',
+        '',
+        table(
+            [
+                'Query shape',
+                'Logical queries',
+                'Input capacity bits',
+                'Output capacity bits',
+                'First chunk bits',
+                'Cells',
+                'Full-value calls',
+                'Controller gates',
+                'Total query gates',
+                'Database qubits',
+                'Oracle qubit bound',
+            ],
+            [
+                {
+                    name: 'Small correspondence',
+                    count: 3n,
+                    inputCapacity: 3n,
+                    outputCapacity: 5n,
+                    firstChunkBits: 2n,
+                },
+                {
+                    name: 'Complete contribution input',
+                    count: 1n,
+                    inputCapacity:
+                        8n *
+                        compileContributionBodyCensus().maximumHashInputBytes,
+                    outputCapacity: 512n,
+                    firstChunkBits: 512n,
+                },
+            ].map(({ name, firstChunkBits, ...run }) => {
+                const work = oracleDomainWork([run], firstChunkBits);
+                return [
+                    name,
+                    ...[
+                        run.count,
+                        run.inputCapacity,
+                        run.outputCapacity,
+                        firstChunkBits,
+                        BigInt(work.cells.length),
+                        work.fullValueQueries,
+                        work.controllerGates,
+                        work.queryGates,
+                        work.databaseQubits,
+                        work.maximumQubits,
+                    ].map(formatCount),
+                ];
+            }),
+        ),
+        '',
+        'A programmed-prefix read calls the complete base stream adapter twice around a clean replacement copy. The following bounded shape counts both layers and retains prior component capacity. Classical record payload excludes object metadata and dispatch work; neither is declared free.',
+        '',
+        table(
+            [
+                'Logical reads',
+                'Input capacity bits',
+                'Output capacity bits',
+                'Replacement input bits',
+                'Replacement prefix bits',
+                'Full-value calls',
+                'Replacement-copy gates',
+                'Total query gates',
+                'Oracle qubit bound',
+                'Classical record payload bits',
+            ],
+            [[3n, 4n, 5n, 3n, 4n]].map(
+                ([
+                    count,
+                    inputCapacity,
+                    outputCapacity,
+                    inputBits,
+                    prefixBits,
+                ]) => {
+                    const work = programmedOracleDomainWork(
+                        [{ count, inputCapacity, outputCapacity }],
+                        2n,
+                        [{ inputBits, prefixBits }],
+                    );
+                    return [
+                        count,
+                        inputCapacity,
+                        outputCapacity,
+                        inputBits,
+                        prefixBits,
+                        work.base.fullValueQueries,
+                        work.copyGates,
+                        work.queryGates,
+                        work.maximumQubits,
+                        work.classicalRecordPayloadBits,
+                    ].map(formatCount);
+                },
+            ),
+        ),
+        '',
+        'The hidden-slice example keeps two independent shadows before one opening and one afterward. It preserves both databases and the programmed background across stages. Slice selection, nested background copies and all shadow calls are charged; record metadata, initialization and complete reduction-time conversion remain separate.',
+        '',
+        table(
+            [
+                'Background full-value calls',
+                'Shadow full-value calls',
+                'Slice-controller gates',
+                'Replacement-copy gates',
+                'Total query gates',
+                'Oracle qubit bound',
+                'Classical slice prefix bits',
+                'Maximum programming record payload bits',
+            ],
+            [
+                (() => {
+                    const work = shadowOracleDomainWork(
+                        [
+                            {
+                                count: 2n,
+                                inputCapacity: 4n,
+                                outputCapacity: 3n,
+                                activeShadows: [0, 1],
+                                replacements: [],
+                            },
+                            {
+                                count: 3n,
+                                inputCapacity: 4n,
+                                outputCapacity: 3n,
+                                activeShadows: [1],
+                                replacements: [
+                                    { inputBits: 4n, prefixBits: 2n },
+                                ],
+                            },
+                        ],
+                        2n,
+                        [2n, 3n],
+                    );
+                    return [
+                        work.base.fullValueQueries,
+                        work.shadows.reduce(
+                            (sum, value) => sum + value.fullValueQueries,
+                            0n,
+                        ),
+                        work.routingGates,
+                        work.copyGates,
+                        work.queryGates,
+                        work.maximumQubits,
+                        work.classicalSlicePrefixBits,
+                        work.maximumProgrammingRecordPayloadBits,
+                    ].map(formatCount);
+                })(),
+            ],
+        ),
+        '',
+        '## Full-body commitment equivocation census',
+        '',
+        'The original whole-message extension uses a separate hidden salt slice for each potential honest credential, with one commitment per sender scope. The fixed credential tape also charges unused credentials, preserving adaptive activation inside the wrapper. These supplied scope caps are conditional operands, not derived lifetime limits. Its bound sums the single-sender one-way-to-hiding hybrids and does not multiply by the body bit length. The ideal-XOF credential-collision term accounts separately for equal original seeds and equal public matrix-seed prefixes. Controlled oracle calls exclude credential generation, routing, input/output processing and actual oracle-simulator cost; complete reduction time and fixed-function correspondence remain open.',
+        '',
+        table(
+            [
+                'Participants',
+                'Potential credential scope cap',
+                'Salt bits',
+                'Quantum query bound',
+                'Failure exponent',
+                'Controlled oracle call bound',
+                'Ideal credential-collision numerator',
+                'Ideal credential-collision denominator',
+            ],
+            [
+                [10, 10n],
+                [10, 30n],
+                [20, 20n],
+            ].map(([participantCount, scopes]) => {
+                const bound = compileCommitmentEquivocationBound(
+                    Number(participantCount),
+                    BigInt(scopes),
+                );
+                return [
+                    formatCount(participantCount),
+                    formatCount(bound.credentialScopeCount),
+                    formatCount(bound.saltBitLength),
+                    formatCount(bound.quantumQueryCount),
+                    formatCount(bound.failureExponent),
+                    formatCount(bound.maximumControlledOracleCalls),
+                    formatCount(bound.credentialCollisionNumerator),
+                    formatCount(bound.credentialCollisionDenominator),
+                ];
+            }),
+        ),
+        '',
+        'The finite model compares exact joint density matrices conditioned on the complete post-opening oracle and public transcript. Its alternate constructions test incomplete masking, retained shadow values, and unwanted changes to the uncommitted output suffix. This enumerates selected receivers rather than proving quantum security.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Full-message real cases',
+                    formatCount(commitmentEquivocation.realCases),
+                ],
+                [
+                    'Full-message simulated cases',
+                    formatCount(commitmentEquivocation.simulatedCases),
+                ],
+                [
+                    'Full-message classical blocks',
+                    formatCount(commitmentEquivocation.classicalBlocks),
+                ],
+                [
+                    'Full-message differing entries',
+                    formatCount(commitmentEquivocation.differingEntries),
+                ],
+                [
+                    'Prefix-programming simulated cases',
+                    formatCount(commitmentPrefix.simulatedCases),
+                ],
+                [
+                    'Prefix-programming differing entries',
+                    formatCount(commitmentPrefix.differingEntries),
+                ],
+                [
+                    'Duplicate-input distinguishing events',
+                    formatCount(duplicateCommitmentInputs.simulatedEvents),
+                ],
+                [
+                    'Duplicate-input simulated cases',
+                    formatCount(duplicateCommitmentInputs.simulatedCases),
+                ],
+            ],
+        ),
+        '',
+        '## Fixed-witness release simulation census',
+        '',
+        'This scalar counterexample applies the KLLPS simulation equation with three fixed corrupt coordinates and one honest release. Using the actual ciphertext plaintext satisfies the expanded noise relation; substituting another output decodes that output but violates the relation to the fixed honest setup witness. It rejects that simulator chronology, not threshold FHE as a family.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Same-plaintext noise checks passed',
+                    formatCount(
+                        releaseSimulation.samePlaintextNoiseChecksPassed,
+                    ),
+                ],
+                [
+                    'Changed-plaintext noise checks refused',
+                    formatCount(
+                        releaseSimulation.changedPlaintextNoiseChecksRefused,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Publication and close local-view census',
+        '',
+        'The rejected close rule can strand an honest READY sender when other honest parties close before receiving its complete ECHO evidence. Every honest message is eventually delivered, while corrupt parties remain silent. Neither publication nor close obtains its quorum. This is a pre-certification liveness counterexample and does not invalidate the post-certification threshold arithmetic.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Continuing honest participants in the close race',
+                    formatCount(closeRace.honestParticipants),
+                ],
+                [
+                    'READY signers after complete delayed delivery',
+                    formatCount(closeRace.readySigners),
+                ],
+                [
+                    'Close signers after complete delayed delivery',
+                    formatCount(closeRace.closeSigners),
+                ],
+                [
+                    'Delivered honest messages',
+                    formatCount(closeRace.deliveredMessages),
+                ],
+                [
+                    'Unresolved honest READY waiters',
+                    formatCount(closeRace.unresolvedReadyWaiters),
+                ],
+            ],
+        ),
+        '',
+        '## Close-response census',
+        '',
+        "Each roster uses the close quorum `q = n - f`, guarantees inclusion of an on-time envelope that `f + 1` honest participants received before responding, and omits at most `f` honest ballots. A response lists at most two envelopes per slot. With every honest participant voting, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots. The stage bound adds three preparation visits to the ballot, close response, target signature, release share and verification; the organizer's close intent and proposal replace its response and signature. Prioritized message-level executions attain every stage bound.",
+        '',
+        table(
+            [
+                'Participants',
+                'Maximum corrupt',
+                'Close quorum',
+                'Inclusion holders',
+                'Maximum honest omission',
+                'Accepted at full honest turnout after omission',
+                'Minimum turnout',
+                'No result forceable',
+                'Maximum listed envelopes per response',
+                'Organizer visits',
+                'Voter visits',
+                'Nonvoter visits',
+            ],
+            closeResponses.profiles.map((profile) => [
+                formatCount(profile.participantCount),
+                formatCount(profile.faultBound),
+                formatCount(profile.quorum),
+                formatCount(profile.inclusionHolderThreshold),
+                formatCount(profile.maximumHonestOmission),
+                formatCount(profile.acceptedAtFullHonestTurnoutAfterOmission),
+                formatCount(profile.minimumTurnout),
+                profile.noResultForceableAtFullHonestTurnout ? 'yes' : 'no',
+                formatCount(profile.maximumListedEntriesPerResponse),
+                formatCount(profile.visits.organizerStageBound),
+                formatCount(profile.visits.voterStageBound),
+                formatCount(profile.visits.nonvoterStageBound),
+            ]),
+        ),
+        '',
+        'The joint views enumerate every held set, answered intent, proposal and corrupt listing for three and four participants, including a corrupt organizer with two close times. Nonorganizer positions have identical roles, so one nonorganizer corruption represents each. Every 64th view is rebuilt through the reference response, proposal, inventory and contract checks.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corruption cases',
+                'Views',
+                'Inventories',
+                'Reference cross-checks',
+                'Maximum honest omission',
+                'No-result inventories',
+                'Contract findings',
+            ],
+            closeResponses.joint.map((census) => [
+                formatCount(census.participantCount),
+                formatCount(census.corruptionCases),
+                formatCount(census.views),
+                formatCount(census.inventories),
+                formatCount(census.referenceCrossChecks),
+                formatCount(census.maximumHonestOmission),
+                formatCount(census.noResultInventories),
+                census.findings.length === 0
+                    ? 'none'
+                    : census.findings.join(', '),
+            ]),
+        ),
+        '',
+        'The brute force covers every corruption set, every proposal containing the organizer and every honest lister set.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corruption sets',
+                'Proposals',
+                'Lister sets',
+                'Minimum inclusion margin',
+                'Maximum honest authors outside a proposal',
+                'Tight omission witness',
+            ],
+            closeResponses.bruteForce.map((census) => [
+                formatCount(census.participantCount),
+                formatCount(census.corruptionSets),
+                formatCount(census.proposals),
+                formatCount(census.listerSetChecks),
+                formatCount(census.minimumInclusionMargin),
+                formatCount(census.maximumOmittedAuthors),
+                census.tightOmissionWitness ? 'yes' : 'no',
+            ]),
+        ),
+        '',
+        'The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action. In the targeted executions the corrupt participants sign no response, fill the two body slots of an honest organizer with late envelopes and give every other honest participant a different on-time envelope. Every participant holds at most two bodies for one slot and discards late ones at its intent lock; the organizer requests bodies from the listing responder and the author.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Corruption sets',
+                    formatCount(closeResponses.execution.corruptionSets),
+                ],
+                [
+                    'Executions',
+                    formatCount(closeResponses.execution.executions),
+                ],
+                [
+                    'Certified executions',
+                    formatCount(closeResponses.execution.certifiedExecutions),
+                ],
+                [
+                    'Maximum honest omission',
+                    formatCount(closeResponses.execution.maximumHonestOmission),
+                ],
+                [
+                    'No result at full honest turnout',
+                    formatCount(
+                        closeResponses.execution.forcedNoResultExecutions,
+                    ),
+                ],
+                [
+                    'Largest honest response listing',
+                    formatCount(closeResponses.execution.maximumListedEntries),
+                ],
+                [
+                    'Certified targeted executions',
+                    `${formatCount(closeResponses.execution.targetedCertifiedExecutions)} of ${formatCount(closeResponses.execution.targetedExecutions)}`,
+                ],
+                [
+                    'Most bodies held at once for one slot',
+                    formatCount(closeResponses.execution.maximumHeldPerSlot),
+                ],
+                [
+                    'Most bodies received for one honest slot',
+                    formatCount(
+                        closeResponses.execution.maximumReceivedPerHonestSlot,
+                    ),
+                ],
+                [
+                    'Most bodies received for one corrupt slot',
+                    formatCount(
+                        closeResponses.execution.maximumReceivedPerCorruptSlot,
+                    ),
+                ],
+                [
+                    'Most organizer body requests for one slot',
+                    formatCount(
+                        closeResponses.execution
+                            .maximumOrganizerRequestsPerSlot,
+                    ),
+                ],
+                [
+                    'Contract findings',
+                    closeResponses.execution.findings.length === 0
+                        ? 'none'
+                        : closeResponses.execution.findings.join(', '),
+                ],
+            ],
+        ),
+        '',
+        'Each review obligation fails under its variant and holds under the maintained rule. The support-rule row replays the rejected organizer-selected union.',
+        '',
+        table(
+            ['Variant', 'Outcome'],
+            [
+                [
+                    'Holdings lost at a restart before responding',
+                    closeResponses.counterexamples.volatileRetentionFindings.join(
+                        ', ',
+                    ),
+                ],
+                [
+                    'Holdings retained until the response',
+                    closeResponses.counterexamples.durableRetentionFindings
+                        .length === 0
+                        ? 'none'
+                        : closeResponses.counterexamples.durableRetentionFindings.join(
+                              ', ',
+                          ),
+                ],
+                [
+                    'Omitted voters and corrupt participants refuse target signatures',
+                    `${formatCount(closeResponses.counterexamples.refusalHonestSigners)} honest signers of ${formatCount(closeResponses.counterexamples.refusalQuorum)}, ${formatCount(closeResponses.counterexamples.refusalCertifiedTargets)} certified targets`,
+                ],
+                [
+                    'Omitted voters sign the valid target',
+                    `${formatCount(closeResponses.counterexamples.omittedSignerCertifiedTargets)} certified target with ${formatCount(closeResponses.counterexamples.omittedSignerHonestOmission)} honest omissions`,
+                ],
+                [
+                    `Unlimited per-slot listing, ${String(closeResponses.counterexamples.equivocations)} equivocations`,
+                    `${formatCount(closeResponses.counterexamples.uncappedResponseEntries)} entries`,
+                ],
+                [
+                    'Two envelopes per slot',
+                    `${formatCount(closeResponses.counterexamples.cappedResponseEntries)} entries`,
+                ],
+                [
+                    'Organizer answers at its intent; a corrupt author then fills its body slots and splits the others',
+                    `${formatCount(closeResponses.counterexamples.earlyOrganizerSelection)} of ${formatCount(closeResponses.counterexamples.organizerStallQuorum)} responses selected`,
+                ],
+                [
+                    'Organizer answers at its proposal and lists two known envelopes',
+                    `${formatCount(closeResponses.counterexamples.lateOrganizerSelection)} of ${formatCount(closeResponses.counterexamples.organizerStallQuorum)} responses selected`,
+                ],
+                [
+                    'Support rule includes a ballot every honest participant holds',
+                    closeResponses.counterexamples.supportRuleIncludesEnvelope
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Union rule includes it',
+                    closeResponses.counterexamples.unionRuleIncludesEnvelope
+                        ? 'yes'
+                        : 'no',
+                ],
+            ],
+        ),
+        '',
+        '## Threshold release flooding bound',
+        '',
+        'For ten participants and release threshold four, one rational-ring implementation enumerates every coefficient over the reduced degree-eight negacyclic subring, while the independent modular-ring model obtains the same maxima. The KLLPS26 trigonometric expression remains as a looser analytic cross-check. All noise-budget figures are floors from the dominant flooding term only: they omit the expanded public-proof radius, remaining correctness terms, proof slack, multi-query and multi-session unions, and hidden constants. They are not approved FHE parameters.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Authorized release subsets enumerated',
+                    formatCount(thresholdReleaseNoise.authorizedSubsetCount),
+                ],
+                [
+                    'Production interpolation-point exponent stride',
+                    formatCount(
+                        thresholdReleaseNoise.productionInterpolationPointExponentStride,
+                    ),
+                ],
+                [
+                    'Bounded-integer scaled reconstructions checked',
+                    formatCount(
+                        thresholdReleaseNoise.boundedIntegerSharingReconstructionCount,
+                    ),
+                ],
+                [
+                    'Lagrange coefficients enumerated',
+                    formatCount(thresholdReleaseNoise.lagrangeCoefficientCount),
+                ],
+                [
+                    'Exact maximum scaled reconstruction coefficient one-norm',
+                    formatCount(
+                        thresholdReleaseNoise.exactMaximumScaledReconstructionCoefficientOneNorm,
+                    ),
+                ],
+                [
+                    'Exact maximum simulation coefficient one-norm',
+                    formatCount(
+                        thresholdReleaseNoise.exactMaximumSimulationCoefficientOneNorm,
+                    ),
+                ],
+                [
+                    'Maximum sum of simulation coefficient one-norms over all honest releases',
+                    formatCount(
+                        thresholdReleaseNoise.exactMaximumJointSimulationCoefficientOneNormSum,
+                    ),
+                ],
+                [
+                    'Joint-release dominant noise reserve at 80 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.jointTargetSecurityDominantNoiseReserveBitLength,
+                    ),
+                ],
+                [
+                    'Exact interpolation product',
+                    formatCount(
+                        thresholdReleaseNoise.exactInterpolationProduct,
+                    ),
+                ],
+                [
+                    'Trigonometric interpolation-product upper bound',
+                    `\`${thresholdReleaseNoise.interpolationProductBound.toFixed(6)}\``,
+                ],
+                [
+                    'Exact dominant noise-budget floor at 80 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+                [
+                    'Exact dominant noise-budget floor at 128 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+                [
+                    'Analytic dominant noise-budget floor at 80 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.targetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+                [
+                    'Analytic dominant noise-budget floor at 128 statistical bits',
+                    formatCount(
+                        thresholdReleaseNoise.conservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        '## Generic commit-and-open setup-proof floor',
+        '',
+        'This optimistic subtotal applies the pinned 128-bit quantum ZKB++/Unruh repetition count and only the binary-multiplication term of its proof-size formula to the bounded coefficients in the depth-sized setup witness. It charges an unrealistically favorable one non-linear gate per bounded coefficient and omits all inputs, commitments, openings, linear work, encrypted sharing expansion, and proof framing. It rejects this direct generic compiler for setup, not commit-and-open proofs or lattice-native proofs as families.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Quantum-security parallel repetitions',
+                    formatCount(
+                        genericProofResources.quantumSecurityParallelRepetitionCount,
+                    ),
+                ],
+                [
+                    'Proof bits per binary multiplication gate',
+                    formatCount(
+                        genericProofResources.proofBitsPerBinaryMultiplicationGate,
+                    ),
+                ],
+                [
+                    'Bounded ring elements per setup witness',
+                    formatCount(
+                        genericProofResources.boundedRingElementCountPerSetupContribution,
+                    ),
+                ],
+                [
+                    'Bounded coefficients per setup witness',
+                    formatCount(
+                        genericProofResources.boundedCoefficientCountPerSetupContribution,
+                    ),
+                ],
+                [
+                    'Proof floor per setup contribution',
+                    formatCount(
+                        genericProofResources.minimumProofSizePerSetupContributionByteLength,
+                    ),
+                ],
+                [
+                    'Ten-proof corpus floor',
+                    formatCount(
+                        genericProofResources.minimumProofCorpusByteLength,
+                    ),
+                ],
+                [
+                    'Setup plus proof subtotal',
+                    formatCount(
+                        genericProofResources.combinedSetupAndProofSubtotalByteLength,
+                    ),
+                ],
+                [
+                    'Above setup-transfer variance ceiling',
+                    genericProofResources.exceedsSetupTransferVarianceCeiling
+                        ? 'yes'
+                        : 'no',
+                ],
+            ],
+        ),
+        '',
+        '## Combining target certification and ordinary release shares',
+        '',
+        'This comparison attaches ordinary threshold-decryption shares to target votes. Corrupt participants keep their own shares and withhold all their public responses. The table counts the honest public responses sufficient for private reconstruction. It does not model encrypted release capsules, an additional activation primitive, or the existing certificate-gated release path.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participant count',
+                    formatCount(certificationRelease.participantCount),
+                ],
+                [
+                    'Corrupt private shares',
+                    formatCount(certificationRelease.corruptCount),
+                ],
+                [
+                    'Public certificate threshold',
+                    formatCount(certificationRelease.certificateThreshold),
+                ],
+                [
+                    'Minimum share threshold delaying this trace until the public certificate',
+                    formatCount(
+                        certificationRelease.minimumThresholdDelayingThisTrace,
+                    ),
+                ],
+                [
+                    'Maximum share threshold for every continuing group',
+                    formatCount(
+                        certificationRelease.maximumThresholdForEveryContinuingSet,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Share threshold',
+                'Honest public responses before reconstruction',
+                'Public certificate available',
+                'Every continuing group can reconstruct',
+            ],
+            certificationRelease.cases.map((value) => [
+                formatCount(value.threshold),
+                formatCount(value.honestPublicShares),
+                value.publicCertificateAvailable ? 'yes' : 'no',
+                value.everyContinuingSetCanDecrypt ? 'yes' : 'no',
+            ]),
+        ),
+        '',
+        '## Close wire census',
+        '',
+        'Exact canonical lengths of the signed close messages and bounds on the archived closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares, archive framing and storage-engine overhead.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                ['Envelope bytes', formatCount(ballotBody.envelopeBytes)],
+                [
+                    'Archived submission bytes',
+                    formatCount(compileCloseWireCensus(10).submissionBytes),
+                ],
+                [
+                    'Close intent body bytes',
+                    formatCount(compileCloseWireCensus(10).intentBodyBytes),
+                ],
+                [
+                    'Empty response body bytes',
+                    formatCount(
+                        compileCloseWireCensus(10).minimumResponseBodyBytes,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Participants',
+                'Close quorum',
+                'Maximum response body bytes',
+                'Proposal body bytes',
+                'Maximum union envelopes',
+                'Maximum barrier metadata bytes',
+                'Barrier signature checks',
+                'Maximum held bodies',
+                'Maximum received bodies',
+                'Maximum close state bytes',
+            ],
+            thresholdProfiles.map(({ participantCount }) => {
+                const value = compileCloseWireCensus(participantCount);
+                return [
+                    formatCount(participantCount),
+                    formatCount(value.closeQuorum),
+                    formatCount(value.maximumResponseBodyBytes),
+                    formatCount(value.proposalBodyBytes),
+                    formatCount(value.maximumUnionEnvelopes),
+                    formatCount(value.maximumBarrierMetadataBytes),
+                    formatCount(value.barrierSignatureVerifications),
+                    formatCount(value.maximumHeldBodies),
+                    formatCount(value.maximumReceivedBodies),
+                    formatCount(value.maximumParticipantStateBytes),
+                ];
+            }),
+        ),
+        '',
+        '## Fixed publication witness visit screen',
+        '',
+        'The cyclic fixed witness sets have the smallest size that guarantees an honest member under every allowed static corruption set. The trace grants instant durable publication, one witness message per ballot, and an ideal nonselective close. It retains the current preparation and post-close evidence, target certification, release and local retrieval dependencies. All participants cooperate and all enabled work coalesces. This is a completing counterexample to this composition, not a protocol implementation or a universal asynchronous lower bound.',
+        '',
+        table(
+            [
+                'Participant',
+                'Assigned publication witnesses',
+                'Productive visits',
+            ],
+            fixedPublicationWitnesses.participantVisits.map(
+                (visits, position) => [
+                    formatCount(position),
+                    formatCount(
+                        fixedPublicationWitnesses.assignments[position],
+                    ),
+                    formatCount(visits),
+                ],
+            ),
+        ),
+        '',
+        table(
+            ['First participant visit', 'Newly enabled work'],
+            fixedPublicationWitnesses.firstParticipantActions.map(
+                (actions, index) => [
+                    formatCount(index + 1),
+                    actions.join(', '),
+                ],
+            ),
+        ),
+        '',
+        '## Participant visit dependency census',
+        '',
+        'The preparation prefix counts joining, roster confirmation and seed commitment, seed opening, verified share-encryption keys, setup contributions, all-roster receipts, and an optional ballot attempt. The completing witness then executes the freeze-and-union publication model with immediate delivery, all enabled work coalesced, and corrupt participants refusing after valid preparation. Publication, close, target certification, release, and terminal retrieval exceed the ceiling. An additional setup-proof commitment wave is not charged, so it cannot rescue this rejected composition. These are witnessed costs, not worst-case upper bounds.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Participants in the sequential witness',
+                    formatCount(participantVisits.participantCount),
+                ],
+                [
+                    'First participant preparation visits including joining',
+                    formatCount(participantVisits.preparationWitnessVisitCount),
+                ],
+                [
+                    'First ballot author visits through its attempt',
+                    formatCount(
+                        participantVisits.ballotAuthorWitnessVisitCount,
+                    ),
+                ],
+                [
+                    'Remaining productive visits within the mandatory ceiling',
+                    formatCount(participantVisits.remainingVisitBudget),
+                ],
+                [
+                    'First participant visits in the completing witness',
+                    formatCount(participantVisits.completionWitnessVisitCount),
+                ],
+                [
+                    'Completing witness visits above the mandatory ceiling',
+                    formatCount(participantVisits.completionWitnessExcess),
+                ],
+                [
+                    'Fixed-suite preparation with eager publication, favorable witness',
+                    formatCount(
+                        participantVisits.commonMatrixCompletionWitnessVisitCount,
+                    ),
+                ],
+                [
+                    'Fixed-suite preparation with eager publication, interleaved ballots',
+                    formatCount(
+                        participantVisits.interleavedCommonMatrixWitnessVisitCount,
+                    ),
+                ],
+                [
+                    'Rejected batched close, result-stage count',
+                    formatCount(
+                        batchedPublicationVisits.maximumParticipantStages,
+                    ),
+                ],
+                [
+                    'Rejected batched close, no-result-stage count',
+                    formatCount(batchedPublicationVisits.maximumNoResultStages),
+                ],
+                [
+                    'Preferred visit count',
+                    formatCount(participantVisits.preferredVisitCount),
+                ],
+                [
+                    'Mandatory visit ceiling',
+                    formatCount(participantVisits.maximumPermittedVisitCount),
+                ],
+            ],
+        ),
+        '',
+        '## Exact ranking arithmetic census',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Plaintext modulus used by the arithmetic experiment',
+                    formatCount(exactRankingModelConstants.plaintextModulus),
+                ],
+                [
+                    'Maximum total difference magnitude',
+                    formatCount(exactRankingModelConstants.maximumDifference),
+                ],
+                [
+                    'Comparison interpolation points',
+                    formatCount(rankingCensus.exhaustiveComparisonPointCount),
+                ],
+                [
+                    'Comparison polynomial degree',
+                    formatCount(rankingCensus.comparisonPolynomialDegree),
+                ],
+                [
+                    'Nonzero comparison coefficients',
+                    formatCount(
+                        rankingCensus.comparisonPolynomialNonzeroCoefficientCount,
+                    ),
+                ],
+                [
+                    'Rank-equality domains checked',
+                    formatCount(rankingCensus.equalityDomainCount),
+                ],
+                [
+                    'Packed option/result-width layouts checked',
+                    formatCount(rankingCensus.packedLayoutCount),
+                ],
+                [
+                    'Participant/option profiles checked',
+                    formatCount(
+                        rankingCensus.testedParticipantOptionProfileCount,
+                    ),
+                ],
+                [
+                    'Adversarial and deterministic score matrices checked',
+                    formatCount(rankingCensus.testedMatrixCount),
+                ],
+                [
+                    'Result-width executions checked',
+                    formatCount(rankingCensus.testedTopCountExecutionCount),
+                ],
+            ],
+        ),
+        '',
+        'The comparison returns one when a lower canonical option position has a nonnegative total difference. This incorporates the lower-position tie rule. Rank-equality polynomials are independently interpolated and exhaustively checked on every rank domain from two through twenty options.',
+        '',
+        '## Packed ranking graph census',
+        '',
+        'The graph uses one packed ciphertext per accepted ballot. Each power-of-two option block reserves the requested-rank lanes, then carries every opponent-minus-current score difference. Slot-varying coefficients select strict or non-strict comparison according to the canonical tie order, so one block-size-24 Paterson-Stockmeyer evaluation computes every ordered-pair predicate. Repeated unit-direction rotations accumulate one encrypted rank per block and copy it backward across the requested-rank lanes; one slot-varying equality evaluation yields a one-hot encoding of exactly the requested identifiers. The terminal decoder checks and converts that leakage-equivalent encoding. The ciphertext-byte projection assumes a polynomial modulus degree of 32,768, 64-bit RNS limbs, and one remaining data prime per consumed multiplicative level; the release-capable resource screen separately retains its bottom-prime reserve. It counts scheduled data ciphertexts only; evaluation keys, scratch allocations, serialization copies, proof data, and the WebAssembly runtime are additional. This is not a selected parameter set.',
+        '',
+        table(
+            [
+                'Graph property',
+                'Ten participants/options',
+                'Twenty participants/options',
+            ],
+            [
+                [
+                    'Ordered pair-difference lanes',
+                    formatCount(completionGraph.orderedPairDifferenceLaneCount),
+                    formatCount(maximumGraph.orderedPairDifferenceLaneCount),
+                ],
+                [
+                    'Packed ballot lanes including block padding',
+                    formatCount(completionGraph.packedBallotLaneCount),
+                    formatCount(maximumGraph.packedBallotLaneCount),
+                ],
+                [
+                    'Multiplicative depth',
+                    formatCount(completionGraph.multiplicativeDepth),
+                    formatCount(maximumGraph.multiplicativeDepth),
+                ],
+                [
+                    'Ciphertext multiplications',
+                    formatCount(completionGraph.ciphertextMultiplicationCount),
+                    formatCount(maximumGraph.ciphertextMultiplicationCount),
+                ],
+                [
+                    'Relinearizations',
+                    formatCount(completionGraph.relinearizationCount),
+                    formatCount(maximumGraph.relinearizationCount),
+                ],
+                [
+                    'Relinearization-key ring-limb reads with one pass per operation',
+                    formatCount(
+                        completionGraph.relinearizationKeyRingLimbReadCount,
+                    ),
+                    formatCount(
+                        maximumGraph.relinearizationKeyRingLimbReadCount,
+                    ),
+                ],
+                [
+                    'Rotations',
+                    formatCount(completionGraph.rotationCount),
+                    formatCount(maximumGraph.rotationCount),
+                ],
+                [
+                    'Rotation-key ring-limb reads with one pass per operation',
+                    formatCount(completionGraph.rotationKeyRingLimbReadCount),
+                    formatCount(maximumGraph.rotationKeyRingLimbReadCount),
+                ],
+                [
+                    'Ciphertext additions',
+                    formatCount(completionGraph.ciphertextAdditionCount),
+                    formatCount(maximumGraph.ciphertextAdditionCount),
+                ],
+                [
+                    'Plaintext multiplications',
+                    formatCount(completionGraph.plaintextMultiplicationCount),
+                    formatCount(maximumGraph.plaintextMultiplicationCount),
+                ],
+                [
+                    'Scheduled peak live ciphertexts',
+                    formatCount(
+                        completionGraph.scheduledPeakLiveCiphertextCount,
+                    ),
+                    formatCount(maximumGraph.scheduledPeakLiveCiphertextCount),
+                ],
+                [
+                    'Projected scheduled peak ciphertext bytes',
+                    formatCount(
+                        completionGraph.scheduledPeakCiphertextByteLength,
+                    ),
+                    formatCount(maximumGraph.scheduledPeakCiphertextByteLength),
+                ],
+                [
+                    'Materialized graph nodes',
+                    formatCount(
+                        completionGraph.materializedCiphertextNodeCount,
+                    ),
+                    formatCount(maximumGraph.materializedCiphertextNodeCount),
+                ],
+            ],
+        ),
+    ].join('\n')}\n`;
+};
+
+const normalizeCensusLine = (line: string): string =>
+    line.startsWith('|')
+        ? line
+              .split('|')
+              .map((cell) => cell.trim().replace(/^-{3,}$/u, '---'))
+              .join('|')
+        : line;
+
+const normalizeCensusText = (text: string): string[] =>
+    text.replace(/\r\n/g, '\n').split('\n').map(normalizeCensusLine);
+
+export const findFirstCensusMismatch = (
+    stored: string,
+    rendered: string,
+): number | undefined => {
+    const storedLines = normalizeCensusText(stored);
+    const renderedLines = normalizeCensusText(rendered);
+    const length = Math.max(storedLines.length, renderedLines.length);
+    for (let index = 0; index < length; index += 1) {
+        if (storedLines[index] !== renderedLines[index]) return index + 1;
+    }
+    return undefined;
+};
+
+const usage =
+    'Usage: generate-documentation-census.ts (--output <file> | --check <file> | --print)';
+
+const main = async (): Promise<void> => {
+    const rawArguments = process.argv.slice(2);
+    const argumentsList =
+        rawArguments[0] === '--' ? rawArguments.slice(1) : rawArguments;
+    const rendered = renderDocumentationCensus();
+    if (argumentsList.length === 1 && argumentsList[0] === '--print') {
+        process.stdout.write(rendered);
+        return;
+    }
+    if (argumentsList.length !== 2 || argumentsList[1] === undefined) {
+        throw new Error(usage);
+    }
+    const targetPath = path.resolve(argumentsList[1]);
+    if (argumentsList[0] === '--output') {
+        await writeFile(targetPath, rendered, 'utf8');
+        process.stdout.write(
+            `Wrote ${String(Buffer.byteLength(rendered))} bytes to ${targetPath}\n`,
+        );
+        return;
+    }
+    if (argumentsList[0] === '--check') {
+        const stored = await readFile(targetPath, 'utf8');
+        const mismatch = findFirstCensusMismatch(stored, rendered);
+        if (mismatch !== undefined) {
+            throw new Error(
+                `The stored census is stale at line ${String(mismatch)}; regenerate it with --output.`,
+            );
+        }
+        process.stdout.write('The stored census matches the models.\n');
+        return;
+    }
+    throw new Error(usage);
+};
+
+if (import.meta.main) await main();

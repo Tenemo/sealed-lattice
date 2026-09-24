@@ -1,0 +1,25 @@
+[package]
+name = "registration-proof"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+setup-witness = { path = "../setup-witness" }
+setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+sha3 = "=0.10.9"
+stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
+num-bigint = "=0.5.1"
+zeroize = "=1.8.2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "=0.3.3"

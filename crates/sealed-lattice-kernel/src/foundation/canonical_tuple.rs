@@ -115,11 +115,11 @@ impl CanonicalDecodeBudget {
     }
 }
 
+#[path = "canonical_tuple/decoding.rs"]
 mod decoding;
+#[path = "canonical_tuple/value.rs"]
 mod value;
 
-pub use decoding::IncrementalCanonicalTupleDecoder;
-pub(in crate::foundation) use decoding::validate_item_bytes;
 pub use value::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 #[cfg(test)]

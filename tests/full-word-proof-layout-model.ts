@@ -1,0 +1,167 @@
+import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
+import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
+import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
+import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+
+const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    const compiler = compileWideChallengeCompilerCensus();
+    const foldCount = Math.log2(agreement.domainSize / 2);
+    const tagBytes = compiler.tagBits / 8n;
+    const saltBytes = compiler.saltBits / 8n;
+    const baseBytes = field.packedFieldElementByteLength;
+    const extensionBytes = field.packedExtensionElementByteLength;
+    const randomReadBytes = 65536n;
+    const randomFieldBytes = (count: bigint) =>
+        ((count * baseBytes + randomReadBytes - 1n) / randomReadBytes) *
+        randomReadBytes;
+    const firstWidth = BigInt(wordCount + 1) * baseBytes + extensionBytes;
+    const secondWidth = BigInt(lookupCount + 2) * extensionBytes;
+    const headerBytes =
+        4n +
+        2n * tagBytes +
+        3n * tagBytes +
+        extensionBytes +
+        BigInt(foldCount + 3) * saltBytes +
+        BigInt(foldCount - 1) * tagBytes +
+        extensionBytes;
+    let maximumProofBytes = headerBytes;
+    let maximumMultiproofBytes = headerBytes;
+    let maximumCachedNodes = 0;
+    let totalLeaves = 3n * BigInt(agreement.domainSize);
+    const openingGroup = (length: number, width: bigint) =>
+        4n +
+        BigInt(Math.min(2 * agreement.queries, length)) *
+            (4n + width + saltBytes + BigInt(Math.log2(length)) * tagBytes);
+    const multiproofGroup = (length: number, width: bigint) => {
+        const count = Math.min(2 * agreement.queries, length);
+        const siblings = maximumSharedPathSiblings(length, count);
+        maximumCachedNodes = Math.max(maximumCachedNodes, 2 * siblings);
+        return (
+            4n +
+            BigInt(count) * (4n + width + saltBytes) +
+            BigInt(siblings) * tagBytes
+        );
+    };
+    for (const width of [firstWidth, secondWidth, extensionBytes]) {
+        maximumProofBytes += openingGroup(agreement.domainSize, width);
+        maximumMultiproofBytes += multiproofGroup(agreement.domainSize, width);
+    }
+    for (let length = agreement.domainSize / 2; length > 2; length /= 2) {
+        maximumProofBytes += openingGroup(length, extensionBytes);
+        maximumMultiproofBytes += multiproofGroup(length, extensionBytes);
+        totalLeaves += BigInt(length);
+    }
+    return {
+        foldCount,
+        headerBytes,
+        firstWidth,
+        secondWidth,
+        maximumProofBytes,
+        maximumMultiproofBytes,
+        maximumCachedNodeDigestBytes: BigInt(maximumCachedNodes) * tagBytes,
+        proverInterpolationPoints: agreement.codeDimension,
+        expandedFirstOracleBytes: firstWidth * BigInt(agreement.domainSize),
+        expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
+        leafSaltBytes: totalLeaves * saltBytes,
+        minimumRequestedRandomBytes:
+            totalLeaves * saltBytes +
+            BigInt(foldCount + 3) * saltBytes +
+            BigInt(wordCount + 1) *
+                randomFieldBytes(BigInt(agreement.maskDimension)) +
+            randomFieldBytes(3n * BigInt(agreement.codeDimension)) +
+            BigInt(lookupCount + 1) *
+                randomFieldBytes(3n * BigInt(agreement.maskDimension)) +
+            randomFieldBytes(3n * BigInt(agreement.witnessDegree + 1)),
+        proverMaskBytes:
+            BigInt(wordCount + 1) *
+                BigInt(agreement.maskDimension) *
+                baseBytes +
+            BigInt(agreement.codeDimension) * extensionBytes +
+            BigInt(lookupCount + 1) *
+                BigInt(agreement.maskDimension) *
+                extensionBytes +
+            BigInt(agreement.witnessDegree + 1) * extensionBytes,
+    };
+};
+
+export const compileFullWordProofLayout = () => {
+    const columns = compileSetupContributionColumnLayout();
+    return compileWordProofLayout(
+        columns.wordColumns + columns.booleanColumns,
+        columns.lookups.length,
+    );
+};
+
+export const compileRegistrationWordProofLayout = () => {
+    const relation = compileRegistrationKeyRelationCensus();
+    return compileWordProofLayout(
+        relation.wordColumns + relation.booleanColumns,
+        relation.lookups,
+    );
+};
+
+export const compileBallotWordProofLayout = () => {
+    const columns = compileBallotEncryptionColumnLayout();
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    return {
+        ...compileWordProofLayout(
+            columns.columns.length,
+            columns.lookups.length,
+        ),
+        residentPublicOperatorBytes:
+            BigInt(columns.columns.length) *
+            BigInt(agreement.systematicSize) *
+            field.packedExtensionElementByteLength,
+    };
+};
+
+export const compileLinkedReleaseWordProofLayout = () => {
+    const columns = compileLinkedReleaseColumnLayout();
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    return {
+        ...compileWordProofLayout(
+            columns.wordColumns + columns.booleanColumns,
+            columns.lookups.length,
+        ),
+        residentPublicOperatorBytes:
+            BigInt(columns.wordColumns + columns.booleanColumns) *
+            BigInt(agreement.systematicSize) *
+            field.packedExtensionElementByteLength,
+    };
+};
+
+// A high-degree term aliases to a constant on the prover's smaller
+// interpolation domain. Verification must retain the complete domain.
+export const proverInterpolationAlias = () => {
+    const prime = 97n,
+        root = 28n,
+        coset = 2n,
+        length = 32,
+        dimension = 16;
+    const modulo = (value: bigint) => ((value % prime) + prime) % prime;
+    const points = Array.from(
+        { length },
+        (_unused, index) => (coset * root ** BigInt(index)) % prime,
+    );
+    const claimedConstant = coset ** BigInt(dimension) % prime;
+    const actual = points.map((point) => point ** BigInt(dimension) % prime);
+    return {
+        points,
+        claimedConstant,
+        actual,
+        evenAgreement: actual.every(
+            (value, index) => index % 2 !== 0 || value === claimedConstant,
+        ),
+        oddDifference: actual
+            .filter((_value, index) => index % 2 !== 0)
+            .map((value) => modulo(value - claimedConstant)),
+    };
+};

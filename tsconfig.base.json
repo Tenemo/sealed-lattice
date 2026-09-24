@@ -1,19 +1,14 @@
 {
     "compilerOptions": {
         "paths": {
-            "@sealed-lattice/types": ["./packages/types/src/index.ts"],
-            "@sealed-lattice/protocol": ["./packages/protocol/src/index.ts"],
-            "@sealed-lattice/crypto": ["./packages/crypto/src/index.ts"],
-            "@sealed-lattice/wasm": ["./packages/wasm/src/index.ts"],
             "#packages/*": ["./packages/*"],
-            "#test-vectors/*": ["./test-vectors/*"],
             "#tests/*": ["./tests/*"],
             "#tools/*": ["./tools/*"]
         },
         "target": "ES2020",
         "module": "ESNext",
         "moduleResolution": "bundler",
-        "lib": ["ES2020", "DOM", "DOM.Iterable"],
+        "lib": ["ES2020", "ES2024.String", "DOM", "DOM.Iterable"],
         "removeComments": true,
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true,

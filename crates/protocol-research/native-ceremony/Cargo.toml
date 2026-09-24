@@ -1,0 +1,30 @@
+[package]
+name = "native-ceremony"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[dependencies]
+registration-enrollment = { path = "../registration-enrollment" }
+registration-credentials = { path = "../registration-credentials", default-features = false }
+setup-witness = { path = "../setup-witness" }
+word-proof = { path = "../word-proof", default-features = false }
+setup-aggregate = { path = "../setup-aggregate" }
+ballot-encryption = { path = "../ballot-encryption" }
+ballot-proof = { path = "../ballot-proof" }
+evaluation-target = { path = "../evaluation-target" }
+rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
+linked-release-proof = { path = "../linked-release-proof", default-features = false }
+num-bigint = "=0.5.1"
+num-traits = "=0.2.19"
+sha3 = "=0.10.9"
+stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
+getrandom = "=0.3.3"
+zeroize = "=1.8.2"
+
+
+[[bin]]
+name = "native-ceremony"
+path = "src/main.rs"

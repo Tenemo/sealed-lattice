@@ -1,0 +1,61 @@
+[package]
+name = "fhe-math"
+description = "Mathematical utilities for the fhe.rs library"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version = "0.2.0"
+
+[lints]
+workspace = true
+
+[lib]
+bench = false  # Disable default bench (we use criterion)
+
+[features]
+scalar-only = []
+tfhe-ntt = ["dep:tfhe-ntt"]
+
+[dependencies]
+fhe-traits = { version = "=0.1.1", path = "../fhe-traits" }
+fhe-util = { version = "=0.1.1", path = "../fhe-util" }
+
+ethnum.workspace = true
+tfhe-ntt = { workspace = true, optional = true }
+itertools.workspace = true
+ndarray.workspace = true
+num-bigint.workspace = true
+num-bigint-dig.workspace = true
+num-traits.workspace = true
+prost.workspace = true
+pulp.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+
+[build-dependencies]
+prost-build.workspace = true
+
+[[bench]]
+name = "zq"
+harness = false
+
+[[bench]]
+name = "rq"
+harness = false
+
+[[bench]]
+name = "ntt"
+harness = false
+
+[[bench]]
+name = "rns"
+harness = false

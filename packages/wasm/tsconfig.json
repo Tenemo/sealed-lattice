@@ -5,12 +5,8 @@
         "declaration": true,
         "outDir": "./dist",
         "rootDir": "./src",
+        "removeComments": false,
         "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
     },
-    "include": ["src/**/*.ts"],
-    "references": [
-        {
-            "path": "../types"
-        }
-    ]
+    "include": ["src/**/*.ts"]
 }

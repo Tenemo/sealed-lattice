@@ -1,18 +1,16 @@
-//! Canonical ceremony inputs and their immutable context bindings.
-
 use std::collections::BTreeSet;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::{
-    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_u64,
-    read_variable_item, require_header,
+    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_variable_item,
+    require_header,
 };
-use super::suite::SuiteRecord;
 use super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
-    FoundationSchemaError, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
-    MINIMUM_CONFIGURABLE_OPTION_COUNT, RefusalReason, Roster, StabilizedDisplayText,
-    StreamingFoundationTupleHash512, hash_foundation_tuple_512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    FOUNDATION_PROTOCOL_NAME, FOUNDATION_PROTOCOL_VERSION, FoundationSchemaError, Hash512,
+    MAXIMUM_CONFIGURABLE_OPTION_COUNT, MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
+    MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH, MINIMUM_CONFIGURABLE_OPTION_COUNT, RefusalReason,
+    Roster, StabilizedDisplayText, StreamingFoundationTupleHash512, hash_foundation_tuple_512,
 };
 
 pub const MANIFEST_SCHEMA_IDENTIFIER: u16 = 0x0110;
@@ -26,7 +24,6 @@ const ACTION_DEFINITION_HASH_DOMAIN: &str = "sealed-lattice/foundation/action-de
 const BOARD_POLICY_HASH_DOMAIN: &str = "sealed-lattice/foundation/board-policy/v1";
 const CEREMONY_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/foundation/ceremony-context/v1";
 const ACTION_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/foundation/action-context/v1";
-const SUBMISSION_CUTOFF_HASH_DOMAIN: &str = "sealed-lattice/foundation/submission-cutoff/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptionDefinition {
@@ -36,6 +33,12 @@ pub struct OptionDefinition {
 }
 
 impl OptionDefinition {
+    pub fn option_identifier(&self) -> &str {
+        &self.option_identifier
+    }
+    pub fn display_label(&self) -> &StabilizedDisplayText {
+        &self.display_label
+    }
     pub fn new(
         option_index: u16,
         option_identifier: String,
@@ -50,18 +53,6 @@ impl OptionDefinition {
         Ok(definition)
     }
 
-    pub const fn option_index(&self) -> u16 {
-        self.option_index
-    }
-
-    pub fn option_identifier(&self) -> &str {
-        &self.option_identifier
-    }
-
-    pub const fn display_label(&self) -> &StabilizedDisplayText {
-        &self.display_label
-    }
-
     fn validate(&self) -> SchemaResult<()> {
         if self.option_index >= MAXIMUM_CONFIGURABLE_OPTION_COUNT {
             return Err(FoundationSchemaError::new(
@@ -69,14 +60,14 @@ impl OptionDefinition {
                 "option index is outside the supported profile",
             ));
         }
-        CanonicalItem::nonempty_ascii(&self.option_identifier)?;
-        if self.display_label.as_str().is_empty() {
+        CanonicalItem::nonempty_ascii(self.option_identifier())?;
+        if self.display_label().as_str().is_empty() {
             return Err(FoundationSchemaError::new(
                 RefusalReason::WrongTypeOrLength,
                 "option display label must be nonempty",
             ));
         }
-        CanonicalItem::display_text(&self.display_label)?;
+        CanonicalItem::display_text(self.display_label())?;
         Ok(())
     }
 
@@ -110,6 +101,16 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub fn option_count(&self) -> usize {
+        self.options.len()
+    }
+    pub fn display_title(&self) -> &StabilizedDisplayText {
+        &self.display_title
+    }
+    pub fn options(&self) -> &[OptionDefinition] {
+        &self.options
+    }
+
     pub fn new(
         display_title: StabilizedDisplayText,
         options: Vec<OptionDefinition>,
@@ -122,27 +123,26 @@ impl Manifest {
         Ok(manifest)
     }
 
-    pub const fn display_title(&self) -> &StabilizedDisplayText {
-        &self.display_title
-    }
-
-    pub fn options(&self) -> &[OptionDefinition] {
-        &self.options
-    }
-
     fn validate_components(&self) -> SchemaResult<()> {
         if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
             ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
-            .contains(&self.options.len())
+            .contains(&self.option_count())
         {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "manifest option count is outside the configurable range",
             ));
         }
-        CanonicalItem::display_text(&self.display_title)?;
+        if self.display_title().as_str().is_empty() {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongTypeOrLength,
+                "manifest display title must be nonempty",
+            ));
+        }
+        CanonicalItem::display_text(self.display_title())?;
         let mut option_identifiers = BTreeSet::new();
-        for (option_position, option) in self.options.iter().enumerate() {
+        let mut display_labels = BTreeSet::new();
+        for (option_position, option) in self.options().iter().enumerate() {
             option.validate()?;
             if usize::from(option.option_index) != option_position {
                 return Err(FoundationSchemaError::new(
@@ -156,6 +156,14 @@ impl Manifest {
                     "manifest option identifiers must be unique",
                 ));
             }
+            // Stabilized labels are NFC, so canonically equivalent input
+            // spellings compare equal here.
+            if !display_labels.insert(option.display_label.as_str()) {
+                return Err(FoundationSchemaError::new(
+                    RefusalReason::DuplicateIdentity,
+                    "manifest option display labels must be unique",
+                ));
+            }
         }
         Ok(())
     }
@@ -165,18 +173,14 @@ impl Manifest {
         let options = self
             .options
             .iter()
-            .map(|option| {
-                option
-                    .canonical_tuple()
-                    .and_then(|tuple| CanonicalItem::nested_tuple(&tuple).map_err(Into::into))
-            })
+            .map(OptionDefinition::canonical_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
         let tuple = CanonicalTuple::new(
             MANIFEST_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::display_text(&self.display_title)?,
-                CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &options)?,
+                CanonicalItem::nested_tuple_list(&options)?,
             ],
         );
         require_copied_buffer_bound(&tuple, "manifest exceeds the supported copied-buffer bound")?;
@@ -221,39 +225,24 @@ impl Manifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionDefinition {
     top_count: u16,
-    submission_cutoff_unix_milliseconds: u64,
 }
 
 impl ActionDefinition {
-    pub fn new(top_count: u16, submission_cutoff_unix_milliseconds: u64) -> SchemaResult<Self> {
+    pub fn new(top_count: u16) -> SchemaResult<Self> {
         if top_count == 0 || top_count > MAXIMUM_CONFIGURABLE_OPTION_COUNT {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "action top count is outside the supported profile",
             ));
         }
-        Ok(Self {
-            top_count,
-            submission_cutoff_unix_milliseconds,
-        })
-    }
-
-    pub const fn top_count(self) -> u16 {
-        self.top_count
-    }
-
-    pub const fn submission_cutoff_unix_milliseconds(self) -> u64 {
-        self.submission_cutoff_unix_milliseconds
+        Ok(Self { top_count })
     }
 
     fn canonical_tuple(self) -> CanonicalTuple {
         CanonicalTuple::new(
             ACTION_DEFINITION_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.top_count),
-                CanonicalItem::unsigned64(self.submission_cutoff_unix_milliseconds),
-            ],
+            vec![CanonicalItem::unsigned16(self.top_count)],
         )
     }
 
@@ -263,8 +252,8 @@ impl ActionDefinition {
 
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, ACTION_DEFINITION_SCHEMA_IDENTIFIER, 2)?;
-        Self::new(read_u16(&tuple.items[0])?, read_u64(&tuple.items[1])?)
+        require_header(&tuple, ACTION_DEFINITION_SCHEMA_IDENTIFIER, 1)?;
+        Self::new(read_u16(&tuple.items[0])?)
     }
 
     pub fn action_definition_hash(self) -> SchemaResult<Hash512> {
@@ -291,10 +280,6 @@ impl BoardPolicy {
             "board policy exceeds the supported copied-buffer bound",
         )?;
         Ok(policy)
-    }
-
-    pub fn board_origin_identifier(&self) -> &str {
-        &self.board_origin_identifier
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
@@ -329,44 +314,30 @@ pub struct CeremonyContext {
     manifest_hash: Hash512,
     roster_hash: Hash512,
     option_count: u16,
-    ceremony_identifier: String,
     context_hash: Hash512,
 }
 
 impl CeremonyContext {
     pub fn new(
-        suite: &SuiteRecord,
+        suite_id: Hash512,
         manifest: &Manifest,
         roster: &Roster,
         ceremony_identifier: String,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&ceremony_identifier)?;
-        if roster.entries.len() != usize::from(suite.roster_size()) {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongContext,
-                "ceremony roster size does not match the suite record",
-            ));
-        }
-        let manifest_option_count = u16::try_from(manifest.options().len()).map_err(|_| {
+        let manifest_option_count = u16::try_from(manifest.options.len()).map_err(|_| {
             FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "manifest option count does not fit the suite field",
+                "manifest option count does not fit the context field",
             )
         })?;
-        if manifest_option_count != suite.option_count() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongContext,
-                "ceremony manifest option count does not match the suite record",
-            ));
-        }
-        let suite_id = suite.suite_id()?;
         let manifest_hash = manifest.manifest_hash()?;
         let roster_hash = roster.roster_hash()?;
         let context_hash = hash_foundation_tuple_512(
             CEREMONY_CONTEXT_HASH_DOMAIN,
             &[
-                CanonicalItem::nonempty_ascii(FOUNDATION_PROFILE.protocol_name)?,
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
+                CanonicalItem::nonempty_ascii(FOUNDATION_PROTOCOL_NAME)?,
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
                 CanonicalItem::hash512(suite_id.into_bytes()),
                 CanonicalItem::hash512(manifest_hash.into_bytes()),
                 CanonicalItem::hash512(roster_hash.into_bytes()),
@@ -378,7 +349,6 @@ impl CeremonyContext {
             manifest_hash,
             roster_hash,
             option_count: manifest_option_count,
-            ceremony_identifier,
             context_hash,
         })
     }
@@ -395,14 +365,6 @@ impl CeremonyContext {
         self.roster_hash
     }
 
-    pub const fn option_count(&self) -> u16 {
-        self.option_count
-    }
-
-    pub fn ceremony_identifier(&self) -> &str {
-        &self.ceremony_identifier
-    }
-
     pub const fn context_hash(&self) -> Hash512 {
         self.context_hash
     }
@@ -413,11 +375,9 @@ pub struct ActionContext {
     suite_id: Hash512,
     roster_hash: Hash512,
     ceremony_context_hash: Hash512,
-    action_identifier: String,
     action_definition_hash: Hash512,
     board_policy_hash: Hash512,
     context_hash: Hash512,
-    submission_cutoff_hash: Hash512,
 }
 
 impl ActionContext {
@@ -428,7 +388,7 @@ impl ActionContext {
         board_policy: &BoardPolicy,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&action_identifier)?;
-        if action_definition.top_count() > ceremony_context.option_count {
+        if action_definition.top_count > ceremony_context.option_count {
             return Err(FoundationSchemaError::new(
                 RefusalReason::WrongContext,
                 "action top count exceeds the ceremony option count",
@@ -445,22 +405,13 @@ impl ActionContext {
                 CanonicalItem::hash512(board_policy_hash.into_bytes()),
             ],
         )?;
-        let submission_cutoff_hash = hash_foundation_tuple_512(
-            SUBMISSION_CUTOFF_HASH_DOMAIN,
-            &[
-                CanonicalItem::hash512(context_hash.into_bytes()),
-                CanonicalItem::unsigned64(action_definition.submission_cutoff_unix_milliseconds),
-            ],
-        )?;
         Ok(Self {
             suite_id: ceremony_context.suite_id,
             roster_hash: ceremony_context.roster_hash,
             ceremony_context_hash: ceremony_context.context_hash,
-            action_identifier,
             action_definition_hash,
             board_policy_hash,
             context_hash,
-            submission_cutoff_hash,
         })
     }
 
@@ -476,10 +427,6 @@ impl ActionContext {
         self.ceremony_context_hash
     }
 
-    pub fn action_identifier(&self) -> &str {
-        &self.action_identifier
-    }
-
     pub const fn action_definition_hash(&self) -> Hash512 {
         self.action_definition_hash
     }
@@ -491,10 +438,6 @@ impl ActionContext {
     pub const fn context_hash(&self) -> Hash512 {
         self.context_hash
     }
-
-    pub const fn submission_cutoff_hash(&self) -> Hash512 {
-        self.submission_cutoff_hash
-    }
 }
 
 fn read_display_text(item: &CanonicalItem) -> SchemaResult<StabilizedDisplayText> {
@@ -505,7 +448,7 @@ fn read_display_text(item: &CanonicalItem) -> SchemaResult<StabilizedDisplayText
 }
 
 fn require_copied_buffer_bound(tuple: &CanonicalTuple, message: &'static str) -> SchemaResult<()> {
-    if tuple.encode()?.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+    if tuple.encode()?.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             message,
@@ -522,7 +465,7 @@ fn manifest_hash_error() -> FoundationSchemaError {
 }
 
 fn validate_external_identifier(identifier: &str) -> SchemaResult<()> {
-    if identifier.len() > FOUNDATION_PROFILE.maximum_identifier_byte_length {
+    if identifier.len() > MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "external identifier exceeds the supported byte bound",
@@ -544,7 +487,13 @@ mod tests {
     };
 
     use super::*;
-    use crate::foundation::{ArtifactKind, ArtifactReference, RosterEntry, SuiteCountLimits};
+    use crate::foundation::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, RosterEntry};
+
+    // A poll has 2 to 20 options, and the mobile runtime copies at most
+    // 8,388,608 bytes per buffer. These literals restate the owners
+    // independently of the implementation constants the tests check.
+    const GOAL_OPTION_COUNTS: std::ops::RangeInclusive<u16> = 2..=20;
+    const RUNTIME_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;
 
     fn display_text(value: &str) -> StabilizedDisplayText {
         StabilizedDisplayText::from_ingress_utf8(value.as_bytes())
@@ -566,11 +515,11 @@ mod tests {
     }
 
     fn sample_manifest() -> Manifest {
-        manifest_for_option_count(FOUNDATION_PROFILE.option_count)
+        manifest_for_option_count(PROTOTYPE_OPTION_COUNT)
     }
 
     fn sample_roster() -> Roster {
-        let entries = (0..FOUNDATION_PROFILE.participant_count)
+        let entries = (0..PROTOTYPE_PARTICIPANT_COUNT)
             .map(|roster_position| {
                 let mut signing_seed = [0x23_u8; 32];
                 signing_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
@@ -579,7 +528,7 @@ mod tests {
                 mailbox_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
                 let mut mailbox_fallback_seed = [0x97_u8; 32];
                 mailbox_fallback_seed[31] =
-                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                    u8::try_from(PROTOTYPE_PARTICIPANT_COUNT - roster_position)
                         .expect("reverse test position fits u8");
                 let (mailbox_key, _) =
                     ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
@@ -593,25 +542,8 @@ mod tests {
         Roster::new(entries).expect("test roster is valid")
     }
 
-    fn sample_suite() -> SuiteRecord {
-        let count_limits = SuiteCountLimits::new(3, 10, 64, 128, 20, 100)
-            .expect("test suite count limits are valid");
-        let artifacts = ArtifactKind::ALL
-            .into_iter()
-            .map(|artifact_kind| {
-                ArtifactReference::new(
-                    artifact_kind,
-                    1,
-                    Hash512::from_bytes(
-                        [u8::try_from(artifact_kind.canonical_code())
-                            .expect("test artifact kind fits u8");
-                            Hash512::BYTE_LENGTH],
-                    ),
-                )
-                .expect("test artifact reference is valid")
-            })
-            .collect();
-        SuiteRecord::new(count_limits, artifacts).expect("test suite is valid")
+    fn sample_suite_identity() -> Hash512 {
+        Hash512::from_bytes([0x5a; Hash512::BYTE_LENGTH])
     }
 
     #[test]
@@ -634,12 +566,16 @@ mod tests {
 
     #[test]
     fn manifest_schema_round_trips_every_configurable_option_count() {
-        for option_count in MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT {
+        assert_eq!(
+            MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+            GOAL_OPTION_COUNTS
+        );
+        for option_count in GOAL_OPTION_COUNTS {
             let manifest = manifest_for_option_count(option_count);
             let encoded = manifest.encode().expect("bounded manifest encodes");
             let decoded = Manifest::decode(&encoded, &CanonicalDecodeLimits::default())
                 .expect("bounded manifest decodes");
-            assert_eq!(decoded.options().len(), usize::from(option_count));
+            assert_eq!(decoded.options.len(), usize::from(option_count));
             assert_eq!(
                 decoded.encode().expect("bounded manifest re-encodes"),
                 encoded
@@ -657,8 +593,11 @@ mod tests {
             .expect("one-byte-title manifest encodes")
             .len()
             - 1;
-        let maximum_title_byte_length = FOUNDATION_PROFILE
-            .maximum_copied_buffer_byte_length
+        assert_eq!(
+            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
+            RUNTIME_COPIED_BUFFER_BYTE_LENGTH
+        );
+        let maximum_title_byte_length = RUNTIME_COPIED_BUFFER_BYTE_LENGTH
             .checked_sub(title_independent_byte_length)
             .expect("manifest framing fits the copied-buffer profile");
 
@@ -672,7 +611,7 @@ mod tests {
                 .encode()
                 .expect("exact-boundary manifest encodes")
                 .len(),
-            FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
+            RUNTIME_COPIED_BUFFER_BYTE_LENGTH,
         );
         exact_boundary_manifest
             .manifest_hash()
@@ -690,8 +629,8 @@ mod tests {
     }
 
     #[test]
-    fn manifest_rejects_wrong_count_order_duplicate_identifiers_and_empty_labels() {
-        let too_few = manifest_for_option_count(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+    fn manifest_rejects_wrong_count_order_duplicates_and_empty_text() {
+        let too_few = manifest_for_option_count(*GOAL_OPTION_COUNTS.start())
             .options
             .into_iter()
             .take(1)
@@ -699,6 +638,38 @@ mod tests {
         assert_eq!(
             Manifest::new(display_text("Title"), too_few)
                 .expect_err("one option must refuse")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+        // A twenty-first option cannot be constructed, so encode it unchecked
+        // and require the decoder to refuse the oversized manifest.
+        let mut too_many: Vec<_> = manifest_for_option_count(*GOAL_OPTION_COUNTS.end())
+            .options
+            .iter()
+            .map(|option| option.canonical_tuple().expect("option encodes"))
+            .collect();
+        too_many.push(CanonicalTuple::new(
+            OPTION_DEFINITION_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned16(*GOAL_OPTION_COUNTS.end()),
+                CanonicalItem::nonempty_ascii("option-20").expect("identifier encodes"),
+                CanonicalItem::display_text(&display_text("Option 20")).expect("label encodes"),
+            ],
+        ));
+        let too_many_bytes = CanonicalTuple::new(
+            MANIFEST_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::display_text(&display_text("Title")).expect("title encodes"),
+                CanonicalItem::nested_tuple_list(&too_many).expect("options encode"),
+            ],
+        )
+        .encode()
+        .expect("unchecked manifest encodes");
+        assert_eq!(
+            Manifest::decode(&too_many_bytes, &CanonicalDecodeLimits::default())
+                .expect_err("twenty-one options must refuse")
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );
@@ -722,6 +693,45 @@ mod tests {
             RefusalReason::DuplicateIdentity
         );
 
+        let mut equivalent_labels = sample_manifest().options;
+        equivalent_labels[2].display_label = display_text("\u{e9}");
+        equivalent_labels[7].display_label = display_text("e\u{301}");
+        assert_eq!(
+            Manifest::new(display_text("Title"), equivalent_labels.clone())
+                .expect_err("canonically equivalent display labels must refuse")
+                .refusal_reason,
+            RefusalReason::DuplicateIdentity
+        );
+        let unchecked_bytes = CanonicalTuple::new(
+            MANIFEST_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::display_text(&display_text("Title")).expect("title encodes"),
+                CanonicalItem::nested_tuple_list(
+                    &equivalent_labels
+                        .iter()
+                        .map(|option| option.canonical_tuple().expect("option encodes"))
+                        .collect::<Vec<_>>(),
+                )
+                .expect("options encode"),
+            ],
+        )
+        .encode()
+        .expect("unchecked manifest encodes");
+        assert_eq!(
+            Manifest::decode(&unchecked_bytes, &CanonicalDecodeLimits::default())
+                .expect_err("decoded duplicate display labels must refuse")
+                .refusal_reason,
+            RefusalReason::DuplicateIdentity
+        );
+
+        assert_eq!(
+            Manifest::new(display_text(""), sample_manifest().options)
+                .expect_err("empty display title must refuse")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
         assert_eq!(
             OptionDefinition::new(0, "option-0".to_owned(), display_text(""))
                 .expect_err("empty display label must refuse")
@@ -738,9 +748,8 @@ mod tests {
 
     #[test]
     fn action_and_board_values_round_trip_and_reject_genuine_boundary_errors() {
-        for top_count in [1, MAXIMUM_CONFIGURABLE_OPTION_COUNT] {
-            let action =
-                ActionDefinition::new(top_count, u64::MAX).expect("boundary top count is valid");
+        for top_count in [1, *GOAL_OPTION_COUNTS.end()] {
+            let action = ActionDefinition::new(top_count).expect("boundary top count is valid");
             assert_eq!(
                 ActionDefinition::decode(
                     &action.encode().expect("action encodes"),
@@ -750,14 +759,26 @@ mod tests {
                 action
             );
         }
-        for top_count in [0, MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1] {
+        for top_count in [0, GOAL_OPTION_COUNTS.end() + 1] {
             assert_eq!(
-                ActionDefinition::new(top_count, 0)
+                ActionDefinition::new(top_count)
                     .expect_err("out-of-range top count must refuse")
                     .refusal_reason,
                 RefusalReason::OutsideSupportedProfile
             );
         }
+        // The definition carries no clock; the former cutoff item is refused.
+        let with_cutoff = CanonicalTuple::new(
+            ACTION_DEFINITION_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned16(2),
+                CanonicalItem::unsigned64(1_800_000_000_000),
+            ],
+        )
+        .encode()
+        .expect("two-item action tuple encodes");
+        assert!(ActionDefinition::decode(&with_cutoff, &CanonicalDecodeLimits::default()).is_err());
 
         let board_policy =
             BoardPolicy::new("https://board.example".to_owned()).expect("board policy is valid");
@@ -773,36 +794,23 @@ mod tests {
     }
 
     #[test]
-    fn ceremony_and_action_contexts_bind_the_suite_option_count() {
-        let suite = sample_suite();
+    fn ceremony_and_action_contexts_bind_the_manifest_option_count() {
+        let suite_identity = sample_suite_identity();
         let roster = sample_roster();
-        assert_eq!(suite.option_count(), FOUNDATION_PROFILE.option_count);
-        assert_eq!(
-            CeremonyContext::new(
-                &suite,
-                &manifest_for_option_count(FOUNDATION_PROFILE.option_count - 1),
-                &roster,
-                "wrong-option-count".to_owned(),
-            )
-            .expect_err("manifest count must match its suite")
-            .refusal_reason,
-            RefusalReason::WrongContext
-        );
-
         let ceremony = CeremonyContext::new(
-            &suite,
-            &sample_manifest(),
+            suite_identity,
+            &manifest_for_option_count(PROTOTYPE_OPTION_COUNT - 1),
             &roster,
-            "matching-option-count".to_owned(),
+            "manifest-owned-option-count".to_owned(),
         )
-        .expect("matching ceremony derives");
+        .expect("structural ceremony derives");
         let board_policy =
             BoardPolicy::new("https://board.example".to_owned()).expect("board policy derives");
         assert_eq!(
             ActionContext::new(
                 &ceremony,
                 "too-wide-action".to_owned(),
-                ActionDefinition::new(FOUNDATION_PROFILE.option_count + 1, 0)
+                ActionDefinition::new(PROTOTYPE_OPTION_COUNT)
                     .expect("top count remains structurally bounded"),
                 &board_policy,
             )
@@ -816,12 +824,11 @@ mod tests {
     fn context_hashes_bind_every_canonical_input_and_identifier_boundary() {
         let manifest = sample_manifest();
         let roster = sample_roster();
-        let suite = sample_suite();
-        let suite_id = suite.suite_id().expect("suite identifier derives");
-        let ceremony = CeremonyContext::new(&suite, &manifest, &roster, "ceremony-2026".to_owned())
-            .expect("schema-level ceremony context derives");
-        let action_definition =
-            ActionDefinition::new(7, 1_800_000_000_000).expect("action definition is valid");
+        let suite_id = sample_suite_identity();
+        let ceremony =
+            CeremonyContext::new(suite_id, &manifest, &roster, "ceremony-2026".to_owned())
+                .expect("schema-level ceremony context derives");
+        let action_definition = ActionDefinition::new(7).expect("action definition is valid");
         let board_policy =
             BoardPolicy::new("board.example".to_owned()).expect("board policy is valid");
         let action = ActionContext::new(
@@ -835,9 +842,9 @@ mod tests {
         let expected_ceremony_hash = hash_foundation_tuple_512(
             CEREMONY_CONTEXT_HASH_DOMAIN,
             &[
-                CanonicalItem::nonempty_ascii(FOUNDATION_PROFILE.protocol_name)
+                CanonicalItem::nonempty_ascii(FOUNDATION_PROTOCOL_NAME)
                     .expect("protocol name is canonical"),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
                 CanonicalItem::hash512(suite_id.into_bytes()),
                 CanonicalItem::hash512(
                     manifest
@@ -862,59 +869,42 @@ mod tests {
         )
         .expect("changed action context derives");
         assert_ne!(changed_action.context_hash(), action.context_hash());
-        assert_ne!(
-            changed_action.submission_cutoff_hash(),
-            action.submission_cutoff_hash()
-        );
 
         for invalid_identifier in [
             String::new(),
             "bad\nidentifier".to_owned(),
-            "a".repeat(FOUNDATION_PROFILE.maximum_identifier_byte_length + 1),
+            "a".repeat(MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH + 1),
         ] {
-            assert!(CeremonyContext::new(&suite, &manifest, &roster, invalid_identifier,).is_err());
+            assert!(
+                CeremonyContext::new(suite_id, &manifest, &roster, invalid_identifier).is_err()
+            );
         }
     }
 
     #[test]
-    fn ceremony_context_is_structural_and_does_not_select_a_suite() {
-        let suite = sample_suite();
+    fn ceremony_context_binds_an_opaque_suite_identity_without_activating_it() {
+        let suite_id = sample_suite_identity();
         let ceremony_context = CeremonyContext::new(
-            &suite,
+            suite_id,
             &sample_manifest(),
             &sample_roster(),
             "ceremony-2026".to_owned(),
         )
-        .expect("a structurally valid suite can bind a ceremony context");
-        assert_eq!(
-            ceremony_context.suite_id(),
-            suite.suite_id().expect("suite identifier derives")
-        );
-
-        let error = super::super::selected_suite::require_selected_suite_record(&suite)
-            .expect_err("structural validation must not grant selected-suite authority");
-        assert!(matches!(
-            error.refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite | RefusalReason::OutsideSupportedProfile
-        ));
+        .expect("an opaque identity can bind a structural ceremony context");
+        assert_eq!(ceremony_context.suite_id(), suite_id);
     }
 
     #[test]
-    fn ceremony_context_requires_the_suite_and_roster_sizes_to_match() {
-        let suite = sample_suite();
+    fn ceremony_context_accepts_every_structurally_admitted_roster_size() {
         let short_roster = Roster::new(sample_roster().entries.into_iter().take(3).collect())
             .expect("three-participant roster is structural");
-        assert_eq!(
-            CeremonyContext::new(
-                &suite,
-                &sample_manifest(),
-                &short_roster,
-                "ceremony-2026".to_owned(),
-            )
-            .expect_err("a selected-profile suite cannot bind a different roster size")
-            .refusal_reason,
-            RefusalReason::WrongContext
-        );
+        CeremonyContext::new(
+            sample_suite_identity(),
+            &sample_manifest(),
+            &short_roster,
+            "ceremony-2026".to_owned(),
+        )
+        .expect("structural admission does not claim suite activation");
     }
 
     #[test]

@@ -1,16 +1,5 @@
 import {
-    deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
-    prepareFoundationManifestIngress,
-    validatePollSpec as validatePollSpecInternal,
-} from '@sealed-lattice/protocol';
-import type { CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput } from '@sealed-lattice/protocol';
-import {
-    type PollSpecInput,
-    type PollSpecValidation,
-    type ProtocolHash,
-} from '@sealed-lattice/types';
-import {
-    openFoundationCeremonyRuntime,
+    createFoundationCeremonyRuntimeLoader,
     type CanonicalFoundationActionDefinition,
     type CanonicalFoundationBoardPolicy,
     type CanonicalFoundationManifest,
@@ -19,21 +8,59 @@ import {
     type FoundationBoardPolicyVerification,
     type FoundationCeremonyContextVerification,
     type FoundationManifestVerification,
-    type FoundationSuiteRecordVerification,
-} from '@sealed-lattice/wasm/published-sdk';
+    type FoundationCeremonyRuntime,
+    type ProtocolHash,
+} from '@sealed-lattice/wasm';
 
-import { loadFreshTranscriptCoreKernel } from './kernel.js';
+import {
+    foundationManifestInputFromPollSpec,
+    type PollSpec,
+    type PollSpecValidation,
+    validatePollSpec as validatePollSpecInternal,
+} from './poll-spec.js';
+import {
+    openPublicArchive,
+    type PublicArchive,
+    type PublicArchiveOptions,
+} from './public-archive.js';
+export type {
+    ArchiveRecord,
+    ArchiveReference,
+    PublicArchive,
+    PublicArchiveOptions,
+    PublicArchiveStore,
+} from './public-archive.js';
+
+const foundationKernelUrl = new URL(
+    './sealed-lattice-kernel.wasm',
+    import.meta.url,
+);
+declare const __SEALED_LATTICE_KERNEL_SHA256_HEX__: string | undefined;
+const loadFoundationCeremonyRuntime: () => Promise<FoundationCeremonyRuntime> =
+    createFoundationCeremonyRuntimeLoader(foundationKernelUrl, {
+        expectedKernelSha256Hex:
+            typeof __SEALED_LATTICE_KERNEL_SHA256_HEX__ === 'undefined'
+                ? undefined
+                : __SEALED_LATTICE_KERNEL_SHA256_HEX__,
+    });
+
+/** Public-byte custody and retrieval only; this does not authorize a poll transition. */
+export const createPublicArchive = async (
+    options: PublicArchiveOptions,
+): Promise<PublicArchive> =>
+    openPublicArchive(await loadFoundationCeremonyRuntime(), options);
 
 export type {
     PollSpec,
-    PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
+} from './poll-spec.js';
+export type {
     ProtocolHash,
     RefusalReason,
     VerificationResult,
-} from '@sealed-lattice/types';
+} from '@sealed-lattice/wasm';
 export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,
@@ -43,22 +70,12 @@ export type {
     FoundationBoardPolicyVerification,
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
-    FoundationSuiteRecordVerification,
 };
-export type CollectiveBgvSetupRosterEntryInput =
-    ProtocolCollectiveBgvSetupRosterEntryInput;
-
-export const deriveCollectiveBgvSetupRosterHash =
-    deriveCollectiveBgvSetupRosterHashInternal;
-
 export const validatePollSpec = (input: unknown): PollSpecValidation =>
     validatePollSpecInternal(input);
 
-const loadFoundationCeremonyRuntime = async () =>
-    openFoundationCeremonyRuntime(await loadFreshTranscriptCoreKernel());
-
 export const createCanonicalManifest = async (
-    input: PollSpecInput,
+    input: PollSpec,
 ): Promise<CanonicalFoundationManifest> => {
     const validation = validatePollSpecInternal(input);
     if (!validation.isValid) {
@@ -68,7 +85,7 @@ export const createCanonicalManifest = async (
     }
     const runtime = await loadFoundationCeremonyRuntime();
     return runtime.encodeManifest(
-        prepareFoundationManifestIngress(validation.normalized),
+        foundationManifestInputFromPollSpec(validation.normalized),
     );
 };
 
@@ -78,7 +95,6 @@ export const verifyCanonicalManifest = async (
     (await loadFoundationCeremonyRuntime()).verifyManifest(canonicalBytes);
 
 export const createCanonicalActionDefinition = async (input: {
-    readonly submissionCutoffUnixMilliseconds: bigint;
     readonly topCount: number;
 }): Promise<CanonicalFoundationActionDefinition> =>
     (await loadFoundationCeremonyRuntime()).encodeActionDefinition(input);
@@ -100,15 +116,9 @@ export const verifyCanonicalBoardPolicy = async (
 ): Promise<FoundationBoardPolicyVerification> =>
     (await loadFoundationCeremonyRuntime()).verifyBoardPolicy(canonicalBytes);
 
-export const verifyCanonicalSuiteRecord = async (
-    canonicalBytes: Uint8Array,
-): Promise<FoundationSuiteRecordVerification> =>
-    (await loadFoundationCeremonyRuntime()).verifySuiteRecord(canonicalBytes);
-
 export const verifyCanonicalCeremonyContext = async (input: {
     readonly canonicalManifestBytes: Uint8Array;
     readonly canonicalRosterBytes: Uint8Array;
-    readonly canonicalSuiteRecordBytes: Uint8Array;
     readonly ceremonyIdentifier: string;
     readonly expectedSuiteId: ProtocolHash;
 }): Promise<FoundationCeremonyContextVerification> =>
@@ -120,7 +130,6 @@ export const verifyCanonicalActionContext = async (input: {
     readonly canonicalBoardPolicyBytes: Uint8Array;
     readonly canonicalManifestBytes: Uint8Array;
     readonly canonicalRosterBytes: Uint8Array;
-    readonly canonicalSuiteRecordBytes: Uint8Array;
     readonly ceremonyIdentifier: string;
     readonly expectedCeremonyContextHash: ProtocolHash;
     readonly expectedSuiteId: ProtocolHash;

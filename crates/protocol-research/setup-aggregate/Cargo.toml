@@ -1,0 +1,25 @@
+[package]
+name = "setup-aggregate"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "verify-setup-aggregate"
+path = "src/verify-setup-aggregate.rs"
+
+[features]
+default = ["bridge"]
+bridge = []
+
+[dependencies]
+num-bigint = "=0.5.1"
+
+opened-contribution = { path = "../opened-contribution", default-features = false }
+registration-credentials = { path = "../registration-credentials", default-features = false }
+sha2 = "=0.10.9"

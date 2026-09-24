@@ -1,0 +1,43 @@
+[package]
+name = "evaluation-target"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+browser = ["ballot-proof/bridge", "setup-aggregate/bridge"]
+
+[dependencies]
+sha2 = "=0.11.0"
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
+num-bigint = "=0.5.1"
+ballot-proof = { path = "../ballot-proof", default-features = false }
+registration-credentials = { path = "../registration-credentials", default-features = false }
+setup-aggregate = { path = "../setup-aggregate", default-features = false }
+setup-witness = { path = "../setup-witness" }
+rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
+linked-release-proof = { path = "../linked-release-proof", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = "=0.2.11"
+
+[dev-dependencies]
+ballot-encryption = { path = "../ballot-encryption", default-features = false }
+
+
+[[bin]]
+name = "check-target"
+path = "src/bin/check-target.rs"
+
+[[bin]]
+name = "check-program"
+path = "src/bin/check-program.rs"
+
+[[bin]]
+name = "emit-release-proof-role"
+path = "src/bin/emit-release-proof-role.rs"

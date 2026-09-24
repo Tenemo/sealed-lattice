@@ -1,0 +1,26 @@
+[package]
+name = "ballot-encryption"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["bridge"]
+bridge = ["setup-aggregate/bridge"]
+
+[dependencies]
+zeroize = "=1.8.2"
+
+num-bigint = "=0.5.1"
+num-traits = "=0.2.19"
+setup-aggregate = { path = "../setup-aggregate", default-features = false }
+setup-witness = { path = "../setup-witness" }
+registration-credentials = { path = "../registration-credentials", default-features = false }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "=0.3.3"

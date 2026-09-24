@@ -1,0 +1,13 @@
+[package]
+name = "registration-verifier"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+
+[dependencies]
+proof-lookup-table = { path = "../proof-lookup-table" }
+registration-proof = { path = "../registration-proof", default-features = false }
+setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+sha3 = "=0.10.9"
