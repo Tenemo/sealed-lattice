@@ -30,6 +30,7 @@ import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.j
 import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
 import { compileCertificationReleaseThresholdCensus } from '#tests/certification-release-threshold-model.js';
+import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import {
     compareCommitmentEquivocationHybrids,
     compareDuplicateCommitmentInputs,
@@ -212,6 +213,7 @@ export const renderDocumentationCensus = (): string => {
     });
     const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
     const closeRace = runPublicationCloseRaceModel(10, false);
+    const closeResponses = compileCloseResponseCensus();
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
     const thresholdKeyResources =
         compileThresholdKeyAggregationResourceLowerBound();
@@ -5540,6 +5542,182 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Unresolved honest READY waiters',
                     formatCount(closeRace.unresolvedReadyWaiters),
+                ],
+            ],
+        ),
+        '',
+        '## Close-response census',
+        '',
+        "Each roster uses the close quorum `q = n - f`, guarantees inclusion of an on-time envelope that `f + 1` honest participants received before responding, and omits at most `f` honest ballots. A response lists at most two envelopes per slot. With every honest participant voting, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots. The stage bound adds three preparation visits to the ballot, close response, target signature, release share and verification; the organizer's close intent and proposal replace its response and signature. Prioritized message-level executions attain every stage bound.",
+        '',
+        table(
+            [
+                'Participants',
+                'Maximum corrupt',
+                'Close quorum',
+                'Inclusion holders',
+                'Maximum honest omission',
+                'Accepted at full honest turnout after omission',
+                'Minimum turnout',
+                'No result forceable',
+                'Maximum listed envelopes per response',
+                'Organizer visits',
+                'Voter visits',
+                'Nonvoter visits',
+            ],
+            closeResponses.profiles.map((profile) => [
+                formatCount(profile.participantCount),
+                formatCount(profile.faultBound),
+                formatCount(profile.quorum),
+                formatCount(profile.inclusionHolderThreshold),
+                formatCount(profile.maximumHonestOmission),
+                formatCount(profile.acceptedAtFullHonestTurnoutAfterOmission),
+                formatCount(profile.minimumTurnout),
+                profile.noResultForceableAtFullHonestTurnout ? 'yes' : 'no',
+                formatCount(profile.maximumListedEntriesPerResponse),
+                formatCount(profile.visits.organizerStageBound),
+                formatCount(profile.visits.voterStageBound),
+                formatCount(profile.visits.nonvoterStageBound),
+            ]),
+        ),
+        '',
+        'The joint views enumerate every held set, answered intent, proposal and corrupt listing for three and four participants, including a corrupt organizer with two close times. Nonorganizer positions have identical roles, so one nonorganizer corruption represents each. Every 64th view is rebuilt through the reference response, proposal, inventory and contract checks.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corruption cases',
+                'Views',
+                'Inventories',
+                'Reference cross-checks',
+                'Maximum honest omission',
+                'No-result inventories',
+                'Contract findings',
+            ],
+            closeResponses.joint.map((census) => [
+                formatCount(census.participantCount),
+                formatCount(census.corruptionCases),
+                formatCount(census.views),
+                formatCount(census.inventories),
+                formatCount(census.referenceCrossChecks),
+                formatCount(census.maximumHonestOmission),
+                formatCount(census.noResultInventories),
+                census.findings.length === 0
+                    ? 'none'
+                    : census.findings.join(', '),
+            ]),
+        ),
+        '',
+        'The brute force covers every corruption set, every proposal containing the organizer and every honest lister set.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corruption sets',
+                'Proposals',
+                'Lister sets',
+                'Minimum inclusion margin',
+                'Maximum honest authors outside a proposal',
+                'Tight omission witness',
+            ],
+            closeResponses.bruteForce.map((census) => [
+                formatCount(census.participantCount),
+                formatCount(census.corruptionSets),
+                formatCount(census.proposals),
+                formatCount(census.listerSetChecks),
+                formatCount(census.minimumInclusionMargin),
+                formatCount(census.maximumOmittedAuthors),
+                census.tightOmissionWitness ? 'yes' : 'no',
+            ]),
+        ),
+        '',
+        'The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Corruption sets',
+                    formatCount(closeResponses.execution.corruptionSets),
+                ],
+                [
+                    'Executions',
+                    formatCount(closeResponses.execution.executions),
+                ],
+                [
+                    'Certified executions',
+                    formatCount(closeResponses.execution.certifiedExecutions),
+                ],
+                [
+                    'Maximum honest omission',
+                    formatCount(closeResponses.execution.maximumHonestOmission),
+                ],
+                [
+                    'No result at full honest turnout',
+                    formatCount(
+                        closeResponses.execution.forcedNoResultExecutions,
+                    ),
+                ],
+                [
+                    'Largest honest response listing',
+                    formatCount(closeResponses.execution.maximumListedEntries),
+                ],
+                [
+                    'Contract findings',
+                    closeResponses.execution.findings.length === 0
+                        ? 'none'
+                        : closeResponses.execution.findings.join(', '),
+                ],
+            ],
+        ),
+        '',
+        'Each review obligation fails under its variant and holds under the maintained rule. The support-rule row replays the rejected organizer-selected union.',
+        '',
+        table(
+            ['Variant', 'Outcome'],
+            [
+                [
+                    'Holdings lost at a restart before responding',
+                    closeResponses.counterexamples.volatileRetentionFindings.join(
+                        ', ',
+                    ),
+                ],
+                [
+                    'Holdings retained until the response',
+                    closeResponses.counterexamples.durableRetentionFindings
+                        .length === 0
+                        ? 'none'
+                        : closeResponses.counterexamples.durableRetentionFindings.join(
+                              ', ',
+                          ),
+                ],
+                [
+                    'Omitted voters and corrupt participants refuse target signatures',
+                    `${formatCount(closeResponses.counterexamples.refusalHonestSigners)} honest signers of ${formatCount(closeResponses.counterexamples.refusalQuorum)}, ${formatCount(closeResponses.counterexamples.refusalCertifiedTargets)} certified targets`,
+                ],
+                [
+                    'Omitted voters sign the valid target',
+                    `${formatCount(closeResponses.counterexamples.omittedSignerCertifiedTargets)} certified target with ${formatCount(closeResponses.counterexamples.omittedSignerHonestOmission)} honest omissions`,
+                ],
+                [
+                    `Unlimited per-slot listing, ${String(closeResponses.counterexamples.equivocations)} equivocations`,
+                    `${formatCount(closeResponses.counterexamples.uncappedResponseEntries)} entries`,
+                ],
+                [
+                    'Two envelopes per slot',
+                    `${formatCount(closeResponses.counterexamples.cappedResponseEntries)} entries`,
+                ],
+                [
+                    'Support rule includes a ballot every honest participant holds',
+                    closeResponses.counterexamples.supportRuleIncludesEnvelope
+                        ? 'yes'
+                        : 'no',
+                ],
+                [
+                    'Union rule includes it',
+                    closeResponses.counterexamples.unionRuleIncludesEnvelope
+                        ? 'yes'
+                        : 'no',
                 ],
             ],
         ),
