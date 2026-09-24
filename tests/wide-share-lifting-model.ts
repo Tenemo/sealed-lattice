@@ -5,57 +5,121 @@ import {
     verifyProthCertificate,
 } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 const proofPrime = compileSmallLimbProofFieldCensus().modulus;
 const scale = verifyProthCertificate(119n, 23, 3n);
-const modulus = proofPrime * scale,
-    radix = 1n << 96n;
+const modulus = proofPrime * scale;
 const degree = 8,
-    participantCount = fixedModulusBfvInputs.participantCount,
-    corruptCount = Number((participantCount - 1n) / 3n),
     encryptionSupportWeight = 256n,
-    errorBound = 64n;
+    errorBound = 64n,
+    quotientBound = 1n << 15n,
+    maximumLimbBits = 96,
+    minimumCarryBits = 32;
 const sharedSecretSupportWeight = fixedModulusBfvInputs.secretSupportWeight;
-const privacyNumerator =
-    participantCount *
-    ((1n << BigInt(corruptCount)) - 1n) *
-    2n *
-    sharedSecretSupportWeight;
-assert.ok(privacyNumerator > 0n);
-const sharingCoefficientBits =
-    fixedModulusBfvInputs.statisticalBits +
-    (privacyNumerator - 1n).toString(2).length;
-const sharingRadius = 1n << BigInt(sharingCoefficientBits - 1);
-const quotientBound = 1n << 15n,
-    carryBound = 1n << 31n;
-const residualBound =
-    (encryptionSupportWeight + quotientBound + 2n) * (radix - 1n) +
-    scale * ((BigInt(corruptCount) * radix) / 2n + 1n) +
-    errorBound +
-    carryBound * (radix + 1n);
-assert.ok(residualBound < proofPrime);
-const trueQuotientBound =
-    ((encryptionSupportWeight + 1n) * (modulus / 2n) +
-        scale * (1n + BigInt(corruptCount) * sharingRadius) +
-        errorBound) /
-    modulus;
-const trueCarryBound =
-    ((encryptionSupportWeight + trueQuotientBound + 2n) * (radix - 1n) +
-        scale * ((BigInt(corruptCount) * radix) / 2n + 1n) +
-        errorBound) /
-        (radix - 1n) +
-    1n;
-assert.ok(trueQuotientBound < quotientBound);
-assert.ok(trueCarryBound < carryBound);
-assert.ok(privacyNumerator << 96n <= 2n * sharingRadius);
-const aggregateSharingMaximum =
-    participantCount * (1n + BigInt(corruptCount) * sharingRadius);
-assert.ok(2n * aggregateSharingMaximum < proofPrime);
-assert.ok(
-    participantCount * (2n * encryptionSupportWeight + 1n) * errorBound <
-        1n << 23n,
-);
-assert.ok(2n * (1n << 23n) < scale);
+const bitLength = (value: bigint): number => value.toString(2).length;
+
+export type WideShareLiftingInput = Readonly<{
+    participantCount: bigint;
+    sharingDegree: number;
+}>;
+const tenParticipantInput: WideShareLiftingInput = {
+    participantCount: fixedModulusBfvInputs.participantCount,
+    sharingDegree:
+        compileThresholdCompletionProfile(
+            Number(fixedModulusBfvInputs.participantCount),
+        ).resultReleaseThreshold - 1,
+};
+
+// Bounds for two limbs of limbBits bits with the least signed carry width,
+// at least minimumCarryBits, that holds the honest carry. The layout is
+// sound only when every in-range witness keeps its residual below p and
+// writing p itself in limbs needs a carry outside that range.
+const wideShareLiftingBounds = (
+    input: WideShareLiftingInput,
+    limbBits: number,
+) => {
+    const { participantCount, sharingDegree } = input;
+    const radix = 1n << BigInt(limbBits);
+    const privacyNumerator =
+        participantCount *
+        ((1n << BigInt(sharingDegree)) - 1n) *
+        2n *
+        sharedSecretSupportWeight;
+    const sharingCoefficientBits =
+        fixedModulusBfvInputs.statisticalBits +
+        bitLength(privacyNumerator - 1n);
+    const sharingRadius = 1n << BigInt(sharingCoefficientBits - 1);
+    const trueQuotientBound =
+        ((encryptionSupportWeight + 1n) * (modulus / 2n) +
+            scale * (1n + BigInt(sharingDegree) * sharingRadius) +
+            errorBound) /
+        modulus;
+    const privateTerms =
+        scale * ((BigInt(sharingDegree) * radix) / 2n + 1n) + errorBound;
+    const trueCarryBound =
+        ((encryptionSupportWeight + trueQuotientBound + 2n) * (radix - 1n) +
+            privateTerms) /
+            (radix - 1n) +
+        1n;
+    const carryBits = Math.max(minimumCarryBits, bitLength(trueCarryBound) + 1);
+    const carryBound = 1n << BigInt(carryBits - 1);
+    const residualBound =
+        (encryptionSupportWeight + quotientBound + 2n) * (radix - 1n) +
+        privateTerms +
+        carryBound * (radix + 1n);
+    const aliasCarry = proofPrime / radix;
+    return {
+        ...input,
+        limbBits,
+        carryBits,
+        radix,
+        privacyNumerator,
+        sharingCoefficientBits,
+        sharingRadius,
+        aggregateSharingMaximum:
+            participantCount * (1n + BigInt(sharingDegree) * sharingRadius),
+        trueQuotientBound,
+        trueCarryBound,
+        carryBound,
+        residualBound,
+        aliasCarry,
+        holds:
+            sharingCoefficientBits > limbBits &&
+            sharingCoefficientBits <= 2 * limbBits &&
+            bitLength(modulus) <= 2 * limbBits &&
+            trueCarryBound < carryBound &&
+            residualBound < proofPrime &&
+            aliasCarry >= carryBound,
+    };
+};
+
+// The widest limb, at most maximumLimbBits, whose bounds hold.
+export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
+    const { participantCount, sharingDegree } = input;
+    assert.ok(participantCount > 0n && sharingDegree > 0);
+    for (let limbBits = maximumLimbBits; limbBits > 0; limbBits--) {
+        const bounds = wideShareLiftingBounds(input, limbBits);
+        if (!bounds.holds) continue;
+        assert.ok(bounds.trueQuotientBound < quotientBound);
+        assert.ok(
+            bounds.privacyNumerator <<
+                BigInt(fixedModulusBfvInputs.statisticalBits) <=
+                2n * bounds.sharingRadius,
+        );
+        assert.ok(2n * bounds.aggregateSharingMaximum < proofPrime);
+        assert.ok(
+            participantCount *
+                (2n * encryptionSupportWeight + 1n) *
+                errorBound <
+                1n << 23n,
+        );
+        assert.ok(2n * (1n << 23n) < scale);
+        return bounds;
+    }
+    throw new Error('No share-lifting limb width fits the proof field.');
+};
+
 type Polynomial = readonly bigint[];
 const abs = (value: bigint): bigint => (value < 0n ? -value : value);
 const mod = (value: bigint, coefficientModulus: bigint): bigint =>
@@ -85,7 +149,7 @@ const monomial = (exponent: number): bigint[] =>
                 : -1n
             : 0n,
     );
-const digit = (value: bigint, index: number): bigint =>
+const digit = (value: bigint, index: number, radix: bigint): bigint =>
     (value < 0n ? -1n : 1n) * ((abs(value) / radix ** BigInt(index)) % radix);
 const rowProduct = (left: Polynomial, right: Polynomial, row: number): bigint =>
     left.reduce(
@@ -100,7 +164,18 @@ const signedRange = (value: bigint, bits: number): void => {
     const radius = 1n << BigInt(bits - 1);
     assert.ok(value >= -radius && value < radius);
 };
-export const compileWideShareLiftingCensus = () => {
+export const compileWideShareLiftingCensus = (
+    input: WideShareLiftingInput = tenParticipantInput,
+) => {
+    const layout = deriveWideShareLiftingLayout(input);
+    const {
+        sharingDegree,
+        limbBits,
+        carryBits,
+        radix,
+        sharingCoefficientBits,
+        sharingRadius,
+    } = layout;
     let state = 0x6a09e667f3bcc909n;
     const random = (): bigint =>
         (state =
@@ -139,7 +214,7 @@ export const compileWideShareLiftingCensus = () => {
             multiply(common, recipient).map((value) => -value),
             publicError,
         ).map(center);
-        const coefficients = Array.from({ length: corruptCount }, () =>
+        const coefficients = Array.from({ length: sharingDegree }, () =>
             zero().map(() =>
                 trial === 0
                     ? -sharingRadius
@@ -176,8 +251,11 @@ export const compileWideShareLiftingCensus = () => {
         );
         coefficients.forEach((coefficient, index) =>
             coefficient.forEach((value, position) => {
-                signedRange(low[index][position], 96);
-                signedRange(high[index][position], sharingCoefficientBits - 96);
+                signedRange(low[index][position], limbBits);
+                signedRange(
+                    high[index][position],
+                    sharingCoefficientBits - limbBits,
+                );
                 assert.equal(
                     low[index][position] +
                         radix * high[index][position] +
@@ -228,21 +306,23 @@ export const compileWideShareLiftingCensus = () => {
                     ),
                 zero(),
             );
-            const publicDigits = publicKey.map((value) => digit(value, limb));
+            const publicDigits = publicKey.map((value) =>
+                digit(value, limb, radix),
+            );
             carry = zero().map((_unused, position) => {
                 const residual =
-                    digit(encrypted[position], limb) -
+                    digit(encrypted[position], limb, radix) -
                     rowProduct(publicDigits, ephemeral, position) -
                     scale * privateDigits[position] -
                     (limb === 0
                         ? scale * secret[position] + cipherError[position]
                         : 0n) -
-                    digit(publicOffset[position], limb) -
-                    digit(modulus, limb) * quotient[position] +
+                    digit(publicOffset[position], limb, radix) -
+                    digit(modulus, limb, radix) * quotient[position] +
                     carry[position];
                 assert.equal(residual % radix, 0n);
                 const next = residual / radix;
-                signedRange(next, 32);
+                signedRange(next, carryBits);
                 maximumObservedCarry =
                     abs(next) > maximumObservedCarry
                         ? abs(next)
@@ -254,34 +334,27 @@ export const compileWideShareLiftingCensus = () => {
         assert.deepEqual(carry, zero());
     }
     // The false public coefficient p needs a carry outside the signed word.
-    const aliasCarry = (proofPrime - digit(proofPrime, 0)) / radix;
+    const { aliasCarry } = layout;
     assert.equal(
-        mod(-digit(proofPrime, 0) - radix * aliasCarry, proofPrime),
+        aliasCarry,
+        (proofPrime - digit(proofPrime, 0, radix)) / radix,
+    );
+    assert.equal(
+        mod(-digit(proofPrime, 0, radix) - radix * aliasCarry, proofPrime),
         0n,
     );
-    assert.equal(-digit(proofPrime, 1) + aliasCarry, 0n);
-    assert.equal(aliasCarry, (1n << 32n) - 1n);
-    assert.ok(aliasCarry >= carryBound);
+    assert.equal(-digit(proofPrime, 1, radix) + aliasCarry, 0n);
     return {
+        ...layout,
         proofPrime,
         scale,
         modulus,
-        radix,
-        sharingRadius,
         encryptionSupportWeight,
         sharedSecretSupportWeight,
-        sharingCoefficientBits,
         errorBound,
-        residualBound,
-        trueQuotientBound,
-        trueCarryBound,
         quotientBound,
-        carryBound,
-        privacyNumerator,
-        aggregateSharingMaximum,
         checkedEquations,
         maximumObservedCarry,
         maximumObservedQuotient,
-        aliasCarry,
     };
 };

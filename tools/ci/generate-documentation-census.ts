@@ -169,6 +169,7 @@ import {
     compileStatelessSignatureProofWork,
     compileStatelessSignatureWork,
 } from '#tests/stateless-signature-work-model.js';
+import { compileSupportedProfileCensus } from '#tests/supported-profile-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -279,6 +280,11 @@ export const renderDocumentationCensus = (): string => {
         compileShareEncryptionCrossModulusCensus();
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
     const fixedModulusBfv = compileFixedModulusBfvCensus();
+    const supportedProfiles = compileSupportedProfileCensus();
+    const distinctJoined = (values: readonly (bigint | number)[]): string =>
+        [...new Set(values.map((value) => value.toString()))]
+            .map((value) => formatCount(BigInt(value)))
+            .join(', ');
     const certificateCustody = compileCertificateCustodyCensus();
     const publicationCut = compilePublicationCutCensus();
     const wideShareLifting = compileWideShareLiftingCensus();
@@ -4968,6 +4974,138 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Public key-contribution corpus bytes before sharing and proofs',
                     formatCount(fixedModulusBfv.publicKeyCorpusBytes),
+                ],
+            ],
+        ),
+        '',
+        '## Supported profile census',
+        '',
+        'Parameters of every supported participant and option count under the derivation rules owned by the construction analysis. Thresholds come from the threshold completion rules; the interpolation norms are exact maxima over every subset; each share-lifting width is the widest sound limb; the ciphertext and release moduli are the smallest lengths of the fixed prime form that decode the ranking graph and satisfy the flooded release and its lifting. These are arithmetic derivations, not attack estimates, resource bounds, an implementation or admission.',
+        '',
+        table(
+            [
+                'Participants',
+                'Corrupt bound',
+                'Inventory threshold',
+                'Release threshold',
+                'Minimum turnout',
+                'Interpolation ring degree',
+                'Clearing factor',
+                'Scaled reconstruction one-norm',
+                'Simulation one-norm',
+                'Joint simulation sum',
+                'Sharing coefficient bits',
+                'Share limb bits',
+                'Share carry bits',
+                'Release share bits',
+                'Release quotient bits',
+            ],
+            supportedProfiles.profiles.map((row) => {
+                const [first] = row;
+                return [
+                    formatCount(first.participantCount),
+                    formatCount(first.maximumCorruptParticipantCount),
+                    formatCount(first.inventoryCertificateThreshold),
+                    formatCount(first.releaseThreshold),
+                    formatCount(first.minimumTurnout),
+                    formatCount(first.interpolation.interpolationRingDegree),
+                    formatCount(first.interpolation.clearingFactor),
+                    formatCount(
+                        first.interpolation.maximumScaledReconstructionOneNorm,
+                    ),
+                    formatCount(first.interpolation.maximumSimulationOneNorm),
+                    formatCount(
+                        first.interpolation.maximumJointSimulationOneNormSum,
+                    ),
+                    formatCount(first.shareLifting.sharingCoefficientBits),
+                    formatCount(first.shareLifting.limbBits),
+                    formatCount(first.shareLifting.carryBits),
+                    distinctJoined(
+                        row.map((profile) => profile.releaseLifting.shareBits),
+                    ),
+                    distinctJoined(
+                        row.map(
+                            (profile) => profile.releaseLifting.quotientBits,
+                        ),
+                    ),
+                ];
+            }),
+        ),
+        '',
+        'Ciphertext modulus bits by participant count (rows) and option count (columns):',
+        '',
+        table(
+            [
+                'Participants',
+                ...supportedProfiles.optionCounts.map((count) => String(count)),
+            ],
+            supportedProfiles.profiles.map((row) => [
+                formatCount(row[0].participantCount),
+                ...row.map((profile) => formatCount(profile.ciphertext.bits)),
+            ]),
+        ),
+        '',
+        table(
+            [
+                'Modulus',
+                'Bits',
+                'Odd factor over the plaintext modulus',
+                'Proth witness',
+                'Gadget coordinates',
+                'Profiles',
+            ],
+            [
+                ...supportedProfiles.ciphertextModuli.map((prime) => [
+                    'Ciphertext',
+                    formatCount(prime.bits),
+                    formatCount(
+                        prime.oddFactor / fixedModulusBfv.plaintextModulus,
+                    ),
+                    formatCount(prime.witness),
+                    formatCount(prime.gadgetLength),
+                    formatCount(prime.profileCount),
+                ]),
+                ...supportedProfiles.releaseModuli.map((prime) => [
+                    'Release',
+                    formatCount(prime.bits),
+                    formatCount(
+                        prime.oddFactor / fixedModulusBfv.plaintextModulus,
+                    ),
+                    formatCount(prime.witness),
+                    'none',
+                    formatCount(supportedProfiles.profiles.flat().length),
+                ]),
+            ],
+        ),
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Supported profiles',
+                    formatCount(supportedProfiles.profiles.flat().length),
+                ],
+                [
+                    'Smallest ciphertext modulus bits',
+                    formatCount(supportedProfiles.minimumCiphertextModulusBits),
+                ],
+                [
+                    'Largest ciphertext modulus bits',
+                    formatCount(supportedProfiles.maximumCiphertextModulusBits),
+                ],
+                [
+                    'Release-noise bits range',
+                    supportedProfiles.releaseNoiseBitRange
+                        .map((value) => formatCount(value))
+                        .join(' to '),
+                ],
+                [
+                    'Largest ranking multiplicative depth',
+                    formatCount(supportedProfiles.maximumRankingDepth),
+                ],
+                [
+                    'Largest ranking error bound bits',
+                    formatCount(supportedProfiles.maximumRankingErrorBits),
                 ],
             ],
         ),

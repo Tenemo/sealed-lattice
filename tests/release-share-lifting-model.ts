@@ -2,38 +2,114 @@ import assert from 'node:assert/strict';
 
 import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 const field = compileSmallLimbProofFieldCensus().modulus;
-const parameters = compileFixedModulusBfvCensus();
-const noiseBits = parameters.releaseNoiseBits;
-const noiseRadius = 1n << BigInt(noiseBits - 1);
-const noiseWordCount = Math.ceil(noiseBits / 48);
-const modulus = parameters.releaseModulus,
-    radix = 1n << 48n,
+const limbBits = 48;
+const radix = 1n << BigInt(limbBits),
     carryBound = 1n << 71n;
-const residualBound =
-    (12n * parameters.polynomialDegree + 3n) * (radix - 1n) ** 2n +
-    5n * (radix - 1n) +
-    carryBound * (radix + 1n);
-const trueCarryBound =
-    ((12n * parameters.polynomialDegree + 3n) * (radix - 1n) ** 2n +
-        5n * (radix - 1n)) /
-        (radix - 1n) +
-    1n;
-const trueQuotientBound =
-    (4n * parameters.polynomialDegree * (modulus / 2n) * (1n << 119n) +
-        4n * noiseRadius +
-        modulus / 2n) /
-    modulus;
-assert.ok(residualBound < field);
-assert.ok(trueCarryBound < carryBound);
-assert.ok(trueQuotientBound < 1n << 143n);
+const bitLength = (value: bigint): number => value.toString(2).length;
+
+export type ReleaseShareLiftingInput = Readonly<{
+    polynomialDegree: bigint;
+    releaseModulus: bigint;
+    releaseNoiseBits: number;
+    releaseThreshold: number;
+    aggregateSharingMaximum: bigint;
+}>;
+const tenParticipantInput = (): ReleaseShareLiftingInput => {
+    const parameters = compileFixedModulusBfvCensus();
+    return {
+        polynomialDegree: parameters.polynomialDegree,
+        releaseModulus: parameters.releaseModulus,
+        releaseNoiseBits: parameters.releaseNoiseBits,
+        releaseThreshold: compileThresholdCompletionProfile(
+            Number(parameters.participantCount),
+        ).resultReleaseThreshold,
+        aggregateSharingMaximum:
+            compileWideShareLiftingCensus().aggregateSharingMaximum,
+    };
+};
+
+// The release proof lifts c*(c1*S + e) = partial + Q_release*quotient into
+// 48-bit limbs. Denominators clear with c = 2^ceil(log2 d), shares occupy
+// whole bytes with a sign bit, and quotients occupy whole signed limbs.
+export const deriveReleaseShareLiftingLayout = (
+    input: ReleaseShareLiftingInput,
+) => {
+    const {
+        polynomialDegree,
+        releaseModulus: modulus,
+        releaseNoiseBits: noiseBits,
+        releaseThreshold,
+    } = input;
+    assert.ok(releaseThreshold >= 2);
+    const clearingFactor =
+        1n << BigInt(bitLength(BigInt(releaseThreshold - 1)));
+    const shareBits =
+        8 * Math.ceil((bitLength(input.aggregateSharingMaximum) + 1) / 8);
+    const noiseRadius = 1n << BigInt(noiseBits - 1);
+    const trueQuotientBound =
+        (clearingFactor *
+            polynomialDegree *
+            (modulus / 2n) *
+            (1n << BigInt(shareBits - 1)) +
+            clearingFactor * noiseRadius +
+            modulus / 2n) /
+        modulus;
+    const quotientBits =
+        limbBits * Math.ceil((bitLength(trueQuotientBound) + 1) / limbBits);
+    const noiseWordCount = Math.ceil(noiseBits / limbBits);
+    const publicLimbs = Math.ceil(bitLength(modulus) / limbBits);
+    const shareLimbs = Math.ceil(shareBits / limbBits);
+    const quotientLimbs = quotientBits / limbBits;
+    const outputLimbs = publicLimbs + Math.max(shareLimbs, quotientLimbs) - 1;
+    // Each output limb receives at most min(public, private) limb products.
+    const productTerms =
+        clearingFactor *
+            BigInt(Math.min(publicLimbs, shareLimbs)) *
+            polynomialDegree +
+        BigInt(Math.min(publicLimbs, quotientLimbs));
+    const linearTerms = (1n + clearingFactor) * (radix - 1n);
+    const residualBound =
+        productTerms * (radix - 1n) ** 2n +
+        linearTerms +
+        carryBound * (radix + 1n);
+    const trueCarryBound =
+        (productTerms * (radix - 1n) ** 2n + linearTerms) / (radix - 1n) + 1n;
+    const aliasCarry = (field - (field % radix)) / radix;
+    return {
+        ...input,
+        clearingFactor,
+        shareBits,
+        quotientBits,
+        noiseWordCount,
+        publicLimbs,
+        shareLimbs,
+        quotientLimbs,
+        outputLimbs,
+        productTerms,
+        radix,
+        carryBound,
+        residualBound,
+        trueCarryBound,
+        trueQuotientBound,
+        aliasCarry,
+        holds:
+            noiseWordCount <= outputLimbs &&
+            residualBound < field &&
+            trueCarryBound < carryBound &&
+            aliasCarry >= carryBound,
+    };
+};
+
 const degree = 8;
 type Polynomial = readonly bigint[];
 const abs = (value: bigint): bigint => (value < 0n ? -value : value);
 const mod = (value: bigint, coefficientModulus: bigint): bigint =>
     ((value % coefficientModulus) + coefficientModulus) % coefficientModulus;
-const center = (value: bigint): bigint => {
+const center = (value: bigint, modulus: bigint): bigint => {
     const reduced = mod(value, modulus);
     return reduced > modulus / 2n ? reduced - modulus : reduced;
 };
@@ -80,7 +156,25 @@ const privateDigits = (value: bigint, bits: number): bigint[] => {
     );
     return result;
 };
-export const compileReleaseShareLiftingCensus = () => {
+export const compileReleaseShareLiftingCensus = (
+    input: ReleaseShareLiftingInput = tenParticipantInput(),
+) => {
+    const layout = deriveReleaseShareLiftingLayout(input);
+    assert.ok(layout.holds);
+    const {
+        releaseModulus: modulus,
+        releaseNoiseBits: noiseBits,
+        clearingFactor,
+        shareBits,
+        quotientBits,
+        noiseWordCount,
+        publicLimbs,
+        shareLimbs,
+        quotientLimbs,
+        outputLimbs,
+    } = layout;
+    const noiseRadius = 1n << BigInt(noiseBits - 1);
+    const shareRadius = 1n << BigInt(shareBits - 1);
     let state = 0x6a09e667f3bcc909n;
     const random = (): bigint =>
         (state =
@@ -93,10 +187,10 @@ export const compileReleaseShareLiftingCensus = () => {
     for (let trial = 0; trial < 32; trial++) {
         const share = zero().map(() =>
             trial === 0
-                ? -(1n << 119n)
+                ? -shareRadius
                 : trial === 1
-                  ? (1n << 119n) - 1n
-                  : (random() % (1n << 120n)) - (1n << 119n),
+                  ? shareRadius - 1n
+                  : (random() % (2n * shareRadius)) - shareRadius,
         );
         const noise = zero().map(() =>
             trial === 0
@@ -106,47 +200,60 @@ export const compileReleaseShareLiftingCensus = () => {
                   : (random() % (2n * noiseRadius)) - noiseRadius,
         );
         const publicValue = zero().map(() =>
-            center((random() * modulus) / (1n << 192n)),
+            center((random() * modulus) / (1n << 192n), modulus),
         );
         const raw = product(publicValue, share).map(
-            (value, index) => 4n * value + 4n * noise[index],
+            (value, index) =>
+                clearingFactor * value + clearingFactor * noise[index],
         );
-        const partial = raw.map(center);
+        const partial = raw.map((value) => center(value, modulus));
         const quotient = raw.map((value, index) => {
             assert.equal((value - partial[index]) % modulus, 0n);
             return (value - partial[index]) / modulus;
         });
-        const shareDigits = share.map((value) => privateDigits(value, 120));
+        const shareDigits = share.map((value) =>
+            privateDigits(value, shareBits),
+        );
         const noiseDigits = noise.map((value) =>
             privateDigits(value, noiseBits),
         );
         const quotientDigits = quotient.map((value) =>
-            privateDigits(value, 144),
+            privateDigits(value, quotientBits),
         );
         let carry = zero();
-        for (let limb = 0; limb < 6; limb++) {
+        for (let limb = 0; limb < outputLimbs; limb++) {
             carry = zero().map((_unused, position) => {
                 let residual =
                     carry[position] -
-                    (limb < 4 ? publicDigit(partial[position], limb) : 0n) +
+                    (limb < publicLimbs
+                        ? publicDigit(partial[position], limb)
+                        : 0n) +
                     (limb < noiseWordCount
-                        ? 4n * noiseDigits[position][limb]
+                        ? clearingFactor * noiseDigits[position][limb]
                         : 0n);
-                for (let publicLimb = 0; publicLimb < 4; publicLimb++) {
+                for (
+                    let publicLimb = 0;
+                    publicLimb < publicLimbs;
+                    publicLimb++
+                ) {
                     const privateLimb = limb - publicLimb;
-                    if (privateLimb < 0 || privateLimb >= 3) continue;
-                    residual +=
-                        4n *
-                        rowProduct(
-                            publicValue.map((value) =>
-                                publicDigit(value, publicLimb),
-                            ),
-                            shareDigits.map((digits) => digits[privateLimb]),
-                            position,
-                        );
-                    residual -=
-                        publicDigit(modulus, publicLimb) *
-                        quotientDigits[position][privateLimb];
+                    if (privateLimb < 0) continue;
+                    if (privateLimb < shareLimbs)
+                        residual +=
+                            clearingFactor *
+                            rowProduct(
+                                publicValue.map((value) =>
+                                    publicDigit(value, publicLimb),
+                                ),
+                                shareDigits.map(
+                                    (digits) => digits[privateLimb],
+                                ),
+                                position,
+                            );
+                    if (privateLimb < quotientLimbs)
+                        residual -=
+                            publicDigit(modulus, publicLimb) *
+                            quotientDigits[position][privateLimb];
                 }
                 assert.equal(residual % radix, 0n);
                 const next = residual / radix;
@@ -176,18 +283,12 @@ export const compileReleaseShareLiftingCensus = () => {
         0n,
     );
     assert.equal(secondAliasCarry - publicDigit(field, 2), 0n);
-    assert.equal(aliasCarry, (1n << 80n) - 133n * (1n << 16n));
-    assert.ok(aliasCarry >= carryBound);
+    assert.equal(aliasCarry, layout.aliasCarry);
     return {
-        radix,
-        carryBound,
-        residualBound,
+        ...layout,
         proofPrime: field,
-        trueCarryBound,
-        trueQuotientBound,
         checkedEquations,
         maximumObservedCarry,
         maximumObservedQuotient,
-        aliasCarry,
     };
 };

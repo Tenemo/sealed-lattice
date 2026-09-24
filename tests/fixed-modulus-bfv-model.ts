@@ -213,6 +213,68 @@ export const createFixedModulusBfvNoiseModel = (
     };
 };
 
+export type ReleaseInterpolationBounds = Readonly<{
+    releaseThreshold: number;
+    clearingFactor: bigint;
+    maximumScaledReconstructionOneNorm: bigint;
+    maximumJointSimulationOneNormSum: bigint;
+}>;
+
+// Final modulus switch to the release modulus, the byte-aligned flooding
+// width from the pointwise joint coupling, and KLLPS26 Theorem 3.1 (C2).
+export const deriveFloodedRelease = (
+    input: Readonly<{
+        polynomialDegree: bigint;
+        plaintextModulus: bigint;
+        ciphertextModulus: bigint;
+        releaseModulus: bigint;
+        statisticalBits: number;
+        evaluationError: bigint;
+        secretOneNorm: bigint;
+        interpolation: ReleaseInterpolationBounds;
+    }>,
+) => {
+    const {
+        polynomialDegree,
+        plaintextModulus,
+        ciphertextModulus,
+        releaseModulus,
+        statisticalBits,
+        interpolation,
+    } = input;
+    const releaseError = ceilingDivide(
+        2n * releaseModulus * plaintextModulus * input.evaluationError +
+            2n *
+                (ciphertextModulus - releaseModulus) *
+                (plaintextModulus / 2n) +
+            ciphertextModulus * plaintextModulus * (input.secretOneNorm + 1n),
+        2n * ciphertextModulus * plaintextModulus,
+    );
+    const jointShift =
+        polynomialDegree *
+        interpolation.maximumJointSimulationOneNormSum *
+        releaseError;
+    const releaseNoiseBits =
+        8 * Math.ceil((statisticalBits + ceilingLogarithm(jointShift)) / 8);
+    const releaseNoiseRadius = 1n << BigInt(releaseNoiseBits - 1);
+    const scaledCorrectnessLeft =
+        (4n * releaseError + plaintextModulus) *
+            (interpolation.clearingFactor + 1n) +
+        4n *
+            BigInt(interpolation.releaseThreshold) *
+            interpolation.maximumScaledReconstructionOneNorm *
+            releaseNoiseRadius;
+    return {
+        releaseError,
+        releaseNoiseBits,
+        jointStatisticalBoundHolds:
+            jointShift << BigInt(statisticalBits) <=
+            1n << BigInt(releaseNoiseBits),
+        releaseCorrect:
+            2n * plaintextModulus * scaledCorrectnessLeft < 4n * releaseModulus,
+    };
+};
+
 export const compileFixedModulusBfvCensus = () => {
     const parameters = fixedModulusBfvInputs;
     assert.equal(
@@ -233,19 +295,6 @@ export const compileFixedModulusBfvCensus = () => {
         parameters.comparisonBlockWidth,
         model,
     );
-    const releaseError = ceilingDivide(
-        2n *
-            parameters.releaseModulus *
-            parameters.plaintextModulus *
-            result.error +
-            2n *
-                (parameters.ciphertextModulus - parameters.releaseModulus) *
-                (parameters.plaintextModulus / 2n) +
-            parameters.ciphertextModulus *
-                parameters.plaintextModulus *
-                (model.secretOneNorm + 1n),
-        2n * parameters.ciphertextModulus * parameters.plaintextModulus,
-    );
     const interpolation = compileThresholdReleaseNoiseCensus();
     assert.equal(
         BigInt(interpolation.completionParticipantCount),
@@ -256,25 +305,21 @@ export const compileFixedModulusBfvCensus = () => {
             BigInt(interpolation.spacedInterpolationSize / 2),
         0n,
     );
-    const clearingFactor =
-        1n << BigInt(Math.ceil(Math.log2(interpolation.releaseThreshold)));
-    const jointShift =
-        parameters.polynomialDegree *
-        interpolation.exactMaximumJointSimulationCoefficientOneNormSum *
-        releaseError;
-    const releaseNoiseBits =
-        8 *
-        Math.ceil(
-            (parameters.statisticalBits + ceilingLogarithm(jointShift)) / 8,
-        );
-    const releaseNoiseRadius = 1n << BigInt(releaseNoiseBits - 1);
-    const scaledCorrectnessLeft =
-        (4n * releaseError + parameters.plaintextModulus) *
-            (clearingFactor + 1n) +
-        4n *
-            BigInt(interpolation.releaseThreshold) *
-            interpolation.exactMaximumScaledReconstructionCoefficientOneNorm *
-            releaseNoiseRadius;
+    const release = deriveFloodedRelease({
+        ...parameters,
+        evaluationError: result.error,
+        secretOneNorm: model.secretOneNorm,
+        interpolation: {
+            releaseThreshold: interpolation.releaseThreshold,
+            clearingFactor:
+                1n <<
+                BigInt(Math.ceil(Math.log2(interpolation.releaseThreshold))),
+            maximumScaledReconstructionOneNorm:
+                interpolation.exactMaximumScaledReconstructionCoefficientOneNorm,
+            maximumJointSimulationOneNormSum:
+                interpolation.exactMaximumJointSimulationCoefficientOneNormSum,
+        },
+    });
     return {
         ...parameters,
         ...model.counts,
@@ -296,14 +341,7 @@ export const compileFixedModulusBfvCensus = () => {
         rankingDepth: result.depth,
         comparisonErrorBits: bitLength(comparison.error),
         rankingErrorBits: bitLength(result.error),
-        releaseError,
-        releaseNoiseBits,
-        jointStatisticalBoundHolds:
-            jointShift << BigInt(parameters.statisticalBits) <=
-            1n << BigInt(releaseNoiseBits),
-        releaseCorrect:
-            2n * parameters.plaintextModulus * scaledCorrectnessLeft <
-            4n * parameters.releaseModulus,
+        ...release,
         publicKeyCorpusBytes:
             4n *
             model.gadgetLength *
