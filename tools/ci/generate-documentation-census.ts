@@ -49,6 +49,7 @@ import {
     compileComposedSecurityLedger,
     compileReductionWork,
     compileUnitCallCostSensitivity,
+    fheCommonStreamGuesses,
     keccakReferenceCost,
 } from '#tests/composed-security-ledger-model.js';
 import {
@@ -5259,7 +5260,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler, and each term takes its largest value over every supported profile; a poll has one profile, so the subtotal bounds every poll. The last column names the first profile that attains a term that varies between profiles. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler, and each term takes its largest value over every supported profile; a poll has one profile, so the subtotal bounds every poll. The last column names the first profile that attains a term that varies between profiles. Every profile reduces the same FHE common streams modulo its own ciphertext modulus, and the adversary may fix the profile after querying them, so the FHE Ring-LWE and circular-security reductions also guess the ciphertext modulus. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
         '',
         table(
             ['Statistical term', 'Bound exponent', 'Largest at'],
@@ -5342,6 +5343,10 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Identity collision exponent, per cost',
                     signedExponent(securityLedger.identityCollisionExponent),
+                ],
+                [
+                    'Ciphertext moduli guessed by the FHE reductions',
+                    formatCount(fheCommonStreamGuesses()),
                 ],
                 [
                     'FHE Ring-LWE requirement if every call cost one gate',

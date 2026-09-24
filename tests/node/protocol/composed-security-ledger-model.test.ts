@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    compileCommonMatrixInitializationCensus,
+    compileCommonMatrixSamplingCensus,
+} from '#tests/common-matrix-sampling-model.js';
+import {
     compileComposedSecurityLedger,
     compileReductionWork,
     compileUnitCallCostSensitivity,
     computationalHybrids,
+    fheCommonStreamGuesses,
     keccakReferenceCost,
     ledgerBudgetBits,
     profileStatisticalTerms,
@@ -22,6 +27,7 @@ import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     deriveSupportedProfile,
     deriveSupportedShareLifting,
+    listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
@@ -192,6 +198,7 @@ describe('composed security ledger', () => {
                 const scaled = rational(
                     worst.numerator *
                         row.multiplicity *
+                        row.guesses *
                         (1n << (securityTargetBits + ledgerBudgetBits)),
                     worst.denominator,
                 );
@@ -270,6 +277,51 @@ describe('composed security ledger', () => {
                 expect(row.multiplicity).toBe(BigInt(rowSteps.length));
             }
         }
+    });
+
+    it('guesses the ciphertext modulus only where a challenge enters the shared FHE common streams', () => {
+        // One modulus of each supported length, the largest of its prime
+        // form: 576 and 640 to 992 bits in steps of 32.
+        const lengths = new Set(
+            listSupportedProfiles().map(
+                (profile) => profile.ciphertext.modulus.toString(2).length,
+            ),
+        );
+        expect(fheCommonStreamGuesses()).toBe(BigInt(lengths.size));
+        expect(fheCommonStreamGuesses()).toBe(13n);
+        for (const row of computationalHybrids(10n))
+            expect(row.guesses).toBe(
+                row.assumption === 'FHE Ring-LWE' ||
+                    row.assumption === 'Evaluation-key circular security'
+                    ? 13n
+                    : 1n,
+            );
+        // Each of the 3n+1 guessing steps loses twice the complete
+        // programming distance per guess, rounded up to a multiple of
+        // 2^-256.
+        const profile = deriveSupportedProfile(8, 18);
+        const matrices = compileCommonMatrixSamplingCensus(profile);
+        const initialization = compileCommonMatrixInitializationCensus(profile);
+        const exactNumerator =
+            2n *
+            13n *
+            25n *
+            (matrices.distanceUpperNumerator * initialization.biasDenominator +
+                initialization.biasNumerator *
+                    matrices.distanceUpperDenominator);
+        const exactDenominator =
+            matrices.distanceUpperDenominator * initialization.biasDenominator;
+        const term = profileStatisticalTerms(profile).find(
+            (value) =>
+                value.name ===
+                'FHE common-stream programming per guessing reduction',
+        )!;
+        expect(term.numerator * exactDenominator).toBeGreaterThanOrEqual(
+            exactNumerator << 256n,
+        );
+        expect((term.numerator - 1n) * exactDenominator).toBeLessThan(
+            exactNumerator << 256n,
+        );
     });
 
     it('keeps the statistical subtotal within its share of the budget', () => {
@@ -368,7 +420,7 @@ describe('composed security ledger', () => {
         )!.requiredBits;
         expect(sensitivity.requiredBits).toBeGreaterThan(referenceFhe + 40n);
         // A reduction as fast as the experiment needs only the budget.
-        expect(requiredAssumptionBits(1n, rational(1n))).toBe(
+        expect(requiredAssumptionBits(1n, 1n, rational(1n))).toBe(
             securityTargetBits + ledgerBudgetBits,
         );
         expect(ledger.identityCollisionExponent).toBeLessThanOrEqual(

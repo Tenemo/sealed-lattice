@@ -157,6 +157,24 @@ export const profileStatisticalTerms = (
                 matrixInitialization.biasDenominator,
             ),
         },
+        {
+            // Each guessing step's reduction programs the FHE common streams
+            // for its guessed modulus, which moves the guessed world by at
+            // most the complete sampling distance and fibre bias, and loses
+            // twice that per guess.
+            name: 'FHE common-stream programming per guessing reduction',
+            numerator: dyadic(
+                2n *
+                    fheCommonStreamGuesses() *
+                    guessingSteps(BigInt(profile.participantCount)) *
+                    (matrices.distanceUpperNumerator *
+                        matrixInitialization.biasDenominator +
+                        matrixInitialization.biasNumerator *
+                            matrices.distanceUpperDenominator),
+                matrices.distanceUpperDenominator *
+                    matrixInitialization.biasDenominator,
+            ),
+        },
         ...compileCurrentSignatureSamplingBounds().map((row) => ({
             name: `${row.purpose} all-seed read bound`,
             numerator: dyadic(row.numerator, 1n << row.denominatorBits),
@@ -516,9 +534,33 @@ export const ledgerBudgetBits = (() => {
     return bits;
 })();
 
+// Every profile reduces the same fixed FHE common streams modulo its own
+// ciphertext modulus, and the adversary may fix the profile after querying
+// them, so a reduction that programs its challenge into those streams guesses
+// the ciphertext modulus. The share-encryption and auxiliary common
+// polynomials have one modulus and sample width for every profile.
+let ciphertextModulusGuesses: bigint | undefined;
+export const fheCommonStreamGuesses = (): bigint => {
+    ciphertextModulusGuesses ??= BigInt(
+        new Set(
+            listSupportedProfiles().map(
+                (profile) => profile.ciphertext.modulus,
+            ),
+        ).size,
+    );
+    return ciphertextModulusGuesses;
+};
+
+// The hybrid steps whose reductions guess the ciphertext modulus.
+const guessingSteps = (participantCount: bigint) =>
+    computationalHybrids(participantCount)
+        .filter((row) => row.guesses > 1n)
+        .reduce((sum, row) => sum + row.multiplicity, 0n);
+
 // Every honest participant can contribute, receive shares and vote. A
 // ciphertext replacement passes through a uniform value, so it takes two
-// steps, and a key that must end good leaves for uniform and returns.
+// steps, and a key that must end good leaves for uniform and returns. Each
+// step's reduction succeeds only when its guesses are right.
 export const computationalHybrids = (participantCount: bigint) =>
     [
         {
@@ -526,47 +568,58 @@ export const computationalHybrids = (participantCount: bigint) =>
             hybrid: 'Honest recipient keys out and back around their honest-to-honest sharing ciphertexts',
             reduction: 'plain',
             multiplicity: 2n * participantCount * (participantCount + 1n),
+            guesses: 1n,
         },
         {
             assumption: 'Auxiliary Ring-LWE',
             hybrid: 'Honest auxiliary key coordinates',
             reduction: 'plain',
             multiplicity: participantCount,
+            guesses: 1n,
         },
         {
             assumption: 'Auxiliary Ring-LWE',
             hybrid: 'Programmed auxiliary key, then its honest ballots with the key out and back',
             reduction: 'extraction',
             multiplicity: 2n * participantCount + 3n,
+            guesses: 1n,
         },
         {
             assumption: 'Evaluation-key circular security',
             hybrid: 'Honest evaluation-key tuples',
             reduction: 'extraction',
             multiplicity: participantCount,
+            guesses: fheCommonStreamGuesses(),
         },
         {
             assumption: 'FHE Ring-LWE',
             hybrid: 'Honest FHE ballots under the uniform programmed key, then its good key',
             reduction: 'extraction',
             multiplicity: 2n * participantCount + 1n,
+            guesses: fheCommonStreamGuesses(),
         },
     ] as const satisfies readonly {
         assumption: (typeof ledgerGroups)[number];
         hybrid: string;
         reduction: ReductionClass;
         multiplicity: bigint;
+        guesses: bigint;
     }[];
 
-// Smallest lambda with multiplicity*Tred(T)/2^lambda <= T/2^(80+budgetBits)
-// at T = 2^80, where Tred(T)/T is constant or increasing in T.
+// Smallest lambda with multiplicity*guesses*Tred(T)/2^lambda <=
+// T/2^(80+budgetBits) at T = 2^80, where Tred(T)/T is constant or increasing
+// in T.
 export const requiredAssumptionBits = (
     multiplicity: bigint,
+    guesses: bigint,
     ratioAtTarget: Rational,
 ) =>
     ceilingLog2(
         multiplyRationals(
-            rational(multiplicity << (securityTargetBits + ledgerBudgetBits)),
+            rational(
+                (multiplicity * guesses) <<
+                    (securityTargetBits + ledgerBudgetBits),
+            ),
             ratioAtTarget,
         ),
     );
@@ -606,6 +659,7 @@ export const compileComposedSecurityLedger = (
                         reductionRatioExponent: ceilingLog2(ratio),
                         requiredBits: requiredAssumptionBits(
                             row.multiplicity,
+                            row.guesses,
                             ratio,
                         ),
                     };
@@ -687,6 +741,10 @@ export const compileUnitCallCostSensitivity = () => {
         participantCount,
         widestEntryBits,
         reductionRatioExponent: ceilingLog2(ratio),
-        requiredBits: requiredAssumptionBits(fhe.multiplicity, ratio),
+        requiredBits: requiredAssumptionBits(
+            fhe.multiplicity,
+            fhe.guesses,
+            ratio,
+        ),
     };
 };
