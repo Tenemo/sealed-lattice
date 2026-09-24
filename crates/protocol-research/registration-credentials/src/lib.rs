@@ -2,8 +2,6 @@
 pub mod ballot_authentication;
 #[path = "ballot-body.rs"]
 pub mod ballot_body;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser;
 #[path = "contribution-authentication.rs"]
 pub mod contribution_authentication;
 #[path = "contribution-commitment.rs"]
@@ -20,9 +18,6 @@ pub mod release_signing;
 pub mod roster;
 #[path = "roster-authentication.rs"]
 pub mod roster_authentication;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-#[path = "roster-bridge.rs"]
-mod roster_bridge;
 #[path = "roster-input.rs"]
 pub mod roster_input;
 #[path = "target-signing.rs"]

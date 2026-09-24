@@ -6,13 +6,6 @@ publish = false
 autobins = false
 
 
-[lib]
-crate-type = ["rlib", "cdylib"]
-
-[features]
-default = ["bridge"]
-bridge = []
-
 [dependencies]
 proof-lookup-table = { path = "../proof-lookup-table" }
 registration-proof = { path = "../registration-proof", default-features = false }

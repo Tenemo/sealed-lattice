@@ -1,8 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #[path = "../../setup-stream-kernel/src/arithmetic.rs"]
 mod arithmetic;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser;
 #[path = "../../word-verifier/src/engine.rs"]
 mod engine;
 mod profile;

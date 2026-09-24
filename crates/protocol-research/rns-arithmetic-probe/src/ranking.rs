@@ -12,10 +12,6 @@ mod requested_output;
 #[cfg(feature = "numerical-probes")]
 pub use requested_output::probe as requested_output_probe;
 
-#[cfg(target_arch = "wasm32")]
-#[path = "ranking-browser.rs"]
-mod browser;
-
 pub const DEGREE: usize = 65_536;
 const OPTION_COUNT: usize = 10;
 pub const COEFFICIENT_BYTES: usize = 109;

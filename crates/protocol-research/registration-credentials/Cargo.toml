@@ -10,13 +10,6 @@ name = "verify-registration-record"
 path = "src/bin/verify-registration-record.rs"
 
 
-[lib]
-crate-type = ["rlib", "cdylib"]
-
-[features]
-default = ["bridge"]
-bridge = []
-
 [dependencies]
 aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
 aes = { version = "=0.8.4", features = ["zeroize"] }

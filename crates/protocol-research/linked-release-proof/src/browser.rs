@@ -26,7 +26,6 @@ struct Output {
     proof: Vec<u8>,
 }
 struct State {
-    role: Vec<u8>,
     input: Vec<u8>,
     output: Vec<u8>,
     prepared: Option<ReleaseInputs>,
@@ -35,20 +34,11 @@ struct State {
     verifier: Option<Verifier>,
     consumed: bool,
 }
-thread_local! {static STATE:RefCell<State>=RefCell::new(State{role:ROLE.to_vec(),input:vec![0;CHUNK_LIMIT],output:Vec::with_capacity(CHUNK_LIMIT),prepared:None,derived:None,completed:None,verifier:None,consumed:false});}
+thread_local! {static STATE:RefCell<State>=RefCell::new(State{input:vec![0;CHUNK_LIMIT],output:Vec::with_capacity(CHUNK_LIMIT),prepared:None,derived:None,completed:None,verifier:None,consumed:false});}
 // This feature-gated interface operates on synthetic inputs only. It does not
 // supply a protocol certificate, original participant key or release capability.
-#[unsafe(no_mangle)]
-pub extern "C" fn release_set_role(length: usize) -> u32 {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !(1..=1024).contains(&length) || state.consumed || state.verifier.is_some() {
-            return 1;
-        }
-        state.role = state.input[..length].to_vec();
-        0
-    })
-}
+// Its prover and verifier bind only the dedicated workload role into their
+// challenges, so it cannot produce or accept a proof bound to a protocol role.
 #[unsafe(no_mangle)]
 pub extern "C" fn release_input_pointer() -> *mut u8 {
     STATE.with(|state| state.borrow_mut().input.as_mut_ptr())
@@ -96,7 +86,7 @@ pub extern "C" fn release_prove() -> u32 {
         let Some(derived) = state.derived.take() else {
             return 1;
         };
-        let (statement, proof) = ReleaseRelationProof::from_prepared(&state.role, derived);
+        let (statement, proof) = ReleaseRelationProof::from_prepared(ROLE, derived);
         let mut output = BoundedProof(Vec::with_capacity(PROOF_LIMIT));
         proof.write(&mut output);
         drop(proof);
@@ -179,7 +169,7 @@ pub extern "C" fn release_verifier_start(length: usize) -> u32 {
             return 1;
         }
         match Verifier::new(
-            &state.role,
+            ROLE,
             state.input[..64].try_into().unwrap(),
             &state.input[64..length],
         ) {
