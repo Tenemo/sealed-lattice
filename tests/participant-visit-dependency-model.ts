@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { createPublicationCutModel } from '#tests/publication-cut-model.js';
+import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 const preferredVisitCount = 5;
 const maximumVisitCount = 10;
@@ -105,9 +106,10 @@ export const tracePublicationCompletionVisits = (
     revisitFirstAfterEachBallot = false,
 ): readonly ParticipantVisit[] => {
     const participantCount = 10;
-    const corruptionBound = Math.floor((participantCount - 1) / 3);
-    const quorum = participantCount - corruptionBound;
-    const releaseThreshold = corruptionBound + 1;
+    const thresholds = compileThresholdCompletionProfile(participantCount);
+    const corruptionBound = thresholds.maximumCorruptParticipantCount;
+    const quorum = thresholds.inventoryCertificateThreshold;
+    const releaseThreshold = thresholds.resultReleaseThreshold;
     const honest = Array.from({ length: quorum }, (_, position) => position);
     // Corrupt parties finish required preparation, then withhold everything.
     const model = createPublicationCutModel(
