@@ -64,6 +64,9 @@ export type FoundationKernelLoaderOptions = {
 export type FoundationKernelCommandRuntime = Readonly<{
     readonly executeCommand: (request: Uint8Array) => Uint8Array;
     readonly measureResources: () => KernelResourceMeasurement;
+    // A trap, allocator contract violation, or memory-guard failure leaves the
+    // instance state undefined; it then refuses every command and must be replaced.
+    readonly isFaulted: () => boolean;
 }>;
 
 type KernelResourceMeasurement = Readonly<{
@@ -226,47 +229,33 @@ const resolveNumberExport = <ExportName extends NumberExportName>(
     return exportValue;
 };
 
+// The kernel allocator grows its own memory, so a valid allocation always lies
+// inside the current buffer; any other range is an allocator fault.
+const allocateKernelRange = (
+    memory: WebAssembly.Memory,
+    allocate: (length: number) => number,
+    length: number,
+    operationName: string,
+): number =>
+    requireKernelMemoryRange(memory, allocate(length), length, operationName);
+
 const copyIntoKernelMemory = (
     memory: WebAssembly.Memory,
     allocate: (length: number) => number,
-    deallocate: (pointer: number, length: number) => void,
     input: Uint8Array,
 ): number => {
     if (input.length === 0) {
         return 0;
     }
 
-    const pointer = allocate(input.length) >>> 0;
-    try {
-        assertKernelMemoryWithinProfile(memory);
-        if (pointer === 0) {
-            throw new Error(
-                'The foundation kernel returned a null pointer for a non-empty allocation.',
-            );
-        }
-        const requiredByteLength = pointer + input.length;
-        if (requiredByteLength > maximumFoundationWasmMemoryByteLength) {
-            throw new RangeError(
-                'The foundation command allocation exceeds the absolute linear-memory safety bound.',
-            );
-        }
-        if (requiredByteLength > memory.buffer.byteLength) {
-            memory.grow(
-                Math.ceil(
-                    (requiredByteLength - memory.buffer.byteLength) /
-                        wasmPageByteLength,
-                ),
-            );
-            assertKernelMemoryWithinProfile(memory);
-        }
-        new Uint8Array(memory.buffer).set(input, pointer);
-        return pointer;
-    } catch (error) {
-        if (pointer !== 0) {
-            deallocate(pointer, input.length);
-        }
-        throw error;
-    }
+    const pointer = allocateKernelRange(
+        memory,
+        allocate,
+        input.length,
+        'input allocation',
+    );
+    new Uint8Array(memory.buffer).set(input, pointer);
+    return pointer;
 };
 
 const copyFromKernelMemory = (
@@ -304,6 +293,8 @@ const readKernelOutputLength = (
         wasm32UsizeByteLength,
     ).getUint32(0, true);
 
+// Any failure here faults the instance. Its allocations are then abandoned
+// with it rather than returned to an allocator whose state is undefined.
 const runKernelCommand = (
     memory: WebAssembly.Memory,
     allocate: (length: number) => number,
@@ -315,59 +306,39 @@ const runKernelCommand = (
     ) => number,
     request: Uint8Array,
 ): Uint8Array => {
-    if (request.byteLength > maximumFoundationCopiedBufferByteLength) {
+    const inputPointer = copyIntoKernelMemory(memory, allocate, request);
+    const outputLengthPointer = allocateKernelRange(
+        memory,
+        allocate,
+        wasm32UsizeByteLength,
+        'output-length allocation',
+    );
+    const outputPointer =
+        commandWithLength(
+            inputPointer,
+            request.byteLength,
+            outputLengthPointer,
+        ) >>> 0;
+    const outputLength = readKernelOutputLength(memory, outputLengthPointer);
+    if (outputLength > maximumFoundationCopiedBufferByteLength) {
         throw new RangeError(
-            'The foundation command exceeds the copied-buffer limit.',
+            'The foundation command response exceeds the copied-buffer limit.',
         );
     }
-
-    let inputPointer = 0;
-    let outputPointer = 0;
-    let outputLengthPointer = 0;
-    let outputLength = 0;
-    try {
-        inputPointer = copyIntoKernelMemory(
-            memory,
-            allocate,
-            deallocate,
-            request,
-        );
-        outputLengthPointer = allocate(wasm32UsizeByteLength) >>> 0;
-        assertKernelMemoryWithinProfile(memory);
-        if (outputLengthPointer === 0) {
-            throw new Error(
-                'The foundation kernel returned a null pointer for the output-length allocation.',
-            );
-        }
-        outputPointer =
-            commandWithLength(
-                inputPointer,
-                request.byteLength,
-                outputLengthPointer,
-            ) >>> 0;
-        outputLength = readKernelOutputLength(memory, outputLengthPointer);
-        if (outputLength > maximumFoundationCopiedBufferByteLength) {
-            throw new RangeError(
-                'The foundation command response exceeds the copied-buffer limit.',
-            );
-        }
-        return copyFromKernelMemory(
-            memory,
-            outputPointer,
-            outputLength,
-            'foundation command',
-        );
-    } finally {
-        if (outputPointer !== 0) {
-            deallocate(outputPointer, outputLength);
-        }
-        if (inputPointer !== 0) {
-            deallocate(inputPointer, request.byteLength);
-        }
-        if (outputLengthPointer !== 0) {
-            deallocate(outputLengthPointer, wasm32UsizeByteLength);
-        }
+    const response = copyFromKernelMemory(
+        memory,
+        outputPointer,
+        outputLength,
+        'foundation command',
+    );
+    if (outputPointer !== 0) {
+        deallocate(outputPointer, outputLength);
     }
+    if (inputPointer !== 0) {
+        deallocate(inputPointer, request.byteLength);
+    }
+    deallocate(outputLengthPointer, wasm32UsizeByteLength);
+    return response;
 };
 
 const instantiateKernelCommandRuntime = async (
@@ -396,19 +367,36 @@ const instantiateKernelCommandRuntime = async (
     );
     let maximumRequestByteLength = 0;
     let maximumResponseByteLength = 0;
+    let faulted = false;
     return {
         executeCommand: (request): Uint8Array => {
+            if (faulted) {
+                throw new Error(
+                    'The foundation kernel instance faulted and must be replaced.',
+                );
+            }
             maximumRequestByteLength = Math.max(
                 maximumRequestByteLength,
                 request.byteLength,
             );
-            const response = runKernelCommand(
-                memory,
-                allocate,
-                deallocate,
-                commandWithLength,
-                request,
-            );
+            if (request.byteLength > maximumFoundationCopiedBufferByteLength) {
+                throw new RangeError(
+                    'The foundation command exceeds the copied-buffer limit.',
+                );
+            }
+            let response: Uint8Array;
+            try {
+                response = runKernelCommand(
+                    memory,
+                    allocate,
+                    deallocate,
+                    commandWithLength,
+                    request,
+                );
+            } catch (error) {
+                faulted = true;
+                throw error;
+            }
             maximumResponseByteLength = Math.max(
                 maximumResponseByteLength,
                 response.byteLength,
@@ -420,6 +408,7 @@ const instantiateKernelCommandRuntime = async (
             maximumRequestByteLength,
             maximumResponseByteLength,
         }),
+        isFaulted: () => faulted,
     };
 };
 

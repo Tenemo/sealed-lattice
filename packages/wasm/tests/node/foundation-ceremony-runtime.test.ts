@@ -39,6 +39,7 @@ const makeKernel = () => {
             maximumRequestByteLength: 0,
             maximumResponseByteLength: 0,
         }),
+        isFaulted: () => false,
     };
     return { executeCommand, kernel };
 };

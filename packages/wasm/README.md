@@ -15,6 +15,8 @@ The canonical participant artifact must remain scalar-capable. SIMD is optional.
 
 The browser bridge transfers owned binary buffers and reacquires WebAssembly memory views after any operation that can grow memory. Its internal command envelope uses one operation tag, bounded length-prefixed byte fields, raw hashes, and complete-input consumption; it does not duplicate bytes as JSON or hexadecimal text.
 
+A trap, an allocation outside the current linear memory, an out-of-bounds response, or linear memory beyond its safety bound faults the kernel instance. A faulted instance refuses every later command, and the loader replaces it with a fresh instance instead of reusing it. A request above the copied-buffer limit is refused before it reaches the kernel and does not fault the instance.
+
 Kernel integrity is the SHA-256 hash of the exact shipped WebAssembly bytes, including custom sections. Build reproducibility is enforced during generation rather than by normalizing bytes in the loader.
 
 The public SDK exposes only implemented foundation operations. Source and package tests define the exact command inventory.

@@ -659,17 +659,36 @@ export const createFoundationCeremonyRuntimeLoader = (
     foundationKernelUrl: URL,
     options: FoundationKernelLoaderOptions = {},
 ): (() => Promise<FoundationCeremonyRuntime>) => {
-    let runtimePromise: Promise<FoundationCeremonyRuntime> | undefined;
-    return async () => {
-        runtimePromise ??= instantiateFoundationKernelCommandRuntime(
+    let loaded:
+        | Promise<
+              Readonly<{
+                  kernel: FoundationKernelCommandRuntime;
+                  runtime: FoundationCeremonyRuntime;
+              }>
+          >
+        | undefined;
+    const load = async (): Promise<FoundationCeremonyRuntime> => {
+        const pending = (loaded ??= instantiateFoundationKernelCommandRuntime(
             foundationKernelUrl,
             options,
         )
-            .then(openFoundationCeremonyRuntime)
+            .then((kernel) => ({
+                kernel,
+                runtime: openFoundationCeremonyRuntime(kernel),
+            }))
             .catch((error: unknown) => {
-                runtimePromise = undefined;
+                loaded = undefined;
                 throw error;
-            });
-        return runtimePromise;
+            }));
+        const { kernel, runtime } = await pending;
+        if (!kernel.isFaulted()) {
+            return runtime;
+        }
+        // Concurrent callers that observe the same fault share one replacement.
+        if (loaded === pending) {
+            loaded = undefined;
+        }
+        return load();
     };
+    return load;
 };
