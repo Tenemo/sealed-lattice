@@ -31,6 +31,20 @@ export const candidateBgvParameterInputs = {
     topCount: 10,
 } as const;
 
+type BgvModulusPrimeInventory = Readonly<{
+    auxiliaryModulusPrimeFactors: readonly bigint[];
+    ciphertextModulusPrimeFactors: readonly bigint[];
+    polynomialModulusDegree: bigint;
+}>;
+
+type CandidateBgvParameterInputs = BgvModulusPrimeInventory &
+    Readonly<{
+        optionCount: number;
+        participantCount: number;
+        retainedBottomPrimeCount: bigint;
+        topCount: number;
+    }>;
+
 export type CandidateBgvParameterCensus = Readonly<{
     auxiliaryModulus: bigint;
     auxiliaryModulusBitLength: bigint;
@@ -44,58 +58,144 @@ export type CandidateBgvParameterCensus = Readonly<{
     retainedBottomModulusBitLength: bigint;
 }>;
 
+// Miller-Rabin with the first twelve prime bases is exact below the smallest
+// strong pseudoprime to all of them, 318665857834031151167461 (Sorenson and
+// Webster, Strong pseudoprimes to twelve prime bases, Mathematics of
+// Computation 86, 2017). Larger factors are refused rather than trusted.
+const millerRabinBases = [
+    2n,
+    3n,
+    5n,
+    7n,
+    11n,
+    13n,
+    17n,
+    19n,
+    23n,
+    29n,
+    31n,
+    37n,
+] as const;
+const millerRabinExactnessBound = 318_665_857_834_031_151_167_461n;
+
 const product = (values: readonly bigint[]): bigint =>
     values.reduce((result, value) => result * value, 1n);
 
 const bitLength = (value: bigint): bigint => BigInt(value.toString(2).length);
 
-export const compileCandidateBgvParameterCensus =
-    (): CandidateBgvParameterCensus => {
-        const graph = compilePackedRankingEvaluationGraph(
-            candidateBgvParameterInputs.participantCount,
-            candidateBgvParameterInputs.optionCount,
-            candidateBgvParameterInputs.topCount,
-            24,
-            Number(candidateBgvParameterInputs.retainedBottomPrimeCount),
-        );
-        const multiplicativeDepth = BigInt(graph.multiplicativeDepth);
-        const expectedCiphertextModulusPrimeCount =
-            candidateBgvParameterInputs.retainedBottomPrimeCount +
-            multiplicativeDepth;
-        if (
-            BigInt(
-                candidateBgvParameterInputs.ciphertextModulusPrimeFactors
-                    .length,
-            ) !== expectedCiphertextModulusPrimeCount
-        ) {
-            throw new Error(
-                'The exact ciphertext-prime inventory disagrees with the graph.',
+const exponentiate = (
+    base: bigint,
+    exponent: bigint,
+    modulus: bigint,
+): bigint => {
+    let result = 1n;
+    let factor = base % modulus;
+    let remaining = exponent;
+    while (remaining > 0n) {
+        if ((remaining & 1n) === 1n) result = (result * factor) % modulus;
+        factor = (factor * factor) % modulus;
+        remaining >>= 1n;
+    }
+    return result;
+};
+
+const isPrimeByMillerRabin = (value: bigint): boolean => {
+    if (value < 2n) return false;
+    for (const base of millerRabinBases) {
+        if (value % base === 0n) return value === base;
+    }
+    let oddPart = value - 1n;
+    let twoAdicValuation = 0n;
+    while ((oddPart & 1n) === 0n) {
+        oddPart >>= 1n;
+        twoAdicValuation += 1n;
+    }
+    return millerRabinBases.every((base) => {
+        let power = exponentiate(base, oddPart, value);
+        if (power === 1n || power === value - 1n) return true;
+        for (let squaring = 1n; squaring < twoAdicValuation; squaring += 1n) {
+            power = (power * power) % value;
+            if (power === value - 1n) return true;
+        }
+        return false;
+    });
+};
+
+// Negacyclic NTT arithmetic modulo X^N + 1 needs a primitive 2N-th root of
+// unity modulo every factor, so each factor must be congruent to 1 modulo 2N.
+// Residue-number-system limbs also need pairwise distinct prime moduli.
+export const validateBgvModulusPrimeInventory = (
+    inventory: BgvModulusPrimeInventory,
+): void => {
+    if (inventory.polynomialModulusDegree < 1n) {
+        throw new RangeError('The polynomial modulus degree must be positive.');
+    }
+    const transformOrder = 2n * inventory.polynomialModulusDegree;
+    const factors = [
+        ...inventory.auxiliaryModulusPrimeFactors,
+        ...inventory.ciphertextModulusPrimeFactors,
+    ];
+    for (const factor of factors) {
+        if (factor >= millerRabinExactnessBound) {
+            throw new RangeError(
+                'A modulus prime factor is outside the proven Miller-Rabin range.',
             );
         }
-        const ciphertextModulus = product(
-            candidateBgvParameterInputs.ciphertextModulusPrimeFactors,
+        if (!isPrimeByMillerRabin(factor)) {
+            throw new Error('A modulus prime factor is not prime.');
+        }
+        if (factor % transformOrder !== 1n) {
+            throw new Error(
+                'A modulus prime factor does not support the negacyclic transform.',
+            );
+        }
+    }
+    if (new Set(factors).size !== factors.length) {
+        throw new Error('The modulus prime factors are not pairwise distinct.');
+    }
+};
+
+export const compileCandidateBgvParameterCensus = (
+    inputs: CandidateBgvParameterInputs = candidateBgvParameterInputs,
+): CandidateBgvParameterCensus => {
+    validateBgvModulusPrimeInventory(inputs);
+    const graph = compilePackedRankingEvaluationGraph(
+        inputs.participantCount,
+        inputs.optionCount,
+        inputs.topCount,
+        24,
+        Number(inputs.retainedBottomPrimeCount),
+    );
+    const multiplicativeDepth = BigInt(graph.multiplicativeDepth);
+    const expectedCiphertextModulusPrimeCount =
+        inputs.retainedBottomPrimeCount + multiplicativeDepth;
+    if (
+        BigInt(inputs.ciphertextModulusPrimeFactors.length) !==
+        expectedCiphertextModulusPrimeCount
+    ) {
+        throw new Error(
+            'The exact ciphertext-prime inventory disagrees with the graph.',
         );
-        const auxiliaryModulus = product(
-            candidateBgvParameterInputs.auxiliaryModulusPrimeFactors,
-        );
-        const combinedModulus = ciphertextModulus * auxiliaryModulus;
-        const retainedBottomModulus = product(
-            candidateBgvParameterInputs.ciphertextModulusPrimeFactors.slice(
-                0,
-                Number(candidateBgvParameterInputs.retainedBottomPrimeCount),
-            ),
-        );
-        return {
-            auxiliaryModulus,
-            auxiliaryModulusBitLength: bitLength(auxiliaryModulus),
-            ciphertextModulus,
-            ciphertextModulusBitLength: bitLength(ciphertextModulus),
-            ciphertextModulusLimbCount: expectedCiphertextModulusPrimeCount,
-            combinedModulus,
-            combinedModulusBitLength: bitLength(combinedModulus),
-            multiplicativeDepth,
-            polynomialModulusDegree:
-                candidateBgvParameterInputs.polynomialModulusDegree,
-            retainedBottomModulusBitLength: bitLength(retainedBottomModulus),
-        };
+    }
+    const ciphertextModulus = product(inputs.ciphertextModulusPrimeFactors);
+    const auxiliaryModulus = product(inputs.auxiliaryModulusPrimeFactors);
+    const combinedModulus = ciphertextModulus * auxiliaryModulus;
+    const retainedBottomModulus = product(
+        inputs.ciphertextModulusPrimeFactors.slice(
+            0,
+            Number(inputs.retainedBottomPrimeCount),
+        ),
+    );
+    return {
+        auxiliaryModulus,
+        auxiliaryModulusBitLength: bitLength(auxiliaryModulus),
+        ciphertextModulus,
+        ciphertextModulusBitLength: bitLength(ciphertextModulus),
+        ciphertextModulusLimbCount: expectedCiphertextModulusPrimeCount,
+        combinedModulus,
+        combinedModulusBitLength: bitLength(combinedModulus),
+        multiplicativeDepth,
+        polynomialModulusDegree: inputs.polynomialModulusDegree,
+        retainedBottomModulusBitLength: bitLength(retainedBottomModulus),
     };
+};
