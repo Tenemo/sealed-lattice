@@ -36,11 +36,25 @@ export async function validateParticipantPredecessor(
         Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join(
             '',
         );
+    // The root nonce is the generation as a 96-bit big-endian counter, so it
+    // never repeats under one root key.
+    if (
+        !Number.isSafeInteger(expected.head.generation) ||
+        expected.head.generation < 0
+    )
+        throw new Error('Invalid predecessor generation.');
     const counts = new Map<string, number>();
     for (const store of expected.recordStores) counts.set(store, 0);
     const keys = new Set<string>();
+    // Record encryption uses a zero nonce, which is safe only while every
+    // record key encrypts exactly one record.
+    const encryptionKeys = new Set<string>();
     for (const record of expected.records) {
         const identity = `${record.store}:${JSON.stringify(record.key)}`;
+        const encryptionKey =
+            record.encryption === undefined
+                ? undefined
+                : hexadecimal(record.encryption.key);
         if (
             !counts.has(record.store) ||
             keys.has(identity) ||
@@ -51,10 +65,12 @@ export async function validateParticipantPredecessor(
             (record.sha512 !== undefined && record.sha512.length !== 64) ||
             (record.encryption !== undefined &&
                 (record.encryption.key.length !== 32 ||
-                    record.byteLength <= 16))
+                    record.byteLength <= 16)) ||
+            (encryptionKey !== undefined && encryptionKeys.has(encryptionKey))
         )
             throw new Error('Invalid predecessor record description.');
         keys.add(identity);
+        if (encryptionKey !== undefined) encryptionKeys.add(encryptionKey);
         counts.set(record.store, counts.get(record.store)! + 1);
     }
     for (const [store, count] of [
@@ -90,7 +106,10 @@ export async function validateParticipantPredecessor(
     )
         throw new Error('Participant predecessor authority changed.');
     const nonce = new Uint8Array(12);
-    nonce[11] = expected.head.generation;
+    new DataView(nonce.buffer).setBigUint64(
+        4,
+        BigInt(expected.head.generation),
+    );
     const manifest = new Uint8Array(
         await crypto.subtle.decrypt(
             {

@@ -27,7 +27,23 @@ const hash = async (bytes: Uint8Array) =>
         await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
     );
 
-const fixture = async () => {
+// The root nonce for generation 16, written independently of the helper.
+const generationSixteenNonce = Uint8Array.of(
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    16,
+);
+
+const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
     const opening = indexedDB.open(`predecessor-${crypto.randomUUID()}`, 1);
     opening.onupgradeneeded = () => {
         for (const name of stores) opening.result.createObjectStore(name);
@@ -40,18 +56,16 @@ const fixture = async () => {
         ['encrypt', 'decrypt'],
     );
     const manifest = Uint8Array.of(13, 5, 67),
-        rootContext = Uint8Array.of(29, 41),
-        iv = new Uint8Array(12);
-    iv[11] = 16;
+        rootContext = Uint8Array.of(29, 41);
     const root = new Uint8Array(
         await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv, additionalData: rootContext },
+            { name: 'AES-GCM', iv: rootNonce, additionalData: rootContext },
             key,
             manifest,
         ),
     );
     const head = {
-        generation: 16,
+        generation,
         hash: Array.from(await hash(root), (byte) =>
             byte.toString(16).padStart(2, '0'),
         ).join(''),
@@ -117,7 +131,7 @@ const fixture = async () => {
                 transaction.objectStore('journal').clear();
                 transaction
                     .objectStore('head')
-                    .put({ ...head, generation: 17 }, 0);
+                    .put({ ...head, generation: generation + 1 }, 0);
             },
         });
     const mutate = async (
@@ -129,13 +143,22 @@ const fixture = async () => {
         apply(transaction.objectStore(store));
         await completed;
     };
-    const generation = async () =>
+    const currentGeneration = async () =>
         (
             (await result(
                 database.transaction('head').objectStore('head').get(0),
             )) as typeof head
         ).generation;
-    return { commit, mutate, generation, expected, journal, root };
+    return {
+        commit,
+        mutate,
+        generation: currentGeneration,
+        expected,
+        journal,
+        root,
+        journalKey: rawKey,
+        journalContext: additionalData,
+    };
 };
 
 afterEach(async () => {
@@ -237,4 +260,88 @@ describe('required predecessor records', () => {
             expect(await value.generation()).toBe(16);
         },
     );
+});
+
+describe('predecessor root nonce', () => {
+    it('authenticates a root past one byte of generations with the full counter nonce', async () => {
+        const value = await fixture(
+            256,
+            Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0),
+        );
+        await value.commit();
+        expect(await value.generation()).toBe(257);
+    });
+
+    it('refuses a root sealed under the wrapped single-byte nonce', async () => {
+        const value = await fixture(256, new Uint8Array(12));
+        await expect(value.commit()).rejects.toThrow();
+        expect(await value.generation()).toBe(256);
+    });
+
+    it.each([-1, 1.5, Number.NaN, 2 ** 53])(
+        'refuses the invalid generation %s before reading the root',
+        async (generation) => {
+            const value = await fixture(generation);
+            await expect(value.commit()).rejects.toThrow(
+                'Invalid predecessor generation.',
+            );
+        },
+    );
+});
+
+describe('predecessor record keys', () => {
+    const addSecondJournal = async (
+        value: Awaited<ReturnType<typeof fixture>>,
+        rawKey: Uint8Array,
+    ) => {
+        const key = await crypto.subtle.importKey(
+            'raw',
+            new Uint8Array(rawKey),
+            'AES-GCM',
+            false,
+            ['encrypt'],
+        );
+        const journal = new Uint8Array(
+            await crypto.subtle.encrypt(
+                {
+                    name: 'AES-GCM',
+                    iv: new Uint8Array(12),
+                    additionalData: value.journalContext,
+                },
+                key,
+                Uint8Array.of(11, 13, 17, 19),
+            ),
+        );
+        await value.mutate('journal', (store) =>
+            store.add(new Blob([journal]), [0, 1]),
+        );
+        value.expected.records.push({
+            store: 'journal',
+            key: [0, 1],
+            byteLength: journal.length,
+            encryption: {
+                key: Uint8Array.from(rawKey),
+                additionalData: value.journalContext,
+            },
+        });
+    };
+
+    it('accepts two zero-nonce records under distinct keys', async () => {
+        const value = await fixture();
+        await addSecondJournal(
+            value,
+            crypto.getRandomValues(new Uint8Array(32)),
+        );
+        await value.commit();
+        expect(await value.generation()).toBe(17);
+    });
+
+    it('refuses two zero-nonce records under one key', async () => {
+        const value = await fixture();
+        await addSecondJournal(value, value.journalKey);
+        await expect(value.commit()).rejects.toThrow(
+            'Invalid predecessor record description.',
+        );
+        expect(await value.generation()).toBe(16);
+    });
 });
