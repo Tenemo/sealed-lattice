@@ -489,6 +489,12 @@ mod tests {
     use super::*;
     use crate::foundation::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, RosterEntry};
 
+    // A poll has 2 to 20 options, and the mobile runtime copies at most
+    // 8,388,608 bytes per buffer. These literals restate the owners
+    // independently of the implementation constants the tests check.
+    const GOAL_OPTION_COUNTS: std::ops::RangeInclusive<u16> = 2..=20;
+    const RUNTIME_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;
+
     fn display_text(value: &str) -> StabilizedDisplayText {
         StabilizedDisplayText::from_ingress_utf8(value.as_bytes())
             .expect("test display text is valid")
@@ -560,7 +566,11 @@ mod tests {
 
     #[test]
     fn manifest_schema_round_trips_every_configurable_option_count() {
-        for option_count in MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT {
+        assert_eq!(
+            MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+            GOAL_OPTION_COUNTS
+        );
+        for option_count in GOAL_OPTION_COUNTS {
             let manifest = manifest_for_option_count(option_count);
             let encoded = manifest.encode().expect("bounded manifest encodes");
             let decoded = Manifest::decode(&encoded, &CanonicalDecodeLimits::default())
@@ -583,7 +593,11 @@ mod tests {
             .expect("one-byte-title manifest encodes")
             .len()
             - 1;
-        let maximum_title_byte_length = MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH
+        assert_eq!(
+            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
+            RUNTIME_COPIED_BUFFER_BYTE_LENGTH
+        );
+        let maximum_title_byte_length = RUNTIME_COPIED_BUFFER_BYTE_LENGTH
             .checked_sub(title_independent_byte_length)
             .expect("manifest framing fits the copied-buffer profile");
 
@@ -597,7 +611,7 @@ mod tests {
                 .encode()
                 .expect("exact-boundary manifest encodes")
                 .len(),
-            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
+            RUNTIME_COPIED_BUFFER_BYTE_LENGTH,
         );
         exact_boundary_manifest
             .manifest_hash()
@@ -616,7 +630,7 @@ mod tests {
 
     #[test]
     fn manifest_rejects_wrong_count_order_duplicates_and_empty_text() {
-        let too_few = manifest_for_option_count(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        let too_few = manifest_for_option_count(*GOAL_OPTION_COUNTS.start())
             .options
             .into_iter()
             .take(1)
@@ -624,6 +638,38 @@ mod tests {
         assert_eq!(
             Manifest::new(display_text("Title"), too_few)
                 .expect_err("one option must refuse")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+        // A twenty-first option cannot be constructed, so encode it unchecked
+        // and require the decoder to refuse the oversized manifest.
+        let mut too_many: Vec<_> = manifest_for_option_count(*GOAL_OPTION_COUNTS.end())
+            .options
+            .iter()
+            .map(|option| option.canonical_tuple().expect("option encodes"))
+            .collect();
+        too_many.push(CanonicalTuple::new(
+            OPTION_DEFINITION_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned16(*GOAL_OPTION_COUNTS.end()),
+                CanonicalItem::nonempty_ascii("option-20").expect("identifier encodes"),
+                CanonicalItem::display_text(&display_text("Option 20")).expect("label encodes"),
+            ],
+        ));
+        let too_many_bytes = CanonicalTuple::new(
+            MANIFEST_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::display_text(&display_text("Title")).expect("title encodes"),
+                CanonicalItem::nested_tuple_list(&too_many).expect("options encode"),
+            ],
+        )
+        .encode()
+        .expect("unchecked manifest encodes");
+        assert_eq!(
+            Manifest::decode(&too_many_bytes, &CanonicalDecodeLimits::default())
+                .expect_err("twenty-one options must refuse")
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );
@@ -702,7 +748,7 @@ mod tests {
 
     #[test]
     fn action_and_board_values_round_trip_and_reject_genuine_boundary_errors() {
-        for top_count in [1, MAXIMUM_CONFIGURABLE_OPTION_COUNT] {
+        for top_count in [1, *GOAL_OPTION_COUNTS.end()] {
             let action = ActionDefinition::new(top_count).expect("boundary top count is valid");
             assert_eq!(
                 ActionDefinition::decode(
@@ -713,7 +759,7 @@ mod tests {
                 action
             );
         }
-        for top_count in [0, MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1] {
+        for top_count in [0, GOAL_OPTION_COUNTS.end() + 1] {
             assert_eq!(
                 ActionDefinition::new(top_count)
                     .expect_err("out-of-range top count must refuse")

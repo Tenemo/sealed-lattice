@@ -491,9 +491,21 @@ mod tests {
             .collect()
     }
 
+    // A poll has 3 to 20 participants; the literals restate that owner
+    // independently of the implementation constants.
+    const GOAL_PARTICIPANT_COUNTS: std::ops::RangeInclusive<u16> = 3..=20;
+
     #[test]
     fn every_configurable_roster_size_round_trips_canonically() {
-        for participant_count in [3, PROTOTYPE_PARTICIPANT_COUNT, 20] {
+        assert_eq!(
+            MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+            GOAL_PARTICIPANT_COUNTS
+        );
+        for participant_count in [
+            *GOAL_PARTICIPANT_COUNTS.start(),
+            PROTOTYPE_PARTICIPANT_COUNT,
+            *GOAL_PARTICIPANT_COUNTS.end(),
+        ] {
             let roster = Roster::new(roster_entries(participant_count)).expect("roster is valid");
             let encoded = roster.encode().expect("roster encodes");
             let decoded = Roster::decode(&encoded, &CanonicalDecodeLimits::default())
@@ -533,6 +545,28 @@ mod tests {
         assert_eq!(
             Roster::decode(&encoded, &CanonicalDecodeLimits::default())
                 .expect_err("oversized declared roster refuses before allocation")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+    }
+
+    #[test]
+    fn roster_refuses_two_participants_when_built_or_decoded() {
+        let two = *GOAL_PARTICIPANT_COUNTS.start() - 1;
+        assert_eq!(
+            Roster::new(roster_entries(two))
+                .expect_err("a two-participant roster must refuse")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+        let mut encoded = Roster::new(roster_entries(3))
+            .expect("roster is valid")
+            .encode()
+            .expect("roster encodes");
+        encoded[16..20].copy_from_slice(&u32::from(two).to_le_bytes());
+        assert_eq!(
+            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect_err("a declared two-participant roster must refuse")
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );

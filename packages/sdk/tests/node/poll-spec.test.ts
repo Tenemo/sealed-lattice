@@ -10,6 +10,8 @@ import {
 } from '#packages/sdk/src/poll-spec';
 
 const prototypeOptionCount = 10;
+// A poll has 2 to 20 options.
+const goalOptionCountRange = { minimum: 2, maximum: 20 } as const;
 
 const validPollSpec = (
     optionCount: number = prototypeOptionCount,
@@ -31,9 +33,10 @@ const errorCodes = (input: unknown): readonly string[] => {
 
 describe('poll input validation', () => {
     it('accepts every supported option count and derives deterministic manifest input', () => {
+        expect(configurableOptionCountRange).toEqual(goalOptionCountRange);
         for (
-            let optionCount = configurableOptionCountRange.minimum;
-            optionCount <= configurableOptionCountRange.maximum;
+            let optionCount = goalOptionCountRange.minimum;
+            optionCount <= goalOptionCountRange.maximum;
             optionCount += 1
         ) {
             const input = validPollSpec(optionCount);
@@ -66,6 +69,14 @@ describe('poll input validation', () => {
             'EmptyQuestion',
             'InvalidOptionCount',
         ]);
+        for (const optionCount of [
+            goalOptionCountRange.minimum - 1,
+            goalOptionCountRange.maximum + 1,
+        ]) {
+            expect(errorCodes(validPollSpec(optionCount))).toEqual([
+                'InvalidOptionCount',
+            ]);
+        }
         expect(
             errorCodes({
                 question: '\ud800',

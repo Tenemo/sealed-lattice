@@ -295,11 +295,8 @@ mod tests {
 
     #[test]
     fn encode_manifest_refuses_out_of_range_counts_before_reading_entries() {
-        for option_count in [
-            MINIMUM_CONFIGURABLE_OPTION_COUNT - 1,
-            MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1,
-            u16::MAX,
-        ] {
+        // A poll has 2 to 20 options; these counts lie just outside that range.
+        for option_count in [0, 1, 21, u16::MAX] {
             let mut command = vec![ENCODE_MANIFEST, 1, 0, 0, 0, b'Q'];
             command.extend_from_slice(&option_count.to_le_bytes());
 

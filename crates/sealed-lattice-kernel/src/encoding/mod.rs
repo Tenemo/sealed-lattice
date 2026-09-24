@@ -250,9 +250,17 @@ mod tests {
         );
     }
 
+    // The mobile runtime copies at most 8,388,608 bytes per buffer; the literal
+    // restates that owner independently of the implementation constant.
+    const RUNTIME_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;
+
     #[test]
     fn binary_command_enforces_the_exact_input_limit() {
-        let mut command = vec![0_u8; MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH];
+        assert_eq!(
+            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
+            RUNTIME_COPIED_BUFFER_BYTE_LENGTH
+        );
+        let mut command = vec![0_u8; RUNTIME_COPIED_BUFFER_BYTE_LENGTH];
         command[0] = 0xff;
         assert_eq!(
             decode_command_error(&run_foundation_command(&command)).0,
@@ -272,7 +280,7 @@ mod tests {
 
     #[test]
     fn binary_response_writer_enforces_the_exact_output_limit() {
-        let exact_limit = vec![0_u8; MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH];
+        let exact_limit = vec![0_u8; RUNTIME_COPIED_BUFFER_BYTE_LENGTH];
         let mut writer = BinaryWriter::new();
         writer
             .write_fixed(&exact_limit)
@@ -286,10 +294,7 @@ mod tests {
             error.message,
             "foundation command response exceeds the copied-buffer limit"
         );
-        assert_eq!(
-            writer.into_bytes().len(),
-            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH
-        );
+        assert_eq!(writer.into_bytes().len(), RUNTIME_COPIED_BUFFER_BYTE_LENGTH);
     }
 
     #[test]
