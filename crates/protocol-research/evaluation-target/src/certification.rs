@@ -137,7 +137,7 @@ mod tests {
             Err(Error::Signature)
         ));
         let signature = key
-            .try_sign_with_seed(&[31; 32], &target, b"sealed-lattice/slot-witness/v1")
+            .try_sign_with_seed(&[31; 32], &target, b"sealed-lattice/close-response/v1")
             .unwrap();
         let mut changed = packet;
         changed[66..].copy_from_slice(&signature);

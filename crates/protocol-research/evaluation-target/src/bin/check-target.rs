@@ -1,10 +1,14 @@
 use ballot_proof::{
     body::SignedBallotVerifier,
-    publication::PublicationContext,
+    close::{CloseContext, ClosedSlot},
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
 use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
 use registration_credentials::{
+    ballot_authentication::ENVELOPE_BYTES,
+    close_signing::{
+        CloseProposalMessage, ClosePurpose, CloseResponseMessage, maximum_close_message_bytes,
+    },
     contribution_authentication::{CommitmentInventory, verify_confirmation},
     roster_authentication::verify_roster_proposal,
     roster_input::RosterInputVerifier,
@@ -13,10 +17,10 @@ use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE};
 use setup_aggregate::{CHUNK_BYTES, ModulusKind, verified::SetupAggregator};
 use sha2::{Digest, Sha512};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
@@ -76,7 +80,8 @@ fn end(file: &mut File) -> io::Result<()> {
     }
     Ok(())
 }
-fn packet(bytes: &[u8]) -> io::Result<(&[u8], &[u8])> {
+/// A length-prefixed signed message body followed by its signature.
+fn packet(bytes: &[u8], maximum: usize) -> io::Result<(&[u8], &[u8])> {
     let length = u32::from_le_bytes(
         bytes
             .get(..4)
@@ -84,10 +89,32 @@ fn packet(bytes: &[u8]) -> io::Result<(&[u8], &[u8])> {
             .try_into()
             .map_err(refusal)?,
     ) as usize;
-    if length > 2048 || bytes.len() != 4 + length + 3309 {
+    if length > maximum || bytes.len() != 4 + length + 3309 {
         return Err(refusal("packet length"));
     }
     Ok((&bytes[4..4 + length], &bytes[4 + length..]))
+}
+fn close_packet(
+    directory: &Path,
+    name: &str,
+    purpose: ClosePurpose,
+    participants: usize,
+    work: &mut Work,
+) -> io::Result<Vec<u8>> {
+    let maximum = maximum_close_message_bytes(purpose, participants);
+    bounded(directory.join(name), 4 + maximum + 3309, work)
+}
+/// A public body path inside the ceremony directory.
+fn contained(ceremony: &Path, relative: &str) -> io::Result<PathBuf> {
+    let path = Path::new(relative);
+    if relative.is_empty()
+        || !path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(refusal("archived body path"));
+    }
+    Ok(ceremony.join(path))
 }
 fn polynomial_name(index: usize) -> String {
     format!("polynomial-{index:02}.bin")
@@ -95,7 +122,7 @@ fn polynomial_name(index: usize) -> String {
 
 struct Operands<'a> {
     aggregate: PathBuf,
-    ballots: &'a [String],
+    ballots: &'a [Option<PathBuf>],
     work: &'a mut Work,
 }
 struct CountedReader<'a> {
@@ -119,8 +146,13 @@ impl PublicInputs for Operands<'_> {
     }
     fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error> {
         Ok(Box::new(CountedReader {
-            file: File::open(self.ballots.get(author).ok_or(Error::PublicInput)?)
-                .map_err(|_| Error::PublicInput)?,
+            file: File::open(
+                self.ballots
+                    .get(author)
+                    .and_then(Option::as_ref)
+                    .ok_or(Error::PublicInput)?,
+            )
+            .map_err(|_| Error::PublicInput)?,
             work: self.work,
         }))
     }
@@ -179,43 +211,45 @@ impl WorkingStore for Spool {
 }
 fn main() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    if !(2..=4).contains(&arguments.len())
+    if !(3..=5).contains(&arguments.len())
         || arguments
-            .get(3)
+            .get(4)
             .is_some_and(|value| value != "certificate" && value != "release")
     {
         return Err(refusal(
-            "supply public path manifest, new result directory, optional public completion directory and optional certificate or release selector",
+            "supply the ceremony directory, a new scratch directory, a new result directory, an optional public completion directory and an optional certificate or release selector",
         ));
     }
     let started = Instant::now();
     let mut work = Work::default();
-    let manifest = bounded(&arguments[0], 65536, &mut work)?;
-    let paths: Vec<_> = std::str::from_utf8(&manifest)
-        .map_err(refusal)?
-        .lines()
-        .map(str::to_owned)
-        .collect();
-    if paths.len() != 60 || paths.iter().any(String::is_empty) {
-        return Err(refusal("path manifest"));
-    }
-    let output = Path::new(&arguments[1]);
+    let ceremony = Path::new(&arguments[0]);
+    let scratch = Path::new(&arguments[1]);
+    let output = Path::new(&arguments[2]);
     fs::create_dir(output)?;
-    let scratch = Path::new(&paths[5]);
     fs::create_dir(scratch)?;
-    let mut control = bounded(&paths[0], 128, &mut work)?;
+    let count = (0..=20)
+        .take_while(|position| ceremony.join(format!("participant-{position}")).is_dir())
+        .count();
+    if !(3..=20).contains(&count) {
+        return Err(refusal("participant count"));
+    }
+    let mut control = bounded(ceremony.join("context.bin"), 128, &mut work)?;
     if control.len() != 128 {
         return Err(refusal("context length"));
     }
-    let definition = bounded(&paths[1], 1 << 20, &mut work)?;
-    control.extend(10u16.to_le_bytes());
+    let definition = bounded(ceremony.join("poll-definition.bin"), 1 << 20, &mut work)?;
+    control.extend((count as u16).to_le_bytes());
     control.extend((definition.len() as u32).to_le_bytes());
     control.extend(definition);
-    control.extend(bounded(&paths[2], 3309, &mut work)?);
+    control.extend(bounded(
+        ceremony.join("poll-signature.bin"),
+        3309,
+        &mut work,
+    )?);
     let mut roster = RosterInputVerifier::new(&control).map_err(refusal)?;
     let mut buffer = vec![0; CHUNK_BYTES];
-    for (position, directory) in paths[6..16].iter().enumerate() {
-        let directory = Path::new(directory);
+    for position in 0..count {
+        let directory = ceremony.join(format!("participant-{position}"));
         let header = bounded(directory.join("registration-header.bin"), 4096, &mut work)?;
         let mut control = Vec::from((position as u16).to_le_bytes());
         control.extend((header.len() as u32).to_le_bytes());
@@ -248,63 +282,48 @@ fn main() -> io::Result<()> {
     let proposal = roster.finish().map_err(refusal)?;
     let poll = Arc::new(roster.into_poll());
     let proposal = Arc::new(
-        verify_roster_proposal(proposal, &bounded(&paths[3], 3309, &mut work)?).map_err(refusal)?,
+        verify_roster_proposal(
+            proposal,
+            &bounded(ceremony.join("proposal-signature.bin"), 3309, &mut work)?,
+        )
+        .map_err(refusal)?,
     );
-    let batch = bounded(&paths[4], 1 << 20, &mut work)?;
-    if batch.get(..4) != Some(10u32.to_le_bytes().as_slice()) {
-        return Err(refusal("confirmation count"));
-    }
-    let mut offset = 4;
+    let contributions: Vec<_> = (0..count)
+        .map(|position| ceremony.join(format!("contribution-{position}")))
+        .collect();
     let mut confirmations = Vec::new();
-    for _ in 0..10 {
-        let length = u32::from_le_bytes(
-            batch
-                .get(offset..offset + 4)
-                .ok_or_else(|| refusal("confirmation frame"))?
-                .try_into()
-                .map_err(refusal)?,
-        ) as usize;
-        let bytes = batch
-            .get(offset..offset + 4 + length + 3309)
-            .ok_or_else(|| refusal("confirmation frame"))?;
-        let (body, signature) = packet(bytes)?;
-        confirmations.push(verify_confirmation(&proposal, body, signature).map_err(refusal)?);
-        offset += bytes.len();
-    }
-    if offset != batch.len() {
-        return Err(refusal("confirmation suffix"));
+    for directory in &contributions {
+        let body = bounded(directory.join("confirmation.bin"), 2048, &mut work)?;
+        let signature = bounded(
+            directory.join("confirmation-signature.bin"),
+            3309,
+            &mut work,
+        )?;
+        confirmations.push(verify_confirmation(&proposal, &body, &signature).map_err(refusal)?);
     }
     let inventory = Arc::new(CommitmentInventory::new(proposal, confirmations).map_err(refusal)?);
     let mut aggregator = SetupAggregator::new(inventory).map_err(refusal)?;
     let indices: Vec<_> = (0..75)
         .filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
         .collect();
-    for position in 0..10 {
+    for (position, directory) in contributions.iter().enumerate() {
         let stage = scratch.join(format!("aggregate-{position}"));
         fs::create_dir(&stage)?;
-        let opening = bounded(
-            Path::new(&paths[16 + position]).join("opening.bin"),
-            4 + 2048 + 3309,
-            &mut work,
-        )?;
-        let header = bounded(
-            Path::new(&paths[16 + position]).join("body-header.bin"),
-            12,
-            &mut work,
-        )?;
-        let mut proof = File::open(&paths[36 + position])?;
+        let opening = bounded(directory.join("opening.bin"), 2048, &mut work)?;
+        let signature = bounded(directory.join("opening-signature.bin"), 3309, &mut work)?;
+        let header = bounded(directory.join("body-header.bin"), 12, &mut work)?;
+        let mut proof = File::open(directory.join("proof.bin"))?;
         let mut proof_header = [0; 4004];
         work.read(&mut proof, &mut proof_header)?;
-        let (body, signature) = packet(&opening)?;
         aggregator
-            .begin(body, signature, &header, &proof_header)
+            .begin(&opening, &signature, &header, &proof_header)
             .map_err(refusal)?;
         for index in &indices {
             let kind = ModulusKind::for_contribution_polynomial(*index).unwrap();
             let length = kind.degree() * kind.coefficient_bytes();
             let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
             let name = polynomial_name(*index);
-            let mut incoming = File::open(Path::new(&paths[26 + position]).join(&name))?;
+            let mut incoming = File::open(directory.join(&name))?;
             let mut prior = if position == 0 {
                 None
             } else {
@@ -342,7 +361,7 @@ fn main() -> io::Result<()> {
             destination.flush()?;
             destination.get_ref().sync_all()?;
         }
-        let mut proof = File::open(&paths[36 + position])?;
+        let mut proof = File::open(directory.join("proof.bin"))?;
         let mut offset = 0;
         loop {
             let count = proof.read(&mut buffer)?;
@@ -369,125 +388,189 @@ fn main() -> io::Result<()> {
     }
     let setup = Arc::new(aggregator.finish().map_err(refusal)?);
     let setup_milliseconds = started.elapsed().as_secs_f64() * 1000.0;
-    let publication = PublicationContext::new(poll.clone(), setup.clone()).map_err(refusal)?;
-    let close = bounded(&paths[46], 4 + 2048 + 3309, &mut work)?;
-    let (body, signature) = packet(&close)?;
-    let close = publication
-        .authenticate_close(body, signature)
+    let close = CloseContext::new(poll.clone(), setup.clone()).map_err(refusal)?;
+    let records = ceremony.join("close");
+    let intent_packet = close_packet(
+        &records,
+        "intent.bin",
+        ClosePurpose::Intent,
+        count,
+        &mut work,
+    )?;
+    let (body, signature) = packet(
+        &intent_packet,
+        maximum_close_message_bytes(ClosePurpose::Intent, count),
+    )?;
+    let intent = close
+        .authenticate_intent(body, signature)
         .map_err(refusal)?;
-    let selection = bounded(&paths[48], 62, &mut work)?;
-    if selection.len() != 62 {
-        return Err(refusal("carrier selection length"));
-    }
-    let carrier_count = u16::from_le_bytes(selection[..2].try_into().unwrap()) as usize;
-    if !(1..=30).contains(&carrier_count) {
-        return Err(refusal("carrier count"));
-    }
-    let mut carriers = Vec::new();
-    for index in 0..carrier_count {
-        let bytes = bounded(
-            Path::new(&paths[47]).join(format!("carrier-{index}.bin")),
-            4 + 2048 + 3309,
+    let proposal_packet = close_packet(
+        &records,
+        "proposal.bin",
+        ClosePurpose::Proposal,
+        count,
+        &mut work,
+    )?;
+    let (proposal_body, proposal_signature) = packet(
+        &proposal_packet,
+        maximum_close_message_bytes(ClosePurpose::Proposal, count),
+    )?;
+    // The proposal names its responses; only those and their listed bodies
+    // are needed. Nothing is accepted before the proposal verifier runs.
+    let named =
+        CloseProposalMessage::parse(proposal_body, count, close.organizer()).map_err(refusal)?;
+    let mut response_packets = Vec::new();
+    let mut needed = BTreeSet::new();
+    for (responder, _) in named.responses() {
+        let bytes = close_packet(
+            &records,
+            &format!("response-{responder}.bin"),
+            ClosePurpose::Response,
+            count,
             &mut work,
         )?;
-        let (body, signature) = packet(&bytes)?;
-        carriers.push(
-            publication
-                .authenticate_witness(body, signature)
+        let (body, _) = packet(
+            &bytes,
+            maximum_close_message_bytes(ClosePurpose::Response, count),
+        )?;
+        let response = CloseResponseMessage::parse(body, count).map_err(refusal)?;
+        needed.extend(response.listed().iter().map(|(_, identity)| *identity));
+        response_packets.push(bytes);
+    }
+    // The archive index names each archived submission and its public body.
+    // Every listed envelope is authenticated; no listed body is read yet.
+    let index = bounded(records.join("submissions.txt"), 1 << 16, &mut work)?;
+    let mut envelopes = Vec::new();
+    let mut bodies = BTreeMap::new();
+    for (ordinal, line) in std::str::from_utf8(&index)
+        .map_err(refusal)?
+        .lines()
+        .enumerate()
+    {
+        let (name, relative) = line
+            .split_once(' ')
+            .ok_or_else(|| refusal("archive index line"))?;
+        if name != format!("submission-{ordinal}.bin") {
+            return Err(refusal("archive index order"));
+        }
+        let bytes = bounded(records.join(name), ENVELOPE_BYTES + 3309, &mut work)?;
+        if bytes.len() != ENVELOPE_BYTES + 3309 {
+            return Err(refusal("archived submission length"));
+        }
+        let authentication =
+            authenticate_envelope(&setup, &bytes[..ENVELOPE_BYTES], &bytes[ENVELOPE_BYTES..])
+                .map_err(refusal)?;
+        let identity = authentication.envelope().identity();
+        if !needed.contains(&identity) || bodies.contains_key(&identity) {
+            continue;
+        }
+        bodies.insert(identity, contained(ceremony, relative)?);
+        envelopes.push(authentication);
+    }
+    let mut responses = Vec::new();
+    for bytes in &response_packets {
+        let (body, signature) = packet(
+            bytes,
+            maximum_close_message_bytes(ClosePurpose::Response, count),
+        )?;
+        responses.push(
+            close
+                .authenticate_response(&intent, body, signature, &envelopes)
                 .map_err(refusal)?,
         );
     }
-    let aggregate = scratch.join("aggregate-9");
-    let mut classifications = Vec::new();
-    let mut slots = Vec::new();
-    for author in 0..10 {
-        let bytes = bounded(
-            Path::new(&paths[49]).join(format!("source-{author}.bin")),
-            1 + 4 + 2048 + 3309,
-            &mut work,
-        )?;
-        let source = match bytes.first() {
-            Some(0) => {
-                let (body, signature) = packet(&bytes[1..])?;
-                classifications.push(None);
-                publication
-                    .authenticate_empty(&close, body, signature)
-                    .map_err(refusal)?
-            }
-            Some(1) if bytes.len() == 1 + 206 + 3309 => {
-                let authentication = authenticate_envelope(&setup, &bytes[1..207], &bytes[207..])
-                    .map_err(refusal)?;
-                let mut authenticated =
-                    BallotBodyAuthentication::new(authentication.clone()).map_err(refusal)?;
-                let mut body = File::open(&paths[50 + author])?;
-                let mut header = [0; 148];
-                work.read(&mut body, &mut header)?;
-                authenticated.push(&header).map_err(refusal)?;
-                let mut classifier =
-                    SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header)
-                        .map_err(refusal)?;
-                if classifier.requires_keys() {
-                    for index in [1, 74] {
-                        classifier.begin_key(index).map_err(refusal)?;
-                        let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-                        let capacity =
-                            CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
-                        let mut key = File::open(aggregate.join(polynomial_name(index)))?;
-                        loop {
-                            let count = key.read(&mut buffer[..capacity])?;
-                            work.read_bytes += count as u64;
-                            if count == 0 {
-                                break;
-                            }
-                            classifier.push_key(&buffer[..count]).map_err(refusal)?;
-                        }
-                        classifier.finish_key().map_err(refusal)?;
-                    }
-                }
+    // Only a usable slot needs its body. Each streams once through the owning
+    // body authentication and classification.
+    let required = close
+        .required_bodies(&intent, &named, &responses)
+        .map_err(refusal)?;
+    let aggregate = scratch.join(format!("aggregate-{}", count - 1));
+    let mut authenticated_bodies = Vec::new();
+    let mut classifications: Vec<_> = (0..count).map(|_| None).collect();
+    let mut ballots = vec![None; count];
+    for (author, identity) in required {
+        let path = bodies
+            .get(&identity)
+            .ok_or_else(|| refusal("usable body outside the archive"))?
+            .clone();
+        let authentication = envelopes
+            .iter()
+            .find(|value| value.envelope().identity() == identity)
+            .ok_or_else(|| refusal("usable envelope outside the archive"))?
+            .clone();
+        let mut authenticated =
+            BallotBodyAuthentication::new(authentication.clone()).map_err(refusal)?;
+        let mut body = File::open(&path)?;
+        let mut header = [0; 148];
+        work.read(&mut body, &mut header)?;
+        authenticated.push(&header).map_err(refusal)?;
+        let mut classifier =
+            SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header)
+                .map_err(refusal)?;
+        if classifier.requires_keys() {
+            for index in [1, 74] {
+                classifier.begin_key(index).map_err(refusal)?;
+                let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
+                let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
+                let mut key = File::open(aggregate.join(polynomial_name(index)))?;
                 loop {
-                    let count = body.read(&mut buffer)?;
+                    let count = key.read(&mut buffer[..capacity])?;
                     work.read_bytes += count as u64;
                     if count == 0 {
                         break;
                     }
-                    authenticated.push(&buffer[..count]).map_err(refusal)?;
-                    classifier.push(&buffer[..count]).map_err(refusal)?;
+                    classifier.push_key(&buffer[..count]).map_err(refusal)?;
                 }
-                classifications.push(Some(classifier.finish().map_err(refusal)?));
-                publication
-                    .ballot_source(authenticated.finish().map_err(refusal)?)
-                    .map_err(refusal)?
+                classifier.finish_key().map_err(refusal)?;
             }
-            _ => return Err(refusal("source kind")),
-        };
-        let selected = (0..3)
-            .map(|ordinal| {
-                let start = 2 + 2 * (author * 3 + ordinal);
-                let index =
-                    u16::from_le_bytes(selection[start..start + 2].try_into().unwrap()) as usize;
-                carriers
-                    .get(index)
-                    .cloned()
-                    .ok_or_else(|| refusal("carrier index"))
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-        slots.push(publication.verify_slot(source, selected).map_err(refusal)?);
+        }
+        loop {
+            let count = body.read(&mut buffer)?;
+            work.read_bytes += count as u64;
+            if count == 0 {
+                break;
+            }
+            authenticated.push(&buffer[..count]).map_err(refusal)?;
+            classifier.push(&buffer[..count]).map_err(refusal)?;
+        }
+        authenticated_bodies.push(authenticated.finish().map_err(refusal)?);
+        classifications[author] = Some(classifier.finish().map_err(refusal)?);
+        ballots[author] = Some(path);
     }
-    let closed = publication
-        .verify_closed_slots(close, slots)
+    let barrier = close
+        .verify_proposal(
+            intent.clone(),
+            proposal_body,
+            proposal_signature,
+            &responses,
+            &authenticated_bodies,
+        )
         .map_err(refusal)?;
-    let incomplete = publication
-        .verify_closed_slots(closed.close().clone(), closed.slots().to_vec())
+    // A second capability over the same records cannot evaluate without
+    // every usable slot's classification.
+    let unclassified = close
+        .verify_proposal(
+            intent,
+            proposal_body,
+            proposal_signature,
+            &responses,
+            &authenticated_bodies,
+        )
         .map_err(refusal)?;
     if !matches!(
-        ClassifiedClosedInventory::new(poll.clone(), setup.clone(), incomplete, vec![]),
+        ClassifiedClosedInventory::new(unclassified, vec![]),
         Err(Error::Incomplete)
     ) {
         return Err(refusal("missing classifications authorized evaluation"));
     }
-    work.save(&output.join("closed.bin"), closed.body())?;
-    let classified =
-        ClassifiedClosedInventory::new(poll, setup, closed, classifications).map_err(refusal)?;
+    let conflicting: Vec<_> = barrier
+        .slots()
+        .iter()
+        .enumerate()
+        .filter_map(|(author, slot)| matches!(slot, ClosedSlot::Conflicting(_)).then_some(author))
+        .collect();
+    work.save(&output.join("proposal.bin"), barrier.proposal().body())?;
+    let classified = ClassifiedClosedInventory::new(barrier, classifications).map_err(refusal)?;
     let accepted: Vec<_> = classified.accepted_authors().collect();
     let classified_milliseconds = started.elapsed().as_secs_f64() * 1000.0;
     let spool_directory = scratch.join("evaluation");
@@ -499,7 +582,7 @@ fn main() -> io::Result<()> {
     };
     let mut operands = Operands {
         aggregate: aggregate.clone(),
-        ballots: &paths[50..60],
+        ballots: &ballots,
         work: &mut work,
     };
     let target = classified
@@ -523,8 +606,8 @@ fn main() -> io::Result<()> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    if let Some(directory) = arguments.get(2) {
-        let stage = match arguments.get(3).map(String::as_str) {
+    if let Some(directory) = arguments.get(3) {
+        let stage = match arguments.get(4).map(String::as_str) {
             Some("certificate") => completion::Stage::Certificate,
             Some("release") => completion::Stage::Release,
             _ => completion::Stage::Terminal,
@@ -545,7 +628,7 @@ fn main() -> io::Result<()> {
         work.save(&output.join(name), terminal.as_bytes())?;
     }
     let report = format!(
-        "{{\"accepted\":{accepted:?},\"targetIdentity\":\"{identity}\",\"ciphertextSha512\":\"{ciphertext_identity}\",\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
+        "{{\"participantCount\":{count},\"accepted\":{accepted:?},\"conflicting\":{conflicting:?},\"targetIdentity\":\"{identity}\",\"ciphertextSha512\":\"{ciphertext_identity}\",\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
         started.elapsed().as_secs_f64() * 1000.0,
         work.read_bytes + spool.work.read_bytes,
         work.written_bytes + spool.work.written_bytes,

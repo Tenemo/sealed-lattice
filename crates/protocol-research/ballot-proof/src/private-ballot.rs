@@ -41,7 +41,11 @@ fn verify_expanded(
     }
     Ok(())
 }
-fn envelope(context: &BallotComputationContext, bytes: &[u8]) -> Result<BallotEnvelope, Error> {
+fn envelope(
+    context: &BallotComputationContext,
+    ballot_time: u64,
+    bytes: &[u8],
+) -> Result<BallotEnvelope, Error> {
     let mut hash =
         ballot_body::BallotBodyHasher::for_body_length(bytes.len()).map_err(|_| Error::Encoding)?;
     for bytes in bytes.chunks(crate::CHUNK_LIMIT) {
@@ -51,6 +55,7 @@ fn envelope(context: &BallotComputationContext, bytes: &[u8]) -> Result<BallotEn
         context.poll().identity(),
         *context.inventory(),
         context.position(),
+        ballot_time,
         bytes.len(),
         hash.finish().map_err(|_| Error::Encoding)?,
     )
@@ -59,11 +64,13 @@ fn envelope(context: &BallotComputationContext, bytes: &[u8]) -> Result<BallotEn
 
 /// Executes and checks one private computation under original retained inputs.
 /// It returns public bytes and an envelope, never a public setup capability.
+/// The ballot time was fixed when the attempt was locked.
 pub fn create(
     context: BallotComputationContext,
     fhe: RetainedAggregatePolynomial,
     auxiliary: RetainedAggregatePolynomial,
     scores: &[u8],
+    ballot_time: u64,
 ) -> Result<(Vec<u8>, BallotEnvelope), Error> {
     let encryption = LinkedBallotWitness::create_with_context(context, fhe, auxiliary, scores)
         .map_err(|_| Error::Context)?;
@@ -85,7 +92,7 @@ pub fn create(
         body.extend(&public.polynomials[index]);
     }
     body.extend(proof_bytes);
-    let envelope = envelope(&context, &body)?;
+    let envelope = envelope(&context, ballot_time, &body)?;
     Ok((body, envelope))
 }
 
@@ -95,6 +102,7 @@ pub fn verify(
     context: &BallotComputationContext,
     keys: &[RetainedAggregatePolynomial; 2],
     body: &[u8],
+    ballot_time: u64,
 ) -> Result<BallotEnvelope, Error> {
     let header = body
         .get(..ballot_body::HEADER_BYTES)
@@ -149,5 +157,5 @@ pub fn verify(
         polynomials,
     };
     verify_expanded(context, &public, &body[offset..])?;
-    envelope(context, body)
+    envelope(context, ballot_time, body)
 }

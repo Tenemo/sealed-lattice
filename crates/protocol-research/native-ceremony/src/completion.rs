@@ -1,4 +1,4 @@
-use ballot_proof::publication::{SourceValue, VerifiedClosedSlots};
+use ballot_proof::close::{ClosedSlot, VerifiedCloseBarrier};
 use evaluation_target::{
     certification::CertificateCollector,
     release::ReleaseContext,
@@ -8,12 +8,15 @@ use evaluation_target::{
 };
 use linked_release_proof::parameters::MAXIMUM_PROOF_BYTES;
 use registration_credentials::{
-    contribution_authentication::SignedOpening, poll::VerifiedPoll, release_signing::body_header,
+    Credential, contribution_authentication::SignedOpening, release_signing::body_header,
     roster::RetainedContributionContext,
 };
-use registration_enrollment::{Enrollment, finality_work::FinalityWork, release_work::ReleaseWork};
+use registration_enrollment::{
+    Enrollment,
+    finality_work::{FinalityWork, OwnBallotStatus},
+    release_work::ReleaseWork,
+};
 use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE};
-use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
     collections::BTreeSet,
     fs::{self, File},
@@ -23,12 +26,6 @@ use std::{
     time::Instant,
 };
 
-fn packet(body: &[u8], signature: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::from((body.len() as u32).to_le_bytes());
-    bytes.extend(body);
-    bytes.extend(signature);
-    bytes
-}
 struct Inputs {
     aggregate: PathBuf,
     ballot: PathBuf,
@@ -105,31 +102,46 @@ impl Write for ProofBytes {
         Ok(())
     }
 }
+/// The participants that sign the target, in order, and the own-ballot status
+/// each enrolled credential and each extra corrupt fork must report.
+pub struct Finality {
+    pub signers: Vec<usize>,
+    pub statuses: Vec<(usize, OwnBallotStatus)>,
+    pub forks: Vec<(usize, Credential, OwnBallotStatus)>,
+}
+
+/// Certifies the target from the barrier with the given target signers; the
+/// others withhold their signatures.
 pub fn run(
     output: &Path,
     scratch_root: &Path,
-    poll: Arc<VerifiedPoll>,
-    setup: Arc<VerifiedSetupAggregate>,
-    closed: VerifiedClosedSlots,
+    barrier: VerifiedCloseBarrier,
     enrollments: &mut [Enrollment],
     openings: &[SignedOpening],
+    finality: Finality,
 ) {
+    let Finality {
+        signers,
+        statuses,
+        forks,
+    } = finality;
     let started = Instant::now();
     let directory = output.join("completion");
     fs::create_dir(&directory).unwrap();
     let aggregate = output.join("aggregates/after-participant-9");
     let ballot = output.join("ballot");
+    let poll = barrier.poll().clone();
+    let setup = barrier.setup().clone();
     let mut classifications = Vec::new();
-    let mut retained_sources = Vec::new();
-    for (author, slot) in closed.slots().iter().enumerate() {
-        match slot.source().value() {
-            SourceValue::Empty { body, signature } => {
+    let mut conflicting = Vec::new();
+    for (author, slot) in barrier.slots().iter().enumerate() {
+        match slot {
+            ClosedSlot::Absent => classifications.push(None),
+            ClosedSlot::Conflicting(_) => {
+                conflicting.push(author);
                 classifications.push(None);
-                let mut bytes = vec![0];
-                bytes.extend(packet(body, signature));
-                retained_sources.push(bytes);
             }
-            SourceValue::Ballot(body) => {
+            ClosedSlot::Usable(body) => {
                 let authentication = body.authentication();
                 let path = crate::ballot_body_path(&ballot, author);
                 classifications.push(Some(
@@ -144,10 +156,6 @@ pub fn run(
                     )
                     .unwrap(),
                 ));
-                let mut bytes = vec![1];
-                bytes.extend(authentication.envelope().bytes());
-                bytes.extend(authentication.signature());
-                retained_sources.push(bytes);
             }
         }
     }
@@ -162,9 +170,7 @@ pub fn run(
             .then_some(author)
         })
         .collect();
-    let classified =
-        ClassifiedClosedInventory::new(poll.clone(), setup.clone(), closed, classifications)
-            .unwrap();
+    let classified = ClassifiedClosedInventory::new(barrier, classifications).unwrap();
     let accepted: Vec<_> = classified.accepted_authors().collect();
     let scratch = scratch_root.join("completion-spills");
     fs::create_dir(&scratch).unwrap();
@@ -216,19 +222,21 @@ pub fn run(
     let mut collector = CertificateCollector::new(target.clone());
     assert_eq!(collector.threshold(), 7);
     assert!(collector.certificate().is_err());
-    for position in 0..enrollments.len() {
-        let body = fs::read(output.join(format!("publication/witness-{position}.bin"))).unwrap();
-        let signature =
-            fs::read(output.join(format!("publication/witness-{position}-signature.bin"))).unwrap();
-        let witness = packet(&body, &signature);
+    assert_eq!(statuses.len(), enrollments.len());
+    for (position, status) in statuses {
+        let work = FinalityWork::new(owners[position].clone(), target.clone()).unwrap();
+        assert_eq!(
+            work.ballot_status(&enrollments[position].credential),
+            status
+        );
+    }
+    for (position, credential, status) in &forks {
+        let work = FinalityWork::new(owners[*position].clone(), target.clone()).unwrap();
+        assert_eq!(work.ballot_status(credential), *status);
+    }
+    for (ordinal, &position) in signers.iter().enumerate() {
         let owner = owners[position].clone();
-        let work = FinalityWork::new(
-            owner,
-            target.clone(),
-            &retained_sources[position],
-            Some(&witness),
-        )
-        .unwrap();
+        let work = FinalityWork::new(owner, target.clone()).unwrap();
         let mut wrong = work.body().to_vec();
         wrong[0] ^= 1;
         assert!(
@@ -263,9 +271,11 @@ pub fn run(
         let mut wrong = packet.clone();
         *wrong.last_mut().unwrap() ^= 1;
         assert!(collector.insert(&wrong).is_err());
-        if position + 1 < collector.threshold() {
-            assert!(collector.certificate().is_err());
-        }
+        // Every signer up to the quorum is needed, including an omitted voter.
+        assert_eq!(
+            collector.certificate().is_ok(),
+            ordinal + 1 >= collector.threshold()
+        );
         crate::write(
             directory.join(format!("target-vote-{position}.bin")),
             &packet,
@@ -283,7 +293,7 @@ pub fn run(
         crate::write(
             directory.join("result.json"),
             format!(
-                "{{\"kind\":\"no-result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"milliseconds\":{}}}\n",
+                "{{\"kind\":\"no-result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"milliseconds\":{}}}\n",
                 started.elapsed().as_secs_f64() * 1000.0
             )
             .as_bytes(),
@@ -415,7 +425,7 @@ pub fn run(
         assert_eq!(result.result().unwrap().identifiers(), expected);
         departures += 1;
     }
-    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
+    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
     println!(
         "Verified original ballot-to-result path, every release subset and bounded departure set"
     );

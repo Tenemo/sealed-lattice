@@ -16,8 +16,9 @@ pub enum SigningPurpose {
     Confirmation,
     Opening,
     Ballot,
-    Close,
-    Witness,
+    CloseIntent,
+    CloseResponse,
+    CloseProposal,
     Target,
     Release,
 }
@@ -79,10 +80,12 @@ impl Credential {
             sealed: true,
             poll_creation_consumed: true,
             proposal_signed: false,
-            ballot_signed: false,
+            signed_ballot: None,
             ballot_attempted: false,
-            ballot_close_signed: false,
-            slot_witness_signed: false,
+            close_intent_signed: false,
+            close_lock: None,
+            close_response: None,
+            close_proposal_signed: false,
             target_signed: false,
             target_lock: None,
             release_started: false,
@@ -162,8 +165,9 @@ mod tests {
             SigningPurpose::Confirmation,
             SigningPurpose::Opening,
             SigningPurpose::Ballot,
-            SigningPurpose::Close,
-            SigningPurpose::Witness,
+            SigningPurpose::CloseIntent,
+            SigningPurpose::CloseResponse,
+            SigningPurpose::CloseProposal,
             SigningPurpose::Target,
             SigningPurpose::Release,
         ];
@@ -174,7 +178,7 @@ mod tests {
                 Err(Error::Consumed)
             ));
         }
-        for undefined in [1 << 8, u16::MAX] {
+        for undefined in [1 << 9, u16::MAX] {
             assert!(matches!(
                 restored.unlock_unused_purposes(undefined),
                 Err(Error::Shape)
@@ -182,12 +186,17 @@ mod tests {
         }
         restored.unlock_unused_purposes(0).unwrap();
         restored
-            .unlock_unused_purposes(SigningPurpose::Ballot.mask() | SigningPurpose::Witness.mask())
+            .unlock_unused_purposes(
+                SigningPurpose::Ballot.mask() | SigningPurpose::CloseResponse.mask(),
+            )
             .unwrap();
         for purpose in purposes {
             assert_eq!(
                 restored.check_unlocked(purpose).is_ok(),
-                matches!(purpose, SigningPurpose::Ballot | SigningPurpose::Witness)
+                matches!(
+                    purpose,
+                    SigningPurpose::Ballot | SigningPurpose::CloseResponse
+                )
             );
         }
         let mut changed = sealed.clone();

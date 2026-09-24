@@ -34,9 +34,9 @@ fn verify_body(
 }
 
 fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8>, Error> {
-    let publication = session.publication.as_ref().ok_or(Error::Context)?;
-    let owner = publication.owner();
-    let setup = publication.setup();
+    let close = session.close.as_ref().ok_or(Error::Context)?;
+    let owner = close.owner();
+    let setup = close.setup();
     let roster = setup.inventory().proposal();
     match operation {
         // The worker commits the target and complete original entropy journal

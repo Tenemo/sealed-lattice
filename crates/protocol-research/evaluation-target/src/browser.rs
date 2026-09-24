@@ -203,11 +203,16 @@ impl State {
                     return Err(Error::Context);
                 }
                 let (poll, setup) = self.context.take().ok_or(Error::Context)?;
-                let closed = ballot_proof::take_browser_closed_slots().ok_or(Error::Incomplete)?;
+                let barrier =
+                    ballot_proof::take_browser_close_barrier().ok_or(Error::Incomplete)?;
+                // The barrier must come from this instance's own setup verifier.
+                if barrier.poll().identity() != poll.identity()
+                    || barrier.setup().inventory().identity() != setup.inventory().identity()
+                {
+                    return Err(Error::Context);
+                }
                 let session = ClassifiedClosedInventory::new(
-                    poll,
-                    setup,
-                    closed,
+                    barrier,
                     std::mem::take(&mut self.classifications),
                 )?
                 .start()?;

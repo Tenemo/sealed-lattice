@@ -13,6 +13,7 @@ import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
@@ -21,7 +22,6 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
-import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
@@ -35,6 +35,8 @@ type NativeResult = {
     kind: string;
     accepted?: number[];
     invalid?: number[];
+    conflicting?: number[];
+    signers?: number[];
     identifiers?: string[];
     releaseSubsets?: number;
     departureSets?: number;
@@ -50,8 +52,12 @@ type NativeResult = {
 const selected = selectProtocolResearchCase(process.argv.slice(2));
 const prefixCase = selected.name === 'native-prefix';
 // The result case reaches the minimum turnout of five with these honest
-// ballots; positions one and two submit authenticated invalid ballots.
+// ballots; positions one and two submit authenticated invalid ballots,
+// corrupt position three equivocates, and honest voter nine is omitted.
+// Corrupt one to three withhold target signatures.
 const honestBallotAuthors = [0, 4, 5, 6, 7];
+const omittedBallotAuthors = [9];
+const resultTargetSigners = [0, 4, 5, 6, 7, 8, 9];
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
 const memoryLimit = 1_073_741_824;
@@ -131,9 +137,7 @@ await runWithLocalRunLog(
                 Number(participants),
             );
             const roster = compileRosterProposalCensus(Number(participants));
-            const publication = compileSlotPublicationResourceCensus(
-                Number(participants),
-            );
+            const close = compileCloseWireCensus(Number(participants));
             const release = compileLinkedReleaseWordProofLayout();
             const degree = fixedModulusBfvInputs.polynomialDegree;
             const coefficientBytes =
@@ -149,8 +153,16 @@ await runWithLocalRunLog(
                 198n +
                 degree * coefficientBytes +
                 release.maximumMultiproofBytes;
+            // The native close records every response, the late control
+            // response and an index line of at most 128 bytes per archived
+            // submission.
+            const closeRecordBound =
+                close.maximumRosterCloseMetadataBytes +
+                close.maximumResponsePacketBytes +
+                128n * close.maximumRosterListedEnvelopes +
+                4096n;
             const sourceBound =
-                publication.maximumEvidenceMetadataBytes +
+                closeRecordBound +
                 participants *
                     (contribution.maximumBodyBytes +
                         registration.maximumProofBytes +
@@ -170,7 +182,11 @@ await runWithLocalRunLog(
                 enrollment.signingPublicKeyBytes +
                 ballot.envelopeBytes +
                 enrollment.signatureBytes +
-                BigInt(honestBallotAuthors.length - 1) *
+                BigInt(
+                    honestBallotAuthors.length +
+                        omittedBallotAuthors.length -
+                        1,
+                ) *
                     (ballot.maximumSignedBodyBytes +
                         ballot.envelopeBytes +
                         enrollment.signatureBytes);
@@ -545,6 +561,54 @@ await runWithLocalRunLog(
                           ? []
                           : [1, 2],
                 );
+                assert.deepEqual(
+                    result.conflicting,
+                    selected.noResult ? [] : [3],
+                );
+                assert.deepEqual(
+                    result.signers,
+                    selected.noResult
+                        ? Array.from(
+                              { length: Number(participants) },
+                              (_unused, position) => position,
+                          )
+                        : resultTargetSigners,
+                );
+                // The Rust close messages match the independent wire model.
+                const records = path.join(output, 'close');
+                assert.equal(
+                    BigInt((await stat(path.join(records, 'intent.bin'))).size),
+                    close.intentPacketBytes,
+                );
+                assert.equal(
+                    BigInt(
+                        (await stat(path.join(records, 'proposal.bin'))).size,
+                    ),
+                    close.proposalPacketBytes,
+                );
+                for (
+                    let position = 0;
+                    position < Number(participants);
+                    position++
+                ) {
+                    const bytes = BigInt(
+                        (
+                            await stat(
+                                path.join(
+                                    records,
+                                    'response-' + position + '.bin',
+                                ),
+                            )
+                        ).size,
+                    );
+                    assert.ok(
+                        bytes >=
+                            close.minimumResponseBodyBytes +
+                                4n +
+                                enrollment.signatureBytes &&
+                            bytes <= close.maximumResponsePacketBytes,
+                    );
+                }
             }
             if (!prefixCase && !selected.noResult) {
                 // Totals 21, 33, 33, 18, 32, 21, 41, 25, 26 and 29; ties go to

@@ -5,6 +5,8 @@ export const compileParticipantBallotCustody = () => {
     const body = compileBallotBodyCensus();
     const randomness = compileBallotRandomnessBudget();
     const maximumScores = 20n;
+    // The attempt lock fixes the ballot time until the envelope carries it.
+    const ballotTimeBytes = 8n;
     const keyBytes = 32n;
     const prefixBytes = 4n + 1n + 2n + 4n + 2n;
     const maximumBodyRecords =
@@ -16,18 +18,23 @@ export const compileParticipantBallotCustody = () => {
             bytes:
                 prefixBytes +
                 maximumScores +
+                ballotTimeBytes +
                 keyBytes * (randomness.recordCount - 1n),
         },
         {
             phase: 14,
             bytes:
-                prefixBytes + maximumScores + keyBytes * randomness.recordCount,
+                prefixBytes +
+                maximumScores +
+                ballotTimeBytes +
+                keyBytes * randomness.recordCount,
         },
         {
             phase: 15,
             bytes:
                 prefixBytes +
                 maximumScores +
+                ballotTimeBytes +
                 keyBytes * (randomness.recordCount + maximumBodyRecords) +
                 body.envelopeBytes,
         },
@@ -36,6 +43,7 @@ export const compileParticipantBallotCustody = () => {
             bytes:
                 prefixBytes +
                 maximumScores +
+                ballotTimeBytes +
                 keyBytes * (randomness.recordCount + maximumBodyRecords) +
                 body.envelopeBytes +
                 32n,

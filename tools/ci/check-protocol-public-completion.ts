@@ -13,17 +13,12 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
 
-type PublicCompletionRun = {
-    completedNative: boolean;
-    emptyCase: boolean;
-    source: string;
-    maximumBodyBytes: number;
-    publicConfiguration: {
-        participantCount: number;
-        inventoryIdentity: string;
-        polynomials: { index: number; bytes: number; width: number }[];
-    };
-    terminal?: { kind: string; identifiers: string[] };
+// A passed native research run. Its ceremony directory holds the public
+// setup, close and completion records the reader verifies.
+type NativeRun = {
+    case: string;
+    output: string;
+    result: { kind: 'result' | 'no-result'; identifiers?: string[] };
 };
 type TerminalResult = {
     kind: 'result' | 'no-result';
@@ -70,28 +65,29 @@ await runWithLocalRunLog(
                 await readFile(path.join(source, 'summary.json'), 'utf8'),
             ) as { result: string };
             assert.equal(summary.result, 'passed');
-            const prior = JSON.parse(
+            const native = JSON.parse(
                 await readFile(path.join(source, 'result.json'), 'utf8'),
-            ) as PublicCompletionRun;
+            ) as NativeRun;
+            assert.match(
+                native.case,
+                /^native-(?:result|empty|invalid-only)$/u,
+            );
+            const ceremony = native.output;
+            assert.ok((await stat(path.join(ceremony, 'close'))).isDirectory());
             let directory: string;
             if (selected.name === 'available-records') {
-                assert.equal(prior.completedNative, true);
-                assert.equal(prior.emptyCase, false);
-                const producer = JSON.parse(
-                        await readFile(
-                            path.join(prior.source, 'result.json'),
-                            'utf8',
-                        ),
-                    ) as { output: string },
-                    original = path.join(producer.output, 'completion');
+                assert.equal(native.case, 'native-result');
+                const original = path.join(ceremony, 'completion');
                 directory = path.join(
                     log.runDirectoryPath,
                     'available-completion',
                 );
                 await mkdir(directory);
+                // The native certificate has exactly the seven honest votes,
+                // so every one is needed; corrupt 1 to 3 signed none.
                 const files = [
                     'target.bin',
-                    ...[2, 3, 4, 5, 6, 7, 9].map(
+                    ...[0, 4, 5, 6, 7, 8, 9].map(
                         (index) => 'target-vote-' + index + '.bin',
                     ),
                     ...[1, 4, 6, 8].flatMap((index) => [
@@ -106,11 +102,11 @@ await runWithLocalRunLog(
                     );
                 // A bad extra vote and a bad extra share precede later valid evidence.
                 const badVote = await readFile(
-                    path.join(original, 'target-vote-0.bin'),
+                    path.join(original, 'target-vote-4.bin'),
                 );
                 badVote[100] ^= 1;
                 await writeFile(
-                    path.join(directory, 'target-vote-0.bin'),
+                    path.join(directory, 'target-vote-1.bin'),
                     badVote,
                     { flag: 'wx' },
                 );
@@ -134,21 +130,10 @@ await runWithLocalRunLog(
                 directory = path.resolve(selected.completionDirectory);
                 assert.ok((await stat(directory)).isDirectory());
             }
-            const paths = (
-                await readFile(path.join(source, 'public-paths.txt'), 'utf8')
-            )
-                .trimEnd()
-                .split(/\r?\n/u);
-            assert.equal(paths.length, 60);
-            paths[5] = path.resolve(
+            const scratch = path.resolve(
                 'temp',
                 'threshold-reader-' + path.basename(log.runDirectoryPath),
             );
-            const manifest = path.join(
-                log.runDirectoryPath,
-                'public-paths.txt',
-            );
-            await writeFile(manifest, paths.join('\n') + '\n', { flag: 'wx' });
             const workspace = path.resolve('crates/protocol-research'),
                 environment = {
                     ...process.env,
@@ -235,7 +220,8 @@ await runWithLocalRunLog(
                     {
                         command: executable,
                         args: [
-                            manifest,
+                            ceremony,
+                            scratch,
                             output,
                             directory,
                             ...(selected.stage !== 'terminal'
@@ -315,15 +301,13 @@ await runWithLocalRunLog(
             ) as TerminalResult | CertificateResult | ReleaseResult;
             const report = JSON.parse(
                 await readFile(path.join(output, 'result.json'), 'utf8'),
-            ) as Record<string, unknown>;
+            ) as Record<string, unknown> & { participantCount: number };
             const emptyCase = report.ciphertextSha512 === '';
+            const participantCount = report.participantCount;
+            assert.equal(emptyCase, native.result.kind === 'no-result');
             assert.ok(
                 verified.certificateAuthors.length >=
-                    prior.publicConfiguration.participantCount -
-                        Math.floor(
-                            (prior.publicConfiguration.participantCount - 1) /
-                                3,
-                        ),
+                    participantCount - Math.floor((participantCount - 1) / 3),
             );
             if (selected.stage === 'certificate') {
                 assert.ok(verified.kind === 'certified-target');
@@ -334,42 +318,33 @@ await runWithLocalRunLog(
                 assert.ok(
                     Number.isInteger(verified.releaseAuthor) &&
                         verified.releaseAuthor >= 0 &&
-                        verified.releaseAuthor <
-                            prior.publicConfiguration.participantCount,
+                        verified.releaseAuthor < participantCount,
                 );
             } else {
                 assert.ok(
                     verified.kind === 'result' || verified.kind === 'no-result',
                 );
-                assert.equal(verified.kind, emptyCase ? 'no-result' : 'result');
-                if (prior.terminal) {
-                    assert.equal(verified.kind, prior.terminal.kind);
-                    if (!emptyCase)
-                        assert.deepEqual(
-                            verified.identifiers,
-                            prior.terminal.identifiers,
-                        );
-                }
+                assert.equal(verified.kind, native.result.kind);
+                if (!emptyCase)
+                    assert.deepEqual(
+                        verified.identifiers,
+                        native.result.identifiers,
+                    );
             }
             if (selected.name === 'available-records') {
                 const terminal = verified as TerminalResult;
                 assert.equal(terminal.kind, 'result');
-                assert.ok(prior.terminal);
-                assert.deepEqual(
-                    terminal.identifiers,
-                    prior.terminal.identifiers,
-                );
                 assert.deepEqual(
                     terminal.certificateAuthors,
-                    [2, 3, 4, 5, 6, 7, 9],
+                    [0, 4, 5, 6, 7, 8, 9],
                 );
                 assert.deepEqual(terminal.releaseAuthors, [1, 4, 6, 8]);
-                assert.deepEqual(terminal.unavailableVotes, [1, 8]);
-                assert.deepEqual(terminal.invalidVotes, [0]);
+                assert.deepEqual(terminal.unavailableVotes, [2, 3]);
+                assert.deepEqual(terminal.invalidVotes, [1]);
                 assert.ok(terminal.invalidReleases.includes(2));
                 for (const file of [
-                    'target-vote-1.bin',
-                    'target-vote-8.bin',
+                    'target-vote-2.bin',
+                    'target-vote-3.bin',
                     'release-0.bin',
                     'release-3.bin',
                     'release-5.bin',
@@ -384,13 +359,10 @@ await runWithLocalRunLog(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
                     {
-                        source:
-                            selected.name === 'available-records'
-                                ? prior.source
-                                : source,
-                        publicCompletionBaseline: source,
-                        completedNative: true,
+                        source,
+                        ceremony,
                         emptyCase,
+                        participantCount,
                         stage: selected.stage,
                         output,
                         completionDirectory: directory,
@@ -398,8 +370,6 @@ await runWithLocalRunLog(
                             output,
                             'certificate-records',
                         ),
-                        publicConfiguration: prior.publicConfiguration,
-                        maximumBodyBytes: prior.maximumBodyBytes,
                         [selected.stage]: verified,
                         peakMemory,
                         samples,
@@ -410,10 +380,10 @@ await runWithLocalRunLog(
                             selected.name === 'available-records'
                                 ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
                                 : selected.stage === 'certificate'
-                                  ? 'Public setup, source classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
+                                  ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
                                   : selected.stage === 'release'
                                     ? 'One supplied release message passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct a terminal. This is component evidence, not terminal availability or a complete security argument.'
-                                    : 'Public setup, source classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
+                                    : 'Public setup, close barrier, usable-slot classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
                         result: report,
                     },
                     null,

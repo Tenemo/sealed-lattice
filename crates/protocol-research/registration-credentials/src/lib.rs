@@ -2,6 +2,8 @@
 pub mod ballot_authentication;
 #[path = "ballot-body.rs"]
 pub mod ballot_body;
+#[path = "close-signing.rs"]
+pub mod close_signing;
 #[path = "contribution-authentication.rs"]
 pub mod contribution_authentication;
 #[path = "contribution-commitment.rs"]
@@ -10,8 +12,6 @@ mod custody;
 pub use custody::SigningPurpose;
 pub mod foundation;
 pub mod poll;
-#[path = "publication-signing.rs"]
-pub mod publication_signing;
 pub mod registration;
 #[path = "release-signing.rs"]
 pub mod release_signing;
@@ -57,10 +57,14 @@ pub struct Credential {
     sealed: bool,
     poll_creation_consumed: bool,
     proposal_signed: bool,
-    ballot_signed: bool,
+    // The signed envelope identity and ballot time.
+    signed_ballot: Option<([u8; 64], u64)>,
     ballot_attempted: bool,
-    ballot_close_signed: bool,
-    slot_witness_signed: bool,
+    close_intent_signed: bool,
+    // The first authenticated close intent and its close time.
+    close_lock: Option<([u8; 64], u64)>,
+    close_response: Option<[u8; 64]>,
+    close_proposal_signed: bool,
     target_signed: bool,
     target_lock: Option<[u8; 64]>,
     release_started: bool,
@@ -89,10 +93,12 @@ impl Credential {
             sealed: false,
             poll_creation_consumed: false,
             proposal_signed: false,
-            ballot_signed: false,
+            signed_ballot: None,
             ballot_attempted: false,
-            ballot_close_signed: false,
-            slot_witness_signed: false,
+            close_intent_signed: false,
+            close_lock: None,
+            close_response: None,
+            close_proposal_signed: false,
             target_signed: false,
             target_lock: None,
             release_started: false,

@@ -1,4 +1,5 @@
 import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
@@ -6,7 +7,6 @@ import { compileParticipantBallotCustody } from '#tests/participant-ballot-custo
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
-import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
 export const compileParticipantCustodyCensus = () => {
@@ -71,27 +71,18 @@ export const compileParticipantCustodyCensus = () => {
     const completedBallotBytes = ballot.phaseBytes.find(
         (value) => value.phase === 17,
     )!.bytes;
-    const publication = compileSlotPublicationResourceCensus(
-        body.participantCount,
-    );
-    const maximumWithVotedPublication =
+    // A voter's completed ballot precedes its close state; a nonvoter's
+    // close state is the same size.
+    const close = compileCloseWireCensus(body.participantCount);
+    const maximumWithClose =
         maximumCompletedMetadataBytes +
         4n +
         completedBallotBytes +
         4n +
-        publication.maximumVotedParticipantStateBytes;
-    const maximumWithEmptyPublication =
-        maximumCompletedMetadataBytes +
-        4n +
-        4n +
-        publication.maximumParticipantStateBytes;
-    const maximumWithPublication =
-        maximumWithVotedPublication > maximumWithEmptyPublication
-            ? maximumWithVotedPublication
-            : maximumWithEmptyPublication;
+        close.maximumParticipantStateBytes;
     const targetSigning = compileTargetSigningStateCensus();
     const maximumWithTargetSigning =
-        maximumWithPublication + 4n + targetSigning.maximumStateBytes;
+        maximumWithClose + 4n + targetSigning.maximumStateBytes;
     const release = compileParticipantReleaseCustody();
     const maximumWithRelease =
         maximumWithTargetSigning + 4n + release.maximumStateBytes;
@@ -140,7 +131,7 @@ export const compileParticipantCustodyCensus = () => {
         maximumRootRecords,
         setupReferenceBytes,
         maximumRootBytes,
-        maximumPublicationStateBytes: publication.maximumParticipantStateBytes,
+        maximumCloseStateBytes: close.maximumParticipantStateBytes,
         maximumTargetSigningStateBytes: targetSigning.maximumStateBytes,
         maximumPublicBodyCiphertextBytes,
         maximumSigningPlaintextBytes,

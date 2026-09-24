@@ -1,11 +1,11 @@
 mod aggregate;
+mod close;
 mod completion;
 mod contribution;
-#[path = "no-result-publication.rs"]
-mod no_result_publication;
+#[path = "no-result-close.rs"]
+mod no_result_close;
 #[path = "public-output.rs"]
 mod public_output;
-mod publication;
 use registration_credentials::{
     ballot_authentication::{BallotEnvelope, RETAINED_SETUP_TAG_BYTES},
     contribution_authentication::{CommitmentInventory, SignedOpening, verify_confirmation},
@@ -18,7 +18,7 @@ use registration_credentials::{
     roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::verify_roster_proposal,
 };
-use registration_enrollment::Enrollment;
+use registration_enrollment::{Enrollment, finality_work::OwnBallotStatus};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
     fs::{self, File},
@@ -38,6 +38,9 @@ const HONEST_BALLOTS: [(usize, [u8; 10]); 5] = [
     (6, [5, 5, 5, 5, 5, 5, 10, 5, 5, 5]),
     (7, [2, 8, 8, 1, 9, 3, 10, 4, 6, 7]),
 ];
+/// Honest voter nine's on-time ballot, which the relay withholds from every
+/// proposed response. It is omitted, so the result excludes it.
+const OMITTED_BALLOT: (usize, [u8; 10]) = (9, [10, 1, 1, 10, 1, 1, 1, 1, 1, 10]);
 
 fn write(path: impl AsRef<Path>, bytes: &[u8]) {
     let mut output = public_output::PublicOutput::create(path).unwrap();
@@ -75,7 +78,7 @@ impl BallotInputs<'_> {
         opening: &SignedOpening,
         position: usize,
         scores: &[u8],
-    ) -> (BallotEnvelope, [u8; 3309], PathBuf) {
+    ) -> close::Submission {
         let proposal = RetainedContributionContext::parse(
             self.poll.identity(),
             self.poll.runtime(),
@@ -123,9 +126,17 @@ impl BallotInputs<'_> {
             }
             work.command(credential, 3, 0, &[]).unwrap();
         }
-        work.command(credential, 4, 0, scores).unwrap();
+        let ballot_time = close::now_milliseconds();
+        work.command(
+            credential,
+            4,
+            0,
+            &[ballot_time.to_le_bytes().as_slice(), scores].concat(),
+        )
+        .unwrap();
         let envelope =
             BallotEnvelope::decode(&work.command(credential, 10, 0, &[]).unwrap()).unwrap();
+        assert_eq!(envelope.ballot_time(), ballot_time);
         let path = ballot_body_path(self.directory, position);
         let mut body = public_output::PublicOutput::create(&path).unwrap();
         for offset in (0..envelope.body_length()).step_by(1 << 20) {
@@ -166,7 +177,11 @@ impl BallotInputs<'_> {
             self.directory.join(format!("signature-{position}.bin")),
             &signature,
         );
-        (envelope, signature, path)
+        close::Submission {
+            envelope,
+            signature,
+            body: path,
+        }
     }
 }
 struct EnrollmentOutput<'a> {
@@ -402,22 +417,38 @@ fn main() {
         &output.join("aggregates"),
     ));
     if let Some(mode) = arguments.get(3) {
-        let closed = no_result_publication::run(
+        let invalid_only = mode == "invalid-only";
+        let barrier = no_result_close::run(
             &output,
             poll.clone(),
             setup.clone(),
             &mut enrollments,
             &openings,
-            mode == "invalid-only",
+            invalid_only,
         );
+        let statuses = (0..enrollments.len())
+            .map(|position| {
+                (
+                    position,
+                    if invalid_only && position == 0 {
+                        OwnBallotStatus::Included
+                    } else {
+                        OwnBallotStatus::NotCast
+                    },
+                )
+            })
+            .collect();
         completion::run(
             &output,
             &scratch,
-            poll,
-            setup,
-            closed,
+            barrier,
             &mut enrollments,
             &openings,
+            completion::Finality {
+                signers: (0..10).collect(),
+                statuses,
+                forks: Vec::new(),
+            },
         );
         return;
     }
@@ -583,8 +614,10 @@ fn main() {
         work.command(&mut enrollments[0].credential, 3, 0, &[])
             .unwrap();
     }
-    // Refused score vectors consume neither the ballot attempt nor the keys
-    // already delivered to this session.
+    // Refused inputs consume neither the ballot attempt nor the keys already
+    // delivered to this session.
+    let ballot_time = close::now_milliseconds();
+    let timed = |scores: &[u8]| [ballot_time.to_le_bytes().as_slice(), scores].concat();
     let valid = HONEST_BALLOTS[0].1;
     let mut refused = vec![
         Vec::new(),
@@ -596,13 +629,16 @@ fn main() {
         scores[index] = score;
         refused.push(scores);
     }
-    for scores in refused {
+    let mut inputs: Vec<_> = refused.iter().map(|scores| timed(scores)).collect();
+    // A score vector without its ballot time.
+    inputs.push(valid[..7].to_vec());
+    for input in inputs {
         assert!(matches!(
-            work.command(&mut enrollments[0].credential, 4, 0, &scores),
+            work.command(&mut enrollments[0].credential, 4, 0, &input),
             Err(registration_credentials::Error::Shape)
         ));
     }
-    work.command(&mut enrollments[0].credential, 4, 0, &valid)
+    work.command(&mut enrollments[0].credential, 4, 0, &timed(&valid))
         .unwrap();
     let encoded = work
         .command(&mut enrollments[0].credential, 10, 0, &[])
@@ -654,6 +690,7 @@ fn main() {
         poll.identity(),
         inventory.identity(),
         0,
+        ballot_time,
         body.length(),
         *body.identity(),
     )
@@ -775,7 +812,7 @@ fn main() {
         )
         .unwrap();
     let mut changed_envelope = *envelope.bytes();
-    changed_envelope[142] ^= 1;
+    changed_envelope[150] ^= 1;
     let changed_envelope =
         registration_credentials::ballot_authentication::BallotEnvelope::decode(&changed_envelope)
             .unwrap();
@@ -812,6 +849,7 @@ fn main() {
             &mut enrollments[0].credential,
             &body,
             &setup,
+            ballot_time,
             *random::<32>()
         )
         .is_err()
@@ -848,6 +886,7 @@ fn main() {
             &mut enrollments[1].credential,
             &body,
             &setup,
+            ballot_time,
             *random::<32>()
         )
         .is_err()
@@ -856,6 +895,7 @@ fn main() {
         *body.relation().poll(),
         setup.inventory().identity(),
         1,
+        close::now_milliseconds(),
         body.length(),
         *body.identity(),
     )
@@ -910,6 +950,7 @@ fn main() {
             poll.identity(),
             setup.inventory().identity(),
             2,
+            close::now_milliseconds(),
             envelope.body_length(),
             hash.finish().unwrap(),
         )
@@ -996,19 +1037,31 @@ fn main() {
         final_keys: &final_keys,
         directory: &ballot_directory,
     };
-    let additional: Vec<_> = HONEST_BALLOTS[1..]
-        .iter()
-        .map(|(position, scores)| {
-            let ballot = ballot_inputs.cast(
-                &mut enrollments[*position],
-                &openings[*position],
-                *position,
-                scores,
-            );
-            println!("Cast and accepted honest ballot {position}");
-            (*position, ballot)
-        })
-        .collect();
+    let mut submissions: Vec<Option<close::Submission>> = vec![None; enrollments.len()];
+    submissions[0] = Some(close::Submission {
+        envelope: envelope.clone(),
+        signature,
+        body: body_path.clone(),
+    });
+    submissions[1] = Some(close::Submission {
+        envelope: wrong_position.clone(),
+        signature: wrong_position_signature,
+        body: body_path.clone(),
+    });
+    submissions[2] = Some(close::Submission {
+        envelope: invalid_proof_envelope.clone(),
+        signature: invalid_proof_signature,
+        body: invalid_proof_path.clone(),
+    });
+    for (position, scores) in HONEST_BALLOTS[1..].iter().chain([&OMITTED_BALLOT]) {
+        submissions[*position] = Some(ballot_inputs.cast(
+            &mut enrollments[*position],
+            &openings[*position],
+            *position,
+            scores,
+        ));
+        println!("Cast and accepted honest ballot {position}");
+    }
     let corrupt_record = &setup.inventory().proposal().proposal().records()[3];
     let restore_corrupt = || {
         registration_credentials::Credential::open_complete(
@@ -1020,49 +1073,48 @@ fn main() {
         )
         .unwrap()
     };
-    // A corrupt participant's own root may unlock any purpose on its fork.
-    let mut corrupt_fork = restore_corrupt();
-    corrupt_fork
-        .unlock_unused_purposes(
-            registration_credentials::SigningPurpose::Ballot.mask()
-                | registration_credentials::SigningPurpose::Witness.mask(),
-        )
-        .unwrap();
-    let corrupt_credentials = [corrupt_fork, restore_corrupt()];
-    let mut ballots = vec![None; enrollments.len()];
-    ballots[0] = Some((&envelope, &signature, body_path.as_path()));
-    ballots[1] = Some((
-        &wrong_position,
-        &wrong_position_signature,
-        body_path.as_path(),
-    ));
-    ballots[2] = Some((
-        &invalid_proof_envelope,
-        &invalid_proof_signature,
-        invalid_proof_path.as_path(),
-    ));
-    for (position, (envelope, signature, path)) in &additional {
-        ballots[*position] = Some((envelope, signature, path.as_path()));
-    }
-    let closed = publication::run(
+    // A corrupt participant's own root may unlock any purpose on its forks.
+    let restored = close::Restored {
+        equivocations: std::array::from_fn(|_| {
+            let mut fork = restore_corrupt();
+            fork.unlock_unused_purposes(registration_credentials::SigningPurpose::Ballot.mask())
+                .unwrap();
+            fork
+        }),
+        corrupt: restore_corrupt(),
+        organizer: restore_credential(),
+    };
+    let (barrier, late_fork) = close::run(
         &output,
-        poll.clone(),
-        setup.clone(),
+        poll,
+        setup,
         &mut enrollments,
         &openings,
-        corrupt_credentials,
-        &ballots,
+        &submissions,
+        restored,
     );
+    // Corrupt 1, 2 and 3 withhold target signatures, so the certificate needs
+    // every honest participant, including omitted voter nine.
+    use OwnBallotStatus::{Included, NotCast, Omitted};
     completion::run(
         &output,
         &scratch,
-        poll,
-        setup,
-        closed,
+        barrier,
         &mut enrollments,
         &openings,
+        completion::Finality {
+            signers: vec![0, 4, 5, 6, 7, 8, 9],
+            statuses: [
+                Included, Included, Included, NotCast, Included, Included, Included, Included,
+                NotCast, Omitted,
+            ]
+            .into_iter()
+            .enumerate()
+            .collect(),
+            forks: vec![(3, late_fork, OwnBallotStatus::Late)],
+        },
     );
     println!(
-        "Fresh original setup, linked proof, signed ballot and slot publication evidence verified"
+        "Fresh original setup, linked proof, signed ballot and quorum close evidence verified"
     );
 }

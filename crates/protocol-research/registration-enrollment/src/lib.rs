@@ -9,12 +9,12 @@ use std::io::{self, Write};
 use zeroize::Zeroizing;
 
 pub mod ballot;
+#[path = "close-work.rs"]
+pub mod close_work;
 #[path = "contribution-signing.rs"]
 pub mod contribution_signing;
 #[path = "finality-work.rs"]
 pub mod finality_work;
-#[path = "publication-work.rs"]
-pub mod publication_work;
 #[path = "release-work.rs"]
 pub mod release_work;
 

@@ -9,8 +9,9 @@ import {
     envelopeIdentity,
     exploreCompletionProfileExecutions,
     exploreJointCloseViews,
-    listHeldEnvelopes,
+    listKnownEnvelopes,
     runCloseExecution,
+    usableEnvelopes,
     verifyCloseProposal,
     verifyCloseResponse,
     type CloseEnvelope,
@@ -38,6 +39,8 @@ const supportedParticipantCounts = Array.from(
     (_unused, index) => index + 3,
 );
 const mandatoryVisitCeiling = 10;
+const memberCount = (mask: number): number =>
+    [...mask.toString(2)].filter((digit) => digit === '1').length;
 const binomial = (n: number, k: number): number => {
     let value = 1;
     for (let index = 1; index <= k; index += 1)
@@ -73,9 +76,9 @@ describe('close response model', () => {
             );
     });
 
-    it('lists on-time held envelopes with complete bodies, at most two per slot', () => {
+    it('lists one on-time envelope with its body and two known ones without', () => {
         const intent: CloseIntent = { variant: 0, closeTime: 5 };
-        const held = [
+        const known = [
             envelope(4, 2, 5),
             envelope(4, 0, 1),
             envelope(4, 1, 2),
@@ -83,18 +86,44 @@ describe('close response model', () => {
             envelope(2, 0, 3, { bodyAvailable: false }),
             envelope(3, 0, 5, { validProof: false }),
             envelope(3, 0, 5, { validProof: false }),
+            envelope(5, 0, 4, { bodyAvailable: false }),
+            envelope(5, 1, 5, { bodyAvailable: false }),
+            envelope(6, 0, 2),
+            envelope(6, 1, 7),
         ];
-        expect(listHeldEnvelopes(held, intent)).toEqual([
+        const held = new Set(
+            known
+                .filter(({ bodyAvailable }) => bodyAvailable)
+                .map(({ author, variant }) =>
+                    envelopeIdentity(author, variant),
+                ),
+        );
+        // Slot 1 is late; slot 2's only envelope has no body; slot 5 lists
+        // two bodiless envelopes; slot 6's second envelope is late.
+        expect(listKnownEnvelopes(known, held, intent)).toEqual([
             envelopeIdentity(3, 0),
             envelopeIdentity(4, 0),
             envelopeIdentity(4, 1),
+            envelopeIdentity(5, 0),
+            envelopeIdentity(5, 1),
+            envelopeIdentity(6, 0),
         ]);
         expect(
-            listHeldEnvelopes(held, intent, Number.POSITIVE_INFINITY),
-        ).toHaveLength(4);
+            listKnownEnvelopes(known, held, intent, Number.POSITIVE_INFINITY),
+        ).toHaveLength(7);
+        // Without bodies only the slots with two known envelopes are listed.
+        expect(listKnownEnvelopes(known, new Set(), intent)).toEqual([
+            envelopeIdentity(4, 0),
+            envelopeIdentity(4, 1),
+            envelopeIdentity(5, 0),
+            envelopeIdentity(5, 1),
+        ]);
+        expect(
+            listKnownEnvelopes(known, held, { variant: 0, closeTime: 0 }),
+        ).toEqual([]);
     });
 
-    it('refuses late, bodiless, unknown, unordered and overfull responses', () => {
+    it('refuses late, unknown, unordered and overfull responses but not bodiless entries', () => {
         const intents = new Map([[0, { variant: 0, closeTime: 5 }]]);
         const envelopes = byIdentity([
             envelope(1, 0, 1),
@@ -121,9 +150,10 @@ describe('close response model', () => {
             ),
         ).toBe(true);
         expect(verify(response([]))).toBe(true);
+        // A response needs the listed envelope, not its body.
+        expect(verify(response([envelopeIdentity(4, 0)]))).toBe(true);
         for (const listed of [
             [envelopeIdentity(3, 0)],
-            [envelopeIdentity(4, 0)],
             [envelopeIdentity(5, 0)],
             [envelopeIdentity(2, 0), envelopeIdentity(1, 0)],
             [envelopeIdentity(1, 0), envelopeIdentity(1, 0)],
@@ -185,6 +215,51 @@ describe('close response model', () => {
             ),
         ).toBe(true);
         expect(verify([response(0), response(1), response(2)], 2)).toBe(false);
+    });
+
+    it('requires the body of every usable slot and of no conflicting slot', () => {
+        const profile = deriveCloseProfile(4);
+        const intents = new Map([[0, { variant: 0, closeTime: 5 }]]);
+        const withheld = envelope(3, 0, 1, { bodyAvailable: false });
+        const other = envelope(3, 1, 1);
+        const envelopes = byIdentity([envelope(1, 0, 1), withheld, other]);
+        const response = (
+            signer: number,
+            listed: readonly string[],
+        ): CloseResponse => ({ signer, intent: 0, listed });
+        const verify = (responses: readonly CloseResponse[]) =>
+            verifyCloseProposal(
+                { intent: 0, responses },
+                intents,
+                envelopes,
+                profile,
+            );
+        const usable = [envelopeIdentity(1, 0)];
+        // The withheld envelope alone would make its slot usable.
+        expect(
+            verify([
+                response(0, usable),
+                response(1, [...usable, envelopeIdentity(3, 0)]),
+                response(2, usable),
+            ]),
+        ).toBe(false);
+        // Listed with a second envelope, the slot is conflicting.
+        const conflicting = [
+            response(0, usable),
+            response(1, [...usable, envelopeIdentity(3, 0)]),
+            response(2, [...usable, envelopeIdentity(3, 1)]),
+        ];
+        expect(verify(conflicting)).toBe(true);
+        expect(
+            usableEnvelopes(conflicting, envelopes).map(({ author }) => author),
+        ).toEqual([1]);
+        expect(
+            closeInventory(
+                { intent: 0, responses: conflicting },
+                envelopes,
+                profile,
+            ).slots,
+        ).toEqual(['absent', 'accepted', 'absent', 'conflicting']);
     });
 
     it('classifies the union and derives the turnout branch at its boundary', () => {
@@ -291,6 +366,60 @@ describe('close response model', () => {
         expect(census.certifiedExecutions).toBeGreaterThan(
             census.executions / 2,
         );
+        // Every honest organizer closes despite late bodies filling its slots
+        // and a different envelope for every other honest participant.
+        expect(census.targetedExecutions).toBeGreaterThan(0);
+        expect(census.targetedCertifiedExecutions).toBe(
+            census.targetedExecutions,
+        );
+        expect(census.maximumHeldPerSlot).toBe(2);
+        expect(census.maximumReceivedPerHonestSlot).toBe(1);
+        expect(census.maximumReceivedPerCorruptSlot).toBeLessThanOrEqual(4);
+        expect(census.maximumOrganizerRequestsPerSlot).toBe(1);
+    });
+
+    it('closes when corrupt participants fill the organizer body slots and split the others', () => {
+        for (const participantCount of [4, 7, 10, 13]) {
+            const { faultBound, quorum } = goalThresholds(participantCount);
+            const corrupt =
+                ((1 << faultBound) - 1) << (participantCount - faultBound);
+            const result = runCloseExecution({
+                participantCount,
+                corrupt,
+                voters: ((1 << participantCount) - 1) & ~corrupt,
+                departedBeforeClose: 0,
+                departedAfterCertification: 0,
+                isolated: 0,
+                seed: participantCount,
+                corruptVotes: false,
+                corruptEquivocation: 0,
+                corruptBackdating: false,
+                corruptWithholdsBody: false,
+                corruptSignTargets: false,
+                corruptOmitsIsolated: false,
+                refuseAfterOwnOmission: false,
+                corruptTargetsOrganizer: true,
+                corruptWithholdsResponses: true,
+            });
+            expect(result.findings).toEqual([]);
+            expect(result.certifiedTargets).toBe(1);
+            expect(result.omittedHonest).toBe(0);
+            // Every corrupt slot is conflicting through the organizer's own
+            // listing, and every honest ballot is accepted.
+            expect(result.inventory!.slots).toEqual(
+                Array.from({ length: participantCount }, (_unused, author) =>
+                    author >= participantCount - faultBound
+                        ? 'conflicting'
+                        : 'accepted',
+                ),
+            );
+            expect(memberCount(result.inventory!.responders)).toBe(quorum);
+            // The organizer receives two late bodies, discarded at its lock,
+            // and requests at most the one known body before a second
+            // envelope for the slot is known.
+            expect(result.maximumReceivedPerCorruptSlot).toBeLessThanOrEqual(3);
+            expect(result.maximumOrganizerRequestsPerSlot).toBe(1);
+        }
     });
 
     it('ignores replayed messages of another action', () => {
@@ -331,6 +460,12 @@ describe('close response model', () => {
         expect(census.omittedSignerFindings).toEqual([]);
         expect(census.uncappedResponseEntries).toBe(census.equivocations);
         expect(census.cappedResponseEntries).toBe(2);
+        expect(census.earlyOrganizerSelection).toBe(1);
+        expect(census.lateOrganizerSelection).toBe(census.organizerStallQuorum);
+        expect(census.lateOwnListing).toEqual([
+            envelopeIdentity(9, 0),
+            envelopeIdentity(9, 1),
+        ]);
         expect(census.supportRuleIncludesEnvelope).toBe(false);
         expect(census.unionRuleIncludesEnvelope).toBe(true);
     });

@@ -1,5 +1,9 @@
 use crate::{Credential, Error, SigningPurpose, roster_authentication::OrganizerSignedRoster};
-use crate::{poll::VerifiedPoll, roster::RetainedContributionContext};
+use crate::{
+    foundation::{CanonicalItem, hash_foundation_tuple_512},
+    poll::VerifiedPoll,
+    roster::RetainedContributionContext,
+};
 use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
@@ -8,7 +12,8 @@ use stateful_sha3::{Digest, Sha3_512};
 use zeroize::Zeroizing;
 
 pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
-pub const ENVELOPE_BYTES: usize = 4 + 64 + 64 + 2 + 8 + 64;
+pub const ENVELOPE_BYTES: usize = 4 + 64 + 64 + 2 + 8 + 8 + 64;
+pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-id/v1";
 pub const RETAINED_SETUP_TAG_BYTES: usize = 64;
 const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v1";
 
@@ -38,6 +43,8 @@ impl RetainedBallotOwner {
 }
 
 /// Canonical public envelope bytes; construction supplies no proof or signature authority.
+/// The ballot time is the author's clock reading when its honest attempt lock
+/// was created, in Unix milliseconds; only its order against a close time matters.
 #[derive(Clone)]
 pub struct BallotEnvelope {
     bytes: [u8; ENVELOPE_BYTES],
@@ -47,6 +54,7 @@ impl BallotEnvelope {
         poll: [u8; 64],
         inventory: [u8; 64],
         position: usize,
+        ballot_time: u64,
         body_length: usize,
         body_identity: [u8; 64],
     ) -> Result<Self, Error> {
@@ -61,25 +69,27 @@ impl BallotEnvelope {
             return Err(Error::Shape);
         }
         let mut bytes = [0; ENVELOPE_BYTES];
-        bytes[..4].copy_from_slice(b"LBE1");
+        bytes[..4].copy_from_slice(b"LBE2");
         bytes[4..68].copy_from_slice(&poll);
         bytes[68..132].copy_from_slice(&inventory);
         bytes[132..134].copy_from_slice(&(position as u16).to_le_bytes());
-        bytes[134..142].copy_from_slice(&(body_length as u64).to_le_bytes());
-        bytes[142..].copy_from_slice(&body_identity);
+        bytes[134..142].copy_from_slice(&ballot_time.to_le_bytes());
+        bytes[142..150].copy_from_slice(&(body_length as u64).to_le_bytes());
+        bytes[150..].copy_from_slice(&body_identity);
         Ok(Self { bytes })
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != ENVELOPE_BYTES || &bytes[..4] != b"LBE1" {
+        if bytes.len() != ENVELOPE_BYTES || &bytes[..4] != b"LBE2" {
             return Err(Error::Shape);
         }
         Self::new(
             bytes[4..68].try_into().unwrap(),
             bytes[68..132].try_into().unwrap(),
             u16::from_le_bytes(bytes[132..134].try_into().unwrap()) as usize,
-            usize::try_from(u64::from_le_bytes(bytes[134..142].try_into().unwrap()))
+            u64::from_le_bytes(bytes[134..142].try_into().unwrap()),
+            usize::try_from(u64::from_le_bytes(bytes[142..150].try_into().unwrap()))
                 .map_err(|_| Error::Shape)?,
-            bytes[142..].try_into().unwrap(),
+            bytes[150..].try_into().unwrap(),
         )
     }
     pub fn bytes(&self) -> &[u8; ENVELOPE_BYTES] {
@@ -94,11 +104,24 @@ impl BallotEnvelope {
     pub fn position(&self) -> usize {
         u16::from_le_bytes(self.bytes[132..134].try_into().unwrap()) as usize
     }
+    pub fn ballot_time(&self) -> u64 {
+        u64::from_le_bytes(self.bytes[134..142].try_into().unwrap())
+    }
     pub fn body_length(&self) -> usize {
-        u64::from_le_bytes(self.bytes[134..142].try_into().unwrap()) as usize
+        u64::from_le_bytes(self.bytes[142..150].try_into().unwrap()) as usize
     }
     pub fn body_identity(&self) -> &[u8; 64] {
-        self.bytes[142..].try_into().unwrap()
+        self.bytes[150..].try_into().unwrap()
+    }
+    /// The submission identity. Signatures are carriers, so two signatures on
+    /// the same envelope are one submission.
+    pub fn identity(&self) -> [u8; 64] {
+        hash_foundation_tuple_512(
+            ENVELOPE_IDENTITY_DOMAIN,
+            &[CanonicalItem::variable_bytes(self.bytes).expect("fixed envelope length")],
+        )
+        .expect("fixed envelope identity input")
+        .into_bytes()
     }
 }
 
@@ -150,10 +173,11 @@ impl Credential {
     }
     /// Mirrors an already authenticated local ballot intent. It grants no
     /// public publication and cannot restore unused authority.
+    /// No attempt starts after an authenticated close intent.
     pub fn reserve_ballot_attempt(&mut self, owner: &RetainedBallotOwner) -> Result<(), Error> {
         self.check_ballot_owner(owner)?;
         self.check_unlocked(SigningPurpose::Ballot)?;
-        if self.ballot_signed {
+        if self.signed_ballot.is_some() || self.close_lock.is_some() {
             return Err(Error::Consumed);
         }
         self.ballot_attempted = true;
@@ -227,7 +251,7 @@ impl Credential {
         envelope: &BallotEnvelope,
         signature: &[u8],
     ) -> Result<(), Error> {
-        if self.ballot_signed {
+        if self.signed_ballot.is_some() {
             return Err(Error::Consumed);
         }
         if self.completed_body != Some(owner.owner_body)
@@ -244,7 +268,7 @@ impl Credential {
         if !public.verify(envelope.bytes(), &signature, BALLOT_SIGNATURE_CONTEXT) {
             return Err(Error::Crypto);
         }
-        self.ballot_signed = true;
+        self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
         Ok(())
     }
     /// One signature operation beneath the authenticated participant-state boundary.
@@ -255,7 +279,7 @@ impl Credential {
         envelope: &BallotEnvelope,
         coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
-        if self.ballot_signed {
+        if self.signed_ballot.is_some() {
             return Err(Error::Consumed);
         }
         let record = roster
@@ -277,10 +301,11 @@ impl Credential {
         coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         self.check_unlocked(SigningPurpose::Ballot)?;
-        if self.ballot_signed {
+        // An attempt locked before the close intent completes; a new one never starts.
+        if self.signed_ballot.is_some() || (self.close_lock.is_some() && !self.ballot_attempted) {
             return Err(Error::Consumed);
         }
-        self.ballot_signed = true;
+        self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
         let coins = Zeroizing::new(coins);
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         private
@@ -294,7 +319,7 @@ impl Credential {
         envelope: &BallotEnvelope,
         signature: &[u8],
     ) -> Result<(), Error> {
-        if self.ballot_signed {
+        if self.signed_ballot.is_some() {
             return Err(Error::Consumed);
         }
         let record = roster
@@ -310,7 +335,7 @@ impl Credential {
         if !verify_ballot_signature(roster, expected_inventory, envelope, signature) {
             return Err(Error::Crypto);
         }
-        self.ballot_signed = true;
+        self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
         Ok(())
     }
 }
@@ -424,20 +449,30 @@ mod tests {
     fn envelope_lengths_and_positions_are_bounded_before_body_work() {
         let minimum = HEADER_BYTES + CIPHERTEXT_BYTES + MINIMUM_PROOF_BYTES;
         let maximum = HEADER_BYTES + CIPHERTEXT_BYTES + MAXIMUM_PROOF_BYTES;
-        for length in [minimum, maximum] {
-            let value = BallotEnvelope::new([1; 64], [2; 64], 19, length, [3; 64]).unwrap();
-            assert_eq!(
-                BallotEnvelope::decode(value.bytes()).unwrap().bytes(),
-                value.bytes()
+        for (length, time) in [(minimum, 0), (maximum, u64::MAX)] {
+            let value = BallotEnvelope::new([1; 64], [2; 64], 19, time, length, [3; 64]).unwrap();
+            let decoded = BallotEnvelope::decode(value.bytes()).unwrap();
+            assert_eq!(decoded.bytes(), value.bytes());
+            assert_eq!(decoded.ballot_time(), time);
+            assert_eq!(decoded.body_length(), length);
+            assert_eq!(decoded.identity(), value.identity());
+            let mut retimed = *value.bytes();
+            retimed[134] ^= 1;
+            assert_ne!(
+                BallotEnvelope::decode(&retimed).unwrap().identity(),
+                value.identity()
             );
+            let mut former = *value.bytes();
+            former[3] = b'1';
+            assert!(BallotEnvelope::decode(&former).is_err());
             assert!(BallotEnvelope::decode(&value.bytes()[..ENVELOPE_BYTES - 1]).is_err());
             let mut extended = value.bytes().to_vec();
             extended.push(0);
             assert!(BallotEnvelope::decode(&extended).is_err());
         }
         for length in [minimum - 1, maximum + 1, usize::MAX] {
-            assert!(BallotEnvelope::new([1; 64], [2; 64], 0, length, [3; 64]).is_err());
+            assert!(BallotEnvelope::new([1; 64], [2; 64], 0, 5, length, [3; 64]).is_err());
         }
-        assert!(BallotEnvelope::new([1; 64], [2; 64], 20, minimum, [3; 64]).is_err());
+        assert!(BallotEnvelope::new([1; 64], [2; 64], 20, 5, minimum, [3; 64]).is_err());
     }
 }

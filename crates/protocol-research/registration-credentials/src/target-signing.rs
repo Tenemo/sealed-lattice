@@ -40,6 +40,7 @@ impl TargetMessage {
         if !(3..=20).contains(&participants) {
             return Err(Error::Context);
         }
+        // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: 2048,
             maximum_item_count: 9,
@@ -70,7 +71,7 @@ impl TargetMessage {
             return Err(Error::Shape);
         }
         let classifications = items[4].variable_value_bytes().map_err(|_| Error::Shape)?;
-        if classifications.len() != participants || classifications.iter().any(|value| *value > 2) {
+        if classifications.len() != participants || classifications.iter().any(|value| *value > 3) {
             return Err(Error::Shape);
         }
         let branch = u16::from_le_bytes(
@@ -207,16 +208,16 @@ impl Credential {
         }
         Ok(())
     }
+    /// A target signer has responded to the close; the organizer has also
+    /// proposed. Its own ballot need not be included.
     pub(crate) fn check_target_predecessors(
         &self,
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
     ) -> Result<(), Error> {
-        let fault_bound = (roster.proposal().records().len() - 1) / 3;
-        if !self.ballot_signed
-            || (fault_bound > 0 && !self.slot_witness_signed)
+        if self.close_response.is_none()
             || (owner.position() == roster.proposal().organizer_position()
-                && !self.ballot_close_signed)
+                && !self.close_proposal_signed)
         {
             return Err(Error::Consumed);
         }
@@ -283,14 +284,14 @@ impl Credential {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Invalid classifications alternate with empty slots after the accepted ones.
+    // Absent, invalid and conflicting classifications cycle after the accepted ones.
     fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
         let classifications: Vec<u8> = (0..participants)
             .map(|position| {
                 if position < accepted {
                     2
                 } else {
-                    position as u8 % 2
+                    [0, 1, 3][position % 3]
                 }
             })
             .collect();
@@ -357,6 +358,12 @@ mod tests {
                 let mut excess = bytes.clone();
                 excess.push(0);
                 assert!(TargetMessage::parse(&excess, participants).is_err());
+                let mut tuple =
+                    CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
+                let mut classifications = tuple.items[4].variable_value_bytes().unwrap().to_vec();
+                classifications[participants - 1] = 4;
+                tuple.items[4] = CanonicalItem::variable_bytes(&classifications).unwrap();
+                assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
                 let mut tuple =
                     CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
                 tuple.items[5] = CanonicalItem::unsigned16(u16::from(!evaluated));

@@ -16,28 +16,26 @@ fn field<'a>(bytes: &mut &'a [u8], maximum: usize) -> Result<&'a [u8], Error> {
 }
 
 fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8>, Error> {
-    let publication = session.publication.as_ref().ok_or(Error::Context)?;
+    let close = session.close.as_ref().ok_or(Error::Context)?;
     match operation {
+        // Returns the ballot status code (0 not cast, 1 late, 2 included,
+        // 3 omitted) followed by the target body to persist before signing.
         0 => {
-            if session.finality.is_some() {
+            if session.finality.is_some() || !input.is_empty() {
                 return Err(Error::Consumed);
             }
-            let mut remaining = input;
-            let source = field(&mut remaining, 1 + 4 + 2048 + 3309)?;
-            let witness = field(&mut remaining, 4 + 2048 + 3309)?;
-            if !remaining.is_empty() || source.is_empty() {
-                return Err(Error::Shape);
-            }
             let target = evaluation_target::verified_browser_target().ok_or(Error::Context)?;
-            let work = crate::finality_work::FinalityWork::new(
-                publication.owner(),
-                target,
-                source,
-                (!witness.is_empty()).then_some(witness),
-            )?;
-            let body = work.body().to_vec();
+            let work = crate::finality_work::FinalityWork::new(close.owner(), target)?;
+            let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
+            let mut output = vec![match work.ballot_status(&enrollment.credential) {
+                crate::finality_work::OwnBallotStatus::NotCast => 0,
+                crate::finality_work::OwnBallotStatus::Late => 1,
+                crate::finality_work::OwnBallotStatus::Included => 2,
+                crate::finality_work::OwnBallotStatus::Omitted => 3,
+            }];
+            output.extend(work.body());
             session.finality = Some(work);
-            Ok(body)
+            Ok(output)
         }
         1 => {
             if !(33..=2048 + 32).contains(&input.len()) {
@@ -63,7 +61,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 return Err(Error::Shape);
             }
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
-            publication.restore_target(&mut enrollment.credential, body, remaining)?;
+            close.restore_target(&mut enrollment.credential, body, remaining)?;
             Ok(Vec::new())
         }
         _ => Err(Error::Shape),

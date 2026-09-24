@@ -9,7 +9,6 @@ import { compileParticipantReleaseCustody } from '#tests/participant-release-cus
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 const envelopeBytes = compileBallotBodyCensus().envelopeBytes;
 const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
@@ -25,9 +24,9 @@ export const authenticationPurposes = [
 export type AuthenticationPurpose = (typeof authenticationPurposes)[number];
 const completeAuthenticationPurposes = [
     ...authenticationPurposes,
-    'ballot-close',
-    'empty-slot',
-    'slot-witness',
+    'close-intent',
+    'close-response',
+    'close-proposal',
     'target-certification',
     'release-envelope',
 ] as const;
@@ -108,13 +107,12 @@ export const compileCompleteAuthenticationFrameWork = () =>
 
 // Per original honest credential/action in the selected arithmetic profile,
 // assuming current authenticated state and the one-shot locks. Re-evaluating
-// a retained intent still incurs work.
+// a retained intent still incurs work. The ballot is optional; every
+// participant signs one close response, and the organizer also its close
+// intent and proposal.
 // These maxima do not bound verification, lifetime keys or signing failures.
 export const compileCompleteCredentialIntentBounds = () => {
     const participantCount = Number(fixedModulusBfvInputs.participantCount);
-    const hasWitnessBatch =
-        compileThresholdCompletionProfile(participantCount)
-            .maximumCorruptParticipantCount > 0;
     const branches = [
         {
             name: 'Encrypted result with own target vote',
@@ -135,9 +133,12 @@ export const compileCompleteCredentialIntentBounds = () => {
                     (purpose) => purpose !== 'ballot-envelope',
                 ),
                 ...(participant.role === 'organizer'
-                    ? ['ballot-close' as const]
-                    : []),
-                ...(hasWitnessBatch ? ['slot-witness' as const] : []),
+                    ? ([
+                          'close-intent',
+                          'close-response',
+                          'close-proposal',
+                      ] as const)
+                    : (['close-response'] as const)),
                 ...(branch.target ? ['target-certification' as const] : []),
                 ...(branch.release ? ['release-envelope' as const] : []),
             ];
@@ -146,7 +147,7 @@ export const compileCompleteCredentialIntentBounds = () => {
                 branch: branch.name,
                 role: participant.role,
                 fixedPurposes,
-                sourceAlternatives: ['ballot-envelope', 'empty-slot'] as const,
+                optionalPurposes: ['ballot-envelope'] as const,
                 firstEvaluatedIntentBound: BigInt(fixedPurposes.length) + 1n,
             };
         }),

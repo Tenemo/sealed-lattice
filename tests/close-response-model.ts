@@ -112,28 +112,14 @@ export const envelopeIdentity = (author: number, variant: number): string =>
 const identityOf = (envelope: CloseEnvelope): string =>
     envelopeIdentity(envelope.author, envelope.variant);
 
-// An honest response lists every held envelope timed no later than the close
-// time, at most two different envelopes per slot, in canonical order. Two
-// already make a slot conflicting, so a longer list gains nothing.
-export const listHeldEnvelopes = (
-    held: readonly CloseEnvelope[],
-    intent: CloseIntent,
-    maximumPerSlot: number = maximumListedEnvelopesPerSlot,
+// The first `maximumPerSlot` identities of each slot, in canonical order.
+const capListing = (
+    identities: Iterable<string>,
+    maximumPerSlot: number,
 ): string[] => {
-    const onTime = [
-        ...new Set(
-            held
-                .filter(
-                    (envelope) =>
-                        envelope.bodyAvailable &&
-                        envelope.time <= intent.closeTime,
-                )
-                .map(identityOf),
-        ),
-    ].sort();
     const listed: string[] = [];
     const perSlot = new Map<string, number>();
-    for (const identity of onTime) {
+    for (const identity of [...new Set(identities)].sort()) {
         const slot = identity.slice(0, 2);
         const count = perSlot.get(slot) ?? 0;
         if (count >= maximumPerSlot) continue;
@@ -143,6 +129,60 @@ export const listHeldEnvelopes = (
     return listed;
 };
 
+// The distinct known identities of each slot timed no later than the close
+// time.
+const knownSlots = (
+    known: Iterable<CloseEnvelope>,
+    intent: CloseIntent,
+): Map<number, Set<string>> => {
+    const perSlot = new Map<number, Set<string>>();
+    for (const envelope of known) {
+        if (envelope.time > intent.closeTime) continue;
+        const identities = perSlot.get(envelope.author) ?? new Set<string>();
+        identities.add(identityOf(envelope));
+        perSlot.set(envelope.author, identities);
+    }
+    return perSlot;
+};
+
+// The honest listing rule over the envelopes a participant knows and the
+// bodies it holds. A slot with at least two known on-time envelopes lists the
+// two smallest identities: two already make it conflicting, so a longer list
+// gains nothing and no body is needed. A slot with one known on-time envelope
+// lists it only when its complete body is held.
+export const listKnownEnvelopes = (
+    known: Iterable<CloseEnvelope>,
+    held: ReadonlySet<string>,
+    intent: CloseIntent,
+    maximumPerSlot: number = maximumListedEnvelopesPerSlot,
+): string[] => {
+    const listed: string[] = [];
+    for (const identities of knownSlots(known, intent).values()) {
+        if (identities.size > 1)
+            listed.push(...capListing(identities, maximumPerSlot));
+        else if (held.has([...identities][0])) listed.push(...identities);
+    }
+    return listed.sort();
+};
+
+// An organizer can include a response when every slot it lists whose only
+// known envelope is that entry has the body held. A slot with two known
+// envelopes is conflicting through the organizer's own listing.
+const organizerReady = (
+    slots: ReadonlyMap<number, ReadonlySet<string>>,
+    held: ReadonlySet<string>,
+    response: CloseResponse,
+): boolean =>
+    response.listed.every((identity) => {
+        const known = slots.get(Number(identity.slice(0, 2)));
+        return (
+            known !== undefined &&
+            known.has(identity) &&
+            (known.size > 1 || held.has(identity))
+        );
+    });
+
+// A response needs only the authenticated envelope of each listed entry.
 export const verifyCloseResponse = (
     response: CloseResponse,
     intents: ReadonlyMap<number, CloseIntent>,
@@ -164,7 +204,6 @@ export const verifyCloseResponse = (
         if (
             envelope === undefined ||
             (previous !== undefined && previous >= identity) ||
-            !envelope.bodyAvailable ||
             envelope.time > intent.closeTime ||
             envelope.author >= participantCount
         )
@@ -176,6 +215,27 @@ export const verifyCloseResponse = (
     return true;
 };
 
+// The single listed envelope of every usable slot in the union of these
+// responses: the only envelopes whose bodies a barrier requires.
+export const usableEnvelopes = (
+    responses: readonly CloseResponse[],
+    envelopes: ReadonlyMap<string, CloseEnvelope>,
+): CloseEnvelope[] => {
+    const perSlot = new Map<number, Set<string>>();
+    for (const identity of responses.flatMap(({ listed }) => listed)) {
+        const envelope = envelopes.get(identity);
+        if (envelope === undefined) continue;
+        const slot = perSlot.get(envelope.author) ?? new Set<string>();
+        slot.add(identity);
+        perSlot.set(envelope.author, slot);
+    }
+    return [...perSlot.values()]
+        .filter((identities) => identities.size === 1)
+        .map((identities) => envelopes.get([...identities][0])!);
+};
+
+// A proposal also needs the complete body of every usable slot; a conflicting
+// slot needs none.
 export const verifyCloseProposal = (
     proposal: CloseProposal,
     intents: ReadonlyMap<number, CloseIntent>,
@@ -199,6 +259,9 @@ export const verifyCloseProposal = (
                     envelopes,
                     profile.participantCount,
                 ),
+        ) &&
+        usableEnvelopes(proposal.responses, envelopes).every(
+            (envelope) => envelope.bodyAvailable,
         )
     );
 };
@@ -324,9 +387,12 @@ const checkCloseContract = (
 // Exhaustive joint views for the smallest rosters.
 //
 // Delivery order reaches an honest participant's close behavior only through
-// the envelopes and bodies it holds when it authenticates its first close
-// intent, which intent that is, whether its own locked ballot precedes it,
-// and which valid proposal it verifies first. Every combination enumerated
+// the envelopes and bodies it holds when it responds, which intent it locked
+// first, whether its own locked ballot precedes it, and which valid proposal
+// it verifies first. A corrupt slot here has at most two variants, so knowing
+// both lists the same pair as holding both: envelope knowledge without bodies,
+// and the organizer's later response, add no listing, only fewer holders of
+// an already conflicting slot. Every combination enumerated
 // here arises from some delivery order: cast every ballot, deliver the chosen
 // envelopes, then the chosen intents; the relay may delay everything else.
 // This enumerates delivery orders up to observable behavior. Late and
@@ -711,7 +777,11 @@ const crossCheckReference = (
         honestResponses.set(participant, {
             signer: participant,
             intent: option.intent,
-            listed: listHeldEnvelopes(held, intents.get(option.intent)!),
+            listed: listKnownEnvelopes(
+                held,
+                new Set(held.map(identityOf)),
+                intents.get(option.intent)!,
+            ),
         });
     });
     const responses = members(signers, profile.participantCount).map(
@@ -821,12 +891,17 @@ export const bruteForceListerSets = (
 };
 
 // Deterministic message-level executions with a malicious relay. Honest
-// handlers never wait for another participant: a response follows the first
-// authenticated intent, a target signature the first valid proposal, a release
-// share the certificate, and verification d shares or a no-result
-// certificate. The relay reorders, duplicates, replays another action's
-// messages, withholds an isolated participant's messages until certification,
-// and otherwise delivers every message among cooperating participants.
+// handlers other than the organizer never wait for another participant: a
+// response follows the first authenticated intent, a target signature the
+// first valid proposal, a release share the certificate, and verification d
+// shares or a no-result certificate. The organizer locks its own intent and
+// answers once q - 1 other responses are ready, then proposes. A participant
+// holds at most two bodies for one slot, discards late bodies at its intent
+// lock and refuses late ones afterwards; the organizer requests the one known
+// envelope's body of a slot a response lists. The relay reorders, duplicates,
+// replays another action's messages, withholds an isolated participant's
+// messages until certification, and otherwise delivers every message among
+// cooperating participants.
 
 const createRandom = (seed: number) => {
     let state = seed >>> 0 || 1;
@@ -842,6 +917,7 @@ const createRandom = (seed: number) => {
 
 type Message =
     | Readonly<{ kind: 'envelope'; envelope: CloseEnvelope }>
+    | Readonly<{ kind: 'body'; envelope: CloseEnvelope }>
     | Readonly<{ kind: 'intent'; intent: CloseIntent }>
     | Readonly<{ kind: 'response'; response: CloseResponse }>
     | Readonly<{ kind: 'proposal'; proposal: CloseProposal }>
@@ -863,8 +939,15 @@ type HonestParticipant = {
     readonly clockSkew: number;
     departed: boolean;
     ownEnvelope: string | undefined;
+    // The envelopes known with or without a body, and the bodies held.
+    readonly known: Map<string, CloseEnvelope>;
     readonly held: Map<string, CloseEnvelope>;
+    // Bodies ever received for each slot.
+    readonly received: Map<number, number>;
+    // Bodies the organizer requested.
+    readonly requested: Set<string>;
     heldAtResponse: ReadonlySet<string>;
+    lockedIntent: CloseIntent | undefined;
     answeredIntent: number | undefined;
     readonly responses: Map<number, CloseResponse>;
     proposed: boolean;
@@ -893,10 +976,18 @@ export type CloseExecutionOptions = Readonly<{
     corruptEquivocation: number;
     corruptBackdating: boolean;
     corruptWithholdsBody: boolean;
+    // Corrupt responders also list envelopes whose bodies no one supplies.
+    corruptListsBodiless?: boolean;
     corruptSignTargets: boolean;
     // Corrupt responders never list an isolated participant's ballot.
     corruptOmitsIsolated: boolean;
     refuseAfterOwnOmission: boolean;
+    // Before an honest organizer's intent, each corrupt nonorganizer fills
+    // the organizer's two body slots for it with late envelopes and gives
+    // every other honest participant a different on-time envelope.
+    corruptTargetsOrganizer?: boolean;
+    // Corrupt participants sign no close response.
+    corruptWithholdsResponses?: boolean;
     // The relay delivers this participant's messages before any other, so
     // each of its stages is enabled in a separate delivery.
     priorityRecipient?: number;
@@ -913,6 +1004,12 @@ export type CloseExecutionResult = Readonly<{
     organizerVisits: number;
     voterVisits: number;
     nonvoterVisits: number;
+    // Bodies any honest participant held at once, and ever received, for one
+    // honest or corrupt slot, and bodies the organizer requested for one slot.
+    maximumHeldPerSlot: number;
+    maximumReceivedPerHonestSlot: number;
+    maximumReceivedPerCorruptSlot: number;
+    maximumOrganizerRequestsPerSlot: number;
 }>;
 
 export const runCloseExecution = (
@@ -933,8 +1030,12 @@ export const runCloseExecution = (
             clockSkew: random(3) - 1,
             departed: false,
             ownEnvelope: undefined,
+            known: new Map(),
             held: new Map(),
+            received: new Map(),
+            requested: new Set(),
             heldAtResponse: new Set(),
+            lockedIntent: undefined,
             answeredIntent: undefined,
             responses: new Map(),
             proposed: false,
@@ -951,6 +1052,10 @@ export const runCloseExecution = (
     let step = 0;
     let ignoredMessages = 0;
     let maximumListedEntries = 0;
+    let maximumHeldPerSlot = 0;
+    let maximumReceivedPerHonestSlot = 0;
+    let maximumReceivedPerCorruptSlot = 0;
+    let maximumOrganizerRequestsPerSlot = 0;
     let anyCertificate = false;
     const allResponses: CloseResponse[] = [];
     const proposalsByTarget = new Map<string, CloseProposal>();
@@ -1000,6 +1105,48 @@ export const runCloseExecution = (
     const work = (participant: HonestParticipant): void => {
         participant.visitSteps.add(step);
     };
+    // A body is taken below the per-slot cap and, after the intent lock, only
+    // on time. Its envelope becomes known either way.
+    const holdBody = (
+        participant: HonestParticipant,
+        envelope: CloseEnvelope,
+    ): boolean => {
+        const identity = identityOf(envelope);
+        participant.known.set(identity, envelope);
+        const inSlot = [...participant.held.values()].filter(
+            ({ author }) => author === envelope.author,
+        ).length;
+        if (
+            participant.held.has(identity) ||
+            !envelope.bodyAvailable ||
+            (participant.lockedIntent !== undefined &&
+                envelope.time > participant.lockedIntent.closeTime) ||
+            inSlot >= maximumListedEnvelopesPerSlot
+        )
+            return false;
+        participant.held.set(identity, envelope);
+        const received = (participant.received.get(envelope.author) ?? 0) + 1;
+        participant.received.set(envelope.author, received);
+        maximumHeldPerSlot = Math.max(maximumHeldPerSlot, inSlot + 1);
+        if ((corrupt & bit(envelope.author)) === 0)
+            maximumReceivedPerHonestSlot = Math.max(
+                maximumReceivedPerHonestSlot,
+                received,
+            );
+        else
+            maximumReceivedPerCorruptSlot = Math.max(
+                maximumReceivedPerCorruptSlot,
+                received,
+            );
+        return true;
+    };
+    // Late bodies can never be listed or needed.
+    const lock = (participant: HonestParticipant, intent: CloseIntent) => {
+        participant.lockedIntent = intent;
+        for (const [identity, envelope] of participant.held)
+            if (envelope.time > intent.closeTime)
+                participant.held.delete(identity);
+    };
     const respond = (
         participant: HonestParticipant,
         intent: CloseIntent,
@@ -1009,7 +1156,11 @@ export const runCloseExecution = (
         const response: CloseResponse = {
             signer: participant.position,
             intent: intent.variant,
-            listed: listHeldEnvelopes([...participant.held.values()], intent),
+            listed: listKnownEnvelopes(
+                participant.known.values(),
+                participant.heldAtResponse,
+                intent,
+            ),
         };
         maximumListedEntries = Math.max(
             maximumListedEntries,
@@ -1097,7 +1248,9 @@ export const runCloseExecution = (
         if (inventory === null) return;
         if (participant.answeredIntent === undefined) {
             // The proposal carries the organizer's intent.
-            respond(participant, intents.get(proposal.intent)!);
+            const intent = intents.get(proposal.intent)!;
+            lock(participant, intent);
+            respond(participant, intent);
         }
         const own = participant.ownEnvelope;
         if (
@@ -1123,27 +1276,105 @@ export const runCloseExecution = (
         }
         recordSignature(participant, participant.position, proposal);
     };
+    // The organizer asks the listing responder and the author for a body. An
+    // honest source supplies it; for two corrupt sources the relay decides
+    // once, and never supplies a withheld body.
+    const corruptSupplies = new Map<string, boolean>();
+    const scheduledBodies = new Set<string>();
+    const requestBody = (
+        participant: HonestParticipant,
+        identity: string,
+        responder: number,
+    ): void => {
+        const envelope = envelopes.get(identity)!;
+        const sources = [responder, envelope.author].filter(
+            (source) => (corrupt & bit(source)) === 0,
+        );
+        if (!participant.requested.has(identity)) {
+            participant.requested.add(identity);
+            const requests = [...participant.requested].filter(
+                (value) => value.slice(0, 2) === identity.slice(0, 2),
+            ).length;
+            maximumOrganizerRequestsPerSlot = Math.max(
+                maximumOrganizerRequestsPerSlot,
+                requests,
+            );
+        }
+        if (scheduledBodies.has(identity) || !envelope.bodyAvailable) return;
+        if (sources.length === 0) {
+            if (!corruptSupplies.has(identity))
+                corruptSupplies.set(
+                    identity,
+                    !options.corruptWithholdsBody && random(2) === 0,
+                );
+            if (!corruptSupplies.get(identity)) return;
+        }
+        scheduledBodies.add(identity);
+        const delivery: Delivery = {
+            recipient: participant.position,
+            message: { kind: 'body', envelope },
+            action,
+        };
+        if (
+            sources.length > 0 &&
+            sources.every((source) => (options.isolated & bit(source)) !== 0) &&
+            !anyCertificate
+        )
+            withheld.push(delivery);
+        else pending.push(delivery);
+    };
+    // The organizer requests the one known envelope's body of each slot a
+    // response lists when it lacks that body, answers once q - 1 other
+    // responses are ready, and proposes its own response and the first q - 1
+    // other responses in arrival order that keep every usable slot's body
+    // held.
     const tryPropose = (participant: HonestParticipant): void => {
+        const intent = participant.lockedIntent;
         if (
             participant.position !== organizer ||
             participant.proposed ||
-            participant.answeredIntent === undefined
+            intent === undefined
         )
             return;
-        const naming = [...participant.responses.values()].filter(
-            ({ intent }) => intent === participant.answeredIntent,
+        const others = [...participant.responses.values()].filter(
+            ({ signer, intent: named }) =>
+                named === intent.variant && signer !== organizer,
         );
-        if (naming.length < profile.quorum) return;
-        const own = participant.responses.get(organizer)!;
-        const others = naming.filter(({ signer }) => signer !== organizer);
+        const slots = knownSlots(participant.known.values(), intent);
+        const held = new Set(participant.held.keys());
+        for (const response of others)
+            for (const identity of response.listed)
+                if (
+                    slots.get(Number(identity.slice(0, 2)))?.size === 1 &&
+                    !held.has(identity)
+                )
+                    requestBody(participant, identity, response.signer);
+        if (
+            others.filter((response) => organizerReady(slots, held, response))
+                .length <
+            profile.quorum - 1
+        )
+            return;
+        respond(participant, intent);
+        const selected = [participant.responses.get(organizer)!];
+        for (const response of others) {
+            if (selected.length === profile.quorum) break;
+            if (
+                usableEnvelopes([...selected, response], envelopes).every(
+                    (envelope) => held.has(identityOf(envelope)),
+                )
+            )
+                selected.push(response);
+        }
+        if (selected.length < profile.quorum)
+            throw new Error('A ready organizer could not propose.');
         const proposal: CloseProposal = {
-            intent: participant.answeredIntent,
-            responses: [own, ...others.slice(0, profile.quorum - 1)].sort(
+            intent: intent.variant,
+            responses: selected.sort(
                 (left, right) => left.signer - right.signer,
             ),
         };
         participant.proposed = true;
-        work(participant);
         send({ kind: 'proposal', proposal }, organizer);
         signTarget(participant, proposal);
     };
@@ -1155,23 +1386,23 @@ export const runCloseExecution = (
             return;
         }
         switch (message.kind) {
-            case 'envelope': {
-                const identity = identityOf(message.envelope);
-                if (
-                    participant.held.has(identity) ||
-                    !message.envelope.bodyAvailable
-                )
+            case 'envelope':
+            case 'body': {
+                const known = participant.known.has(
+                    identityOf(message.envelope),
+                );
+                if (!holdBody(participant, message.envelope) && known)
                     ignoredMessages += 1;
-                else participant.held.set(identity, message.envelope);
+                tryPropose(participant);
                 return;
             }
             case 'intent': {
-                if (participant.answeredIntent !== undefined) {
+                if (participant.lockedIntent !== undefined) {
                     ignoredMessages += 1;
                     return;
                 }
+                lock(participant, message.intent);
                 respond(participant, message.intent);
-                tryPropose(participant);
                 return;
             }
             case 'response': {
@@ -1184,6 +1415,12 @@ export const runCloseExecution = (
                     return;
                 }
                 participant.responses.set(response.signer, response);
+                if (participant.position === organizer)
+                    for (const identity of response.listed)
+                        participant.known.set(
+                            identity,
+                            envelopes.get(identity)!,
+                        );
                 tryPropose(participant);
                 return;
             }
@@ -1232,7 +1469,7 @@ export const runCloseExecution = (
         clock += 1;
         envelopes.set(identityOf(envelope), envelope);
         participant.ownEnvelope = identityOf(envelope);
-        participant.held.set(identityOf(envelope), envelope);
+        holdBody(participant, envelope);
         work(participant);
         send({ kind: 'envelope', envelope }, participant.position);
     }
@@ -1267,6 +1504,34 @@ export const runCloseExecution = (
     const partial = random(pending.length + 1);
     for (let index = 0; index < partial && pending.length > 0; index += 1)
         deliverOne();
+    if (options.corruptTargetsOrganizer && !organizerCorrupt) {
+        const organizerState = participants.get(organizer)!;
+        for (const author of members(corrupt, n)) {
+            for (const variant of [50, 51]) {
+                const envelope: CloseEnvelope = {
+                    author,
+                    variant,
+                    time: 1e9,
+                    bodyAvailable: true,
+                    validProof: true,
+                };
+                envelopes.set(identityOf(envelope), envelope);
+                holdBody(organizerState, envelope);
+            }
+            for (const participant of participants.values()) {
+                if (participant.position === organizer) continue;
+                const envelope: CloseEnvelope = {
+                    author,
+                    variant: 100 + participant.position,
+                    time: 0,
+                    bodyAvailable: true,
+                    validProof: participant.position % 2 === 0,
+                };
+                envelopes.set(identityOf(envelope), envelope);
+                holdBody(participant, envelope);
+            }
+        }
+    }
     clock += 4;
     if (!organizerCorrupt) {
         const organizerState = participants.get(organizer)!;
@@ -1277,7 +1542,8 @@ export const runCloseExecution = (
                 closeTime: clock + organizerState.clockSkew,
             };
             intents.set(0, intent);
-            respond(organizerState, intent);
+            lock(organizerState, intent);
+            work(organizerState);
             send({ kind: 'intent', intent }, organizer);
         }
     } else {
@@ -1302,7 +1568,7 @@ export const runCloseExecution = (
         if (
             participant.ownEnvelope !== undefined ||
             participant.departed ||
-            participant.answeredIntent !== undefined ||
+            participant.lockedIntent !== undefined ||
             random(5) !== 0
         )
             continue;
@@ -1316,31 +1582,38 @@ export const runCloseExecution = (
         };
         envelopes.set(identityOf(envelope), envelope);
         participant.ownEnvelope = identityOf(envelope);
-        participant.held.set(identityOf(envelope), envelope);
+        holdBody(participant, envelope);
         work(participant);
         send({ kind: 'envelope', envelope }, participant.position);
     }
-    // Corrupt responders answer every intent with a relay-chosen listing.
-    for (const signer of members(corrupt, n))
-        for (const intent of intents.values()) {
-            const response: CloseResponse = {
-                signer,
-                intent: intent.variant,
-                listed: listHeldEnvelopes(
-                    [...envelopes.values()].filter(
-                        ({ author }) =>
-                            random(2) === 0 &&
-                            !(
-                                options.corruptOmitsIsolated &&
-                                (options.isolated & bit(author)) !== 0
-                            ),
+    // Corrupt responders answer every intent with a relay-chosen listing of
+    // at most two on-time envelopes per slot.
+    if (!options.corruptWithholdsResponses)
+        for (const signer of members(corrupt, n))
+            for (const intent of intents.values()) {
+                const response: CloseResponse = {
+                    signer,
+                    intent: intent.variant,
+                    listed: capListing(
+                        [...envelopes.values()]
+                            .filter(
+                                ({ author, time, bodyAvailable }) =>
+                                    random(2) === 0 &&
+                                    !(
+                                        options.corruptOmitsIsolated &&
+                                        (options.isolated & bit(author)) !== 0
+                                    ) &&
+                                    time <= intent.closeTime &&
+                                    (bodyAvailable ||
+                                        options.corruptListsBodiless === true),
+                            )
+                            .map(identityOf),
+                        maximumListedEnvelopesPerSlot,
                     ),
-                    intent,
-                ),
-            };
-            allResponses.push(response);
-            send({ kind: 'response', response }, undefined);
-        }
+                };
+                allResponses.push(response);
+                send({ kind: 'response', response }, undefined);
+            }
     const corruptProposals = new Set<number>();
     let rounds = 0;
     while (pending.length > 0 || withheld.length > 0) {
@@ -1365,7 +1638,8 @@ export const runCloseExecution = (
                     responseValid(response)
                 )
                     bySigner.set(response.signer, response);
-            if (bySigner.size < profile.quorum) continue;
+            if (bySigner.size < profile.quorum || !bySigner.has(organizer))
+                continue;
             corruptProposals.add(intent.variant);
             const own = bySigner.get(organizer)!;
             const others = [...bySigner.values()].filter(
@@ -1392,6 +1666,16 @@ export const runCloseExecution = (
         .map(([target]) => target);
     const findings = new Set<string>();
     if (certifiedTargets.length > 1) findings.add('agreement');
+    // Two bodies for one slot at once; an honest author's body once; for a
+    // corrupt slot two before the lock and two on-time bodies after it; and
+    // one organizer request per slot.
+    if (
+        maximumHeldPerSlot > maximumListedEnvelopesPerSlot ||
+        maximumReceivedPerHonestSlot > 1 ||
+        maximumReceivedPerCorruptSlot > 2 * maximumListedEnvelopesPerSlot ||
+        maximumOrganizerRequestsPerSlot > 1
+    )
+        findings.add('body-bound');
     const heldBeforeResponding = new Map<string, number>();
     for (const participant of participants.values())
         for (const identity of participant.heldAtResponse)
@@ -1471,6 +1755,10 @@ export const runCloseExecution = (
                 position !== organizer &&
                 participants.get(position)!.ownEnvelope === undefined,
         ),
+        maximumHeldPerSlot,
+        maximumReceivedPerHonestSlot,
+        maximumReceivedPerCorruptSlot,
+        maximumOrganizerRequestsPerSlot,
     };
 };
 
@@ -1482,13 +1770,22 @@ export type CompletionProfileExecutionCensus = Readonly<{
     maximumHonestOmission: number;
     forcedNoResultExecutions: number;
     maximumListedEntries: number;
+    targetedExecutions: number;
+    targetedCertifiedExecutions: number;
+    maximumHeldPerSlot: number;
+    maximumReceivedPerHonestSlot: number;
+    maximumReceivedPerCorruptSlot: number;
+    maximumOrganizerRequestsPerSlot: number;
     findings: readonly string[];
 }>;
 
 // Every corruption set, with an honest or corrupt organizer, full or partial
 // honest turnout, departures inside the budget before the close and after
 // certification, isolation of f honest voters, and corrupt equivocation,
-// backdating, withheld bodies, abstention and refused signatures.
+// backdating, withheld bodies listed by corrupt responders, abstention,
+// withheld responses with late bodies filling the organizer's slots and a
+// different envelope for every other honest participant, and refused
+// signatures.
 export const exploreCompletionProfileExecutions = (
     participantCount = 10,
 ): CompletionProfileExecutionCensus => {
@@ -1501,6 +1798,12 @@ export const exploreCompletionProfileExecutions = (
     let maximumHonestOmission = 0;
     let forcedNoResultExecutions = 0;
     let maximumListedEntries = 0;
+    let targetedExecutions = 0;
+    let targetedCertifiedExecutions = 0;
+    let maximumHeldPerSlot = 0;
+    let maximumReceivedPerHonestSlot = 0;
+    let maximumReceivedPerCorruptSlot = 0;
+    let maximumOrganizerRequestsPerSlot = 0;
     for (const corrupt of masksAtMost(participantCount, profile.faultBound)) {
         corruptionSets += 1;
         const honest = everyone & ~corrupt;
@@ -1518,6 +1821,13 @@ export const exploreCompletionProfileExecutions = (
                 voters: honest & 0b01010101010101010101,
             },
             { isolated: firstF, before: 0, after: lastF, voters: honest },
+            {
+                isolated: 0,
+                before: 0,
+                after: 0,
+                voters: honest,
+                targeted: true,
+            },
         ];
         for (const [index, value] of cases.entries()) {
             const seed = corrupt * 97 + index * 13 + 5;
@@ -1533,12 +1843,36 @@ export const exploreCompletionProfileExecutions = (
                 corruptEquivocation: (corrupt + index) % 3,
                 corruptBackdating: index === 2,
                 corruptWithholdsBody: index === 3,
+                corruptListsBodiless: index === 3,
                 corruptSignTargets: (corrupt + index) % 2 === 0,
                 corruptOmitsIsolated: index % 2 === 1,
                 refuseAfterOwnOmission: false,
+                corruptTargetsOrganizer: value.targeted === true,
+                corruptWithholdsResponses: value.targeted === true,
             });
             executions += 1;
             if (result.certifiedTargets > 0) certifiedExecutions += 1;
+            if (value.targeted === true && (corrupt & bit(organizer)) === 0) {
+                targetedExecutions += 1;
+                if (result.certifiedTargets > 0)
+                    targetedCertifiedExecutions += 1;
+            }
+            maximumHeldPerSlot = Math.max(
+                maximumHeldPerSlot,
+                result.maximumHeldPerSlot,
+            );
+            maximumReceivedPerHonestSlot = Math.max(
+                maximumReceivedPerHonestSlot,
+                result.maximumReceivedPerHonestSlot,
+            );
+            maximumReceivedPerCorruptSlot = Math.max(
+                maximumReceivedPerCorruptSlot,
+                result.maximumReceivedPerCorruptSlot,
+            );
+            maximumOrganizerRequestsPerSlot = Math.max(
+                maximumOrganizerRequestsPerSlot,
+                result.maximumOrganizerRequestsPerSlot,
+            );
             maximumHonestOmission = Math.max(
                 maximumHonestOmission,
                 result.omittedHonest,
@@ -1564,11 +1898,17 @@ export const exploreCompletionProfileExecutions = (
         maximumHonestOmission,
         forcedNoResultExecutions,
         maximumListedEntries,
+        targetedExecutions,
+        targetedCertifiedExecutions,
+        maximumHeldPerSlot,
+        maximumReceivedPerHonestSlot,
+        maximumReceivedPerCorruptSlot,
+        maximumOrganizerRequestsPerSlot,
         findings: [...findings].sort(),
     };
 };
 
-// Counterexamples for the three obligations found in review and the rejected
+// Counterexamples for the four obligations found in review and the rejected
 // support rule. Each shows the violation under the variant and confirms the
 // maintained rule avoids it.
 export const compileCloseObligationCounterexamples = () => {
@@ -1649,6 +1989,66 @@ export const compileCloseObligationCounterexamples = () => {
         }),
     );
 
+    // An organizer that answers at its intent cannot resolve an equivocation
+    // it learns afterwards, even though its lock discards late bodies. After
+    // that answer, corrupt 9 fills the organizer's two body slots for 9 with
+    // on-time envelopes that no other response lists, and gives each other
+    // honest participant a different on-time envelope; corrupt 7 and 8 sign
+    // no response. The early response lists nothing for 9 and the organizer
+    // holds no third body for 9, so each other response alone makes 9 usable
+    // with a body the organizer lacks, and the one-at-a-time selection stays
+    // below q. Answering at the proposal lists the two smallest known
+    // envelopes, which makes 9 conflicting.
+    const ten = deriveCloseProfile(10);
+    const stallIntent: CloseIntent = { variant: 0, closeTime: 5 };
+    const fillingVariants = [0, 1].map((variant): CloseEnvelope => ({
+        author: 9,
+        variant,
+        time: 1,
+        bodyAvailable: true,
+        validProof: true,
+    }));
+    const otherHonest = [1, 2, 3, 4, 5, 6];
+    const spreadVariants = otherHonest.map((signer): CloseEnvelope => ({
+        author: 9,
+        variant: 1 + signer,
+        time: 1,
+        bodyAvailable: true,
+        validProof: true,
+    }));
+    const stallEnvelopes = new Map(
+        [...fillingVariants, ...spreadVariants].map((value) => [
+            identityOf(value),
+            value,
+        ]),
+    );
+    const organizerHeld = new Set(fillingVariants.map(identityOf));
+    const otherResponses = otherHonest.map((signer, index): CloseResponse => ({
+        signer,
+        intent: 0,
+        listed: [identityOf(spreadVariants[index])],
+    }));
+    const organizerSelection = (ownListing: readonly string[]): number => {
+        const selected: CloseResponse[] = [
+            { signer: organizer, intent: 0, listed: ownListing },
+        ];
+        for (const response of otherResponses)
+            if (
+                selected.length < ten.quorum &&
+                usableEnvelopes([...selected, response], stallEnvelopes).every(
+                    (value) => organizerHeld.has(identityOf(value)),
+                )
+            )
+                selected.push(response);
+        return selected.length;
+    };
+    const earlyOwnListing = listKnownEnvelopes([], new Set(), stallIntent);
+    const lateOwnListing = listKnownEnvelopes(
+        [...fillingVariants, ...spreadVariants],
+        organizerHeld,
+        stallIntent,
+    );
+
     // The rejected support rule admits an envelope only when q of the used
     // responses list it. Every honest participant of four holds participant
     // 3's ballot; the proposal uses honest 0 and 1 and a corrupt 2 that does
@@ -1672,13 +2072,21 @@ export const compileCloseObligationCounterexamples = () => {
         omittedSignerHonestOmission: omittedSigner.omittedHonest,
         omittedSignerFindings: omittedSigner.findings,
         equivocations,
-        uncappedResponseEntries: listHeldEnvelopes(
+        uncappedResponseEntries: listKnownEnvelopes(
             corruptVariants,
+            new Set(corruptVariants.map(identityOf)),
             intent,
             Number.POSITIVE_INFINITY,
         ).length,
-        cappedResponseEntries: listHeldEnvelopes(corruptVariants, intent)
-            .length,
+        cappedResponseEntries: listKnownEnvelopes(
+            corruptVariants,
+            new Set(),
+            intent,
+        ).length,
+        organizerStallQuorum: ten.quorum,
+        earlyOrganizerSelection: organizerSelection(earlyOwnListing),
+        lateOrganizerSelection: organizerSelection(lateOwnListing),
+        lateOwnListing,
         supportRuleIncludesEnvelope: supportCount >= four.quorum,
         unionRuleIncludesEnvelope: closeInventory(
             { intent: 0, responses: supportResponses },
@@ -1693,8 +2101,8 @@ export const compileCloseObligationCounterexamples = () => {
 // its newest delivery enables; separate deliveries are separate visits. Every
 // visit performs at least one one-shot stage, so the stage count bounds the
 // visits: a ballot, the close response, the target signature, the release
-// share and verification, and for the organizer the close intent with its
-// own response and the proposal with its own target signature instead of the
+// share and verification, and for the organizer the close intent and the
+// proposal with its own response and target signature instead of the
 // response and signature.
 const closeStages = {
     voter: ['ballot', 'response', 'target-signature', 'release', 'verify'],

@@ -52,7 +52,7 @@ export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
         !values[1]?.trim()
     ) {
         throw new Error(
-            'Select available-records with a passed completion run, or certificate-records/release-records/terminal-records with a passed public target and public-record directory.',
+            'Select available-records with a passed native result run, or certificate-records/release-records/terminal-records with a passed native run and a public-record directory.',
         );
     }
     return {

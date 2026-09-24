@@ -1,7 +1,7 @@
 use crate::program::RankingProgram;
 use ballot_proof::{
     body::BallotBodyClassification,
-    publication::{PublicationContext, SourceValue, VerifiedClosedSlots},
+    close::{ClosedSlot, VerifiedCloseBarrier},
 };
 use num_bigint::Sign;
 use registration_credentials::{
@@ -41,73 +41,62 @@ pub trait WorkingStore {
     fn remove(&mut self, index: usize) -> Result<(), Error>;
 }
 
+/// Classification codes in the target: 0 absent, 1 invalid, 2 accepted and
+/// 3 conflicting.
 pub struct ClassifiedClosedInventory {
     pub(crate) poll: Arc<VerifiedPoll>,
     pub(crate) setup: Arc<VerifiedSetupAggregate>,
-    closed: VerifiedClosedSlots,
+    barrier: VerifiedCloseBarrier,
     classifications: Vec<u8>,
     pub(crate) accepted: Vec<Option<BallotEnvelope>>,
 }
 impl ClassifiedClosedInventory {
+    /// Consumes the close barrier and exactly one owning classification for
+    /// each usable slot; absent and conflicting slots take none.
     pub fn new(
-        poll: Arc<VerifiedPoll>,
-        setup: Arc<VerifiedSetupAggregate>,
-        closed: VerifiedClosedSlots,
+        barrier: VerifiedCloseBarrier,
         classifications: Vec<Option<BallotBodyClassification>>,
     ) -> Result<Self, Error> {
-        let context =
-            PublicationContext::new(poll.clone(), setup.clone()).map_err(|_| Error::Context)?;
-        let count = context.participant_count();
+        let count = barrier.slots().len();
         if classifications.len() != count {
             return Err(Error::Incomplete);
         }
-        let checked = context
-            .verify_closed_slots(closed.close().clone(), closed.slots().to_vec())
-            .map_err(|_| Error::Context)?;
-        if checked.body() != closed.body() || checked.identity() != closed.identity() {
-            return Err(Error::Context);
-        }
         let mut encoded = Vec::with_capacity(count);
         let mut accepted = Vec::with_capacity(count);
-        for (slot, classification) in closed.slots().iter().zip(classifications) {
-            match (slot.source().value(), classification) {
-                (SourceValue::Empty { .. }, None) => {
+        for (slot, classification) in barrier.slots().iter().zip(classifications) {
+            match (slot, classification) {
+                (ClosedSlot::Absent, None) => {
                     encoded.push(0);
                     accepted.push(None);
                 }
-                (SourceValue::Ballot(source), Some(BallotBodyClassification::Invalid(value))) => {
+                (ClosedSlot::Conflicting(_), None) => {
+                    encoded.push(3);
+                    accepted.push(None);
+                }
+                (ClosedSlot::Usable(source), Some(BallotBodyClassification::Invalid(value))) => {
                     if source.authentication().envelope().bytes() != value.envelope().bytes() {
                         return Err(Error::Context);
                     }
                     encoded.push(1);
                     accepted.push(None);
                 }
-                (SourceValue::Ballot(source), Some(BallotBodyClassification::Valid(value))) => {
-                    let body = value.body();
-                    let relation = body.relation();
-                    // Reconstruct every canonical outer field. In particular,
-                    // equal body hashes do not transfer validity across authors.
-                    let envelope = BallotEnvelope::new(
-                        *relation.poll(),
-                        *relation.inventory(),
-                        relation.position(),
-                        body.length(),
-                        *body.identity(),
-                    )
-                    .map_err(|_| Error::Context)?;
-                    if envelope.bytes() != source.authentication().envelope().bytes() {
+                (ClosedSlot::Usable(source), Some(BallotBodyClassification::Valid(value))) => {
+                    // The owning submission verifier matched this envelope to
+                    // its verified body, so equal body hashes cannot transfer
+                    // validity across authors or ballot times.
+                    if value.envelope().bytes() != source.authentication().envelope().bytes() {
                         return Err(Error::Context);
                     }
                     encoded.push(2);
-                    accepted.push(Some(envelope));
+                    accepted.push(Some(value.envelope().clone()));
                 }
                 _ => return Err(Error::Incomplete),
             }
         }
         Ok(Self {
-            poll,
-            setup,
-            closed,
+            poll: barrier.poll().clone(),
+            setup: barrier.setup().clone(),
+            barrier,
             classifications: encoded,
             accepted,
         })
@@ -118,8 +107,8 @@ impl ClassifiedClosedInventory {
             .enumerate()
             .filter_map(|(position, value)| value.as_ref().map(|_| position))
     }
-    pub fn source_identity(&self) -> &[u8; 64] {
-        self.closed.identity()
+    pub fn proposal_identity(&self) -> &[u8; 64] {
+        self.barrier.proposal().identity()
     }
     pub fn poll(&self) -> &Arc<VerifiedPoll> {
         &self.poll
@@ -127,8 +116,8 @@ impl ClassifiedClosedInventory {
     pub fn setup(&self) -> &Arc<VerifiedSetupAggregate> {
         &self.setup
     }
-    pub fn closed(&self) -> &VerifiedClosedSlots {
-        &self.closed
+    pub fn barrier(&self) -> &VerifiedCloseBarrier {
+        &self.barrier
     }
     fn target_fields(&self) -> Result<Vec<CanonicalItem>, Error> {
         Ok(vec![
@@ -136,7 +125,7 @@ impl ClassifiedClosedInventory {
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(self.poll.identity()),
             CanonicalItem::hash512(self.setup.inventory().identity()),
-            CanonicalItem::hash512(*self.closed.identity()),
+            CanonicalItem::hash512(*self.barrier.proposal().identity()),
             CanonicalItem::variable_bytes(&self.classifications).map_err(|_| Error::Encoding)?,
         ])
     }

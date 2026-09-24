@@ -6,6 +6,10 @@ pub mod body;
 mod body_browser;
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
 mod browser;
+pub mod close;
+#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[path = "close-browser.rs"]
+mod close_browser;
 pub mod columns;
 pub mod context;
 #[path = "../../word-proof/src/field.rs"]
@@ -16,10 +20,6 @@ pub mod parameters;
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
 #[path = "prover-browser.rs"]
 mod prover_browser;
-pub mod publication;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-#[path = "publication-browser.rs"]
-mod publication_browser;
 #[path = "../../word-proof/src/random.rs"]
 mod random;
 pub mod statement;
@@ -51,6 +51,6 @@ pub fn take_browser_classification() -> Option<body::BallotBodyClassification> {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-pub fn take_browser_closed_slots() -> Option<publication::VerifiedClosedSlots> {
-    publication_browser::take_closed()
+pub fn take_browser_close_barrier() -> Option<close::VerifiedCloseBarrier> {
+    close_browser::take_barrier()
 }

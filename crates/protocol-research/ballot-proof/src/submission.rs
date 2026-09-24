@@ -19,6 +19,9 @@ impl VerifiedBallotSubmission {
     pub fn body(&self) -> &VerifiedBallotBody {
         &self.body
     }
+    pub fn envelope(&self) -> &BallotEnvelope {
+        &self.authentication.envelope
+    }
     pub fn signature(&self) -> &[u8; 3309] {
         &self.authentication.signature
     }
@@ -112,10 +115,12 @@ fn check_setup(body: &VerifiedBallotBody, setup: &VerifiedSetupAggregate) -> Res
     }
     Ok(relation.position())
 }
+/// The ballot time is the author's clock reading when its attempt was locked.
 pub fn sign_body(
     credential: &mut Credential,
     body: &VerifiedBallotBody,
     setup: &VerifiedSetupAggregate,
+    ballot_time: u64,
     coins: [u8; 32],
 ) -> Result<(BallotEnvelope, [u8; 3309]), Error> {
     let position = check_setup(body, setup)?;
@@ -123,6 +128,7 @@ pub fn sign_body(
         *body.relation().poll(),
         setup.inventory().identity(),
         position,
+        ballot_time,
         body.length(),
         *body.identity(),
     )

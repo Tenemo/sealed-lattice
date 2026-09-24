@@ -195,7 +195,7 @@ describe('Authentication frame accounting', () => {
             64n,
             64n,
             64n,
-            206n,
+            214n,
         ]);
         for (const role of roles) {
             const frame = pureSignatureFrame(

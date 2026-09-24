@@ -184,15 +184,18 @@ impl BallotWork {
                 let reader = self.reader.take().ok_or(Error::Consumed)?;
                 self.keys.push(reader.finish().map_err(|_| Error::Crypto)?);
             }
+            // Input is the ballot time fixed by the attempt lock, then the scores.
             4 => {
                 if argument != 0 || self.consumed || self.keys.len() != 2 || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
                 let context = self.context.as_ref().ok_or(Error::Consumed)?;
-                check_ballot_scores(context.poll(), input).map_err(|_| Error::Shape)?;
+                let (time, scores) = input.split_at_checked(8).ok_or(Error::Shape)?;
+                check_ballot_scores(context.poll(), scores).map_err(|_| Error::Shape)?;
                 credential.reserve_ballot_attempt(&self.owner)?;
                 self.consumed = true;
-                let scores = Zeroizing::new(input.to_vec());
+                let ballot_time = u64::from_le_bytes(time.try_into().unwrap());
+                let scores = Zeroizing::new(scores.to_vec());
                 let auxiliary = self.keys.pop().unwrap();
                 let fhe = self.keys.pop().unwrap();
                 let (body, envelope) = ballot_proof::private_ballot::create(
@@ -200,6 +203,7 @@ impl BallotWork {
                     fhe,
                     auxiliary,
                     &scores,
+                    ballot_time,
                 )
                 .map_err(|_| Error::Crypto)?;
                 self.body = body;
@@ -242,6 +246,7 @@ impl BallotWork {
                     self.context.as_ref().ok_or(Error::Context)?,
                     &keys,
                     &self.body,
+                    pending.ballot_time(),
                 )
                 .map_err(|_| Error::Crypto)?;
                 if checked.bytes() != pending.bytes() {

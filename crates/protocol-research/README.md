@@ -4,7 +4,7 @@ research direction
 
 This workspace versions the executable threshold-FHE research construction. It is separate from the published SDK and is not enabled by its foundation API. End-to-end post-quantum security is unestablished. Use synthetic data only.
 
-The current native case uses ten participants, ten options and all ten result identifiers. Five honest participants cast ballots, which meets the minimum turnout of `f+2` accepted ballots, and two corrupt participants submit authenticated invalid ballots. It generates fresh original credentials, proves and verifies setup, classifies signed sources, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction. A target with fewer accepted ballots than the minimum turnout takes the no-result branch. The no-result cases cover all-empty sources and one authenticated invalid ballot with the remaining sources empty. The latter preserves a valid body header and consumes the classification operands before rejecting its malformed proof. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
+The current native case uses ten participants, ten options and all ten result identifiers. Five honest participants cast accepted ballots, which meets the minimum turnout of `f+2`, and two corrupt participants submit authenticated invalid ballots. A third corrupt participant signs two on-time envelopes, which make its slot conflicting, and a late one that every verifier refuses. The relay delivers a sixth honest voter's ballot only to two other participants, so the organizer's proposal of `n-f` close responses omits it within the bound of `f`. That voter still signs the target, which the corrupt participants withhold, and its ballot does not reach the result. The case generates fresh original credentials, proves and verifies setup, closes through signed close responses, classifies the usable slots, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction. A target with fewer accepted ballots than the minimum turnout takes the no-result branch. The no-result cases cover a close with no ballot and one whose only listed submission is an authenticated invalid ballot. The latter preserves a valid body header and consumes the classification operands before rejecting its malformed proof. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
 
 Ballots pack a comparison window for every rank, whatever result length the poll requests. The evaluator and terminal decoder support every requested result length for the ten-participant, ten-option profile. The encrypted computation clears omitted ranks; the decoder rejects a plaintext containing them. The complete-ordering program keeps its existing bytes. This arithmetic profile supports no other participant or option count: poll creation refuses other option counts, and a roster proposal refuses other sizes.
 
@@ -28,23 +28,23 @@ pnpm run research:protocol -- native-prefix
 
 It exercises the coefficient-selection gates and checks every decrypted coefficient with a test-only secret and an independent interpolation oracle. Because these numerical probes decrypt synthetic test ciphertexts, they compile only with the `numerical-probes` feature, which this case enables; evaluation modules neither contain nor export them. It creates no participants, ballots, certificate or protocol terminal.
 
-For focused retrieval checks, an existing passed public completion run can supply archived public fixtures:
+For focused retrieval checks, a passed native result run supplies its public ceremony records:
 
 ```text
-pnpm run research:protocol:public -- available-records <public-completion-run>
+pnpm run research:protocol:public -- available-records <native-result-run>
 ```
 
-This case supplies a nonconsecutive quorum of votes and a nonconsecutive release subset, leaves other files absent, and injects corrupt extras. It recomputes setup and evaluation before consuming completion records. This is a retrieval test after generation; it does not demonstrate participants disappearing before their later actions.
+This case supplies the certificate's votes and a nonconsecutive release subset, leaves other files absent, and injects corrupt extras. It recomputes setup, the close barrier and evaluation before consuming completion records. This is a retrieval test after generation; it does not demonstrate participants disappearing before their later actions.
 
-An independently verified public target can also be checked against a directory containing actual participant messages:
+The public setup and close records of a passed native run can also be checked against a directory containing actual participant messages:
 
 ```text
-pnpm run research:protocol:public -- certificate-records <public-target-run> <public-record-directory>
-pnpm run research:protocol:public -- release-records <public-target-run> <public-record-directory>
-pnpm run research:protocol:public -- terminal-records <public-target-run> <public-record-directory>
+pnpm run research:protocol:public -- certificate-records <native-run> <public-record-directory>
+pnpm run research:protocol:public -- release-records <native-run> <public-record-directory>
+pnpm run research:protocol:public -- terminal-records <native-run> <public-record-directory>
 ```
 
-All three modes recompute setup, classification and the target. The certificate mode needs only a valid quorum of target votes and does not request release messages. The release mode additionally verifies one available release message and runs wrong-target, incomplete-proof, altered-proof and duplicate controls at its actual author; it requires an encrypted target and emits no result identifiers. The terminal mode verifies sufficient release shares when the target is encrypted. These checks do not establish durable publication by themselves.
+All three modes recompute setup, the close barrier from the archived intent, responses, proposal and listed envelopes, the classification of each usable slot and the target. Only usable slots' bodies are read. The certificate mode needs only a valid quorum of target votes and does not request release messages. The release mode additionally verifies one available release message and runs wrong-target, incomplete-proof, altered-proof and duplicate controls at its actual author; it requires an encrypted target and emits no result identifiers. The terminal mode verifies sufficient release shares when the target is encrypted. These checks do not establish durable publication by themselves.
 
 The public reader retains the accepted target-vote packets in its output's `certificate-records/` directory, using each authenticated author's position. The run report identifies that directory for archive construction. Candidate file positions are transport labels and need not match the author encoded in a vote; archive extraction must use the retained packets. Retrieval still requires the owning certificate verifier.
 

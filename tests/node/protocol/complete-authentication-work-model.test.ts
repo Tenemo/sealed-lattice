@@ -22,9 +22,9 @@ describe('complete participant authentication accounting', () => {
             'roster-confirmation',
             'setup-opening',
             'ballot-envelope',
-            'ballot-close',
-            'empty-slot',
-            'slot-witness',
+            'close-intent',
+            'close-response',
+            'close-proposal',
             'target-certification',
             'release-envelope',
         ]);
@@ -38,7 +38,7 @@ describe('complete participant authentication accounting', () => {
             64n,
             64n,
             64n,
-            206n,
+            214n,
             64n,
             64n,
             64n,
@@ -72,32 +72,32 @@ describe('complete participant authentication accounting', () => {
         }
     });
 
-    it('counts one source choice and one witness batch under the retained-state locks', () => {
+    it('counts an optional ballot and one close response under the retained-state locks', () => {
         const rows = compileCompleteCredentialIntentBounds();
+        // Organizer: five setup purposes, three close purposes, then target
+        // and release as the branch allows. Others: three setup purposes and
+        // one close response. Each row adds the optional ballot.
         expect(rows.map((row) => row.firstEvaluatedIntentBound)).toEqual([
-            10n,
+            11n,
             7n,
-            9n,
+            10n,
             6n,
-            9n,
+            10n,
             6n,
         ]);
         for (const row of rows) {
             expect(row.participantCount).toBe(10);
-            expect(row.sourceAlternatives).toEqual([
-                'ballot-envelope',
-                'empty-slot',
-            ]);
+            expect(row.optionalPurposes).toEqual(['ballot-envelope']);
             expect(row.fixedPurposes).not.toContain('ballot-envelope');
-            expect(row.fixedPurposes).not.toContain('empty-slot');
             expect(
                 row.fixedPurposes.filter(
-                    (purpose) => purpose === 'slot-witness',
+                    (purpose) => purpose === 'close-response',
                 ),
             ).toHaveLength(1);
-            expect(row.fixedPurposes.includes('ballot-close')).toBe(
-                row.role === 'organizer',
-            );
+            for (const purpose of ['close-intent', 'close-proposal'] as const)
+                expect(row.fixedPurposes.includes(purpose)).toBe(
+                    row.role === 'organizer',
+                );
             expect(new Set(row.fixedPurposes).size).toBe(
                 row.fixedPurposes.length,
             );

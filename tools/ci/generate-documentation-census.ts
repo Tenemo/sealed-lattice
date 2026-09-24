@@ -31,6 +31,7 @@ import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-pr
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
 import { compileCertificationReleaseThresholdCensus } from '#tests/certification-release-threshold-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
+import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import {
     compareCommitmentEquivocationHybrids,
     compareDuplicateCommitmentInputs,
@@ -153,8 +154,6 @@ import {
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileProgrammedSignatureSamplerBounds } from '#tests/signing-programmed-prefix-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
-import { compileSlotPublicationResourceCensus } from '#tests/slot-publication-resource-model.js';
-import { compileSlotPublicationVisitCensus } from '#tests/slot-publication-visit-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
@@ -221,7 +220,6 @@ export const renderDocumentationCensus = (): string => {
     const participantVisits = compileParticipantVisitDependencyCensus();
     const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
     const certificationRelease = compileCertificationReleaseThresholdCensus();
-    const slotPublicationVisits = compileSlotPublicationVisitCensus();
     const participantCustody = compileParticipantCustodyCensus();
     const participantBallotCustody = compileParticipantBallotCustody();
     const participantReleaseCustody = compileParticipantReleaseCustody();
@@ -1755,7 +1753,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        "For one original credential/action under the retained-state invariant, the source choice is ballot or empty, never both; a pending ballot also blocks an empty declaration. Each witness batch consumes one purpose. No-result omits release. Encrypted release may omit the participant's own target vote, but cannot bypass a pending target intent or start target signing after release begins. The no-result row is a maximum allowing an own target vote, not a claim that every participant supplies one.",
+        "For one original credential/action under the retained-state invariant, the ballot is optional and at most one; the close intent blocks a new ballot attempt. Every participant signs one close response, and the organizer also its close intent and proposal. No-result omits release. Encrypted release may omit the participant's own target vote, but cannot bypass a pending target intent or start target signing after release begins. The no-result row is a maximum allowing an own target vote, not a claim that every participant supplies one.",
         '',
         table(
             [
@@ -1763,7 +1761,7 @@ export const renderDocumentationCensus = (): string => {
                 'Branch',
                 'Credential role',
                 'Fixed purposes',
-                'Exclusive source alternatives',
+                'Optional purposes',
                 'First-evaluated intent bound',
             ],
             compileCompleteCredentialIntentBounds().map((value) => [
@@ -1771,7 +1769,7 @@ export const renderDocumentationCensus = (): string => {
                 value.branch,
                 value.role,
                 value.fixedPurposes.join(', '),
-                value.sourceAlternatives.join(' or '),
+                value.optionalPurposes.join(', '),
                 formatCount(value.firstEvaluatedIntentBound),
             ]),
         ),
@@ -4458,6 +4456,10 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(participantCustody.maximumReleaseStateBytes),
                 ],
                 [
+                    'Maximum close state bytes',
+                    formatCount(participantCustody.maximumCloseStateBytes),
+                ],
+                [
                     'Maximum target-signing state bytes',
                     formatCount(
                         participantCustody.maximumTargetSigningStateBytes,
@@ -5631,7 +5633,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action.',
+        'The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action. In the targeted executions the corrupt participants sign no response, fill the two body slots of an honest organizer with late envelopes and give every other honest participant a different on-time envelope. Every participant holds at most two bodies for one slot and discards late ones at its intent lock; the organizer requests bodies from the listing responder and the author.',
         '',
         table(
             ['Property', 'Value'],
@@ -5661,6 +5663,33 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Largest honest response listing',
                     formatCount(closeResponses.execution.maximumListedEntries),
+                ],
+                [
+                    'Certified targeted executions',
+                    `${formatCount(closeResponses.execution.targetedCertifiedExecutions)} of ${formatCount(closeResponses.execution.targetedExecutions)}`,
+                ],
+                [
+                    'Most bodies held at once for one slot',
+                    formatCount(closeResponses.execution.maximumHeldPerSlot),
+                ],
+                [
+                    'Most bodies received for one honest slot',
+                    formatCount(
+                        closeResponses.execution.maximumReceivedPerHonestSlot,
+                    ),
+                ],
+                [
+                    'Most bodies received for one corrupt slot',
+                    formatCount(
+                        closeResponses.execution.maximumReceivedPerCorruptSlot,
+                    ),
+                ],
+                [
+                    'Most organizer body requests for one slot',
+                    formatCount(
+                        closeResponses.execution
+                            .maximumOrganizerRequestsPerSlot,
+                    ),
                 ],
                 [
                     'Contract findings',
@@ -5706,6 +5735,14 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Two envelopes per slot',
                     `${formatCount(closeResponses.counterexamples.cappedResponseEntries)} entries`,
+                ],
+                [
+                    'Organizer answers at its intent; a corrupt author then fills its body slots and splits the others',
+                    `${formatCount(closeResponses.counterexamples.earlyOrganizerSelection)} of ${formatCount(closeResponses.counterexamples.organizerStallQuorum)} responses selected`,
+                ],
+                [
+                    'Organizer answers at its proposal and lists two known envelopes',
+                    `${formatCount(closeResponses.counterexamples.lateOrganizerSelection)} of ${formatCount(closeResponses.counterexamples.organizerStallQuorum)} responses selected`,
                 ],
                 [
                     'Support rule includes a ballot every honest participant holds',
@@ -5917,72 +5954,59 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        '## Slot-publication wire census',
+        '## Close wire census',
         '',
-        'Metadata for the complete source, close and witness messages, including the original participant root suffix. Distinct corrupt witness carriers may be needed by different already completed slot certificates. These bounds exclude setup and ballot body bytes, target evaluation, target signatures, release, archive framing and storage-engine overhead.',
-        '',
-        table(
-            ['Property', 'Completion profile', 'Largest roster'],
-            Object.entries(compileSlotPublicationResourceCensus(10)).map(
-                ([property, value]) => [
-                    property,
-                    formatCount(value),
-                    formatCount(
-                        compileSlotPublicationResourceCensus(20)[
-                            property as keyof ReturnType<
-                                typeof compileSlotPublicationResourceCensus
-                            >
-                        ],
-                    ),
-                ],
-            ),
-        ),
-        '',
-        '## Batched slot-publication visit comparison',
-        '',
-        'This conditional model gives each source one ballot-or-empty token and waits for all assigned source tokens before issuing one witness batch. It has no separate global close-report wave. Target certification still precedes release. The action bound covers these modeled honest one-shot purposes and the current preparation graph; it does not establish the unresolved corrupt-origin/publication mapping, quorum-only pre-boundary liveness, complete resources, runtime or qualification. Samples use cyclic sequential orders and all-cooperating valid actions.',
+        'Exact canonical lengths of the signed close messages and bounds on the archived closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares, archive framing and storage-engine overhead.',
         '',
         table(
-            ['Property', 'Count'],
+            ['Property', 'Value'],
             [
+                ['Envelope bytes', formatCount(ballotBody.envelopeBytes)],
                 [
-                    'Maximum preparation visits',
-                    formatCount(slotPublicationVisits.preparationMaximum),
+                    'Archived submission bytes',
+                    formatCount(compileCloseWireCensus(10).submissionBytes),
                 ],
                 [
-                    'Remaining one-shot action purposes',
+                    'Close intent body bytes',
+                    formatCount(compileCloseWireCensus(10).intentBodyBytes),
+                ],
+                [
+                    'Empty response body bytes',
                     formatCount(
-                        slotPublicationVisits.continuationActions.length,
+                        compileCloseWireCensus(10).minimumResponseBodyBytes,
                     ),
-                ],
-                [
-                    'Ordinary participant action bound',
-                    formatCount(slotPublicationVisits.ordinaryActionBound),
-                ],
-                [
-                    'Organizer action bound including separate close intent',
-                    formatCount(slotPublicationVisits.organizerActionBound),
                 ],
             ],
         ),
         '',
         table(
             [
-                'Ballot authors',
-                'Invalid ballot authors',
-                'Sequential orders tested',
-                'Largest observed visit count',
+                'Participants',
+                'Close quorum',
+                'Maximum response body bytes',
+                'Proposal body bytes',
+                'Maximum union envelopes',
+                'Maximum barrier metadata bytes',
+                'Barrier signature checks',
+                'Maximum held bodies',
+                'Maximum received bodies',
+                'Maximum close state bytes',
             ],
-            slotPublicationVisits.cases.map((value) => [
-                value.ballotAuthors.length === 0
-                    ? 'none'
-                    : value.ballotAuthors.join(', '),
-                value.invalidBallotAuthors.length === 0
-                    ? 'none'
-                    : value.invalidBallotAuthors.join(', '),
-                formatCount(value.scheduleCount),
-                formatCount(value.maximumObservedVisits),
-            ]),
+            thresholdProfiles.map(({ participantCount }) => {
+                const value = compileCloseWireCensus(participantCount);
+                return [
+                    formatCount(participantCount),
+                    formatCount(value.closeQuorum),
+                    formatCount(value.maximumResponseBodyBytes),
+                    formatCount(value.proposalBodyBytes),
+                    formatCount(value.maximumUnionEnvelopes),
+                    formatCount(value.maximumBarrierMetadataBytes),
+                    formatCount(value.barrierSignatureVerifications),
+                    formatCount(value.maximumHeldBodies),
+                    formatCount(value.maximumReceivedBodies),
+                    formatCount(value.maximumParticipantStateBytes),
+                ];
+            }),
         ),
         '',
         '## Fixed publication witness visit screen',

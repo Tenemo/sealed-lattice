@@ -26,11 +26,11 @@ struct Session {
     contribution_output: Vec<u8>,
     retained_context: Option<RetainedContributionContext>,
     ballot: Option<crate::ballot::BallotWork>,
-    publication: Option<crate::publication_work::PublicationWork>,
+    close: Option<crate::close_work::CloseWork>,
     finality: Option<crate::finality_work::FinalityWork>,
     release: Option<release_browser::ReleaseState>,
 }
-thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,publication:None,finality:None,release:None});}
+thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,close:None,finality:None,release:None});}
 #[unsafe(no_mangle)]
 pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
@@ -884,11 +884,7 @@ pub extern "C" fn participant_ballot_command(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn participant_publication_command(
-    operation: u32,
-    argument: usize,
-    length: usize,
-) -> u32 {
+pub extern "C" fn participant_close_command(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
         session.contribution_output.clear();
@@ -898,7 +894,7 @@ pub extern "C" fn participant_publication_command(
         let input = Zeroizing::new(session.input[..length].to_vec());
         session.input[..length].zeroize();
         if operation == 0 {
-            if argument != 0 || session.publication.is_some() || session.ballot.is_some() {
+            if argument != 0 || session.close.is_some() || session.ballot.is_some() {
                 return 1;
             }
             let Some(enrollment) = session.enrollment.as_ref() else {
@@ -915,27 +911,26 @@ pub extern "C" fn participant_publication_command(
             else {
                 return 1;
             };
-            let Ok(publication) =
-                crate::publication_work::PublicationWork::new(ballot.into_owner(), poll, setup)
+            let Ok(close) = crate::close_work::CloseWork::new(ballot.into_owner(), poll, setup)
             else {
                 return 1;
             };
-            session.publication = Some(publication);
+            session.close = Some(close);
             return 0;
         }
         let Session {
             enrollment,
-            publication,
+            close,
             contribution_output,
             ..
         } = &mut *session;
         let Some(enrollment) = enrollment.as_mut() else {
             return 1;
         };
-        let Some(publication) = publication.as_mut() else {
+        let Some(close) = close.as_mut() else {
             return 1;
         };
-        match publication.command(&mut enrollment.credential, operation, argument, &input) {
+        match close.command(&mut enrollment.credential, operation, argument, &input) {
             Ok(bytes) => {
                 *contribution_output = bytes;
                 0
