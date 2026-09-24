@@ -6,11 +6,15 @@ import {
     createLinkedReleaseRelationModel,
 } from '#tests/linked-release-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import {
+    completionProfile,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 describe('release linked to the original encrypted aggregate share', () => {
     it('places every signed range in complete words and constrains each high word', () => {
-        const layout = compileLinkedReleaseColumnLayout();
+        const layout = compileLinkedReleaseColumnLayout(completionProfile());
         expect(layout.wordColumns).toBe(61);
         expect(layout.positiveSecretColumn).toBe(61);
         expect(layout.negativeSecretColumn).toBe(62);
@@ -39,7 +43,7 @@ describe('release linked to the original encrypted aggregate share', () => {
         }
     });
     it('rejects high-limb aliases in every public polynomial family', () => {
-        const model = createLinkedReleaseRelationModel();
+        const model = createLinkedReleaseRelationModel(completionProfile());
         for (const [coefficients, bits] of [
             [model.common, 192],
             [model.publicKey, 192],
@@ -65,9 +69,12 @@ describe('release linked to the original encrypted aggregate share', () => {
     });
 
     it('checks the key, aggregate decryption, and dense partial release in the same integer relation', () => {
-        const sharing = compileWideShareLiftingCensus();
+        const sharing = shareEncryptionParameters;
         for (const seed of [0n, 1n, 17n, 987654321n]) {
-            const model = createLinkedReleaseRelationModel(seed);
+            const model = createLinkedReleaseRelationModel(
+                completionProfile(),
+                seed,
+            );
             expect(model.verify()).toBe(true);
             expect(Object.values(model.rows()).flat()).toHaveLength(10 * 16);
             expect(
@@ -87,8 +94,8 @@ describe('release linked to the original encrypted aggregate share', () => {
     });
 
     it('rejects a valid partial decryption of a different hidden share, including its attempted noise repair', () => {
-        const model = createLinkedReleaseRelationModel();
-        const sharing = compileWideShareLiftingCensus();
+        const model = createLinkedReleaseRelationModel(completionProfile());
+        const sharing = shareEncryptionParameters;
         model.share[0] += 1n;
         model.derivePartial();
         expect(model.rows().partial.every((value) => value === 0n)).toBe(true);
@@ -100,7 +107,10 @@ describe('release linked to the original encrypted aggregate share', () => {
     });
 
     it('rejects another bounded recipient key and a changed release target', () => {
-        const model = createLinkedReleaseRelationModel(31n);
+        const model = createLinkedReleaseRelationModel(
+            completionProfile(),
+            31n,
+        );
         model.recipientSecret[0] = 0n;
         model.recipientSecret[4] = 1n;
         expect(model.verify()).toBe(false);
@@ -112,7 +122,7 @@ describe('release linked to the original encrypted aggregate share', () => {
     });
 
     it('excludes an exact proof-field alias through the accepted carry bound', () => {
-        const model = createLinkedReleaseRelationModel();
+        const model = createLinkedReleaseRelationModel(completionProfile());
         const prime = compileSmallLimbProofFieldCensus().modulus;
         const radix = 1n << 96n;
         const highDigit = (value: bigint) => value / radix;
@@ -129,7 +139,7 @@ describe('release linked to the original encrypted aggregate share', () => {
     });
 
     it('derives the full residual bound and word inventory', () => {
-        const census = compileLinkedReleaseRelationCensus();
+        const census = compileLinkedReleaseRelationCensus(completionProfile());
         const prime = compileSmallLimbProofFieldCensus().modulus;
         expect(census.trueDecodingQuotientBound).toBeLessThan(1n << 15n);
         expect(census.trueDecodingCarryBound).toBeLessThan(1n << 29n);
@@ -139,5 +149,34 @@ describe('release linked to the original encrypted aggregate share', () => {
         expect(census.narrowMemberships).toBe(10);
         expect(census.lookupEntries).toBe(71);
         expect(census.affineRows).toBe(655362n);
+    });
+
+    it('links the release at two shares, capped share widths and the largest profile', () => {
+        for (const [participantCount, optionCount] of [
+            [3, 2],
+            [16, 2],
+            [20, 20],
+        ]) {
+            const profile = deriveSupportedProfile(
+                participantCount,
+                optionCount,
+            );
+            for (const seed of [0n, 7n]) {
+                const model = createLinkedReleaseRelationModel(profile, seed);
+                expect(model.verify()).toBe(true);
+                model.share[0] += 1n;
+                model.derivePartial();
+                expect(model.verify()).toBe(false);
+            }
+            const census = compileLinkedReleaseRelationCensus(profile);
+            const prime = compileSmallLimbProofFieldCensus().modulus;
+            expect(census.decodingResidualBound).toBeLessThan(prime);
+            expect(census.releaseResidualBound).toBeLessThan(prime);
+            expect(
+                compileLinkedReleaseColumnLayout(profile).columns.find(
+                    (column) => column.name === 'aggregate-share',
+                ),
+            ).toMatchObject({ bits: profile.releaseLifting.shareBits });
+        }
     });
 });

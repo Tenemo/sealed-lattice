@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('bounded ballot randomness', () => {
     it('budgets actual buffered calls and both encrypted-message samplers', () => {
-        const budget = compileBallotRandomnessBudget();
+        const budget = compileBallotRandomnessBudget(completionProfile());
         const proofMinimum =
             (4n * 262144n - 4n) * 128n +
             20n * 128n +

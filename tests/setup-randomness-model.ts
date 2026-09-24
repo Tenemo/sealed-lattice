@@ -1,5 +1,6 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const setupGaussianParameters = {
     sigmaNumerator: 16n,
@@ -9,15 +10,9 @@ export const setupGaussianParameters = {
     maximum: 63,
 } as const;
 
-export const compileSetupRandomnessCensus = () => {
-    let gadgetLength = 0n;
-    for (
-        let covered = 1n;
-        covered < fixedModulusBfvInputs.ciphertextModulus;
-        covered *= fixedModulusBfvInputs.gadgetBase
-    )
-        gadgetLength++;
-    const participants = fixedModulusBfvInputs.participantCount;
+export const compileSetupRandomnessCensus = (profile: SupportedProfile) => {
+    const gadgetLength = profile.gadgetLength;
+    const participants = BigInt(profile.participantCount);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
         (4n * gadgetLength + 2n * participants) * degree +

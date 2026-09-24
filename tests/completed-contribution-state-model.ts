@@ -1,9 +1,12 @@
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const compileCompletedContributionStateCensus = () => {
-    const body = compileContributionBodyCensus();
-    const checkpoint = compileFirstOracleCheckpointCensus();
+export const compileCompletedContributionStateCensus = (
+    profile: SupportedProfile,
+) => {
+    const body = compileContributionBodyCensus(profile);
+    const checkpoint = compileFirstOracleCheckpointCensus(profile);
     const maximumProofRecords =
         (body.maximumProofBytes + (1n << 20n) - 1n) / (1n << 20n);
     const maximumPublicRecords =

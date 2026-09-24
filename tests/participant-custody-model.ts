@@ -7,16 +7,17 @@ import { compileParticipantBallotCustody } from '#tests/participant-ballot-custo
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
-export const compileParticipantCustodyCensus = () => {
-    const body = compileContributionBodyCensus();
-    const checkpoint = compileFirstOracleCheckpointCensus();
+export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
+    const body = compileContributionBodyCensus(profile);
+    const checkpoint = compileFirstOracleCheckpointCensus(profile);
     const enrollment = compileRegistrationEnrollmentCensus();
     const authentication = compileContributionAuthenticationCensus(
         body.participantCount,
     );
-    const relation = compileSetupContributionRelationCensus();
+    const relation = compileSetupContributionRelationCensus(profile);
     const chunkBytes = 1n << 20n;
     const publicRecords = body.polynomials.flatMap((polynomial) => {
         const records = [];
@@ -61,7 +62,7 @@ export const compileParticipantCustodyCensus = () => {
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
     const maximumRootRecords = enrollment.maximumRecords + 1n;
-    const ballot = compileParticipantBallotCustody();
+    const ballot = compileParticipantBallotCustody(profile);
     // Marker, inventory identity, one digest per aggregate polynomial, and the
     // credential-keyed SHA3-512 tag that the ballot step checks before parsing.
     const setupReferenceBytes =
@@ -73,7 +74,7 @@ export const compileParticipantCustodyCensus = () => {
     )!.bytes;
     // A voter's completed ballot precedes its close state; a nonvoter's
     // close state is the same size.
-    const close = compileCloseWireCensus(body.participantCount);
+    const close = compileCloseWireCensus(profile);
     const maximumWithClose =
         maximumCompletedMetadataBytes +
         4n +
@@ -83,7 +84,7 @@ export const compileParticipantCustodyCensus = () => {
     const targetSigning = compileTargetSigningStateCensus();
     const maximumWithTargetSigning =
         maximumWithClose + 4n + targetSigning.maximumStateBytes;
-    const release = compileParticipantReleaseCustody();
+    const release = compileParticipantReleaseCustody(profile);
     const maximumWithRelease =
         maximumWithTargetSigning + 4n + release.maximumStateBytes;
     const maximumWithLaterWork =
@@ -215,14 +216,16 @@ export const compileGcmKeyHistory = (
     };
 };
 
-export const compileParticipantVaultKeyClasses = () => {
+export const compileParticipantVaultKeyClasses = (
+    profile: SupportedProfile,
+) => {
     const enrollment = compileRegistrationEnrollmentCensus();
-    const custody = compileParticipantCustodyCensus();
-    const body = compileContributionBodyCensus();
-    const checkpoint = compileFirstOracleCheckpointCensus();
-    const ballot = compileParticipantBallotCustody();
-    const randomness = compileBallotRandomnessBudget();
-    const release = compileParticipantReleaseCustody();
+    const custody = compileParticipantCustodyCensus(profile);
+    const body = compileContributionBodyCensus(profile);
+    const checkpoint = compileFirstOracleCheckpointCensus(profile);
+    const ballot = compileParticipantBallotCustody(profile);
+    const randomness = compileBallotRandomnessBudget(profile);
+    const release = compileParticipantReleaseCustody(profile);
     const authentication = compileContributionAuthenticationCensus(
         body.participantCount,
     );

@@ -8,6 +8,7 @@ import {
     compileCurrentSignatureHashInputs,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
+import { completionProfileCounts } from '#tests/supported-profile-model.js';
 
 describe('complete participant authentication accounting', () => {
     it('keeps all actual signature purposes in the current hash-input inventory', () => {
@@ -73,7 +74,9 @@ describe('complete participant authentication accounting', () => {
     });
 
     it('counts an optional ballot and one close response under the retained-state locks', () => {
-        const rows = compileCompleteCredentialIntentBounds();
+        const rows = compileCompleteCredentialIntentBounds(
+            completionProfileCounts.participantCount,
+        );
         // Organizer: five setup purposes, three close purposes, then target
         // and release as the branch allows. Others: three setup purposes and
         // one close response. Each row adds the optional ballot.
@@ -105,7 +108,9 @@ describe('complete participant authentication accounting', () => {
     });
 
     it('omits release for no result and permits release without an own target vote', () => {
-        const rows = compileCompleteCredentialIntentBounds();
+        const rows = compileCompleteCredentialIntentBounds(
+            completionProfileCounts.participantCount,
+        );
         for (const row of rows.filter(
             (candidate) => candidate.branch === 'No result',
         )) {

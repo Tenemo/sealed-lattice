@@ -6,11 +6,12 @@ import {
     compileFullWordProofLayout,
     proverInterpolationAlias,
 } from '#tests/full-word-proof-layout-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 describe('full word-proof layout and theorem operands', () => {
     it('accounts for the emitted linked ballot rows and full public operator', () => {
-        const layout = compileBallotWordProofLayout();
+        const layout = compileBallotWordProofLayout(completionProfile());
         expect(layout.headerBytes).toBe(4004n);
         expect(layout.firstWidth).toBe(33n * 16n + 48n);
         expect(layout.secondWidth).toBe(34n * 48n);
@@ -31,7 +32,7 @@ describe('full word-proof layout and theorem operands', () => {
     });
 
     it('matches the emitted header and leaf shapes', () => {
-        const layout = compileFullWordProofLayout();
+        const layout = compileFullWordProofLayout(completionProfile());
         expect(layout.foldCount).toBe(17);
         expect(layout.headerBytes).toBe(
             4n + 128n + 192n + 48n + 20n * 128n + 16n * 64n + 48n,
@@ -49,7 +50,7 @@ describe('full word-proof layout and theorem operands', () => {
         expect(layout.maximumCachedNodeDigestBytes).toBeLessThan(2_097_152n);
     });
     it('charges the actual lookup, affine, batching, and first-fold events', () => {
-        const census = compileWideChallengeCompilerCensus();
+        const census = compileWideChallengeCompilerCensus(completionProfile());
         expect(census.lookupEntryCount).toBe(378n * 65536n);
         expect(census.lookupRootDegree).toBe(379n * 65536n - 1n);
         expect(census.correlatedRowCount).toBe(2n * 1172n);

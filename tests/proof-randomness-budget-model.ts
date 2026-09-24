@@ -5,6 +5,7 @@ import {
     compileRegistrationWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 const binomial = (population: bigint, count: bigint) => {
@@ -99,9 +100,9 @@ export const bufferedFieldSamplingFailure = (input: {
     };
 };
 
-export const compileProofRandomnessBudgets = () => {
+export const compileProofRandomnessBudgets = (profile: SupportedProfile) => {
     const field = compileSmallLimbProofFieldCensus();
-    const compiler = compileWideChallengeCompilerCensus();
+    const compiler = compileWideChallengeCompilerCensus(profile);
     const bufferBytes = 65_536n;
     const failureAllocationBits = 128n;
     // This is the compiler's explicit conditional cap, not an established
@@ -109,9 +110,9 @@ export const compileProofRandomnessBudgets = () => {
     const invocationCap = compiler.roleBudget;
     const layouts = [
         ['registration', compileRegistrationWordProofLayout()],
-        ['setup contribution', compileFullWordProofLayout()],
-        ['linked ballot', compileBallotWordProofLayout()],
-        ['linked release', compileLinkedReleaseWordProofLayout()],
+        ['setup contribution', compileFullWordProofLayout(profile)],
+        ['linked ballot', compileBallotWordProofLayout(profile)],
+        ['linked release', compileLinkedReleaseWordProofLayout(profile)],
     ] as const;
     return layouts.map(([role, layout]) => {
         const ordinaryBaselineBytes = layout.minimumRequestedRandomBytes;

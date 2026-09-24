@@ -6,6 +6,7 @@ import {
     framedProofHashBytes,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('proof hash work', () => {
     it('matches explicit suffix padding and block-by-block squeezing', () => {
@@ -47,7 +48,7 @@ describe('proof hash work', () => {
     });
 
     it('matches the deployed per-role layouts while retaining the shared query bound', () => {
-        const profiles = proofHashProfiles();
+        const profiles = proofHashProfiles(completionProfile());
         expect(
             profiles.map((value) => [
                 value.role,
@@ -69,7 +70,7 @@ describe('proof hash work', () => {
             341n,
         ]);
         for (const profile of profiles) {
-            const costs = compileProofHashWork(profile);
+            const costs = compileProofHashWork(completionProfile(), profile);
             expect(costs.verifierCore.queries).toBe(97827n);
             expect(costs.proverCore.queries).toBe(2097187n);
             expect(costs.proverCore.permutations).toBeGreaterThan(
@@ -79,15 +80,16 @@ describe('proof hash work', () => {
                 costs.verifierCore.queries,
             );
             expect(
-                compileProofHashWork(profile, 1024n).proverCore.permutations,
+                compileProofHashWork(completionProfile(), profile, 1024n)
+                    .proverCore.permutations,
             ).toBeGreaterThan(costs.proverCore.permutations);
         }
     });
 
     it('preserves distinct hash inputs even when only their common prefix grows', () => {
-        const profile = proofHashProfiles()[0];
-        const short = compileProofHashWork(profile, 64n);
-        const long = compileProofHashWork(profile, 282n);
+        const profile = proofHashProfiles(completionProfile())[0];
+        const short = compileProofHashWork(completionProfile(), profile, 64n);
+        const long = compileProofHashWork(completionProfile(), profile, 282n);
         expect(long.proverCore.queries).toBe(short.proverCore.queries);
         expect(long.proverCore.inputBytes).toBeGreaterThan(
             short.proverCore.inputBytes,
@@ -95,13 +97,17 @@ describe('proof hash work', () => {
         expect(long.proverCore.permutations).toBeGreaterThan(
             short.proverCore.permutations,
         );
-        expect(() => compileProofHashWork(profile, 0n)).toThrow();
-        expect(() => compileProofHashWork(profile, 1025n)).toThrow();
+        expect(() =>
+            compileProofHashWork(completionProfile(), profile, 0n),
+        ).toThrow();
+        expect(() =>
+            compileProofHashWork(completionProfile(), profile, 1025n),
+        ).toThrow();
     });
 
     it('charges cached prefix initialization while preserving logical queries and inputs', () => {
-        const values = proofHashProfiles().map((profile) =>
-            compileProofHashWork(profile),
+        const values = proofHashProfiles(completionProfile()).map((profile) =>
+            compileProofHashWork(completionProfile(), profile),
         );
         // First, second and linear trees, followed by the emitted FRI trees.
         // Each tree reuses a leaf prefix after the first leaf and a node

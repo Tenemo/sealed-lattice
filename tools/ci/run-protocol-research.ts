@@ -22,6 +22,7 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
@@ -127,26 +128,25 @@ await runWithLocalRunLog(
                 'protobuf-compiler',
             );
             assert.equal(protoc.trim(), 'libprotoc 36.1');
-            const contribution = compileContributionBodyCensus();
-            const aggregate = compileSetupAggregateResources();
+            // The research crates implement the completion profile.
+            const profile = completionProfile();
+            const contribution = compileContributionBodyCensus(profile);
+            const aggregate = compileSetupAggregateResources(profile);
             const enrollment = compileRegistrationEnrollmentCensus();
-            const ballot = compileBallotBodyCensus();
+            const ballot = compileBallotBodyCensus(profile);
             const participants = BigInt(contribution.participantCount);
             const registration = compileRegistrationKeyRelationCensus();
             const authentication = compileContributionAuthenticationCensus(
                 Number(participants),
             );
             const roster = compileRosterProposalCensus(Number(participants));
-            const close = compileCloseWireCensus(Number(participants));
-            const release = compileLinkedReleaseWordProofLayout();
+            const close = compileCloseWireCensus(profile);
+            const release = compileLinkedReleaseWordProofLayout(profile);
             const degree = fixedModulusBfvInputs.polynomialDegree;
             const coefficientBytes =
                 1n +
                 BigInt(
-                    Math.ceil(
-                        fixedModulusBfvInputs.releaseModulus.toString(2)
-                            .length / 8,
-                    ),
+                    Math.ceil(profile.release.modulus.toString(2).length / 8),
                 );
             const releaseBody =
                 12n +

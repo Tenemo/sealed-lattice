@@ -1,6 +1,7 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const wideChallengeLayout = (
     oracleCount: number,
@@ -57,13 +58,78 @@ export const jointModuloDensityBound = (
     return { numerator: space, denominator: space - total };
 };
 
-export const compileWideChallengeCompilerCensus = () => {
+// The compiler's charged caps are the same for every supported profile. The
+// ledger charges them; the emitted chronology must stay within them.
+const adversaryQueries = 1n << 80n;
+const verificationBudget = 1n << 32n;
+const roleBudget = 1n << 16n;
+const tagBits = 512n;
+export const proofCompilerCaps = {
+    adversaryQueries,
+    verificationBudget,
+    chargedQueries: 4n * (adversaryQueries + verificationBudget),
+    roleBudget,
+    tagBits,
+    saltBits: 2n * tagBits,
+    relativeBalanceBits: 160n,
+    maximumNonSaltInputBits: 1n << 40n,
+    committedNodeBudget: 1n << 23n,
+    programmedMessageBudget: 32n * roleBudget,
+} as const;
+
+export const compileProofCompilerCapCensus = () => {
+    const {
+        chargedQueries,
+        relativeBalanceBits,
+        maximumNonSaltInputBits,
+        committedNodeBudget,
+        programmedMessageBudget,
+    } = proofCompilerCaps;
+    // For each output count, Chernoff gives 2*exp(-2^(kappa-2s)/3).
+    // e>2 and 1/3>1/4 give this conservative binary exponent. Union over
+    // every bounded non-salt input and every output, before any interaction.
+    const balanceTailPower = 1n << (tagBits - 2n * relativeBalanceBits - 2n);
+    const balanceFailureExponent =
+        balanceTailPower - maximumNonSaltInputBits - tagBits - 2n;
+    if (balanceFailureExponent < 256n)
+        throw new Error('The all-input hash-balance exception is too large.');
+    // Two privacy replacements per node, with a role union. Charge epsilon
+    // per replacement instead of the smaller epsilon/2 total-variation bound.
+    const merklePrivacyNumerator = 2n * roleBudget * committedNodeBudget;
+    const merklePrivacyDenominator = 1n << relativeBalanceBits;
+    let merklePrivacyBits = 0;
+    while (
+        merklePrivacyNumerator << BigInt(merklePrivacyBits + 1) <=
+        merklePrivacyDenominator
+    )
+        merklePrivacyBits++;
+    const reprogrammingSquaredNumerator =
+        9n * programmedMessageBudget ** 2n * chargedQueries;
+    const reprogrammingSquaredDenominator = 1n << (tagBits + 1n);
+    let reprogrammingBits = 0;
+    while (
+        reprogrammingSquaredNumerator << BigInt(2 * (reprogrammingBits + 1)) <=
+        reprogrammingSquaredDenominator
+    )
+        reprogrammingBits++;
+    return {
+        ...proofCompilerCaps,
+        balanceFailureExponent,
+        merklePrivacyBits,
+        reprogrammingBits,
+    };
+};
+
+// Ordinary IOP event counts for one profile's full word relation, which is
+// the largest proof operator of that profile. The QROM compilation and
+// whole-protocol assumptions remain separate obligations.
+export const compileWideChallengeCompilerCensus = (
+    profile: SupportedProfile,
+) => {
     const prime = compileSmallLimbProofFieldCensus().modulus;
     const agreement = compileCommonAgreementDegreeCensus();
     const queryCount = agreement.queries;
-    // Ordinary IOP event counts for the full word relation. The QROM
-    // compilation and whole-protocol assumptions remain separate obligations.
-    const relation = compileSetupContributionRelationCensus();
+    const relation = deriveSetupContributionShape(profile);
     const originalOracles =
         relation.wordColumns +
         relation.booleanColumns +
@@ -86,43 +152,8 @@ export const compileWideChallengeCompilerCensus = () => {
     );
     if (density.numerator > 2n * density.denominator)
         throw new Error('The compiler charged an insufficient density factor.');
-    const adversaryQueries = 1n << 80n;
-    const verificationBudget = 1n << 32n;
-    const chargedQueries = 4n * (adversaryQueries + verificationBudget);
-    const roleBudget = 1n << 16n;
-    const tagBits = 512n;
-    const saltBits = 2n * tagBits;
-    const relativeBalanceBits = 160n;
-    const maximumNonSaltInputBits = 1n << 40n;
-    // For each output count, Chernoff gives 2*exp(-2^(kappa-2s)/3).
-    // e>2 and 1/3>1/4 give this conservative binary exponent. Union over
-    // every bounded non-salt input and every output, before any interaction.
-    const balanceTailPower = 1n << (tagBits - 2n * relativeBalanceBits - 2n);
-    const balanceFailureExponent =
-        balanceTailPower - maximumNonSaltInputBits - tagBits - 2n;
-    if (balanceFailureExponent < 256n)
-        throw new Error('The all-input hash-balance exception is too large.');
-    const committedNodeBudget = 1n << 23n;
-    // Two privacy replacements per node, with a role union. Charge epsilon
-    // per replacement instead of the smaller epsilon/2 total-variation bound.
-    const merklePrivacyNumerator = 2n * roleBudget * committedNodeBudget;
-    const merklePrivacyDenominator = 1n << relativeBalanceBits;
-    let merklePrivacyBits = 0;
-    while (
-        merklePrivacyNumerator << BigInt(merklePrivacyBits + 1) <=
-        merklePrivacyDenominator
-    )
-        merklePrivacyBits++;
-    const programmedMessageBudget = 32n * roleBudget;
-    const reprogrammingSquaredNumerator =
-        9n * programmedMessageBudget ** 2n * chargedQueries;
-    const reprogrammingSquaredDenominator = 1n << (tagBits + 1n);
-    let reprogrammingBits = 0;
-    while (
-        reprogrammingSquaredNumerator << BigInt(2 * (reprogrammingBits + 1)) <=
-        reprogrammingSquaredDenominator
-    )
-        reprogrammingBits++;
+    const caps = compileProofCompilerCapCensus();
+    const { chargedQueries } = caps;
     const fieldSize = prime ** 3n;
     const lookupEntryCount =
         BigInt(relation.lookupEntries) * BigInt(agreement.systematicSize);
@@ -163,20 +194,11 @@ export const compileWideChallengeCompilerCensus = () => {
     while (failureNumerator << BigInt(failureBits + 1) <= failureDenominator)
         failureBits++;
     return {
+        ...caps,
         ...layout,
+        originalOracles,
+        virtualOracles,
         queryCount,
-        tagBits,
-        saltBits,
-        relativeBalanceBits,
-        maximumNonSaltInputBits,
-        committedNodeBudget,
-        merklePrivacyBits,
-        programmedMessageBudget,
-        reprogrammingBits,
-        adversaryQueries,
-        verificationBudget,
-        chargedQueries,
-        roleBudget,
         lookupEntryCount,
         lookupRootDegree,
         lookupChallengeSpace,

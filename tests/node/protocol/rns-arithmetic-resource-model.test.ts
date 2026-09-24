@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('exact RNS arithmetic resource floor', () => {
     it('rejects recursively duplicated transform tables before materialization', () => {
-        const census = compileRnsArithmeticResourceCensus();
+        const census = compileRnsArithmeticResourceCensus(completionProfile());
         const layers = Array.from({ length: 30 }, (_, index) =>
             BigInt(index + 1),
         );
@@ -22,7 +23,7 @@ describe('exact RNS arithmetic resource floor', () => {
     });
 
     it('charges fixed public coefficients and transformed multiplication keys separately', () => {
-        const census = compileRnsArithmeticResourceCensus();
+        const census = compileRnsArithmeticResourceCensus(completionProfile());
         expect(census.coefficientWords).toBe(14n);
         expect(census.canonicalPolynomialBytes).toBe(7340032n);
         expect(census.cachedMultiplicationKeyBytes).toBe(226492416n);

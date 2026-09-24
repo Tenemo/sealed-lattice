@@ -76,7 +76,6 @@ import {
 } from '#tests/excluded-prefix-stream-model.js';
 import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
-import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFixedPublicationWitnessCensus } from '#tests/fixed-publication-witness-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import {
@@ -148,7 +147,10 @@ import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resour
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import {
+    compileSetupContributionRelationCensus,
+    deriveSetupContributionShape,
+} from '#tests/setup-contribution-relation-model.js';
 import {
     compileSetupRandomnessCensus,
     setupGaussianParameters,
@@ -176,7 +178,13 @@ import {
     compileStatelessSignatureProofWork,
     compileStatelessSignatureWork,
 } from '#tests/stateless-signature-work-model.js';
-import { compileSupportedProfileCensus } from '#tests/supported-profile-model.js';
+import {
+    compileProfileBfvCensus,
+    compileSupportedProfileCensus,
+    completionProfile,
+    completionProfileCounts,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
@@ -186,7 +194,10 @@ import {
     undetectabilityCollectionViews,
     idealCollectionPreimageBound,
 } from '#tests/unrevealed-point-query-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import {
+    compileWideChallengeCompilerCensus,
+    proofCompilerCaps,
+} from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 const formatCount = (value: bigint | number): string =>
@@ -203,6 +214,7 @@ const table = (
     ].join('\n');
 
 export const renderDocumentationCensus = (): string => {
+    const completion = completionProfile();
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
     const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
     const boundedLinearProof = compileBoundedLinearPolynomialProofCensus();
@@ -228,32 +240,39 @@ export const renderDocumentationCensus = (): string => {
     const participantVisits = compileParticipantVisitDependencyCensus();
     const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
     const certificationRelease = compileCertificationReleaseThresholdCensus();
-    const participantCustody = compileParticipantCustodyCensus();
-    const participantBallotCustody = compileParticipantBallotCustody();
-    const participantReleaseCustody = compileParticipantReleaseCustody();
+    const participantCustody = compileParticipantCustodyCensus(completion);
+    const participantBallotCustody =
+        compileParticipantBallotCustody(completion);
+    const participantReleaseCustody =
+        compileParticipantReleaseCustody(completion);
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
-    const commonMatrixSampling = compileCommonMatrixSamplingCensus();
-    const fixedSpongeInitialization = compileFixedSpongeInitializationCensus();
-    const wideChallengeCompiler = compileWideChallengeCompilerCensus();
-    const fullWordProof = compileFullWordProofLayout();
-    const ballotWordProof = compileBallotWordProofLayout();
-    const ballotBody = compileBallotBodyCensus();
-    const ballotRandomness = compileBallotRandomnessBudget();
-    const browserWordProver = compileBrowserWordProverResources();
-    const contributionGeneration = compileContributionGenerationResources();
-    const contributionBody = compileContributionBodyCensus();
-    const setupAggregate = compileSetupAggregateResources();
+    const commonMatrixSampling = compileCommonMatrixSamplingCensus(completion);
+    const fixedSpongeInitialization =
+        compileFixedSpongeInitializationCensus(completion);
+    const wideChallengeCompiler =
+        compileWideChallengeCompilerCensus(completion);
+    const fullWordProof = compileFullWordProofLayout(completion);
+    const ballotWordProof = compileBallotWordProofLayout(completion);
+    const ballotBody = compileBallotBodyCensus(completion);
+    const ballotRandomness = compileBallotRandomnessBudget(completion);
+    const browserWordProver = compileBrowserWordProverResources(completion);
+    const contributionGeneration =
+        compileContributionGenerationResources(completion);
+    const contributionBody = compileContributionBodyCensus(completion);
+    const setupAggregate = compileSetupAggregateResources(completion);
     const contributionSigning = compileContributionAuthenticationCensus(
         contributionBody.participantCount,
     );
-    const setupRandomness = compileSetupRandomnessCensus();
+    const setupRandomness = compileSetupRandomnessCensus(completion);
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
     const hashRowCheckpoint = compileHashRowCheckpointCensus();
-    const firstOracleCheckpoint = compileFirstOracleCheckpointCensus();
+    const firstOracleCheckpoint =
+        compileFirstOracleCheckpointCensus(completion);
     const selectedOpeningTransform = compileSelectedOpeningTransformCensus();
-    const completedContribution = compileCompletedContributionStateCensus();
+    const completedContribution =
+        compileCompletedContributionStateCensus(completion);
     const commitmentEquivocation = compareCommitmentEquivocationHybrids(
         3,
         2,
@@ -274,11 +293,11 @@ export const renderDocumentationCensus = (): string => {
         compileContributionAuthenticationCensus(profile.participantCount),
     );
     const commonAgreement = compileCommonAgreementDegreeCensus();
-    const rnsArithmetic = compileRnsArithmeticResourceCensus();
-    const setupRelation = compileSetupContributionRelationCensus();
-    const linkedRelease = compileLinkedReleaseRelationCensus();
-    const linkedReleaseProof = compileLinkedReleaseWordProofLayout();
-    const ballotRelation = compileBallotEncryptionRelationCensus();
+    const rnsArithmetic = compileRnsArithmeticResourceCensus(completion);
+    const setupRelation = compileSetupContributionRelationCensus(completion);
+    const linkedRelease = compileLinkedReleaseRelationCensus(completion);
+    const linkedReleaseProof = compileLinkedReleaseWordProofLayout(completion);
+    const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const spongePaths = compileSpongePathExtractionCensus();
     const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
     const publicEncryptedSharingProof =
@@ -286,7 +305,7 @@ export const renderDocumentationCensus = (): string => {
     const shareEncryptionCrossModulus =
         compileShareEncryptionCrossModulusCensus();
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
-    const fixedModulusBfv = compileFixedModulusBfvCensus();
+    const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
     const securityLedger = compileComposedSecurityLedger();
     const populationLedger = compileComposedSecurityLedger(
@@ -305,10 +324,23 @@ export const renderDocumentationCensus = (): string => {
         [...new Set(values.map((value) => value.toString()))]
             .map((value) => formatCount(BigInt(value)))
             .join(', ');
+    const rangeOf = (values: readonly (bigint | number)[]): string => {
+        const sorted = values
+            .map((value) => BigInt(value))
+            .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+        const [low, high] = [sorted[0], sorted[sorted.length - 1]];
+        return low === high
+            ? formatCount(low)
+            : `${formatCount(low)} to ${formatCount(high)}`;
+    };
     const certificateCustody = compileCertificateCustodyCensus();
     const publicationCut = compilePublicationCutCensus();
-    const wideShareLifting = compileWideShareLiftingCensus();
-    const releaseShareLifting = compileReleaseShareLiftingCensus();
+    const wideShareLifting = compileWideShareLiftingCensus(
+        completion.shareLifting,
+    );
+    const releaseShareLifting = compileReleaseShareLiftingCensus(
+        completion.releaseLifting,
+    );
     const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
     const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
     const falseRelation = createFalseBinaryRelationTable();
@@ -331,7 +363,7 @@ export const renderDocumentationCensus = (): string => {
     return `${[
         '# Documentation census',
         '',
-        'Generated by `pnpm run docs:census` from the independent TypeScript models under `tests/`. Do not edit by hand. These are model-derived development values, not a protocol theorem, concrete FHE parameter approval, browser measurement, or supported-phone qualification.',
+        'Generated by `pnpm run docs:census` from the independent TypeScript models under `tests/`. Do not edit by hand. These are model-derived development values, not a protocol theorem, concrete FHE parameter approval, browser measurement, or supported-phone qualification. A section that names no participant or option count evaluates the completion profile of ten participants and ten options; the supported profile census and the composed security ledger cover every supported profile.',
         '',
         '## Threshold completion census',
         '',
@@ -1790,7 +1822,9 @@ export const renderDocumentationCensus = (): string => {
                 'Optional purposes',
                 'First-evaluated intent bound',
             ],
-            compileCompleteCredentialIntentBounds().map((value) => [
+            compileCompleteCredentialIntentBounds(
+                completion.participantCount,
+            ).map((value) => [
                 formatCount(value.participantCount),
                 value.branch,
                 value.role,
@@ -2061,7 +2095,7 @@ export const renderDocumentationCensus = (): string => {
             (() => {
                 const value = keyedXofViews();
                 const bound = unrevealedPointQueryBound(
-                    2n * compileWideChallengeCompilerCensus().adversaryQueries,
+                    2n * proofCompilerCaps.adversaryQueries,
                     1n << (8n * compileStatelessSignatureWork().nodeBytes),
                 );
                 return [
@@ -2105,16 +2139,11 @@ export const renderDocumentationCensus = (): string => {
                 'Shared hidden-point term',
                 'Combined upper bound',
             ],
-            [
-                1n,
-                10n,
-                20n,
-                compileWideChallengeCompilerCensus().adversaryQueries,
-            ].map((keys) => {
+            [1n, 10n, 20n, proofCompilerCaps.adversaryQueries].map((keys) => {
                 const domain =
                     1n << (8n * compileStatelessSignatureWork().nodeBytes);
                 const value = labelledKeyedXofBound(
-                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    proofCompilerCaps.adversaryQueries,
                     keys,
                     domain,
                     domain,
@@ -2228,8 +2257,7 @@ export const renderDocumentationCensus = (): string => {
         table(
             ['Operand', 'Exact rational upper bound'],
             (() => {
-                const queries =
-                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const queries = proofCompilerCaps.adversaryQueries;
                 const bits = Number(
                     compileStatelessSignatureWork().nodeBytes * 8n,
                 );
@@ -2282,8 +2310,7 @@ export const renderDocumentationCensus = (): string => {
         table(
             ['Illustrative ideal undetectability operand', 'Value'],
             (() => {
-                const hashQueries =
-                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const hashQueries = proofCompilerCaps.adversaryQueries;
                 const bits = compileStatelessSignatureWork().nodeBytes * 8n;
                 const point = unrevealedPointQueryBound(
                     2n * hashQueries,
@@ -2344,8 +2371,7 @@ export const renderDocumentationCensus = (): string => {
         table(
             ['Ideal bound operand', 'Value'],
             (() => {
-                const queries =
-                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const queries = proofCompilerCaps.adversaryQueries;
                 const size =
                     1n << (8n * compileStatelessSignatureWork().nodeBytes);
                 const value = stagedPreimageBound(queries, size, size);
@@ -2430,7 +2456,7 @@ export const renderDocumentationCensus = (): string => {
             [0n, 1n, 6n].map((targets) => {
                 const parameters = compileStatelessSignatureWork();
                 const value = interleavedTargetQueryBound(
-                    compileWideChallengeCompilerCensus().adversaryQueries,
+                    proofCompilerCaps.adversaryQueries,
                     targets,
                     1n << (8n * parameters.nodeBytes),
                     1n << parameters.totalHeight,
@@ -2520,13 +2546,12 @@ export const renderDocumentationCensus = (): string => {
             [
                 [1n, 6n],
                 [10n, 10n],
-                [compileWideChallengeCompilerCensus().adversaryQueries, 10n],
+                [proofCompilerCaps.adversaryQueries, 10n],
             ].map(([credentials, requestsPerCredential]) => {
                 const parameters = compileStatelessSignatureWork(),
                     domain = 1n << (8n * parameters.nodeBytes);
                 const value = multiKeyTargetBound({
-                    publicQueries:
-                        compileWideChallengeCompilerCensus().adversaryQueries,
+                    publicQueries: proofCompilerCaps.adversaryQueries,
                     credentials,
                     requestsPerCredential,
                     randomizerDomain: domain,
@@ -2621,8 +2646,7 @@ export const renderDocumentationCensus = (): string => {
             ['Operand or term', 'Value'],
             (() => {
                 const work = compileStatelessSignatureWork(),
-                    publicQueries =
-                        compileWideChallengeCompilerCensus().adversaryQueries,
+                    publicQueries = proofCompilerCaps.adversaryQueries,
                     domain = 1n << (8n * work.nodeBytes),
                     value = adaptiveWotsBound(
                         publicQueries,
@@ -2669,8 +2693,7 @@ export const renderDocumentationCensus = (): string => {
                 'Floor security bits',
             ],
             (() => {
-                const queries =
-                    compileWideChallengeCompilerCensus().adversaryQueries;
+                const queries = proofCompilerCaps.adversaryQueries;
                 return [
                     [queries, 10n, 10n],
                     [queries, 10n, 15n],
@@ -2700,7 +2723,7 @@ export const renderDocumentationCensus = (): string => {
                 const work = compileStatelessSignatureWork(),
                     domain = 1n << (8n * work.nodeBytes),
                     value = hashGraphCollisionBound(
-                        compileWideChallengeCompilerCensus().adversaryQueries,
+                        proofCompilerCaps.adversaryQueries,
                         domain,
                     );
                 return [
@@ -2845,8 +2868,8 @@ export const renderDocumentationCensus = (): string => {
                 'Verifier core permutations',
                 'One statement-digest pass permutations',
             ],
-            proofHashProfiles().map((profile) => {
-                const value = compileProofHashWork(profile);
+            proofHashProfiles(completion).map((profile) => {
+                const value = compileProofHashWork(completion, profile);
                 return [
                     profile.role,
                     formatCount(value.roleBytes),
@@ -2978,7 +3001,7 @@ export const renderDocumentationCensus = (): string => {
                 'Maximum browser RNG bytes',
                 'Per-call failure bits',
             ],
-            compileSparseSupportSamplingCensus().map((value) => [
+            compileSparseSupportSamplingCensus(completion).map((value) => [
                 value.role,
                 formatCount(value.degree),
                 formatCount(value.support),
@@ -3004,7 +3027,7 @@ export const renderDocumentationCensus = (): string => {
                 'Conditional invocation cap',
                 'Failure allocation bits',
             ],
-            compileProofRandomnessBudgets().map((value) => [
+            compileProofRandomnessBudgets(completion).map((value) => [
                 value.role,
                 formatCount(value.ordinaryBaselineBytes),
                 formatCount(value.programmedMessageBytes),
@@ -4531,7 +4554,7 @@ export const renderDocumentationCensus = (): string => {
                 'Algorithmic encryption AES call bound',
                 'Maximum GHASH degree',
             ],
-            compileParticipantVaultKeyClasses().map((value) => [
+            compileParticipantVaultKeyClasses(completion).map((value) => [
                 value.name,
                 value.maximumPerCompletedCorpus === null
                     ? 'Unmeasured'
@@ -4657,7 +4680,7 @@ export const renderDocumentationCensus = (): string => {
             ['Property', 'Value'],
             (() => {
                 const initialization =
-                    compileCommonMatrixInitializationCensus();
+                    compileCommonMatrixInitializationCensus(completion);
                 return [
                     ['Programmed XOF inputs', initialization.programmedInputs],
                     [
@@ -4690,15 +4713,17 @@ export const renderDocumentationCensus = (): string => {
                 'Random bits per coefficient',
                 'Programmed prefix bytes',
             ],
-            compileCommonMatrixInitializationCensus().families.map((value) => [
-                value.name,
-                ...[
-                    value.polynomials,
-                    value.coefficients,
-                    value.randomBitsPerCoefficient,
-                    value.programmedPrefixBytes,
-                ].map(formatCount),
-            ]),
+            compileCommonMatrixInitializationCensus(completion).families.map(
+                (value) => [
+                    value.name,
+                    ...[
+                        value.polynomials,
+                        value.coefficients,
+                        value.randomBitsPerCoefficient,
+                        value.programmedPrefixBytes,
+                    ].map(formatCount),
+                ],
+            ),
         ),
         '',
         '## Fixed sponge initialization census',
@@ -5130,12 +5155,68 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Composed security ledger',
-        '',
-        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler; roster-dependent terms take the largest roster and the others keep their ten-participant models. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        'Proof and body layouts of every supported profile under the same derivation rules. Each cell is the range over the option counts of one participant count.',
         '',
         table(
-            ['Statistical term', 'Bound exponent'],
+            [
+                'Participants',
+                'Common-matrix sample bits',
+                'Setup word columns',
+                'Setup affine rows',
+                'Verifier message bytes',
+                'Largest contribution body bytes',
+                'Largest ballot body bytes',
+            ],
+            supportedProfiles.profiles.map((row) => [
+                formatCount(row[0].participantCount),
+                rangeOf(
+                    row.map(
+                        (profile) =>
+                            compileCommonMatrixSamplingCensus(profile)
+                                .bitsPerCoefficient,
+                    ),
+                ),
+                rangeOf(
+                    row.map(
+                        (profile) =>
+                            deriveSetupContributionShape(profile).wordColumns,
+                    ),
+                ),
+                rangeOf(
+                    row.map(
+                        (profile) =>
+                            deriveSetupContributionShape(profile).affineRows,
+                    ),
+                ),
+                rangeOf(
+                    row.map(
+                        (profile) =>
+                            compileWideChallengeCompilerCensus(profile)
+                                .challengeBytes,
+                    ),
+                ),
+                rangeOf(
+                    row.map(
+                        (profile) =>
+                            compileContributionBodyCensus(profile)
+                                .maximumBodyBytes,
+                    ),
+                ),
+                rangeOf(
+                    row.map(
+                        (profile) =>
+                            compileBallotBodyCensus(profile).maximumBodyBytes,
+                    ),
+                ),
+            ]),
+        ),
+        '',
+        '## Composed security ledger',
+        '',
+        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler, and each term takes its largest value over every supported profile; a poll has one profile, so the subtotal bounds every poll. The last column names the first profile that attains a term that varies between profiles. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        '',
+        table(
+            ['Statistical term', 'Bound exponent', 'Largest at'],
             [
                 ...securityLedger.statistical.terms.map((term) => [
                     term.name,
@@ -5147,10 +5228,19 @@ export const renderDocumentationCensus = (): string => {
                                 securityLedger.statistical.denominatorBits,
                         }),
                     ),
+                    term.largestAt === undefined
+                        ? 'every profile'
+                        : [
+                              `${term.largestAt.participantCount} participants`,
+                              ...(term.largestAt.optionCount === undefined
+                                  ? []
+                                  : [`${term.largestAt.optionCount} options`]),
+                          ].join(', '),
                 ]),
                 [
                     'Subtotal',
                     signedExponent(securityLedger.statistical.subtotalExponent),
+                    'every profile',
                 ],
             ],
         ),
@@ -5574,7 +5664,8 @@ export const renderDocumentationCensus = (): string => {
                     count: 1n,
                     inputCapacity:
                         8n *
-                        compileContributionBodyCensus().maximumHashInputBytes,
+                        compileContributionBodyCensus(completion)
+                            .maximumHashInputBytes,
                     outputCapacity: 512n,
                     firstChunkBits: 512n,
                 },
@@ -6241,16 +6332,21 @@ export const renderDocumentationCensus = (): string => {
                 ['Envelope bytes', formatCount(ballotBody.envelopeBytes)],
                 [
                     'Archived submission bytes',
-                    formatCount(compileCloseWireCensus(10).submissionBytes),
+                    formatCount(
+                        compileCloseWireCensus(completion).submissionBytes,
+                    ),
                 ],
                 [
                     'Close intent body bytes',
-                    formatCount(compileCloseWireCensus(10).intentBodyBytes),
+                    formatCount(
+                        compileCloseWireCensus(completion).intentBodyBytes,
+                    ),
                 ],
                 [
                     'Empty response body bytes',
                     formatCount(
-                        compileCloseWireCensus(10).minimumResponseBodyBytes,
+                        compileCloseWireCensus(completion)
+                            .minimumResponseBodyBytes,
                     ),
                 ],
             ],
@@ -6270,7 +6366,12 @@ export const renderDocumentationCensus = (): string => {
                 'Maximum close state bytes',
             ],
             thresholdProfiles.map(({ participantCount }) => {
-                const value = compileCloseWireCensus(participantCount);
+                const value = compileCloseWireCensus(
+                    deriveSupportedProfile(
+                        participantCount,
+                        completionProfileCounts.optionCount,
+                    ),
+                );
                 return [
                     formatCount(participantCount),
                     formatCount(value.closeQuorum),

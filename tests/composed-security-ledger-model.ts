@@ -12,16 +12,27 @@ import {
     prefixOracleQueriesPerAccess,
     sparseRoutingWork,
 } from '#tests/compressed-oracle-model.js';
-import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
-import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    contributionSenderPrefix,
+    compileContributionBodyCensus,
+} from '#tests/contribution-body-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { prefixReplacementBaseQueriesPerAccess } from '#tests/oracle-domain-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
 import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
+import {
+    listSupportedProfiles,
+    type SupportedProfile,
+} from '#tests/supported-profile-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
-import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import {
+    compileProofCompilerCapCensus,
+    compileWideChallengeCompilerCensus,
+    proofCompilerCaps,
+} from '#tests/wide-challenge-compiler-model.js';
 
 // Frozen requirement VI.2. A protocol has this many bits when every adversary
 // whose complete experiment costs T gates has advantage at most T/2^bits.
@@ -103,121 +114,162 @@ export const supportedParticipantCounts =
     );
 const largestParticipantCount = Math.max(...supportedParticipantCounts);
 
-type StatisticalTerm = Readonly<{ name: string; numerator: bigint }>;
+type StatisticalTerm = Readonly<{
+    name: string;
+    numerator: bigint;
+    // The first profile at which a profile-dependent term is largest. A term
+    // that depends on the roster alone names no option count.
+    largestAt?: Readonly<{ participantCount: number; optionCount?: number }>;
+}>;
+
+// Terms of one supported profile that do not depend on the honest credential
+// population.
+export const profileStatisticalTerms = (
+    profile: SupportedProfile,
+): readonly StatisticalTerm[] => {
+    const caps = compileProofCompilerCapCensus();
+    const compiler = compileWideChallengeCompilerCensus(profile);
+    const extraction = compileCommitmentExtractionBound(
+        profile.participantCount,
+        prefixReplacementBaseQueriesPerAccess *
+            prefixOracleQueriesPerAccess *
+            caps.adversaryQueries,
+    );
+    const matrices = compileCommonMatrixSamplingCensus(profile);
+    const matrixInitialization =
+        compileCommonMatrixInitializationCensus(profile);
+    const sharing = profile.shareLifting;
+    const releaseJournal = compileParticipantReleaseCustody(profile);
+    const sampling = compileSetupRandomnessCensus(profile);
+    return [
+        {
+            name: 'Fixed common matrix sampling',
+            numerator: dyadic(
+                matrices.distanceUpperNumerator,
+                matrices.distanceUpperDenominator,
+            ),
+        },
+        {
+            name: 'Fixed common matrix fibre initialization',
+            numerator: dyadic(
+                matrixInitialization.biasNumerator,
+                matrixInitialization.biasDenominator,
+            ),
+        },
+        ...compileCurrentSignatureSamplingBounds().map((row) => ({
+            name: `${row.purpose} all-seed read bound`,
+            numerator: dyadic(row.numerator, 1n << row.denominatorBits),
+        })),
+        {
+            name: 'Bounded recipient-key collision',
+            numerator: power(
+                compileRecipientKeyUniquenessBound()
+                    .uniformMatrixFailureExponent,
+            ),
+        },
+        {
+            name: 'Preparation Gaussian sampling',
+            numerator: dyadic(
+                sampling.preparationVariationNumerator,
+                sampling.preparationVariationDenominator,
+            ),
+        },
+        {
+            name: 'Integer sharing translation',
+            numerator: dyadic(
+                sharing.privacyNumerator,
+                2n * sharing.sharingRadius,
+            ),
+        },
+        {
+            // A profile exists only when its flooded release meets the
+            // joint translated-cube bound at the statistical target.
+            name: 'One-target release coupling',
+            numerator: power(BigInt(fixedModulusBfvInputs.statisticalBits)),
+        },
+        {
+            name: 'Corrupt-body extraction',
+            numerator: dyadic(
+                extraction.combinedFailureNumerator,
+                extraction.denominator,
+            ),
+        },
+        {
+            name: 'Wide-message proof soundness',
+            numerator: dyadic(
+                compiler.failureNumerator,
+                compiler.failureDenominator,
+            ),
+        },
+        {
+            name: 'Merkle privacy',
+            numerator: power(BigInt(caps.merklePrivacyBits)),
+        },
+        {
+            name: 'Proof reprogramming',
+            numerator: power(BigInt(caps.reprogrammingBits)),
+        },
+        {
+            name: 'Ballot journal exhaustion',
+            numerator: power(
+                compileBallotRandomnessBudget(profile).exhaustionBits,
+            ),
+        },
+        {
+            name: 'Release journal exhaustion',
+            numerator: dyadic(
+                releaseJournal.exhaustionBound.numerator,
+                1n << releaseJournal.exhaustionBound.denominatorBits,
+            ),
+        },
+        ...compileProofRandomnessBudgets(profile).map((value) => ({
+            name: `${value.role.charAt(0).toUpperCase()}${value.role.slice(1)} simulator field sampling`,
+            numerator: dyadic(
+                value.failure.numerator,
+                1n << value.failure.denominatorBits,
+            ),
+        })),
+    ];
+};
 
 let credentialIndependentTerms:
     | Readonly<{ adversaryQueries: bigint; terms: readonly StatisticalTerm[] }>
     | undefined;
 
-// Terms that do not depend on the honest credential population. Terms that
-// depend on the roster take the largest supported roster; the others keep
-// their ten-participant models.
+// Terms that do not depend on the honest credential population, each at its
+// largest value over every supported profile. A poll has one profile, so
+// their sum bounds that profile's terms.
 const statisticalTermsWithoutCredentials = () => {
     if (credentialIndependentTerms !== undefined)
         return credentialIndependentTerms;
-    const compiler = compileWideChallengeCompilerCensus();
-    const extraction = compileCommitmentExtractionBound(
-        largestParticipantCount,
-        prefixReplacementBaseQueriesPerAccess *
-            prefixOracleQueriesPerAccess *
-            compiler.adversaryQueries,
-    );
-    const matrices = compileCommonMatrixSamplingCensus();
-    const matrixInitialization = compileCommonMatrixInitializationCensus();
-    const sharing = compileWideShareLiftingCensus();
-    const releaseJournal = compileParticipantReleaseCustody();
-    const ranking = compileFixedModulusBfvCensus();
-    assert.ok(ranking.releaseCorrect && ranking.jointStatisticalBoundHolds);
-    const sampling = compileSetupRandomnessCensus();
+    const evaluated = listSupportedProfiles().map((profile) => ({
+        profile,
+        terms: profileStatisticalTerms(profile),
+    }));
+    const terms = evaluated[0].terms.map((first, index): StatisticalTerm => {
+        let largest = { profile: evaluated[0].profile, term: first };
+        let varies = false;
+        for (const { profile, terms: values } of evaluated) {
+            const term = values[index];
+            assert.equal(term.name, first.name);
+            if (term.numerator !== first.numerator) varies = true;
+            if (term.numerator > largest.term.numerator)
+                largest = { profile, term };
+        }
+        return {
+            name: first.name,
+            numerator: largest.term.numerator,
+            ...(varies && {
+                largestAt: {
+                    participantCount: largest.profile.participantCount,
+                    optionCount: largest.profile.optionCount,
+                },
+            }),
+        };
+    });
     credentialIndependentTerms = {
-        adversaryQueries: compiler.adversaryQueries,
-        terms: [
-            {
-                name: 'Fixed common matrix sampling',
-                numerator: dyadic(
-                    matrices.distanceUpperNumerator,
-                    matrices.distanceUpperDenominator,
-                ),
-            },
-            {
-                name: 'Fixed common matrix fibre initialization',
-                numerator: dyadic(
-                    matrixInitialization.biasNumerator,
-                    matrixInitialization.biasDenominator,
-                ),
-            },
-            ...compileCurrentSignatureSamplingBounds().map((row) => ({
-                name: `${row.purpose} all-seed read bound`,
-                numerator: dyadic(row.numerator, 1n << row.denominatorBits),
-            })),
-            {
-                name: 'Bounded recipient-key collision',
-                numerator: power(
-                    compileRecipientKeyUniquenessBound()
-                        .uniformMatrixFailureExponent,
-                ),
-            },
-            {
-                name: 'Preparation Gaussian sampling',
-                numerator: dyadic(
-                    sampling.preparationVariationNumerator,
-                    sampling.preparationVariationDenominator,
-                ),
-            },
-            {
-                name: 'Integer sharing translation',
-                numerator: dyadic(
-                    sharing.privacyNumerator,
-                    2n * sharing.sharingRadius,
-                ),
-            },
-            {
-                name: 'One-target release coupling',
-                numerator: power(BigInt(ranking.statisticalBits)),
-            },
-            {
-                name: 'Corrupt-body extraction',
-                numerator: dyadic(
-                    extraction.combinedFailureNumerator,
-                    extraction.denominator,
-                ),
-            },
-            {
-                name: 'Wide-message proof soundness',
-                numerator: dyadic(
-                    compiler.failureNumerator,
-                    compiler.failureDenominator,
-                ),
-            },
-            {
-                name: 'Merkle privacy',
-                numerator: power(BigInt(compiler.merklePrivacyBits)),
-            },
-            {
-                name: 'Proof reprogramming',
-                numerator: power(BigInt(compiler.reprogrammingBits)),
-            },
-            {
-                name: 'Ballot journal exhaustion',
-                numerator: power(
-                    compileBallotRandomnessBudget().exhaustionBits,
-                ),
-            },
-            {
-                name: 'Release journal exhaustion',
-                numerator: dyadic(
-                    releaseJournal.exhaustionBound.numerator,
-                    1n << releaseJournal.exhaustionBound.denominatorBits,
-                ),
-            },
-            ...compileProofRandomnessBudgets().map((value) => ({
-                name: `${value.role.charAt(0).toUpperCase()}${value.role.slice(1)} simulator field sampling`,
-                numerator: dyadic(
-                    value.failure.numerator,
-                    1n << value.failure.denominatorBits,
-                ),
-            })),
-        ],
+        adversaryQueries: proofCompilerCaps.adversaryQueries,
+        terms,
     };
     return credentialIndependentTerms;
 };
@@ -239,11 +291,13 @@ const compileStatisticalLedger = (
         potentialCredentialCount,
     );
     assert.equal(equivocation.quantumQueryCount, fixed.adversaryQueries);
+    const largestRoster = { participantCount: largestParticipantCount };
     const terms: readonly StatisticalTerm[] = [
         ...fixed.terms,
         {
             name: 'Honest-body equivocation',
             numerator: dyadic(equivocation.numerator, equivocation.denominator),
+            largestAt: largestRoster,
         },
         {
             name: 'Honest signing credential collision',
@@ -251,6 +305,7 @@ const compileStatisticalLedger = (
                 equivocation.credentialCollisionNumerator,
                 equivocation.credentialCollisionDenominator,
             ),
+            largestAt: largestRoster,
         },
     ];
     const subtotalNumerator = terms.reduce(
@@ -297,17 +352,17 @@ export const sparseRoutingCoefficients = (() => {
 const maximumOf = (...values: readonly bigint[]) =>
     values.reduce((maximum, value) => (value > maximum ? value : maximum));
 
-let reductionOperandCache:
-    | Readonly<{ programmedMessageBudget: bigint; senderPrefixBits: bigint }>
-    | undefined;
-
-const reductionOperands = () =>
-    (reductionOperandCache ??= {
-        programmedMessageBudget:
-            compileWideChallengeCompilerCensus().programmedMessageBudget,
-        senderPrefixBits:
-            8n * compileContributionBodyCensus().senderPrefixBytes,
-    });
+// The sender prefix and the programming cap are the same for every profile.
+const reductionOperands = () => ({
+    programmedMessageBudget: proofCompilerCaps.programmedMessageBudget,
+    senderPrefixBits:
+        8n *
+        BigInt(
+            contributionSenderPrefix(
+                new Uint8Array(Number(registrationSigningPublicKeyBytes)),
+            ).length,
+        ),
+});
 
 // Reduction work relative to the complete experiment's charged cost T, which
 // includes every honest operation, in the gate basis of the compressed-oracle
@@ -593,11 +648,21 @@ export const compileComposedSecurityLedger = (
 };
 
 // The same extraction reduction if every oracle call cost one gate: an entry
-// could then hold the complete contribution input with a 512-bit output.
+// could then hold the widest supported contribution input with a 512-bit
+// output.
 export const compileUnitCallCostSensitivity = () => {
     const participantCount = largestParticipantCount;
     const widestEntryBits =
-        8n * compileContributionBodyCensus().maximumHashInputBytes + 512n + 1n;
+        8n *
+            maximumOf(
+                ...listSupportedProfiles().map(
+                    (profile) =>
+                        compileContributionBodyCensus(profile)
+                            .maximumHashInputBytes,
+                ),
+            ) +
+        512n +
+        1n;
     const work = compileReductionWork(
         BigInt(participantCount),
         compileCommitmentExtractionBound(participantCount)

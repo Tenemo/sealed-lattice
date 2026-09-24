@@ -1,11 +1,14 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const compileFirstOracleCheckpointCensus = () => {
+export const compileFirstOracleCheckpointCensus = (
+    profile: SupportedProfile,
+) => {
     const proof = compileCommonAgreementDegreeCensus();
-    const relation = compileSetupContributionRelationCensus();
-    const body = compileContributionBodyCensus();
+    const relation = compileSetupContributionRelationCensus(profile);
+    const body = compileContributionBodyCensus(profile);
     const systematic = BigInt(proof.systematicSize);
     const domain = BigInt(proof.domainSize);
     const columns = BigInt(relation.wordColumns + relation.booleanColumns);

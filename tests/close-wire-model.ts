@@ -1,6 +1,7 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { deriveCloseProfile } from '#tests/close-response-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // Canonical tuple framing: an eight-byte tuple header, then a two-byte type
 // and a four-byte length for each item. ASCII and byte-string values also
@@ -29,16 +30,14 @@ const maximumListedEnvelopesPerSlot = 2n;
 // The participant root prefixes each retained completed message, and the
 // close state as a whole, with six bytes.
 const entryPrefixBytes = 6n;
-// The ballot body census does not depend on the roster.
-let ballotBodyCensus: ReturnType<typeof compileBallotBodyCensus> | undefined;
-
-export const compileCloseWireCensus = (participantCount: number) => {
+export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
+    const participantCount = supportedProfile.participantCount;
     const profile = deriveCloseProfile(participantCount);
     const participants = BigInt(participantCount);
     const quorum = BigInt(profile.quorum);
     const faultBound = BigInt(profile.faultBound);
     const { signatureBytes } = compileRegistrationEnrollmentCensus();
-    const ballot = (ballotBodyCensus ??= compileBallotBodyCensus());
+    const ballot = compileBallotBodyCensus(supportedProfile);
     // Purpose, poll identity and inventory identity open every close message.
     const prefixBytes = (purpose: string) =>
         tupleHeaderBytes + asciiItemBytes(purpose) + 2n * identityItemBytes;

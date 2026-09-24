@@ -6,6 +6,7 @@ import {
     squeezingCapacityCondition,
     staticSpongeConditioningBound,
 } from '#tests/sponge-initialization-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 function* permutations(
     remaining: readonly number[],
@@ -24,7 +25,8 @@ function* permutations(
 
 describe('fixed-input sponge initialization', () => {
     it('covers the emitted common-vector seeds with distinct one-block inputs and complete output prefixes', () => {
-        const value = compileFixedSpongeInitializationCensus();
+        const value =
+            compileFixedSpongeInitializationCensus(completionProfile());
         expect(value.rateBits).toBe(1088n);
         expect(value.capacityBits).toBe(512n);
         expect(value.seeds.map(({ label }) => label)).toEqual([

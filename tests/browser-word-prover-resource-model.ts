@@ -5,11 +5,14 @@ import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const compileBrowserWordProverResources = () => {
+export const compileBrowserWordProverResources = (
+    profile: SupportedProfile,
+) => {
     const agreement = compileCommonAgreementDegreeCensus();
-    const relation = compileSetupContributionRelationCensus();
-    const layout = compileFullWordProofLayout();
+    const relation = compileSetupContributionRelationCensus(profile);
+    const layout = compileFullWordProofLayout(profile);
     const field = compileSmallLimbProofFieldCensus();
     const systematic = BigInt(agreement.systematicSize);
     const domain = BigInt(agreement.domainSize);
@@ -18,15 +21,8 @@ export const compileBrowserWordProverResources = () => {
     const extension = field.packedExtensionElementByteLength;
     const columns = BigInt(relation.wordColumns + relation.booleanColumns);
     const lookups = BigInt(relation.lookupEntries);
-    let gadgetLength = 0n;
-    for (
-        let value = 1n;
-        value < fixedModulusBfvInputs.ciphertextModulus;
-        value *= fixedModulusBfvInputs.gadgetBase
-    )
-        gadgetLength++;
     const fullDegreeCommonPolynomials =
-        3n * gadgetLength + fixedModulusBfvInputs.participantCount + 1n;
+        3n * profile.gadgetLength + BigInt(profile.participantCount) + 1n;
     const preparedAdjointBytes =
         (fullDegreeCommonPolynomials * systematic +
             auxiliaryInputEncryptionParameters.degree) *
@@ -124,21 +120,24 @@ export const compileBrowserWordProverResources = () => {
     };
 };
 
-export const compileContributionGenerationResources = () => {
+export const compileContributionGenerationResources = (
+    profile: SupportedProfile,
+) => {
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
-    const participants = fixedModulusBfvInputs.participantCount;
+    const participants = BigInt(profile.participantCount);
+    const sharingDegree = BigInt(profile.releaseThreshold - 1);
     const roster = compileRosterProposalCensus(Number(participants));
     const retainedRosterPayloadBytes =
         roster.retainedRecordPayloadBytes +
         roster.canonicalRosterBytes +
         roster.proposalBytes;
     const additionalInputBufferBytes = 1_572_864n - (1n << 20n);
-    const relation = compileSetupContributionRelationCensus();
-    const proof = compileFullWordProofLayout();
+    const relation = compileSetupContributionRelationCensus(profile);
+    const proof = compileFullWordProofLayout(profile);
     const sparseData = ((participants + 2n) * degree + auxiliaryDegree) * 17n;
     const transforms = 3n * (degree + auxiliaryDegree) * 16n;
-    const sharing = 3n * degree * 16n;
+    const sharing = sharingDegree * degree * 16n;
     const privateWorkspace = 24n * degree * 16n;
     const publicCoefficientAllowance = 1024n;
     const publicWorkspace = 4n * degree * publicCoefficientAllowance;
@@ -151,14 +150,8 @@ export const compileContributionGenerationResources = () => {
         publicWorkspace +
         64n * 1024n * 1024n;
     const proverAllowance =
-        compileBrowserWordProverResources().maximumLiveBytes;
-    let gadgetLength = 0n;
-    for (
-        let value = 1n;
-        value < fixedModulusBfvInputs.ciphertextModulus;
-        value *= fixedModulusBfvInputs.gadgetBase
-    )
-        gadgetLength++;
+        compileBrowserWordProverResources(profile).maximumLiveBytes;
+    const gadgetLength = profile.gadgetLength;
     const auxiliaryPolynomialBytes =
         auxiliaryDegree *
         (1n +

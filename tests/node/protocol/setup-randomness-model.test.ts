@@ -4,10 +4,11 @@ import {
     compileSetupRandomnessCensus,
     reduceSignedDigitModel,
 } from '#tests/setup-randomness-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('setup randomness and bounded integer reduction', () => {
     it('charges all contribution and registration errors in the preparation profile', () => {
-        const result = compileSetupRandomnessCensus();
+        const result = compileSetupRandomnessCensus(completionProfile());
         expect(result.samplesPerContribution).toBe(44n * 65536n + 4096n);
         expect(result.samplesPerPreparation).toBe(10n * (45n * 65536n + 4096n));
         expect(result.encodedThresholdBytes).toBe(127n * 20n);

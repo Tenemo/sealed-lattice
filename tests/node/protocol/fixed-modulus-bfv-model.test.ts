@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    compileFixedModulusBfvCensus,
     createFixedModulusBfvNoiseModel,
     verifyProthCertificate,
 } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    compileProfileBfvCensus,
+    completionProfile,
+} from '#tests/supported-profile-model.js';
 
 type Polynomial = readonly bigint[];
 const degree = 8;
@@ -168,7 +171,7 @@ describe('fixed-modulus BFV noise', () => {
     );
 
     it('certifies the candidate primes and preserves the full ranking decoding margin', () => {
-        const census = compileFixedModulusBfvCensus();
+        const census = compileProfileBfvCensus(completionProfile());
         expect(census.ciphertextModulus.toString(2)).toHaveLength(864);
         expect(census.releaseModulus.toString(2)).toHaveLength(192);
         expect(census.gadgetLength).toBe(6n);

@@ -8,22 +8,25 @@ import {
     partitionAggregatePolynomial,
     setupAggregateChunkBytes,
 } from '#tests/setup-aggregate-resource-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('setup aggregate cache resources', () => {
     it('matches an independent count of key and encrypted-share components', () => {
-        const value = compileSetupAggregateResources();
+        const profile = completionProfile();
+        const value = compileSetupAggregateResources(profile);
         const parameters = fixedModulusBfvInputs;
+        const participantCount = BigInt(profile.participantCount);
         const recipient = compileRegistrationKeyRelationCensus();
         const gadgetCount = BigInt(
             Math.ceil(
-                parameters.ciphertextModulus.toString(2).length /
+                profile.ciphertext.modulus.toString(2).length /
                     (parameters.gadgetBase.toString(2).length - 1),
             ),
         );
         const fheWidth =
             1n +
             BigInt(
-                Math.ceil(parameters.ciphertextModulus.toString(2).length / 8),
+                Math.ceil(profile.ciphertext.modulus.toString(2).length / 8),
             );
         const auxiliaryWidth =
             1n +
@@ -35,11 +38,11 @@ describe('setup aggregate cache resources', () => {
             );
         const expected =
             4n * gadgetCount * parameters.polynomialDegree * fheWidth +
-            2n * parameters.participantCount * recipient.publicKeyBytes +
+            2n * participantCount * recipient.publicKeyBytes +
             auxiliaryInputEncryptionParameters.degree * auxiliaryWidth;
         expect(value.aggregateBytes).toBe(expected);
         expect(value.coefficients).toBe(
-            (4n * gadgetCount + 2n * parameters.participantCount) *
+            (4n * gadgetCount + 2n * participantCount) *
                 parameters.polynomialDegree +
                 auxiliaryInputEncryptionParameters.degree,
         );

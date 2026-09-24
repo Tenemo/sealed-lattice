@@ -1,19 +1,15 @@
 import assert from 'node:assert/strict';
 
-import { evaluateFixedModulusBfvRanking } from '#tests/fixed-modulus-bfv-ranking-model.js';
-import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
-
+// Operands shared by every supported profile. The participant and option
+// counts and both moduli are derived per profile by the supported-profile
+// rules.
 export const fixedModulusBfvInputs = {
-    participantCount: 10n,
     polynomialDegree: 65536n,
     plaintextSubringDegree: 32768n,
     plaintextModulus: 65537n,
-    ciphertextModulus: 65537n * 65319n * (1n << 832n) + 1n,
-    releaseModulus: 65537n * 65445n * (1n << 160n) + 1n,
     secretSupportWeight: 1024n,
     errorBound: 64n,
     gadgetBase: 1n << 144n,
-    optionCount: 10,
     comparisonBlockWidth: 16,
     statisticalBits: 96,
 } as const;
@@ -272,81 +268,5 @@ export const deriveFloodedRelease = (
             1n << BigInt(releaseNoiseBits),
         releaseCorrect:
             2n * plaintextModulus * scaledCorrectnessLeft < 4n * releaseModulus,
-    };
-};
-
-export const compileFixedModulusBfvCensus = () => {
-    const parameters = fixedModulusBfvInputs;
-    assert.equal(
-        verifyProthCertificate(65537n * 65319n, 832, 7n),
-        parameters.ciphertextModulus,
-    );
-    assert.equal(
-        verifyProthCertificate(65537n * 65445n, 160, 7n),
-        parameters.releaseModulus,
-    );
-    const model = createFixedModulusBfvNoiseModel(parameters);
-    const { comparison, result } = evaluateFixedModulusBfvRanking(
-        Array.from(
-            { length: Number(parameters.participantCount) },
-            () => model.fresh,
-        ),
-        parameters.optionCount,
-        parameters.comparisonBlockWidth,
-        model,
-    );
-    const interpolation = compileThresholdReleaseNoiseCensus();
-    assert.equal(
-        BigInt(interpolation.completionParticipantCount),
-        parameters.participantCount,
-    );
-    assert.equal(
-        parameters.polynomialDegree %
-            BigInt(interpolation.spacedInterpolationSize / 2),
-        0n,
-    );
-    const release = deriveFloodedRelease({
-        ...parameters,
-        evaluationError: result.error,
-        secretOneNorm: model.secretOneNorm,
-        interpolation: {
-            releaseThreshold: interpolation.releaseThreshold,
-            clearingFactor:
-                1n <<
-                BigInt(Math.ceil(Math.log2(interpolation.releaseThreshold))),
-            maximumScaledReconstructionOneNorm:
-                interpolation.exactMaximumScaledReconstructionCoefficientOneNorm,
-            maximumJointSimulationOneNormSum:
-                interpolation.exactMaximumJointSimulationCoefficientOneNormSum,
-        },
-    });
-    return {
-        ...parameters,
-        ...model.counts,
-        // KLSW24 section 4.3 rounds every tensor coordinate separately.
-        tensorProducts: 4 * model.counts.multiplications,
-        relinearizationExternalProducts: 4 * model.counts.multiplications,
-        relinearizationGadgetDecompositions: 2 * model.counts.multiplications,
-        // Section 4.4 computes both psi(c1) external h and psi(c1) external k.
-        // Only h contributes fresh key error; the common k still costs work.
-        rotationExternalProducts: 2 * model.counts.rotations,
-        rotationGadgetDecompositions: model.counts.rotations,
-        gadgetPolynomialProducts:
-            BigInt(
-                4 * model.counts.multiplications + 2 * model.counts.rotations,
-            ) * model.gadgetLength,
-        finalModulusSwitchCoefficients: 2n * parameters.polynomialDegree,
-        gadgetLength: model.gadgetLength,
-        comparisonDepth: comparison.depth,
-        rankingDepth: result.depth,
-        comparisonErrorBits: bitLength(comparison.error),
-        rankingErrorBits: bitLength(result.error),
-        ...release,
-        publicKeyCorpusBytes:
-            4n *
-            model.gadgetLength *
-            parameters.polynomialDegree *
-            BigInt(Math.ceil(bitLength(parameters.ciphertextModulus) / 8)) *
-            parameters.participantCount,
     };
 };

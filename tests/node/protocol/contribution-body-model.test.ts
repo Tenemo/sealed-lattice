@@ -6,6 +6,7 @@ import {
     matchesContributionSenderPrefix,
     contributionSaltPrefix,
 } from '#tests/contribution-body-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('complete contribution body encoding', () => {
     it('masks the complete sender and salt slice without selecting a body suffix', () => {
@@ -19,7 +20,8 @@ describe('complete contribution body encoding', () => {
         );
         expect(prefix.subarray(sender.length + 6)).toEqual(Buffer.from(salt));
         expect(BigInt(prefix.length)).toBe(
-            compileContributionBodyCensus().senderSaltPrefixBytes,
+            compileContributionBodyCensus(completionProfile())
+                .senderSaltPrefixBytes,
         );
         expect(() => contributionSaltPrefix(key, salt.subarray(1))).toThrow(
             'salt length',
@@ -82,7 +84,7 @@ describe('complete contribution body encoding', () => {
         );
     });
     it('omits only fixed common polynomials and previously verified recipient keys', () => {
-        const value = compileContributionBodyCensus();
+        const value = compileContributionBodyCensus(completionProfile());
         const excluded = new Set([
             42,
             73,

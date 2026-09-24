@@ -1,7 +1,8 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
-import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 // Proof-only truncation of the existing sampler, coupled to the same random
 // tape. This does not impose a new runtime limit or authorize another attempt.
@@ -45,9 +46,11 @@ export const boundSparseSupportSampling = (degree: bigint, support: bigint) => {
     };
 };
 
-export const compileSparseSupportSamplingCensus = () => {
+export const compileSparseSupportSamplingCensus = (
+    profile: SupportedProfile,
+) => {
     const registration = compileRegistrationKeyRelationCensus();
-    const sharing = compileWideShareLiftingCensus();
+    const sharing = shareEncryptionParameters;
     return [
         {
             role: 'Registration recipient secret',
@@ -67,7 +70,7 @@ export const compileSparseSupportSamplingCensus = () => {
         },
         {
             role: 'Contribution recipient ephemerals',
-            callsPerOperation: fixedModulusBfvInputs.participantCount,
+            callsPerOperation: BigInt(profile.participantCount),
             ...boundSparseSupportSampling(
                 fixedModulusBfvInputs.polynomialDegree,
                 sharing.encryptionSupportWeight,

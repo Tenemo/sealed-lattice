@@ -3,6 +3,7 @@ import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileBallotWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 const choose = (population: bigint, count: bigint): bigint => {
     let value = 1n;
@@ -37,12 +38,12 @@ const combine = (values: readonly FailureBound[]): FailureBound => {
 
 // A prospective finite journal of actual independent random bytes. The budget
 // is consumed by the replay experiment, not a new pseudorandom generator.
-export const compileBallotRandomnessBudget = () => {
+export const compileBallotRandomnessBudget = (profile: SupportedProfile) => {
     const readBytes = 65_536n;
     const exhaustionAllocationBits = 128n;
-    const participantCount = fixedModulusBfvInputs.participantCount;
+    const participantCount = BigInt(profile.participantCount);
     const field = compileSmallLimbProofFieldCensus();
-    const proof = compileBallotWordProofLayout();
+    const proof = compileBallotWordProofLayout(profile);
     const rejectedFieldValues = (1n << field.modulusBitLength) - field.modulus;
     const proofFailure = (extraReads: bigint): FailureBound => {
         const rejections = extraReads + 1n;

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('complete first-oracle proof checkpoint', () => {
     it('accounts for every required private field without deterministic caches', () => {
-        const model = compileFirstOracleCheckpointCensus();
+        const model = compileFirstOracleCheckpointCensus(completionProfile());
         expect(model.fields.map((field) => field.plaintextBytes)).toEqual([
             365n * 65536n * 2n,
             366n * 1409n * 16n,

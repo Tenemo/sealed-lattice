@@ -1,16 +1,15 @@
-import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
-import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { ballotEnvelopeBytes } from '#tests/ballot-body-model.js';
 import {
     mlDsa65ChallengeSeedBytes,
     mlDsa65MaskNonceBytes,
     mlDsa65Parameters,
 } from '#tests/ml-dsa-theorem-screen-model.js';
-import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { participantReleaseEnvelopeBytes } from '#tests/participant-release-custody-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 
-const envelopeBytes = compileBallotBodyCensus().envelopeBytes;
+const envelopeBytes = ballotEnvelopeBytes;
 const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
 
 export const authenticationPurposes = [
@@ -80,7 +79,7 @@ const authenticationFrameWork = <Purpose extends CompleteAuthenticationPurpose>(
         purpose === 'ballot-envelope'
             ? envelopeBytes
             : purpose === 'release-envelope'
-              ? compileParticipantReleaseCustody().envelopeBytes
+              ? participantReleaseEnvelopeBytes
               : 64n;
     const frameBytes = 2n + BigInt(Buffer.byteLength(context)) + messageBytes;
     // Sign_internal and Verify_internal hash tr || M'. Other ML-DSA
@@ -111,8 +110,9 @@ export const compileCompleteAuthenticationFrameWork = () =>
 // participant signs one close response, and the organizer also its close
 // intent and proposal.
 // These maxima do not bound verification, lifetime keys or signing failures.
-export const compileCompleteCredentialIntentBounds = () => {
-    const participantCount = Number(fixedModulusBfvInputs.participantCount);
+export const compileCompleteCredentialIntentBounds = (
+    participantCount: number,
+) => {
     const branches = [
         {
             name: 'Encrypted result with own target vote',

@@ -5,7 +5,6 @@ import {
     verifyProthCertificate,
 } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 const proofPrime = compileSmallLimbProofFieldCensus().modulus;
 const scale = verifyProthCertificate(119n, 23, 3n);
@@ -17,19 +16,26 @@ const degree = 8,
     maximumLimbBits = 96,
     minimumCarryBits = 32;
 const sharedSecretSupportWeight = fixedModulusBfvInputs.secretSupportWeight;
+// Every supported roster keeps the summed decryption error of all its
+// contributors' shares below this radius; the layout derivation checks it.
+const aggregateDecryptionErrorRadius = 1n << 23n;
 const bitLength = (value: bigint): number => value.toString(2).length;
+
+// Share encryption is the same for every supported profile.
+export const shareEncryptionParameters = {
+    proofPrime,
+    scale,
+    modulus,
+    encryptionSupportWeight,
+    errorBound,
+    quotientBound,
+    aggregateDecryptionErrorRadius,
+} as const;
 
 export type WideShareLiftingInput = Readonly<{
     participantCount: bigint;
     sharingDegree: number;
 }>;
-const tenParticipantInput: WideShareLiftingInput = {
-    participantCount: fixedModulusBfvInputs.participantCount,
-    sharingDegree:
-        compileThresholdCompletionProfile(
-            Number(fixedModulusBfvInputs.participantCount),
-        ).resultReleaseThreshold - 1,
-};
 
 // Bounds for two limbs of limbBits bits with the least signed carry width,
 // at least minimumCarryBits, that holds the honest carry. The layout is
@@ -112,9 +118,9 @@ export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
             participantCount *
                 (2n * encryptionSupportWeight + 1n) *
                 errorBound <
-                1n << 23n,
+                aggregateDecryptionErrorRadius,
         );
-        assert.ok(2n * (1n << 23n) < scale);
+        assert.ok(2n * aggregateDecryptionErrorRadius < scale);
         return bounds;
     }
     throw new Error('No share-lifting limb width fits the proof field.');
@@ -164,9 +170,7 @@ const signedRange = (value: bigint, bits: number): void => {
     const radius = 1n << BigInt(bits - 1);
     assert.ok(value >= -radius && value < radius);
 };
-export const compileWideShareLiftingCensus = (
-    input: WideShareLiftingInput = tenParticipantInput,
-) => {
+export const compileWideShareLiftingCensus = (input: WideShareLiftingInput) => {
     const layout = deriveWideShareLiftingLayout(input);
     const {
         sharingDegree,

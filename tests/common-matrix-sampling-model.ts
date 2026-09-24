@@ -1,6 +1,7 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const uniformWordResidueDistance = (modulus: bigint, bits: number) => {
     if (!Number.isSafeInteger(bits) || bits < 1 || bits > 4096)
@@ -43,8 +44,10 @@ export const boundedResidueFiberWord = (
     return residue + modulus * (randomWord % count);
 };
 
-export function compileCommonMatrixInitializationCensus() {
-    const matrix = compileCommonMatrixSamplingCensus();
+export function compileCommonMatrixInitializationCensus(
+    profile: SupportedProfile,
+) {
+    const matrix = compileCommonMatrixSamplingCensus(profile);
     // Preserve the previously analysed one-pass fibre sampler's extra width.
     const extraSamplingBits =
         256n + BigInt((matrix.coefficientCount - 1n).toString(2).length);
@@ -53,7 +56,7 @@ export function compileCommonMatrixInitializationCensus() {
             name: 'FHE',
             polynomials: matrix.fhePolynomialCount,
             degree: fixedModulusBfvInputs.polynomialDegree,
-            modulus: fixedModulusBfvInputs.ciphertextModulus,
+            modulus: profile.ciphertext.modulus,
         },
         {
             name: 'Sharing',
@@ -106,19 +109,20 @@ export function compileCommonMatrixInitializationCensus() {
     };
 }
 
-export const compileCommonMatrixSamplingCensus = () => {
-    const bitsPerCoefficient = 1024;
+// Every sampled coefficient is a whole number of 64-bit words, and the
+// width is the least one whose complete distance is at most 2^-128.
+const commonMatrixSampling = {
+    wordBits: 64,
+    distanceAllocationBits: 128,
+} as const;
+
+export const compileCommonMatrixSamplingCensus = (
+    profile: SupportedProfile,
+) => {
     const degree = fixedModulusBfvInputs.polynomialDegree;
-    let gadgetLength = 0n;
-    for (
-        let covered = 1n;
-        covered < fixedModulusBfvInputs.ciphertextModulus;
-        covered *= fixedModulusBfvInputs.gadgetBase
-    )
-        gadgetLength++;
     // KLSW setup contains a, u, and one independent gadget vector per
     // automorphism. The current ranking consumes one unit automorphism.
-    const fhePolynomialCount = (2n + 1n) * gadgetLength;
+    const fhePolynomialCount = (2n + 1n) * profile.gadgetLength;
     const sharingModulus =
         compileSmallLimbProofFieldCensus().modulus * 998244353n;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
@@ -126,10 +130,17 @@ export const compileCommonMatrixSamplingCensus = () => {
     const coefficientCount =
         fhePolynomialCount * degree + degree + auxiliaryDegree;
     const distanceUpperNumerator =
-        fhePolynomialCount * degree * fixedModulusBfvInputs.ciphertextModulus +
+        fhePolynomialCount * degree * profile.ciphertext.modulus +
         degree * sharingModulus +
         auxiliaryDegree * auxiliaryModulus;
     // r(Q-r) <= Q^2/4; tensorization adds the coefficient distances.
+    let bitsPerCoefficient: number = commonMatrixSampling.wordBits;
+    while (
+        distanceUpperNumerator <<
+            BigInt(commonMatrixSampling.distanceAllocationBits) >
+        4n << BigInt(bitsPerCoefficient)
+    )
+        bitsPerCoefficient += commonMatrixSampling.wordBits;
     const distanceUpperDenominator = 4n << BigInt(bitsPerCoefficient);
     let distanceBits = 0;
     while (

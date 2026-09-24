@@ -10,7 +10,11 @@ import {
     geometricNegacyclicAdjoint,
 } from '#tests/geometric-ring-adjoint-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import {
+    interpolationRingDegree,
+    type SupportedProfile,
+} from '#tests/supported-profile-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 type Column = {
     name: string;
@@ -29,8 +33,11 @@ type ConvolutionTerm = Readonly<{
     publicCoefficients: readonly bigint[];
     variable: Variable;
 }>;
+// A sharing coefficient c = low + radix*high + radix/2, with its low and
+// high limb parts as separate signed variables.
 type MonomialTerm = Readonly<{
-    variable: Variable;
+    low: Variable;
+    high: Variable;
     exponent: number;
     factor: bigint;
 }>;
@@ -53,13 +60,15 @@ type Equation = Readonly<{
     error: Variable;
     errorSign: bigint;
     limbs: number;
+    radix: bigint;
 }>;
 
-const radix = 1n << 96n;
+// FHE and auxiliary equations use 96-bit limbs; share equations use the
+// profile's share-lifting limb.
+const fheRadix = 1n << 96n;
 const prime = compileSmallLimbProofFieldCensus().modulus;
-const sharingParameters = compileWideShareLiftingCensus();
-const shareScale = sharingParameters.scale;
-const shareModulus = sharingParameters.modulus;
+const shareScale = shareEncryptionParameters.scale;
+const shareModulus = shareEncryptionParameters.modulus;
 const auxiliaryModulus = auxiliaryInputEncryptionParameters.modulus;
 const modulo = (value: bigint, modulus: bigint) =>
     ((value % modulus) + modulus) % modulus;
@@ -67,7 +76,7 @@ const center = (value: bigint, modulus: bigint) => {
     const result = modulo(value, modulus);
     return result > modulus / 2n ? result - modulus : result;
 };
-const digit = (value: bigint, limb: number) =>
+const digit = (value: bigint, limb: number, radix: bigint) =>
     (value < 0n ? -1n : 1n) *
     (((value < 0n ? -value : value) / radix ** BigInt(limb)) % radix);
 const convolution = (
@@ -91,11 +100,19 @@ const addPolynomials = (...values: readonly (readonly bigint[])[]): bigint[] =>
 
 // The physical degrees and sparse supports are reduced. Moduli, signed sharing
 // interval, gadget coordinates, and every distinct equation family are retained.
-export const createSetupContributionRelationModel = (seed = 1n) => {
+export const createSetupContributionRelationModel = (
+    profile: SupportedProfile,
+    seed = 1n,
+) => {
     const degree = 16,
         auxiliaryDegree = 8;
-    const participants = Number(fixedModulusBfvInputs.participantCount);
-    const sharingDegree = Math.floor((participants - 1) / 3);
+    const participants = profile.participantCount;
+    const sharingDegree = profile.releaseThreshold - 1;
+    const shareLifting = profile.shareLifting;
+    const shareRadix = 1n << BigInt(shareLifting.limbBits);
+    // Roster position a evaluates at Z^a with Z = X^(degree/R).
+    assert.equal(degree % interpolationRingDegree(participants), 0);
+    const pointStride = degree / interpolationRingDegree(participants);
     const columns: Column[] = [],
         equations: Equation[] = [],
         supportRows: Row[] = [];
@@ -228,21 +245,35 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
         'auxiliary encryption secret',
         auxiliaryDegree,
     );
+    const sharingRadius = 1n << BigInt(shareLifting.sharingCoefficientBits - 1);
+    const highRadius =
+        1n <<
+        BigInt(shareLifting.sharingCoefficientBits - shareLifting.limbBits - 1);
     const sharingValues = Array.from({ length: sharingDegree }, () =>
         Array.from({ length: degree }, (_unused, position) => {
-            const radius =
-                1n << BigInt(sharingParameters.sharingCoefficientBits - 1);
-            if (seed === 0n) return position % 2 === 0 ? -radius : radius - 1n;
-            return (random() & (2n * radius - 1n)) - radius;
+            if (seed === 0n)
+                return position % 2 === 0 ? -sharingRadius : sharingRadius - 1n;
+            return (random() & (2n * sharingRadius - 1n)) - sharingRadius;
         }),
     );
-    const sharing = sharingValues.map((values, index) =>
-        signed(
-            `sharing coefficient ${String(index + 1)}`,
-            sharingParameters.sharingCoefficientBits,
-            values,
-        ),
-    );
+    const sharing = sharingValues.map((values, index) => {
+        const name = `sharing coefficient ${String(index + 1)}`;
+        const encoded = values.map((value) => value + sharingRadius);
+        return {
+            low: signed(
+                `${name}/low`,
+                shareLifting.limbBits,
+                encoded.map(
+                    (value) => modulo(value, shareRadix) - shareRadix / 2n,
+                ),
+            ),
+            high: signed(
+                `${name}/high`,
+                shareLifting.sharingCoefficientBits - shareLifting.limbBits,
+                encoded.map((value) => value / shareRadix - highRadius),
+            ),
+        };
+    });
     const publicPolynomial = (modulus: bigint, length = degree) =>
         Array.from({ length }, () => {
             let value = 0n;
@@ -276,8 +307,16 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                 const row: Row = {
                     constant:
                         equation.publicSign *
-                            digit(equation.publicValue[position], limb) +
-                        digit(equation.offset?.[position] ?? 0n, limb),
+                            digit(
+                                equation.publicValue[position],
+                                limb,
+                                equation.radix,
+                            ) +
+                        digit(
+                            equation.offset?.[position] ?? 0n,
+                            limb,
+                            equation.radix,
+                        ),
                     terms: [],
                 };
                 for (const term of equation.convolution)
@@ -288,7 +327,11 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                             (position - index + equation.degree) %
                                 equation.degree,
                             (position < index ? -1n : 1n) *
-                                digit(term.publicCoefficients[index], limb),
+                                digit(
+                                    term.publicCoefficients[index],
+                                    limb,
+                                    equation.radix,
+                                ),
                         );
                 for (const term of equation.direct) {
                     if (term.automorphism === undefined)
@@ -296,7 +339,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                             row,
                             term.variable,
                             position,
-                            digit(term.factor, limb),
+                            digit(term.factor, limb, equation.radix),
                         );
                     else
                         for (let index = 0; index < equation.degree; index++) {
@@ -310,7 +353,12 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                                         2 ===
                                     0
                                         ? 1n
-                                        : -1n) * digit(term.factor, limb),
+                                        : -1n) *
+                                        digit(
+                                            term.factor,
+                                            limb,
+                                            equation.radix,
+                                        ),
                                 );
                         }
                 }
@@ -324,31 +372,12 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                         Math.floor((input + shift) / degree) % 2 === 0
                             ? 1n
                             : -1n;
-                    const variable =
-                        limb === 0
-                            ? {
-                                  terms: term.variable.terms.slice(0, 6),
-                                  offset: -(radix / 2n),
-                                  stride: 1,
-                              }
-                            : {
-                                  terms: term.variable.terms
-                                      .slice(6)
-                                      .map((value) => ({
-                                          ...value,
-                                          factor: value.factor / radix,
-                                      })),
-                                  offset: -(
-                                      1n <<
-                                      BigInt(
-                                          sharingParameters.sharingCoefficientBits -
-                                              96 -
-                                              1,
-                                      )
-                                  ),
-                                  stride: 1,
-                              };
-                    append(row, variable, input, sign * term.factor);
+                    append(
+                        row,
+                        limb === 0 ? term.low : term.high,
+                        input,
+                        sign * term.factor,
+                    );
                 }
                 if (limb === 0)
                     append(row, equation.error, position, equation.errorSign);
@@ -356,12 +385,17 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                     row,
                     equation.quotient,
                     position,
-                    -digit(equation.modulus, limb),
+                    -digit(equation.modulus, limb, equation.radix),
                 );
                 if (limb > 0)
                     append(row, equation.carries[limb - 1], position, 1n);
                 if (limb < equation.limbs - 1)
-                    append(row, equation.carries[limb], position, -radix);
+                    append(
+                        row,
+                        equation.carries[limb],
+                        position,
+                        -equation.radix,
+                    );
                 rows.push(row);
             }
         return rows;
@@ -398,8 +432,8 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                 carries[limb],
                 rows.map((row) => {
                     const value = evaluateRow(row);
-                    assert.equal(value % radix, 0n);
-                    return value / radix;
+                    assert.equal(value % values.radix, 0n);
+                    return value / values.radix;
                 }),
             );
         }
@@ -408,7 +442,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
         );
         equations.push(equation);
     };
-    const modulus = fixedModulusBfvInputs.ciphertextModulus;
+    const modulus = profile.ciphertext.modulus;
     const limbs = Math.ceil(modulus.toString(2).length / 96);
     for (
         let gadget = 1n, gadgetIndex = 0;
@@ -485,6 +519,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                               ],
                     errorSign: -1n,
                     limbs,
+                    radix: fheRadix,
                 },
                 raw,
                 error,
@@ -506,7 +541,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                 center(-value + recipientError[position], shareModulus),
         );
         const point = Array.from({ length: degree }, () => 0n);
-        const pointExponent = (recipient * degree) / 8;
+        const pointExponent = recipient * pointStride;
         point[pointExponent % degree] =
             Math.floor(pointExponent / degree) % 2 === 0 ? 1n : -1n;
         let power = Array.from({ length: degree }, (_value, index) =>
@@ -525,7 +560,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                 offset[shifted % degree] +=
                     (Math.floor(shifted / degree) % 2 === 0 ? 1n : -1n) *
                     shareScale *
-                    (radix / 2n);
+                    (shareRadix / 2n);
             }
         }
         const ephemeral = shareEphemerals[recipient];
@@ -556,14 +591,16 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                     },
                 ],
                 direct: [{ variable: secret.variable, factor: shareScale }],
-                shifts: sharing.map((variable, index) => ({
-                    variable,
+                shifts: sharing.map(({ low, high }, index) => ({
+                    low,
+                    high,
                     exponent: pointExponent * (index + 1),
                     factor: shareScale,
                 })),
                 offset,
                 errorSign: 1n,
                 limbs: 2,
+                radix: shareRadix,
             },
             product0.map(
                 (value, position) =>
@@ -573,7 +610,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                     first[position],
             ),
             error0,
-            32,
+            shareLifting.carryBits,
         );
         addEquation(
             `encrypted-share-${String(recipient)}/linear`,
@@ -591,6 +628,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                 direct: [],
                 errorSign: 1n,
                 limbs: 2,
+                radix: shareRadix,
             },
             product1.map(
                 (value, position) =>
@@ -636,6 +674,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
             direct: [],
             errorSign: -1n,
             limbs: 1,
+            radix: fheRadix,
         },
         auxiliaryProduct.map(
             (value, position) =>
@@ -675,7 +714,7 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
             const fingerprint = (value: bigint) =>
                 fingerprintSignedLimbs(
                     value,
-                    radix,
+                    equation.radix,
                     equation.limbs,
                     powers[equation.degree],
                     prime,
@@ -717,24 +756,6 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                     }),
                 );
             for (const term of equation.shifts ?? []) {
-                const low = {
-                    terms: term.variable.terms.slice(0, 6),
-                    offset: -radix / 2n,
-                    stride: 1,
-                };
-                const high = {
-                    terms: term.variable.terms.slice(6).map((value) => ({
-                        ...value,
-                        factor: value.factor / radix,
-                    })),
-                    offset: -(
-                        1n <<
-                        BigInt(
-                            sharingParameters.sharingCoefficientBits - 96 - 1,
-                        )
-                    ),
-                    stride: 1,
-                };
                 const monomialWeights = positions.map((_value, input) => {
                     const exponent = input + term.exponent;
                     return (
@@ -747,9 +768,9 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                         prime
                     );
                 });
-                addVariable(low, monomialWeights);
+                addVariable(term.low, monomialWeights);
                 addVariable(
-                    high,
+                    term.high,
                     monomialWeights.map(
                         (value) => (value * powers[equation.degree]) % prime,
                     ),
@@ -777,7 +798,8 @@ export const createSetupContributionRelationModel = (seed = 1n) => {
                             (value *
                                 prefix *
                                 (powers[(limb + 1) * equation.degree] -
-                                    radix * powers[limb * equation.degree])) %
+                                    equation.radix *
+                                        powers[limb * equation.degree])) %
                             prime,
                     ),
                 ),
@@ -882,16 +904,88 @@ const columnLayout = (
     };
 };
 
-export const compileSetupContributionColumnLayout = () =>
-    columnLayout(createSetupContributionRelationModel());
+export const compileSetupContributionColumnLayout = (
+    profile: SupportedProfile,
+) => columnLayout(createSetupContributionRelationModel(profile));
 
-export const compileSetupContributionRelationCensus = () => {
-    const model = createSetupContributionRelationModel();
-    const layout = columnLayout(model);
-    const { wordColumns, booleanColumns } = layout;
-    const errorColumns = model.columns.filter(({ bits }) => bits === 7).length;
-    const disjointPairs = layout.disjointBooleanPairs.length;
+// Columns of one signed variable: whole 16-bit words then one Boolean column
+// per remaining bit, or a single narrow word when it is narrower than a word.
+const signedVariableColumns = (bits: number) =>
+    bits < 16
+        ? { words: 1, narrowWords: 1, booleans: 0 }
+        : { words: Math.floor(bits / 16), narrowWords: 0, booleans: bits % 16 };
+
+// The column and row counts of the full-size relation, from the variable
+// families that the reduced model allocates. Tests compare them with the
+// executed model's layout.
+export const deriveSetupContributionShape = (profile: SupportedProfile) => {
+    const participants = profile.participantCount;
+    const sharingDegree = profile.releaseThreshold - 1;
+    const { sharingCoefficientBits, limbBits, carryBits } =
+        profile.shareLifting;
+    const fheLimbs = Math.ceil(
+        profile.ciphertext.modulus.toString(2).length / 96,
+    );
+    const gadgetLength = Number(profile.gadgetLength);
+    const fheEquations = 4 * gadgetLength;
+    const variableBits = [
+        // FHE key equations: quotient, carries and error.
+        ...Array.from({ length: fheEquations }, () => [
+            16,
+            ...Array.from({ length: fheLimbs - 1 }, () => 16),
+            7,
+        ]).flat(),
+        // Sharing coefficients: low and high limb parts.
+        ...Array.from({ length: sharingDegree }, () => [
+            limbBits,
+            sharingCoefficientBits - limbBits,
+        ]).flat(),
+        // Each recipient's constant and linear share equations.
+        ...Array.from({ length: participants }, () => [
+            16,
+            carryBits,
+            7,
+            16,
+            16,
+            7,
+        ]).flat(),
+        // The auxiliary key equation.
+        16,
+        7,
+    ];
+    const columns = variableBits.map(signedVariableColumns);
+    // FHE secret, FHE auxiliary secret, recipient ephemerals and the
+    // auxiliary encryption secret each have a positive and a negative column.
+    const disjointPairs = participants + 3;
+    const wordColumns = columns.reduce((sum, value) => sum + value.words, 0);
+    const narrowWords = columns.reduce(
+        (sum, value) => sum + value.narrowWords,
+        0,
+    );
+    const booleanColumns =
+        2 * disjointPairs +
+        columns.reduce((sum, value) => sum + value.booleans, 0);
     const supportRows = 2 * disjointPairs;
+    return {
+        wordColumns,
+        booleanColumns,
+        errorColumns: variableBits.filter((bits) => bits === 7).length,
+        disjointPairs,
+        supportRows,
+        lookupEntries: wordColumns + narrowWords,
+        affineRows:
+            BigInt(fheEquations * fheLimbs + 4 * participants) *
+                fixedModulusBfvInputs.polynomialDegree +
+            auxiliaryInputEncryptionParameters.degree +
+            BigInt(supportRows),
+    };
+};
+
+export const compileSetupContributionRelationCensus = (
+    profile: SupportedProfile,
+) => {
+    const shape = deriveSetupContributionShape(profile);
+    const columnCount = BigInt(shape.wordColumns + shape.booleanColumns);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
     const field = compileSmallLimbProofFieldCensus();
@@ -903,31 +997,24 @@ export const compileSetupContributionRelationCensus = () => {
     const singlePublicAdjointCoefficientByteLength =
         degree * extensionElementByteLength;
     const publicCoefficientMagnitudeByteLength =
-        BigInt(fixedModulusBfvInputs.ciphertextModulus.toString(2).length + 7) /
-        8n;
+        BigInt(profile.ciphertext.modulus.toString(2).length + 7) / 8n;
     const shareMagnitudeByteLength =
         BigInt(shareModulus.toString(2).length + 7) / 8n;
     const auxiliaryMagnitudeByteLength =
         BigInt(auxiliaryModulus.toString(2).length + 7) / 8n;
-    let gadgetLength = 0n;
-    for (
-        let power = 1n;
-        power < fixedModulusBfvInputs.ciphertextModulus;
-        power *= fixedModulusBfvInputs.gadgetBase
-    )
-        gadgetLength++;
-    const fheStatementPolynomials = 7n * gadgetLength;
+    const fheStatementPolynomials = 7n * profile.gadgetLength;
     const sharingStatementPolynomials =
-        3n * fixedModulusBfvInputs.participantCount + 1n;
+        3n * BigInt(profile.participantCount) + 1n;
     const auxiliaryStatementPolynomials = 2n;
     const largestConvolutionOneNorm = [
         fixedModulusBfvInputs.secretSupportWeight,
-        sharingParameters.encryptionSupportWeight,
+        shareEncryptionParameters.encryptionSupportWeight,
         auxiliaryInputEncryptionParameters.support,
     ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
+    // The widest limb of any equation bounds every limb convolution.
     const maximumIntegerLimbConvolutionMagnitude =
         integerLimbConvolutionMagnitudeBound(
-            radix,
+            fheRadix,
             largestConvolutionOneNorm,
             field.modulus,
         );
@@ -938,33 +1025,17 @@ export const compileSetupContributionRelationCensus = () => {
         publicCoefficientMagnitudeByteLength +
         shareMagnitudeByteLength +
         auxiliaryMagnitudeByteLength;
-    const affineRows = model.equations.reduce(
-        (sum, equation) =>
-            sum +
-            BigInt(equation.limbs) *
-                (equation.degree === model.auxiliaryDegree
-                    ? auxiliaryDegree
-                    : degree),
-        BigInt(supportRows),
-    );
     return {
-        wordColumns,
-        booleanColumns,
-        errorColumns,
-        disjointPairs,
-        supportRows,
-        affineRows,
-        lookupEntries: layout.lookups.length,
+        ...shape,
         fullAffineCoefficientByteLength:
-            BigInt(model.columns.length) *
-            singlePublicAdjointCoefficientByteLength,
+            columnCount * singlePublicAdjointCoefficientByteLength,
         singlePublicAdjointCoefficientByteLength,
         largestPublicPolynomialByteLength:
             degree * (1n + publicCoefficientMagnitudeByteLength),
         maximumPublicQueryCount,
         publicQueryValueByteLength,
         fullAffineQueryValueByteLength:
-            BigInt(model.columns.length) * publicQueryValueByteLength,
+            columnCount * publicQueryValueByteLength,
         publicQueryTransformVectorByteLength:
             2n * singlePublicAdjointCoefficientByteLength +
             (degree / 2n) * field.packedFieldElementByteLength +
@@ -990,11 +1061,10 @@ export const compileSetupContributionRelationCensus = () => {
         maximumEncodedOperatorByteLength:
             64n +
             2n * extensionElementByteLength +
-            BigInt(model.columns.length) * publicQueryValueByteLength,
+            columnCount * publicQueryValueByteLength,
         maximumIntegerLimbConvolutionMagnitude,
         syntheticWitnessHeaderByteLength,
         syntheticWitnessByteLength:
-            syntheticWitnessHeaderByteLength +
-            2n * degree * BigInt(model.columns.length),
+            syntheticWitnessHeaderByteLength + 2n * degree * columnCount,
     };
 };

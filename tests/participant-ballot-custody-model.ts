@@ -1,9 +1,10 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const compileParticipantBallotCustody = () => {
-    const body = compileBallotBodyCensus();
-    const randomness = compileBallotRandomnessBudget();
+export const compileParticipantBallotCustody = (profile: SupportedProfile) => {
+    const body = compileBallotBodyCensus(profile);
+    const randomness = compileBallotRandomnessBudget(profile);
     const maximumScores = 20n;
     // The attempt lock fixes the ballot time until the envelope carries it.
     const ballotTimeBytes = 8n;

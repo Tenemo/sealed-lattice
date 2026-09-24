@@ -1,12 +1,13 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // Pinned fhe.rs NttOperator owns four N-element u64 tables. Context::new
 // constructs every shorter modulus context recursively, without sharing them.
-export const compileRnsArithmeticResourceCensus = () => {
+export const compileRnsArithmeticResourceCensus = (
+    profile: SupportedProfile,
+) => {
     const degree = fixedModulusBfvInputs.polynomialDegree;
-    const bits = BigInt(
-        fixedModulusBfvInputs.ciphertextModulus.toString(2).length,
-    );
+    const bits = BigInt(profile.ciphertext.modulus.toString(2).length);
     const basePrimes = 15n;
     const multiplicationPrimes = basePrimes + (bits + 60n + 61n) / 62n;
     const tableBytesPerPrime = 4n * degree * 8n;

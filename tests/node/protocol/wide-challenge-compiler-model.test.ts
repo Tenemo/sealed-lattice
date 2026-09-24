@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { completionProfile } from '#tests/supported-profile-model.js';
 import {
     compileWideChallengeCompilerCensus,
     jointModuloDensityBound,
@@ -64,7 +65,7 @@ describe('wide verifier messages and short authentication tags', () => {
     });
 
     it('charges routing, verification, and role unions in the conditional compiler bound', () => {
-        const census = compileWideChallengeCompilerCensus();
+        const census = compileWideChallengeCompilerCensus(completionProfile());
         expect(census.chargedQueries).toBe(4n * ((1n << 80n) + (1n << 32n)));
         expect(census.roleBudget).toBe(65536n);
         expect(census.saltBits).toBe(2n * census.tagBits);

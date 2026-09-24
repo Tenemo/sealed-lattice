@@ -2,6 +2,7 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const setupAggregateChunkBytes = 524_288n;
 
@@ -26,10 +27,13 @@ export const partitionAggregatePolynomial = (
     };
 };
 
-export const compileSetupAggregateResources = () => {
-    const body = compileContributionBodyCensus();
+export const compileSetupAggregateResources = (profile: SupportedProfile) => {
+    const body = compileContributionBodyCensus(profile);
     const recipient = compileRegistrationKeyRelationCensus();
-    const parameters = fixedModulusBfvInputs;
+    const parameters = {
+        ...fixedModulusBfvInputs,
+        ciphertextModulus: profile.ciphertext.modulus,
+    };
     let gadgetCount = 0;
     for (
         let value = 1n;

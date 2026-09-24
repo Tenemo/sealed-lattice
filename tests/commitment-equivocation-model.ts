@@ -4,6 +4,8 @@ import {
     mlDsa65PublicMatrixSeedBytes,
 } from '#tests/ml-dsa-theorem-screen-model.js';
 
+export const commitmentSaltBits = 512n;
+
 // Whole-message extension of ABKK22 Theorem 5.12's single-sender hybrid.
 // The coefficient two is from AHU19 Theorem 3 (one-way to hiding).
 // This models an ideal oracle; it does not establish the joint fixed-hash claim.
@@ -24,7 +26,7 @@ export const compileCommitmentEquivocationBound = (
         throw new RangeError('Credential scope cap must cover the roster.');
     const { quantumQueryCount } =
         compileCommitmentExtractionBound(participantCount);
-    const saltBitLength = 512n;
+    const saltBitLength = commitmentSaltBits;
     // Charge every potential honest credential, including unused entries in
     // the fixed tape. The default is a conditional one-cohort allocation,
     // not a derived lifetime cap for the host or registration interface.

@@ -5,6 +5,7 @@ import {
 } from '#tests/common-matrix-sampling-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const forcePermutationMappings = (
     permutation: readonly number[],
@@ -100,12 +101,14 @@ export const staticSpongeConditioningBound = (
     };
 };
 
-export const compileFixedSpongeInitializationCensus = () => {
+export const compileFixedSpongeInitializationCensus = (
+    profile: SupportedProfile,
+) => {
     // FIPS 202 Sections 5.2 and 6.2: KECCAK-p[1600,24], capacity 512.
     const capacityBits = 512n,
         rateBits = 1600n - capacityBits;
     const rateBytes = Number(rateBits / 8n);
-    const matrices = compileCommonMatrixSamplingCensus();
+    const matrices = compileCommonMatrixSamplingCensus(profile);
     const gadgetCount = Number(matrices.fhePolynomialCount / 3n);
     if (BigInt(3 * gadgetCount) !== matrices.fhePolynomialCount)
         throw new Error('Incomplete fixed gadget-vector groups.');
@@ -117,7 +120,7 @@ export const compileFixedSpongeInitializationCensus = () => {
             (part): { label: string; degree: bigint; modulus: bigint } => ({
                 label: `common-fhe-${part}-${gadget}`,
                 degree,
-                modulus: fixedModulusBfvInputs.ciphertextModulus,
+                modulus: profile.ciphertext.modulus,
             }),
         ),
     )
@@ -132,7 +135,7 @@ export const compileFixedSpongeInitializationCensus = () => {
         ]);
     const prefix = Buffer.from('synthetic-full-setup-witness/1');
     const extraSamplingBits =
-        compileCommonMatrixInitializationCensus().extraSamplingBits;
+        compileCommonMatrixInitializationCensus(profile).extraSamplingBits;
     const seeds = roles.map(({ label, degree: seedDegree, modulus }) => {
         const bytes = Buffer.from(label),
             length = Buffer.alloc(4);

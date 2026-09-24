@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 describe('participant ballot custody layout', () => {
     it('counts the retained bytes before and after signed-message completion', () => {
-        const value = compileParticipantBallotCustody(),
-            body = compileBallotBodyCensus();
+        const value = compileParticipantBallotCustody(completionProfile()),
+            body = compileBallotBodyCensus(completionProfile());
         expect(value.prefixBytes).toBe(13n);
         expect(value.maximumBodyRecords).toBe(25n);
         expect(value.phaseBytes.map((entry) => entry.bytes)).toEqual([

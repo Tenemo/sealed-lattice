@@ -4,13 +4,16 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 const proofPrime = compileSmallLimbProofFieldCensus().modulus;
 const plaintextModulus = fixedModulusBfvInputs.plaintextModulus;
-const modulus = fixedModulusBfvInputs.ciphertextModulus;
 const radix = 1n << 96n;
-const scale = (modulus + plaintextModulus / 2n) / plaintextModulus;
 const auxiliary = auxiliaryInputEncryptionParameters;
+const ciphertextLimbs = (profile: SupportedProfile) =>
+    Math.ceil(profile.ciphertext.modulus.toString(2).length / 96);
+const profilePlaintextScale = (profile: SupportedProfile) =>
+    (profile.ciphertext.modulus + plaintextModulus / 2n) / plaintextModulus;
 const modulo = (value: bigint, target: bigint) =>
     ((value % target) + target) % target;
 const centered = (value: bigint, target: bigint) => {
@@ -23,8 +26,10 @@ const digit = (value: bigint, index: number) =>
     (value < 0n ? -1n : 1n) *
     (((value < 0n ? -value : value) / radix ** BigInt(index)) % radix);
 
-export const compileBallotEncryptionColumnLayout = () => {
-    const limbs = Math.ceil(modulus.toString(2).length / 96);
+export const compileBallotEncryptionColumnLayout = (
+    profile: SupportedProfile,
+) => {
+    const limbs = ciphertextLimbs(profile);
     const columns: { name: string; maximum: number }[] = [];
     const add = (name: string, maximum: number) => {
         columns.push({ name, maximum });
@@ -84,11 +89,16 @@ export const compileBallotEncryptionColumnLayout = () => {
     };
 };
 
-export const compileBallotEncryptionRelationCensus = () => {
-    const participants = fixedModulusBfvInputs.participantCount;
+export const compileBallotEncryptionRelationCensus = (
+    profile: SupportedProfile,
+) => {
+    const participants = BigInt(profile.participantCount);
+    const optionCount = BigInt(profile.optionCount);
+    const modulus = profile.ciphertext.modulus;
+    const scale = profilePlaintextScale(profile);
     const support = fixedModulusBfvInputs.secretSupportWeight;
     const error = fixedModulusBfvInputs.errorBound;
-    const limbs = Math.ceil(modulus.toString(2).length / 96);
+    const limbs = ciphertextLimbs(profile);
     const plaintextBound = plaintextModulus / 2n;
     const quotientBound = 1n << 15n,
         carryBound = 1n << 15n;
@@ -114,12 +124,10 @@ export const compileBallotEncryptionRelationCensus = () => {
     assert.ok(trueCarryBound < carryBound);
     assert.ok(residualBound < proofPrime);
     const packingQuotientBound =
-        (BigInt(fixedModulusBfvInputs.optionCount) * 10n * plaintextBound +
-            plaintextBound) /
+        (optionCount * 10n * plaintextBound + plaintextBound) /
         plaintextModulus;
     const packingResidualBound =
-        plaintextBound *
-            (1n + 10n * BigInt(fixedModulusBfvInputs.optionCount)) +
+        plaintextBound * (1n + 10n * optionCount) +
         plaintextModulus * quotientBound;
     const auxiliaryResidualBound =
         (auxiliary.support + 1n) * (auxiliary.modulus / 2n) +
@@ -128,7 +136,7 @@ export const compileBallotEncryptionRelationCensus = () => {
         auxiliary.modulus * quotientBound;
     assert.ok(packingResidualBound < proofPrime);
     assert.ok(auxiliaryResidualBound < proofPrime);
-    const layout = compileBallotEncryptionColumnLayout();
+    const layout = compileBallotEncryptionColumnLayout(profile);
     const wordColumns = layout.wordColumns;
     return {
         limbs,
@@ -274,12 +282,18 @@ const rowProduct = (
         0n,
     );
 
-// Reduced physical rings and sparse supports; current moduli and all distinct
-// packing, range, quotient, carry, and linked-encryption families are retained.
+// Reduced physical rings and sparse supports; the profile's moduli and all
+// distinct packing, range, quotient, carry, and linked-encryption families
+// are retained. Aggregate keys sum every participant's contribution.
 export const createBallotEncryptionRelationModel = (
+    profile: SupportedProfile,
     scores: readonly bigint[],
     auxiliaryScores: readonly bigint[] = scores,
 ) => {
+    const modulus = profile.ciphertext.modulus;
+    const scale = profilePlaintextScale(profile);
+    const limbs = ciphertextLimbs(profile);
+    const participants = BigInt(profile.participantCount);
     assert.equal(scores.length, 2);
     assert.equal(auxiliaryScores.length, scores.length);
     const degree = 64,
@@ -311,7 +325,9 @@ export const createBallotEncryptionRelationModel = (
             ((1n << 1024n) - 1n));
     const sparse = (length: number, aggregate: boolean) =>
         Array.from({ length }, (_unused, index) =>
-            index < 4 ? (index < 2 ? 1n : -1n) * (aggregate ? 10n : 1n) : 0n,
+            index < 4
+                ? (index < 2 ? 1n : -1n) * (aggregate ? participants : 1n)
+                : 0n,
         );
     const error = (length: number, negative: boolean) =>
         Array.from({ length }, () => (negative ? -64n : 63n));
@@ -327,7 +343,10 @@ export const createBallotEncryptionRelationModel = (
             centered(random(), ciphertextModulus),
         );
         const publicKey = convolution(common, secret).map((value) =>
-            centered(-value - 640n, ciphertextModulus),
+            centered(
+                -value - participants * fixedModulusBfvInputs.errorBound,
+                ciphertextModulus,
+            ),
         );
         const errors = [error(length, false), error(length, true)];
         const products = [
@@ -384,7 +403,7 @@ export const createBallotEncryptionRelationModel = (
         auxiliaryPlaintext,
     );
     const carries = Array.from({ length: 2 }, () =>
-        Array.from({ length: 8 }, () =>
+        Array.from({ length: limbs - 1 }, () =>
             Array.from({ length: degree }, () => 0n),
         ),
     );
@@ -395,7 +414,7 @@ export const createBallotEncryptionRelationModel = (
         );
     const fheRows = () =>
         [0, 1].map((component) =>
-            Array.from({ length: 9 }, (_unused, limb) =>
+            Array.from({ length: limbs }, (_unused, limb) =>
                 Array.from(
                     { length: degree },
                     (_coefficient, position) =>
@@ -415,14 +434,14 @@ export const createBallotEncryptionRelationModel = (
                             : carries[component][limb - 1][position]) -
                         digit(modulus, limb) *
                             fhe.quotients[component][position] -
-                        (limb < 8
+                        (limb < limbs - 1
                             ? radix * carries[component][limb][position]
                             : 0n),
                 ),
             ),
         );
     for (let component = 0; component < 2; component++)
-        for (let limb = 0; limb < 8; limb++)
+        for (let limb = 0; limb < limbs - 1; limb++)
             fheRows()[component][limb].forEach((value, position) => {
                 assert.equal(value % radix, 0n);
                 carries[component][limb][position] = value / radix;

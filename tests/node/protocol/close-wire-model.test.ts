@@ -5,6 +5,11 @@ import {
     closeContexts,
     compileCloseWireCensus,
 } from '#tests/close-wire-model.js';
+import {
+    completionProfile,
+    completionProfileCounts,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 
 // FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
 const signatureBytes = 3309n;
@@ -12,6 +17,11 @@ const supportedParticipantCounts = Array.from(
     { length: 18 },
     (_unused, index) => index + 3,
 );
+const rosterProfile = (participantCount: number) =>
+    deriveSupportedProfile(
+        participantCount,
+        completionProfileCounts.optionCount,
+    );
 
 describe('close wire census', () => {
     it('matches hand-derived lengths at the smallest, completion and largest rosters', () => {
@@ -25,23 +35,24 @@ describe('close wire census', () => {
             [10, 7, 190 + 70 + 8 + 10 + 20 * 66, 190 + 70 + 10 + 7 * 66],
             [20, 14, 2918, 1194],
         ]) {
-            const value = compileCloseWireCensus(participants);
+            const value = compileCloseWireCensus(rosterProfile(participants));
             expect(value.closeQuorum).toBe(BigInt(quorum));
             expect(value.intentBodyBytes).toBe(188n + 14n);
             expect(value.maximumResponseBodyBytes).toBe(BigInt(response));
             expect(value.proposalBodyBytes).toBe(BigInt(proposal));
             expect(value.intentPacketBytes).toBe(4n + 202n + signatureBytes);
         }
-        expect(compileCloseWireCensus(3).minimumResponseBodyBytes).toBe(
-            190n + 70n + 8n + 10n,
-        );
+        expect(
+            compileCloseWireCensus(rosterProfile(3)).minimumResponseBodyBytes,
+        ).toBe(190n + 70n + 8n + 10n);
     });
 
     it('bounds the barrier closure by envelopes and usable bodies only', () => {
-        const ballot = compileBallotBodyCensus();
-        expect(ballot.envelopeBytes).toBe(214n);
         for (const participants of supportedParticipantCounts) {
-            const value = compileCloseWireCensus(participants);
+            const profile = rosterProfile(participants);
+            const ballot = compileBallotBodyCensus(profile);
+            expect(ballot.envelopeBytes).toBe(214n);
+            const value = compileCloseWireCensus(profile);
             const faultBound = BigInt(Math.floor((participants - 1) / 3));
             const quorum = BigInt(participants) - faultBound;
             expect(value.maximumResponseEntries).toBe(
@@ -92,10 +103,10 @@ describe('close wire census', () => {
         }
         // Conflicting corrupt envelopes add only envelope metadata: at the
         // completion roster, 3 * 2 * 7 of them cost far less than one body.
-        const completion = compileCloseWireCensus(10);
+        const completion = compileCloseWireCensus(completionProfile());
         expect(completion.maximumUnionEnvelopes).toBe(7n + 42n);
         expect(42n * completion.submissionBytes).toBeLessThan(
-            ballot.maximumBodyBytes,
+            compileBallotBodyCensus(completionProfile()).maximumBodyBytes,
         );
     });
 });

@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import {
     compileCommonMatrixSamplingCensus,
     uniformWordResidueDistance,
     boundedResidueFiberWord,
     compileCommonMatrixInitializationCensus,
 } from '#tests/common-matrix-sampling-model.js';
+import {
+    completionProfile,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 describe('fixed-suite public-matrix sampling', () => {
     it('accounts for complete one-pass initialization without a retry budget', () => {
-        const matrix = compileCommonMatrixSamplingCensus(),
-            initialization = compileCommonMatrixInitializationCensus();
+        const matrix = compileCommonMatrixSamplingCensus(completionProfile()),
+            initialization =
+                compileCommonMatrixInitializationCensus(completionProfile());
         expect(initialization.programmedPrefixBytes).toBe(
             matrix.expandedSampleBytes,
         );
@@ -82,7 +89,7 @@ describe('fixed-suite public-matrix sampling', () => {
     });
 
     it('covers every common vector and charges the complete sampling expansion', () => {
-        const census = compileCommonMatrixSamplingCensus();
+        const census = compileCommonMatrixSamplingCensus(completionProfile());
         // Six gadget coordinates in each of a, u, and the automorphism vector,
         // plus distinct common polynomials for sharing and auxiliary scores.
         expect(census.fhePolynomialCount).toBe(18n);
@@ -95,6 +102,46 @@ describe('fixed-suite public-matrix sampling', () => {
         expect(census.distanceUpperNumerator << 142n).toBeGreaterThan(
             census.distanceUpperDenominator,
         );
+    });
+
+    it('chooses the least whole-word width whose distance meets the allocation', () => {
+        for (const [participantCount, optionCount, width] of [
+            [3, 2, 768],
+            [10, 10, 1024],
+            [20, 20, 1152],
+        ] as const) {
+            const profile = deriveSupportedProfile(
+                participantCount,
+                optionCount,
+            );
+            const census = compileCommonMatrixSamplingCensus(profile);
+            expect(census.bitsPerCoefficient).toBe(width);
+            const families = [
+                [
+                    3n * profile.gadgetLength * 65536n,
+                    profile.ciphertext.modulus,
+                ],
+                [65536n, shareEncryptionParameters.modulus],
+                [4096n, auxiliaryInputEncryptionParameters.modulus],
+            ] as const;
+            // The exact distance at the chosen width is at most 2^-128.
+            let numerator = 0n,
+                denominator = 1n;
+            for (const [coefficients, modulus] of families) {
+                const distance = uniformWordResidueDistance(modulus, width);
+                numerator =
+                    numerator * distance.denominator +
+                    coefficients * distance.numerator * denominator;
+                denominator *= distance.denominator;
+            }
+            expect(numerator << 128n).toBeLessThanOrEqual(denominator);
+            // One word fewer leaves the r(Q-r) <= Q^2/4 bound above 2^-128.
+            const bound = families.reduce(
+                (sum, [coefficients, modulus]) => sum + coefficients * modulus,
+                0n,
+            );
+            expect(bound << 128n).toBeGreaterThan(4n << BigInt(width - 64));
+        }
     });
 
     it('shows why the matrix label cannot be chosen after observing its output', () => {

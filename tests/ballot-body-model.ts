@@ -2,14 +2,19 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileBallotWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const compileBallotBodyCensus = () => {
-    const proof = compileBallotWordProofLayout();
+// Marker, poll, inventory, author position, ballot time, body length and
+// body identity; the same for every profile.
+export const ballotEnvelopeBytes = 4n + 64n + 64n + 2n + 8n + 8n + 64n;
+
+export const compileBallotBodyCensus = (profile: SupportedProfile) => {
+    const proof = compileBallotWordProofLayout(profile);
     const polynomialBytes = (degree: bigint, modulus: bigint) =>
         degree * (1n + BigInt(Math.ceil(modulus.toString(2).length / 8)));
     const fheBytes = polynomialBytes(
         fixedModulusBfvInputs.polynomialDegree,
-        fixedModulusBfvInputs.ciphertextModulus,
+        profile.ciphertext.modulus,
     );
     const auxiliaryBytes = polynomialBytes(
         auxiliaryInputEncryptionParameters.degree,
@@ -40,9 +45,7 @@ export const compileBallotBodyCensus = () => {
     const headerBytes = 4n + 8n + contextBytes;
     const ciphertextBytes = 2n * fheBytes + 2n * auxiliaryBytes;
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
-    // Marker, poll, inventory, author position, ballot time, body length and
-    // body identity.
-    const envelopeBytes = 4n + 64n + 64n + 2n + 8n + 8n + 64n;
+    const envelopeBytes = ballotEnvelopeBytes;
     const maximumBodyBytes =
         headerBytes + ciphertextBytes + proof.maximumMultiproofBytes;
     const hashPrefixBytes =

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 // Each canonical coefficient is a sign byte plus enough magnitude bytes for
 // its modulus: 109 bytes in the 65536-coefficient FHE family and 6 bytes in
@@ -11,7 +12,7 @@ const polynomialPairPerFamilyBytes = 2n * 65536n * 109n + 2n * 4096n * 6n;
 
 describe('ballot body framing', () => {
     it('transmits both ciphertext pairs and reconstructs fixed common and certified key inputs', () => {
-        const layout = compileBallotBodyCensus();
+        const layout = compileBallotBodyCensus(completionProfile());
         expect(layout.polynomials.map((value) => value.expandedIndex)).toEqual([
             2, 3, 6, 7,
         ]);
@@ -31,7 +32,9 @@ describe('ballot body framing', () => {
         // The proof maximum comes from the separately tested proof layout
         // model.
         const maximumProofBytes =
-            compileBallotWordProofLayout().maximumMultiproofBytes;
+            compileBallotWordProofLayout(
+                completionProfile(),
+            ).maximumMultiproofBytes;
         expect(layout.maximumProofBytes).toBe(maximumProofBytes);
         expect(layout.maximumBodyBytes).toBe(
             148n + polynomialPairPerFamilyBytes + maximumProofBytes,

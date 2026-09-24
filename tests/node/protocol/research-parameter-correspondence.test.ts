@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
-import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 const unsigned = (value: bigint, bytes: number) => {
     const encoded = Buffer.alloc(bytes);
@@ -32,8 +32,8 @@ describe('tracked research parameter correspondence', () => {
     it('reconstructs the exact modulus object from independent parameter owners', async () => {
         const expected = Buffer.concat([
             Buffer.from('SCP1'),
-            unsigned(fixedModulusBfvInputs.ciphertextModulus, 108),
-            unsigned(compileWideShareLiftingCensus().modulus, 20),
+            unsigned(completionProfile().ciphertext.modulus, 108),
+            unsigned(shareEncryptionParameters.modulus, 20),
             unsigned(auxiliaryInputEncryptionParameters.modulus, 5),
         ]);
         expect(

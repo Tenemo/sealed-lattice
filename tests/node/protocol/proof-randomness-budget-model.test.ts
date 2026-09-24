@@ -7,6 +7,7 @@ import {
     rejectionSubsetBound,
 } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('bounded randomness for complete proof simulation', () => {
     it('bounds a stopping event by fixed rejected-position subsets', () => {
@@ -84,7 +85,7 @@ describe('bounded randomness for complete proof simulation', () => {
     });
 
     it('charges the complete role population and only adds enough read headroom', () => {
-        const budgets = compileProofRandomnessBudgets();
+        const budgets = compileProofRandomnessBudgets(completionProfile());
         expect(budgets.map((value) => value.role)).toEqual([
             'registration',
             'setup contribution',

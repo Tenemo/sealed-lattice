@@ -441,7 +441,7 @@ export const deriveSupportedShareLifting = (participantCount: number) => {
 
 // The ciphertext modulus has the smallest multiple of 32 bits for which
 // every ranking operation decodes and a release modulus exists.
-export const deriveSupportedProfile = (
+const computeSupportedProfile = (
     participantCount: number,
     optionCount: number,
 ) => {
@@ -494,11 +494,42 @@ export const deriveSupportedProfile = (
     }
 };
 
-export const compileSupportedProfileCensus = () => {
-    const participantCounts = compileSupportedThresholdCompletionProfiles().map(
+export type SupportedProfile = ReturnType<typeof computeSupportedProfile>;
+
+const supportedProfiles = new Map<string, SupportedProfile>();
+
+export const deriveSupportedProfile = (
+    participantCount: number,
+    optionCount: number,
+): SupportedProfile => {
+    const key = `${participantCount}:${optionCount}`;
+    let profile = supportedProfiles.get(key);
+    if (profile === undefined) {
+        profile = computeSupportedProfile(participantCount, optionCount);
+        supportedProfiles.set(key, profile);
+    }
+    return profile;
+};
+
+// The system specification's completion and qualification profile.
+export const completionProfileCounts = {
+    participantCount: 10,
+    optionCount: 10,
+} as const;
+
+export const completionProfile = () =>
+    deriveSupportedProfile(
+        completionProfileCounts.participantCount,
+        completionProfileCounts.optionCount,
+    );
+
+const supportedParticipantCounts = () =>
+    compileSupportedThresholdCompletionProfiles().map(
         (profile) => profile.participantCount,
     );
-    const optionCounts = Array.from(
+
+const supportedOptionCountRange = () =>
+    Array.from(
         {
             length:
                 supportedOptionCounts.maximum -
@@ -507,6 +538,71 @@ export const compileSupportedProfileCensus = () => {
         },
         (_unused, index) => supportedOptionCounts.minimum + index,
     );
+
+// Every supported profile, by participant count and then option count.
+export const listSupportedProfiles = (): readonly SupportedProfile[] =>
+    supportedParticipantCounts().flatMap((participantCount) =>
+        supportedOptionCountRange().map((optionCount) =>
+            deriveSupportedProfile(participantCount, optionCount),
+        ),
+    );
+
+// The noise census of one profile's ranking graph and flooded release.
+export const compileProfileBfvCensus = (profile: SupportedProfile) => {
+    const ranking = deriveRankingNoise(
+        profile.participantCount,
+        profile.optionCount,
+        profile.ciphertext.modulus,
+    );
+    assert.ok(ranking !== undefined);
+    const { model, comparison, result } = ranking;
+    const release = deriveFloodedRelease({
+        ...fixedModulusBfvInputs,
+        ciphertextModulus: profile.ciphertext.modulus,
+        releaseModulus: profile.release.modulus,
+        evaluationError: result.error,
+        secretOneNorm: model.secretOneNorm,
+        interpolation: profile.interpolation,
+    });
+    return {
+        ...fixedModulusBfvInputs,
+        participantCount: BigInt(profile.participantCount),
+        optionCount: profile.optionCount,
+        ciphertextModulus: profile.ciphertext.modulus,
+        releaseModulus: profile.release.modulus,
+        ...model.counts,
+        // KLSW24 section 4.3 rounds every tensor coordinate separately.
+        tensorProducts: 4 * model.counts.multiplications,
+        relinearizationExternalProducts: 4 * model.counts.multiplications,
+        relinearizationGadgetDecompositions: 2 * model.counts.multiplications,
+        // Section 4.4 computes both psi(c1) external h and psi(c1) external k.
+        // Only h contributes fresh key error; the common k still costs work.
+        rotationExternalProducts: 2 * model.counts.rotations,
+        rotationGadgetDecompositions: model.counts.rotations,
+        gadgetPolynomialProducts:
+            BigInt(
+                4 * model.counts.multiplications + 2 * model.counts.rotations,
+            ) * model.gadgetLength,
+        finalModulusSwitchCoefficients:
+            2n * fixedModulusBfvInputs.polynomialDegree,
+        gadgetLength: model.gadgetLength,
+        comparisonDepth: comparison.depth,
+        rankingDepth: result.depth,
+        comparisonErrorBits: bitLength(comparison.error),
+        rankingErrorBits: bitLength(result.error),
+        ...release,
+        publicKeyCorpusBytes:
+            4n *
+            model.gadgetLength *
+            fixedModulusBfvInputs.polynomialDegree *
+            BigInt(Math.ceil(bitLength(profile.ciphertext.modulus) / 8)) *
+            BigInt(profile.participantCount),
+    };
+};
+
+export const compileSupportedProfileCensus = () => {
+    const participantCounts = supportedParticipantCounts();
+    const optionCounts = supportedOptionCountRange();
     const profiles = participantCounts.map((participantCount) =>
         optionCounts.map((optionCount) =>
             deriveSupportedProfile(participantCount, optionCount),

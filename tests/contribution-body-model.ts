@@ -1,5 +1,5 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import { compileCommitmentEquivocationBound } from '#tests/commitment-equivocation-model.js';
+import { commitmentSaltBits } from '#tests/commitment-equivocation-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import {
@@ -8,6 +8,7 @@ import {
 } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const contributionBodyHeaderBytes = 4n + 8n;
 const commitmentDomain = Buffer.from(
@@ -50,10 +51,7 @@ export const contributionSaltPrefix = (
     publicKey: Uint8Array,
     salt: Uint8Array,
 ) => {
-    const saltBytes =
-        compileCommitmentEquivocationBound(
-            Number(fixedModulusBfvInputs.participantCount),
-        ).saltBitLength / 8n;
+    const saltBytes = commitmentSaltBits / 8n;
     if (BigInt(salt.length) !== saltBytes)
         throw new RangeError('Invalid commitment salt length.');
     const header = Buffer.alloc(6);
@@ -62,14 +60,16 @@ export const contributionSaltPrefix = (
     return Buffer.concat([contributionSenderPrefix(publicKey), header, salt]);
 };
 
-export const compileContributionBodyCensus = () => {
-    const parameters = fixedModulusBfvInputs;
-    const participantCount = Number(parameters.participantCount);
-    const proof = compileFullWordProofLayout();
+export const compileContributionBodyCensus = (profile: SupportedProfile) => {
+    const parameters = {
+        ...fixedModulusBfvInputs,
+        ciphertextModulus: profile.ciphertext.modulus,
+    };
+    const participantCount = profile.participantCount;
+    const proof = compileFullWordProofLayout(profile);
     const registration = compileRegistrationEnrollmentCensus();
     const recipient = compileRegistrationKeyRelationCensus();
     const roster = compileRosterProposalCensus(participantCount);
-    const commitment = compileCommitmentEquivocationBound(participantCount);
     const polynomialBytes = (degree: bigint, modulus: bigint) =>
         degree * (1n + BigInt(Math.ceil(modulus.toString(2).length / 8)));
     const fhePolynomialBytes = polynomialBytes(
@@ -111,7 +111,7 @@ export const compileContributionBodyCensus = () => {
     );
     const maximumBodyBytes =
         headerBytes + polynomialPayloadBytes + proof.maximumMultiproofBytes;
-    const saltBytes = commitment.saltBitLength / 8n;
+    const saltBytes = commitmentSaltBits / 8n;
     const hashPrefixBytes =
         8n +
         5n * 6n +
@@ -161,6 +161,6 @@ export const compileContributionBodyCensus = () => {
             8n * maximumHashInputBytes,
         ),
         maximumAllContributorBodies:
-            parameters.participantCount * maximumBodyBytes,
+            BigInt(participantCount) * maximumBodyBytes,
     };
 };

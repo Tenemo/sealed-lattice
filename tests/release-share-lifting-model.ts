@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 
-import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
-import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 const field = compileSmallLimbProofFieldCensus().modulus;
 const limbBits = 48;
@@ -18,23 +16,27 @@ export type ReleaseShareLiftingInput = Readonly<{
     releaseThreshold: number;
     aggregateSharingMaximum: bigint;
 }>;
-const tenParticipantInput = (): ReleaseShareLiftingInput => {
-    const parameters = compileFixedModulusBfvCensus();
-    return {
-        polynomialDegree: parameters.polynomialDegree,
-        releaseModulus: parameters.releaseModulus,
-        releaseNoiseBits: parameters.releaseNoiseBits,
-        releaseThreshold: compileThresholdCompletionProfile(
-            Number(parameters.participantCount),
-        ).resultReleaseThreshold,
-        aggregateSharingMaximum:
-            compileWideShareLiftingCensus().aggregateSharingMaximum,
-    };
-};
+
+// The release relation decrypts the aggregate share S from the sum of every
+// contributor's share ciphertext, so an accepted S decodes uniquely only
+// when 2*(scale*2^(bits-1) + error radius) < share modulus. S and S + p
+// otherwise satisfy the same decryption equation.
+export const widestDecodableShareBits = (() => {
+    const { scale, modulus, aggregateDecryptionErrorRadius } =
+        shareEncryptionParameters;
+    let bits = 1;
+    while (
+        2n * (scale * (1n << BigInt(bits)) + aggregateDecryptionErrorRadius) <
+        modulus
+    )
+        bits++;
+    return bits;
+})();
 
 // The release proof lifts c*(c1*S + e) = partial + Q_release*quotient into
 // 48-bit limbs. Denominators clear with c = 2^ceil(log2 d), shares occupy
-// whole bytes with a sign bit, and quotients occupy whole signed limbs.
+// whole bytes with a sign bit up to the widest uniquely decodable width, and
+// quotients occupy whole signed limbs.
 export const deriveReleaseShareLiftingLayout = (
     input: ReleaseShareLiftingInput,
 ) => {
@@ -47,8 +49,10 @@ export const deriveReleaseShareLiftingLayout = (
     assert.ok(releaseThreshold >= 2);
     const clearingFactor =
         1n << BigInt(bitLength(BigInt(releaseThreshold - 1)));
-    const shareBits =
-        8 * Math.ceil((bitLength(input.aggregateSharingMaximum) + 1) / 8);
+    const shareBits = Math.min(
+        8 * Math.ceil((bitLength(input.aggregateSharingMaximum) + 1) / 8),
+        widestDecodableShareBits,
+    );
     const noiseRadius = 1n << BigInt(noiseBits - 1);
     const trueQuotientBound =
         (clearingFactor *
@@ -97,6 +101,7 @@ export const deriveReleaseShareLiftingLayout = (
         trueQuotientBound,
         aliasCarry,
         holds:
+            input.aggregateSharingMaximum < 1n << BigInt(shareBits - 1) &&
             noiseWordCount <= outputLimbs &&
             residualBound < field &&
             trueCarryBound < carryBound &&
@@ -157,7 +162,7 @@ const privateDigits = (value: bigint, bits: number): bigint[] => {
     return result;
 };
 export const compileReleaseShareLiftingCensus = (
-    input: ReleaseShareLiftingInput = tenParticipantInput(),
+    input: ReleaseShareLiftingInput,
 ) => {
     const layout = deriveReleaseShareLiftingLayout(input);
     assert.ok(layout.holds);

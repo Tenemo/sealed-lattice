@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileSetupContributionRelationCensus,
     compileSetupContributionColumnLayout,
     createSetupContributionRelationModel,
+    deriveSetupContributionShape,
 } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import {
+    completionProfile,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 
 describe('complete setup contribution relation in a reduced ring', () => {
     it('rejects public limbs outside the canonical modulus even when the lifted equations are unchanged', () => {
-        const model = createSetupContributionRelationModel();
+        const model = createSetupContributionRelationModel(completionProfile());
         for (const equation of model.equations) {
             for (const coefficients of [
                 equation.publicValue,
@@ -32,14 +39,17 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('rejects incomplete public polynomials before evaluating the relation', () => {
-        const model = createSetupContributionRelationModel();
+        const model = createSetupContributionRelationModel(completionProfile());
         model.equations[0].publicValue.pop();
         expect(model.verify()).toBe(false);
     });
 
     it('satisfies every integer row and decrypts every share at both interval endpoints and varied inputs', () => {
         for (const seed of [0n, 1n, 23n, 987654321n]) {
-            const model = createSetupContributionRelationModel(seed);
+            const model = createSetupContributionRelationModel(
+                completionProfile(),
+                seed,
+            );
             expect(model.verify()).toBe(true);
             expect(
                 model.rows().every((row) => model.evaluateRow(row) === 0n),
@@ -50,8 +60,52 @@ describe('complete setup contribution relation in a reduced ring', () => {
         }
     });
 
+    it('derives the executed layout in closed form at the boundary profiles', () => {
+        for (const [participantCount, optionCount] of [
+            [3, 2],
+            [4, 20],
+            [16, 2],
+            [20, 20],
+        ]) {
+            const profile = deriveSupportedProfile(
+                participantCount,
+                optionCount,
+            );
+            const model = createSetupContributionRelationModel(profile);
+            expect(model.verify()).toBe(true);
+            expect(model.decryptedShares).toEqual(model.expectedShares);
+            expect(model.equations).toHaveLength(
+                4 * Number(profile.gadgetLength) + 2 * participantCount + 1,
+            );
+            const layout = compileSetupContributionColumnLayout(profile);
+            const shape = deriveSetupContributionShape(profile);
+            expect(layout.wordColumns).toBe(shape.wordColumns);
+            expect(layout.booleanColumns).toBe(shape.booleanColumns);
+            expect(layout.lookups).toHaveLength(shape.lookupEntries);
+            expect(layout.disjointBooleanPairs).toHaveLength(
+                shape.disjointPairs,
+            );
+            expect(
+                model.columns.filter((column) => column.bits === 7),
+            ).toHaveLength(shape.errorColumns);
+            // Each limb equation has one row per ring coefficient.
+            const limbEquations =
+                (model.rows().length -
+                    model.auxiliaryDegree -
+                    shape.supportRows) /
+                model.degree;
+            expect(
+                BigInt(limbEquations) * fixedModulusBfvInputs.polynomialDegree +
+                    auxiliaryInputEncryptionParameters.degree +
+                    BigInt(shape.supportRows),
+            ).toBe(shape.affineRows);
+        }
+    });
+
     it('derives the full operator inventory from the exercised equation families', () => {
-        expect(compileSetupContributionRelationCensus()).toEqual({
+        expect(
+            compileSetupContributionRelationCensus(completionProfile()),
+        ).toEqual({
             wordColumns: 24 * 10 + 3 * 7 + 10 * 7 + 2,
             booleanColumns: 2 * (2 + 10 + 1) + 3 * 2,
             errorColumns: 24 + 2 * 10 + 1,
@@ -85,7 +139,8 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('orders word and Boolean columns and constrains each narrow error in that order', () => {
-        const layout = compileSetupContributionColumnLayout();
+        const layout =
+            compileSetupContributionColumnLayout(completionProfile());
         expect(
             [...layout.modelToCanonicalColumn].sort(
                 (left, right) => left - right,
@@ -117,7 +172,8 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('rejects full resident affine coefficients at the absolute WASM bound', () => {
-        const census = compileSetupContributionRelationCensus();
+        const census =
+            compileSetupContributionRelationCensus(completionProfile());
         expect(census.fullAffineCoefficientByteLength).toBeGreaterThan(
             671_088_640n,
         );
@@ -127,7 +183,10 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('binds low and high public limbs in every key and ciphertext equation', () => {
-        const model = createSetupContributionRelationModel(5n);
+        const model = createSetupContributionRelationModel(
+            completionProfile(),
+            5n,
+        );
         for (const equation of model.equations) {
             const original = equation.publicValue[3];
             for (const delta of [1n, 1n << BigInt(96 * (equation.limbs - 1))]) {
@@ -140,7 +199,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('uses the same common encryption coordinate for encryption and first relinearization', () => {
-        const model = createSetupContributionRelationModel();
+        const model = createSetupContributionRelationModel(completionProfile());
         for (let gadget = 0; gadget < 6; gadget++) {
             const encryption = model.equations[4 * gadget];
             const relinearization = model.equations[4 * gadget + 1];
@@ -151,7 +210,10 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('matches every entry of the independently assembled affine transpose, including degenerate challenges', () => {
-        const model = createSetupContributionRelationModel(17n);
+        const model = createSetupContributionRelationModel(
+            completionProfile(),
+            17n,
+        );
         const prime = compileSmallLimbProofFieldCensus().modulus;
         const modulo = (value: bigint) => ((value % prime) + prime) % prime;
         const rows = model.rows();
@@ -175,11 +237,11 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('rejects an altered shared constant and an altered wide coefficient', () => {
-        const model = createSetupContributionRelationModel();
+        const model = createSetupContributionRelationModel(completionProfile());
         for (const name of [
             'FHE secret/positive',
-            'sharing coefficient 1/word-0',
-            'sharing coefficient 3/bit-113',
+            'sharing coefficient 1/low/word-0',
+            'sharing coefficient 3/high/bit-17',
         ]) {
             const column = model.columns.find(
                 (candidate) => candidate.name === name,
@@ -193,7 +255,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
     });
 
     it('rejects range violations and support moved from active auxiliary positions to padding', () => {
-        const model = createSetupContributionRelationModel();
+        const model = createSetupContributionRelationModel(completionProfile());
         const error = model.columns.find((column) => column.bits === 7)!;
         const originalError = error.values[0];
         error.values[0] = 128n;

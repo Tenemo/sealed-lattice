@@ -1,5 +1,5 @@
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
 interface ReleaseVerificationAttempts {
     readonly replayedCandidates: bigint;
@@ -36,7 +36,7 @@ export const compileReleaseVerificationWorkload = (
     const plainStatementDigestPasses = 2n;
     const completedBodyDigestPasses = 1n;
     const selectedVerificationQueryBudget =
-        compileWideChallengeCompilerCensus().verificationBudget;
+        proofCompilerCaps.verificationBudget;
     return {
         attempts: { ...attempts },
         count,

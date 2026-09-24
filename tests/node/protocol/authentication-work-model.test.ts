@@ -18,6 +18,7 @@ import {
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 describe('Authentication frame accounting', () => {
@@ -108,12 +109,14 @@ describe('Authentication frame accounting', () => {
             'Matrix polynomial sampling',
         ]);
         expect(signature.maximumInputBytes).toBeLessThan(
-            compileContributionBodyCensus().senderPrefixBytes,
+            compileContributionBodyCensus(completionProfile())
+                .senderPrefixBytes,
         );
         const messageBytes = BigInt(
-            compileWideChallengeCompilerCensus().challengeBytes,
+            compileWideChallengeCompilerCensus(completionProfile())
+                .challengeBytes,
         );
-        for (const profile of proofHashProfiles())
+        for (const profile of proofHashProfiles(completionProfile()))
             expect(signature.maximumInputBytes).toBeLessThan(
                 framedProofHashBytes('bounded-proof/verifier-message', [
                     profile.roleBytes,
@@ -128,7 +131,9 @@ describe('Authentication frame accounting', () => {
             challenge = signature.rows.find(
                 (value) => value.purpose === 'Challenge polynomial sampling',
             )!;
-        const aliases = compileFixedSpongeInitializationCensus().seeds.filter(
+        const aliases = compileFixedSpongeInitializationCensus(
+            completionProfile(),
+        ).seeds.filter(
             (seed) => BigInt(seed.message.length) === challenge.inputBytes,
         );
         expect(aliases.map((seed) => seed.label)).toEqual(

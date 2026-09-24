@@ -90,11 +90,12 @@ const power = (base: bigint, exponent: bigint, modulus: bigint): bigint => {
 describe('supported profile parameters', () => {
     it('reproduces the independently maintained ten-participant tuple', async () => {
         const profile = deriveSupportedProfile(10, 10);
+        // Proth certificates maintained independently of the derivation.
         expect(profile.ciphertext.modulus).toBe(
-            fixedModulusBfvInputs.ciphertextModulus,
+            verifyProthCertificate(65537n * 65319n, 832, 7n),
         );
         expect(profile.release.modulus).toBe(
-            fixedModulusBfvInputs.releaseModulus,
+            verifyProthCertificate(65537n * 65445n, 160, 7n),
         );
         const threshold = compileThresholdReleaseNoiseCensus();
         expect(profile.interpolation).toMatchObject({

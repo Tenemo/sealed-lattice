@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('finite original-key release randomness', () => {
     it('covers the actual noise, tree-salt and buffered field-mask schedule', () => {
-        const budget = compileParticipantReleaseCustody();
+        const budget = compileParticipantReleaseCustody(completionProfile());
         // Independent expansion of the current Rust release parameters and
         // FirstOracle, SecondOracle and Tree allocation schedules.
         const readBytes = 65_536n;
@@ -29,7 +30,7 @@ describe('finite original-key release randomness', () => {
     });
 
     it('bounds every participant and rejects one fewer reserve block at the chosen allocation', () => {
-        const budget = compileParticipantReleaseCustody();
+        const budget = compileParticipantReleaseCustody(completionProfile());
         // Rejection words for p = (2^64 - 133) * 2^64 + 1.
         const rejectedWords = 133n * (1n << 64n) - 1n;
         const upper = (extraReads: bigint) => {

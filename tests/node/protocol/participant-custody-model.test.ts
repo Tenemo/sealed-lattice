@@ -9,11 +9,12 @@ import {
 } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('shared participant custody', () => {
     it('retains every contribution polynomial once and omits fixed statement framing', () => {
-        const value = compileParticipantCustodyCensus();
-        const body = compileContributionBodyCensus();
+        const value = compileParticipantCustodyCensus(completionProfile());
+        const body = compileContributionBodyCensus(completionProfile());
         expect(value.maximumRootRecords).toBe(
             compileRegistrationEnrollmentCensus().maximumRecords + 1n,
         );
@@ -41,8 +42,9 @@ describe('shared participant custody', () => {
     });
 
     it('carries the complete existing private checkpoint without exceeding the root or storage bounds', () => {
-        const value = compileParticipantCustodyCensus();
-        const checkpoint = compileFirstOracleCheckpointCensus();
+        const value = compileParticipantCustodyCensus(completionProfile());
+        const checkpoint =
+            compileFirstOracleCheckpointCensus(completionProfile());
         expect(BigInt(value.checkpointLengths.length)).toBe(
             checkpoint.recordCount,
         );
@@ -109,7 +111,7 @@ describe('shared participant custody', () => {
     });
 
     it('leaves lifetime key and read populations unknown across the complete emitted custody graph', () => {
-        const classes = compileParticipantVaultKeyClasses();
+        const classes = compileParticipantVaultKeyClasses(completionProfile());
         expect(classes.map((value) => value.name)).toEqual([
             'Initial root',
             'Later root',
@@ -144,8 +146,8 @@ describe('shared participant custody', () => {
     });
 
     it('includes target-bound release records without turning corpus maxima into lifetime limits', () => {
-        const classes = compileParticipantVaultKeyClasses();
-        const release = compileParticipantReleaseCustody();
+        const classes = compileParticipantVaultKeyClasses(completionProfile());
+        const release = compileParticipantReleaseCustody(completionProfile());
         const associatedBytes = Buffer.concat([
             Buffer.from('sealed-lattice/participant-release-record/v1'),
             Buffer.alloc(64),

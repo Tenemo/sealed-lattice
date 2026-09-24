@@ -15,6 +15,7 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 export const byteAlignedSpongePermutations = (
@@ -78,16 +79,16 @@ const total = (values: readonly Work[]): Work =>
         { queries: 0n, inputBytes: 0n, outputBytes: 0n, permutations: 0n },
     );
 
-export const proofHashProfiles = () => {
+export const proofHashProfiles = (profile: SupportedProfile) => {
     const registration = compileRegistrationKeyRelationCensus();
-    const setup = compileSetupContributionRelationCensus();
-    const ballot = compileBallotEncryptionRelationCensus();
-    const ballotBody = compileBallotBodyCensus();
-    const release = compileLinkedReleaseColumnLayout();
+    const setup = compileSetupContributionRelationCensus(profile);
+    const ballot = compileBallotEncryptionRelationCensus(profile);
+    const ballotBody = compileBallotBodyCensus(profile);
+    const release = compileLinkedReleaseColumnLayout(profile);
     const byteWidth = (value: bigint) =>
         BigInt(Math.ceil(value.toString(2).length / 8));
     const shareBytes = byteWidth(registration.modulus);
-    const releaseBytes = byteWidth(fixedModulusBfvInputs.releaseModulus);
+    const releaseBytes = byteWidth(profile.release.modulus);
     const rows = [
         {
             role: 'registration',
@@ -103,7 +104,7 @@ export const proofHashProfiles = () => {
         },
         {
             role: 'setup',
-            layout: compileFullWordProofLayout(),
+            layout: compileFullWordProofLayout(profile),
             columns: setup.wordColumns + setup.booleanColumns,
             booleans: setup.booleanColumns,
             lookups: setup.lookupEntries,
@@ -111,13 +112,12 @@ export const proofHashProfiles = () => {
             prefixWords: 19n,
             statementBytes: setup.expandedStatementByteLength,
             relationTag: 'complete-setup-words/1',
-            roleBytes: compileRosterProposalCensus(
-                Number(fixedModulusBfvInputs.participantCount),
-            ).roleBytes,
+            roleBytes: compileRosterProposalCensus(profile.participantCount)
+                .roleBytes,
         },
         {
             role: 'ballot',
-            layout: compileBallotWordProofLayout(),
+            layout: compileBallotWordProofLayout(profile),
             columns: ballot.wordColumns + ballot.booleanColumns,
             booleans: ballot.booleanColumns,
             lookups: ballot.lookupEntries,
@@ -130,7 +130,7 @@ export const proofHashProfiles = () => {
         },
         {
             role: 'release',
-            layout: compileLinkedReleaseWordProofLayout(),
+            layout: compileLinkedReleaseWordProofLayout(profile),
             columns: release.wordColumns + release.booleanColumns,
             booleans: release.booleanColumns,
             lookups: release.lookups.length,
@@ -169,6 +169,7 @@ export const proofHashProfiles = () => {
 };
 
 export const compileProofHashWork = (
+    supportedProfile: SupportedProfile,
     profile: ReturnType<typeof proofHashProfiles>[number],
     roleBytes = profile.roleBytes,
 ) => {
@@ -176,7 +177,7 @@ export const compileProofHashWork = (
         throw new RangeError('Unsupported verifier role length.');
     const query = compileProofVerifierQueryCensus();
     const field = compileSmallLimbProofFieldCensus();
-    const compiler = compileWideChallengeCompilerCensus();
+    const compiler = compileWideChallengeCompilerCensus(supportedProfile);
     const tag = compiler.tagBits / 8n,
         salt = compiler.saltBits / 8n;
     const message = BigInt(compiler.challengeBytes);

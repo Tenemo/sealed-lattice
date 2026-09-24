@@ -7,10 +7,14 @@ import {
     createBallotEncryptionRelationModel,
 } from '#tests/ballot-encryption-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import {
+    completionProfile,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 
 describe('linked scored ballot encryption', () => {
     it('keeps the full plaintext interval and exact score range in the committed columns', () => {
-        const layout = compileBallotEncryptionColumnLayout();
+        const layout = compileBallotEncryptionColumnLayout(completionProfile());
         expect(
             layout.columns.slice(20, 23).map((column) => column.name),
         ).toEqual([
@@ -42,12 +46,16 @@ describe('linked scored ballot encryption', () => {
         expect(Math.max(...endpointValues)).toBe(32768);
         expect(layout.maximumLiveProductColumns).toBe(2);
         expect(
-            compileBallotEncryptionRelationCensus().zeroProductCacheBytes,
+            compileBallotEncryptionRelationCensus(completionProfile())
+                .zeroProductCacheBytes,
         ).toBe(4194304n);
     });
 
     it('rejects truncated FHE limbs and direct auxiliary proof-field aliases', () => {
-        const model = createBallotEncryptionRelationModel([1n, 10n]);
+        const model = createBallotEncryptionRelationModel(completionProfile(), [
+            1n,
+            10n,
+        ]);
         for (const coefficients of [
             model.fhe.common,
             model.fhe.publicKey,
@@ -97,7 +105,10 @@ describe('linked scored ballot encryption', () => {
             [10n, 10n],
             [5n, 9n],
         ]) {
-            const model = createBallotEncryptionRelationModel(scores);
+            const model = createBallotEncryptionRelationModel(
+                completionProfile(),
+                scores,
+            );
             expect(model.verify()).toBe(true);
             expect(
                 Object.values(model.rows())
@@ -139,7 +150,11 @@ describe('linked scored ballot encryption', () => {
     });
 
     it('rejects individually valid encryptions of different scores and a forged error repair', () => {
-        const model = createBallotEncryptionRelationModel([1n, 10n], [10n, 1n]);
+        const model = createBallotEncryptionRelationModel(
+            completionProfile(),
+            [1n, 10n],
+            [10n, 1n],
+        );
         expect(model.rows().fhe.every((value) => value === 0n)).toBe(true);
         expect(model.rows().packing.every((value) => value === 0n)).toBe(true);
         expect(model.auxiliaryCiphertext.decoded.slice(0, 2)).toEqual([
@@ -163,7 +178,10 @@ describe('linked scored ballot encryption', () => {
             [1n, 11n],
             [-1n, 10n],
         ]) {
-            const model = createBallotEncryptionRelationModel(scores);
+            const model = createBallotEncryptionRelationModel(
+                completionProfile(),
+                scores,
+            );
             expect(
                 Object.values(model.rows())
                     .flat()
@@ -174,7 +192,10 @@ describe('linked scored ballot encryption', () => {
     });
 
     it('admits both centered plaintext endpoints and excludes a high-bit alias', () => {
-        const model = createBallotEncryptionRelationModel([1n, 1n]);
+        const model = createBallotEncryptionRelationModel(completionProfile(), [
+            1n,
+            1n,
+        ]);
         model.plaintextWords[0] = 0n;
         model.plaintextHighBits[0] = 0n;
         expect(model.rangeValid()).toBe(true);
@@ -185,7 +206,8 @@ describe('linked scored ballot encryption', () => {
     });
 
     it('fits the actual auxiliary decoding margin and full field residuals', () => {
-        const census = compileBallotEncryptionRelationCensus();
+        const census =
+            compileBallotEncryptionRelationCensus(completionProfile());
         expect(census.auxiliaryNoiseBound).toBe((2n * 10n * 256n + 1n) * 64n);
         expect(2n * census.auxiliaryNoiseBound).toBeLessThan(
             auxiliaryInputEncryptionParameters.scale,
@@ -199,5 +221,39 @@ describe('linked scored ballot encryption', () => {
         expect(census.wordColumns).toBe(27);
         expect(census.lookupEntries).toBe(32);
         expect(census.affineRows).toBe(19n * 65536n + 2n * 4096n + 4n);
+    });
+
+    it('encrypts in every public limb of the smallest and largest ciphertext moduli', () => {
+        for (const [participantCount, optionCount] of [
+            [3, 2],
+            [20, 20],
+        ]) {
+            const profile = deriveSupportedProfile(
+                participantCount,
+                optionCount,
+            );
+            const limbs = Math.ceil(profile.ciphertext.bits / 96);
+            const model = createBallotEncryptionRelationModel(profile, [
+                1n,
+                10n,
+            ]);
+            expect(model.verify()).toBe(true);
+            expect(model.rows().fhe).toHaveLength(2 * limbs * 64);
+            const original = model.fhe.ciphertext[0][0];
+            model.fhe.ciphertext[0][0] +=
+                (original < 0n ? -1n : 1n) * (1n << BigInt(96 * limbs));
+            expect(model.rows().fhe.every((value) => value === 0n)).toBe(true);
+            expect(model.verify()).toBe(false);
+            model.fhe.ciphertext[0][0] = original;
+            expect(
+                createBallotEncryptionRelationModel(profile, [
+                    1n,
+                    11n,
+                ]).verify(),
+            ).toBe(false);
+            expect(
+                compileBallotEncryptionColumnLayout(profile).wordColumns,
+            ).toBe(compileBallotEncryptionRelationCensus(profile).wordColumns);
+        }
     });
 });

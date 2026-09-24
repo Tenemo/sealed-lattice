@@ -6,6 +6,7 @@ import {
     boundSparseSupportSampling,
     compileSparseSupportSamplingCensus,
 } from '#tests/sparse-sampling-bound-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 // Exact occupancy recurrence: each unselected label advances the state; every
 // already selected label repeats it. Completed paths absorb all later draws.
@@ -45,7 +46,7 @@ describe('bounded sparse-support sampling comparison', () => {
             read('contribution.rs'),
             read('registration.rs'),
         ]);
-        const rows = compileSparseSupportSamplingCensus();
+        const rows = compileSparseSupportSamplingCensus(completionProfile());
         const bufferBytes = BigInt(
             reader.match(/vec!\[0; ([\d_]+)\]/u)![1].replace(/_/gu, ''),
         );
@@ -143,7 +144,7 @@ describe('bounded sparse-support sampling comparison', () => {
     });
 
     it('charges full browser fills and independently recomputes the emitted bounds', () => {
-        const rows = compileSparseSupportSamplingCensus();
+        const rows = compileSparseSupportSamplingCensus(completionProfile());
         expect(
             rows.map((value) => [
                 value.degree,

@@ -4,10 +4,12 @@ import {
     compileBrowserWordProverResources,
     compileContributionGenerationResources,
 } from '#tests/browser-word-prover-resource-model.js';
+import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('browser word prover live-data schedule', () => {
     it('bounds the combined private handoff and public working-store representation', () => {
-        const result = compileContributionGenerationResources();
+        const result =
+            compileContributionGenerationResources(completionProfile());
         expect(result.combinedAllowance).toBeLessThan(671_088_640n);
         expect(result.maximumPublicEmissionBatch).toBe(7n * 65536n * 109n);
         expect(result.regeneratedCommonBytes).toBe(
@@ -22,7 +24,7 @@ describe('browser word prover live-data schedule', () => {
         expect(result.expandedPublicWorkingBytes).toBeGreaterThan(268_435_456n);
     });
     it('retains common adjoints while streaming public polynomials and releases first-oracle state before second openings', () => {
-        const result = compileBrowserWordProverResources();
+        const result = compileBrowserWordProverResources(completionProfile());
         expect(result.fullDegreeCommonPolynomials).toBe(3n * 6n + 10n + 1n);
         expect(result.preparedAdjointBytes).toBe((29n * 65536n + 4096n) * 48n);
         const first = result.stages.find(

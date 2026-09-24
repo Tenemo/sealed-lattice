@@ -3,17 +3,17 @@ import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degr
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
-import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
 const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
-    const compiler = compileWideChallengeCompilerCensus();
     const foldCount = Math.log2(agreement.domainSize / 2);
-    const tagBytes = compiler.tagBits / 8n;
-    const saltBytes = compiler.saltBits / 8n;
+    const tagBytes = proofCompilerCaps.tagBits / 8n;
+    const saltBytes = proofCompilerCaps.saltBits / 8n;
     const baseBytes = field.packedFieldElementByteLength;
     const extensionBytes = field.packedExtensionElementByteLength;
     const randomReadBytes = 65536n;
@@ -90,11 +90,11 @@ const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     };
 };
 
-export const compileFullWordProofLayout = () => {
-    const columns = compileSetupContributionColumnLayout();
+export const compileFullWordProofLayout = (profile: SupportedProfile) => {
+    const shape = deriveSetupContributionShape(profile);
     return compileWordProofLayout(
-        columns.wordColumns + columns.booleanColumns,
-        columns.lookups.length,
+        shape.wordColumns + shape.booleanColumns,
+        shape.lookupEntries,
     );
 };
 
@@ -106,8 +106,8 @@ export const compileRegistrationWordProofLayout = () => {
     );
 };
 
-export const compileBallotWordProofLayout = () => {
-    const columns = compileBallotEncryptionColumnLayout();
+export const compileBallotWordProofLayout = (profile: SupportedProfile) => {
+    const columns = compileBallotEncryptionColumnLayout(profile);
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
     return {
@@ -122,8 +122,10 @@ export const compileBallotWordProofLayout = () => {
     };
 };
 
-export const compileLinkedReleaseWordProofLayout = () => {
-    const columns = compileLinkedReleaseColumnLayout();
+export const compileLinkedReleaseWordProofLayout = (
+    profile: SupportedProfile,
+) => {
+    const columns = compileLinkedReleaseColumnLayout(profile);
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
     return {

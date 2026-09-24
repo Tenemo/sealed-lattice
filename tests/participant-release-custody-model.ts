@@ -1,7 +1,8 @@
-import { compileFixedModulusBfvCensus } from '#tests/fixed-modulus-bfv-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
 export const participantReleaseProofRoleBytes =
@@ -12,11 +13,20 @@ export const participantReleaseProofRoleBytes =
     4n * 64n +
     2n;
 
+const releaseContextBytes = 4n + 3n * 64n + 2n;
+// Context, body length and body identity; the same for every profile.
+export const participantReleaseEnvelopeBytes = releaseContextBytes + 8n + 64n;
+
 // A finite journal of independent bytes for one original-key release. The
 // proof budget bounds rejection-sampling exhaustion; it is not a PRG claim.
-export const compileParticipantReleaseCustody = () => {
-    const parameters = compileFixedModulusBfvCensus();
-    const proof = compileLinkedReleaseWordProofLayout();
+export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
+    const parameters = {
+        participantCount: BigInt(profile.participantCount),
+        polynomialDegree: fixedModulusBfvInputs.polynomialDegree,
+        releaseModulus: profile.release.modulus,
+        releaseNoiseBits: profile.releaseNoiseBits,
+    };
+    const proof = compileLinkedReleaseWordProofLayout(profile);
     const field = compileSmallLimbProofFieldCensus();
     const { signatureBytes } = compileRegistrationEnrollmentCensus();
     const readBytes = 65_536n;
@@ -54,7 +64,7 @@ export const compileParticipantReleaseCustody = () => {
         proof.minimumRequestedRandomBytes + extraProofReads * readBytes;
     const totalRandomBytes = roundedNoiseBytes + maximumProofRandomBytes;
     const journalRecords = (totalRandomBytes + recordBytes - 1n) / recordBytes;
-    const contextBytes = 4n + 3n * 64n + 2n;
+    const contextBytes = releaseContextBytes;
     const bodyHeaderBytes = 4n + 8n + contextBytes;
     const coefficientBytes =
         1n + (BigInt(parameters.releaseModulus.toString(2).length) + 7n) / 8n;
@@ -62,7 +72,7 @@ export const compileParticipantReleaseCustody = () => {
     const minimumBodyBytes = bodyHeaderBytes + partialBytes + proof.headerBytes;
     const maximumBodyBytes =
         bodyHeaderBytes + partialBytes + proof.maximumMultiproofBytes;
-    const envelopeBytes = contextBytes + 8n + 64n;
+    const envelopeBytes = participantReleaseEnvelopeBytes;
     const maximumBodyRecords =
         (maximumBodyBytes + recordBytes - 1n) / recordBytes;
     const prefixBytes = 4n + 1n + 2n + 2n + 4n + 2n;

@@ -7,6 +7,7 @@ import {
     computationalHybrids,
     keccakReferenceCost,
     ledgerBudgetBits,
+    profileStatisticalTerms,
     rational,
     reductionRatioAt,
     requiredAssumptionBits,
@@ -18,7 +19,10 @@ import {
 } from '#tests/composed-security-ledger-model.js';
 import { sparseRoutingWork } from '#tests/compressed-oracle-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { deriveSupportedShareLifting } from '#tests/supported-profile-model.js';
+import {
+    deriveSupportedProfile,
+    deriveSupportedShareLifting,
+} from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 const ledger = compileComposedSecurityLedger();
@@ -282,7 +286,7 @@ describe('composed security ledger', () => {
             subtotal << (securityTargetBits + ledgerBudgetBits),
         ).toBeLessThanOrEqual(1n << ledger.statistical.denominatorBits);
         // The sharing translation meets the statistical target for every
-        // supported roster, not only the ten-participant term above.
+        // supported roster.
         const secretOneNorm = 2n * fixedModulusBfvInputs.secretSupportWeight;
         for (const participantCount of supportedParticipantCounts) {
             const degree =
@@ -297,6 +301,42 @@ describe('composed security ledger', () => {
             expect(
                 numerator << BigInt(fixedModulusBfvInputs.statisticalBits),
             ).toBeLessThanOrEqual(2n * lifting.sharingRadius);
+        }
+    });
+
+    it('charges each credential-independent term at its largest supported profile', () => {
+        const rosterTerms = new Set([
+            'Honest-body equivocation',
+            'Honest signing credential collision',
+        ]);
+        const charged = ledger.statistical.terms.filter(
+            (term) => !rosterTerms.has(term.name),
+        );
+        for (const [participantCount, optionCount] of [
+            [3, 2],
+            [10, 10],
+            [20, 20],
+        ]) {
+            const terms = profileStatisticalTerms(
+                deriveSupportedProfile(participantCount, optionCount),
+            );
+            expect(terms.map((term) => term.name)).toEqual(
+                charged.map((term) => term.name),
+            );
+            terms.forEach((term, index) =>
+                expect(term.numerator).toBeLessThanOrEqual(
+                    charged[index].numerator,
+                ),
+            );
+        }
+        for (const term of charged) {
+            if (term.largestAt === undefined) continue;
+            const { participantCount, optionCount } = term.largestAt;
+            expect(optionCount).toBeDefined();
+            const attained = profileStatisticalTerms(
+                deriveSupportedProfile(participantCount, optionCount!),
+            ).find((value) => value.name === term.name);
+            expect(attained?.numerator).toBe(term.numerator);
         }
     });
 
