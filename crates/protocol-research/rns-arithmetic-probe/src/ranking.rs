@@ -93,6 +93,36 @@ pub fn stored_bytes(value: &Ciphertext) -> Vec<u8> {
         .flat_map(|word| word.to_le_bytes())
         .collect()
 }
+/// The resident values to evict so that `needed` more fit the capacity,
+/// farthest next use first and never an input of the current instruction.
+/// A value whose verified copy is still stored, because it was reloaded, is
+/// dropped rather than written again; every other one is spilled. Returns the
+/// spills and the drops.
+fn evictions(
+    mut resident: Vec<usize>,
+    required: &BTreeSet<usize>,
+    needed: usize,
+    capacity: usize,
+    next_use: impl Fn(usize) -> usize,
+    stored: impl Fn(usize) -> bool,
+) -> Result<(Vec<usize>, Vec<usize>), Refusal> {
+    let (mut spills, mut drops) = (Vec::new(), Vec::new());
+    while resident.len() + needed > capacity {
+        let evicted = resident
+            .iter()
+            .filter(|index| !required.contains(index))
+            .max_by_key(|index| (next_use(**index), **index))
+            .copied()
+            .ok_or(Refusal::Allocation)?;
+        resident.retain(|index| *index != evicted);
+        if stored(evicted) {
+            drops.push(evicted);
+        } else {
+            spills.push(evicted);
+        }
+    }
+    Ok((spills, drops))
+}
 /// Splits stored bytes into the two components' words. The engine checks a
 /// readback's shape and retained identity before it uses the value.
 pub fn stored_value(bytes: &[u8]) -> Result<Ciphertext, Refusal> {
@@ -294,28 +324,27 @@ impl Engine {
         if reloads.iter().any(|index| self.stored[*index].is_none()) {
             return Err(Refusal::Phase);
         }
-        let mut resident: Vec<_> = self
+        let resident: Vec<_> = self
             .values
             .iter()
             .enumerate()
             .filter_map(|(index, value)| value.as_ref().map(|_| index))
             .collect();
-        let mut spills = Vec::new();
-        while resident.len() + reloads.len() + 1 > capacity {
-            let next_use = |value: usize| {
+        let (spills, drops) = evictions(
+            resident,
+            &required,
+            reloads.len() + 1,
+            capacity,
+            |value| {
                 self.instructions[self.step + 1..]
                     .iter()
                     .position(|next| next.inputs.contains(&value))
                     .map_or(self.instructions.len(), |offset| self.step + 1 + offset)
-            };
-            let evicted = resident
-                .iter()
-                .filter(|index| !required.contains(index))
-                .max_by_key(|index| (next_use(**index), **index))
-                .copied()
-                .ok_or(Refusal::Allocation)?;
-            resident.retain(|index| *index != evicted);
-            spills.push(evicted);
+            },
+            |value| self.stored[value].is_some(),
+        )?;
+        for index in drops {
+            self.values[index] = None;
         }
         Ok(Requirements {
             step: self.step,
@@ -612,5 +641,65 @@ impl Engine {
             }
         }
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Refusal, evictions};
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn a_reloaded_value_evicted_again_is_dropped_rather_than_written() {
+        // Four resident values, room for three and one more needed: the two
+        // with the farthest next uses leave. Value 1 still has its stored
+        // copy, so only value 2 is written.
+        let next_use = |index: usize| [5, 9, 7, 6][index];
+        assert_eq!(
+            evictions(
+                vec![0, 1, 2, 3],
+                &BTreeSet::from([0]),
+                1,
+                3,
+                next_use,
+                |index| index == 1
+            ),
+            Ok((vec![2], vec![1]))
+        );
+        assert_eq!(
+            evictions(
+                vec![0, 1, 2, 3],
+                &BTreeSet::from([0]),
+                1,
+                3,
+                next_use,
+                |_| false
+            ),
+            Ok((vec![1, 2], vec![]))
+        );
+    }
+
+    #[test]
+    fn a_fitting_step_evicts_nothing_and_inputs_are_never_evicted() {
+        assert_eq!(
+            evictions(vec![0, 1], &BTreeSet::new(), 1, 3, |_| 0, |_| false),
+            Ok((vec![], vec![]))
+        );
+        // Equal next uses evict the larger index first.
+        assert_eq!(
+            evictions(vec![0, 1, 2], &BTreeSet::new(), 1, 3, |_| 4, |_| false),
+            Ok((vec![2], vec![]))
+        );
+        assert_eq!(
+            evictions(
+                vec![0, 1, 2],
+                &BTreeSet::from([0, 1, 2]),
+                1,
+                3,
+                |_| 0,
+                |_| true
+            ),
+            Err(Refusal::Allocation)
+        );
     }
 }
