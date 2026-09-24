@@ -59,7 +59,7 @@ const deterministicPublic = (seed: number, modulus: bigint): bigint[] =>
         ),
     );
 
-const verifyExactQuotients = (
+export const verifyExactQuotients = (
     numerator: RingElement,
     modulus: bigint,
     quotientBound: bigint,

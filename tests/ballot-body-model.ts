@@ -21,6 +21,14 @@ export const compileBallotBodyCensus = () => {
         { expandedIndex: 6, bytes: auxiliaryBytes },
         { expandedIndex: 7, bytes: auxiliaryBytes },
     ];
+    // The verifier rebuilds each family's fixed common polynomial and
+    // certified public key from its setup, in the family's statement encoding.
+    const reconstructedPolynomials = [
+        { expandedIndex: 0, bytes: fheBytes },
+        { expandedIndex: 1, bytes: fheBytes },
+        { expandedIndex: 4, bytes: auxiliaryBytes },
+        { expandedIndex: 5, bytes: auxiliaryBytes },
+    ];
     const contextBytes = 4n + 64n + 64n + 2n + 1n + 1n;
     const proofRoleBytes =
         8n +
@@ -43,6 +51,7 @@ export const compileBallotBodyCensus = () => {
         4n;
     return {
         polynomials,
+        reconstructedPolynomials,
         contextBytes,
         proofRoleBytes,
         headerBytes,
@@ -56,6 +65,9 @@ export const compileBallotBodyCensus = () => {
             maximumBodyBytes + envelopeBytes + signatureBytes,
         hashPrefixBytes,
         maximumHashInputBytes: hashPrefixBytes + maximumBodyBytes,
-        reconstructedInputBytes: ciphertextBytes,
+        reconstructedInputBytes: reconstructedPolynomials.reduce(
+            (total, polynomial) => total + polynomial.bytes,
+            0n,
+        ),
     };
 };

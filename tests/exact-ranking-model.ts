@@ -799,6 +799,10 @@ export type ExactRankingModelCensus = Readonly<{
     exhaustiveComparisonPointCount: number;
     equalityDomainCount: number;
     packedLayoutCount: number;
+    testedParticipantOptionProfiles: readonly Readonly<{
+        participantCount: number;
+        optionCount: number;
+    }>[];
     testedParticipantOptionProfileCount: number;
     testedMatrixCount: number;
     testedTopCountExecutionCount: number;
@@ -951,6 +955,10 @@ export const verifyExactRankingModel = (): ExactRankingModelCensus => {
         randomState ^= randomState << 5;
         return randomState >>> 0;
     };
+    const testedParticipantOptionProfiles: {
+        participantCount: number;
+        optionCount: number;
+    }[] = [];
     let testedMatrixCount = 0;
     let testedTopCountExecutionCount = 0;
     for (let participants = 3; participants <= 20; participants += 1) {
@@ -1046,6 +1054,10 @@ export const verifyExactRankingModel = (): ExactRankingModelCensus => {
                     }
                 }
             }
+            testedParticipantOptionProfiles.push({
+                participantCount: participants,
+                optionCount: options,
+            });
         }
     }
 
@@ -1057,7 +1069,9 @@ export const verifyExactRankingModel = (): ExactRankingModelCensus => {
         exhaustiveComparisonPointCount: comparisonPoints.length,
         equalityDomainCount: equalityPolynomials.size,
         packedLayoutCount,
-        testedParticipantOptionProfileCount: 18 * 19,
+        testedParticipantOptionProfiles,
+        testedParticipantOptionProfileCount:
+            testedParticipantOptionProfiles.length,
         testedMatrixCount,
         testedTopCountExecutionCount,
     };

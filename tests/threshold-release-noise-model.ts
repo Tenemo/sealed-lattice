@@ -5,6 +5,9 @@ const spacedInterpolationSize = 16;
 const reducedInterpolationRingDegree = 8;
 const productionInterpolationPointExponentStride =
     polynomialModulusDegree / reducedInterpolationRingDegree;
+// 2^ceil(log2 t) for t >= 2, without a floating-point logarithm.
+const reconstructionClearingFactor =
+    1n << BigInt((releaseThreshold - 1).toString(2).length);
 
 type Fraction = Readonly<{ denominator: bigint; numerator: bigint }>;
 type RationalRingElement = readonly Fraction[];
@@ -280,7 +283,6 @@ const exactInterpolationCensus = (): Readonly<{
     exactMaximumJointSimulationCoefficientOneNormSum: bigint;
     lagrangeCoefficientCount: number;
 }> => {
-    const clearingFactor = 1n << BigInt(Math.ceil(Math.log2(releaseThreshold)));
     const participantPoints = Array.from(
         { length: participantCount },
         (_unused, index) => monomialPoint(index),
@@ -323,13 +325,14 @@ const exactInterpolationCensus = (): Readonly<{
         });
         for (let index = 0; index < points.length; index += 1) {
             const coefficient = lagrangeCoefficientAtZero(points, index);
+            const scaledCoefficientOneNorm = integerOneNorm(
+                scaleRationalRing(coefficient, reconstructionClearingFactor),
+            );
             exactMaximumScaledReconstructionCoefficientOneNorm =
                 exactMaximumScaledReconstructionCoefficientOneNorm >
-                integerOneNorm(scaleRationalRing(coefficient, clearingFactor))
+                scaledCoefficientOneNorm
                     ? exactMaximumScaledReconstructionCoefficientOneNorm
-                    : integerOneNorm(
-                          scaleRationalRing(coefficient, clearingFactor),
-                      );
+                    : scaledCoefficientOneNorm;
             const inverseCoefficientOneNorm = integerOneNorm(
                 invertRationalRing(coefficient),
             );
@@ -355,7 +358,7 @@ const exactInterpolationCensus = (): Readonly<{
                     multiplyRationalRing(
                         scaleRationalRing(
                             lagrangeCoefficientAtZero(points, index),
-                            clearingFactor,
+                            reconstructionClearingFactor,
                         ),
                         integerShares[participant] ?? rationalRingOne(),
                     ),
@@ -367,7 +370,7 @@ const exactInterpolationCensus = (): Readonly<{
                 reconstructed,
                 scaleRationalRing(
                     integerSharingPolynomial[0] ?? rationalRingOne(),
-                    clearingFactor,
+                    reconstructionClearingFactor,
                 ),
             )
         ) {
@@ -390,6 +393,9 @@ const exactInterpolationCensus = (): Readonly<{
     };
 };
 
+// KLLPS26 equation (1), with its 2N replaced by the spaced interpolation
+// size. This floating-point value is displayed only; bit lengths use the
+// certified rational upper bound below.
 const optimizedInterpolationProductBound = (): number => {
     const halfThreshold = Math.floor(releaseThreshold / 2);
     let product =
@@ -399,24 +405,74 @@ const optimizedInterpolationProductBound = (): number => {
             1 / Math.tan((Math.PI * index) / spacedInterpolationSize) ** 2;
     }
     return (
-        2 ** Math.ceil(Math.log2(releaseThreshold)) *
+        Number(reconstructionClearingFactor) *
         (spacedInterpolationSize / 2) *
         product
     );
 };
 
+// pi = 3.14159265358979323..., so this fraction is below pi.
+const piLowerBound = fraction(314_159_265_358_979n, 100_000_000_000_000n);
+
+// For 0 < x <= pi/4, sin(x) >= x - x^3/6 and tan(x) >= x + x^3/3, and both
+// lower bounds increase with x. Evaluating them at angles computed from a
+// lower bound on pi gives a rational upper bound on the same product.
+const certifiedInterpolationProductUpperBound = (): Fraction => {
+    const halfThreshold = Math.floor(releaseThreshold / 2);
+    if (4 * halfThreshold > spacedInterpolationSize) {
+        throw new RangeError('A certified interpolation angle exceeds pi/4.');
+    }
+    const angleLowerBound = (multiple: number): Fraction =>
+        multiplyFraction(
+            piLowerBound,
+            fraction(BigInt(multiple), BigInt(spacedInterpolationSize)),
+        );
+    const cubeOverDivisor = (angle: Fraction, divisor: bigint): Fraction =>
+        multiplyFraction(
+            multiplyFraction(angle, multiplyFraction(angle, angle)),
+            fraction(1n, divisor),
+        );
+    const inverseSquare = (value: Fraction): Fraction =>
+        inverseFraction(multiplyFraction(value, value));
+    const sineAngle = angleLowerBound(halfThreshold);
+    let product = inverseSquare(
+        subtractFraction(sineAngle, cubeOverDivisor(sineAngle, 6n)),
+    );
+    for (let index = 1; index < halfThreshold; index += 1) {
+        const tangentAngle = angleLowerBound(index);
+        product = multiplyFraction(
+            product,
+            inverseSquare(
+                addFraction(tangentAngle, cubeOverDivisor(tangentAngle, 3n)),
+            ),
+        );
+    }
+    return multiplyFraction(
+        fraction(
+            reconstructionClearingFactor * BigInt(spacedInterpolationSize / 2),
+        ),
+        product,
+    );
+};
+
+// Exact ceil(log2(t * 2^lambda * N * B)) for a positive rational bound B.
+// A power of two bounds a rational value exactly when it bounds its ceiling.
 const requiredDominantNoiseBudgetBitLength = (
     statisticalSecurityBitLength: number,
-    interpolationProductBound: number,
-): number =>
-    Math.ceil(
-        Math.log2(
-            releaseThreshold *
-                2 ** statisticalSecurityBitLength *
-                polynomialModulusDegree *
-                interpolationProductBound,
+    interpolationProductBound: Fraction,
+): number => {
+    const dominantFactor = multiplyFraction(
+        fraction(
+            BigInt(releaseThreshold * polynomialModulusDegree) <<
+                BigInt(statisticalSecurityBitLength),
         ),
+        interpolationProductBound,
     );
+    const dominantFactorCeiling =
+        (dominantFactor.numerator + dominantFactor.denominator - 1n) /
+        dominantFactor.denominator;
+    return (dominantFactorCeiling - 1n).toString(2).length;
+};
 
 export type ThresholdReleaseNoiseCensus = Readonly<{
     authorizedSubsetCount: number;
@@ -441,20 +497,11 @@ export type ThresholdReleaseNoiseCensus = Readonly<{
 export const compileThresholdReleaseNoiseCensus =
     (): ThresholdReleaseNoiseCensus => {
         const exactInterpolation = exactInterpolationCensus();
-        const interpolationProductBound = optimizedInterpolationProductBound();
-        const targetSecurityDominantNoiseBudgetLowerBoundBitLength =
-            requiredDominantNoiseBudgetBitLength(80, interpolationProductBound);
-        const conservativeSecurityDominantNoiseBudgetLowerBoundBitLength =
-            requiredDominantNoiseBudgetBitLength(
-                128,
-                interpolationProductBound,
-            );
+        const interpolationProductUpperBound =
+            certifiedInterpolationProductUpperBound();
         const exactInterpolationProduct =
             exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm *
             exactInterpolation.exactMaximumSimulationCoefficientOneNorm;
-        const exactInterpolationProductNumber = Number(
-            exactInterpolationProduct,
-        );
         // Joint cube coupling charges every honest release for a fixed corrupt
         // set. Width 2*B_sm+1 gives B_sm = 2^(lambda-1)*N*sum_i ||lambda_0,i||_1*E.
         // This remains a dominant-term floor; the entire accepted support and
@@ -473,7 +520,7 @@ export const compileThresholdReleaseNoiseCensus =
             exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength:
                 requiredDominantNoiseBudgetBitLength(
                     128,
-                    exactInterpolationProductNumber,
+                    fraction(exactInterpolationProduct),
                 ),
             exactMaximumScaledReconstructionCoefficientOneNorm:
                 exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm,
@@ -487,15 +534,23 @@ export const compileThresholdReleaseNoiseCensus =
             exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength:
                 requiredDominantNoiseBudgetBitLength(
                     80,
-                    exactInterpolationProductNumber,
+                    fraction(exactInterpolationProduct),
                 ),
             lagrangeCoefficientCount:
                 exactInterpolation.lagrangeCoefficientCount,
             productionInterpolationPointExponentStride,
             releaseThreshold,
             spacedInterpolationSize,
-            interpolationProductBound,
-            targetSecurityDominantNoiseBudgetLowerBoundBitLength,
-            conservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+            interpolationProductBound: optimizedInterpolationProductBound(),
+            targetSecurityDominantNoiseBudgetLowerBoundBitLength:
+                requiredDominantNoiseBudgetBitLength(
+                    80,
+                    interpolationProductUpperBound,
+                ),
+            conservativeSecurityDominantNoiseBudgetLowerBoundBitLength:
+                requiredDominantNoiseBudgetBitLength(
+                    128,
+                    interpolationProductUpperBound,
+                ),
         };
     };

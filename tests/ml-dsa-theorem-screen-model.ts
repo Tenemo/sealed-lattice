@@ -10,8 +10,9 @@ type SignatureParameters = Readonly<{
     roundingBound: bigint;
 }>;
 
-// FIPS 204 Table 1, ML-DSA-65. These independently maintained operands are
-// checked against the deployed fips204 source by the research audit.
+// ML-DSA-65 operands transcribed from FIPS 204 Table 1; the challenge seed
+// has lambda/4 bytes. The model test derives the FIPS 204 Table 2 key and
+// signature sizes from them.
 export const mlDsa65ChallengeSeedBytes = 192n / 4n;
 // The pinned implementation uses a u16 nonce in FIPS 204 ExpandMask.
 export const mlDsa65MaskNonceBytes = 2n;

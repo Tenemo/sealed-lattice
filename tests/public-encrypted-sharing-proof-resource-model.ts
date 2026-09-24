@@ -10,14 +10,53 @@ import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/thresho
 // oracle queries and allocates sixteen bits beyond the 80-bit end-to-end target
 // to this component. Its asymptotic constant and fixed-hash encoding remain
 // unknown.
-const endToEndTargetSecurityBitLength = 80;
-const componentSecurityMarginBitLength = 16;
-const maximumQuantumRandomOracleQueryBitLength = 64;
-const ternaryConstraintMultiplicationCount = 2;
-const shareEncryptionKeyBoundedRingElementCount = 2;
-const shareEncryptionBoundedRingElementCountPerCiphertext = 3;
-const shareEncryptionEquationRingElementCountPerCiphertext = 2;
+const endToEndTargetSecurityBitLength = 80n;
+const componentSecurityMarginBitLength = 16n;
+const maximumQuantumRandomOracleQueryBitLength = 64n;
+const ternaryConstraintMultiplicationCount = 2n;
+const shareEncryptionKeyBoundedRingElementCount = 2n;
+const shareEncryptionBoundedRingElementCountPerCiphertext = 3n;
+const shareEncryptionEquationRingElementCountPerCiphertext = 2n;
 const sharingPolynomialNonconstantCoefficientCount = 3n;
+
+const ceilingDivide = (numerator: bigint, denominator: bigint): bigint =>
+    (numerator + denominator - 1n) / denominator;
+
+// The smallest exponent e with 2^e >= value, which is the authentication-path
+// length of a binary Merkle tree over value leaves.
+const ceilingLogarithmBaseTwo = (value: bigint): bigint => {
+    let exponent = 0n;
+    while (1n << exponent < value) exponent += 1n;
+    return exponent;
+};
+
+const smallestPowerOfTwoAbove = (value: bigint): bigint => {
+    let result = 1n;
+    while (result <= value) result *= 2n;
+    return result;
+};
+
+// The screen charges every Ligero column query a two-thirds survival
+// probability. The smallest query count t with (2/3)^t <= 2^-lambda is the
+// first t with 2^(lambda + t) <= 3^t, compared in exact integers.
+export const minimumLigeroQueryCount = (
+    interactiveSoundnessBitLength: bigint,
+): bigint => {
+    if (interactiveSoundnessBitLength < 0n) {
+        throw new RangeError(
+            'The interactive soundness bit length must be nonnegative.',
+        );
+    }
+    let queryCount = 0n;
+    let scaledPowerOfTwo = 1n << interactiveSoundnessBitLength;
+    let powerOfThree = 1n;
+    while (scaledPowerOfTwo > powerOfThree) {
+        queryCount += 1n;
+        scaledPowerOfTwo *= 2n;
+        powerOfThree *= 3n;
+    }
+    return queryCount;
+};
 
 export type PublicEncryptedSharingProofResourceCensus = Readonly<{
     binaryDecompositionConstraintCountPerContributor: bigint;
@@ -61,17 +100,15 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             publicEncryptedSharingModelConstants.productionPolynomialModulusDegree;
         const participantCount =
             publicEncryptedSharingModelConstants.productionParticipantCount;
-        const proofFieldElementBitLength = Number(
-            setupProofField.modulusBitLength,
-        );
+        const proofFieldElementBitLength = setupProofField.modulusBitLength;
         const componentSecurityBitLength =
             endToEndTargetSecurityBitLength + componentSecurityMarginBitLength;
         const interactiveSoundnessBitLength =
             componentSecurityBitLength +
-            2 * maximumQuantumRandomOracleQueryBitLength;
+            2n * maximumQuantumRandomOracleQueryBitLength;
         const randomOracleOutputBitLength =
             componentSecurityBitLength +
-            3 * maximumQuantumRandomOracleQueryBitLength;
+            3n * maximumQuantumRandomOracleQueryBitLength;
 
         // KLSW24 Section 4.1: two secrets and four error vectors; encryption
         // reuses the first b coordinate. Ternary errors are an HLS25-inspired
@@ -80,9 +117,9 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             2n + 4n * resources.ciphertextModulusLimbCount;
         const ternaryRingElementCountPerContributor =
             fheKeyBoundedRingElementCount +
-            BigInt(shareEncryptionKeyBoundedRingElementCount) +
+            shareEncryptionKeyBoundedRingElementCount +
             participantCount *
-                BigInt(shareEncryptionBoundedRingElementCountPerCiphertext);
+                shareEncryptionBoundedRingElementCountPerCiphertext;
         // Encode a centered coefficient a as a + R in [0, 2R]. The domain has
         // 2R+1 values, so when R is a power of two the endpoint needs one more
         // bit than R itself.
@@ -99,7 +136,7 @@ export const compilePublicEncryptedSharingProofResourceCensus =
         const boundedCoefficientCountPerContributor =
             boundedRingElementCountPerContributor * ringDegree;
         const ternaryConstraintCountPerContributor =
-            BigInt(ternaryConstraintMultiplicationCount) *
+            ternaryConstraintMultiplicationCount *
             ternaryRingElementCountPerContributor *
             ringDegree;
         const binaryDecompositionConstraintCountPerContributor =
@@ -112,13 +149,14 @@ export const compilePublicEncryptedSharingProofResourceCensus =
 
         // The optimistic linear rows comprise every public KLSW key equation,
         // one share-encryption key equation, one sharing evaluation per
-        // recipient, and two share-encryption equations per recipient.
+        // recipient, two share-encryption equations per recipient, and one
+        // bit recomposition per decomposed sharing coefficient.
         const linearEquationRingElementCount =
             resources.publicKeyContributionRingElementCount +
             1n +
             participantCount +
             participantCount *
-                BigInt(shareEncryptionEquationRingElementCountPerCiphertext) +
+                shareEncryptionEquationRingElementCountPerCiphertext +
             sharingPolynomialNonconstantCoefficientCount;
         const linearConstraintCountPerContributor =
             linearEquationRingElementCount * ringDegree;
@@ -128,54 +166,59 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             binaryEndpointConstraintCountPerContributor +
             linearConstraintCountPerContributor;
 
-        const fieldBitLength = proofFieldElementBitLength;
-        const ligeroQueryCount = Math.ceil(
-            interactiveSoundnessBitLength / Math.log2(3 / 2),
+        const ligeroQueryCount = minimumLigeroQueryCount(
+            interactiveSoundnessBitLength,
         );
-        const ligeroRepetitionCount = Math.max(
-            1,
-            Math.ceil(interactiveSoundnessBitLength / fieldBitLength),
-        );
-        const nextPowerOfTwoStrictlyGreater = (value: number): number => {
-            let result = 1;
-            while (result <= value) result *= 2;
-            return result;
-        };
-        const circuitConstraintCount = Number(
-            optimisticCircuitConstraintCountPerContributor,
-        );
-        const searchLimit = Math.ceil(
-            2 * Math.sqrt(4 * ligeroQueryCount * circuitConstraintCount),
-        );
+        // Repeat the field-dependent checks until |F|^r >= 2^lambda. The
+        // serialized bit length can exceed log2|F| by up to one bit, so the
+        // comparison uses the modulus itself.
+        let ligeroRepetitionCount = 1n;
+        while (
+            setupProofField.modulus ** ligeroRepetitionCount <
+            1n << interactiveSoundnessBitLength
+        ) {
+            ligeroRepetitionCount += 1n;
+        }
         let best:
             | Readonly<{
-                  codeDimension: number;
-                  codeLength: number;
-                  messageBlockLength: number;
-                  proofBitLength: number;
-                  witnessRowCount: number;
+                  codeDimension: bigint;
+                  codeLength: bigint;
+                  messageBlockLength: bigint;
+                  proofBitLength: bigint;
+                  witnessRowCount: bigint;
               }>
             | undefined;
-        for (
-            let messageBlockLength = 1;
-            messageBlockLength <= searchLimit;
-            messageBlockLength += 1
-        ) {
-            const codeDimension = nextPowerOfTwoStrictlyGreater(
+        for (let messageBlockLength = 1n; ; messageBlockLength += 1n) {
+            const codeDimension = smallestPowerOfTwoAbove(
                 messageBlockLength + ligeroQueryCount,
             );
-            const codeLength = 3 * codeDimension;
+            const codeDimensionFieldElementCount =
+                (4n * codeDimension + messageBlockLength - 2n) *
+                ligeroRepetitionCount;
+            // Every proof term is nonnegative, and this term never decreases
+            // as the message block grows. Once it alone reaches the best
+            // proof, no longer block can be strictly smaller, so stopping
+            // here keeps the search exhaustive.
+            if (
+                best !== undefined &&
+                codeDimensionFieldElementCount * proofFieldElementBitLength >=
+                    best.proofBitLength
+            ) {
+                break;
+            }
+            const codeLength = 3n * codeDimension;
             const witnessRowCount =
-                Math.floor(circuitConstraintCount / messageBlockLength) + 1;
+                optimisticCircuitConstraintCountPerContributor /
+                    messageBlockLength +
+                1n;
             const communicatedFieldElementCount =
-                (4 * codeDimension + messageBlockLength - 2) *
-                    ligeroRepetitionCount +
+                codeDimensionFieldElementCount +
                 ligeroQueryCount *
-                    (4 * witnessRowCount + 3 * ligeroRepetitionCount);
+                    (4n * witnessRowCount + 3n * ligeroRepetitionCount);
             const proofBitLength =
-                communicatedFieldElementCount * fieldBitLength +
+                communicatedFieldElementCount * proofFieldElementBitLength +
                 ligeroQueryCount *
-                    Math.ceil(Math.log2(codeLength)) *
+                    ceilingLogarithmBaseTwo(codeLength) *
                     randomOracleOutputBitLength;
             if (best === undefined || proofBitLength < best.proofBitLength) {
                 best = {
@@ -190,12 +233,14 @@ export const compilePublicEncryptedSharingProofResourceCensus =
         if (best === undefined) {
             throw new Error('The Ligero parameter search found no candidate.');
         }
-        const optimisticLigeroProofByteLengthPerContributor = BigInt(
-            Math.ceil(best.proofBitLength / 8),
+        const optimisticLigeroProofByteLengthPerContributor = ceilingDivide(
+            best.proofBitLength,
+            8n,
         );
 
-        const oneExpandedFieldElementByteLength = BigInt(
-            Math.ceil(fieldBitLength / 8),
+        const oneExpandedFieldElementByteLength = ceilingDivide(
+            proofFieldElementBitLength,
+            8n,
         );
         const expandedBoundedWitnessByteLengthPerContributor =
             (boundedCoefficientCountPerContributor +
@@ -207,10 +252,9 @@ export const compilePublicEncryptedSharingProofResourceCensus =
                 resources.minimumPublicEncryptedShareCiphertextRingElementCount *
                 resources.oneSerializedShareEncryptionRingElementByteLength +
             resources.oneSerializedShareEncryptionRingElementByteLength;
-        const encodedProofOracleFieldElementCountPerContributor = BigInt(
-            (4 * best.witnessRowCount + 5 * ligeroRepetitionCount) *
-                best.codeLength,
-        );
+        const encodedProofOracleFieldElementCountPerContributor =
+            (4n * best.witnessRowCount + 5n * ligeroRepetitionCount) *
+            best.codeLength;
         const encodedProofOracleByteLengthPerContributor =
             encodedProofOracleFieldElementCountPerContributor *
             oneExpandedFieldElementByteLength;
@@ -231,22 +275,20 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             fitsSetupProofBudgetBeforeFixedHashAndLiftingConstant:
                 optimisticLigeroProofByteLengthPerContributor <=
                 resources.availablePublicEncryptedSharingProofPerContributorByteLength,
-            interactiveSoundnessBitLength: BigInt(
-                interactiveSoundnessBitLength,
-            ),
-            ligeroCodeDimension: BigInt(best.codeDimension),
-            ligeroCodeLength: BigInt(best.codeLength),
-            ligeroMessageBlockLength: BigInt(best.messageBlockLength),
-            ligeroQueryCount: BigInt(ligeroQueryCount),
-            ligeroRepetitionCount: BigInt(ligeroRepetitionCount),
-            ligeroWitnessRowCount: BigInt(best.witnessRowCount),
+            interactiveSoundnessBitLength,
+            ligeroCodeDimension: best.codeDimension,
+            ligeroCodeLength: best.codeLength,
+            ligeroMessageBlockLength: best.messageBlockLength,
+            ligeroQueryCount,
+            ligeroRepetitionCount,
+            ligeroWitnessRowCount: best.witnessRowCount,
             linearConstraintCountPerContributor,
             optimisticCircuitConstraintCountPerContributor,
             optimisticLigeroProofByteLengthPerContributor,
             optimisticTenProofCorpusByteLength:
                 participantCount *
                 optimisticLigeroProofByteLengthPerContributor,
-            proofFieldElementBitLength: BigInt(fieldBitLength),
+            proofFieldElementBitLength,
             proofBudgetRemainingByteLengthPerContributor:
                 resources.availablePublicEncryptedSharingProofPerContributorByteLength -
                 optimisticLigeroProofByteLengthPerContributor,
@@ -254,7 +296,7 @@ export const compilePublicEncryptedSharingProofResourceCensus =
             publicInputPlusExpandedWitnessByteLengthPerContributor:
                 publicInputByteLengthPerContributor +
                 expandedBoundedWitnessByteLengthPerContributor,
-            randomOracleOutputBitLength: BigInt(randomOracleOutputBitLength),
+            randomOracleOutputBitLength,
             sharingCoefficientDecompositionBitLength,
             ternaryConstraintCountPerContributor,
             ternaryRingElementCountPerContributor,
