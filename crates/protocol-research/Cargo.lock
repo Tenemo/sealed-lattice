@@ -70,6 +70,7 @@ dependencies = [
  "registration-credentials",
  "setup-aggregate",
  "setup-witness",
+ "supported-profile",
  "zeroize",
 ]
 
@@ -78,7 +79,6 @@ name = "ballot-proof"
 version = "0.0.0"
 dependencies = [
  "ballot-encryption",
- "fips204",
  "getrandom 0.3.3",
  "num-bigint",
  "proof-lookup-table",
@@ -89,6 +89,7 @@ dependencies = [
  "sha2 0.10.9",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "zeroize",
 ]
 
@@ -161,6 +162,7 @@ dependencies = [
  "setup-witness",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "word-proof",
  "zeroize",
 ]
@@ -287,6 +289,7 @@ dependencies = [
  "setup-aggregate",
  "setup-witness",
  "sha2 0.11.0",
+ "supported-profile",
 ]
 
 [[package]]
@@ -513,8 +516,6 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 name = "linked-release-proof"
 version = "0.0.0"
 dependencies = [
- "aes",
- "aes-gcm",
  "getrandom 0.3.3",
  "num-bigint",
  "num-traits",
@@ -522,6 +523,7 @@ dependencies = [
  "setup-stream-kernel",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "zeroize",
 ]
 
@@ -577,6 +579,7 @@ dependencies = [
  "setup-witness",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "word-proof",
  "zeroize",
 ]
@@ -677,12 +680,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 name = "opened-contribution"
 version = "0.0.0"
 dependencies = [
- "fips204",
  "num-bigint",
  "registration-credentials",
  "setup-witness",
- "sha3 0.12.0",
- "word-proof",
  "word-verifier",
 ]
 
@@ -982,6 +982,7 @@ dependencies = [
  "registration-verifier",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "unicode-normalization",
  "zeroize",
 ]
@@ -1016,6 +1017,7 @@ dependencies = [
  "setup-witness",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "zeroize",
 ]
 
@@ -1027,6 +1029,7 @@ dependencies = [
  "registration-proof",
  "setup-stream-kernel",
  "sha3 0.10.9",
+ "supported-profile",
 ]
 
 [[package]]
@@ -1037,6 +1040,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "sha2 0.11.0",
+ "supported-profile",
 ]
 
 [[package]]
@@ -1089,13 +1093,17 @@ dependencies = [
  "opened-contribution",
  "registration-credentials",
  "sha2 0.10.9",
+ "supported-profile",
 ]
 
 [[package]]
 name = "setup-stream-kernel"
 version = "0.0.0"
 dependencies = [
+ "num-bigint",
+ "num-traits",
  "sha3 0.10.9",
+ "supported-profile",
 ]
 
 [[package]]
@@ -1109,6 +1117,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "sha3 0.10.9",
+ "supported-profile",
  "zeroize",
 ]
 
@@ -1175,6 +1184,13 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "supported-profile"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+]
 
 [[package]]
 name = "syn"
@@ -1405,6 +1421,7 @@ dependencies = [
  "setup-stream-kernel",
  "sha3 0.10.9",
  "sha3 0.12.0",
+ "supported-profile",
  "zeroize",
 ]
 
@@ -1415,6 +1432,8 @@ dependencies = [
  "proof-lookup-table",
  "setup-stream-kernel",
  "sha3 0.10.9",
+ "supported-profile",
+ "word-proof",
 ]
 
 [[package]]

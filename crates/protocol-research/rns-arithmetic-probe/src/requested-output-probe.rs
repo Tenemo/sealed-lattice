@@ -1,10 +1,10 @@
-use super::{Ciphertext, DEGREE, Engine, OPTION_COUNT, Refusal, plaintext};
+use super::{Ciphertext, DEGREE, Engine, Refusal, plaintext};
 use num_bigint::BigInt;
 use num_traits::Zero;
 use sha2::{Digest, Sha512};
+use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
 
-const PRIME: u64 = 65_537;
-const ORDER: [usize; OPTION_COUNT] = [4, 1, 8, 0, 7, 2, 9, 5, 3, 6];
+const PRIME: u64 = PLAINTEXT_MODULUS as u64;
 
 fn power(mut value: u64, mut exponent: usize, modulus: u64) -> u64 {
     let mut result = 1;
@@ -18,12 +18,23 @@ fn power(mut value: u64, mut exponent: usize, modulus: u64) -> u64 {
     result
 }
 
+/// The fixed rank order of the options that the synthetic inputs encrypt.
+fn order(options: usize) -> Vec<usize> {
+    let mut state = 0x9e37_79b9_7f4a_7c15 ^ options as u64;
+    let mut order: Vec<_> = (0..options).collect();
+    for index in (1..options).rev() {
+        let other = (super::super::next(&mut state) % (index as u64 + 1)) as usize;
+        order.swap(index, other);
+    }
+    order
+}
+
 // Direct evaluation-basis interpolation is independent of the coefficient
 // encoder and of the encrypted arithmetic being exercised.
-fn expected_coefficients(top_count: usize) -> Vec<u64> {
+fn expected_coefficients(profile: Profile, order: &[usize], top_count: usize) -> Vec<u64> {
     let mut expected = vec![0; DEGREE];
-    for (rank, option) in ORDER.iter().take(top_count).enumerate() {
-        let slot = (option * OPTION_COUNT + rank) * 16;
+    for (rank, option) in order.iter().take(top_count).enumerate() {
+        let slot = (option * profile.options() + rank) * profile.rank_window();
         let exponent = power(5, slot, DEGREE as u64);
         let root = power(3, exponent as usize, PRIME);
         let inverse = power(root, (PRIME - 2) as usize, PRIME);
@@ -36,24 +47,28 @@ fn expected_coefficients(top_count: usize) -> Vec<u64> {
     expected
 }
 
-fn program(top_count: usize) -> Vec<u8> {
+/// Input p below the option count less one encrypts the rank powers of
+/// exponent p + 1; every other input encrypts zero and only enters the sum.
+fn program(profile: Profile, top_count: usize) -> Vec<u8> {
+    let (participants, options) = (profile.participants(), profile.options());
     let mut instructions = Vec::<[u32; 4]>::new();
-    for position in 0..OPTION_COUNT {
+    for position in 0..participants {
         instructions.push([0, u32::MAX, u32::MAX, position as u32]);
     }
-    let family = if top_count == OPTION_COUNT {
-        0
-    } else {
-        top_count
-    };
-    let mut sum = (OPTION_COUNT - 1) as u32;
-    for exponent in 1..OPTION_COUNT {
+    let family = if top_count == options { 0 } else { top_count };
+    let mut sum = (participants - 1) as u32;
+    for position in options - 1..participants - 1 {
+        let next = instructions.len() as u32;
+        instructions.push([1, sum, position as u32, 0]);
+        sum = next;
+    }
+    for exponent in 1..options {
         let weighted = instructions.len() as u32;
         instructions.push([
             4,
             (exponent - 1) as u32,
             u32::MAX,
-            (OPTION_COUNT * family + exponent) as u32,
+            (options * family + exponent) as u32,
         ]);
         let next = instructions.len() as u32;
         instructions.push([1, sum, weighted, 0]);
@@ -73,20 +88,23 @@ fn program(top_count: usize) -> Vec<u8> {
 }
 
 /// Numerical coefficient-selection gates under a deterministic synthetic BFV
-/// key. The inputs encrypt known rank powers, not participant ballots. The
-/// test-only secret decoder cannot receive an external key or ciphertext.
-pub fn probe(top_count: usize) -> Result<String, Refusal> {
-    if !(1..=OPTION_COUNT).contains(&top_count) {
+/// key. The inputs encrypt known rank powers, not participant ballots, so
+/// the profile needs an input for every rank power. The test-only secret
+/// decoder cannot receive an external key or ciphertext.
+pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
+    let (participants, options) = (profile.participants(), profile.options());
+    if !(1..=options).contains(&top_count) || participants < options {
         return Err(Refusal::Program);
     }
-    crate::benchmark_phase(0);
-    let bytes = program(top_count);
+    let bytes = program(profile, top_count);
     let identity: [u8; 64] = Sha512::digest(&bytes).into();
-    let mut engine = Engine::new(&bytes, identity)?;
-    let secret =
-        engine
-            .arithmetic
-            .small(&super::super::secret(DEGREE, 1024, 0x1234_5678_9abc_def1));
+    let mut engine = Engine::new(profile, &bytes, identity)?;
+    let secret = engine.arithmetic.small(&super::super::secret(
+        DEGREE,
+        participants,
+        FHE_SECRET_SUPPORT,
+        0x1234_5678_9abc_def1,
+    ));
     let common = engine.arithmetic.uniform(0x6a09_e667_f3bc_c909);
     let zeros = vec![0; DEGREE];
     let public = engine.arithmetic.affine(
@@ -96,21 +114,21 @@ pub fn probe(top_count: usize) -> Result<String, Refusal> {
         &BigInt::zero(),
         -640,
     );
-    let mut ranks = [0; OPTION_COUNT];
-    for (rank, option) in ORDER.iter().enumerate() {
+    let order = order(options);
+    let mut ranks = vec![0; options];
+    for (rank, option) in order.iter().enumerate() {
         ranks[*option] = rank as u32;
     }
     let mut slots: Vec<_> = (0..DEGREE / 4)
         .map(|index| ((index * 73 + 19) % PRIME as usize) as u32)
         .collect();
     for (option, rank) in ranks.iter().enumerate() {
-        for requested in 0..OPTION_COUNT {
-            slots[(option * OPTION_COUNT + requested) * 16] = *rank;
+        for requested in 0..options {
+            slots[(option * options + requested) * profile.rank_window()] = *rank;
         }
     }
     let mut input_hash = Sha512::new();
     input_hash.update(b"sealed-lattice/requested-output-probe-input/v1");
-    crate::benchmark_phase(1);
     while !engine.finished() {
         let requirements = engine.requirements()?;
         if requirements.cache.is_some()
@@ -120,12 +138,12 @@ pub fn probe(top_count: usize) -> Result<String, Refusal> {
             return Err(Refusal::Allocation);
         }
         if let Some(position) = requirements.input_position {
-            let input: Ciphertext = if position == OPTION_COUNT - 1 {
-                std::array::from_fn(|_| vec![[0; 14]; DEGREE])
+            let input: Ciphertext = if position + 1 >= options {
+                engine.zero_value()
             } else {
                 let ephemeral = engine.arithmetic.small(&super::super::ephemeral(
                     DEGREE,
-                    1024,
+                    FHE_SECRET_SUPPORT,
                     0x12ab_cdef_1234_5679 ^ position as u64,
                 ));
                 let encrypted_zero = [
@@ -151,26 +169,19 @@ pub fn probe(top_count: usize) -> Result<String, Refusal> {
                 engine.add_plaintext(&encrypted_zero, &plaintext::encode(&powered))
             };
             input_hash.update((position as u32).to_le_bytes());
-            for polynomial in &input {
-                for coefficient in polynomial {
-                    for word in coefficient {
-                        input_hash.update(word.to_le_bytes());
-                    }
-                }
+            for word in input.iter().flatten() {
+                input_hash.update(word.to_le_bytes());
             }
             engine.load_input(position, input)?;
         }
         engine.execute()?;
     }
-    crate::benchmark_phase(2);
     let decoded = engine
         .arithmetic
         .decode(engine.value(engine.step() - 1)?, &secret);
-    let expected = expected_coefficients(top_count);
-    if decoded != expected {
+    if decoded != expected_coefficients(profile, &order, top_count) {
         return Err(Refusal::Coefficient);
     }
-    crate::benchmark_phase(3);
     let to_hex = |bytes: &[u8]| {
         bytes
             .iter()
@@ -178,8 +189,8 @@ pub fn probe(top_count: usize) -> Result<String, Refusal> {
             .collect::<String>()
     };
     Ok(format!(
-        "{{\"topCount\":{top_count},\"degree\":{DEGREE},\"optionPositions\":{:?},\"inputIdentity\":\"{}\",\"programIdentity\":\"{}\",\"ciphertextIdentity\":\"{}\"}}",
-        &ORDER[..top_count],
+        "{{\"participants\":{participants},\"options\":{options},\"topCount\":{top_count},\"degree\":{DEGREE},\"optionPositions\":{:?},\"inputIdentity\":\"{}\",\"programIdentity\":\"{}\",\"ciphertextIdentity\":\"{}\"}}",
+        &order[..top_count],
         to_hex(&input_hash.finalize()),
         to_hex(&identity),
         to_hex(&engine.value_identity(engine.step() - 1, engine.value(engine.step() - 1)?)),

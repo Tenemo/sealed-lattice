@@ -5,11 +5,18 @@ use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};
 use zeroize::Zeroizing;
 
-pub const RADIX_BITS: usize = 96;
+// FHE, registration and auxiliary equations use 96-bit limbs; share
+// equations use the profile's share limb.
+pub const RADIX_BITS: usize = supported_profile::FHE_LIMB_BITS;
 pub const RADIX: i128 = 1i128 << RADIX_BITS;
 
 pub fn digit(value: &BigInt, limb: usize) -> i128 {
-    let magnitude = (value.abs() >> (RADIX_BITS * limb)) & BigInt::from(RADIX - 1);
+    digit_in(value, limb, RADIX_BITS)
+}
+pub fn digit_in(value: &BigInt, limb: usize, radix_bits: usize) -> i128 {
+    assert!(radix_bits <= RADIX_BITS);
+    let magnitude: BigInt =
+        (value.abs() >> (radix_bits * limb)) & ((BigInt::from(1) << radix_bits) - 1);
     let result = magnitude.to_i128().unwrap();
     if value.is_negative() { -result } else { result }
 }
@@ -100,6 +107,7 @@ impl Plan {
         sparse: &[i8],
         transformed: &[u128],
         limbs: usize,
+        radix_bits: usize,
     ) -> Vec<Vec<i128>> {
         assert_eq!(public.len(), self.degree);
         assert_eq!(transformed.len(), self.degree);
@@ -107,7 +115,7 @@ impl Plan {
             .iter()
             .map(|value| value.unsigned_abs() as u128)
             .sum::<u128>();
-        assert!(support * (RADIX as u128 - 1) < MODULUS / 2);
+        assert!(support * ((1u128 << radix_bits) - 1) < MODULUS / 2);
         let result: Vec<Vec<i128>> = (0..limbs)
             .map(|limb| {
                 let mut values = Zeroizing::new(
@@ -115,7 +123,7 @@ impl Plan {
                         .iter()
                         .zip(&self.twist)
                         .map(|(value, twist)| {
-                            let value = digit(value, limb);
+                            let value = digit_in(value, limb, radix_bits);
                             let residue = if value < 0 {
                                 MODULUS - value.unsigned_abs()
                             } else {
@@ -170,7 +178,7 @@ impl Plan {
                         * BigInt::from(if position < input { -*secret } else { *secret });
                 }
                 assert_eq!(
-                    reconstruct(&result, position),
+                    reconstruct_in(&result, position, radix_bits),
                     expected,
                     "ordinary product at {position}"
                 );
@@ -181,9 +189,9 @@ impl Plan {
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
-pub fn reconstruct(digits: &[Vec<i128>], position: usize) -> BigInt {
+pub fn reconstruct_in(digits: &[Vec<i128>], position: usize, radix_bits: usize) -> BigInt {
     digits.iter().rev().fold(BigInt::from(0), |sum, limb| {
-        (sum << RADIX_BITS) + BigInt::from(limb[position])
+        (sum << radix_bits) + BigInt::from(limb[position])
     })
 }
 
@@ -214,7 +222,9 @@ mod tests {
                 })
                 .collect();
             let transformed = plan.sparse_transform(&sparse);
-            plan.digit_products(&public, &sparse, &transformed, 2);
+            for radix_bits in [95, 96] {
+                plan.digit_products(&public, &sparse, &transformed, 2, radix_bits);
+            }
         }
     }
 }

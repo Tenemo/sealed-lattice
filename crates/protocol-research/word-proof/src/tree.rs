@@ -1,11 +1,6 @@
 use crate::transcript::part;
 use stateful_sha3::{Digest, Sha3_512};
-use std::{
-    collections::BTreeSet,
-    fs::OpenOptions,
-    io::{BufWriter, Write},
-    path::Path,
-};
+use std::{collections::BTreeSet, io::Write};
 use zeroize::{Zeroize, Zeroizing};
 
 const LEAF_DOMAIN: &[u8] = b"bounded-proof/leaf";
@@ -128,23 +123,6 @@ impl Tree {
                 node /= 2;
             }
         }
-    }
-    pub fn save(&self, directory: &Path, name: &str) {
-        let mut file = BufWriter::with_capacity(
-            1 << 20,
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(directory.join(name))
-                .unwrap(),
-        );
-        for node in &self.nodes {
-            file.write_all(node).unwrap();
-        }
-        for salt in &self.salts {
-            file.write_all(salt).unwrap();
-        }
-        file.flush().unwrap();
     }
 }
 

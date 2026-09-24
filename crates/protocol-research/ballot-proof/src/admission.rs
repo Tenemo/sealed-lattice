@@ -1,7 +1,12 @@
-use crate::{CHUNK_LIMIT, Refusal, Verifier, parameters::*, statement::encode_polynomial};
+use crate::{
+    CHUNK_LIMIT, Refusal, Verifier,
+    parameters::BALLOT_HEADER_BYTES,
+    statement::{self, coefficient_bytes, encode_polynomial, polynomial_bytes, setup_inputs},
+};
 use registration_credentials::poll::VerifiedPoll;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use sha2::{Digest, Sha512};
+use supported_profile::Profile;
 
 /// Proof-valid linked ciphertexts under this verifier's own setup.
 /// Envelope authentication and authoritative publication are separate gates.
@@ -26,6 +31,7 @@ impl VerifiedBallotRelation {
     }
 }
 pub struct BallotRelationVerifier {
+    profile: Profile,
     verifier: Option<Verifier>,
     expected_header: Vec<u8>,
     expected_inputs: [[u8; 64]; 4],
@@ -45,35 +51,40 @@ impl BallotRelationVerifier {
         proof_header: &[u8],
     ) -> Result<Self, Refusal> {
         let inventory = setup.inventory();
+        let profile = setup.profile();
         let role =
             crate::context::proof_role(poll, setup, position).map_err(|_| Refusal::Context)?;
-        if position >= inventory.confirmations().len()
+        if position >= profile.participants()
+            || profile.options() != poll.manifest().option_count()
             || inventory.proposal().proposal().records()[0].header().poll != poll.identity()
         {
             return Err(Refusal::Context);
         }
-        let mut expected_header = Vec::from(b"LBS1".as_slice());
-        expected_header.extend(poll.identity());
-        expected_header.extend(inventory.identity());
-        expected_header.extend((position as u16).to_le_bytes());
-        expected_header.push(poll.manifest().option_count() as u8);
-        expected_header.push(u8::try_from(poll.top_count()).map_err(|_| Refusal::Context)?);
+        let expected_header = statement::header(
+            &poll.identity(),
+            &inventory.identity(),
+            position,
+            profile.options(),
+            usize::from(poll.top_count()),
+        )
+        .map_err(|_| Refusal::Context)?;
         let mut expected_inputs = [[0; 64]; 4];
-        for (slot, index) in [0, 73].into_iter().enumerate() {
-            let common = setup_witness::contribution::common_polynomial(index)
+        for (slot, (family, common, key)) in setup_inputs(profile).into_iter().enumerate() {
+            let common = setup_witness::contribution::common_polynomial(profile, common)
                 .map_err(|_| Refusal::Context)?;
-            let bytes = encode_polynomial(&common, if index == 0 { 109 } else { 6 })
+            let bytes = encode_polynomial(&common, coefficient_bytes(profile, family))
                 .map_err(|_| Refusal::Context)?;
             expected_inputs[2 * slot] = Sha512::digest(bytes).into();
             let key = setup
                 .polynomials()
                 .iter()
-                .find(|polynomial| polynomial.index() == if index == 0 { 1 } else { 74 })
+                .find(|polynomial| polynomial.index() == key)
                 .ok_or(Refusal::Context)?;
             expected_inputs[2 * slot + 1] = *key.digest();
         }
         Ok(Self {
-            verifier: Some(Verifier::new(&role, statement, proof_header)?),
+            profile,
+            verifier: Some(Verifier::new(profile, &role, statement, proof_header)?),
             expected_header,
             expected_inputs,
             header_offset: 0,
@@ -99,8 +110,8 @@ impl BallotRelationVerifier {
             .as_mut()
             .ok_or(Refusal::Stage)?
             .push_statement(bytes)?;
-        if self.header_offset < HEADER_BYTES {
-            let count = bytes.len().min(HEADER_BYTES - self.header_offset);
+        if self.header_offset < BALLOT_HEADER_BYTES {
+            let count = bytes.len().min(BALLOT_HEADER_BYTES - self.header_offset);
             if bytes[..count]
                 != self.expected_header[self.header_offset..self.header_offset + count]
             {
@@ -113,11 +124,7 @@ impl BallotRelationVerifier {
             if self.polynomial >= 8 {
                 return Err(Refusal::Length);
             }
-            let length = if self.polynomial < 4 {
-                SYSTEMATIC * 109
-            } else {
-                4096 * 6
-            };
+            let length = polynomial_bytes(self.profile, self.polynomial);
             let count = bytes.len().min(length - self.polynomial_bytes);
             if self.polynomial % 4 < 2 {
                 self.hash.update(&bytes[..count]);

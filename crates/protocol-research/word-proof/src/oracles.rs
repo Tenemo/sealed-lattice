@@ -4,11 +4,6 @@ use crate::{
     tree::Tree,
 };
 use stateful_sha3::{Digest, Sha3_512};
-use std::{
-    fs::{File, OpenOptions},
-    io::{BufWriter, Read, Write},
-    path::Path,
-};
 use zeroize::{Zeroize, Zeroizing};
 
 pub fn random_base(count: usize) -> Vec<u128> {
@@ -35,50 +30,30 @@ pub fn random_extension(count: usize) -> Vec<Element> {
         .collect()
 }
 pub struct Witness {
+    pub relation: Relation,
     pub statement: [u8; 64],
     pub columns: Vec<Vec<u16>>,
     pub counts: Vec<u128>,
 }
 impl Witness {
-    pub fn read(path: &Path) -> Self {
-        let mut file = File::open(path).unwrap();
-        let mut header = [0; 80];
-        file.read_exact(&mut header).unwrap();
-        assert_eq!(&header[..4], WITNESS_MAGIC);
-        for (index, expected) in [SYSTEMATIC, WORDS, BOOLEANS].iter().enumerate() {
-            assert_eq!(
-                u32::from_le_bytes(header[4 + 4 * index..8 + 4 * index].try_into().unwrap())
-                    as usize,
-                *expected
-            );
-        }
-        let mut columns = Vec::new();
-        let mut bytes = Zeroizing::new(vec![0; 2 * SYSTEMATIC]);
-        for column in 0..COLUMNS {
-            file.read_exact(&mut bytes).unwrap();
-            let values: Vec<u16> = bytes
-                .chunks_exact(2)
-                .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
-                .collect();
-            if column >= WORDS {
-                assert!(values.iter().all(|value| *value <= 1));
-            }
-            columns.push(values);
-        }
-        assert_eq!(file.read(&mut [0]).unwrap(), 0);
-        Self::from_columns(header[16..].try_into().unwrap(), columns).unwrap()
-    }
-    pub fn from_columns(statement: [u8; 64], columns: Vec<Vec<u16>>) -> Result<Self, &'static str> {
+    pub fn from_columns(
+        relation: &Relation,
+        statement: [u8; 64],
+        columns: Vec<Vec<u16>>,
+    ) -> Result<Self, &'static str> {
         let mut columns = Zeroizing::new(columns);
-        if columns.len() != COLUMNS || columns.iter().any(|column| column.len() != SYSTEMATIC) {
+        let words = relation.words();
+        if columns.len() != relation.columns()
+            || columns.iter().any(|column| column.len() != SYSTEMATIC)
+        {
             return Err("Witness shape");
         }
-        if columns[WORDS..].iter().flatten().any(|value| *value > 1) {
+        if columns[words..].iter().flatten().any(|value| *value > 1) {
             return Err("Boolean range");
         }
         let mut counts = vec![0; SYSTEMATIC];
-        for pair in 0..ZERO_PRODUCTS {
-            let (left, right) = zero_product_columns(pair);
+        for pair in 0..relation.zero_products() {
+            let (left, right) = relation.zero_product_columns(pair);
             if columns[left]
                 .iter()
                 .zip(&columns[right])
@@ -87,10 +62,10 @@ impl Witness {
                 return Err("Nonzero product");
             }
         }
-        for pair in 0..SUPPORT_PAIRS {
-            let positive = &columns[WORDS + 2 * pair];
-            let negative = &columns[WORDS + 2 * pair + 1];
-            let (stride, required) = support(pair);
+        for pair in 0..relation.support_pairs() {
+            let (positive, negative) = relation.zero_product_columns(pair);
+            let (positive, negative) = (&columns[positive], &columns[negative]);
+            let (stride, required) = relation.support(pair);
             let mut counts = [0u64; 2];
             for position in 0..SYSTEMATIC {
                 if position % stride == 0 {
@@ -102,8 +77,8 @@ impl Witness {
                 return Err("Support count");
             }
         }
-        for index in 0..LOOKUPS {
-            let (column, scale) = lookup(index);
+        for index in 0..relation.lookups() {
+            let (column, scale) = relation.lookup(index);
             for value in &columns[column] {
                 let value = usize::from(*value) * scale as usize;
                 if value >= SYSTEMATIC {
@@ -113,6 +88,7 @@ impl Witness {
             }
         }
         Ok(Self {
+            relation: relation.clone(),
             statement,
             columns: std::mem::take(&mut *columns),
             counts,
@@ -171,21 +147,23 @@ pub(crate) fn masked_extension_coefficients(
 impl SecondOracle {
     pub fn create(role: &[u8], witness: &Witness, inverses: &[Element]) -> Self {
         assert_eq!(inverses.len(), SYSTEMATIC);
-        let mut result = Self::initialize(role);
-        for column in 0..LOOKUPS + 2 {
+        let mut result = Self::initialize(&witness.relation, role);
+        for column in 0..witness.relation.lookups() + 2 {
             result.commit_column(witness, inverses, column);
         }
         result.finish_commitment();
         result
     }
-    pub fn initialize(role: &[u8]) -> Self {
-        let masks = (0..LOOKUPS + 1).map(|_| random_extension(MASKS)).collect();
+    pub fn initialize(relation: &Relation, role: &[u8]) -> Self {
+        let masks = (0..relation.lookups() + 1)
+            .map(|_| random_extension(MASKS))
+            .collect();
         let sum_mask = random_extension(WITNESS_DEGREE + 1);
         let mask_sum = field::scale(
             field::add(sum_mask[0], sum_mask[SYSTEMATIC]),
             SYSTEMATIC as u128,
         );
-        let tree = Tree::new(role, 1, DOMAIN, SECOND_WIDTH);
+        let tree = Tree::new(role, 1, DOMAIN, relation.second_width());
         let prefix = tree.leaf_hash_prefix();
         let hashers = (0..DOMAIN)
             .map(|row| tree.leaf_hasher(row, &prefix))
@@ -200,12 +178,13 @@ impl SecondOracle {
         }
     }
     pub fn commit_column(&mut self, witness: &Witness, inverses: &[Element], column: usize) {
-        assert!(column < LOOKUPS + 2 && inverses.len() == SYSTEMATIC);
+        let lookups = witness.relation.lookups();
+        assert!(column < lookups + 2 && inverses.len() == SYSTEMATIC);
         let transform = Transform::new(SYSTEMATIC);
-        let coefficients = Zeroizing::new(if column == LOOKUPS + 1 {
+        let coefficients = Zeroizing::new(if column == lookups + 1 {
             self.sum_mask.clone()
         } else {
-            let values = if column == LOOKUPS {
+            let values = if column == lookups {
                 witness
                     .counts
                     .iter()
@@ -213,7 +192,7 @@ impl SecondOracle {
                     .map(|(count, inverse)| field::scale(*inverse, *count))
                     .collect()
             } else {
-                let (index, factor) = lookup(column);
+                let (index, factor) = witness.relation.lookup(column);
                 witness.columns[index]
                     .iter()
                     .map(|value| inverses[usize::from(*value) * factor as usize])
@@ -222,7 +201,7 @@ impl SecondOracle {
             let coefficients =
                 masked_extension_coefficients(values, &self.masks[column], &transform);
             for (sum, value) in self.lookup_coefficients.iter_mut().zip(&coefficients) {
-                *sum = if column == LOOKUPS {
+                *sum = if column == lookups {
                     field::subtract(*sum, *value)
                 } else {
                     field::add(*sum, *value)
@@ -247,33 +226,6 @@ impl SecondOracle {
         }
         self.tree.finish();
     }
-    pub fn save(&self, directory: &Path) {
-        self.tree.save(directory, "second-tree.bin");
-        let mut masks = BufWriter::new(
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(directory.join("inverse-masks.bin"))
-                .unwrap(),
-        );
-        for column in &self.masks {
-            for value in column {
-                masks.write_all(&field::encode(*value)).unwrap();
-            }
-        }
-        masks.flush().unwrap();
-        let mut sums = BufWriter::new(
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(directory.join("sum-polynomials.bin"))
-                .unwrap(),
-        );
-        for value in self.sum_mask.iter().chain(&self.lookup_coefficients) {
-            sums.write_all(&field::encode(*value)).unwrap();
-        }
-        sums.flush().unwrap();
-    }
     pub fn openings(
         &self,
         witness: &Witness,
@@ -281,10 +233,11 @@ impl SecondOracle {
         indices: &[usize],
     ) -> Vec<Vec<u8>> {
         let transform = Transform::new(SYSTEMATIC);
-        let mut data = vec![Vec::with_capacity(SECOND_WIDTH); indices.len()];
+        let lookups = witness.relation.lookups();
+        let mut data = vec![Vec::with_capacity(witness.relation.second_width()); indices.len()];
         let groups = query_groups(indices);
-        for column in 0..LOOKUPS + 1 {
-            let raw = if column == LOOKUPS {
+        for column in 0..lookups + 1 {
+            let raw = if column == lookups {
                 witness
                     .counts
                     .iter()
@@ -292,7 +245,7 @@ impl SecondOracle {
                     .map(|(count, inverse)| field::scale(*inverse, *count))
                     .collect()
             } else {
-                let (index, factor) = lookup(column);
+                let (index, factor) = witness.relation.lookup(column);
                 witness.columns[index]
                     .iter()
                     .map(|value| inverses[usize::from(*value) * factor as usize])
@@ -441,20 +394,22 @@ fn extension_values_inner(
 }
 impl FirstOracle {
     pub fn create(role: &[u8], witness: &Witness, excess_degree: bool) -> Self {
-        let mut result = Self::initialize(role, excess_degree);
-        for column in 0..COLUMNS + 2 {
+        let mut result = Self::initialize(&witness.relation, role, excess_degree);
+        for column in 0..witness.relation.columns() + 2 {
             result.commit_column(witness, column);
         }
         result.finish_commitment();
         result
     }
-    pub fn initialize(role: &[u8], excess_degree: bool) -> Self {
-        let masks = (0..COLUMNS + 1).map(|_| random_base(MASKS)).collect();
+    pub fn initialize(relation: &Relation, role: &[u8], excess_degree: bool) -> Self {
+        let masks = (0..relation.columns() + 1)
+            .map(|_| random_base(MASKS))
+            .collect();
         let mut degree_mask = random_extension(MAX_DEGREE + 1);
         if excess_degree {
             degree_mask.push(field::ONE);
         }
-        let tree = Tree::new(role, 0, DOMAIN, FIRST_WIDTH);
+        let tree = Tree::new(role, 0, DOMAIN, relation.first_width());
         let prefix = tree.leaf_hash_prefix();
         let hashers = (0..DOMAIN)
             .map(|row| tree.leaf_hasher(row, &prefix))
@@ -467,10 +422,11 @@ impl FirstOracle {
         }
     }
     pub fn commit_column(&mut self, witness: &Witness, column: usize) {
-        assert!(column < COLUMNS + 2);
+        let columns = witness.relation.columns();
+        assert!(column < columns + 2);
         let transform = Transform::new(SYSTEMATIC);
-        if column <= COLUMNS {
-            let mut coefficients = Zeroizing::new(if column == COLUMNS {
+        if column <= columns {
+            let mut coefficients = Zeroizing::new(if column == columns {
                 witness.counts.clone()
             } else {
                 witness.columns[column]
@@ -510,39 +466,13 @@ impl FirstOracle {
         }
         self.tree.finish();
     }
-    pub fn save(&self, directory: &Path) {
-        self.tree.save(directory, "first-tree.bin");
-        let mut masks = BufWriter::new(
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(directory.join("first-masks.bin"))
-                .unwrap(),
-        );
-        for column in &self.masks {
-            for value in column {
-                masks.write_all(&value.to_le_bytes()).unwrap();
-            }
-        }
-        masks.flush().unwrap();
-        let mut mask = BufWriter::new(
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(directory.join("degree-mask.bin"))
-                .unwrap(),
-        );
-        for value in &self.degree_mask {
-            mask.write_all(&field::encode(*value)).unwrap();
-        }
-        mask.flush().unwrap();
-    }
     pub fn openings(&self, witness: &Witness, indices: &[usize]) -> Vec<Vec<u8>> {
-        let mut data = vec![Vec::with_capacity(FIRST_WIDTH); indices.len()];
+        let columns = witness.relation.columns();
+        let mut data = vec![Vec::with_capacity(witness.relation.first_width()); indices.len()];
         let transform = Transform::new(SYSTEMATIC);
         let groups = query_groups(indices);
-        for column in 0..COLUMNS + 1 {
-            let mut coefficients = Zeroizing::new(if column == COLUMNS {
+        for column in 0..columns + 1 {
+            let mut coefficients = Zeroizing::new(if column == columns {
                 witness.counts.clone()
             } else {
                 witness.columns[column]

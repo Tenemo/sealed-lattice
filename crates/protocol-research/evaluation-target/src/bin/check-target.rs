@@ -1,11 +1,13 @@
 use ballot_proof::{
     body::SignedBallotVerifier,
     close::{CloseContext, ClosedSlot},
+    statement::setup_inputs,
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
 use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
 use registration_credentials::{
     ballot_authentication::ENVELOPE_BYTES,
+    ballot_body,
     close_signing::{
         CloseProposalMessage, ClosePurpose, CloseResponseMessage, maximum_close_message_bytes,
     },
@@ -13,8 +15,8 @@ use registration_credentials::{
     roster_authentication::verify_roster_proposal,
     roster_input::RosterInputVerifier,
 };
-use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE};
-use setup_aggregate::{CHUNK_BYTES, ModulusKind, verified::SetupAggregator};
+use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value, stored_value_bytes};
+use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};
 use sha2::{Digest, Sha512};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -24,6 +26,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+use supported_profile::{Profile, relation::PROOF_HEADER_BYTES};
 
 #[path = "../public-completion-check.rs"]
 mod completion;
@@ -119,6 +122,16 @@ fn contained(ceremony: &Path, relative: &str) -> io::Result<PathBuf> {
 fn polynomial_name(index: usize) -> String {
     format!("polynomial-{index:02}.bin")
 }
+/// Bytes of a contribution polynomial and of the largest whole-coefficient
+/// chunk.
+fn polynomial_bytes(profile: Profile, index: usize) -> io::Result<(usize, usize)> {
+    let family = contribution_family(profile, index).ok_or_else(|| refusal("key index"))?;
+    let width = 1 + profile.family_magnitude_bytes(family);
+    Ok((
+        profile.family_degree(family) * width,
+        CHUNK_BYTES / width * width,
+    ))
+}
 
 struct Operands<'a> {
     aggregate: PathBuf,
@@ -160,6 +173,7 @@ impl PublicInputs for Operands<'_> {
 struct Spool {
     directory: PathBuf,
     indices: BTreeSet<usize>,
+    value_bytes: usize,
     work: Work,
 }
 impl WorkingStore for Spool {
@@ -167,38 +181,24 @@ impl WorkingStore for Spool {
         if !self.indices.insert(index) {
             return Err(Error::Storage);
         }
-        let mut bytes = Vec::with_capacity(2 * DEGREE * 112);
-        for polynomial in value {
-            for coefficient in polynomial {
-                for word in coefficient {
-                    bytes.extend(word.to_le_bytes());
-                }
-            }
-        }
         self.work
-            .save(&self.directory.join(format!("{index}.bin")), &bytes)
+            .save(
+                &self.directory.join(format!("{index}.bin")),
+                &stored_bytes(value),
+            )
             .map_err(|_| Error::Storage)
     }
     fn get(&mut self, index: usize) -> Result<Ciphertext, Error> {
         let bytes = bounded(
             self.directory.join(format!("{index}.bin")),
-            2 * DEGREE * 112,
+            self.value_bytes,
             &mut self.work,
         )
         .map_err(|_| Error::Storage)?;
-        if bytes.len() != 2 * DEGREE * 112 {
+        if bytes.len() != self.value_bytes {
             return Err(Error::Storage);
         }
-        Ok(std::array::from_fn(|part| {
-            bytes[part * DEGREE * 112..(part + 1) * DEGREE * 112]
-                .chunks_exact(112)
-                .map(|coefficient| {
-                    std::array::from_fn(|word| {
-                        u64::from_le_bytes(coefficient[word * 8..word * 8 + 8].try_into().unwrap())
-                    })
-                })
-                .collect()
-        }))
+        stored_value(&bytes).map_err(|_| Error::Storage)
     }
     fn remove(&mut self, index: usize) -> Result<(), Error> {
         if self.indices.remove(&index) {
@@ -301,11 +301,10 @@ fn main() -> io::Result<()> {
         )?;
         confirmations.push(verify_confirmation(&proposal, &body, &signature).map_err(refusal)?);
     }
+    let profile = proposal.proposal().profile();
     let inventory = Arc::new(CommitmentInventory::new(proposal, confirmations).map_err(refusal)?);
     let mut aggregator = SetupAggregator::new(inventory).map_err(refusal)?;
-    let indices: Vec<_> = (0..75)
-        .filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
-        .collect();
+    let indices = profile.contribution_body_polynomials();
     for (position, directory) in contributions.iter().enumerate() {
         let stage = scratch.join(format!("aggregate-{position}"));
         fs::create_dir(&stage)?;
@@ -313,15 +312,13 @@ fn main() -> io::Result<()> {
         let signature = bounded(directory.join("opening-signature.bin"), 3309, &mut work)?;
         let header = bounded(directory.join("body-header.bin"), 12, &mut work)?;
         let mut proof = File::open(directory.join("proof.bin"))?;
-        let mut proof_header = [0; 4004];
+        let mut proof_header = [0; PROOF_HEADER_BYTES];
         work.read(&mut proof, &mut proof_header)?;
         aggregator
             .begin(&opening, &signature, &header, &proof_header)
             .map_err(refusal)?;
         for index in &indices {
-            let kind = ModulusKind::for_contribution_polynomial(*index).unwrap();
-            let length = kind.degree() * kind.coefficient_bytes();
-            let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
+            let (length, capacity) = polynomial_bytes(profile, *index)?;
             let name = polynomial_name(*index);
             let mut incoming = File::open(directory.join(&name))?;
             let mut prior = if position == 0 {
@@ -501,17 +498,16 @@ fn main() -> io::Result<()> {
         let mut authenticated =
             BallotBodyAuthentication::new(authentication.clone()).map_err(refusal)?;
         let mut body = File::open(&path)?;
-        let mut header = [0; 148];
+        let mut header = [0; ballot_body::HEADER_BYTES];
         work.read(&mut body, &mut header)?;
         authenticated.push(&header).map_err(refusal)?;
         let mut classifier =
             SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header)
                 .map_err(refusal)?;
         if classifier.requires_keys() {
-            for index in [1, 74] {
+            for (_, _, index) in setup_inputs(profile) {
                 classifier.begin_key(index).map_err(refusal)?;
-                let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-                let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
+                let (_, capacity) = polynomial_bytes(profile, index)?;
                 let mut key = File::open(aggregate.join(polynomial_name(index)))?;
                 loop {
                     let count = key.read(&mut buffer[..capacity])?;
@@ -578,6 +574,7 @@ fn main() -> io::Result<()> {
     let mut spool = Spool {
         directory: spool_directory,
         indices: BTreeSet::new(),
+        value_bytes: stored_value_bytes(profile),
         work: Work::default(),
     };
     let mut operands = Operands {

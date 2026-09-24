@@ -1,12 +1,14 @@
 use registration_credentials::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
 use setup_aggregate::{RetainedSetupInputs, verified::VerifiedSetupAggregate};
 use std::sync::Arc;
+use supported_profile::Profile;
 
 #[derive(Debug)]
 pub struct Error;
 /// Fixed private-computation inputs. It is not a public setup capability.
 pub struct BallotComputationContext {
     poll: Arc<VerifiedPoll>,
+    profile: Profile,
     inventory: [u8; 64],
     position: usize,
 }
@@ -16,7 +18,9 @@ impl BallotComputationContext {
         setup: &VerifiedSetupAggregate,
         position: usize,
     ) -> Result<Self, Error> {
-        if position >= setup.inventory().confirmations().len()
+        let profile = setup.profile();
+        if position >= profile.participants()
+            || profile.options() != poll.manifest().option_count()
             || setup.inventory().proposal().proposal().records()[0]
                 .header()
                 .poll
@@ -26,6 +30,7 @@ impl BallotComputationContext {
         }
         Ok(Self {
             poll,
+            profile,
             inventory: setup.inventory().identity(),
             position,
         })
@@ -35,21 +40,27 @@ impl BallotComputationContext {
         owner: &RetainedBallotOwner,
         inputs: &RetainedSetupInputs,
     ) -> Result<Self, Error> {
+        let profile = inputs.profile();
         if owner.poll() != &poll.identity()
             || owner.runtime() != &poll.runtime()
             || owner.inventory() != inputs.inventory()
-            || owner.position() >= 10
+            || owner.position() >= profile.participants()
+            || profile.options() != poll.manifest().option_count()
         {
             return Err(Error);
         }
         Ok(Self {
             poll,
+            profile,
             inventory: *owner.inventory(),
             position: owner.position(),
         })
     }
     pub fn poll(&self) -> &Arc<VerifiedPoll> {
         &self.poll
+    }
+    pub fn profile(&self) -> Profile {
+        self.profile
     }
     pub fn inventory(&self) -> &[u8; 64] {
         &self.inventory

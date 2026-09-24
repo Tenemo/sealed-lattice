@@ -6,10 +6,10 @@ use registration_credentials::{
     },
     roster_authentication::OrganizerSignedRoster,
 };
-use setup_aggregate::ModulusKind;
+use setup_aggregate::contribution_family;
 use setup_witness::{
     PolynomialOutput,
-    contribution::{Contribution, common_polynomial, statement_header},
+    contribution::{Contribution, common_polynomial},
 };
 use stateful_sha3::{Digest, Sha3_512};
 use std::{
@@ -17,9 +17,11 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use supported_profile::{Profile, relation::setup_relation};
 use word_proof::{bridge::Prover, transcript};
 
 struct PublicOutput {
+    profile: Profile,
     directory: PathBuf,
     next: usize,
     hash: Sha3_512,
@@ -27,17 +29,18 @@ struct PublicOutput {
 }
 impl PolynomialOutput for PublicOutput {
     fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize) {
-        assert!(self.next < 75);
-        let expected = if self.next < 42 {
-            (65536, 108)
-        } else if self.next < 73 {
-            (65536, 20)
-        } else {
-            (4096, 5)
-        };
-        assert_eq!((values.len(), width), expected);
+        let family = self.profile.setup_family(self.next).unwrap();
+        assert_eq!(
+            (values.len(), width),
+            (
+                self.profile.family_degree(family),
+                self.profile.family_magnitude_bytes(family)
+            )
+        );
         let half = modulus >> 1usize;
-        let mut file = ModulusKind::for_contribution_polynomial(self.next).map(|_| {
+        // Only contribution body polynomials are published; the others are
+        // recomputed common polynomials and roster keys.
+        let mut file = contribution_family(self.profile, self.next).map(|_| {
             crate::public_output::PublicOutput::create(
                 self.directory
                     .join(format!("polynomial-{:02}.bin", self.next)),
@@ -45,15 +48,16 @@ impl PolynomialOutput for PublicOutput {
             .unwrap()
         });
         let mut buffer = Vec::with_capacity(1 << 20);
+        let mut encoded = vec![0u8; 1 + width];
         for value in values {
             assert!(value.abs() <= half);
             let (sign, magnitude) = value.to_bytes_le();
             assert!(magnitude.len() <= width);
-            let mut bytes = [0u8; 109];
-            bytes[0] = u8::from(sign == Sign::Minus);
-            bytes[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-            buffer.extend(&bytes[..width + 1]);
-            if buffer.len() + width + 1 > 1 << 20 {
+            encoded.fill(0);
+            encoded[0] = u8::from(sign == Sign::Minus);
+            encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
+            buffer.extend(&encoded);
+            if buffer.len() + encoded.len() > 1 << 20 {
                 self.hash.update(&buffer);
                 self.context.update(&buffer);
                 if let Some(file) = file.as_mut() {
@@ -86,24 +90,23 @@ fn public_bytes(values: &[BigInt], width: usize) -> Vec<u8> {
     }
     output
 }
+/// A setup statement polynomial: a published body polynomial, a roster
+/// member's registration key or a recomputed common polynomial.
 fn polynomial_bytes(roster: &OrganizerSignedRoster, directory: &Path, index: usize) -> Vec<u8> {
-    if ModulusKind::for_contribution_polynomial(index).is_some() {
+    let profile = roster.proposal().profile();
+    if contribution_family(profile, index).is_some() {
         return std::fs::read(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
     }
-    if (43..73).contains(&index) {
-        return roster.proposal().records()[(index - 43) / 3]
-            .public_key()
-            .to_vec();
+    let records = roster.proposal().records();
+    if let Some(recipient) =
+        (0..records.len()).find(|recipient| profile.recipient_key_polynomial(*recipient) == index)
+    {
+        return records[recipient].public_key().to_vec();
     }
+    let family = profile.setup_family(index).unwrap();
     public_bytes(
-        &common_polynomial(index).unwrap(),
-        if index < 42 {
-            108
-        } else if index == 42 {
-            20
-        } else {
-            5
-        },
+        &common_polynomial(profile, index).unwrap(),
+        profile.family_magnitude_bytes(family),
     )
 }
 pub fn generate(
@@ -113,25 +116,28 @@ pub fn generate(
     salt: &[u8; 64],
 ) -> (ComputedContributionCommitment, Vec<u8>) {
     std::fs::create_dir(directory).unwrap();
+    let profile = roster.proposal().profile();
     let role = roster.proposal().contribution_role(position).unwrap();
-    let header = statement_header();
+    let header = profile.setup_statement_header();
     let mut output = PublicOutput {
+        profile,
         directory: directory.to_owned(),
         next: 0,
         hash: Sha3_512::new(),
-        context: transcript::context_hasher(&role),
+        context: transcript::context_hasher(&setup_relation(profile), &role),
     };
     output.hash.update(&header);
     output.context.update(&header);
-    let mut generator = Contribution::new();
-    for gadget in 0..6 {
+    let mut generator = Contribution::new(profile);
+    for gadget in 0..profile.gadget_length() {
         generator.gadget(gadget, &mut output).unwrap();
     }
     generator.begin_shares(&mut output).unwrap();
+    let width = 1 + supported_profile::share_modulus().len();
     for (recipient, record) in roster.proposal().records().iter().enumerate() {
         let values = record
             .public_key()
-            .chunks_exact(21)
+            .chunks_exact(width)
             .map(|bytes| {
                 let magnitude = BigInt::from_bytes_le(Sign::Plus, &bytes[1..]);
                 if bytes[0] == 1 { -magnitude } else { magnitude }
@@ -140,14 +146,15 @@ pub fn generate(
         generator.share(recipient, &values, &mut output).unwrap();
     }
     generator.finish(&mut output).unwrap();
-    assert_eq!(output.next, 75);
-    let witness = generator.into_witness().unwrap();
+    assert_eq!(output.next, profile.setup_polynomials());
+    let columns = generator.into_columns().unwrap();
     let mut prover = Prover::from_generated(
+        profile,
         &role,
         output.hash.finalize().into(),
         output.context.finalize().into(),
         header,
-        witness.into_columns(),
+        columns,
     )
     .unwrap();
     let mut unused = Vec::new();
@@ -155,7 +162,7 @@ pub fn generate(
         match prover.phase_code() {
             3..=6 | 8..=9 => prover.advance(7, 0, &[], &mut unused).unwrap(),
             7 => {
-                for index in 0..75 {
+                for index in 0..profile.setup_polynomials() {
                     prover.advance(8, index, &[], &mut unused).unwrap();
                     let bytes = polynomial_bytes(roster, directory, index);
                     for chunk in bytes.chunks(1 << 20) {
@@ -178,7 +185,11 @@ pub fn generate(
     }
     file.finish().unwrap();
     drop(prover);
-    let body_header = body_header(std::fs::metadata(&proof_path).unwrap().len() as usize).unwrap();
+    let body_header = body_header(
+        profile,
+        std::fs::metadata(&proof_path).unwrap().len() as usize,
+    )
+    .unwrap();
     let mut hash =
         ContributionCommitmentHasher::new(roster.proposal(), position, salt, &body_header).unwrap();
     let mut buffer = vec![0; 1 << 20];

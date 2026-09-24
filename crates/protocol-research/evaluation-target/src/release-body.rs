@@ -6,8 +6,8 @@ use fips204::{
 use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
 use num_bigint::BigInt;
 use registration_credentials::release_signing::{
-    PARTIAL_BYTES, RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, RELEASE_SIGNATURE_CONTEXT,
-    ReleaseBodyHasher, ReleaseEnvelope, proof_length,
+    RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, RELEASE_SIGNATURE_CONTEXT,
+    ReleaseBodyHasher, ReleaseEnvelope, partial_bytes, proof_length,
 };
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ impl ReleaseContext {
         if packet.len() != RELEASE_ENVELOPE_BYTES + 3309 {
             return Err(Error::Encoding);
         }
-        let envelope = ReleaseEnvelope::decode(&packet[..RELEASE_ENVELOPE_BYTES])
+        let envelope = ReleaseEnvelope::decode(self.profile(), &packet[..RELEASE_ENVELOPE_BYTES])
             .map_err(|_| Error::Encoding)?;
         let target = self.certificate().target();
         let inventory = target.inventory();
@@ -64,6 +64,7 @@ pub struct ReleaseBodyVerifier {
     hash: ReleaseBodyHasher,
     length: usize,
     remaining: usize,
+    partial_bytes: usize,
     partial: Vec<u8>,
     proof_prefix: Vec<u8>,
     verifier: Option<Verifier>,
@@ -71,19 +72,22 @@ pub struct ReleaseBodyVerifier {
 }
 impl ReleaseBodyVerifier {
     pub fn new(context: Arc<ReleaseContext>, header: &[u8]) -> Result<Self, Error> {
-        let proof_bytes = proof_length(header).map_err(|_| Error::Encoding)?;
+        let profile = context.profile();
+        let proof_bytes = proof_length(profile, header).map_err(|_| Error::Encoding)?;
         if header[12..] != *context.header() {
             return Err(Error::Context);
         }
-        let length = RELEASE_BODY_HEADER_BYTES + PARTIAL_BYTES + proof_bytes;
-        let mut hash = ReleaseBodyHasher::new(length).map_err(|_| Error::Encoding)?;
+        let partial_bytes = partial_bytes(profile);
+        let length = RELEASE_BODY_HEADER_BYTES + partial_bytes + proof_bytes;
+        let mut hash = ReleaseBodyHasher::new(profile, length).map_err(|_| Error::Encoding)?;
         hash.push(header).map_err(|_| Error::Encoding)?;
         Ok(Self {
             context,
             hash,
             length,
             remaining: length - header.len(),
-            partial: Vec::with_capacity(PARTIAL_BYTES),
+            partial_bytes,
+            partial: Vec::with_capacity(partial_bytes),
             proof_prefix: Vec::with_capacity(HEADER_LENGTH),
             verifier: None,
             failed: false,
@@ -106,12 +110,12 @@ impl ReleaseBodyVerifier {
         }
         self.hash.push(bytes).map_err(|_| Error::Encoding)?;
         self.remaining -= bytes.len();
-        if self.partial.len() < PARTIAL_BYTES {
-            let count = (PARTIAL_BYTES - self.partial.len()).min(bytes.len());
+        if self.partial.len() < self.partial_bytes {
+            let count = (self.partial_bytes - self.partial.len()).min(bytes.len());
             self.partial.extend(&bytes[..count]);
             bytes = &bytes[count..];
         }
-        if self.partial.len() != PARTIAL_BYTES || bytes.is_empty() {
+        if self.partial.len() != self.partial_bytes || bytes.is_empty() {
             return Ok(());
         }
         if self.proof_prefix.len() < HEADER_LENGTH {
@@ -121,6 +125,7 @@ impl ReleaseBodyVerifier {
             if self.proof_prefix.len() == HEADER_LENGTH {
                 let statement = self.context.statement(&self.partial)?;
                 let mut verifier = Verifier::new(
+                    self.context.profile(),
                     &self.context.proof_role()?,
                     statement.digest(),
                     &self.proof_prefix,
@@ -149,10 +154,11 @@ impl ReleaseBodyVerifier {
             return Err(Error::Proof);
         }
         let identity = self.hash.finish().map_err(|_| Error::Encoding)?;
+        let profile = self.context.profile();
         let partial = super::release::decode_polynomial(
             &self.partial,
-            25,
-            &linked_release_proof::statement::release_modulus(),
+            linked_release_proof::statement::release_coefficient_bytes(profile),
+            &linked_release_proof::statement::release_modulus(profile),
         )?;
         Ok(VerifiedReleaseBody {
             certificate: self.context.certificate().clone(),
@@ -190,6 +196,7 @@ impl VerifiedReleaseBody {
         let target = self.certificate.target();
         let inventory = target.inventory();
         ReleaseEnvelope::new(
+            inventory.setup().profile(),
             inventory.poll().identity(),
             inventory.setup().inventory().identity(),
             *target.identity(),

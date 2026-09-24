@@ -2,6 +2,7 @@ use crate::encryption::{LinkedBallotWitness, check_ballot_scores};
 use num_bigint::Sign;
 use setup_aggregate::{VerifiedAggregatePolynomial, setup_browser};
 use std::cell::RefCell;
+use supported_profile::Family;
 
 const CHUNK_BYTES: usize = 1_048_576;
 
@@ -46,10 +47,13 @@ pub extern "C" fn ballot_encryption_capture_key() -> u32 {
         if key.inventory() != &setup.inventory().identity() {
             return 1;
         }
-        let index = match key.index() {
-            1 => 0,
-            74 => 1,
-            _ => return 1,
+        let profile = setup.profile();
+        let index = if key.index() == crate::encryption::fhe_key_polynomial(profile) {
+            0
+        } else if key.index() == profile.auxiliary_key_polynomial() {
+            1
+        } else {
+            return 1;
         };
         if value.keys[index].is_some() {
             return 1;
@@ -121,11 +125,13 @@ pub extern "C" fn ballot_encryption_copy(
         let Some(witness) = witness else {
             return 1;
         };
-        let (encryption, width) = match family {
-            0 => (&witness.fhe, 109),
-            1 => (&witness.auxiliary, 6),
+        let profile = witness.context.profile();
+        let (encryption, family) = match family {
+            0 => (&witness.fhe, Family::Fhe),
+            1 => (&witness.auxiliary, Family::Auxiliary),
             _ => return 1,
         };
+        let width = 1 + profile.family_magnitude_bytes(family);
         let Some(component) = encryption.components.get(component) else {
             return 1;
         };

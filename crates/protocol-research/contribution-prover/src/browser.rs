@@ -1,24 +1,25 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::{Signed, Zero};
 use registration_credentials::{
-    registration::VerifiedRegistration,
+    registration::{KEY_BYTES, VerifiedRegistration},
     roster::{RosterProposal, contribution_role_from_context},
-    roster_input::RosterInputVerifier,
 };
 use setup_witness::{
     PolynomialOutput,
-    contribution::{Contribution, statement_header},
+    contribution::{Contribution, common_polynomial},
 };
 use stateful_sha3::{Digest, Sha3_512};
 use std::{cell::RefCell, sync::Arc};
+use supported_profile::{DEGREE, Profile, relation::setup_relation, share_modulus};
 use word_proof::{
     bridge::{Prover, first_checkpoint},
-    transcript::{context_hasher, statement_length},
+    transcript::context_hasher,
 };
 use zeroize::Zeroize;
 
 const CHUNK: usize = 1 << 20;
 struct PublicOutput {
+    profile: Profile,
     hash: Sha3_512,
     context: Sha3_512,
     next: usize,
@@ -27,16 +28,17 @@ struct PublicOutput {
     buffer: Vec<u8>,
 }
 impl PublicOutput {
-    fn new(role: &[u8]) -> Self {
+    fn new(profile: Profile, role: &[u8]) -> Self {
         let mut output = Self {
+            profile,
             hash: Sha3_512::new(),
-            context: context_hasher(role),
+            context: context_hasher(&setup_relation(profile), role),
             next: 0,
             total: 0,
             offset: 0,
             buffer: Vec::with_capacity(CHUNK),
         };
-        output.append(&statement_header());
+        output.append(&profile.setup_statement_header());
         output.flush();
         output.next = 1;
         output.offset = 0;
@@ -81,25 +83,21 @@ impl PublicOutput {
 }
 impl PolynomialOutput for PublicOutput {
     fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize) {
-        let (degree, expected_width) = if self.next <= 42 {
-            (65536, 108)
-        } else if self.next <= 73 {
-            (65536, 20)
-        } else {
-            (4096, 5)
-        };
-        assert!(self.next > 0 && self.next <= 75);
-        assert_eq!(values.len(), degree);
-        assert_eq!(width, expected_width);
+        // Object zero is the header and object i + 1 setup polynomial i.
+        assert!(self.next > 0);
+        let family = self.profile.setup_family(self.next - 1).unwrap();
+        assert_eq!(values.len(), self.profile.family_degree(family));
+        assert_eq!(width, self.profile.family_magnitude_bytes(family));
         let half = modulus >> 1usize;
+        let mut encoded = vec![0u8; 1 + width];
         for value in values {
             assert!(value.abs() <= half);
             let (sign, magnitude) = value.to_bytes_le();
             assert!(magnitude.len() <= width);
-            let mut encoded = [0u8; 109];
+            encoded.fill(0);
             encoded[0] = u8::from(sign == Sign::Minus);
             encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-            self.append(&encoded[..width + 1]);
+            self.append(&encoded);
         }
         self.flush();
         self.next += 1;
@@ -107,11 +105,11 @@ impl PolynomialOutput for PublicOutput {
     }
 }
 struct Work {
+    profile: Profile,
     role: Vec<u8>,
     registrations: Vec<Arc<VerifiedRegistration>>,
     retained_keys: Vec<Vec<u8>>,
     input_hashes: Vec<[u8; 64]>,
-    proposal_identity: [u8; 64],
     generator: Option<Contribution>,
     proof: Option<Prover>,
     public: Option<PublicOutput>,
@@ -121,8 +119,10 @@ struct Work {
 }
 impl Work {
     fn new(proposal: &RosterProposal, position: usize) -> Result<Self, ()> {
+        let profile = proposal.profile();
         let role = proposal.contribution_role(position).map_err(|_| ())?;
         Ok(Self {
+            profile,
             registrations: proposal.records().to_vec(),
             retained_keys: Vec::new(),
             input_hashes: proposal
@@ -130,10 +130,9 @@ impl Work {
                 .iter()
                 .map(|record| record.header().recipient_key_hash)
                 .collect(),
-            proposal_identity: proposal.identity(),
-            generator: Some(Contribution::new()),
+            generator: Some(Contribution::new(profile)),
             proof: None,
-            public: Some(PublicOutput::new(&role)),
+            public: Some(PublicOutput::new(profile, &role)),
             role,
             next_gadget: 0,
             shares_started: false,
@@ -142,35 +141,38 @@ impl Work {
     }
     fn restore(
         proof: Prover,
-        proposal_identity: [u8; 64],
         retained_keys: Vec<Vec<u8>>,
         input_hashes: Vec<[u8; 64]>,
     ) -> Result<Self, ()> {
-        if retained_keys.len() != 10 || input_hashes.len() != 10 {
+        let profile = proof.profile();
+        if retained_keys.len() != profile.participants()
+            || input_hashes.len() != profile.participants()
+        {
             return Err(());
         }
         let role = proof.role().to_vec();
         Ok(Self {
+            profile,
             role,
-            proposal_identity,
             retained_keys,
             input_hashes,
             registrations: Vec::new(),
             generator: None,
             proof: Some(proof),
             public: None,
-            next_gadget: 6,
+            next_gadget: profile.gadget_length(),
             shares_started: true,
-            next_recipient: 10,
+            next_recipient: profile.participants(),
         })
     }
     fn generate(&mut self) -> Result<(), ()> {
         if self.proof.is_some() {
             return Err(());
         }
+        let profile = self.profile;
         let public = self.public.as_mut().ok_or(())?;
         let generator = self.generator.as_mut().ok_or(())?;
-        if self.next_gadget < 6 {
+        if self.next_gadget < profile.gadget_length() {
             generator.gadget(self.next_gadget, public).map_err(|_| ())?;
             self.next_gadget += 1;
         } else if !self.shares_started {
@@ -178,25 +180,28 @@ impl Work {
             self.shares_started = true;
         } else if self.next_recipient < self.registrations.len() {
             self.generate_recipient()?;
-        } else if self.next_recipient == 10 {
+        } else if self.next_recipient == profile.participants() {
             generator.finish(public).map_err(|_| ())?;
-            if public.total != statement_length() || public.next != 76 {
+            if public.total != profile.setup_statement_length()
+                || public.next != profile.setup_polynomials() + 1
+            {
                 return Err(());
             }
-            let witness = self
+            let columns = self
                 .generator
                 .take()
                 .unwrap()
-                .into_witness()
+                .into_columns()
                 .map_err(|_| ())?;
             let public = self.public.take().ok_or(())?;
             self.proof = Some(
                 Prover::from_generated(
+                    profile,
                     &self.role,
                     public.hash.finalize().into(),
                     public.context.finalize().into(),
-                    statement_header(),
-                    witness.into_columns(),
+                    profile.setup_statement_header(),
+                    columns,
                 )
                 .map_err(|_| ())?,
             );
@@ -215,10 +220,9 @@ impl Work {
         if <[u8; 64]>::from(Sha3_512::digest(key)) != record.header().recipient_key_hash {
             return Err(());
         }
-        let header = statement_header();
-        let half = BigInt::from_bytes_le(Sign::Plus, &header[120..140]) >> 1usize;
-        let mut values = Vec::with_capacity(65536);
-        for coefficient in key.chunks_exact(21) {
+        let half = BigInt::from_bytes_le(Sign::Plus, share_modulus()) >> 1usize;
+        let mut values = Vec::with_capacity(DEGREE);
+        for coefficient in key.chunks_exact(1 + share_modulus().len()) {
             let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
             if coefficient[0] > 1
                 || magnitude > half
@@ -241,16 +245,14 @@ impl Work {
         Ok(())
     }
     fn consume_predecessor(&mut self, index: usize) -> Result<(), ()> {
+        let profile = self.profile;
         let proof = self.proof.as_mut().ok_or(())?;
         let mut unused_output = Vec::new();
         proof
             .advance(8, index, &[], &mut unused_output)
             .map_err(|_| ())?;
-        if let Some(recipient) = index
-            .checked_sub(7 * self.next_gadget + 1)
-            .filter(|value| value.is_multiple_of(3))
-            .map(|value| value / 3)
-            .filter(|value| *value < self.input_hashes.len())
+        if let Some(recipient) = (0..self.input_hashes.len())
+            .find(|recipient| profile.recipient_key_polynomial(*recipient) == index)
         {
             let key = if self.registrations.is_empty() {
                 self.retained_keys[recipient].as_slice()
@@ -266,24 +268,19 @@ impl Work {
                 .advance(10, 0, &[], &mut unused_output)
                 .map_err(|_| ());
         }
-        let values = setup_witness::contribution::common_polynomial(index).map_err(|_| ())?;
-        let width = if index < 42 {
-            108
-        } else if index == 42 {
-            20
-        } else {
-            5
-        };
+        let values = common_polynomial(profile, index).map_err(|_| ())?;
+        let width = profile.family_magnitude_bytes(profile.setup_family(index).ok_or(())?);
+        let mut encoded = vec![0u8; 1 + width];
         let mut buffer = Vec::with_capacity(CHUNK);
         for value in values {
             let (sign, magnitude) = value.to_bytes_le();
             if magnitude.len() > width {
                 return Err(());
             }
-            let mut encoded = [0u8; 109];
+            encoded.fill(0);
             encoded[0] = u8::from(sign == Sign::Minus);
             encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-            let mut remaining = &encoded[..width + 1];
+            let mut remaining = encoded.as_slice();
             while !remaining.is_empty() {
                 let count = remaining.len().min(CHUNK - buffer.len());
                 buffer.extend_from_slice(&remaining[..count]);
@@ -308,9 +305,9 @@ impl Work {
     fn phase(&self) -> u32 {
         if let Some(proof) = &self.proof {
             100 + proof.phase_code()
-        } else if self.next_gadget < 6 || !self.shares_started {
+        } else if self.next_gadget < self.profile.gadget_length() || !self.shares_started {
             1
-        } else if self.next_recipient < 10 {
+        } else if self.next_recipient < self.profile.participants() {
             2
         } else {
             3
@@ -321,15 +318,12 @@ struct Session {
     input: Vec<u8>,
     output: Vec<u8>,
     work: Option<Work>,
-    roster: Option<RosterInputVerifier>,
-    proposal: Option<RosterProposal>,
     stopped: bool,
     checkpoint_export: Option<first_checkpoint::Export>,
     checkpoint_import: Option<first_checkpoint::Import>,
-    restore_proposal: Option<[u8; 64]>,
     restore_keys: Vec<Option<Vec<u8>>>,
 }
-thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; 1_572_864], output: Vec::new(), work: None, roster: None, proposal: None, stopped: false, checkpoint_export: None, checkpoint_import: None, restore_proposal: None, restore_keys: Vec::new() }); }
+thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; 1_572_864], output: Vec::new(), work: None, stopped: false, checkpoint_export: None, checkpoint_import: None, restore_keys: Vec::new() }); }
 /// Initializes an embedded prover from the owning verifier's immutable proposal.
 /// The participant worker persists its one-shot intent before invoking this.
 pub fn begin_verified(
@@ -352,64 +346,31 @@ pub fn begin_verified(
         Ok(())
     })
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn input_pointer() -> usize {
+pub fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_begin(length: usize) -> u32 {
+
+/// Records of the checkpoint being imported, or else of the running proof's
+/// checkpoint.
+pub fn checkpoint_records() -> usize {
     SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped || state.work.is_some() || state.checkpoint_import.is_some() {
-            return 1;
-        }
-        let Some(input) = state.input.get(..length) else {
-            return 1;
-        };
-        let Ok(roster) = RosterInputVerifier::new(input) else {
-            return 1;
-        };
-        state.roster = Some(roster);
-        state.proposal = None;
-        0
-    })
-}
-fn roster_advance(operation: u32, length: usize) -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped
-            || state.work.is_some()
-            || state.proposal.is_some()
-            || state.checkpoint_import.is_some()
-        {
-            return 1;
-        }
-        let Session { input, roster, .. } = &mut *state;
-        let Some(bytes) = input.get(..length) else {
-            return 1;
-        };
-        let Some(roster) = roster.as_mut() else {
-            return 1;
-        };
-        let result = match operation {
-            0 => roster.begin_record(bytes),
-            1 => roster.push_key(bytes),
-            2 => roster.finish_key(),
-            3 => roster.push_proof(bytes),
-            4 => roster.finish_record(),
-            _ => unreachable!(),
-        };
-        u32::from(result.is_err())
+        let state = state.borrow();
+        state
+            .checkpoint_import
+            .as_ref()
+            .map(first_checkpoint::Import::relation)
+            .or_else(|| {
+                state
+                    .work
+                    .as_ref()
+                    .and_then(|work| work.proof.as_ref())
+                    .map(Prover::relation)
+            })
+            .map_or(0, first_checkpoint::record_count)
     })
 }
 
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn checkpoint_records() -> usize {
-    first_checkpoint::record_count()
-}
-
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn checkpoint_command(operation: u32, position: usize, length: usize) -> u32 {
+pub fn checkpoint_command(operation: u32, position: usize, length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.stopped || (operation != 4 && position != 0) {
@@ -422,10 +383,8 @@ pub extern "C" fn checkpoint_command(operation: u32, position: usize, length: us
             work,
             checkpoint_export,
             checkpoint_import,
-            restore_proposal,
             restore_keys,
             stopped,
-            ..
         } = &mut *state;
         let result = (|| {
             let bytes = input.get(..length).ok_or(())?;
@@ -474,12 +433,15 @@ pub extern "C" fn checkpoint_command(operation: u32, position: usize, length: us
                     let role = contribution_role_from_context(poll, runtime, proposal, position)
                         .map_err(|_| ())?;
                     let import = first_checkpoint::Import::begin(&bytes[192..]).map_err(|_| ())?;
-                    if import.role() != role || import.input_hashes().len() != 10 {
+                    let participants = import.profile().participants();
+                    if import.role() != role
+                        || position >= participants
+                        || import.input_hashes().len() != participants
+                    {
                         return Err(());
                     }
                     *checkpoint_import = Some(import);
-                    *restore_proposal = Some(proposal);
-                    *restore_keys = vec![None; 10];
+                    *restore_keys = vec![None; participants];
                 }
                 5 if (48..=32 + first_checkpoint::RECORD_BYTES + 16).contains(&length) => {
                     let key = zeroize::Zeroizing::new(<[u8; 32]>::try_from(&bytes[..32]).unwrap());
@@ -491,7 +453,6 @@ pub extern "C" fn checkpoint_command(operation: u32, position: usize, length: us
                 }
                 6 if length == 0 => {
                     if !checkpoint_import.as_ref().ok_or(())?.complete()
-                        || restore_keys.len() != 10
                         || restore_keys.iter().any(Option::is_none)
                     {
                         return Err(());
@@ -503,12 +464,7 @@ pub extern "C" fn checkpoint_command(operation: u32, position: usize, length: us
                         .into_iter()
                         .map(Option::unwrap)
                         .collect();
-                    *work = Some(Work::restore(
-                        proof,
-                        restore_proposal.take().ok_or(())?,
-                        keys,
-                        input_hashes,
-                    )?);
+                    *work = Some(Work::restore(proof, keys, input_hashes)?);
                 }
                 _ => return Err(()),
             }
@@ -520,136 +476,29 @@ pub extern "C" fn checkpoint_command(operation: u32, position: usize, length: us
             && (operation == 5 || (operation == 6 && work.is_none() && checkpoint_import.is_none()))
         {
             *checkpoint_import = None;
-            *restore_proposal = None;
             restore_keys.clear();
             *stopped = true;
         }
         u32::from(result.is_err())
     })
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_record_begin(length: usize) -> u32 {
-    roster_advance(0, length)
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_record_key(length: usize) -> u32 {
-    roster_advance(1, length)
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_record_key_finish() -> u32 {
-    roster_advance(2, 0)
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_record_proof(length: usize) -> u32 {
-    roster_advance(3, length)
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_record_finish() -> u32 {
-    roster_advance(4, 0)
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn roster_finish() -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped
-            || state.work.is_some()
-            || state.proposal.is_some()
-            || state.checkpoint_import.is_some()
-        {
-            return 0;
-        }
-        let Some(roster) = state.roster.as_ref() else {
-            return 0;
-        };
-        let Ok(proposal) = roster.finish() else {
-            return 0;
-        };
-        state.proposal = Some(proposal);
-        state.roster = None;
-        1
-    })
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn proposal_identity_pointer() -> usize {
-    SESSION.with(|state| {
-        let state = state.borrow();
-        state.work.as_ref().map_or_else(
-            || {
-                state
-                    .proposal
-                    .as_ref()
-                    .map_or(0, |proposal| proposal.identity_bytes().as_ptr() as usize)
-            },
-            |work| work.proposal_identity.as_ptr() as usize,
-        )
-    })
-}
-
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn contribution_role_pointer() -> usize {
-    SESSION.with(|state| {
-        state
-            .borrow()
-            .work
-            .as_ref()
-            .map_or(0, |work| work.role.as_ptr() as usize)
-    })
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn contribution_role_length() -> usize {
-    SESSION.with(|state| {
-        state
-            .borrow()
-            .work
-            .as_ref()
-            .map_or(0, |work| work.role.len())
-    })
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn output_pointer() -> usize {
+pub fn output_pointer() -> usize {
     SESSION.with(|state| state.borrow().output.as_ptr() as usize)
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn output_length() -> usize {
+pub fn output_length() -> usize {
     SESSION.with(|state| state.borrow().output.len())
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn phase() -> u32 {
+pub fn phase() -> u32 {
     SESSION.with(|state| state.borrow().work.as_ref().map_or(0, Work::phase))
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn recipient_index() -> usize {
-    SESSION.with(|state| {
-        state
-            .borrow()
-            .work
-            .as_ref()
-            .map_or(0, |work| work.next_recipient)
-    })
-}
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn command(operation: u32, argument: usize, length: usize) -> u32 {
+pub fn command(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.checkpoint_export.is_some() || state.checkpoint_import.is_some() {
             return 1;
         }
-        if !matches!(operation, 1 | 2 | 7..=11 | 14) || length > CHUNK {
+        if !matches!(operation, 2 | 7..=11 | 14) || length > CHUNK {
             return 1;
-        }
-        if operation == 1 {
-            if state.stopped || state.work.is_some() || length != 0 {
-                return 1;
-            }
-            let Some(proposal) = state.proposal.as_ref() else {
-                return 1;
-            };
-            let Ok(work) = Work::new(proposal, argument) else {
-                return 1;
-            };
-            state.output.clear();
-            state.work = Some(work);
-            return 0;
         }
         state.output.clear();
         let Session {
@@ -686,13 +535,12 @@ pub extern "C" fn command(operation: u32, argument: usize, length: usize) -> u32
         u32::from(result.is_err())
     })
 }
-#[cfg_attr(feature = "bridge", unsafe(no_mangle))]
-pub extern "C" fn checkpoint_key(position: usize, length: usize) -> u32 {
+pub fn checkpoint_key(position: usize, length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.stopped
             || state.work.is_some()
-            || length != 65536 * 21
+            || length != KEY_BYTES
             || position >= state.restore_keys.len()
             || state.restore_keys[position].is_some()
         {

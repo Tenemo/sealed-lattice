@@ -13,8 +13,8 @@ struct Weights {
     classes: Vec<usize>,
 }
 impl Weights {
-    fn new(message: &[u8], coset: u128) -> Self {
-        let degrees = degrees();
+    fn new(relation: &Relation, message: &[u8], coset: u128) -> Self {
+        let degrees = relation.degrees();
         let mut unique = degrees.clone();
         unique.sort_unstable();
         unique.dedup();
@@ -34,7 +34,7 @@ impl Weights {
             })
             .collect();
         Self {
-            coefficients: (0..2 * ORACLES)
+            coefficients: (0..2 * relation.oracles())
                 .map(|index| challenge(message, index, false))
                 .collect(),
             powers,
@@ -66,15 +66,17 @@ impl Weights {
     fn add_lookup(
         &self,
         output: &mut [Element],
-        lookup_index: usize,
+        lookup: LookupOracles,
         beta: Element,
         inverse_vanishing: u128,
         words: &[u128],
         reciprocals: &[Element],
     ) {
-        let inverse_oracle = COLUMNS + 1 + lookup_index;
-        let residual_oracle = COLUMNS + LOOKUPS + 4 + BOOLEANS + ZERO_PRODUCTS + lookup_index;
-        let (_, factor) = lookup(lookup_index);
+        let LookupOracles {
+            inverse: inverse_oracle,
+            residual: residual_oracle,
+            factor,
+        } = lookup;
         let residual_constant =
             field::scale(self.coefficients[2 * residual_oracle], inverse_vanishing);
         let residual_shifted = field::scale(
@@ -121,6 +123,23 @@ impl Weights {
         }
     }
 }
+// A lookup's reciprocal and residual oracles and its word scale.
+#[derive(Clone, Copy)]
+struct LookupOracles {
+    inverse: usize,
+    residual: usize,
+    factor: u128,
+}
+fn lookup_oracles(relation: &Relation, lookup_index: usize) -> LookupOracles {
+    LookupOracles {
+        inverse: relation.columns() + 1 + lookup_index,
+        residual: relation.original_oracles()
+            + relation.booleans()
+            + relation.zero_products()
+            + lookup_index,
+        factor: relation.lookup(lookup_index).1,
+    }
+}
 pub fn polynomial(
     witness: &Witness,
     first: &FirstOracle,
@@ -130,11 +149,16 @@ pub fn polynomial(
     inverses: &[Element],
     message: &[u8],
 ) -> Vec<Element> {
+    let relation = &witness.relation;
+    let columns = relation.columns();
+    let lookups = relation.lookups();
+    let original = relation.original_oracles();
+    let oracles = relation.oracles();
     let transform = Transform::new(SYSTEMATIC);
     // Every honest combined oracle has degree below twice the systematic size.
     // Interpolate on that many points; the verifier still checks the full domain.
     let shifts = [oracles::coset(0), oracles::coset(2)];
-    let weights = shifts.map(|coset| Weights::new(message, coset));
+    let weights = shifts.map(|coset| Weights::new(relation, message, coset));
     let inverse_vanishing = shifts.map(|coset| {
         base::power(
             base::subtract(base::power(coset, SYSTEMATIC as u128), 1),
@@ -148,11 +172,12 @@ pub fn polynomial(
             &transform,
         ))
     });
-    let mut product_inputs: Vec<[Option<Zeroizing<Vec<u128>>>; 2]> =
-        (0..ZERO_PRODUCTS).map(|_| [None, None]).collect();
+    let mut product_inputs: Vec<[Option<Zeroizing<Vec<u128>>>; 2]> = (0..relation.zero_products())
+        .map(|_| [None, None])
+        .collect();
     // Both cosets use the same inverse transform. Retain just this column's
     // coefficients while computing their different forward evaluations.
-    for column in 0..COLUMNS {
+    for column in 0..columns {
         let mut coefficients = Zeroizing::new(
             witness.columns[column]
                 .iter()
@@ -172,9 +197,9 @@ pub fn polynomial(
         for coset in 0..2 {
             weights[coset].add_base(&mut outputs[coset], column, &values[coset]);
         }
-        if column < WORDS {
-            for lookup_index in 0..LOOKUPS {
-                let (source, factor) = lookup(lookup_index);
+        if column < relation.words() {
+            for lookup_index in 0..lookups {
+                let (source, factor) = relation.lookup(lookup_index);
                 if source != column {
                     continue;
                 }
@@ -195,7 +220,7 @@ pub fn polynomial(
                     ));
                     weights[coset].add_lookup(
                         &mut outputs[coset],
-                        lookup_index,
+                        lookup_oracles(relation, lookup_index),
                         beta,
                         inverse_vanishing[coset],
                         &values[coset],
@@ -219,14 +244,14 @@ pub fn polynomial(
                 );
                 weights[coset].add_base(
                     &mut outputs[coset],
-                    COLUMNS + LOOKUPS + 4 + column - WORDS,
+                    original + column - relation.words(),
                     &residuals,
                 );
             }
         }
         for (pair, cached) in product_inputs.iter_mut().enumerate() {
-            let (left, right) = zero_product_columns(pair);
-            assert!(left < right && right < COLUMNS);
+            let (left, right) = relation.zero_product_columns(pair);
+            assert!(left < right && right < columns);
             if column == left {
                 for coset in 0..2 {
                     cached[coset] = Some(values[coset].clone());
@@ -248,7 +273,7 @@ pub fn polynomial(
                     );
                     weights[coset].add_base(
                         &mut outputs[coset],
-                        COLUMNS + LOOKUPS + 4 + BOOLEANS + pair,
+                        original + relation.booleans() + pair,
                         &residuals,
                     );
                 }
@@ -265,7 +290,7 @@ pub fn polynomial(
         .collect();
     let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
         raw,
-        &second.masks[LOOKUPS],
+        &second.masks[lookups],
         &transform,
     ));
     for coset_index in 0..2 {
@@ -275,15 +300,15 @@ pub fn polynomial(
         let inverse_vanishing = inverse_vanishing[coset_index];
         let multiplicity = Zeroizing::new(oracles::masked_base_coefficients(
             count_coefficients.to_vec(),
-            &first.masks[COLUMNS],
+            &first.masks[columns],
             coset,
             &transform,
             None,
         ));
-        weights.add_base(output, COLUMNS, &multiplicity);
+        weights.add_base(output, columns, &multiplicity);
         let table_inverse =
             Zeroizing::new(oracles::extension_values(&coefficients, coset, &transform));
-        weights.add_extension(output, COLUMNS + 1 + LOOKUPS, &table_inverse);
+        weights.add_extension(output, columns + 1 + lookups, &table_inverse);
         let table = oracles::masked_base(
             &(0..SYSTEMATIC)
                 .map(|value| value as u128)
@@ -308,10 +333,10 @@ pub fn polynomial(
                 })
                 .collect::<Vec<Element>>(),
         );
-        weights.add_extension(output, ORACLES - 2, &residuals);
+        weights.add_extension(output, oracles - 2, &residuals);
         weights.add_extension(
             output,
-            COLUMNS + LOOKUPS + 2,
+            columns + lookups + 2,
             &Zeroizing::new(oracles::extension_values(
                 &second.sum_mask,
                 coset,
@@ -320,7 +345,7 @@ pub fn polynomial(
         );
         weights.add_extension(
             output,
-            COLUMNS + LOOKUPS + 3,
+            columns + lookups + 3,
             &Zeroizing::new(oracles::extension_values(
                 &linear.quotient,
                 coset,
@@ -329,7 +354,7 @@ pub fn polynomial(
         );
         weights.add_extension(
             output,
-            ORACLES - 1,
+            oracles - 1,
             &Zeroizing::new(oracles::extension_values(
                 &linear.remainder,
                 coset,
@@ -360,7 +385,7 @@ mod tests {
     use super::*;
     use crate::field::ONE;
     #[test]
-    fn collected_reciprocal_terms_equal_the_direct_constraint_for_both_lookup_scales() {
+    fn collected_reciprocal_terms_equal_the_direct_constraint_for_every_lookup_scale() {
         let mut state = 0x935ac307125aec91u128;
         let mut sample = || {
             state ^= state << 23;
@@ -368,64 +393,91 @@ mod tests {
             state ^= state << 17;
             state % MODULUS
         };
-        let weights = Weights {
-            coefficients: (0..2 * ORACLES)
-                .map(|_| [sample(), sample(), sample()])
-                .collect(),
-            powers: vec![vec![0, 1, MODULUS - 1, 37], vec![11, 0, 2, MODULUS - 1]],
-            classes: (0..ORACLES).map(|index| index % 2).collect(),
-        };
-        let words = [0, 1, MODULUS - 1, sample()];
-        let reciprocals = [
-            [0, 0, 0],
-            [1, 0, 0],
-            [MODULUS - 1; 3],
-            [sample(), sample(), sample()],
-        ];
-        for lookup_index in [0, 1, WORDS - 1, WORDS, LOOKUPS - 1] {
-            for beta in [ZERO, ONE, [0, 0, 1], [sample(), sample(), sample()]] {
-                for inverse_vanishing in [0, 1, MODULUS - 1, sample()] {
-                    let mut actual = vec![ONE; words.len()];
-                    weights.add_lookup(
-                        &mut actual,
-                        lookup_index,
-                        beta,
-                        inverse_vanishing,
-                        &words,
-                        &reciprocals,
-                    );
-                    for position in 0..words.len() {
-                        let inverse_oracle = COLUMNS + 1 + lookup_index;
-                        let residual_oracle =
-                            COLUMNS + LOOKUPS + 4 + BOOLEANS + ZERO_PRODUCTS + lookup_index;
-                        let residue = field::scale(
-                            field::subtract(
-                                field::multiply(
-                                    reciprocals[position],
-                                    field::subtract(
-                                        beta,
-                                        [
-                                            base::multiply(words[position], lookup(lookup_index).1),
-                                            0,
-                                            0,
-                                        ],
+        // Whole words and narrow words scaled by powers of two or by a
+        // score range's quotient.
+        for narrow in [vec![(2, 512)], vec![(6, 8), (9, 512)], vec![(22, 7281)]] {
+            let relation = Relation {
+                tag: b"combination-test",
+                proof_magic: b"TEST",
+                words: 27,
+                booleans: 5,
+                narrow,
+                zero_product_pairs: vec![(27, 28), (29, 30), (20, 31)],
+                supports: vec![(1, 512), (16, 128)],
+                message_bytes: 1 << 18,
+                statement_bytes: 1,
+                parameters: Vec::new(),
+            };
+            let (words_count, lookups) = (relation.words(), relation.lookups());
+            let weights = Weights {
+                coefficients: (0..2 * relation.oracles())
+                    .map(|_| [sample(), sample(), sample()])
+                    .collect(),
+                powers: vec![vec![0, 1, MODULUS - 1, 37], vec![11, 0, 2, MODULUS - 1]],
+                classes: (0..relation.oracles()).map(|index| index % 2).collect(),
+            };
+            let words = [0, 1, MODULUS - 1, sample()];
+            let reciprocals = [
+                [0, 0, 0],
+                [1, 0, 0],
+                [MODULUS - 1; 3],
+                [sample(), sample(), sample()],
+            ];
+            for lookup_index in [0, 1, words_count - 1, words_count, lookups - 1] {
+                for beta in [ZERO, ONE, [0, 0, 1], [sample(), sample(), sample()]] {
+                    for inverse_vanishing in [0, 1, MODULUS - 1, sample()] {
+                        let mut actual = vec![ONE; words.len()];
+                        weights.add_lookup(
+                            &mut actual,
+                            lookup_oracles(&relation, lookup_index),
+                            beta,
+                            inverse_vanishing,
+                            &words,
+                            &reciprocals,
+                        );
+                        for position in 0..words.len() {
+                            let inverse_oracle = relation.columns() + 1 + lookup_index;
+                            let residual_oracle = relation.columns()
+                                + lookups
+                                + 4
+                                + relation.booleans()
+                                + relation.zero_products()
+                                + lookup_index;
+                            let residue = field::scale(
+                                field::subtract(
+                                    field::multiply(
+                                        reciprocals[position],
+                                        field::subtract(
+                                            beta,
+                                            [
+                                                base::multiply(
+                                                    words[position],
+                                                    relation.lookup(lookup_index).1,
+                                                ),
+                                                0,
+                                                0,
+                                            ],
+                                        ),
+                                    ),
+                                    ONE,
+                                ),
+                                inverse_vanishing,
+                            );
+                            let expected = field::add(
+                                ONE,
+                                field::add(
+                                    field::multiply(
+                                        weights.value(inverse_oracle, position),
+                                        reciprocals[position],
+                                    ),
+                                    field::multiply(
+                                        weights.value(residual_oracle, position),
+                                        residue,
                                     ),
                                 ),
-                                ONE,
-                            ),
-                            inverse_vanishing,
-                        );
-                        let expected = field::add(
-                            ONE,
-                            field::add(
-                                field::multiply(
-                                    weights.value(inverse_oracle, position),
-                                    reciprocals[position],
-                                ),
-                                field::multiply(weights.value(residual_oracle, position), residue),
-                            ),
-                        );
-                        assert_eq!(actual[position], expected);
+                            );
+                            assert_eq!(actual[position], expected);
+                        }
                     }
                 }
             }

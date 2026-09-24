@@ -1,11 +1,24 @@
-use crate::parameters::ZERO_PRODUCTS as DISJOINT_PAIRS;
 use crate::{
     field::{self, Element, MODULUS, Transform, ZERO, base},
     linear::LinearOracle,
     oracles::{self, FirstOracle, SecondOracle, Witness},
-    parameters::*,
+    parameters::{MAX_DEGREE, SYSTEMATIC, registration_relation},
     transcript::challenge,
 };
+
+// The registration relation's layout when this reference was taken.
+const WORDS: usize = 3;
+const BOOLEANS: usize = 2;
+const COLUMNS: usize = WORDS + BOOLEANS;
+const LOOKUPS: usize = 4;
+const DISJOINT_PAIRS: usize = 1;
+const ORACLES: usize = COLUMNS + LOOKUPS + 4 + BOOLEANS + DISJOINT_PAIRS + LOOKUPS + 2;
+fn lookup(index: usize) -> (usize, u128) {
+    registration_relation().lookup(index)
+}
+fn degrees() -> Vec<usize> {
+    registration_relation().degrees()
+}
 
 struct Weights {
     coefficients: Vec<Element>,

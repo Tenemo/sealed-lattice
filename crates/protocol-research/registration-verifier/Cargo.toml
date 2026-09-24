@@ -11,3 +11,4 @@ proof-lookup-table = { path = "../proof-lookup-table" }
 registration-proof = { path = "../registration-proof", default-features = false }
 setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
 sha3 = "=0.10.9"
+supported-profile = { path = "../supported-profile" }

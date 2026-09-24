@@ -9,6 +9,7 @@ use crate::{
     registration::VerifiedRegistration,
 };
 use std::sync::Arc;
+use supported_profile::Profile;
 
 /// Parsed context for private continuation after the current local root is authenticated.
 /// This is not a verified public proposal and cannot initialize contribution generation.
@@ -19,12 +20,16 @@ pub struct RetainedContributionContext {
     pub(crate) proposal: [u8; 64],
     pub(crate) position: usize,
     pub(crate) owner_body: [u8; 64],
+    profile: Profile,
     role: Vec<u8>,
 }
 impl RetainedContributionContext {
+    /// The option count comes from the same retained poll whose identity the
+    /// proposal names; together with the roster size it fixes the profile.
     pub fn parse(
         poll: [u8; 64],
         runtime: [u8; 64],
+        options: usize,
         position: usize,
         bytes: &[u8],
     ) -> Result<Self, Error> {
@@ -53,10 +58,12 @@ impl RetainedContributionContext {
             return Err(Error::Context);
         }
         let bodies = items[3].variable_value_bytes().map_err(|_| Error::Shape)?;
-        if bodies.len() != 4 + 10 * 64
-            || u32::from_le_bytes(bodies[..4].try_into().unwrap()) != 10
-            || position >= 10
-        {
+        let count = bodies
+            .get(..4)
+            .map(|count| u32::from_le_bytes(count.try_into().unwrap()) as usize)
+            .ok_or(Error::Shape)?;
+        let profile = Profile::new(count, options).map_err(|_| Error::Shape)?;
+        if bodies.len() != 4 + count * 64 || position >= count {
             return Err(Error::Shape);
         }
         let proposal = hash_foundation_tuple_512(
@@ -74,6 +81,7 @@ impl RetainedContributionContext {
             owner_body: bodies[4 + 64 * position..4 + 64 * (position + 1)]
                 .try_into()
                 .unwrap(),
+            profile,
             role,
         })
     }
@@ -82,6 +90,9 @@ impl RetainedContributionContext {
     }
     pub fn position(&self) -> usize {
         self.position
+    }
+    pub fn profile(&self) -> Profile {
+        self.profile
     }
     pub(crate) fn role(&self) -> &[u8] {
         &self.role
@@ -96,17 +107,17 @@ pub struct RosterProposal {
     records: Vec<Arc<VerifiedRegistration>>,
     canonical_roster: Vec<u8>,
     organizer_position: usize,
+    profile: Profile,
 }
 impl RosterProposal {
     pub fn new(
         poll: &VerifiedPoll,
         records: Vec<Arc<VerifiedRegistration>>,
     ) -> Result<Self, Error> {
-        // The research arithmetic profile supports ten participants, so a
-        // roster of another size is refused before any preparation starts.
-        if records.len() != 10 {
-            return Err(Error::Shape);
-        }
+        // Every supported roster size has a profile for every option count
+        // a poll can have; another size is refused before any preparation.
+        let profile = Profile::new(records.len(), poll.manifest().option_count())
+            .map_err(|_| Error::Shape)?;
         let mut entries = Vec::with_capacity(records.len());
         let mut bodies = Vec::with_capacity(4 + 64 * records.len());
         bodies.extend((records.len() as u32).to_le_bytes());
@@ -163,7 +174,11 @@ impl RosterProposal {
             records,
             canonical_roster,
             organizer_position,
+            profile,
         })
+    }
+    pub fn profile(&self) -> Profile {
+        self.profile
     }
     pub fn identity(&self) -> [u8; 64] {
         self.identity
@@ -197,7 +212,7 @@ pub fn contribution_role_from_context(
     proposal: [u8; 64],
     position: usize,
 ) -> Result<Vec<u8>, Error> {
-    if position >= 10 {
+    if position >= *Profile::participant_range().end() {
         return Err(Error::Shape);
     }
     let role = CanonicalTuple::new(

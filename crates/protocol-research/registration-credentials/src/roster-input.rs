@@ -20,7 +20,7 @@ impl RosterInputVerifier {
         }
         let count = u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize;
         let length = u32::from_le_bytes(input[130..134].try_into().unwrap()) as usize;
-        if !(3..=20).contains(&count)
+        if !supported_profile::Profile::participant_range().contains(&count)
             || length > crate::poll::MAXIMUM_POLL_BYTES
             || input.len() != 134 + length + 3309
         {

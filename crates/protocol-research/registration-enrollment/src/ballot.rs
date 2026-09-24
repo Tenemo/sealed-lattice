@@ -1,4 +1,5 @@
 use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
+use ballot_proof::statement::setup_inputs;
 use registration_credentials::{
     Credential, Error,
     ballot_authentication::{
@@ -100,8 +101,8 @@ impl BallotWork {
                 .ok_or(Error::Shape)?,
         );
         credential.check_retained_setup_tag(&poll, reference, tag)?;
-        let inputs =
-            RetainedSetupInputs::parse(reference, inventory).map_err(|_| Error::Context)?;
+        let inputs = RetainedSetupInputs::parse(proposal.profile(), reference, inventory)
+            .map_err(|_| Error::Context)?;
         let context = BallotComputationContext::from_retained(poll, &owner, &inputs)
             .map_err(|_| Error::Context)?;
         Ok(Self {
@@ -155,7 +156,7 @@ impl BallotWork {
                     || self.consumed
                     || self.reader.is_some()
                     || self.keys.len() >= 2
-                    || argument != [1, 74][self.keys.len()]
+                    || argument != setup_inputs(self.inputs.profile())[self.keys.len()].2
                 {
                     return Err(Error::Consumed);
                 }
@@ -213,7 +214,7 @@ impl BallotWork {
                 if argument != 0 || self.consumed || self.keys.len() != 2 || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
-                let envelope = BallotEnvelope::decode(input)?;
+                let envelope = BallotEnvelope::decode(self.inputs.profile(), input)?;
                 if envelope.poll() != self.owner.poll()
                     || envelope.inventory() != self.owner.inventory()
                     || envelope.position() != self.owner.position()

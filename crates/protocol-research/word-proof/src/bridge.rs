@@ -7,15 +7,10 @@ use crate::{
     parameters::*,
     transcript::{self, Transcript},
 };
-#[cfg(feature = "bridge")]
-use setup_stream_kernel::SetupStatementStream;
-use setup_stream_kernel::{PolynomialStream, prover_operator_plan};
+use setup_stream_kernel::{PolynomialStream, prover_operator_plan, setup_polynomial_stream};
 use stateful_sha3::{Digest, Sha3_512};
-#[cfg(feature = "bridge")]
-use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};
-#[cfg(feature = "bridge")]
-use zeroize::Zeroize;
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 #[path = "first-checkpoint.rs"]
@@ -24,10 +19,6 @@ pub mod first_checkpoint;
 const CHUNK: usize = 1 << 20;
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
-    #[cfg(feature = "bridge")]
-    Witness,
-    #[cfg(feature = "bridge")]
-    Statement,
     FirstInitialize,
     FirstColumn(usize),
     SecondInitialize,
@@ -39,22 +30,12 @@ enum Phase {
     Done,
 }
 pub struct Prover {
+    profile: Profile,
+    relation: Relation,
     role: Vec<u8>,
     expected: [u8; 64],
     phase: Phase,
-    #[cfg(feature = "bridge")]
-    witness_header: bool,
-    #[cfg(feature = "bridge")]
-    witness_bytes: usize,
-    #[cfg(feature = "bridge")]
-    low_byte: Option<u8>,
-    #[cfg(feature = "bridge")]
-    columns: Vec<Vec<u16>>,
     witness: Option<Witness>,
-    #[cfg(feature = "bridge")]
-    statement: Option<SetupStatementStream>,
-    #[cfg(feature = "bridge")]
-    context: Sha3_512,
     statement_header: Vec<u8>,
     transcript: Option<Transcript>,
     first: Option<FirstOracle>,
@@ -72,10 +53,20 @@ pub struct Prover {
     known: BTreeSet<usize>,
 }
 impl Prover {
+    pub fn profile(&self) -> Profile {
+        self.profile
+    }
     pub fn role(&self) -> &[u8] {
         &self.role
     }
+    pub fn relation(&self) -> &Relation {
+        &self.relation
+    }
+    /// Starts a proof of generated witness columns for the profile's setup
+    /// statement, whose digest and context the generator computed while it
+    /// emitted the statement.
     pub fn from_generated(
+        profile: Profile,
         role: &[u8],
         statement_digest: [u8; 64],
         context: [u8; 64],
@@ -83,22 +74,22 @@ impl Prover {
         columns: Vec<Vec<u16>>,
     ) -> Result<Self, Error> {
         let mut columns = Zeroizing::new(columns);
-        if role.is_empty() || role.len() > 1024 || header.len() != 145 {
+        if role.is_empty() || role.len() > 1024 || header != profile.setup_statement_header() {
             return Err(Error::GeneratedInput);
         }
-        let mut control = Vec::from((role.len() as u32).to_le_bytes());
-        control.extend(role);
-        control.extend(statement_digest);
-        let mut prover = Self::new(&control).map_err(|_| Error::GeneratedInput)?;
+        let mut prover = Self::new(profile, role, statement_digest);
         prover.witness = Some(
-            Witness::from_columns(statement_digest, std::mem::take(&mut *columns))
-                .map_err(|_| Error::GeneratedInput)?,
+            Witness::from_columns(
+                &prover.relation,
+                statement_digest,
+                std::mem::take(&mut *columns),
+            )
+            .map_err(|_| Error::GeneratedInput)?,
         );
         prover.statement_header = header;
-        let mut transcript = Transcript::new(role, context);
+        let mut transcript = Transcript::new(role, context, prover.relation.message_bytes());
         transcript.next();
         prover.transcript = Some(transcript);
-        prover.phase = Phase::FirstInitialize;
         Ok(prover)
     }
     pub fn advance(
@@ -124,39 +115,15 @@ impl Prover {
         }
         .map_err(|_| Error::Operation)
     }
-    fn new(bytes: &[u8]) -> Result<Self, ()> {
+    fn new(profile: Profile, role: &[u8], expected: [u8; 64]) -> Self {
         assert!(std::mem::size_of::<Sha3_512>() <= 512);
-        if bytes.len() < 4 {
-            return Err(());
-        }
-        let length = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
-        if length == 0 || length > 1024 || bytes.len() != 4 + length + 64 {
-            return Err(());
-        }
-        let role = bytes[4..4 + length].to_vec();
-        let expected = bytes[4 + length..].try_into().unwrap();
-        #[cfg(feature = "bridge")]
-        let context = transcript::context_hasher(&role);
-        Ok(Self {
-            role,
+        Self {
+            profile,
+            relation: setup_relation(profile),
+            role: role.to_vec(),
             expected,
-            #[cfg(feature = "bridge")]
-            phase: Phase::Witness,
-            #[cfg(not(feature = "bridge"))]
             phase: Phase::FirstInitialize,
-            #[cfg(feature = "bridge")]
-            witness_header: false,
-            #[cfg(feature = "bridge")]
-            witness_bytes: 0,
-            #[cfg(feature = "bridge")]
-            low_byte: None,
-            #[cfg(feature = "bridge")]
-            columns: Vec::new(),
             witness: None,
-            #[cfg(feature = "bridge")]
-            statement: None,
-            #[cfg(feature = "bridge")]
-            context,
             statement_header: Vec::new(),
             transcript: None,
             first: None,
@@ -172,119 +139,19 @@ impl Prover {
             output_started: false,
             openings: VecDeque::new(),
             known: BTreeSet::new(),
-        })
-    }
-    #[cfg(feature = "bridge")]
-    fn witness_header(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        if self.phase != Phase::Witness
-            || self.witness_header
-            || bytes.len() != 80
-            || &bytes[..4] != b"SFW1"
-            || bytes[16..] != self.expected
-        {
-            return Err(());
         }
-        for (index, value) in [SYSTEMATIC, WORDS, BOOLEANS].iter().enumerate() {
-            if u32::from_le_bytes(bytes[4 + 4 * index..8 + 4 * index].try_into().unwrap()) as usize
-                != *value
-            {
-                return Err(());
-            }
-        }
-        self.witness_header = true;
-        Ok(())
-    }
-    #[cfg(feature = "bridge")]
-    fn push_witness(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        if self.phase != Phase::Witness
-            || !self.witness_header
-            || bytes.len() > 2 * COLUMNS * SYSTEMATIC - self.witness_bytes
-        {
-            return Err(());
-        }
-        self.witness_bytes += bytes.len();
-        for byte in bytes {
-            if let Some(low) = self.low_byte.take() {
-                if self
-                    .columns
-                    .last()
-                    .is_none_or(|column| column.len() == SYSTEMATIC)
-                {
-                    self.columns.push(Vec::with_capacity(SYSTEMATIC));
-                }
-                self.columns
-                    .last_mut()
-                    .unwrap()
-                    .push(u16::from_le_bytes([low, *byte]));
-            } else {
-                self.low_byte = Some(*byte);
-            }
-        }
-        Ok(())
-    }
-    #[cfg(feature = "bridge")]
-    fn finish_witness(&mut self) -> Result<(), ()> {
-        if self.phase != Phase::Witness
-            || !self.witness_header
-            || self.low_byte.is_some()
-            || self.witness_bytes != 2 * COLUMNS * SYSTEMATIC
-        {
-            return Err(());
-        }
-        self.witness = Some(
-            Witness::from_columns(self.expected, std::mem::take(&mut self.columns))
-                .map_err(|_| ())?,
-        );
-        self.statement =
-            Some(SetupStatementStream::new(self.expected, field::ZERO, &[0]).map_err(|_| ())?);
-        self.phase = Phase::Statement;
-        Ok(())
-    }
-    #[cfg(feature = "bridge")]
-    fn push_statement(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        if self.phase != Phase::Statement {
-            return Err(());
-        }
-        let header = bytes.len().min(145 - self.statement_header.len());
-        self.statement_header.extend_from_slice(&bytes[..header]);
-        self.context.update(bytes);
-        self.statement
-            .as_mut()
-            .ok_or(())?
-            .push(bytes)
-            .map_err(|_| ())
-    }
-    #[cfg(feature = "bridge")]
-    fn finish_statement(&mut self) -> Result<(), ()> {
-        if self.phase != Phase::Statement {
-            return Err(());
-        }
-        self.statement.take().ok_or(())?.finish().map_err(|_| ())?;
-        self.transcript = Some(Transcript::new(
-            &self.role,
-            self.context.clone().finalize().into(),
-        ));
-        self.transcript.as_mut().unwrap().next();
-        self.phase = Phase::FirstInitialize;
-        Ok(())
     }
     fn begin_polynomial(&mut self, index: usize) -> Result<(), ()> {
         if self.phase != Phase::Polynomials
             || self.polynomial.is_some()
             || index != self.polynomials.len()
-            || index >= 75
+            || index >= self.profile.setup_polynomials()
         {
             return Err(());
         }
-        let family = if index < 42 {
-            0
-        } else if index < 73 {
-            1
-        } else {
-            2
-        };
         let alpha = transcript::challenge(&self.transcript.as_ref().unwrap().message, 0, false);
-        self.polynomial = Some(PolynomialStream::new(family, alpha).map_err(|_| ())?);
+        self.polynomial =
+            Some(setup_polynomial_stream(self.profile, index, alpha).map_err(|_| ())?);
         Ok(())
     }
     fn push_polynomial(&mut self, bytes: &[u8]) -> Result<(), ()> {
@@ -310,7 +177,7 @@ impl Prover {
             PreparedPolynomial::Value(parser.finish_value().map_err(|_| ())?)
         };
         self.polynomials.push(prepared);
-        if self.polynomials.len() == 75 {
+        if self.polynomials.len() == self.profile.setup_polynomials() {
             if <[u8; 64]>::from(self.second_pass_hash.clone().finalize()) != self.expected {
                 return Err(());
             }
@@ -323,13 +190,13 @@ impl Prover {
         let transcript = self.transcript.as_mut().ok_or(())?;
         match self.phase {
             Phase::FirstInitialize => {
-                self.first = Some(FirstOracle::initialize(&self.role, false));
+                self.first = Some(FirstOracle::initialize(&self.relation, &self.role, false));
                 self.phase = Phase::FirstColumn(0);
             }
             Phase::FirstColumn(index) => {
                 let first = self.first.as_mut().unwrap();
                 first.commit_column(witness, index);
-                if index < COLUMNS + 1 {
+                if index < self.relation.columns() + 1 {
                     self.phase = Phase::FirstColumn(index + 1);
                 } else {
                     first.finish_commitment();
@@ -345,21 +212,23 @@ impl Prover {
                 }
             }
             Phase::SecondInitialize => {
-                self.second = Some(SecondOracle::initialize(&self.role));
+                self.second = Some(SecondOracle::initialize(&self.relation, &self.role));
                 self.phase = Phase::SecondColumn(0);
             }
             Phase::SecondColumn(index) => {
                 let second = self.second.as_mut().unwrap();
                 second.commit_column(witness, &self.inverses, index);
-                if index < LOOKUPS + 1 {
+                if index < self.relation.lookups() + 1 {
                     self.phase = Phase::SecondColumn(index + 1);
                 } else {
                     second.finish_commitment();
                     transcript.respond(&[&second.tree.root(), &field::encode(second.mask_sum)]);
                     transcript.next();
-                    let plan =
-                        prover_operator_plan(transcript::challenge(&transcript.message, 0, false))
-                            .map_err(|_| ())?;
+                    let plan = prover_operator_plan(
+                        self.profile,
+                        transcript::challenge(&transcript.message, 0, false),
+                    )
+                    .map_err(|_| ())?;
                     self.common = plan
                         .common_columns
                         .iter()
@@ -375,12 +244,12 @@ impl Prover {
                     mask: transcript::challenge(&transcript.message, 1, false),
                 };
                 let linear = LinearOracle::create_prepared(
+                    self.profile,
                     &self.role,
                     witness,
                     self.first.as_ref().unwrap(),
                     self.second.as_ref().unwrap(),
                     challenges,
-                    false,
                     std::mem::take(&mut self.polynomials).into_iter(),
                 );
                 transcript.respond(&[&linear.tree.root()]);
@@ -400,7 +269,12 @@ impl Prover {
                     &self.inverses,
                     &transcript.message,
                 );
-                self.folding = Some(Fri::create(&self.role, combined, transcript));
+                self.folding = Some(Fri::create(
+                    &self.role,
+                    self.relation.oracles(),
+                    combined,
+                    transcript,
+                ));
                 self.phase = Phase::Output;
             }
             _ => return Err(()),
@@ -415,7 +289,7 @@ impl Prover {
         if !self.output_started {
             self.output_started = true;
             let transcript = self.transcript.as_ref().unwrap();
-            output.extend(b"SWP2");
+            output.extend(self.relation.proof_magic);
             output.extend(self.expected);
             output.extend(transcript.context);
             for root in [
@@ -477,8 +351,8 @@ impl Prover {
         }
         let row = self.openings.pop_front().unwrap();
         let width = match self.output_stage {
-            0 => FIRST_WIDTH,
-            1 => SECOND_WIDTH,
+            0 => self.relation.first_width(),
+            1 => self.relation.second_width(),
             _ => 48,
         };
         output.extend(&row[..4 + width + 128]);
@@ -511,10 +385,6 @@ impl Prover {
     }
     pub fn phase_code(&self) -> u32 {
         match self.phase {
-            #[cfg(feature = "bridge")]
-            Phase::Witness => 1,
-            #[cfg(feature = "bridge")]
-            Phase::Statement => 2,
             Phase::FirstInitialize => 3,
             Phase::FirstColumn(_) => 4,
             Phase::SecondInitialize => 5,
@@ -536,188 +406,4 @@ impl From<()> for Error {
     fn from(_: ()) -> Self {
         Self::Operation
     }
-}
-#[cfg(feature = "bridge")]
-impl Drop for Prover {
-    fn drop(&mut self) {
-        self.columns.zeroize();
-    }
-}
-#[cfg(feature = "bridge")]
-struct Session {
-    input: Vec<u8>,
-    output: Vec<u8>,
-    prover: Option<Prover>,
-    stopped: bool,
-    checkpoint_export: Option<first_checkpoint::Export>,
-    checkpoint_import: Option<first_checkpoint::Import>,
-}
-#[cfg(feature = "bridge")]
-thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; CHUNK], output: Vec::new(), prover: None, stopped: false, checkpoint_export: None, checkpoint_import: None }); }
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn input_pointer() -> usize {
-    SESSION.with(|session| session.borrow_mut().input.as_mut_ptr() as usize)
-}
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn output_pointer() -> usize {
-    SESSION.with(|session| session.borrow().output.as_ptr() as usize)
-}
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn output_length() -> usize {
-    SESSION.with(|session| session.borrow().output.len())
-}
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn phase() -> u32 {
-    SESSION.with(|session| {
-        session
-            .borrow()
-            .prover
-            .as_ref()
-            .map_or(0, Prover::phase_code)
-    })
-}
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn command(operation: u32, argument: usize, length: usize) -> u32 {
-    SESSION.with(|session| {
-        let mut session = session.borrow_mut();
-        if session.checkpoint_export.is_some() || session.checkpoint_import.is_some() {
-            return 1;
-        }
-        session.output.clear();
-        let Session {
-            input,
-            output,
-            prover,
-            stopped,
-            ..
-        } = &mut *session;
-        let result = (|| {
-            if *stopped {
-                return Err(());
-            }
-            let bytes = input.get(..length).ok_or(())?;
-            if operation == 1 {
-                if prover.is_some() || argument != 0 {
-                    return Err(());
-                }
-                *prover = Some(Prover::new(bytes)?);
-                return Ok(());
-            }
-            if operation != 8 && argument != 0 {
-                return Err(());
-            }
-            if ![2, 3, 5, 9].contains(&operation) && length != 0 {
-                return Err(());
-            }
-            let prover = prover.as_mut().ok_or(())?;
-            match operation {
-                2 => prover.witness_header(bytes),
-                3 => prover.push_witness(bytes),
-                4 => prover.finish_witness(),
-                5 => prover.push_statement(bytes),
-                6 => prover.finish_statement(),
-                7 => prover.step(),
-                8 => prover.begin_polynomial(argument),
-                9 => prover.push_polynomial(bytes),
-                10 => prover.finish_polynomial(),
-                11 => prover.next_output(output),
-                _ => Err(()),
-            }
-        })();
-        if result.is_err() {
-            *prover = None;
-            *stopped = true;
-            input.zeroize();
-            output.clear();
-        }
-        u32::from(result.is_err())
-    })
-}
-
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn checkpoint_records() -> usize {
-    first_checkpoint::record_count()
-}
-
-#[cfg(feature = "bridge")]
-#[unsafe(no_mangle)]
-pub extern "C" fn checkpoint_command(operation: u32, length: usize) -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped {
-            return 1;
-        }
-        state.output.clear();
-        let Session {
-            input,
-            output,
-            prover,
-            checkpoint_export,
-            checkpoint_import,
-            stopped,
-        } = &mut *state;
-        let result = (|| {
-            let bytes = input.get(..length).ok_or(())?;
-            match operation {
-                1 if length == 0 && checkpoint_export.is_none() && checkpoint_import.is_none() => {
-                    let export = first_checkpoint::Export::begin(prover.as_ref().ok_or(())?)
-                        .map_err(|_| ())?;
-                    *output = export.header();
-                    *checkpoint_export = Some(export);
-                }
-                2 if length == 32 => {
-                    let key = Zeroizing::new(<[u8; 32]>::try_from(bytes).unwrap());
-                    *output = checkpoint_export
-                        .as_mut()
-                        .ok_or(())?
-                        .seal(prover.as_ref().ok_or(())?, &key)
-                        .map_err(|_| ())?;
-                }
-                3 if length == 0 => {
-                    if !checkpoint_export.as_ref().ok_or(())?.complete() {
-                        return Err(());
-                    }
-                    *checkpoint_export = None;
-                }
-                4 if prover.is_none()
-                    && checkpoint_export.is_none()
-                    && checkpoint_import.is_none() =>
-                {
-                    *checkpoint_import =
-                        Some(first_checkpoint::Import::begin(bytes).map_err(|_| ())?);
-                }
-                5 if (48..=32 + first_checkpoint::RECORD_BYTES + 16).contains(&length) => {
-                    let key = Zeroizing::new(<[u8; 32]>::try_from(&bytes[..32]).unwrap());
-                    checkpoint_import
-                        .as_mut()
-                        .ok_or(())?
-                        .open(&key, &bytes[32..])
-                        .map_err(|_| ())?;
-                }
-                6 if length == 0 => {
-                    if !checkpoint_import.as_ref().ok_or(())?.complete() {
-                        return Err(());
-                    }
-                    *prover = Some(checkpoint_import.take().unwrap().finish().map_err(|_| ())?);
-                }
-                _ => return Err(()),
-            }
-            Ok(())
-        })();
-        input[..length.min(CHUNK)].zeroize();
-        if result.is_err()
-            && (operation == 5
-                || (operation == 6 && prover.is_none() && checkpoint_import.is_none()))
-        {
-            *checkpoint_import = None;
-            *stopped = true;
-        }
-        u32::from(result.is_err())
-    })
 }

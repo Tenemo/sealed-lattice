@@ -1,6 +1,6 @@
 use crate::context::BallotComputationContext;
 use crate::{
-    convolution::{Plan, RADIX, digit},
+    convolution::{Plan, RADIX, RADIX_BITS, digit},
     gaussian,
     packing::PackingWitness,
     reduction,
@@ -11,9 +11,11 @@ use setup_aggregate::{
     RetainedAggregatePolynomial, VerifiedAggregatePolynomial, verified::VerifiedSetupAggregate,
 };
 use std::sync::Arc;
+use supported_profile::{
+    AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, AUXILIARY_SECRET_SUPPORT, FHE_SECRET_SUPPORT,
+    Family, PLAINTEXT_MODULUS, Profile,
+};
 use zeroize::Zeroizing;
-
-const PARAMETERS: &[u8; 137] = include_bytes!("../../setup-proof/parameters.bin");
 
 #[derive(Debug)]
 pub enum Refusal {
@@ -119,16 +121,17 @@ fn component(
     let degree = public.len();
     let modulus_bytes = modulus.to_bytes_le().1;
     let reducer =
-        reduction::Modulus::from_bytes(&modulus_bytes).map_err(|_| Refusal::Arithmetic)?;
+        reduction::Modulus::new(&modulus_bytes, RADIX_BITS).map_err(|_| Refusal::Arithmetic)?;
     let limbs = reducer.digits.len();
     if errors.len() != degree || message.is_some_and(|value| value.len() != degree) {
         return Err(Refusal::Arithmetic);
     }
-    let products = Zeroizing::new(plan.digit_products(public, ephemeral, transformed, limbs));
+    let products =
+        Zeroizing::new(plan.digit_products(public, ephemeral, transformed, limbs, RADIX_BITS));
     let mut coefficients = Vec::with_capacity(degree);
     let mut quotients = Zeroizing::new(Vec::with_capacity(degree));
     for position in 0..degree {
-        let mut raw = Zeroizing::new([0i128; 9]);
+        let mut raw = Zeroizing::new(vec![0i128; limbs]);
         for limb in 0..limbs {
             raw[limb] = products[limb][position]
                 + if limb == 0 {
@@ -140,16 +143,13 @@ fn component(
                     digit(scale, limb) * i128::from(values[position])
                 });
         }
-        let mut reduced = [0u128; 9];
+        let mut reduced = vec![0u128; limbs];
         let result = reducer
-            .reduce(&raw[..limbs], &mut reduced[..limbs])
+            .reduce(&raw, &mut reduced)
             .map_err(|_| Refusal::Arithmetic)?;
-        let magnitude = reduced[..limbs]
-            .iter()
-            .rev()
-            .fold(BigInt::from(0), |sum, value| {
-                (sum << 96usize) + BigInt::from(*value)
-            });
+        let magnitude = reduced.iter().rev().fold(BigInt::from(0), |sum, value| {
+            (sum << RADIX_BITS) + BigInt::from(*value)
+        });
         coefficients.push(if result.negative {
             -magnitude
         } else {
@@ -191,17 +191,39 @@ fn component(
     })
 }
 
+/// A ballot encrypts under the first gadget coordinate's FHE encryption key
+/// and under the auxiliary key.
+pub fn fhe_key_polynomial(profile: Profile) -> usize {
+    profile.fhe_polynomial(0, 1)
+}
 impl EncryptionWitness {
-    fn create(
+    /// Encrypts a message under the profile's FHE or auxiliary key with
+    /// fresh randomness.
+    pub fn create(
+        profile: Profile,
         key: RetainedAggregatePolynomial,
         message: &[i32],
-        random: &mut Random,
     ) -> Result<Self, Refusal> {
-        let (degree, support, common_index, modulus_bytes, plaintext_modulus) = match key.index() {
-            1 => (65536, 1024, 0, &PARAMETERS[4..112], 65537),
-            74 => (4096, 256, 73, &PARAMETERS[132..137], 257),
-            _ => return Err(Refusal::Context),
-        };
+        let random = &mut Random::new();
+        let (family, support, common_index, plaintext_modulus) =
+            if key.index() == fhe_key_polynomial(profile) {
+                (
+                    Family::Fhe,
+                    FHE_SECRET_SUPPORT,
+                    profile.fhe_polynomial(0, 0),
+                    PLAINTEXT_MODULUS,
+                )
+            } else if key.index() == profile.auxiliary_key_polynomial() {
+                (
+                    Family::Auxiliary,
+                    AUXILIARY_SECRET_SUPPORT,
+                    profile.auxiliary_common_polynomial(),
+                    AUXILIARY_PLAINTEXT_MODULUS,
+                )
+            } else {
+                return Err(Refusal::Context);
+            };
+        let degree = profile.family_degree(family);
         if key.coefficients().len() != degree
             || message.len() != degree
             || message
@@ -210,9 +232,9 @@ impl EncryptionWitness {
         {
             return Err(Refusal::Context);
         }
-        let modulus = BigInt::from_bytes_le(Sign::Plus, modulus_bytes);
+        let modulus = BigInt::from_bytes_le(Sign::Plus, &profile.family_modulus(family));
         let scale = (&modulus - BigInt::from(1)) / BigInt::from(plaintext_modulus);
-        let common = setup_witness::contribution::common_polynomial(common_index)
+        let common = setup_witness::contribution::common_polynomial(profile, common_index)
             .map_err(|_| Refusal::Context)?;
         let plan = Plan::new(degree);
         let ephemeral = random.sparse(degree, support)?;
@@ -288,8 +310,9 @@ impl LinkedBallotWitness {
         auxiliary_key: RetainedAggregatePolynomial,
         scores: &[u8],
     ) -> Result<Self, Refusal> {
-        if fhe_key.index() != 1
-            || auxiliary_key.index() != 74
+        let profile = context.profile();
+        if fhe_key.index() != fhe_key_polynomial(profile)
+            || auxiliary_key.index() != profile.auxiliary_key_polynomial()
             || fhe_key.inventory() != context.inventory()
             || auxiliary_key.inventory() != context.inventory()
         {
@@ -297,13 +320,12 @@ impl LinkedBallotWitness {
         }
         check_ballot_scores(context.poll(), scores)?;
         let packing = PackingWitness::new(scores).map_err(|_| Refusal::Scores)?;
-        let mut random = Random::new();
-        let fhe = EncryptionWitness::create(fhe_key, packing.message(), &mut random)?;
-        let mut literal = Zeroizing::new(vec![0i32; 4096]);
+        let fhe = EncryptionWitness::create(profile, fhe_key, packing.message())?;
+        let mut literal = Zeroizing::new(vec![0i32; AUXILIARY_DEGREE]);
         for (target, score) in literal.iter_mut().zip(scores) {
             *target = i32::from(*score);
         }
-        let auxiliary = EncryptionWitness::create(auxiliary_key, &literal, &mut random)?;
+        let auxiliary = EncryptionWitness::create(profile, auxiliary_key, &literal)?;
         Ok(Self {
             context,
             packing,
@@ -341,11 +363,15 @@ mod tests {
     #[test]
     fn both_encryption_moduli_match_independent_integer_convolution_and_decoding() {
         let degree = 32;
-        for (bytes, plaintext_modulus) in [
-            (&PARAMETERS[4..112], 65537i32),
-            (&PARAMETERS[132..137], 257i32),
+        let small = Profile::new(3, 2).unwrap();
+        let wide = Profile::new(20, 20).unwrap();
+        for (profile, family, plaintext_modulus) in [
+            (small, Family::Fhe, 65537i32),
+            (wide, Family::Fhe, 65537i32),
+            (small, Family::Auxiliary, 257i32),
         ] {
-            let modulus = BigInt::from_bytes_le(Sign::Plus, bytes);
+            let bytes = profile.family_modulus(family);
+            let modulus = BigInt::from_bytes_le(Sign::Plus, &bytes);
             let scale = (&modulus - BigInt::from(1)) / plaintext_modulus;
             let common: Vec<_> = (0..degree)
                 .map(|index| {

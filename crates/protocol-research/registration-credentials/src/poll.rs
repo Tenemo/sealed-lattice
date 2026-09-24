@@ -9,6 +9,7 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub const POLL_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/poll-definition/v1";
@@ -21,10 +22,10 @@ pub struct PollDraft {
     top_count: u16,
 }
 fn validate_fields(manifest: &Manifest, top_count: u16) -> Result<(), Error> {
-    // The research arithmetic profile evaluates exactly ten options, so a
-    // poll with another option count is refused when it is created.
+    // Only an option count without a supported profile is refused when the
+    // poll is created; the roster size is known only when it is proposed.
     // The manifest itself owns the nonempty title and distinct labels.
-    if manifest.option_count() != 10
+    if !Profile::option_range().contains(&manifest.option_count())
         || top_count == 0
         || usize::from(top_count) > manifest.option_count()
     {
@@ -266,21 +267,33 @@ mod tests {
     }
 
     #[test]
-    fn option_counts_outside_the_research_profile_are_refused_at_creation() {
-        for count in [2, 9, 11, 20] {
+    fn every_supported_option_count_and_top_count_can_be_created() {
+        for count in Profile::option_range() {
+            let count = u16::try_from(count).unwrap();
+            for top_count in [1, count] {
+                let draft =
+                    PollDraft::new(manifest("Question", "First", "Second", count), top_count)
+                        .unwrap();
+                let packet = Credential::from_seeds([7; 32], [8; 32], [9; 32])
+                    .create_poll(draft, [2; 64], [3; 32], [4; 32])
+                    .unwrap();
+                let verified =
+                    verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
+                assert_eq!(verified.manifest().option_count(), usize::from(count));
+            }
             assert!(matches!(
-                PollDraft::new(manifest("Question", "First", "Second", count), 1),
+                PollDraft::new(manifest("Question", "First", "Second", count), count + 1),
                 Err(Error::Shape)
             ));
         }
-        assert!(PollDraft::new(manifest("Question", "First", "Second", 10), 1).is_ok());
+        assert_eq!(Profile::option_range(), 2..=20);
     }
 
     #[test]
     fn valid_signatures_do_not_authorize_invalid_poll_fields() {
         let mut creator = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
         let packet = creator
-            .create_poll(draft(2).unwrap(), [2; 64], [3; 32], [4; 32])
+            .create_poll(draft(10).unwrap(), [2; 64], [3; 32], [4; 32])
             .unwrap();
         let original =
             CanonicalTuple::decode(&packet.body, &CanonicalDecodeLimits::default()).unwrap();
@@ -296,14 +309,13 @@ mod tests {
         let mut top = original.clone();
         top.items[5] = CanonicalItem::unsigned16(11);
         signed_refusal(top);
-        for changed in [
-            manifest("Question", "First", "Second", 9),
-            manifest("Question", "First", "Second", 11),
-        ] {
-            let mut body = original.clone();
-            body.items[4] = CanonicalItem::variable_bytes(changed.encode().unwrap()).unwrap();
-            signed_refusal(body);
-        }
+        // Nine options cannot carry the signed top count of ten.
+        let mut body = original.clone();
+        body.items[4] = CanonicalItem::variable_bytes(
+            manifest("Question", "First", "Second", 9).encode().unwrap(),
+        )
+        .unwrap();
+        signed_refusal(body);
         let mut wrong_runtime = original;
         wrong_runtime.items[1] = CanonicalItem::hash512([9; 64]);
         signed_refusal(wrong_runtime);

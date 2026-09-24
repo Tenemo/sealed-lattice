@@ -6,7 +6,9 @@ use registration_proof::statement;
 use registration_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
 use sha3::{Digest, Sha3_512};
 
-const KEY_BYTES: usize = 65536 * 21;
+/// A registration public key: a sign byte and a share-modulus magnitude for
+/// each coefficient.
+pub const KEY_BYTES: usize = 65536 * 21;
 pub struct VerifiedRegistration {
     header: RegistrationHeader,
     body_digest: [u8; 64],
@@ -169,9 +171,10 @@ mod tests {
         roster::RosterProposal,
     };
     use std::sync::Arc;
+    use supported_profile::Profile;
 
     #[test]
-    fn roster_sizes_outside_the_research_profile_are_refused_at_proposal() {
+    fn every_supported_roster_size_can_be_proposed() {
         let text =
             |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
         let options = (0..10)
@@ -208,7 +211,7 @@ mod tests {
                 public_key: Vec::new(),
             })
         };
-        let members: Vec<_> = (10..29)
+        let members: Vec<_> = (10..30)
             .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))
             .collect();
         let proposal = |size: usize| {
@@ -218,9 +221,13 @@ mod tests {
                 .collect();
             RosterProposal::new(&poll, records)
         };
-        for size in [3, 9, 11, 20] {
+        for size in Profile::participant_range() {
+            let profile = proposal(size).unwrap().profile();
+            assert_eq!((profile.participants(), profile.options()), (size, 10));
+        }
+        for size in [2, 21] {
             assert!(matches!(proposal(size), Err(Error::Shape)));
         }
-        assert!(proposal(10).is_ok());
+        assert_eq!(Profile::participant_range(), 3..=20);
     }
 }

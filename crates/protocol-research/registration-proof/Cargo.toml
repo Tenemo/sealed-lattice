@@ -6,16 +6,13 @@ publish = false
 autobins = false
 
 
-[features]
-default = ["bridge"]
-bridge = []
-
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib"]
 
 [dependencies]
 setup-witness = { path = "../setup-witness" }
 setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+supported-profile = { path = "../supported-profile" }
 sha3 = "=0.10.9"
 stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
 num-bigint = "=0.5.1"

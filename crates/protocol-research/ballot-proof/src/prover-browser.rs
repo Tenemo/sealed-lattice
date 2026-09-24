@@ -3,6 +3,7 @@ use std::{
     cell::RefCell,
     io::{self, Write},
 };
+use supported_profile::relation::ballot_relation;
 
 struct PublicWriter {
     kind: u32,
@@ -80,8 +81,12 @@ pub extern "C" fn ballot_prover_create() -> u32 {
             let role = crate::context::private_proof_role(&encryption.context).map_err(|_| ())?;
             let public = PublicStatement::from_encryption(&encryption).map_err(|_| ())?;
             let mut columns = columns::from_encryption(&encryption).map_err(|_| ())?;
-            let witness = Witness::from_columns(public.digest(), std::mem::take(&mut *columns))
-                .map_err(|_| ())?;
+            let witness = Witness::from_columns(
+                &ballot_relation(public.profile),
+                public.digest(),
+                std::mem::take(&mut *columns),
+            )
+            .map_err(|_| ())?;
             let mut context = [0; 194];
             context[..64].copy_from_slice(&encryption.context.poll().identity());
             context[64..128].copy_from_slice(encryption.context.inventory());

@@ -117,26 +117,40 @@ export const compileFixedSpongeInitializationCensus = (
         compileSmallLimbProofFieldCensus().modulus * 998244353n;
     const roles = Array.from({ length: gadgetCount }, (_, gadget) =>
         ['a', 'u', 'k'].map(
-            (part): { label: string; degree: bigint; modulus: bigint } => ({
+            (
+                part,
+            ): {
+                label: string;
+                degree: bigint;
+                modulus: bigint;
+                bits: number;
+            } => ({
                 label: `common-fhe-${part}-${gadget}`,
                 degree,
                 modulus: profile.ciphertext.modulus,
+                bits: matrices.fheBitsPerCoefficient,
             }),
         ),
     )
         .flat()
         .concat([
-            { label: 'common-share', degree, modulus: sharingModulus },
+            {
+                label: 'common-share',
+                degree,
+                modulus: sharingModulus,
+                bits: matrices.fixedFamilyBitsPerCoefficient,
+            },
             {
                 label: 'common-auxiliary',
                 degree: auxiliaryInputEncryptionParameters.degree,
                 modulus: auxiliaryInputEncryptionParameters.modulus,
+                bits: matrices.fixedFamilyBitsPerCoefficient,
             },
         ]);
     const prefix = Buffer.from('synthetic-full-setup-witness/1');
     const extraSamplingBits =
         compileCommonMatrixInitializationCensus(profile).extraSamplingBits;
-    const seeds = roles.map(({ label, degree: seedDegree, modulus }) => {
+    const seeds = roles.map(({ label, degree: seedDegree, modulus, bits }) => {
         const bytes = Buffer.from(label),
             length = Buffer.alloc(4);
         length.writeUInt32LE(bytes.length);
@@ -147,10 +161,9 @@ export const compileFixedSpongeInitializationCensus = (
         message.copy(paddedInput);
         paddedInput[message.length] ^= 0x1f;
         paddedInput[rateBytes - 1] ^= 0x80;
-        const outputBits = seedDegree * BigInt(matrices.bitsPerCoefficient);
+        const outputBits = seedDegree * BigInt(bits);
         const maximumFiberSize =
-            ((1n << BigInt(matrices.bitsPerCoefficient)) + modulus - 1n) /
-            modulus;
+            ((1n << BigInt(bits)) + modulus - 1n) / modulus;
         const fiberRandomBits =
             BigInt(maximumFiberSize.toString(2).length) + extraSamplingBits;
         return {

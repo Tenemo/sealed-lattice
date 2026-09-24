@@ -7,7 +7,7 @@ use registration_credentials::{
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
     poll::VerifiedPoll,
 };
-use rns_arithmetic_probe::ranking::{COEFFICIENT_BYTES, Ciphertext, DEGREE, Engine};
+use rns_arithmetic_probe::ranking::{DEGREE, Engine, stored_value, stored_value_bytes};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use sha2::{Digest, Sha512};
 use std::{cell::RefCell, sync::Arc};
@@ -26,7 +26,8 @@ struct Incoming {
     bytes: Vec<u8>,
     hash: Sha512,
     expected: Option<[u8; 64]>,
-    ballot_hash: Option<BallotBodyHasher>,
+    /// A ballot body's hasher and the end of its FHE ciphertext.
+    ballot: Option<(BallotBodyHasher, usize)>,
 }
 struct State {
     input: Vec<u8>,
@@ -64,7 +65,7 @@ impl State {
         length: usize,
         expected: Option<[u8; 64]>,
         hash: Sha512,
-        ballot_hash: Option<BallotBodyHasher>,
+        ballot: Option<(BallotBodyHasher, usize)>,
     ) -> Result<(), Error> {
         if self.incoming.is_some() {
             return Err(Error::Incomplete);
@@ -76,7 +77,7 @@ impl State {
             bytes: Vec::new(),
             expected,
             hash,
-            ballot_hash,
+            ballot,
         });
         Ok(())
     }
@@ -86,10 +87,10 @@ impl State {
             return Err(Error::PublicInput);
         }
         let bytes = &self.input[..length];
-        if let Some(hash) = value.ballot_hash.as_mut() {
+        if let Some((hash, end)) = value.ballot.as_mut() {
             hash.push(bytes).map_err(|_| Error::PublicInput)?;
             let first = value.received.max(HEADER_BYTES);
-            let last = (value.received + length).min(HEADER_BYTES + 2 * DEGREE * COEFFICIENT_BYTES);
+            let last = (value.received + length).min(*end);
             if first < last {
                 value
                     .bytes
@@ -107,7 +108,7 @@ impl State {
         if incoming.received != incoming.length {
             return Err(Error::Incomplete);
         }
-        let digest = if let Some(hash) = incoming.ballot_hash {
+        let digest = if let Some((hash, _)) = incoming.ballot {
             hash.finish().map_err(|_| Error::PublicInput)?
         } else {
             incoming.hash.finalize().into()
@@ -126,7 +127,7 @@ impl State {
                     .map_err(|_| Error::Arithmetic)
             }
             Destination::Ballot(author) => {
-                let length = DEGREE * COEFFICIENT_BYTES;
+                let length = DEGREE * engine.coefficient_bytes();
                 if incoming.bytes.len() != 2 * length {
                     return Err(Error::PublicInput);
                 }
@@ -146,21 +147,10 @@ impl State {
                 .retire_to_storage(index, digest)
                 .map_err(|_| Error::Storage),
             Destination::Reload(index) => {
-                if incoming.bytes.len() != 2 * DEGREE * 112 {
+                if incoming.bytes.len() != stored_value_bytes(engine.profile()) {
                     return Err(Error::Storage);
                 }
-                let value: Ciphertext = std::array::from_fn(|part| {
-                    incoming.bytes[part * DEGREE * 112..(part + 1) * DEGREE * 112]
-                        .chunks_exact(112)
-                        .map(|coefficient| {
-                            std::array::from_fn(|word| {
-                                u64::from_le_bytes(
-                                    coefficient[word * 8..word * 8 + 8].try_into().unwrap(),
-                                )
-                            })
-                        })
-                        .collect()
-                });
+                let value = stored_value(&incoming.bytes).map_err(|_| Error::Storage)?;
                 engine.reload(index, value).map_err(|_| Error::Storage)
             }
         }
@@ -261,21 +251,26 @@ impl State {
                 if ordinal >= required.key_count {
                     return Err(Error::Incomplete);
                 }
-                let (common, index) =
-                    Engine::key_identity(required.cache.ok_or(Error::Arithmetic)?, ordinal)
-                        .map_err(|_| Error::Arithmetic)?;
+                let profile = engine.profile();
+                let width = engine.coefficient_bytes();
+                let (common, index) = Engine::key_identity(
+                    profile,
+                    required.cache.ok_or(Error::Arithmetic)?,
+                    ordinal,
+                )
+                .map_err(|_| Error::Arithmetic)?;
                 if common {
-                    let values = setup_witness::contribution::common_polynomial(index)
+                    let values = setup_witness::contribution::common_polynomial(profile, index)
                         .map_err(|_| Error::PublicInput)?;
-                    let mut bytes = Vec::with_capacity(DEGREE * COEFFICIENT_BYTES);
+                    let mut bytes = Vec::with_capacity(DEGREE * width);
                     for value in values {
                         let (sign, magnitude) = value.to_bytes_le();
-                        if magnitude.len() >= COEFFICIENT_BYTES {
+                        if magnitude.len() >= width {
                             return Err(Error::PublicInput);
                         }
                         bytes.push(u8::from(sign == Sign::Minus));
                         bytes.extend(&magnitude);
-                        bytes.resize(bytes.len() + COEFFICIENT_BYTES - 1 - magnitude.len(), 0);
+                        bytes.resize(bytes.len() + width - 1 - magnitude.len(), 0);
                     }
                     let value = engine
                         .decode_polynomial(&bytes)
@@ -340,19 +335,23 @@ impl State {
                 {
                     let bytes = envelope.body_length();
                     let expected = *envelope.body_identity();
-                    let hash =
-                        BallotBodyHasher::for_body_length(bytes).map_err(|_| Error::PublicInput)?;
+                    let hash = BallotBodyHasher::for_body_length(engine.profile(), bytes)
+                        .map_err(|_| Error::PublicInput)?;
+                    // The body carries the FHE ciphertext's two components
+                    // first.
+                    let end = HEADER_BYTES + 2 * DEGREE * engine.coefficient_bytes();
                     self.begin(
                         Destination::Ballot(argument),
                         bytes,
                         Some(expected),
                         Sha512::new(),
-                        Some(hash),
+                        Some((hash, end)),
                     )?;
                     self.word(bytes);
                 } else {
+                    let zero = engine.zero_value();
                     engine
-                        .load_input(argument, std::array::from_fn(|_| vec![[0; 14]; DEGREE]))
+                        .load_input(argument, zero)
                         .map_err(|_| Error::Arithmetic)?;
                     self.word(0);
                 }
@@ -375,13 +374,17 @@ impl State {
                 }
                 let offset = u32::from_le_bytes(self.input[..4].try_into().unwrap()) as usize;
                 let count = u32::from_le_bytes(self.input[4..8].try_into().unwrap()) as usize;
-                if count == 0 || count > CHUNK_BYTES / 112 || offset > 2 * DEGREE - count {
+                let value = self.engine()?.value(argument).map_err(|_| Error::Storage)?;
+                // The stored value's coefficients in order: both components'
+                // words.
+                let words = value[0].len() / DEGREE;
+                if count == 0 || count > CHUNK_BYTES / (8 * words) || offset > 2 * DEGREE - count {
                     return Err(Error::Encoding);
                 }
-                let value = self.engine()?.value(argument).map_err(|_| Error::Storage)?;
-                let mut output = Vec::with_capacity(count * 112);
+                let mut output = Vec::with_capacity(count * 8 * words);
                 for position in offset..offset + count {
-                    for word in value[position / DEGREE][position % DEGREE] {
+                    let (part, index) = (position / DEGREE, position % DEGREE);
+                    for word in &value[part][index * words..(index + 1) * words] {
                         output.extend(word.to_le_bytes());
                     }
                 }
@@ -412,7 +415,8 @@ impl State {
                     (Destination::Reload(argument), None)
                 };
                 let hash = engine.value_hasher(argument);
-                self.begin(destination, 2 * DEGREE * 112, expected, hash, None)
+                let bytes = stored_value_bytes(engine.profile());
+                self.begin(destination, bytes, expected, hash, None)
             }
             19 => {
                 if argument != 0 || length != 0 || !self.engine()?.finished() {

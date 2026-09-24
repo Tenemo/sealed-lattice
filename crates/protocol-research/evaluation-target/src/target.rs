@@ -11,7 +11,7 @@ use registration_credentials::{
     poll::VerifiedPoll,
     target_signing::{TargetMessage, minimum_turnout},
 };
-use rns_arithmetic_probe::ranking::{COEFFICIENT_BYTES, Ciphertext, DEGREE, Engine};
+use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE, Engine};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use sha2::{Digest, Sha512};
 use std::{io::Read, sync::Arc};
@@ -135,8 +135,7 @@ impl ClassifiedClosedInventory {
         } else {
             Some(
                 RankingProgram::for_profile(
-                    self.accepted.len(),
-                    self.poll.manifest().option_count(),
+                    self.setup.profile(),
                     usize::from(self.poll.top_count()),
                 )
                 .map_err(|_| Error::UnsupportedProfile)?,
@@ -145,7 +144,8 @@ impl ClassifiedClosedInventory {
         let engine = program
             .as_ref()
             .map(|program| {
-                Engine::new(program.bytes(), *program.identity()).map_err(|_| Error::Arithmetic)
+                Engine::new(self.setup.profile(), program.bytes(), *program.identity())
+                    .map_err(|_| Error::Arithmetic)
             })
             .transpose()?;
         Ok(EvaluationSession {
@@ -170,7 +170,7 @@ impl ClassifiedClosedInventory {
                 let expected = engine.value_identity(index, value);
                 store.put(index, value)?;
                 let restored = store.get(index)?;
-                if restored.iter().any(|polynomial| polynomial.len() != DEGREE)
+                if engine.validate_value(&restored).is_err()
                     || engine.value_identity(index, &restored) != expected
                 {
                     return Err(Error::Storage);
@@ -184,22 +184,24 @@ impl ClassifiedClosedInventory {
                 engine.reload(index, value).map_err(|_| Error::Storage)?;
             }
             if let Some(cache) = required.cache {
+                let profile = engine.profile();
+                let width = engine.coefficient_bytes();
                 while engine.key_count() < required.key_count {
                     let ordinal = engine.key_count();
-                    let (common, index) =
-                        Engine::key_identity(cache, ordinal).map_err(|_| Error::Arithmetic)?;
+                    let (common, index) = Engine::key_identity(profile, cache, ordinal)
+                        .map_err(|_| Error::Arithmetic)?;
                     let bytes = if common {
-                        let values = setup_witness::contribution::common_polynomial(index)
+                        let values = setup_witness::contribution::common_polynomial(profile, index)
                             .map_err(|_| Error::PublicInput)?;
-                        let mut bytes = Vec::with_capacity(DEGREE * COEFFICIENT_BYTES);
+                        let mut bytes = Vec::with_capacity(DEGREE * width);
                         for value in values {
                             let (sign, magnitude) = value.to_bytes_le();
-                            if magnitude.len() >= COEFFICIENT_BYTES {
+                            if magnitude.len() >= width {
                                 return Err(Error::PublicInput);
                             }
                             bytes.push(u8::from(sign == Sign::Minus));
                             bytes.extend(&magnitude);
-                            bytes.resize(bytes.len() + COEFFICIENT_BYTES - 1 - magnitude.len(), 0);
+                            bytes.resize(bytes.len() + width - 1 - magnitude.len(), 0);
                         }
                         bytes
                     } else {
@@ -210,8 +212,7 @@ impl ClassifiedClosedInventory {
                             .iter()
                             .find(|value| value.index() == index)
                             .ok_or(Error::Context)?;
-                        let bytes =
-                            exact_bytes(inputs.aggregate(index)?, DEGREE * COEFFICIENT_BYTES)?;
+                        let bytes = exact_bytes(inputs.aggregate(index)?, DEGREE * width)?;
                         if <[u8; 64]>::from(Sha512::digest(&bytes)) != *metadata.digest() {
                             return Err(Error::PublicInput);
                         }
@@ -235,7 +236,7 @@ impl ClassifiedClosedInventory {
                 {
                     read_ballot(inputs.ballot(author)?, envelope, engine)?
                 } else {
-                    std::array::from_fn(|_| vec![[0; 14]; DEGREE])
+                    engine.zero_value()
                 };
                 engine
                     .load_input(author, value)
@@ -304,9 +305,11 @@ fn read_ballot(
     envelope: &BallotEnvelope,
     engine: &Engine,
 ) -> Result<Ciphertext, Error> {
-    let mut hash = BallotBodyHasher::for_body_length(envelope.body_length())
+    let mut hash = BallotBodyHasher::for_body_length(engine.profile(), envelope.body_length())
         .map_err(|_| Error::PublicInput)?;
-    let end = HEADER_BYTES + 2 * DEGREE * COEFFICIENT_BYTES;
+    // The body carries the FHE ciphertext's two components first.
+    let split = DEGREE * engine.coefficient_bytes();
+    let end = HEADER_BYTES + 2 * split;
     let mut ciphertext = Vec::with_capacity(end - HEADER_BYTES);
     let mut buffer = vec![0; 1 << 20];
     let mut offset = 0;
@@ -332,7 +335,6 @@ fn read_ballot(
     if ciphertext.len() != end - HEADER_BYTES {
         return Err(Error::PublicInput);
     }
-    let split = DEGREE * COEFFICIENT_BYTES;
     Ok([
         engine
             .decode_polynomial(&ciphertext[..split])

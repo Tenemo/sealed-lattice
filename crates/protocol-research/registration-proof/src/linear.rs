@@ -36,7 +36,7 @@ impl LinearOracle {
         let mut evaluations = Zeroizing::new(vec![ZERO; DOMAIN]);
         for coset in 0..4 {
             let twist = base::multiply(7, base::power(field::root(DOMAIN), coset as u128));
-            for column in 0..COLUMNS {
+            for column in 0..witness.relation.columns() {
                 let public = extension_values(&coefficients[column], twist, &transform);
                 let values = Zeroizing::new(masked_base(
                     &raw[column],

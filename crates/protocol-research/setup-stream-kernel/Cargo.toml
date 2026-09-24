@@ -6,13 +6,14 @@ publish = false
 autobins = false
 
 
-[features]
-default = ["bridge"]
-bridge = []
-
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 
 [dependencies]
 sha3 = "=0.10.9"
+supported-profile = { path = "../supported-profile" }
+
+[dev-dependencies]
+num-bigint = "=0.5.1"
+num-traits = "=0.2.19"

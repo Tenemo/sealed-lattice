@@ -3,15 +3,9 @@ name = "ballot-proof"
 version = "0.0.0"
 edition = "2024"
 publish = false
-autobins = false
-
 
 [lib]
-crate-type = ["rlib", "cdylib"]
-
-[[bin]]
-name = "verify-participant-ballot"
-path = "src/bin/verify-participant-ballot.rs"
+crate-type = ["rlib"]
 
 [features]
 default = ["bridge"]
@@ -29,7 +23,7 @@ sha2 = "=0.10.9"
 setup-witness = { path = "../setup-witness" }
 stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
 zeroize = "=1.8.2"
-fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
+supported-profile = { path = "../supported-profile" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "=0.3.3"

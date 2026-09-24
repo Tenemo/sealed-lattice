@@ -11,9 +11,16 @@ pub(crate) fn public_reader(label: &str) -> impl XofReader + use<> {
     Update::update(&mut state, label.as_bytes());
     state.finalize_xof()
 }
-pub(crate) fn public_polynomial(label: &str, degree: usize, modulus: &BigInt) -> Vec<BigInt> {
+// Each coefficient reduces one uniform little-endian sample of sample_bits.
+pub(crate) fn public_polynomial(
+    label: &str,
+    degree: usize,
+    modulus: &BigInt,
+    sample_bits: usize,
+) -> Vec<BigInt> {
+    assert!(sample_bits.is_multiple_of(8));
     let mut random = public_reader(label);
-    let mut bytes = [0u8; 128];
+    let mut bytes = vec![0u8; sample_bits / 8];
     (0..degree)
         .map(|_| {
             random.read(&mut bytes);

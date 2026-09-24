@@ -34,19 +34,21 @@ describe('bounded sparse-support sampling comparison', () => {
         const read = (name: string) =>
             readFile(
                 new URL(
-                    '../../../crates/protocol-research/setup-witness/src/' +
-                        name,
+                    '../../../crates/protocol-research/' + name,
                     import.meta.url,
                 ),
                 'utf8',
             );
-        const [reader, source, contribution, registration] = await Promise.all([
-            read('browser_random.rs'),
-            read('lib.rs'),
-            read('contribution.rs'),
-            read('registration.rs'),
-        ]);
-        const rows = compileSparseSupportSamplingCensus(completionProfile());
+        const [reader, source, contribution, registration, shared] =
+            await Promise.all([
+                read('setup-witness/src/browser_random.rs'),
+                read('setup-witness/src/lib.rs'),
+                read('setup-witness/src/contribution.rs'),
+                read('setup-witness/src/registration.rs'),
+                read('supported-profile/src/lib.rs'),
+            ]);
+        const profile = completionProfile();
+        const rows = compileSparseSupportSamplingCensus(profile);
         const bufferBytes = BigInt(
             reader.match(/vec!\[0; ([\d_]+)\]/u)![1].replace(/_/gu, ''),
         );
@@ -56,12 +58,14 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(source).toContain('let mut bytes = [0; 4];');
         expect(source).toContain('u32::from_le_bytes(bytes) as usize % degree');
         expect(source).toContain('if selected < support / 2 { 1 } else { -1 }');
-        const degree = (name: string) =>
+        // Degrees and supports are named constants of the shared profile
+        // crate.
+        const constant = (name: string) =>
             BigInt(
-                source
+                shared
                     .match(
                         new RegExp(
-                            'const ' + name + ': usize = ([\\d_]+);',
+                            'pub const ' + name + ': usize = ([\\d_]+);',
                             'u',
                         ),
                     )![1]
@@ -70,16 +74,18 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(
             rows
                 .slice(0, 3)
-                .every((value) => value.degree === degree('DEGREE')),
+                .every((value) => value.degree === constant('DEGREE')),
         ).toBe(true);
-        expect(rows[3].degree).toBe(degree('AUXILIARY_DEGREE'));
+        expect(rows[3].degree).toBe(constant('AUXILIARY_DEGREE'));
         expect(contribution.match(/witness\.sparse\(/gu)).toHaveLength(4);
         expect(registration.match(/witness\.sparse\(/gu)).toHaveLength(1);
         const support = (code: string, label: string) =>
-            BigInt(
+            constant(
                 code.match(
                     new RegExp(
-                        'witness\\.sparse\\("' + label + '", [A-Z_]+, (\\d+),',
+                        'witness\\.sparse\\(\\s*"' +
+                            label +
+                            '",\\s*[A-Z_]+,\\s*([A-Z_]+),',
                         'u',
                     ),
                 )![1],
@@ -90,11 +96,14 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(support(contribution, 'fhe-secret')).toBe(rows[1].support);
         expect(support(contribution, 'fhe-auxiliary')).toBe(rows[1].support);
         expect(support(contribution, 'auxiliary-secret')).toBe(rows[3].support);
+        // One share-encryption ephemeral per roster position.
         const ephemerals = contribution.match(
-            /\(0\.\.(\d+)\)\s*\.map\(\|index\| witness\.sparse\(&format!\("share-ephemeral-\{index\}"\), DEGREE, (\d+),/u,
+            /\(0\.\.profile\.participants\(\)\)\s*\.map\(\|index\| \{\s*witness\.sparse\(\s*&format!\("share-ephemeral-\{index\}"\),\s*DEGREE,\s*([A-Z_]+),/u,
         )!;
-        expect(BigInt(ephemerals[1])).toBe(rows[2].callsPerOperation);
-        expect(BigInt(ephemerals[2])).toBe(rows[2].support);
+        expect(rows[2].callsPerOperation).toBe(
+            BigInt(profile.participantCount),
+        );
+        expect(constant(ephemerals[1])).toBe(rows[2].support);
     });
 
     it('bounds exact occupancy tails across small and dense alphabets', () => {

@@ -21,6 +21,7 @@ pub struct BallotProof {
     inverses: Vec<field::Element>,
 }
 impl BallotProof {
+    /// The witness must hold the statement profile's ballot relation.
     pub fn create(
         role: &[u8],
         public: &PublicStatement,
@@ -29,13 +30,15 @@ impl BallotProof {
     ) -> Self {
         let statement_digest = public.digest();
         assert_eq!(witness.statement, statement_digest);
-        let mut context_hash = transcript::context_hasher(role);
+        let relation = ballot_relation(public.profile);
+        assert_eq!(witness.relation, relation);
+        let mut context_hash = transcript::context_hasher(&relation, role);
         context_hash.update(&public.header);
         for polynomial in &public.polynomials {
             context_hash.update(polynomial);
         }
         let context = context_hash.finalize().into();
-        let mut transcript = Transcript::new(role, context);
+        let mut transcript = Transcript::new(role, context, relation.message_bytes());
         transcript.next();
         let first = FirstOracle::create(role, &witness, false);
         transcript.respond(&[&first.tree.root()]);
@@ -71,7 +74,7 @@ impl BallotProof {
             &inverses,
             &transcript.message,
         );
-        let folding = fri::Fri::create(role, coefficients, &mut transcript);
+        let folding = fri::Fri::create(role, relation.oracles(), coefficients, &mut transcript);
         Self {
             statement_digest,
             context,
@@ -85,7 +88,8 @@ impl BallotProof {
         }
     }
     pub fn write(&self, output: &mut impl Write) {
-        output.write_all(b"LBP1").unwrap();
+        let relation = &self.witness.relation;
+        output.write_all(relation.proof_magic).unwrap();
         output.write_all(&self.statement_digest).unwrap();
         output.write_all(&self.context).unwrap();
         for root in [
@@ -111,7 +115,7 @@ impl BallotProof {
         let openings = self.first.openings(&self.witness, &indices);
         let payloads: Vec<&[u8]> = openings
             .iter()
-            .map(|value| &value[4..4 + FIRST_WIDTH])
+            .map(|value| &value[4..4 + relation.first_width()])
             .collect();
         self.first
             .tree
@@ -122,7 +126,7 @@ impl BallotProof {
             .openings(&self.witness, &self.inverses, &indices);
         let payloads: Vec<&[u8]> = openings
             .iter()
-            .map(|value| &value[4..4 + SECOND_WIDTH])
+            .map(|value| &value[4..4 + relation.second_width()])
             .collect();
         self.second
             .tree
@@ -142,5 +146,70 @@ impl BallotProof {
             let views: Vec<&[u8]> = payloads.iter().map(|value| value.as_slice()).collect();
             layer.tree.write_multiproof(&indices, &views, output);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, statement::tests::synthetic_ballot};
+    use supported_profile::Profile;
+
+    fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
+        let Ok(mut verifier) =
+            Verifier::new(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
+        else {
+            return false;
+        };
+        for part in std::iter::once(&statement.header).chain(&statement.polynomials) {
+            for chunk in part.chunks(CHUNK_LIMIT) {
+                if verifier.push_statement(chunk).is_err() {
+                    return false;
+                }
+            }
+        }
+        if verifier.finish_statement().is_err() {
+            return false;
+        }
+        for chunk in proof[HEADER_LENGTH..].chunks(CHUNK_LIMIT) {
+            if verifier.push_proof(chunk).is_err() {
+                return false;
+            }
+        }
+        verifier.finish()
+    }
+
+    #[test]
+    fn ballot_proofs_verify_only_for_their_role_profile_and_true_ciphertext() {
+        let profile = Profile::new(3, 2).unwrap();
+        let role = b"ballot-proof-test";
+        let (statement, columns) = synthetic_ballot(profile);
+        let relation = ballot_relation(profile);
+        let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
+        let proof = BallotProof::create(role, &statement, witness, false);
+        let mut bytes = Vec::new();
+        proof.write(&mut bytes);
+        drop(proof);
+        assert!(bytes.len() <= relation.maximum_proof_bytes());
+        assert!(verify(profile, role, &statement, &bytes));
+        assert!(!verify(profile, b"another-role", &statement, &bytes));
+        // The same bytes are a statement of another option count only by
+        // header, which that profile's verifier refuses.
+        assert!(!verify(
+            Profile::new(3, 3).unwrap(),
+            role,
+            &statement,
+            &bytes
+        ));
+        // A proof for a ciphertext coefficient changed by one cannot meet
+        // the affine relation. The coefficient is uniform, so its magnitude
+        // stays nonzero and below half the modulus.
+        let (mut statement, columns) = synthetic_ballot(profile);
+        statement.polynomials[2][1] ^= 1;
+        let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
+        let proof = BallotProof::create(role, &statement, witness, true);
+        let mut bytes = Vec::new();
+        proof.write(&mut bytes);
+        assert!(!verify(profile, role, &statement, &bytes));
     }
 }

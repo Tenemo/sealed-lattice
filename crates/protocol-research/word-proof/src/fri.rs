@@ -34,7 +34,14 @@ pub fn requested(queries: &[usize], length: usize) -> Vec<usize> {
     output
 }
 impl Fri {
-    pub fn create(role: &[u8], coefficients: Vec<Element>, transcript: &mut Transcript) -> Self {
+    /// The first fold challenge follows the relation's combination
+    /// challenges, two for each of its oracles.
+    pub fn create(
+        role: &[u8],
+        oracles: usize,
+        coefficients: Vec<Element>,
+        transcript: &mut Transcript,
+    ) -> Self {
         let mut coefficients = Zeroizing::new(coefficients);
         assert_eq!(coefficients.len(), MAX_DEGREE + 1);
         let mut length = DOMAIN;
@@ -47,7 +54,7 @@ impl Fri {
             }
             let scalar = challenge(
                 &transcript.message,
-                if round == 0 { 2 * ORACLES } else { 0 },
+                if round == 0 { 2 * oracles } else { 0 },
                 false,
             );
             coefficients = Zeroizing::new(

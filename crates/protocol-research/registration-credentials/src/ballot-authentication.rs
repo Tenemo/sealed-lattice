@@ -9,6 +9,7 @@ use fips204::{
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
 use stateful_sha3::{Digest, Sha3_512};
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
@@ -51,6 +52,7 @@ pub struct BallotEnvelope {
 }
 impl BallotEnvelope {
     pub fn new(
+        profile: Profile,
         poll: [u8; 64],
         inventory: [u8; 64],
         position: usize,
@@ -58,13 +60,8 @@ impl BallotEnvelope {
         body_length: usize,
         body_identity: [u8; 64],
     ) -> Result<Self, Error> {
-        use crate::ballot_body::{
-            CIPHERTEXT_BYTES, HEADER_BYTES, MAXIMUM_PROOF_BYTES, MINIMUM_PROOF_BYTES,
-        };
-        if position >= 20
-            || !(HEADER_BYTES + CIPHERTEXT_BYTES + MINIMUM_PROOF_BYTES
-                ..=HEADER_BYTES + CIPHERTEXT_BYTES + MAXIMUM_PROOF_BYTES)
-                .contains(&body_length)
+        if position >= profile.participants()
+            || !crate::ballot_body::body_lengths(profile).contains(&body_length)
         {
             return Err(Error::Shape);
         }
@@ -78,11 +75,12 @@ impl BallotEnvelope {
         bytes[150..].copy_from_slice(&body_identity);
         Ok(Self { bytes })
     }
-    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+    pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != ENVELOPE_BYTES || &bytes[..4] != b"LBE2" {
             return Err(Error::Shape);
         }
         Self::new(
+            profile,
             bytes[4..68].try_into().unwrap(),
             bytes[68..132].try_into().unwrap(),
             u16::from_le_bytes(bytes[132..134].try_into().unwrap()) as usize,
@@ -193,6 +191,7 @@ impl Credential {
     ) -> Result<RetainedBallotOwner, Error> {
         if context.poll != poll.identity()
             || context.runtime != poll.runtime()
+            || context.profile().options() != poll.manifest().option_count()
             || self.completed_body != Some(context.owner_body)
         {
             return Err(Error::Context);
@@ -447,32 +446,61 @@ mod tests {
     }
     #[test]
     fn envelope_lengths_and_positions_are_bounded_before_body_work() {
-        let minimum = HEADER_BYTES + CIPHERTEXT_BYTES + MINIMUM_PROOF_BYTES;
-        let maximum = HEADER_BYTES + CIPHERTEXT_BYTES + MAXIMUM_PROOF_BYTES;
-        for (length, time) in [(minimum, 0), (maximum, u64::MAX)] {
-            let value = BallotEnvelope::new([1; 64], [2; 64], 19, time, length, [3; 64]).unwrap();
-            let decoded = BallotEnvelope::decode(value.bytes()).unwrap();
-            assert_eq!(decoded.bytes(), value.bytes());
-            assert_eq!(decoded.ballot_time(), time);
-            assert_eq!(decoded.body_length(), length);
-            assert_eq!(decoded.identity(), value.identity());
-            let mut retimed = *value.bytes();
-            retimed[134] ^= 1;
-            assert_ne!(
-                BallotEnvelope::decode(&retimed).unwrap().identity(),
-                value.identity()
+        for (participants, options) in [(3, 2), (20, 20)] {
+            let profile = Profile::new(participants, options).unwrap();
+            let lengths = body_lengths(profile);
+            let (minimum, maximum) = (*lengths.start(), *lengths.end());
+            let last = participants - 1;
+            for (length, time) in [(minimum, 0), (maximum, u64::MAX)] {
+                let value =
+                    BallotEnvelope::new(profile, [1; 64], [2; 64], last, time, length, [3; 64])
+                        .unwrap();
+                let decoded = BallotEnvelope::decode(profile, value.bytes()).unwrap();
+                assert_eq!(decoded.bytes(), value.bytes());
+                assert_eq!(decoded.ballot_time(), time);
+                assert_eq!(decoded.body_length(), length);
+                assert_eq!(decoded.identity(), value.identity());
+                let mut retimed = *value.bytes();
+                retimed[134] ^= 1;
+                assert_ne!(
+                    BallotEnvelope::decode(profile, &retimed)
+                        .unwrap()
+                        .identity(),
+                    value.identity()
+                );
+                let mut former = *value.bytes();
+                former[3] = b'1';
+                assert!(BallotEnvelope::decode(profile, &former).is_err());
+                assert!(
+                    BallotEnvelope::decode(profile, &value.bytes()[..ENVELOPE_BYTES - 1]).is_err()
+                );
+                let mut extended = value.bytes().to_vec();
+                extended.push(0);
+                assert!(BallotEnvelope::decode(profile, &extended).is_err());
+            }
+            for length in [minimum - 1, maximum + 1, usize::MAX] {
+                assert!(
+                    BallotEnvelope::new(profile, [1; 64], [2; 64], 0, 5, length, [3; 64]).is_err()
+                );
+            }
+            assert!(
+                BallotEnvelope::new(profile, [1; 64], [2; 64], participants, 5, minimum, [3; 64])
+                    .is_err()
             );
-            let mut former = *value.bytes();
-            former[3] = b'1';
-            assert!(BallotEnvelope::decode(&former).is_err());
-            assert!(BallotEnvelope::decode(&value.bytes()[..ENVELOPE_BYTES - 1]).is_err());
-            let mut extended = value.bytes().to_vec();
-            extended.push(0);
-            assert!(BallotEnvelope::decode(&extended).is_err());
         }
-        for length in [minimum - 1, maximum + 1, usize::MAX] {
-            assert!(BallotEnvelope::new([1; 64], [2; 64], 0, 5, length, [3; 64]).is_err());
-        }
-        assert!(BallotEnvelope::new([1; 64], [2; 64], 20, 5, minimum, [3; 64]).is_err());
+        // The widest profile's last position is no position of a
+        // three-participant roster.
+        let wide = Profile::new(20, 20).unwrap();
+        let value = BallotEnvelope::new(
+            wide,
+            [1; 64],
+            [2; 64],
+            19,
+            5,
+            *body_lengths(wide).start(),
+            [3; 64],
+        )
+        .unwrap();
+        assert!(BallotEnvelope::decode(Profile::new(3, 2).unwrap(), value.bytes()).is_err());
     }
 }

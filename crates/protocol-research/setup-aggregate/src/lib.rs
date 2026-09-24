@@ -1,4 +1,5 @@
 use num_bigint::{BigInt, Sign};
+use supported_profile::{Family, Profile};
 
 mod retained;
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
@@ -10,43 +11,16 @@ pub use retained::{
     RetainedSetupInputs, VerifiedAggregatePolynomial,
 };
 
-const PARAMETERS: &[u8; 137] = include_bytes!("../../setup-proof/parameters.bin");
 pub const CHUNK_BYTES: usize = 524_288;
 
-#[derive(Clone, Copy, Debug)]
-pub enum ModulusKind {
-    Fhe,
-    Sharing,
-    Auxiliary,
-}
-impl ModulusKind {
-    pub fn for_contribution_polynomial(index: usize) -> Option<Self> {
-        if index < 42 && [1, 2, 4, 6].contains(&(index % 7)) {
-            Some(Self::Fhe)
-        } else if (44..=72).contains(&index) && !(index - 43).is_multiple_of(3) {
-            Some(Self::Sharing)
-        } else if index == 74 {
-            Some(Self::Auxiliary)
-        } else {
-            None
-        }
-    }
-    pub fn degree(self) -> usize {
-        match self {
-            Self::Auxiliary => 4096,
-            _ => 65536,
-        }
-    }
-    pub fn magnitude_bytes(self) -> &'static [u8] {
-        match self {
-            Self::Fhe => &PARAMETERS[4..112],
-            Self::Sharing => &PARAMETERS[112..132],
-            Self::Auxiliary => &PARAMETERS[132..137],
-        }
-    }
-    pub fn coefficient_bytes(self) -> usize {
-        self.magnitude_bytes().len() + 1
-    }
+/// The family of a setup polynomial that contribution bodies carry, and so
+/// the aggregate sums.
+pub fn contribution_family(profile: Profile, index: usize) -> Option<Family> {
+    profile
+        .contribution_body_polynomials()
+        .contains(&index)
+        .then(|| profile.setup_family(index))
+        .flatten()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -61,12 +35,12 @@ pub struct PolynomialAdder {
     width: usize,
 }
 impl PolynomialAdder {
-    pub fn new(kind: ModulusKind) -> Self {
-        let modulus = BigInt::from_bytes_le(Sign::Plus, kind.magnitude_bytes());
+    pub fn new(profile: Profile, family: Family) -> Self {
+        let modulus = BigInt::from_bytes_le(Sign::Plus, &profile.family_modulus(family));
         Self {
             half: &modulus >> 1usize,
             modulus,
-            width: kind.coefficient_bytes(),
+            width: 1 + profile.family_magnitude_bytes(family),
         }
     }
     pub(crate) fn decode(&self, bytes: &[u8]) -> Result<BigInt, Refusal> {
@@ -125,10 +99,15 @@ mod browser {
         SESSION.with(|value| value.borrow_mut().input.as_mut_ptr() as usize)
     }
     #[unsafe(no_mangle)]
-    pub extern "C" fn aggregate_begin(index: usize) -> u32 {
+    pub extern "C" fn aggregate_begin(participants: usize, options: usize, index: usize) -> u32 {
         SESSION.with(|value| {
             let mut value = value.borrow_mut();
-            value.adder = ModulusKind::for_contribution_polynomial(index).map(PolynomialAdder::new);
+            value.adder = Profile::new(participants, options)
+                .ok()
+                .and_then(|profile| {
+                    contribution_family(profile, index)
+                        .map(|family| PolynomialAdder::new(profile, family))
+                });
             u32::from(value.adder.is_none())
         })
     }
@@ -165,12 +144,13 @@ mod tests {
     }
     #[test]
     fn centered_wraps_and_cancellation_are_exact() {
-        for kind in [
-            ModulusKind::Fhe,
-            ModulusKind::Sharing,
-            ModulusKind::Auxiliary,
+        for (participants, options, family) in [
+            (3, 2, Family::Fhe),
+            (20, 20, Family::Fhe),
+            (3, 2, Family::Sharing),
+            (3, 2, Family::Auxiliary),
         ] {
-            let adder = PolynomialAdder::new(kind);
+            let adder = PolynomialAdder::new(Profile::new(participants, options).unwrap(), family);
             let values = [
                 BigInt::from(0),
                 BigInt::from(1),
@@ -197,7 +177,8 @@ mod tests {
     }
     #[test]
     fn refuses_noncanonical_values_and_shapes() {
-        let adder = PolynomialAdder::new(ModulusKind::Auxiliary);
+        let profile = Profile::new(3, 2).unwrap();
+        let adder = PolynomialAdder::new(profile, Family::Auxiliary);
         let zero = vec![0; adder.width];
         let mut negative_zero = zero.clone();
         negative_zero[0] = 1;
@@ -222,8 +203,36 @@ mod tests {
         );
         assert_eq!(adder.add_into(&[], &mut []), Err(Refusal::Shape));
         assert_eq!(adder.add_into(&zero, &mut [0]), Err(Refusal::Shape));
-        assert!(ModulusKind::for_contribution_polynomial(0).is_none());
-        assert!(ModulusKind::for_contribution_polynomial(43).is_none());
-        assert!(ModulusKind::for_contribution_polynomial(75).is_none());
+    }
+    #[test]
+    fn only_contribution_polynomials_have_an_aggregate_family() {
+        for (participants, options) in [(3, 2), (20, 20)] {
+            let profile = Profile::new(participants, options).unwrap();
+            for index in [
+                profile.fhe_polynomial(0, 0),
+                profile.fhe_polynomial(profile.gadget_length() - 1, 5),
+                profile.share_common_polynomial(),
+                profile.recipient_key_polynomial(participants - 1),
+                profile.auxiliary_common_polynomial(),
+                profile.setup_polynomials(),
+            ] {
+                assert_eq!(contribution_family(profile, index), None);
+            }
+            for (index, family) in [
+                (profile.fhe_polynomial(0, 1), Family::Fhe),
+                (
+                    profile.fhe_polynomial(profile.gadget_length() - 1, 6),
+                    Family::Fhe,
+                ),
+                (profile.share_constant_polynomial(0), Family::Sharing),
+                (
+                    profile.share_linear_polynomial(participants - 1),
+                    Family::Sharing,
+                ),
+                (profile.auxiliary_key_polynomial(), Family::Auxiliary),
+            ] {
+                assert_eq!(contribution_family(profile, index), Some(family));
+            }
+        }
     }
 }

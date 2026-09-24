@@ -5,11 +5,6 @@ edition = "2024"
 publish = false
 autobins = false
 
-[[bin]]
-name = "verify-registration-record"
-path = "src/bin/verify-registration-record.rs"
-
-
 [dependencies]
 aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
 aes = { version = "=0.8.4", features = ["zeroize"] }
@@ -22,6 +17,7 @@ zeroize = "=1.8.2"
 registration-proof = { path = "../registration-proof", default-features = false }
 registration-verifier = { path = "../registration-verifier", default-features = false }
 linked-release-proof = { path = "../linked-release-proof", default-features = false }
+supported-profile = { path = "../supported-profile" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "=0.3.3"

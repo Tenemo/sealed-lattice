@@ -109,7 +109,7 @@ impl VerifiedCloseBarrier {
 impl CloseContext {
     pub fn new(poll: Arc<VerifiedPoll>, setup: Arc<VerifiedSetupAggregate>) -> Result<Self, Error> {
         let proposal = setup.inventory().proposal().proposal();
-        if !(3..=20).contains(&proposal.records().len())
+        if !supported_profile::Profile::participant_range().contains(&proposal.records().len())
             || proposal
                 .records()
                 .iter()

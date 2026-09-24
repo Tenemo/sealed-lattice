@@ -18,6 +18,7 @@ members = [
     "rns-arithmetic-probe",
     "proof-lookup-table",
     "contribution-prover",
+    "supported-profile",
 ]
 exclude = ["vendor/fhe-rs", "vendor/keccak"]
 resolver = "3"

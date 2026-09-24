@@ -1,180 +1,196 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Fraction {
-    numerator: i128,
-    denominator: i128,
-}
-impl Fraction {
-    const ZERO: Self = Self {
-        numerator: 0,
-        denominator: 1,
+use supported_profile::Profile;
+
+/// The signed monomial X^exponent of Z[X]/(X^R + 1).
+fn monomial(exponent: usize, degree: usize) -> Vec<i64> {
+    let mut value = vec![0; degree];
+    value[exponent % degree] = if (exponent / degree).is_multiple_of(2) {
+        1
+    } else {
+        -1
     };
-    const ONE: Self = Self {
-        numerator: 1,
-        denominator: 1,
-    };
-    fn new(numerator: i128, denominator: i128) -> Self {
-        assert_ne!(denominator, 0);
-        let sign = if denominator < 0 { -1 } else { 1 };
-        let mut left = numerator.abs();
-        let mut right = denominator.abs();
-        while right != 0 {
-            (left, right) = (right, left % right);
-        }
-        Self {
-            numerator: sign * numerator / left,
-            denominator: denominator.abs() / left,
-        }
-    }
-    fn add(self, other: Self) -> Self {
-        Self::new(
-            self.numerator
-                .checked_mul(other.denominator)
-                .unwrap()
-                .checked_add(other.numerator.checked_mul(self.denominator).unwrap())
-                .unwrap(),
-            self.denominator.checked_mul(other.denominator).unwrap(),
-        )
-    }
-    fn negative(self) -> Self {
-        Self {
-            numerator: -self.numerator,
-            ..self
-        }
-    }
-    fn multiply(self, other: Self) -> Self {
-        Self::new(
-            self.numerator.checked_mul(other.numerator).unwrap(),
-            self.denominator.checked_mul(other.denominator).unwrap(),
-        )
-    }
-    fn inverse(self) -> Self {
-        Self::new(self.denominator, self.numerator)
-    }
-}
-type Ring = [Fraction; 8];
-fn monomial(exponent: usize) -> Ring {
-    let mut value = [Fraction::ZERO; 8];
-    value[exponent % 8] = Fraction::new(if exponent % 16 >= 8 { -1 } else { 1 }, 1);
     value
 }
-fn product(left: &Ring, right: &Ring) -> Ring {
-    let mut result = [Fraction::ZERO; 8];
-    for (i, a) in left.iter().enumerate() {
-        for (j, b) in right.iter().enumerate() {
-            let term = a.multiply(*b);
-            result[(i + j) % 8] =
-                result[(i + j) % 8].add(if i + j >= 8 { term.negative() } else { term });
+fn product(left: &[i64], right: &[i64]) -> Vec<i64> {
+    let degree = left.len();
+    let mut result = vec![0i64; degree];
+    for (first, left) in left.iter().enumerate() {
+        for (second, right) in right.iter().enumerate() {
+            let term = left.checked_mul(*right).unwrap();
+            if first + second < degree {
+                result[first + second] += term;
+            } else {
+                result[first + second - degree] -= term;
+            }
         }
     }
     result
 }
-fn inverse(value: &Ring) -> Ring {
-    let columns: [Ring; 8] = std::array::from_fn(|column| product(value, &monomial(column)));
-    let mut rows: [[Fraction; 9]; 8] = std::array::from_fn(|row| {
-        std::array::from_fn(|column| {
-            if column < 8 {
-                columns[column][row]
-            } else if row == 0 {
-                Fraction::ONE
-            } else {
-                Fraction::ZERO
-            }
-        })
-    });
-    for column in 0..8 {
-        let pivot = (column..8)
-            .find(|row| rows[*row][column].numerator != 0)
-            .expect("Distinct interpolation points are units");
-        rows.swap(column, pivot);
-        let scale = rows[column][column].inverse();
-        for value in &mut rows[column] {
-            *value = value.multiply(scale);
-        }
-        let pivot = rows[column];
-        for (row, values) in rows.iter_mut().enumerate() {
-            if row != column {
-                let scale = values[column];
-                for (value, coefficient) in values.iter_mut().zip(pivot) {
-                    *value = value.add(scale.multiply(coefficient).negative());
-                }
-            }
+/// Twice the inverse of 1 - X^k for k not a multiple of 2R. With
+/// k = 2^v * odd, X^k has order 2R / 2^v, so with L = R / 2^v,
+/// (1 - X^k) * sum_{i < L} X^(k i) = 1 - X^(k L) = 2.
+fn doubled_inverse(exponent: usize, degree: usize) -> Vec<i64> {
+    let exponent = exponent % (2 * degree);
+    assert_ne!(exponent, 0);
+    let mut result = vec![0; degree];
+    for index in 0..degree >> exponent.trailing_zeros() {
+        for (sum, value) in result.iter_mut().zip(monomial(exponent * index, degree)) {
+            *sum += value;
         }
     }
-    std::array::from_fn(|index| rows[index][8])
+    result
 }
 
-/// Four times the exact zero-interpolation weights in Z[X]/(X^8+1).
-/// The caller lifts X to X^(65536/8) in the actual ciphertext ring.
-pub(crate) fn cleared_weights(positions: [usize; 4]) -> Result<[[i128; 8]; 4], ()> {
-    if positions.iter().any(|position| *position >= 10)
+/// The clearing factor times each selected position's Lagrange coefficient
+/// at zero in Z[X]/(X^R + 1), where roster position a is X^a. The
+/// coefficient of position i is the product over the other positions j of
+/// 1 / (1 - X^(a_i - a_j)). The caller lifts X to X^(N/R) in the ciphertext
+/// ring.
+pub(crate) fn cleared_weights(profile: Profile, positions: &[usize]) -> Result<Vec<Vec<i64>>, ()> {
+    if positions.len() != profile.release_threshold()
+        || positions
+            .iter()
+            .any(|position| *position >= profile.participants())
         || positions.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(());
     }
-    let points = positions.map(monomial);
-    Ok(std::array::from_fn(|selected| {
-        let mut numerator = monomial(0);
-        let mut denominator = monomial(0);
-        for other in 0..4 {
-            if other == selected {
-                continue;
+    let degree = profile.interpolation_degree();
+    let period = 2 * degree;
+    let clearing = profile.clearing_factor() as i64;
+    // Each factor is half a doubled inverse.
+    let divisor = 1i64 << (positions.len() - 1);
+    Ok(positions
+        .iter()
+        .map(|member| {
+            let mut numerator = monomial(0, degree);
+            for other in positions.iter().filter(|other| *other != member) {
+                numerator = product(
+                    &numerator,
+                    &doubled_inverse((member + period - other) % period, degree),
+                );
             }
-            numerator = product(&numerator, &points[other].map(Fraction::negative));
-            denominator = product(
-                &denominator,
-                &std::array::from_fn(|index| {
-                    points[selected][index].add(points[other][index].negative())
-                }),
-            );
-        }
-        product(&numerator, &inverse(&denominator)).map(|value| {
-            let scaled = value.multiply(Fraction::new(4, 1));
-            assert_eq!(
-                scaled.denominator, 1,
-                "The selected profile requires the original denominator clearing factor"
-            );
-            scaled.numerator
+            numerator
+                .into_iter()
+                .map(|value| {
+                    let scaled = value * clearing;
+                    assert_eq!(
+                        scaled % divisor,
+                        0,
+                        "The clearing factor clears every reconstruction denominator"
+                    );
+                    scaled / divisor
+                })
+                .collect()
         })
-    }))
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn every_actual_release_subset_reconstructs_all_sharing_basis_terms() {
-        let mut subsets = 0;
-        for a in 0..10 {
-            for b in a + 1..10 {
-                for c in b + 1..10 {
-                    for d in c + 1..10 {
-                        let positions = [a, b, c, d];
-                        let weights = cleared_weights(positions).unwrap();
-                        for power in 0..4 {
-                            let mut sum = [0i128; 8];
-                            for (position, weight) in positions.iter().zip(weights) {
-                                for (coefficient, value) in weight.into_iter().enumerate() {
-                                    let exponent = coefficient + position * power;
-                                    sum[exponent % 8] += if (exponent / 8) % 2 == 0 {
-                                        value
-                                    } else {
-                                        -value
-                                    };
-                                }
-                            }
-                            let mut expected = [0i128; 8];
-                            if power == 0 {
-                                expected[0] = 4;
-                            }
-                            assert_eq!(sum, expected);
-                        }
-                        subsets += 1;
-                    }
+
+    // Reconstruction at zero of each sharing basis term X^(a * power) below
+    // the release threshold: the cleared weights sum to the clearing factor
+    // for the constant term and to zero for every other term.
+    fn check(profile: Profile, positions: &[usize]) {
+        let degree = profile.interpolation_degree();
+        let weights = cleared_weights(profile, positions).unwrap();
+        for power in 0..profile.release_threshold() {
+            let mut sum = vec![0i64; degree];
+            for (position, weight) in positions.iter().zip(&weights) {
+                for (total, value) in sum
+                    .iter_mut()
+                    .zip(product(weight, &monomial(position * power, degree)))
+                {
+                    *total += value;
                 }
             }
+            let mut expected = vec![0i64; degree];
+            if power == 0 {
+                expected[0] = profile.clearing_factor() as i64;
+            }
+            assert_eq!(
+                sum, expected,
+                "profile={profile:?}, positions={positions:?}"
+            );
         }
-        assert_eq!(subsets, 210);
-        assert!(cleared_weights([0, 0, 1, 2]).is_err());
-        assert!(cleared_weights([0, 1, 2, 10]).is_err());
+    }
+    fn subsets(count: usize, size: usize, visit: &mut impl FnMut(&[usize])) {
+        fn extend(
+            next: usize,
+            count: usize,
+            size: usize,
+            chosen: &mut Vec<usize>,
+            visit: &mut impl FnMut(&[usize]),
+        ) {
+            if chosen.len() == size {
+                visit(chosen);
+                return;
+            }
+            for position in next..count {
+                chosen.push(position);
+                extend(position + 1, count, size, chosen, visit);
+                chosen.pop();
+            }
+        }
+        extend(0, count, size, &mut Vec::new(), visit);
+    }
+
+    #[test]
+    fn every_release_subset_of_small_rosters_reconstructs_all_sharing_basis_terms() {
+        for (participants, expected) in [(3, 3), (4, 6), (7, 35), (10, 210), (12, 495)] {
+            let profile = Profile::new(participants, 2).unwrap();
+            let mut count = 0;
+            subsets(
+                participants,
+                profile.release_threshold(),
+                &mut |positions| {
+                    check(profile, positions);
+                    count += 1;
+                },
+            );
+            assert_eq!(count, expected);
+        }
+    }
+
+    #[test]
+    fn spread_release_subsets_of_large_rosters_reconstruct_all_sharing_basis_terms() {
+        for participants in [13, 16, 19, 20] {
+            let profile = Profile::new(participants, 2).unwrap();
+            let size = profile.release_threshold();
+            let mut state = 0x2545_f491_4f6c_dd1d_u64 ^ participants as u64;
+            let mut candidates = vec![
+                (0..size).collect::<Vec<_>>(),
+                (participants - size..participants).collect(),
+                (0..size)
+                    .map(|index| index * (participants - 1) / (size - 1))
+                    .collect(),
+            ];
+            for _ in 0..64 {
+                let mut positions: Vec<usize> = (0..participants).collect();
+                for index in (1..participants).rev() {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    positions.swap(index, (state % (index as u64 + 1)) as usize);
+                }
+                let mut chosen = positions[..size].to_vec();
+                chosen.sort_unstable();
+                candidates.push(chosen);
+            }
+            for positions in candidates {
+                check(profile, &positions);
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_position_sets_refuse() {
+        let profile = Profile::new(10, 10).unwrap();
+        assert!(cleared_weights(profile, &[0, 0, 1, 2]).is_err());
+        assert!(cleared_weights(profile, &[0, 1, 2, 10]).is_err());
+        assert!(cleared_weights(profile, &[2, 1, 3, 4]).is_err());
+        assert!(cleared_weights(profile, &[0, 1, 2]).is_err());
+        assert!(cleared_weights(profile, &[0, 1, 2, 3, 4]).is_err());
     }
 }

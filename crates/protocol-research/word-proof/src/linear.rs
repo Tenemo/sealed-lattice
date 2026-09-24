@@ -3,8 +3,9 @@ use crate::{
     oracles::{FirstOracle, SecondOracle, Witness, extension_values},
     parameters::*,
 };
-use setup_stream_kernel::{PolynomialStream, prover_operator_plan};
-use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
+use setup_stream_kernel::prover_operator_plan;
+use std::collections::BTreeMap;
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 fn combined_witness(
@@ -93,66 +94,22 @@ pub enum PreparedPolynomial {
     Adjoint(Vec<Element>),
 }
 impl LinearOracle {
-    pub fn create(
-        directory: &Path,
-        role: &[u8],
-        witness: &Witness,
-        first: &FirstOracle,
-        second: &SecondOracle,
-        challenges: Challenges,
-        adversarial_affine: bool,
-    ) -> Self {
-        let plan = prover_operator_plan(challenges.alpha).unwrap();
-        let alpha = challenges.alpha;
-        let polynomials = (0..75).map(|index| {
-            let family = if index < 42 {
-                0
-            } else if index < 73 {
-                1
-            } else {
-                2
-            };
-            let mut parser = PolynomialStream::new(family, alpha).unwrap();
-            let mut file =
-                File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
-            let mut buffer = vec![0; 1 << 20];
-            loop {
-                let length = file.read(&mut buffer).unwrap();
-                if length == 0 {
-                    break;
-                }
-                parser.push(&buffer[..length]).unwrap();
-            }
-            if plan.common_columns[index].is_empty() {
-                PreparedPolynomial::Value(parser.finish_value().unwrap())
-            } else {
-                PreparedPolynomial::Adjoint(parser.adjoint().unwrap())
-            }
-        });
-        Self::create_prepared(
-            role,
-            witness,
-            first,
-            second,
-            challenges,
-            adversarial_affine,
-            polynomials,
-        )
-    }
     pub fn create_prepared(
+        profile: Profile,
         role: &[u8],
         witness: &Witness,
         first: &FirstOracle,
         second: &SecondOracle,
         challenges: Challenges,
-        adversarial_affine: bool,
         mut polynomials: impl Iterator<Item = PreparedPolynomial>,
     ) -> Self {
         let Challenges {
             alpha,
             mask: mask_challenge,
         } = challenges;
-        let plan = prover_operator_plan(alpha).unwrap();
+        let relation = &witness.relation;
+        let polynomial_count = profile.setup_polynomials();
+        let plan = prover_operator_plan(profile, alpha).unwrap();
         let mut target = plan.target_offset;
         let mut evaluations = Zeroizing::new(vec![ZERO; DOMAIN]);
         let transform = Transform::new(SYSTEMATIC);
@@ -160,7 +117,7 @@ impl LinearOracle {
         for term in &plan.fixed_terms {
             let group = groups
                 .entry((term.degree, term.automorphism, term.shift, term.constant))
-                .or_insert_with(|| vec![ZERO; COLUMNS]);
+                .or_insert_with(|| vec![ZERO; relation.columns()]);
             for (column, weight) in &term.columns {
                 group[*column] = field::add(group[*column], *weight);
             }
@@ -180,7 +137,7 @@ impl LinearOracle {
         }
         #[cfg(not(target_arch = "wasm32"))]
         println!("Accumulated fixed affine bases");
-        for index in 0..75 {
+        for index in 0..polynomial_count {
             let polynomial = polynomials.next().unwrap();
             if plan.common_columns[index].is_empty() {
                 let PreparedPolynomial::Value(value) = polynomial else {
@@ -230,7 +187,7 @@ impl LinearOracle {
             plan.lookup_weight,
             mask_challenge,
             second.mask_sum,
-            adversarial_affine,
+            false,
         )
     }
 }

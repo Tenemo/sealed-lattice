@@ -4,9 +4,15 @@ research direction
 
 This workspace versions the executable threshold-FHE research construction. It is separate from the published SDK and is not enabled by its foundation API. End-to-end post-quantum security is unestablished. Use synthetic data only.
 
-The current native case uses ten participants, ten options and all ten result identifiers. Five honest participants cast accepted ballots, which meets the minimum turnout of `f+2`, and two corrupt participants submit authenticated invalid ballots. A third corrupt participant signs two on-time envelopes, which make its slot conflicting, and a late one that every verifier refuses. The relay delivers a sixth honest voter's ballot only to two other participants, so the organizer's proposal of `n-f` close responses omits it within the bound of `f`. That voter still signs the target, which the corrupt participants withhold, and its ballot does not reach the result. The case generates fresh original credentials, proves and verifies setup, closes through signed close responses, classifies the usable slots, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction. A target with fewer accepted ballots than the minimum turnout takes the no-result branch. The no-result cases cover a close with no ballot and one whose only listed submission is an authenticated invalid ballot. The latter preserves a valid body header and consumes the classification operands before rejecting its malformed proof. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
+The native cases take a participant count from 3 to 20 and an option count from 2 to 20, ten of each by default, and request every result identifier. Their roles follow from the threshold completion rules, with at most `f=floor((n-1)/3)` corrupt participants. Positions one to `f` are corrupt and withhold their target signatures. The first `f+2` honest positions cast accepted ballots, which meets the minimum turnout. The last corrupt position signs two on-time envelopes, which make its slot conflicting, and a late one that every verifier refuses; the two corrupt positions before it, where present, submit authenticated invalid ballots. When `f` is positive and another honest position remains, the relay delivers the last position's ballot only to the last `f` positions, so the organizer's proposal of `n-f` close responses omits it within the bound of `f`. That voter still signs the target, and its ballot does not reach the result. At three participants `f` is zero, so no participant is corrupt and no ballot is omitted. The case generates fresh original credentials, proves and verifies setup, closes through signed close responses, classifies the usable slots, evaluates the encrypted ranking, certifies its target, proves original-key releases and checks reconstruction from every release subset and from the honest shares that remain after every departure of at most `f` participants. When either kind has more than 256 sets, it checks a deterministic sample of 256. A target with fewer accepted ballots than the minimum turnout takes the no-result branch. The no-result cases cover a close with no ballot and one whose only listed submission is an authenticated invalid ballot. The latter preserves a valid body header and consumes the classification operands before rejecting its malformed proof. These cases retain volatile native private state; they do not establish browser custody, durable terminal publication or a complete participant workflow. Subset reconstruction is not evidence of participants departing before release generation.
 
-Ballots pack a comparison window for every rank, whatever result length the poll requests. The evaluator and terminal decoder support every requested result length for the ten-participant, ten-option profile. The encrypted computation clears omitted ranks; the decoder rejects a plaintext containing them. The complete-ordering program keeps its existing bytes. This arithmetic profile supports no other participant or option count: poll creation refuses other option counts, and a roster proposal refuses other sizes.
+Ballots pack a comparison window for every rank, whatever result length the poll requests. The evaluator and terminal decoder support every requested result length of every profile of 3 to 20 participants and 2 to 20 options. The encrypted computation clears omitted ranks; the decoder rejects a plaintext containing them. The complete-ordering program of ten participants and ten options keeps its existing bytes. Poll creation refuses only option counts outside that range, and a roster proposal refuses only sizes outside it.
+
+The `supported-profile` crate derives each profile's thresholds, interpolation points and relation layouts in closed form. Its tracked `profiles.bin` table carries the searched parameters: both moduli with their primality witnesses, the sharing and release widths, the common sampling width and the share lifting limb and carry widths. The repository's protocol tests compare that table with the independent TypeScript profile model. After a model change, regenerate it with:
+
+```text
+pnpm run research:profiles -- --output crates/protocol-research/supported-profile/profiles.bin
+```
 
 ## Build and run
 
@@ -20,7 +26,15 @@ pnpm run research:protocol -- native-empty
 pnpm run research:protocol -- native-invalid-only
 ```
 
-The focused numerical case checks complete and shorter output prefixes using the same deterministic BFV ciphertext inputs:
+Each native ceremony case optionally takes its participant and option counts:
+
+```text
+pnpm run research:protocol -- native-result 3 2
+```
+
+The runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
+
+The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:
 
 ```text
 pnpm run research:protocol -- native-prefix
@@ -52,7 +66,7 @@ The runner refuses unknown or empty selectors, serializes heavy runs, derives th
 
 All sources, parameters, toolchain selection and third-party code needed by the native generation case are tracked. That case uses `temp/` only for run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.
 
-The public verifier and scalar bridge are library consumers of the same owning Rust verifiers. Target certification alone does not establish archive availability. The complete reduction argument, independent adversarial review, supported-profile coverage, resource qualification and physical qualification remain outstanding.
+The public verifier and scalar bridge are library consumers of the same owning Rust verifiers. Target certification alone does not establish archive availability. The complete reduction argument, independent adversarial review, resource qualification of every supported profile and physical qualification remain outstanding.
 
 The original participant bridge also exposes target signing and certified release in the same scalar instance. New release work requires the actual certificate-derived context and original recipient key; an unsigned retained body passes the owning verifier before signing. Completed-message restoration verifies its original signature and exact body digest and restores consumed authority only. A restored credential signs nothing new until the authenticated participant root unlocks the purposes its records show unused. The experimental worker connects encrypted journal and root transitions, but its complete target/release browser fault gate remains open. These interfaces are not exported by the published SDK.
 

@@ -35,10 +35,10 @@ use foundation::{
     CanonicalItem, RegistrationHeader, hash::StreamingFoundationTupleHash512,
     participant_identity::derive_participant_identity,
 };
+use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
 use zeroize::Zeroizing;
 
 pub const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
-pub const MAXIMUM_PROOF_BYTES: usize = 8_604_512;
 
 #[derive(Debug)]
 pub enum Error {
@@ -173,7 +173,9 @@ pub struct BodyHasher {
 }
 impl BodyHasher {
     pub fn new(header: RegistrationHeader) -> Result<Self, Error> {
-        if !(4004..=MAXIMUM_PROOF_BYTES).contains(&header.proof_length) {
+        if !(PROOF_HEADER_BYTES..=registration_relation().maximum_proof_bytes())
+            .contains(&header.proof_length)
+        {
             return Err(Error::Shape);
         }
         ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Error::Shape)?;

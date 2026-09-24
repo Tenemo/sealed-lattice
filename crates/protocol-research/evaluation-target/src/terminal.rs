@@ -4,11 +4,14 @@ use crate::{
     release::{self, Error},
     release_body::VerifiedReleaseShare,
 };
-use linked_release_proof::{parameters::SYSTEMATIC, statement::release_modulus};
+use linked_release_proof::{
+    parameters::SYSTEMATIC,
+    statement::{release_coefficient_bytes, release_modulus},
+};
 use num_bigint::BigInt;
 use std::sync::Arc;
+use supported_profile::{PLAINTEXT_MODULUS as PRIME, Profile};
 
-const PRIME: u32 = 65537;
 fn multiply(left: u32, right: u32) -> u32 {
     (u64::from(left) * u64::from(right) % u64::from(PRIME)) as u32
 }
@@ -23,8 +26,16 @@ fn power(mut value: u32, mut exponent: u32) -> u32 {
     }
     result
 }
-fn selected_positions(coefficients: &[u32], top_count: usize) -> Result<Vec<usize>, Error> {
-    if !(1..=10).contains(&top_count)
+/// The option at each requested rank. The result plaintext is one at the
+/// slot of each requested rank's option and zero at every other slot.
+fn selected_positions(
+    profile: Profile,
+    coefficients: &[u32],
+    top_count: usize,
+) -> Result<Vec<usize>, Error> {
+    let options = profile.options();
+    let window = profile.rank_window();
+    if !(1..=options).contains(&top_count)
         || coefficients.len() != SYSTEMATIC
         || coefficients.iter().any(|value| *value >= PRIME)
         || coefficients
@@ -77,13 +88,16 @@ fn selected_positions(coefficients: &[u32], top_count: usize) -> Result<Vec<usiz
         used[index] = true;
         let value = values[index];
         exponent = 5 * exponent % SYSTEMATIC;
-        if slot < 1600 && slot % 16 == 0 && slot / 16 % 10 < top_count {
+        if slot < options * options * window
+            && slot.is_multiple_of(window)
+            && slot / window % options < top_count
+        {
             if value > 1 {
                 return Err(Error::Encoding);
             }
             if value == 1 {
-                let option = slot / 160;
-                let rank = slot / 16 % 10;
+                let option = slot / (options * window);
+                let rank = slot / window % options;
                 if selected[rank].replace(option).is_some() {
                     return Err(Error::Encoding);
                 }
@@ -103,7 +117,7 @@ fn selected_positions(coefficients: &[u32], top_count: usize) -> Result<Vec<usiz
         .into_iter()
         .collect::<Option<Vec<_>>>()
         .ok_or(Error::Encoding)?;
-    let mut seen = [false; 10];
+    let mut seen = vec![false; options];
     for position in &result {
         if seen[*position] {
             return Err(Error::Encoding);
@@ -155,15 +169,17 @@ impl ReleaseCollector {
         if target.ciphertext().is_none() {
             return Err(Error::NoResult);
         }
-        if target.inventory().setup().inventory().confirmations().len() != 10
-            || target.inventory().poll().manifest().option_count() != 10
-            || !(1..=10).contains(&target.inventory().poll().top_count())
+        let profile = target.inventory().setup().profile();
+        if target.inventory().setup().inventory().confirmations().len() != profile.participants()
+            || target.inventory().poll().manifest().option_count() != profile.options()
+            || !(1..=profile.options())
+                .contains(&usize::from(target.inventory().poll().top_count()))
         {
             return Err(Error::Context);
         }
         Ok(Self {
             certificate,
-            shares: (0..10).map(|_| None).collect(),
+            shares: (0..profile.participants()).map(|_| None).collect(),
         })
     }
     pub fn insert(&mut self, share: Arc<VerifiedReleaseShare>) -> Result<bool, Error> {
@@ -183,35 +199,48 @@ impl ReleaseCollector {
         *slot = Some(share);
         Ok(true)
     }
+    /// Decrypts with the first release-threshold shares by roster position.
+    /// Each partial carries the clearing factor c and each cleared weight
+    /// another, so the phase is c^2 times the target's; one c is removed
+    /// modulo the release modulus and the other modulo the plaintext
+    /// modulus.
     pub fn result(&self) -> Result<VerifiedResult, Error> {
+        let profile = self.certificate.target().inventory().setup().profile();
+        let threshold = profile.release_threshold();
         let chosen: Vec<_> = self
             .shares
             .iter()
             .enumerate()
             .filter_map(|(position, share)| share.as_ref().map(|share| (position, share)))
-            .take(4)
+            .take(threshold)
             .collect();
-        if chosen.len() != 4 {
+        if chosen.len() != threshold {
             return Err(Error::Incomplete);
         }
-        let positions: [usize; 4] = std::array::from_fn(|index| chosen[index].0);
-        let weights = cleared_weights(positions).map_err(|_| Error::Context)?;
-        let modulus = release_modulus();
+        let positions: Vec<usize> = chosen.iter().map(|(position, _)| *position).collect();
+        let weights = cleared_weights(profile, &positions).map_err(|_| Error::Context)?;
+        let modulus = release_modulus(profile);
         let half = &modulus >> 1usize;
-        let inverse_four = (&modulus * 3u32 + 1u32) / 4u32;
+        let clearing = BigInt::from(profile.clearing_factor());
+        let inverse_clearing = clearing.modpow(&(&modulus - 2u32), &modulus);
         let ciphertext = self
             .certificate
             .target()
             .ciphertext()
             .ok_or(Error::NoResult)?;
-        let constant = release::decode_polynomial(&ciphertext[..SYSTEMATIC * 25], 25, &modulus)?;
-        let mut phase: Vec<_> = constant.into_iter().map(|value| value * 16u32).collect();
+        let width = release_coefficient_bytes(profile);
+        let constant =
+            release::decode_polynomial(&ciphertext[..SYSTEMATIC * width], width, &modulus)?;
+        let mut phase: Vec<_> = constant
+            .into_iter()
+            .map(|value| value * &clearing * &clearing)
+            .collect();
         for (ordinal, (_, share)) in chosen.iter().enumerate() {
             for (power, weight) in weights[ordinal].iter().enumerate() {
                 if *weight == 0 {
                     continue;
                 }
-                let shift = power * SYSTEMATIC / 8;
+                let shift = power * profile.point_stride();
                 for (index, value) in share.body().partial().iter().enumerate() {
                     let position = index + shift;
                     let term = value * BigInt::from(*weight);
@@ -223,11 +252,11 @@ impl ReleaseCollector {
                 }
             }
         }
-        let inverse_plain_four = power(4, PRIME - 2);
+        let inverse_plain_clearing = power(profile.clearing_factor() as u32, PRIME - 2);
         let plaintext: Vec<u32> = phase
             .into_iter()
             .map(|value| {
-                let mut value = (value * &inverse_four) % &modulus;
+                let mut value = (value * &inverse_clearing) % &modulus;
                 if value < BigInt::from(0) {
                     value += &modulus;
                 }
@@ -238,10 +267,11 @@ impl ReleaseCollector {
                 let residue = ((value % PRIME) + PRIME) % PRIME;
                 let digits = residue.to_u32_digits().1;
                 let value = digits.first().copied().unwrap_or(0);
-                multiply(value, inverse_plain_four)
+                multiply(value, inverse_plain_clearing)
             })
             .collect();
         let ordered = selected_positions(
+            profile,
             &plaintext,
             usize::from(self.certificate.target().inventory().poll().top_count()),
         )?;
@@ -259,7 +289,7 @@ impl ReleaseCollector {
         Ok(VerifiedResult {
             certificate: self.certificate.clone(),
             identifiers,
-            participants: positions.to_vec(),
+            participants: positions,
         })
     }
 }
@@ -268,6 +298,13 @@ impl ReleaseCollector {
 mod decoder_tests {
     use super::*;
 
+    // Every boundary shape and the completion profile.
+    fn profiles() -> Vec<Profile> {
+        [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)]
+            .into_iter()
+            .map(|(participants, options)| Profile::new(participants, options).unwrap())
+            .collect()
+    }
     // Direct evaluation-basis interpolation, independent of the decoder's NTT.
     // A nonzero evaluation at z contributes z^(-j)/32768 to coefficient j.
     fn encode_evaluations(entries: &[(usize, u32)]) -> Vec<u32> {
@@ -295,65 +332,93 @@ mod decoder_tests {
             .1[0] as usize;
         (exponent - 1) / 2
     }
-    fn entries(order: &[usize]) -> Vec<(usize, u32)> {
+    fn slot(profile: Profile, option: usize, rank: usize) -> usize {
+        (option * profile.options() + rank) * profile.rank_window()
+    }
+    fn entries(profile: Profile, order: &[usize]) -> Vec<(usize, u32)> {
         order
             .iter()
             .enumerate()
-            .map(|(rank, option)| (evaluation_index((option * 10 + rank) * 16), 1))
+            .map(|(rank, option)| (evaluation_index(slot(profile, *option, rank)), 1))
             .collect()
+    }
+    // The identity, its reverse and a fixed shuffle of the options.
+    fn orders(options: usize) -> Vec<Vec<usize>> {
+        let identity: Vec<usize> = (0..options).collect();
+        let reverse = identity.iter().rev().copied().collect();
+        let shuffled = (0..options)
+            .map(|index| (index * 7 + 3) % options)
+            .collect::<Vec<_>>();
+        let mut orders = vec![identity, reverse];
+        let mut sorted = shuffled.clone();
+        sorted.sort_unstable();
+        if sorted == orders[0] {
+            orders.push(shuffled);
+        }
+        orders
     }
     #[test]
     fn direct_interpolation_decodes_varied_exact_rankings() {
-        for order in [
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-            [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
-            [4, 1, 8, 0, 7, 2, 9, 5, 3, 6],
-        ] {
-            for top_count in 1..=10 {
-                assert_eq!(
-                    selected_positions(
-                        &encode_evaluations(&entries(&order[..top_count])),
-                        top_count,
-                    )
-                    .unwrap(),
-                    order[..top_count]
-                );
+        for profile in profiles() {
+            let options = profile.options();
+            for order in orders(options) {
+                for top_count in [1, options / 2, options - 1, options] {
+                    let top_count = top_count.max(1);
+                    assert_eq!(
+                        selected_positions(
+                            profile,
+                            &encode_evaluations(&entries(profile, &order[..top_count])),
+                            top_count,
+                        )
+                        .unwrap(),
+                        order[..top_count]
+                    );
+                }
             }
         }
     }
     #[test]
     fn decoder_rejects_extra_values_missing_ranks_and_noncanonical_polynomials() {
-        let original = entries(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        let mut variants = Vec::new();
-        let mut missing = original.clone();
-        missing.pop();
-        variants.push(missing);
-        for extra in [
-            (evaluation_index(1), 1),
-            (evaluation_index(1600), 1),
-            // Root exponent 3 belongs to the complementary packing orbit.
-            (1, 1),
-            (original[0].0, 1),
-            (evaluation_index(160), 1),
-        ] {
-            let mut changed = original.clone();
-            changed.push(extra);
-            variants.push(changed);
+        for profile in profiles() {
+            let options = profile.options();
+            let window = profile.rank_window();
+            let identity: Vec<usize> = (0..options).collect();
+            let original = entries(profile, &identity);
+            let mut variants = Vec::new();
+            let mut missing = original.clone();
+            missing.pop();
+            variants.push(missing);
+            for extra in [
+                (evaluation_index(1), 1),
+                (evaluation_index(options * options * window), 1),
+                // Root exponent 3 belongs to the complementary packing orbit.
+                (1, 1),
+                (original[0].0, 1),
+                (evaluation_index(slot(profile, 1, 0)), 1),
+            ] {
+                let mut changed = original.clone();
+                changed.push(extra);
+                variants.push(changed);
+            }
+            let mut repeated = identity.clone();
+            repeated[1] = 0;
+            variants.push(entries(profile, &repeated));
+            for changed in variants {
+                assert!(
+                    selected_positions(profile, &encode_evaluations(&changed), options).is_err()
+                );
+            }
+            let valid = encode_evaluations(&original);
+            for (index, value) in [(1, 1), (0, 65_537)] {
+                let mut changed = valid.clone();
+                changed[index] = value;
+                assert!(selected_positions(profile, &changed, options).is_err());
+            }
+            assert!(selected_positions(profile, &valid[..valid.len() - 1], options).is_err());
+            let mut changed = valid;
+            changed.push(0);
+            assert!(selected_positions(profile, &changed, options).is_err());
         }
-        variants.push(entries(&[0, 0, 2, 3, 4, 5, 6, 7, 8, 9]));
-        for changed in variants {
-            assert!(selected_positions(&encode_evaluations(&changed), 10).is_err());
-        }
-        let valid = encode_evaluations(&original);
-        for (index, value) in [(1, 1), (0, 65_537)] {
-            let mut changed = valid.clone();
-            changed[index] = value;
-            assert!(selected_positions(&changed, 10).is_err());
-        }
-        assert!(selected_positions(&valid[..valid.len() - 1], 10).is_err());
-        let mut changed = valid;
-        changed.push(0);
-        assert!(selected_positions(&changed, 10).is_err());
     }
 
     // Direct evaluation at one packing slot, independent of every transform.
@@ -373,95 +438,113 @@ mod decoder_tests {
     }
     #[test]
     fn packed_ballots_decode_through_every_requested_result_length() {
-        // Totals tie twice, so the canonical tie rule decides two positions.
-        let ballots: [[u8; 10]; 5] = [
-            [3, 9, 9, 1, 7, 2, 10, 5, 4, 6],
-            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-            [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-            [5, 5, 5, 5, 5, 5, 10, 5, 5, 5],
-            [2, 8, 8, 1, 9, 3, 10, 4, 6, 7],
-        ];
-        let mut sum = vec![0u32; 65_536];
-        for scores in &ballots {
-            let packed = ballot_encryption::packing::encode(scores).unwrap();
-            for (total, value) in sum.iter_mut().zip(packed) {
-                *total = (*total + value.rem_euclid(PRIME as i32) as u32) % PRIME;
-            }
-        }
-        let totals: Vec<i64> = (0..10)
-            .map(|option| ballots.iter().map(|scores| i64::from(scores[option])).sum())
-            .collect();
-        let centered = |value: u32| {
-            if value > PRIME / 2 {
-                i64::from(value) - i64::from(PRIME)
-            } else {
-                i64::from(value)
-            }
-        };
-        // Every rank window the evaluator reads holds the same comparisons,
-        // whatever result length the poll requests.
-        let mut ranks = [0; 10];
-        for option in 0..10 {
-            for rank in 0..10 {
-                let mut ahead = 0;
-                for lane in 0..16 {
-                    let difference = centered(slot_value(&sum, (option * 10 + rank) * 16 + lane));
-                    let expected = if lane < 10 {
-                        2 * (totals[lane] - totals[option])
-                    } else {
-                        0
-                    };
-                    assert_eq!(
-                        difference, expected,
-                        "option={option}, rank={rank}, lane={lane}"
-                    );
-                    // The evaluator's tie bias favours the lower canonical opponent.
-                    let bias = if lane < option { 1 } else { -1 };
-                    ahead += usize::from(difference + bias > 0);
-                }
-                if rank == 0 {
-                    ranks[option] = ahead;
-                }
-                assert_eq!(ahead, ranks[option]);
-            }
-            assert_eq!(i64::from(slot_value(&sum, 1600 + option)), totals[option]);
-        }
-        for padding in [1610, 16_383] {
-            assert_eq!(slot_value(&sum, padding), 0);
-        }
-        let mut order: Vec<usize> = (0..10).collect();
-        order.sort_by_key(|option| (std::cmp::Reverse(totals[*option]), *option));
-        assert_eq!(order, [6, 1, 2, 4, 9, 8, 7, 0, 5, 3]);
-        for top_count in 1..=10 {
-            let output: Vec<_> = (0..10)
-                .filter(|option| ranks[*option] < top_count)
-                .map(|option| (evaluation_index((option * 10 + ranks[option]) * 16), 1))
+        for profile in profiles() {
+            let options = profile.options();
+            let window = profile.rank_window();
+            // Scores of every value, with repeated totals so that the
+            // canonical tie rule decides positions.
+            let ballots: Vec<Vec<u8>> = (0..profile.participants().min(5))
+                .map(|ballot| {
+                    (0..options)
+                        .map(|option| ((option * (ballot + 3) + ballot) % 10 + 1) as u8)
+                        .collect()
+                })
                 .collect();
-            assert_eq!(
-                selected_positions(&encode_evaluations(&output), top_count).unwrap(),
-                order[..top_count]
-            );
+            let mut sum = vec![0u32; 65_536];
+            for scores in &ballots {
+                let packed = ballot_encryption::packing::encode(scores).unwrap();
+                for (total, value) in sum.iter_mut().zip(packed) {
+                    *total = (*total + value.rem_euclid(PRIME as i32) as u32) % PRIME;
+                }
+            }
+            let totals: Vec<i64> = (0..options)
+                .map(|option| ballots.iter().map(|scores| i64::from(scores[option])).sum())
+                .collect();
+            let centered = |value: u32| {
+                if value > PRIME / 2 {
+                    i64::from(value) - i64::from(PRIME)
+                } else {
+                    i64::from(value)
+                }
+            };
+            // Every rank window the evaluator reads holds the same
+            // comparisons, whatever result length the poll requests.
+            let mut ranks = vec![0; options];
+            for option in 0..options {
+                for rank in [0, options - 1] {
+                    let mut ahead = 0;
+                    for lane in 0..window {
+                        let difference =
+                            centered(slot_value(&sum, slot(profile, option, rank) + lane));
+                        let expected = if lane < options {
+                            2 * (totals[lane] - totals[option])
+                        } else {
+                            0
+                        };
+                        assert_eq!(
+                            difference, expected,
+                            "option={option}, rank={rank}, lane={lane}"
+                        );
+                        // The evaluator's tie bias favours the lower opponent.
+                        let bias = if lane < option { 1 } else { -1 };
+                        ahead += usize::from(difference + bias > 0);
+                    }
+                    if rank == 0 {
+                        ranks[option] = ahead;
+                    }
+                    assert_eq!(ahead, ranks[option]);
+                }
+                assert_eq!(
+                    i64::from(slot_value(&sum, options * options * window + option)),
+                    totals[option]
+                );
+            }
+            for padding in [options * options * window + options, 16_383] {
+                assert_eq!(slot_value(&sum, padding), 0);
+            }
+            let mut order: Vec<usize> = (0..options).collect();
+            order.sort_by_key(|option| (std::cmp::Reverse(totals[*option]), *option));
+            for top_count in 1..=options {
+                let output: Vec<_> = (0..options)
+                    .filter(|option| ranks[*option] < top_count)
+                    .map(|option| (evaluation_index(slot(profile, option, ranks[option])), 1))
+                    .collect();
+                assert_eq!(
+                    selected_positions(profile, &encode_evaluations(&output), top_count).unwrap(),
+                    order[..top_count]
+                );
+            }
         }
     }
 
     #[test]
     fn shorter_outputs_reject_omitted_ranks_in_the_plaintext() {
-        let order = [4, 1, 8, 0, 7, 2, 9, 5, 3, 6];
-        let complete = encode_evaluations(&entries(&order));
-        for top_count in 1..10 {
-            assert!(selected_positions(&complete, top_count).is_err());
-            let mut extra = entries(&order[..top_count]);
-            extra.push((
-                evaluation_index((order[top_count] * 10 + top_count) * 16),
-                1,
-            ));
-            assert!(selected_positions(&encode_evaluations(&extra), top_count).is_err());
-            let mut missing = entries(&order[..top_count]);
-            missing.pop();
-            assert!(selected_positions(&encode_evaluations(&missing), top_count).is_err());
-        }
-        for top_count in [0, 11, usize::MAX] {
-            assert!(selected_positions(&complete, top_count).is_err());
+        for profile in profiles() {
+            let options = profile.options();
+            let order: Vec<usize> = (0..options).rev().collect();
+            let complete = encode_evaluations(&entries(profile, &order));
+            for top_count in [1, options - 1] {
+                if top_count == options {
+                    continue;
+                }
+                assert!(selected_positions(profile, &complete, top_count).is_err());
+                let mut extra = entries(profile, &order[..top_count]);
+                extra.push((
+                    evaluation_index(slot(profile, order[top_count], top_count)),
+                    1,
+                ));
+                assert!(
+                    selected_positions(profile, &encode_evaluations(&extra), top_count).is_err()
+                );
+                let mut missing = entries(profile, &order[..top_count]);
+                missing.pop();
+                assert!(
+                    selected_positions(profile, &encode_evaluations(&missing), top_count).is_err()
+                );
+            }
+            for top_count in [0, options + 1, usize::MAX] {
+                assert!(selected_positions(profile, &complete, top_count).is_err());
+            }
         }
     }
 }

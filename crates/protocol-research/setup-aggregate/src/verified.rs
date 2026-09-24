@@ -1,8 +1,9 @@
-use crate::{CHUNK_BYTES, ModulusKind, PolynomialAdder};
+use crate::{CHUNK_BYTES, PolynomialAdder};
 use opened_contribution::OpenedContributionVerifier;
 use registration_credentials::contribution_authentication::CommitmentInventory;
 use sha2::{Digest, Sha512};
 use std::sync::Arc;
+use supported_profile::Profile;
 
 #[derive(Clone, Debug)]
 pub struct AggregatePolynomial {
@@ -30,6 +31,9 @@ impl VerifiedSetupAggregate {
     pub fn inventory(&self) -> &Arc<CommitmentInventory> {
         &self.inventory
     }
+    pub fn profile(&self) -> Profile {
+        self.inventory.proposal().proposal().profile()
+    }
     pub fn polynomials(&self) -> &[AggregatePolynomial] {
         &self.polynomials
     }
@@ -42,7 +46,11 @@ impl VerifiedSetupAggregate {
             .iter()
             .find(|polynomial| polynomial.index == index)
             .ok_or(Refusal::Order)?;
-        crate::AggregatePolynomialReader::new(self.inventory.identity(), polynomial.clone())
+        crate::AggregatePolynomialReader::new(
+            self.profile(),
+            self.inventory.identity(),
+            polynomial.clone(),
+        )
     }
 }
 
@@ -70,6 +78,7 @@ struct Pending {
 /// Output chunks are provisional until `finish_contribution` succeeds.
 pub struct SetupAggregator {
     inventory: Arc<CommitmentInventory>,
+    profile: Profile,
     accepted: usize,
     indices: Vec<usize>,
     previous: Vec<AggregatePolynomial>,
@@ -77,21 +86,25 @@ pub struct SetupAggregator {
 }
 impl SetupAggregator {
     pub fn new(inventory: Arc<CommitmentInventory>) -> Result<Self, Refusal> {
-        if inventory.confirmations().len() != 10 {
+        let profile = inventory.proposal().proposal().profile();
+        if inventory.confirmations().len() != profile.participants() {
             return Err(Refusal::Context);
         }
         Ok(Self {
             inventory,
+            profile,
             accepted: 0,
-            indices: (0..75)
-                .filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
-                .collect(),
+            indices: profile.contribution_body_polynomials(),
             previous: Vec::new(),
             pending: None,
         })
     }
     pub fn accepted(&self) -> usize {
         self.accepted
+    }
+    /// Every roster position's opening is accepted and none is pending.
+    pub fn complete(&self) -> bool {
+        self.pending.is_none() && self.accepted == self.inventory.confirmations().len()
     }
     pub fn polynomials(&self) -> &[AggregatePolynomial] {
         &self.previous
@@ -146,8 +159,11 @@ impl SetupAggregator {
             if self.indices.get(pending.ordinal) != Some(&index) || pending.offset != offset {
                 return Err(Refusal::Order);
             }
-            let kind = ModulusKind::for_contribution_polynomial(index).ok_or(Refusal::Order)?;
-            let bytes = kind.degree() * kind.coefficient_bytes();
+            let family = self.profile.setup_family(index).ok_or(Refusal::Order)?;
+            let bytes = self
+                .profile
+                .setup_polynomial_bytes(index)
+                .ok_or(Refusal::Order)?;
             if incoming.len() > bytes.saturating_sub(offset) {
                 return Err(Refusal::Order);
             }
@@ -160,7 +176,7 @@ impl SetupAggregator {
             } else {
                 pending.previous_hash.update(&*previous_and_output);
             }
-            PolynomialAdder::new(kind)
+            PolynomialAdder::new(self.profile, family)
                 .add_into(incoming, previous_and_output)
                 .map_err(|_| Refusal::Body)?;
             pending.output_hash.update(&*previous_and_output);
@@ -220,7 +236,7 @@ impl SetupAggregator {
         Ok(())
     }
     pub fn finish(self) -> Result<VerifiedSetupAggregate, Refusal> {
-        if self.pending.is_some() || self.accepted != self.inventory.confirmations().len() {
+        if !self.complete() {
             return Err(Refusal::Incomplete);
         }
         Ok(VerifiedSetupAggregate {
@@ -235,10 +251,10 @@ mod retained_tests {
     use super::*;
     use num_bigint::{BigInt, Sign};
 
-    fn source(index: usize) -> (AggregatePolynomial, Vec<u8>, Vec<BigInt>) {
-        let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-        let width = kind.coefficient_bytes();
-        let half = BigInt::from_bytes_le(Sign::Plus, kind.magnitude_bytes()) >> 1usize;
+    fn source(profile: Profile, index: usize) -> (AggregatePolynomial, Vec<u8>, Vec<BigInt>) {
+        let family = crate::contribution_family(profile, index).unwrap();
+        let width = 1 + profile.family_magnitude_bytes(family);
+        let half = BigInt::from_bytes_le(Sign::Plus, &profile.family_modulus(family)) >> 1usize;
         let values = vec![
             BigInt::from(0),
             BigInt::from(1),
@@ -246,7 +262,7 @@ mod retained_tests {
             half.clone(),
             -half,
         ];
-        let mut bytes = vec![0; kind.degree() * width];
+        let mut bytes = vec![0; profile.family_degree(family) * width];
         for (position, coefficient) in bytes.chunks_exact_mut(width).enumerate() {
             let (sign, magnitude) = values[position % values.len()].to_bytes_le();
             coefficient[0] = u8::from(sign == Sign::Minus);
@@ -261,37 +277,64 @@ mod retained_tests {
     }
     #[test]
     fn retained_coefficients_match_both_boundaries_in_every_modulus() {
-        for index in [1, 44, 74] {
-            let (expected, bytes, values) = source(index);
-            let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-            let mut reader = crate::AggregatePolynomialReader::new([19; 64], expected).unwrap();
-            let chunk = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
-            for (ordinal, bytes) in bytes.chunks(chunk).enumerate() {
-                reader.push(ordinal * chunk, bytes).unwrap();
-            }
-            let key = reader.finish().unwrap();
-            assert_eq!(key.inventory(), &[19; 64]);
-            assert_eq!(key.index(), index);
-            assert_eq!(key.coefficients().len(), kind.degree());
-            for (position, coefficient) in key.coefficients().iter().enumerate() {
-                assert_eq!(coefficient, &values[position % values.len()]);
+        for (participants, options) in [(3, 2), (20, 20)] {
+            let profile = Profile::new(participants, options).unwrap();
+            for index in [
+                profile.fhe_polynomial(profile.gadget_length() - 1, 6),
+                profile.share_linear_polynomial(participants - 1),
+                profile.auxiliary_key_polynomial(),
+            ] {
+                let (expected, bytes, values) = source(profile, index);
+                let family = profile.setup_family(index).unwrap();
+                let width = 1 + profile.family_magnitude_bytes(family);
+                let mut reader =
+                    crate::AggregatePolynomialReader::new(profile, [19; 64], expected).unwrap();
+                let chunk = CHUNK_BYTES / width * width;
+                for (ordinal, bytes) in bytes.chunks(chunk).enumerate() {
+                    reader.push(ordinal * chunk, bytes).unwrap();
+                }
+                let key = reader.finish().unwrap();
+                assert_eq!(key.inventory(), &[19; 64]);
+                assert_eq!(key.index(), index);
+                assert_eq!(key.coefficients().len(), profile.family_degree(family));
+                for (position, coefficient) in key.coefficients().iter().enumerate() {
+                    assert_eq!(coefficient, &values[position % values.len()]);
+                }
             }
         }
     }
     #[test]
+    fn readers_refuse_a_reference_of_another_profile_or_polynomial() {
+        let small = Profile::new(3, 2).unwrap();
+        let wide = Profile::new(20, 20).unwrap();
+        let index = wide.fhe_polynomial(0, 1);
+        let (expected, _, _) = source(wide, index);
+        // The same key position has fewer ciphertext bytes in the smaller
+        // profile, and a common polynomial is never an aggregate.
+        assert!(crate::AggregatePolynomialReader::new(small, [0; 64], expected.clone()).is_err());
+        let common = AggregatePolynomial {
+            index: wide.fhe_polynomial(0, 0),
+            ..expected
+        };
+        assert!(crate::AggregatePolynomialReader::new(wide, [0; 64], common).is_err());
+    }
+    #[test]
     fn changed_canonical_cache_and_incomplete_reads_supply_no_key() {
-        let (expected, mut bytes, _) = source(74);
-        let mut reader = crate::AggregatePolynomialReader::new([0; 64], expected.clone()).unwrap();
+        let profile = Profile::new(3, 2).unwrap();
+        let (expected, mut bytes, _) = source(profile, profile.auxiliary_key_polynomial());
+        let mut reader =
+            crate::AggregatePolynomialReader::new(profile, [0; 64], expected.clone()).unwrap();
         reader.push(0, &bytes[..bytes.len() - 6]).unwrap();
         assert!(matches!(reader.finish(), Err(Refusal::Incomplete)));
         bytes[1] = 1;
-        let mut reader = crate::AggregatePolynomialReader::new([0; 64], expected).unwrap();
+        let mut reader = crate::AggregatePolynomialReader::new(profile, [0; 64], expected).unwrap();
         reader.push(0, &bytes).unwrap();
         assert!(matches!(reader.finish(), Err(Refusal::PreviousAggregate)));
     }
     #[test]
     fn malformed_reads_poison_only_the_pending_key() {
-        let (expected, bytes, _) = source(74);
+        let profile = Profile::new(3, 2).unwrap();
+        let (expected, bytes, _) = source(profile, profile.auxiliary_key_polynomial());
         let mut negative_zero = vec![0; 6];
         negative_zero[0] = 1;
         let mut unknown_sign = vec![0; 6];
@@ -305,16 +348,17 @@ mod retained_tests {
             (0, unknown_sign),
         ] {
             let mut reader =
-                crate::AggregatePolynomialReader::new([0; 64], expected.clone()).unwrap();
+                crate::AggregatePolynomialReader::new(profile, [0; 64], expected.clone()).unwrap();
             assert!(reader.push(offset, &invalid).is_err());
             assert!(reader.push(0, &bytes).is_err());
             assert!(reader.finish().is_err());
         }
-        let mut reader = crate::AggregatePolynomialReader::new([0; 64], expected.clone()).unwrap();
+        let mut reader =
+            crate::AggregatePolynomialReader::new(profile, [0; 64], expected.clone()).unwrap();
         reader.push(0, &bytes[..6]).unwrap();
         assert!(reader.push(0, &bytes[..6]).is_err());
         assert!(reader.finish().is_err());
-        let mut reader = crate::AggregatePolynomialReader::new([0; 64], expected).unwrap();
+        let mut reader = crate::AggregatePolynomialReader::new(profile, [0; 64], expected).unwrap();
         reader.push(0, &bytes).unwrap();
         assert!(reader.push(bytes.len(), &bytes[..6]).is_err());
         assert!(reader.finish().is_err());

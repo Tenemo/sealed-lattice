@@ -3,33 +3,20 @@ mod convolution;
 mod gaussian;
 mod reduction;
 pub mod registration;
-#[cfg(not(target_arch = "wasm32"))]
-use convolution::reconstruct;
-use convolution::{Plan, RADIX, digit};
+use convolution::{Plan, RADIX_BITS, digit, digit_in};
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
 use sha3::digest::XofReader;
-#[cfg(not(target_arch = "wasm32"))]
-use sha3::{Digest, Sha3_512};
 #[path = "common-polynomial.rs"]
 mod common_polynomial;
-#[cfg(not(target_arch = "wasm32"))]
-use common_polynomial::center;
 use common_polynomial::public_polynomial;
-#[cfg(not(target_arch = "wasm32"))]
-use std::{
-    fs::{File, OpenOptions},
-    io::{BufReader, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+pub use supported_profile::Profile;
+use supported_profile::{
+    AUXILIARY_DEGREE, DEGREE, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS,
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const DEGREE: usize = 65_536;
-const AUXILIARY_DEGREE: usize = 4_096;
-const WORD_COLUMNS: usize = 333;
-const BOOLEAN_COLUMNS: usize = 32;
-const SCALE: i128 = 998_244_353;
-const PARAMETERS: &[u8; 137] = include_bytes!("../../setup-proof/parameters.bin");
+const SCALE: i128 = supported_profile::SHARE_SCALE as i128;
 
 fn errors(label: &str, degree: usize) -> Vec<i128> {
     let mut random = private_reader(label);
@@ -57,22 +44,18 @@ fn sparse_values(label: &str, degree: usize, support: usize) -> Vec<i8> {
     }
     values
 }
+fn integer(bytes: &[u8]) -> BigInt {
+    BigInt::from_bytes_le(Sign::Plus, bytes)
+}
 struct Sparse {
     values: Zeroizing<Vec<i8>>,
     transform: Zeroizing<Vec<u128>>,
 }
-pub struct Witness {
+struct Witness {
     words: Vec<Vec<u16>>,
     booleans: Vec<Vec<u16>>,
 }
 impl Witness {
-    pub fn into_columns(mut self) -> Vec<Vec<u16>> {
-        assert_eq!(self.words.len(), WORD_COLUMNS);
-        assert_eq!(self.booleans.len(), BOOLEAN_COLUMNS);
-        let mut columns = std::mem::take(&mut self.words);
-        columns.append(&mut self.booleans);
-        columns
-    }
     fn new() -> Self {
         Self {
             words: Vec::new(),
@@ -123,29 +106,6 @@ impl Witness {
             self.booleans.push(column);
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    fn write(&self, path: &Path, statement_digest: &[u8; 64]) {
-        assert_eq!(self.words.len(), WORD_COLUMNS);
-        assert_eq!(self.booleans.len(), BOOLEAN_COLUMNS);
-        let mut file = BufWriter::new(
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)
-                .unwrap(),
-        );
-        file.write_all(b"SFW1").unwrap();
-        for value in [DEGREE, WORD_COLUMNS, BOOLEAN_COLUMNS] {
-            file.write_all(&(value as u32).to_le_bytes()).unwrap();
-        }
-        file.write_all(statement_digest).unwrap();
-        for column in self.words.iter().chain(&self.booleans) {
-            for value in column {
-                file.write_all(&value.to_le_bytes()).unwrap();
-            }
-        }
-        file.flush().unwrap();
-    }
 }
 pub trait PolynomialOutput {
     fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize);
@@ -154,64 +114,6 @@ impl Drop for Witness {
     fn drop(&mut self) {
         self.words.zeroize();
         self.booleans.zeroize();
-    }
-}
-#[cfg(not(target_arch = "wasm32"))]
-struct Output {
-    directory: PathBuf,
-    hash: Sha3_512,
-    next: usize,
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl Output {
-    fn new(directory: PathBuf) -> Self {
-        let mut header = Vec::from(b"SCO1".as_slice());
-        header.extend((DEGREE as u32).to_le_bytes());
-        header.extend((AUXILIARY_DEGREE as u32).to_le_bytes());
-        header.extend(&PARAMETERS[4..]);
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(directory.join("header.bin"))
-            .unwrap();
-        file.write_all(&header).unwrap();
-        let mut hash = Sha3_512::new();
-        Digest::update(&mut hash, &header);
-        Self {
-            directory,
-            hash,
-            next: 0,
-        }
-    }
-    fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize) {
-        let mut file = BufWriter::new(
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(
-                    self.directory
-                        .join(format!("polynomial-{:02}.bin", self.next)),
-                )
-                .unwrap(),
-        );
-        let half = modulus >> 1usize;
-        for value in values {
-            assert!(value.abs() <= half);
-            let (negative, mut magnitude) = value.to_bytes_le();
-            assert!(magnitude.len() <= width);
-            magnitude.resize(width, 0);
-            let sign = [u8::from(negative == Sign::Minus)];
-            file.write_all(&sign).unwrap();
-            file.write_all(&magnitude).unwrap();
-            Digest::update(&mut self.hash, sign);
-            Digest::update(&mut self.hash, &magnitude);
-        }
-        file.flush().unwrap();
-        self.next += 1;
-    }
-    fn finish(self) -> [u8; 64] {
-        assert_eq!(self.next, 75);
-        self.hash.finalize().into()
     }
 }
 
@@ -251,23 +153,24 @@ fn key(
         &input.left.values,
         &input.left.transform,
         input.limbs,
+        RADIX_BITS,
     ));
     let error = Zeroizing::new(errors(input.label, degree));
     let transformed = Zeroizing::new(transformed(input.right, input.automorphism));
-    let modulus = reduction::Modulus::from_bytes(&input.modulus.to_bytes_le().1).unwrap();
+    let modulus = reduction::Modulus::new(&input.modulus.to_bytes_le().1, RADIX_BITS).unwrap();
     let direct: Vec<i128> = (0..input.limbs)
         .map(|limb| digit(&input.multiplier, limb))
         .collect();
     let mut values = Vec::with_capacity(degree);
     let mut quotients = Zeroizing::new(Vec::with_capacity(degree));
     for position in 0..degree {
-        let mut raw = Zeroizing::new([0i128; 9]);
+        let mut raw = Zeroizing::new([0i128; reduction::MAXIMUM_LIMBS]);
         for limb in 0..input.limbs {
             raw[limb] = -products[limb][position]
                 + direct[limb] * i128::from(transformed[position])
                 + if limb == 0 { error[position] } else { 0 };
         }
-        let mut reduced = [0u128; 9];
+        let mut reduced = [0u128; reduction::MAXIMUM_LIMBS];
         let result = modulus
             .reduce(&raw[..input.limbs], &mut reduced[..input.limbs])
             .unwrap();
@@ -275,7 +178,7 @@ fn key(
             .iter()
             .rev()
             .fold(BigInt::from(0), |sum, value| {
-                (sum << 96usize) + BigInt::from(*value)
+                (sum << RADIX_BITS) + BigInt::from(*value)
             });
         let value = if result.negative {
             -magnitude
@@ -295,25 +198,26 @@ fn key(
                 - digit(input.modulus, limb) * quotients[position]
                 + carry;
             if limb + 1 < input.limbs {
-                assert_eq!(row % RADIX, 0);
-                carry = row / RADIX;
+                assert_eq!(row % convolution::RADIX, 0);
+                carry = row / convolution::RADIX;
                 carries[limb][position] = carry;
             } else {
                 assert_eq!(row, 0, "final key carry at {position}");
             }
         }
     }
-    witness.signed(16, &quotients);
+    witness.signed(SETUP_QUOTIENT_BITS, &quotients);
     for carry in carries.iter() {
-        witness.signed(16, carry);
+        witness.signed(SETUP_FHE_CARRY_BITS, carry);
     }
-    witness.signed(7, &error);
+    witness.signed(SETUP_ERROR_BITS, &error);
     output.polynomial(&values, input.modulus, input.width);
     #[cfg(not(target_arch = "wasm32"))]
     println!("Generated {}", input.label);
 }
 
 struct ShareInput<'a> {
+    profile: Profile,
     recipient: usize,
     common: &'a [BigInt],
     public_key: &'a [BigInt],
@@ -322,6 +226,8 @@ struct ShareInput<'a> {
     ephemeral: &'a Sparse,
     modulus: &'a BigInt,
 }
+// Share equations use the profile's share limb for every digit, including
+// the sharing coefficients' low and high parts.
 fn share_ciphertexts(
     witness: &mut Witness,
     output: &mut impl PolynomialOutput,
@@ -329,6 +235,7 @@ fn share_ciphertexts(
     input: ShareInput<'_>,
 ) -> Vec<Vec<BigInt>> {
     let ShareInput {
+        profile,
         recipient,
         common,
         public_key,
@@ -337,7 +244,9 @@ fn share_ciphertexts(
         ephemeral,
         modulus,
     } = input;
-    let point = recipient * DEGREE / 8;
+    let radix_bits = profile.share_limb_bits();
+    let radix = 1i128 << radix_bits;
+    let point = recipient * profile.point_stride();
     let mut message = Zeroizing::new(
         secret
             .values
@@ -358,16 +267,22 @@ fn share_ciphertexts(
                 -1
             };
             message[position] += sign * value;
-            low_sum[position] += sign * (value.rem_euclid(RADIX) - RADIX / 2);
-            high_sum[position] += sign * value.div_euclid(RADIX);
-            offset[position] += sign * SCALE * (RADIX / 2);
+            low_sum[position] += sign * (value.rem_euclid(radix) - radix / 2);
+            high_sum[position] += sign * value.div_euclid(radix);
+            offset[position] += sign * SCALE * (radix / 2);
         }
     }
     let mut ciphertexts = Vec::new();
-    let reduction = reduction::Modulus::from_bytes(&modulus.to_bytes_le().1).unwrap();
+    let reduction = reduction::Modulus::new(&modulus.to_bytes_le().1, radix_bits).unwrap();
+    let width = supported_profile::share_modulus().len();
     for (component, common) in [public_key, common].into_iter().enumerate() {
-        let products =
-            Zeroizing::new(plan.digit_products(common, &ephemeral.values, &ephemeral.transform, 2));
+        let products = Zeroizing::new(plan.digit_products(
+            common,
+            &ephemeral.values,
+            &ephemeral.transform,
+            2,
+            radix_bits,
+        ));
         let error = Zeroizing::new(errors(
             &format!("share-{recipient}-{component}-error"),
             DEGREE,
@@ -380,12 +295,12 @@ fn share_ciphertexts(
                 products[1][position],
             ]);
             if component == 0 {
-                raw[0] += SCALE * (message[position] % RADIX);
-                raw[1] += SCALE * (message[position] / RADIX);
+                raw[0] += SCALE * (message[position] % radix);
+                raw[1] += SCALE * (message[position] / radix);
             }
             let mut digits = [0; 2];
             let reduced = reduction.reduce(raw.as_ref(), &mut digits).unwrap();
-            let magnitude = (BigInt::from(digits[1]) << 96usize) + BigInt::from(digits[0]);
+            let magnitude = (BigInt::from(digits[1]) << radix_bits) + BigInt::from(digits[0]);
             let value = if reduced.negative {
                 -magnitude
             } else {
@@ -399,7 +314,7 @@ fn share_ciphertexts(
             let mut carry = 0;
             for (limb, product) in products.iter().enumerate() {
                 let shared = if component == 0 {
-                    digit(&BigInt::from(offset[position]), limb)
+                    digit_in(&BigInt::from(offset[position]), limb, radix_bits)
                         + SCALE
                             * if limb == 0 {
                                 low_sum[position] + i128::from(secret.values[position])
@@ -409,24 +324,31 @@ fn share_ciphertexts(
                 } else {
                     0
                 };
-                let row = product[position] - digit(&values[position], limb)
+                let row = product[position] - digit_in(&values[position], limb, radix_bits)
                     + shared
                     + if limb == 0 { error[position] } else { 0 }
-                    - digit(modulus, limb) * quotients[position]
+                    - digit_in(modulus, limb, radix_bits) * quotients[position]
                     + carry;
                 if limb == 0 {
-                    assert_eq!(row % RADIX, 0);
-                    carry = row / RADIX;
+                    assert_eq!(row % radix, 0);
+                    carry = row / radix;
                     carries[position] = carry;
                 } else {
                     assert_eq!(row, 0, "final share carry at {position}");
                 }
             }
         }
-        witness.signed(16, &quotients);
-        witness.signed(if component == 0 { 32 } else { 16 }, &carries);
-        witness.signed(7, &error);
-        output.polynomial(&values, modulus, 20);
+        witness.signed(SETUP_QUOTIENT_BITS, &quotients);
+        witness.signed(
+            if component == 0 {
+                profile.share_carry_bits()
+            } else {
+                SETUP_FHE_CARRY_BITS
+            },
+            &carries,
+        );
+        witness.signed(SETUP_ERROR_BITS, &error);
+        output.polynomial(&values, modulus, width);
         ciphertexts.push(values);
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -434,115 +356,6 @@ fn share_ciphertexts(
     ciphertexts
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn generate_fixture(directory: &Path) {
-    let directory = directory.to_path_buf();
-    assert!(directory.is_dir());
-    let mut contribution = contribution::Contribution::new();
-    let mut output = Output::new(directory.clone());
-    for gadget in 0..6 {
-        contribution.gadget(gadget, &mut output).unwrap();
-    }
-    contribution.begin_shares(&mut output).unwrap();
-    let common = public_polynomial("common-share", DEGREE, &contribution.share_modulus);
-    for recipient in 0..10 {
-        let values = Zeroizing::new(sparse_values(
-            &format!("recipient-secret-{recipient}"),
-            DEGREE,
-            256,
-        ));
-        let recipient_secret = Sparse {
-            transform: Zeroizing::new(contribution.plan.sparse_transform(&values)),
-            values,
-        };
-        let products = contribution.plan.digit_products(
-            &common,
-            &recipient_secret.values,
-            &recipient_secret.transform,
-            2,
-        );
-        let error = errors(&format!("recipient-error-{recipient}"), DEGREE);
-        let public_key: Vec<BigInt> = (0..DEGREE)
-            .map(|position| {
-                center(
-                    -reconstruct(&products, position) + BigInt::from(error[position]),
-                    &contribution.share_modulus,
-                )
-            })
-            .collect();
-        let ciphertexts = contribution
-            .share(recipient, &public_key, &mut output)
-            .unwrap();
-        // Only the native fixture checker owns the recipients' synthetic keys.
-        let product = contribution.plan.digit_products(
-            &ciphertexts[1],
-            &recipient_secret.values,
-            &recipient_secret.transform,
-            2,
-        );
-        for (position, ciphertext) in ciphertexts[0].iter().enumerate() {
-            let mut expected = i128::from(contribution.secret.values[position]);
-            for (coefficient, values) in contribution.sharing.iter().enumerate() {
-                let shift = recipient * (coefficient + 1) * DEGREE / 8;
-                let input = (position + DEGREE - shift % DEGREE) % DEGREE;
-                let sign = if ((input + shift) / DEGREE).is_multiple_of(2) {
-                    1
-                } else {
-                    -1
-                };
-                expected += sign * values[input];
-            }
-            let phase = center(
-                ciphertext + reconstruct(&product, position),
-                &contribution.share_modulus,
-            );
-            assert!(
-                (phase - BigInt::from(SCALE) * BigInt::from(expected)).abs()
-                    < BigInt::from(SCALE / 2)
-            );
-        }
-    }
-    contribution.finish(&mut output).unwrap();
-    let digest = output.finish();
-    contribution
-        .into_witness()
-        .unwrap()
-        .write(&directory.join("witness.bin"), &digest);
-    let mut hash = Sha3_512::new();
-    let mut file = BufReader::new(File::open(directory.join("witness.bin")).unwrap());
-    let mut buffer = vec![0; 1 << 20];
-    let mut length = 0;
-    loop {
-        let read = Read::read(&mut file, &mut buffer).unwrap();
-        if read == 0 {
-            break;
-        }
-        Digest::update(&mut hash, &buffer[..read]);
-        length += read;
-    }
-    println!(
-        "statement_digest={}",
-        digest
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    );
-    println!("witness_bytes={length}");
-    println!(
-        "witness_sha3_512={}",
-        hash.finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl PolynomialOutput for Output {
-    fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize) {
-        Output::polynomial(self, values, modulus, width);
-    }
-}
 #[cfg(not(target_arch = "wasm32"))]
 fn private_reader(_label: &str) -> impl XofReader + use<> {
     struct NativeRandom;

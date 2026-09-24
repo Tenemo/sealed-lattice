@@ -22,11 +22,12 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
-import { completionProfile } from '#tests/supported-profile-model.js';
+import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
+import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
@@ -44,6 +45,8 @@ type NativeResult = {
     cases?: {
         milliseconds: number;
         result: {
+            participants: number;
+            options: number;
             topCount: number;
             inputIdentity: string;
             optionPositions: number[];
@@ -52,20 +55,34 @@ type NativeResult = {
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
 const prefixCase = selected.name === 'native-prefix';
-// The result case reaches the minimum turnout of five with these honest
-// ballots; positions one and two submit authenticated invalid ballots,
-// corrupt position three equivocates, and honest voter nine is omitted.
-// Corrupt one to three withhold target signatures.
-const honestBallotAuthors = [0, 4, 5, 6, 7];
-const omittedBallotAuthors = [9];
-const resultTargetSigners = [0, 4, 5, 6, 7, 8, 9];
+// The ceremony's roles and expected outcome for the selected profile.
+const scenario = deriveResearchScenario(
+    selected.participantCount,
+    selected.optionCount,
+);
+// The requested-output probe's profiles, each with its complete ordering
+// and then a shorter prefix.
+const prefixProfiles = [
+    { participantCount: 3, optionCount: 2, topCounts: [2, 1] },
+    { participantCount: 10, optionCount: 10, topCounts: [10, 3] },
+    { participantCount: 20, optionCount: 20, topCounts: [20, 1] },
+];
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
 const memoryLimit = 1_073_741_824;
+// A native ceremony generates and proves one contribution per participant,
+// which dominates its duration.
+const executionTimeout = prefixCase
+    ? 3_600_000
+    : 900_000 * selected.participantCount;
 
 await runWithLocalRunLog(
     {
-        commandLineArguments: [selected.name],
+        commandLineArguments: [
+            selected.name,
+            String(selected.participantCount),
+            String(selected.optionCount),
+        ],
         lanes: [
             'Pinned protocol research build',
             ...(selected.execution
@@ -128,8 +145,12 @@ await runWithLocalRunLog(
                 'protobuf-compiler',
             );
             assert.equal(protoc.trim(), 'libprotoc 36.1');
-            // The research crates implement the completion profile.
-            const profile = completionProfile();
+            // The research crates implement every supported profile; the
+            // native ceremony runs the selected one.
+            const profile = deriveSupportedProfile(
+                selected.participantCount,
+                selected.optionCount,
+            );
             const contribution = compileContributionBodyCensus(profile);
             const aggregate = compileSetupAggregateResources(profile);
             const enrollment = compileRegistrationEnrollmentCensus();
@@ -182,11 +203,7 @@ await runWithLocalRunLog(
                 enrollment.signingPublicKeyBytes +
                 ballot.envelopeBytes +
                 enrollment.signatureBytes +
-                BigInt(
-                    honestBallotAuthors.length +
-                        omittedBallotAuthors.length -
-                        1,
-                ) *
+                BigInt(scenario.accepted.length + scenario.omitted.length - 1) *
                     (ballot.maximumSignedBodyBytes +
                         ballot.envelopeBytes +
                         enrollment.signatureBytes);
@@ -206,7 +223,7 @@ await runWithLocalRunLog(
                 publicPayloadBound +
                 participants * aggregate.aggregateBytes +
                 ballot.maximumProofBytes;
-            assert.equal(participants, 10n);
+            assert.equal(participants, BigInt(selected.participantCount));
             assert.ok(
                 freemem() >= 2 * memoryLimit,
                 'Insufficient host memory before research execution.',
@@ -283,28 +300,10 @@ await runWithLocalRunLog(
                 await readFile(import.meta.filename),
                 { flag: 'wx' },
             );
-            const members = [
-                'native-ceremony',
-                'registration-enrollment',
-                'registration-credentials',
-                'evaluation-target',
-                'contribution-prover',
-                'setup-aggregate',
-                'opened-contribution',
-                'ballot-encryption',
-                'ballot-proof',
-                'linked-release-proof',
-                'rns-arithmetic-probe',
-            ];
+            // Every workspace member; the vendored crates are excluded.
             await execute(
                 'cargo',
-                [
-                    '+1.95.0',
-                    'fmt',
-                    ...members.flatMap((name) => ['-p', name]),
-                    '--',
-                    '--check',
-                ],
+                ['+1.95.0', 'fmt', '--all', '--', '--check'],
                 'format',
             );
             await execute(
@@ -315,7 +314,7 @@ await runWithLocalRunLog(
                     '--offline',
                     '--locked',
                     '--no-default-features',
-                    ...members.flatMap((name) => ['-p', name]),
+                    '--workspace',
                     '--all-targets',
                     '--',
                     '-D',
@@ -344,9 +343,9 @@ await runWithLocalRunLog(
                 ],
                 'clippy-numerical-probes',
             );
-            // The browser participant module is a wasm32 cdylib whose host
-            // supplies randomness, so its dependency graph must build there
-            // without an operating-system generator.
+            // The browser participant and completion modules are wasm32
+            // cdylibs whose host supplies randomness, so their dependency
+            // graphs must build there without an operating-system generator.
             await execute(
                 'cargo',
                 [
@@ -366,22 +365,31 @@ await runWithLocalRunLog(
                 'cargo',
                 [
                     '+1.95.0',
+                    'check',
+                    '--offline',
+                    '--locked',
+                    '--target',
+                    'wasm32-unknown-unknown',
+                    '-p',
+                    'evaluation-target',
+                    '--features',
+                    'browser',
+                    '--lib',
+                ],
+                'browser-completion-target',
+            );
+            // Unit tests of every member, including the ceremony's
+            // profile-derived roles.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
                     'test',
                     '--offline',
                     '--locked',
-                    '-p',
-                    'registration-credentials',
-                    '-p',
-                    'ballot-encryption',
-                    '-p',
-                    'evaluation-target',
-                    '-p',
-                    'linked-release-proof',
-                    '-p',
-                    'ballot-proof',
-                    '-p',
-                    'rns-arithmetic-probe',
+                    '--workspace',
                     '--lib',
+                    '--bins',
                 ],
                 'unit-verification',
             );
@@ -394,14 +402,9 @@ await runWithLocalRunLog(
                     '--locked',
                     '--release',
                     '--no-default-features',
-                    ...[
-                        'native-ceremony',
-                        'contribution-prover',
-                        'setup-aggregate',
-                        'opened-contribution',
-                        'ballot-proof',
-                        'rns-arithmetic-probe',
-                    ].flatMap((name) => ['-p', name]),
+                    ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
+                        (name) => ['-p', name],
+                    ),
                     ...(prefixCase
                         ? [
                               '--features',
@@ -468,6 +471,8 @@ await runWithLocalRunLog(
                                       output,
                                       runtimeFile,
                                       scratch!,
+                                      String(selected.participantCount),
+                                      String(selected.optionCount),
                                       ...(selected.name ===
                                       'native-invalid-only'
                                           ? ['invalid-only']
@@ -487,7 +492,7 @@ await runWithLocalRunLog(
                         outputMode: 'inherit',
                         signal: AbortSignal.any([
                             controller.signal,
-                            AbortSignal.timeout(3_600_000),
+                            AbortSignal.timeout(executionTimeout),
                         ]),
                         observer: {
                             onCommandStart({ processIdentifier }) {
@@ -550,18 +555,42 @@ await runWithLocalRunLog(
             if (prefixCase) {
                 assert.equal(result.kind, 'requested-output');
                 assert.ok(result.cases);
+                const cases = result.cases.map((value) => value.result);
                 assert.deepEqual(
-                    result.cases.map((value) => value.result.topCount),
-                    [10, 3],
+                    cases.map((value) => [
+                        value.participants,
+                        value.options,
+                        value.topCount,
+                    ]),
+                    prefixProfiles.flatMap((value) =>
+                        value.topCounts.map((topCount) => [
+                            value.participantCount,
+                            value.optionCount,
+                            topCount,
+                        ]),
+                    ),
                 );
-                assert.equal(
-                    result.cases[0].result.inputIdentity,
-                    result.cases[1].result.inputIdentity,
-                );
-                assert.deepEqual(
-                    result.cases[1].result.optionPositions,
-                    [4, 1, 8],
-                );
+                // Each shorter prefix decrypts from the same inputs as the
+                // complete ordering and lists its leading options.
+                for (let index = 0; index < cases.length; index += 2) {
+                    const [complete, prefix] = [cases[index], cases[index + 1]];
+                    assert.equal(complete.inputIdentity, prefix.inputIdentity);
+                    assert.equal(
+                        complete.optionPositions.length,
+                        complete.options,
+                    );
+                    assert.deepEqual(
+                        [...complete.optionPositions].sort((a, b) => a - b),
+                        Array.from(
+                            { length: complete.options },
+                            (_unused, option) => option,
+                        ),
+                    );
+                    assert.deepEqual(
+                        prefix.optionPositions,
+                        complete.optionPositions.slice(0, prefix.topCount),
+                    );
+                }
             } else {
                 assert.equal(
                     result.kind,
@@ -569,7 +598,7 @@ await runWithLocalRunLog(
                 );
                 assert.deepEqual(
                     result.accepted,
-                    selected.noResult ? [] : honestBallotAuthors,
+                    selected.noResult ? [] : scenario.accepted,
                 );
                 assert.deepEqual(
                     result.invalid,
@@ -577,11 +606,11 @@ await runWithLocalRunLog(
                         ? [0]
                         : selected.noResult
                           ? []
-                          : [1, 2],
+                          : scenario.invalid,
                 );
                 assert.deepEqual(
                     result.conflicting,
-                    selected.noResult ? [] : [3],
+                    selected.noResult ? [] : scenario.conflicting,
                 );
                 assert.deepEqual(
                     result.signers,
@@ -590,7 +619,7 @@ await runWithLocalRunLog(
                               { length: Number(participants) },
                               (_unused, position) => position,
                           )
-                        : resultTargetSigners,
+                        : scenario.signers,
                 );
                 // The Rust close messages match the independent wire model.
                 const records = path.join(output, 'close');
@@ -629,16 +658,11 @@ await runWithLocalRunLog(
                 }
             }
             if (!prefixCase && !selected.noResult) {
-                // Totals 21, 33, 33, 18, 32, 21, 41, 25, 26 and 29; ties go to
+                // The reference ranking of the accepted ballots; ties go to
                 // the lower option position.
-                assert.deepEqual(
-                    result.identifiers,
-                    [6, 1, 2, 4, 9, 8, 7, 0, 5, 3].map(
-                        (option) => `option-${option}`,
-                    ),
-                );
-                assert.equal(result.releaseSubsets, 210);
-                assert.equal(result.departureSets, 176);
+                assert.deepEqual(result.identifiers, scenario.identifiers);
+                assert.equal(result.releaseSubsets, scenario.releaseSubsets);
+                assert.equal(result.departureSets, scenario.departureSets);
             }
             const countFiles = async (directory: string): Promise<number> => {
                 let bytes = 0;
@@ -662,6 +686,8 @@ await runWithLocalRunLog(
                 JSON.stringify(
                     {
                         case: selected.name,
+                        participantCount: selected.participantCount,
+                        optionCount: selected.optionCount,
                         output,
                         runtimeIdentity: runtime.toString('hex'),
                         result,

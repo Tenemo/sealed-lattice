@@ -1,6 +1,4 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser;
 #[path = "../../word-proof/src/combination.rs"]
 pub mod combination;
 #[path = "../../word-proof/src/field.rs"]

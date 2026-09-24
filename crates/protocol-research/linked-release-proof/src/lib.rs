@@ -23,15 +23,40 @@ pub mod statement;
 use field::base as arithmetic;
 #[path = "../../word-verifier/src/engine.rs"]
 mod engine;
-mod profile;
-pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal, Verifier};
+pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 #[path = "../../word-proof/src/transcript.rs"]
 pub mod transcript;
 #[path = "../../word-proof/src/tree.rs"]
 pub mod tree;
 mod witness;
-pub use witness::{
-    PreparedRelease, ReleaseInputError, ReleaseInputs, derive, derive_bound, synthetic_inputs,
-};
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser;
+use statement::{StatementOutput, StatementStream};
+use supported_profile::{Profile, relation::release_relation};
+pub use witness::{PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound};
+
+impl engine::Statement for StatementStream {
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        StatementStream::push(self, bytes).is_ok()
+    }
+    fn finish(self) -> Option<StatementOutput> {
+        StatementStream::finish(self).ok()
+    }
+}
+
+pub type Verifier = engine::Verifier<StatementStream>;
+impl Verifier {
+    /// Verifies one profile's release proof against its expected statement.
+    pub fn new(
+        profile: Profile,
+        role: &[u8],
+        expected_statement: [u8; 64],
+        proof_header: &[u8],
+    ) -> Result<Self, Refusal> {
+        Self::open(
+            release_relation(profile),
+            role,
+            expected_statement,
+            proof_header,
+            |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
+        )
+    }
+}

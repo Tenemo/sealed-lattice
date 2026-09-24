@@ -4686,14 +4686,20 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Common-matrix sampling census',
         '',
-        'A fixed admitted suite label selects independent ideal-oracle words. Exact modulo-law enumeration checks the residue distance and the corresponding conditional full-oracle law. The complete bound includes all FHE, sharing, and auxiliary common polynomials. Caller-selected labels, adaptive parameter grinding, the fixed SHAKE implementation, and cryptographic security of the resulting keys are not established by this sampling calculation.',
+        'A fixed admitted suite label selects independent ideal-oracle words. Exact modulo-law enumeration checks the residue distance and the corresponding conditional full-oracle law. The complete bound includes all FHE, sharing, and auxiliary common polynomials. Registration fixes the common share polynomial before the roster size is known, so the sharing and auxiliary families use one profile-independent sample width within half the distance allocation, and the FHE width follows the profile. Caller-selected labels, adaptive parameter grinding, the fixed SHAKE implementation, and cryptographic security of the resulting keys are not established by this sampling calculation.',
         '',
         table(
             ['Property', 'Value'],
             [
                 [
-                    'Sample bits per coefficient',
-                    formatCount(commonMatrixSampling.bitsPerCoefficient),
+                    'FHE sample bits per coefficient',
+                    formatCount(commonMatrixSampling.fheBitsPerCoefficient),
+                ],
+                [
+                    'Sharing and auxiliary sample bits per coefficient',
+                    formatCount(
+                        commonMatrixSampling.fixedFamilyBitsPerCoefficient,
+                    ),
                 ],
                 [
                     'FHE common polynomials',
@@ -5200,7 +5206,7 @@ export const renderDocumentationCensus = (): string => {
         table(
             [
                 'Participants',
-                'Common-matrix sample bits',
+                'FHE common-matrix sample bits',
                 'Setup word columns',
                 'Setup affine rows',
                 'Verifier message bytes',
@@ -5213,7 +5219,7 @@ export const renderDocumentationCensus = (): string => {
                     row.map(
                         (profile) =>
                             compileCommonMatrixSamplingCensus(profile)
-                                .bitsPerCoefficient,
+                                .fheBitsPerCoefficient,
                     ),
                 ),
                 rangeOf(

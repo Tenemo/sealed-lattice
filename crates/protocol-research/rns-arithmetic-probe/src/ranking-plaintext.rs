@@ -1,6 +1,6 @@
-use super::{DEGREE, OPTION_COUNT};
+use super::DEGREE;
+use supported_profile::{PLAINTEXT_MODULUS as PRIME, Profile};
 
-const PRIME: u32 = 65_537;
 fn multiply(left: u32, right: u32) -> u32 {
     (u64::from(left) * u64::from(right) % u64::from(PRIME)) as u32
 }
@@ -88,9 +88,18 @@ pub(super) fn encode(slots: &[u32]) -> Vec<i32> {
     coefficients
 }
 
-pub fn parameters(top_count: usize) -> (Vec<i32>, Vec<Vec<i32>>, Vec<i32>) {
-    assert!((1..=OPTION_COUNT).contains(&top_count));
-    let maximum: i32 = 18 * 10 + 1;
+/// The comparison polynomial's coefficients, each rank-equality power's
+/// weights at the requested ranks' slots and the comparison input offset.
+///
+/// The comparison polynomial is one on every odd point of the profile's
+/// comparison degree above zero and zero below it. Slot
+/// `(option * options + rank) * window + opponent` compares the option with
+/// the opponent, and the offset breaks ties toward the lower position.
+pub fn parameters(profile: Profile, top_count: usize) -> (Vec<i32>, Vec<Vec<i32>>, Vec<i32>) {
+    let options = profile.options();
+    let window = profile.rank_window();
+    assert!((1..=options).contains(&top_count));
+    let maximum = profile.comparison_degree() as i32;
     let points: Vec<_> = (0..=maximum)
         .map(|index| (2 * index - maximum).rem_euclid(PRIME as i32) as u32)
         .collect();
@@ -105,33 +114,34 @@ pub fn parameters(top_count: usize) -> (Vec<i32>, Vec<Vec<i32>>, Vec<i32>) {
             .enumerate()
             .all(|(index, value)| index == 0 || index % 2 == 1 || *value == 0)
     );
-    let ranks: Vec<_> = (0..10).collect();
-    let equality: Vec<_> = (0..10)
+    let ranks: Vec<_> = (0..options as u32).collect();
+    let equality: Vec<_> = (0..options as u32)
         .map(|requested| {
             interpolate(
                 &ranks,
-                &(0..10)
-                    .map(|rank| u32::from(rank == requested))
+                &ranks
+                    .iter()
+                    .map(|rank| u32::from(*rank == requested))
                     .collect::<Vec<_>>(),
             )
         })
         .collect();
-    let ranking = (0..10)
+    let ranking = (0..options)
         .map(|exponent| {
             let mut slots = vec![0; DEGREE / 4];
-            for option in 0..10 {
+            for option in 0..options {
                 for rank in 0..top_count {
-                    slots[(option * 10 + rank) * 16] = equality[rank][exponent];
+                    slots[(option * options + rank) * window] = equality[rank][exponent];
                 }
             }
             encode(&slots)
         })
         .collect();
     let mut offset = vec![PRIME - 1; DEGREE / 4];
-    for option in 0..10 {
-        for rank in 0..10 {
+    for option in 0..options {
+        for rank in 0..options {
             for opponent in 0..option {
-                offset[(option * 10 + rank) * 16 + opponent] = 1;
+                offset[(option * options + rank) * window + opponent] = 1;
             }
         }
     }
@@ -170,81 +180,117 @@ mod tests {
             })
     }
 
+    fn slot_point(slot: usize) -> u32 {
+        let exponent = (0..slot).fold(1usize, |value, _| 5 * value % DEGREE);
+        power(3, exponent as u32)
+    }
+
+    // Every boundary shape: the fewest and most participants and options,
+    // and the completion profile.
+    fn profiles() -> Vec<Profile> {
+        [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)]
+            .into_iter()
+            .map(|(participants, options)| Profile::new(participants, options).unwrap())
+            .collect()
+    }
+
     #[test]
     fn comparison_and_encoded_rank_coefficients_match_direct_evaluation() {
-        let (comparison, ranking, offset) = parameters(OPTION_COUNT);
-        for difference in (-181i32..=181).step_by(2) {
-            assert_eq!(
-                evaluate(&comparison, difference.rem_euclid(PRIME as i32) as u32),
-                u32::from(difference > 0)
-            );
-        }
-        for slot in [0usize, 1, 16, 1440, 1584, 1600, DEGREE / 4 - 1] {
-            let exponent = (0..slot).fold(1usize, |value, _| 5 * value % DEGREE);
-            let point = power(3, exponent as u32);
-            let first = slot < 1600 && slot.is_multiple_of(16);
-            let requested = (slot / 16) % 10;
-            let coefficients: Vec<_> = ranking
-                .iter()
-                .map(|polynomial| evaluate_subring(polynomial, point) as i32)
-                .collect();
-            for rank in 0..10 {
+        for profile in profiles() {
+            let options = profile.options();
+            let window = profile.rank_window();
+            let active = options * options * window;
+            let (comparison, ranking, offset) = parameters(profile, options);
+            let maximum = profile.comparison_degree() as i32;
+            for difference in (-maximum..=maximum).step_by(2) {
                 assert_eq!(
-                    evaluate(&coefficients, rank),
-                    u32::from(first && rank as usize == requested)
+                    evaluate(&comparison, difference.rem_euclid(PRIME as i32) as u32),
+                    u32::from(difference > 0)
                 );
             }
-            let option = slot / 160;
-            let expected_offset = if slot < 1600 && slot % 16 < option {
-                1
-            } else {
-                PRIME - 1
-            };
-            assert_eq!(evaluate_subring(&offset, point), expected_offset);
-            assert!(
-                ranking
+            for slot in [
+                0,
+                1,
+                window,
+                active - window,
+                active - 1,
+                active,
+                DEGREE / 4 - 1,
+            ] {
+                let point = slot_point(slot);
+                let first = slot < active && slot.is_multiple_of(window);
+                let requested = (slot / window) % options;
+                let coefficients: Vec<_> = ranking
                     .iter()
-                    .all(|polynomial| evaluate_subring(polynomial, power(point, PRIME - 2)) == 0)
-            );
+                    .map(|polynomial| evaluate_subring(polynomial, point) as i32)
+                    .collect();
+                for rank in 0..options {
+                    assert_eq!(
+                        evaluate(&coefficients, rank as u32),
+                        u32::from(first && rank == requested)
+                    );
+                }
+                let option = slot / (options * window);
+                let expected_offset = if slot < active && slot % window < option {
+                    1
+                } else {
+                    PRIME - 1
+                };
+                assert_eq!(evaluate_subring(&offset, point), expected_offset);
+                assert!(
+                    ranking
+                        .iter()
+                        .all(
+                            |polynomial| evaluate_subring(polynomial, power(point, PRIME - 2)) == 0
+                        )
+                );
+            }
         }
     }
 
     #[test]
     fn requested_rank_coefficients_zero_every_omitted_output_in_the_same_subring() {
-        for top_count in 1..=OPTION_COUNT {
-            let (_, ranking, _) = parameters(top_count);
-            for polynomial in &ranking {
-                assert!(polynomial.iter().enumerate().all(|(index, value)| {
-                    value.unsigned_abs() <= PRIME / 2 && (index % 2 == 0 || *value == 0)
-                }));
-            }
-            let mut slots = vec![1, 1599, 1600, DEGREE / 4 - 1];
-            for option in [0, 4, 9] {
-                for rank in [0, top_count - 1, top_count.min(OPTION_COUNT - 1), 9] {
-                    slots.push((option * OPTION_COUNT + rank) * 16);
+        for profile in profiles() {
+            let options = profile.options();
+            let window = profile.rank_window();
+            let active = options * options * window;
+            let mut top_counts = vec![1, options - 1, options];
+            top_counts.dedup();
+            for top_count in top_counts {
+                let (_, ranking, _) = parameters(profile, top_count);
+                for polynomial in &ranking {
+                    assert!(polynomial.iter().enumerate().all(|(index, value)| {
+                        value.unsigned_abs() <= PRIME / 2 && (index % 2 == 0 || *value == 0)
+                    }));
                 }
-            }
-            slots.sort_unstable();
-            slots.dedup();
-            for slot in slots {
-                let exponent = (0..slot).fold(1usize, |value, _| 5 * value % DEGREE);
-                let point = power(3, exponent as u32);
-                let requested = slot / 16 % OPTION_COUNT;
-                let selected = slot < 1600 && slot % 16 == 0 && requested < top_count;
-                let coefficients: Vec<_> = ranking
-                    .iter()
-                    .map(|polynomial| evaluate_subring(polynomial, point) as i32)
-                    .collect();
-                for rank in 0..OPTION_COUNT {
-                    assert_eq!(
-                        evaluate(&coefficients, rank as u32),
-                        u32::from(selected && rank == requested),
-                        "top_count={top_count}, slot={slot}, rank={rank}"
-                    );
+                let mut slots = vec![1, active - 1, active, DEGREE / 4 - 1];
+                for option in [0, options / 2, options - 1] {
+                    for rank in [0, top_count - 1, top_count.min(options - 1), options - 1] {
+                        slots.push((option * options + rank) * window);
+                    }
                 }
-                assert!(ranking.iter().all(|polynomial| {
-                    evaluate_subring(polynomial, power(point, PRIME - 2)) == 0
-                }));
+                slots.sort_unstable();
+                slots.dedup();
+                for slot in slots {
+                    let point = slot_point(slot);
+                    let requested = slot / window % options;
+                    let selected =
+                        slot < active && slot.is_multiple_of(window) && requested < top_count;
+                    let coefficients: Vec<_> = ranking
+                        .iter()
+                        .map(|polynomial| evaluate_subring(polynomial, point) as i32)
+                        .collect();
+                    for rank in 0..options {
+                        assert_eq!(
+                            evaluate(&coefficients, rank as u32),
+                            u32::from(selected && rank == requested),
+                            "profile={profile:?}, top_count={top_count}, slot={slot}, rank={rank}"
+                        );
+                    }
+                    assert!(ranking.iter().all(|polynomial| {
+                        evaluate_subring(polynomial, power(point, PRIME - 2)) == 0
+                    }));
+                }
             }
         }
     }

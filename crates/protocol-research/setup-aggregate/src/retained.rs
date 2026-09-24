@@ -1,9 +1,10 @@
 use crate::{
-    CHUNK_BYTES, ModulusKind, PolynomialAdder,
+    CHUNK_BYTES, PolynomialAdder, contribution_family,
     verified::{AggregatePolynomial, Refusal, VerifiedSetupAggregate},
 };
 use num_bigint::BigInt;
 use sha2::{Digest, Sha512};
+use supported_profile::Profile;
 
 /// Immutable coefficients read from exactly one owning aggregate reference.
 /// This value is public key material, not participant signing or release authority.
@@ -40,16 +41,11 @@ impl From<VerifiedAggregatePolynomial> for RetainedAggregatePolynomial {
     }
 }
 
-fn contribution_polynomial_indices() -> Vec<usize> {
-    (0..75)
-        .filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
-        .collect()
-}
-
 /// Parsed local references only. Their provenance is the owning setup verifier's
 /// result, keyed to the participant's credential when retained; the consumer
 /// checks that key before parsing, so an arbitrary copy supplies no premise.
 pub struct RetainedSetupInputs {
+    profile: Profile,
     inventory: [u8; 64],
     polynomials: Vec<AggregatePolynomial>,
 }
@@ -59,7 +55,7 @@ impl RetainedSetupInputs {
     pub fn reference(setup: &VerifiedSetupAggregate) -> Result<Vec<u8>, Refusal> {
         let mut bytes = Vec::from(b"SAV1".as_slice());
         bytes.extend(setup.inventory().identity());
-        let indices = contribution_polynomial_indices();
+        let indices = setup.profile().contribution_body_polynomials();
         if setup.polynomials().len() != indices.len() {
             return Err(Refusal::Incomplete);
         }
@@ -71,8 +67,13 @@ impl RetainedSetupInputs {
         }
         Ok(bytes)
     }
-    pub fn parse(bytes: &[u8], expected_inventory: [u8; 64]) -> Result<Self, Refusal> {
-        let indices = contribution_polynomial_indices();
+    /// The profile is the one of the setup that owns the expected inventory.
+    pub fn parse(
+        profile: Profile,
+        bytes: &[u8],
+        expected_inventory: [u8; 64],
+    ) -> Result<Self, Refusal> {
+        let indices = profile.contribution_body_polynomials();
         if bytes.len() != 4 + 64 + 64 * indices.len()
             || &bytes[..4] != b"SAV1"
             || bytes[4..68] != expected_inventory
@@ -82,22 +83,23 @@ impl RetainedSetupInputs {
         let polynomials = indices
             .into_iter()
             .zip(bytes[68..].chunks_exact(64))
-            .map(|(index, digest)| {
-                let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-                AggregatePolynomial {
-                    index,
-                    bytes: kind.degree() * kind.coefficient_bytes(),
-                    digest: digest.try_into().unwrap(),
-                }
+            .map(|(index, digest)| AggregatePolynomial {
+                index,
+                bytes: profile.setup_polynomial_bytes(index).unwrap(),
+                digest: digest.try_into().unwrap(),
             })
             .collect();
         Ok(Self {
+            profile,
             inventory: expected_inventory,
             polynomials,
         })
     }
     pub fn inventory(&self) -> &[u8; 64] {
         &self.inventory
+    }
+    pub fn profile(&self) -> Profile {
+        self.profile
     }
     pub fn read_polynomial(&self, index: usize) -> Result<RetainedPolynomialReader, Refusal> {
         let expected = self
@@ -107,7 +109,7 @@ impl RetainedSetupInputs {
             .ok_or(Refusal::Order)?
             .clone();
         Ok(RetainedPolynomialReader {
-            reader: AggregatePolynomialReader::new(self.inventory, expected)?,
+            reader: AggregatePolynomialReader::new(self.profile, self.inventory, expected)?,
         })
     }
 }
@@ -145,18 +147,21 @@ pub struct AggregatePolynomialReader {
     failed: bool,
 }
 impl AggregatePolynomialReader {
-    pub(crate) fn new(inventory: [u8; 64], expected: AggregatePolynomial) -> Result<Self, Refusal> {
-        let kind =
-            ModulusKind::for_contribution_polynomial(expected.index()).ok_or(Refusal::Order)?;
-        if expected.bytes() != kind.degree() * kind.coefficient_bytes() {
+    pub(crate) fn new(
+        profile: Profile,
+        inventory: [u8; 64],
+        expected: AggregatePolynomial,
+    ) -> Result<Self, Refusal> {
+        let family = contribution_family(profile, expected.index()).ok_or(Refusal::Order)?;
+        if profile.setup_polynomial_bytes(expected.index()) != Some(expected.bytes()) {
             return Err(Refusal::Context);
         }
         Ok(Self {
             inventory,
             expected,
-            decoder: PolynomialAdder::new(kind),
+            decoder: PolynomialAdder::new(profile, family),
             hash: Sha512::new(),
-            coefficients: Vec::with_capacity(kind.degree()),
+            coefficients: Vec::with_capacity(profile.family_degree(family)),
             offset: 0,
             failed: false,
         })
@@ -218,14 +223,17 @@ impl AggregatePolynomialReader {
 #[cfg(test)]
 mod private_tests {
     use super::*;
+    fn profile() -> Profile {
+        Profile::new(3, 2).unwrap()
+    }
     fn record() -> (Vec<u8>, Vec<u8>) {
-        let values = vec![0; 4096 * 6];
+        let profile = profile();
+        let key = profile.auxiliary_key_polynomial();
+        let values = vec![0; profile.setup_polynomial_bytes(key).unwrap()];
         let mut record = Vec::from(b"SAV1".as_slice());
         record.extend([9; 64]);
-        for index in
-            (0..75).filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
-        {
-            record.extend(if index == 74 {
+        for index in profile.contribution_body_polynomials() {
+            record.extend(if index == key {
                 <[u8; 64]>::from(Sha512::digest(&values))
             } else {
                 [0; 64]
@@ -236,12 +244,13 @@ mod private_tests {
     #[test]
     fn retained_inputs_check_complete_identity_and_canonical_values() {
         let (record, values) = record();
-        let inputs = RetainedSetupInputs::parse(&record, [9; 64]).unwrap();
-        let mut reader = inputs.read_polynomial(74).unwrap();
+        let key_index = profile().auxiliary_key_polynomial();
+        let inputs = RetainedSetupInputs::parse(profile(), &record, [9; 64]).unwrap();
+        let mut reader = inputs.read_polynomial(key_index).unwrap();
         reader.push(0, &values).unwrap();
         let key = reader.finish().unwrap();
         assert_eq!(key.inventory(), &[9; 64]);
-        assert_eq!(key.index(), 74);
+        assert_eq!(key.index(), key_index);
         assert!(
             key.coefficients()
                 .iter()
@@ -249,29 +258,33 @@ mod private_tests {
         );
         let mut changed = values.clone();
         changed[1] = 1;
-        let mut reader = inputs.read_polynomial(74).unwrap();
+        let mut reader = inputs.read_polynomial(key_index).unwrap();
         reader.push(0, &changed).unwrap();
         assert!(reader.finish().is_err());
-        let mut reader = inputs.read_polynomial(74).unwrap();
+        let mut reader = inputs.read_polynomial(key_index).unwrap();
         reader.push(0, &values[..values.len() - 6]).unwrap();
         assert!(reader.finish().is_err());
         let mut negative_zero = values.clone();
         negative_zero[0] = 1;
-        let mut reader = inputs.read_polynomial(74).unwrap();
+        let mut reader = inputs.read_polynomial(key_index).unwrap();
         assert!(reader.push(0, &negative_zero).is_err());
         assert!(reader.push(0, &values).is_err());
         assert!(reader.finish().is_err());
         assert!(inputs.read_polynomial(0).is_err());
     }
     #[test]
-    fn retained_reference_parser_refuses_wrong_inventory_or_framing() {
+    fn retained_reference_parser_refuses_wrong_inventory_profile_or_framing() {
         let (mut record, _) = record();
-        assert!(RetainedSetupInputs::parse(&record, [8; 64]).is_err());
-        assert!(RetainedSetupInputs::parse(&record[..record.len() - 1], [9; 64]).is_err());
+        assert!(RetainedSetupInputs::parse(profile(), &record, [8; 64]).is_err());
+        assert!(
+            RetainedSetupInputs::parse(profile(), &record[..record.len() - 1], [9; 64]).is_err()
+        );
+        // A four-participant setup carries two more share encryptions.
+        assert!(RetainedSetupInputs::parse(Profile::new(4, 2).unwrap(), &record, [9; 64]).is_err());
         record.push(0);
-        assert!(RetainedSetupInputs::parse(&record, [9; 64]).is_err());
+        assert!(RetainedSetupInputs::parse(profile(), &record, [9; 64]).is_err());
         record.pop();
         record[0] ^= 1;
-        assert!(RetainedSetupInputs::parse(&record, [9; 64]).is_err());
+        assert!(RetainedSetupInputs::parse(profile(), &record, [9; 64]).is_err());
     }
 }

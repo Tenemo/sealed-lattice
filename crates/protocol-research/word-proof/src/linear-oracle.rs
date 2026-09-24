@@ -5,11 +5,6 @@ use crate::{
     tree::Tree,
 };
 use stateful_sha3::Digest;
-use std::{
-    fs::OpenOptions,
-    io::{BufWriter, Write},
-    path::Path,
-};
 use zeroize::{Zeroize, Zeroizing};
 pub struct LinearOracle {
     pub target: Element,
@@ -105,20 +100,6 @@ impl LinearOracle {
             tree,
             lookup_weight,
         }
-    }
-    pub fn save(&self, directory: &Path) {
-        self.tree.save(directory, "third-tree.bin");
-        let mut file = BufWriter::new(
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(directory.join("linear-polynomials.bin"))
-                .unwrap(),
-        );
-        for value in self.quotient.iter().chain(&self.remainder) {
-            file.write_all(&field::encode(*value)).unwrap();
-        }
-        file.flush().unwrap();
     }
     pub fn openings(&self, indices: &[usize]) -> Vec<Vec<u8>> {
         let transform = Transform::new(SYSTEMATIC);

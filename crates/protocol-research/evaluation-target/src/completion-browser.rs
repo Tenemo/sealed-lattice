@@ -14,7 +14,6 @@ enum Terminal {
 }
 struct Operand {
     position: usize,
-    index: usize,
     reader: AggregatePolynomialReader,
     constant: Option<VerifiedAggregatePolynomial>,
 }
@@ -102,16 +101,16 @@ impl State {
                     return Err(Error::NoResult);
                 }
                 let setup = target.inventory().setup();
-                if setup.inventory().confirmations().len() != 10 || argument >= 10 {
+                let profile = setup.profile();
+                if argument >= profile.participants() {
                     return Err(Error::Context);
                 }
-                let index = 44 + 3 * argument;
+                let index = profile.share_constant_polynomial(argument);
                 let reader = setup.read_polynomial(index).map_err(|_| Error::Context)?;
                 // A public-data retry replaces only unfinished verification.
                 // It cannot revoke a certified target or an accepted share.
                 self.operand = Some(Operand {
                     position: argument,
-                    index,
                     reader,
                     constant: None,
                 });
@@ -144,16 +143,11 @@ impl State {
                     )?));
                     self.word(0);
                 } else {
-                    let index = operand.index + 1;
-                    let reader = certificate
-                        .target()
-                        .inventory()
-                        .setup()
-                        .read_polynomial(index)
-                        .map_err(|_| Error::Context)?;
+                    let setup = certificate.target().inventory().setup();
+                    let index = setup.profile().share_linear_polynomial(operand.position);
+                    let reader = setup.read_polynomial(index).map_err(|_| Error::Context)?;
                     self.operand = Some(Operand {
                         position: operand.position,
-                        index,
                         reader,
                         constant: Some(verified),
                     });

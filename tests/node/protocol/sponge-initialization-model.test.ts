@@ -36,7 +36,14 @@ describe('fixed-input sponge initialization', () => {
             'common-share',
             'common-auxiliary',
         ]);
-        expect(value.outputBlocks).toBe(19n * 61681n + 3856n);
+        // Rate blocks covering each seed's prefix: 65536 FHE coefficients of
+        // 1024 bits, then 65536 share and 4096 auxiliary ones of 320 bits.
+        const blocks = (bits: bigint) => (bits + 1087n) / 1088n;
+        expect(value.outputBlocks).toBe(
+            18n * blocks(65536n * 1024n) +
+                blocks(65536n * 320n) +
+                blocks(4096n * 320n),
+        );
         for (const seed of value.seeds) {
             expect(seed.message.length).toBeLessThan(136);
             expect(seed.paddedInput.subarray(136)).toEqual(Buffer.alloc(64));

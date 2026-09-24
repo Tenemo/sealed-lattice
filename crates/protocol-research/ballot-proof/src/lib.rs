@@ -41,9 +41,38 @@ pub mod linear;
 pub mod linear_oracle;
 #[path = "private-ballot.rs"]
 pub mod private_ballot;
-mod profile;
 pub mod proof;
-pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal, Verifier};
+pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
+use statement::{StatementOutput, StatementStream};
+use supported_profile::{Profile, relation::ballot_relation};
+
+impl engine::Statement for StatementStream {
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        StatementStream::push(self, bytes).is_ok()
+    }
+    fn finish(self) -> Option<StatementOutput> {
+        StatementStream::finish(self).ok()
+    }
+}
+
+pub type Verifier = engine::Verifier<StatementStream>;
+impl Verifier {
+    /// Verifies one profile's ballot proof against its expected statement.
+    pub fn new(
+        profile: Profile,
+        role: &[u8],
+        expected_statement: [u8; 64],
+        proof_header: &[u8],
+    ) -> Result<Self, Refusal> {
+        Self::open(
+            ballot_relation(profile),
+            role,
+            expected_statement,
+            proof_header,
+            |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
+        )
+    }
+}
 
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
 pub fn take_browser_classification() -> Option<body::BallotBodyClassification> {

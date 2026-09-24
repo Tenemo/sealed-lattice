@@ -1,67 +1,101 @@
-use crate::parameters::*;
-use ballot_encryption::encryption::LinkedBallotWitness;
+use ballot_encryption::{
+    encryption::{EncryptionWitness, LinkedBallotWitness},
+    packing::PackingWitness,
+};
+use supported_profile::{
+    AUXILIARY_DEGREE, DEGREE, Profile, SETUP_ERROR_BITS, WORD_BITS,
+    relation::{BallotColumns, ballot_relation},
+};
 use zeroize::Zeroizing;
 
 #[derive(Debug)]
 pub struct Error;
 pub fn from_encryption(witness: &LinkedBallotWitness) -> Result<Zeroizing<Vec<Vec<u16>>>, Error> {
-    let mut columns = Zeroizing::new(vec![vec![0; SYSTEMATIC]; COLUMNS]);
-    let signed_word = |value: i16| (i32::from(value) + 32768) as u16;
-    for (component, input) in witness.fhe.components.iter().enumerate() {
-        let offset = component * 10;
-        if input.quotients.len() != SYSTEMATIC
-            || input.errors.len() != SYSTEMATIC
-            || input.carries.len() != 8
-            || input
-                .carries
-                .iter()
-                .any(|values| values.len() != SYSTEMATIC)
+    from_parts(
+        witness.context.profile(),
+        &witness.packing,
+        &witness.fhe,
+        &witness.auxiliary,
+    )
+}
+/// The ballot relation's witness columns: signed words offset by half their
+/// range, narrow errors by half theirs, and the scores less one.
+pub(crate) fn from_parts(
+    profile: Profile,
+    packing: &PackingWitness,
+    fhe: &EncryptionWitness,
+    auxiliary: &EncryptionWitness,
+) -> Result<Zeroizing<Vec<Vec<u16>>>, Error> {
+    let layout = BallotColumns::new(profile);
+    let limbs = layout.fhe_limbs();
+    let mut columns = Zeroizing::new(vec![vec![0; DEGREE]; ballot_relation(profile).columns()]);
+    let word_offset = 1i32 << (WORD_BITS - 1);
+    let error_offset = 1i16 << (SETUP_ERROR_BITS - 1);
+    let signed_word = |value: i16| (i32::from(value) + word_offset) as u16;
+    for (component, input) in fhe.components.iter().enumerate() {
+        if input.quotients.len() != DEGREE
+            || input.errors.len() != DEGREE
+            || input.carries.len() != limbs - 1
+            || input.carries.iter().any(|values| values.len() != DEGREE)
         {
             return Err(Error);
         }
-        for position in 0..SYSTEMATIC {
-            columns[offset][position] = signed_word(input.quotients[position]);
-            for carry in 0..8 {
-                columns[offset + 1 + carry][position] = signed_word(input.carries[carry][position]);
+        for position in 0..DEGREE {
+            columns[layout.fhe_quotient(component)][position] =
+                signed_word(input.quotients[position]);
+            for carry in 0..limbs - 1 {
+                columns[layout.fhe_carry(component, carry)][position] =
+                    signed_word(input.carries[carry][position]);
             }
-            columns[offset + 9][position] = (i16::from(input.errors[position]) + 64) as u16;
+            columns[layout.fhe_error(component)][position] =
+                (i16::from(input.errors[position]) + error_offset) as u16;
         }
     }
-    if witness.packing.message().len() != SYSTEMATIC
-        || witness.packing.quotients().len() != SYSTEMATIC
-        || witness.fhe.ephemeral.len() != SYSTEMATIC
-        || witness.auxiliary.ephemeral.len() != 4096
+    if packing.message().len() != DEGREE
+        || packing.quotients().len() != DEGREE
+        || packing.scores().len() != profile.options()
+        || fhe.ephemeral.len() != DEGREE
+        || auxiliary.ephemeral.len() != AUXILIARY_DEGREE
     {
         return Err(Error);
     }
-    for position in 0..SYSTEMATIC {
-        let shifted = witness.packing.message()[position] + 32768;
-        if !(0..=65536).contains(&shifted) {
+    // The packed plaintext offset by half a word takes a word and one high
+    // bit.
+    let word = 1i32 << WORD_BITS;
+    for position in 0..DEGREE {
+        let shifted = packing.message()[position] + word_offset;
+        if !(0..=word).contains(&shifted) {
             return Err(Error);
         }
-        columns[20][position] = (shifted % 65536) as u16;
-        columns[31][position] = (shifted / 65536) as u16;
-        columns[21][position] = signed_word(witness.packing.quotients()[position]);
-        columns[27][position] = u16::from(witness.fhe.ephemeral[position] == 1);
-        columns[28][position] = u16::from(witness.fhe.ephemeral[position] == -1);
+        columns[layout.plaintext()][position] = (shifted % word) as u16;
+        columns[layout.plaintext_high_bit()][position] = (shifted / word) as u16;
+        columns[layout.packing_quotient()][position] = signed_word(packing.quotients()[position]);
+        columns[layout.fhe_positive()][position] = u16::from(fhe.ephemeral[position] == 1);
+        columns[layout.fhe_positive() + 1][position] = u16::from(fhe.ephemeral[position] == -1);
     }
-    for (position, score) in witness.packing.scores().iter().enumerate() {
-        columns[22][position] = u16::from(*score) - 1;
+    for (position, score) in packing.scores().iter().enumerate() {
+        columns[layout.scores()][position] = u16::from(*score) - 1;
     }
-    for (component, input) in witness.auxiliary.components.iter().enumerate() {
-        if input.quotients.len() != 4096 || input.errors.len() != 4096 || !input.carries.is_empty()
+    let stride = DEGREE / AUXILIARY_DEGREE;
+    for (component, input) in auxiliary.components.iter().enumerate() {
+        if input.quotients.len() != AUXILIARY_DEGREE
+            || input.errors.len() != AUXILIARY_DEGREE
+            || !input.carries.is_empty()
         {
             return Err(Error);
         }
-        for position in 0..4096 {
-            columns[23 + component * 2][position * 16] = signed_word(input.quotients[position]);
-            columns[24 + component * 2][position * 16] =
-                (i16::from(input.errors[position]) + 64) as u16;
+        for position in 0..AUXILIARY_DEGREE {
+            columns[layout.auxiliary_quotient(component)][position * stride] =
+                signed_word(input.quotients[position]);
+            columns[layout.auxiliary_error(component)][position * stride] =
+                (i16::from(input.errors[position]) + error_offset) as u16;
         }
     }
-    for position in 0..4096 {
-        columns[29][position * 16] = u16::from(witness.auxiliary.ephemeral[position] == 1);
-        columns[30][position * 16] = u16::from(witness.auxiliary.ephemeral[position] == -1);
+    for position in 0..AUXILIARY_DEGREE {
+        columns[layout.auxiliary_positive()][position * stride] =
+            u16::from(auxiliary.ephemeral[position] == 1);
+        columns[layout.auxiliary_positive() + 1][position * stride] =
+            u16::from(auxiliary.ephemeral[position] == -1);
     }
     Ok(columns)
 }

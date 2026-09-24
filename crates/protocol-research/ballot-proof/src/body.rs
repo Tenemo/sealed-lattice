@@ -1,7 +1,7 @@
 use crate::{
     CHUNK_LIMIT, HEADER_LENGTH,
     admission::{BallotRelationVerifier, VerifiedBallotRelation},
-    statement::encode_polynomial,
+    statement::{coefficient_bytes, encode_polynomial, setup_inputs},
 };
 use registration_credentials::{
     ballot_body::{self, BallotBodyHasher},
@@ -10,6 +10,7 @@ use registration_credentials::{
 use setup_aggregate::{AggregatePolynomialReader, verified::VerifiedSetupAggregate};
 use sha3::{Digest, Sha3_512};
 use std::sync::Arc;
+use supported_profile::Profile;
 
 #[derive(Debug)]
 pub enum Error {
@@ -39,6 +40,7 @@ impl VerifiedBallotBody {
 }
 
 struct BallotBodyRelationVerifier {
+    profile: Profile,
     poll: Arc<VerifiedPoll>,
     setup: Arc<VerifiedSetupAggregate>,
     position: usize,
@@ -61,8 +63,9 @@ impl BallotBodyRelationVerifier {
         position: usize,
         header: &[u8],
     ) -> Result<Self, Error> {
-        let proof_length = ballot_body::proof_length(header).map_err(|_| Error::Shape)?;
-        if position >= setup.inventory().confirmations().len() {
+        let profile = setup.profile();
+        let proof_length = ballot_body::proof_length(profile, header).map_err(|_| Error::Shape)?;
+        if position >= profile.participants() {
             return Err(Error::Context);
         }
         let context = &header[12..];
@@ -79,6 +82,7 @@ impl BallotBodyRelationVerifier {
             return Err(Error::Context);
         }
         Ok(Self {
+            profile,
             poll,
             setup,
             position,
@@ -99,7 +103,7 @@ impl BallotBodyRelationVerifier {
         if self.failed
             || self.key_reader.is_some()
             || self.keys.len() >= 2
-            || index != [1, 74][self.keys.len()]
+            || index != setup_inputs(self.profile)[self.keys.len()].2
         {
             self.failed = true;
             return Err(Error::Stage);
@@ -166,7 +170,8 @@ impl BallotBodyRelationVerifier {
             return Err(Error::Stage);
         }
         while !bytes.is_empty() && self.ordinal < 4 {
-            let (_, length) = ballot_body::polynomial(self.ordinal).ok_or(Error::Shape)?;
+            let (_, length) =
+                ballot_body::polynomial(self.profile, self.ordinal).ok_or(Error::Shape)?;
             let count = bytes
                 .len()
                 .min(length - self.ciphertexts[self.ordinal].len());
@@ -202,16 +207,16 @@ impl BallotBodyRelationVerifier {
     }
     fn initialize_proof(&mut self) -> Result<(), Error> {
         let mut polynomials = Vec::with_capacity(8);
-        for (family, index) in [0, 73].into_iter().enumerate() {
-            let common = setup_witness::contribution::common_polynomial(index)
+        for (slot, (family, common, _)) in setup_inputs(self.profile).into_iter().enumerate() {
+            let common = setup_witness::contribution::common_polynomial(self.profile, common)
                 .map_err(|_| Error::Context)?;
             polynomials.push(
-                encode_polynomial(&common, if family == 0 { 109 } else { 6 })
+                encode_polynomial(&common, coefficient_bytes(self.profile, family))
                     .map_err(|_| Error::Shape)?,
             );
-            polynomials.push(std::mem::take(&mut self.keys[family]));
-            polynomials.push(std::mem::take(&mut self.ciphertexts[2 * family]));
-            polynomials.push(std::mem::take(&mut self.ciphertexts[2 * family + 1]));
+            polynomials.push(std::mem::take(&mut self.keys[slot]));
+            polynomials.push(std::mem::take(&mut self.ciphertexts[2 * slot]));
+            polynomials.push(std::mem::take(&mut self.ciphertexts[2 * slot + 1]));
         }
         let mut hash = Sha3_512::new();
         hash.update(&self.context);
@@ -265,10 +270,12 @@ impl BallotBodyVerifier {
         position: usize,
         header: &[u8],
     ) -> Result<Self, Error> {
+        let profile = setup.profile();
         let relation = BallotBodyRelationVerifier::new(poll, setup, position, header)?;
-        let length =
-            ballot_body::HEADER_BYTES + ballot_body::CIPHERTEXT_BYTES + relation.proof_length;
-        let hash = BallotBodyHasher::new(header).map_err(|_| Error::Shape)?;
+        let length = ballot_body::HEADER_BYTES
+            + ballot_body::ciphertext_bytes(profile)
+            + relation.proof_length;
+        let hash = BallotBodyHasher::new(profile, header).map_err(|_| Error::Shape)?;
         Ok(Self {
             relation,
             hash,
@@ -335,8 +342,8 @@ impl SignedBallotVerifier {
         {
             return Err(Error::Context);
         }
-        let mut hash =
-            BallotBodyHasher::for_body_length(envelope.body_length()).map_err(|_| Error::Shape)?;
+        let mut hash = BallotBodyHasher::for_body_length(setup.profile(), envelope.body_length())
+            .map_err(|_| Error::Shape)?;
         hash.push(header).map_err(|_| Error::Shape)?;
         let relation =
             BallotBodyRelationVerifier::new(poll, setup.clone(), envelope.position(), header).ok();

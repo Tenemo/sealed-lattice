@@ -1,27 +1,43 @@
+import { completionProfileCounts } from '#tests/supported-profile-model.js';
+
+// Only the native ceremony cases take a profile; the build check and the
+// requested-output probe cover fixed profiles.
 const protocolResearchCases = {
-    check: { execution: false, noResult: false },
-    'native-result': { execution: true, noResult: false },
-    'native-empty': { execution: true, noResult: true },
-    'native-invalid-only': { execution: true, noResult: true },
-    'native-prefix': { execution: true, noResult: false },
+    check: { execution: false, noResult: false, profile: false },
+    'native-result': { execution: true, noResult: false, profile: true },
+    'native-empty': { execution: true, noResult: true, profile: true },
+    'native-invalid-only': { execution: true, noResult: true, profile: true },
+    'native-prefix': { execution: true, noResult: false, profile: false },
 } as const;
 
 export const selectProtocolResearchCase = (arguments_: readonly string[]) => {
-    const selectors = arguments_.filter((value) => value !== '--');
-    if (selectors.length !== 1) {
-        throw new Error('Select exactly one protocol research case.');
-    }
-    const name = selectors[0];
+    const [name, ...counts] = arguments_.filter((value) => value !== '--');
     if (
         name === undefined ||
         !Object.prototype.hasOwnProperty.call(protocolResearchCases, name)
     ) {
         throw new Error('No protocol research case matches the selector.');
     }
-    return {
-        name,
-        ...protocolResearchCases[name as keyof typeof protocolResearchCases],
-    };
+    const { profile, ...selected } =
+        protocolResearchCases[name as keyof typeof protocolResearchCases];
+    if (
+        counts.length !== 0 &&
+        (!profile ||
+            counts.length !== 2 ||
+            counts.some((value) => !/^[1-9][0-9]*$/u.test(value)))
+    ) {
+        throw new Error(
+            'Select exactly one protocol research case, and for a native ceremony case optionally its participant and option counts.',
+        );
+    }
+    const [participantCount, optionCount] =
+        counts.length === 0
+            ? [
+                  completionProfileCounts.participantCount,
+                  completionProfileCounts.optionCount,
+              ]
+            : counts.map(Number);
+    return { name, ...selected, participantCount, optionCount };
 };
 
 export const selectPublicCompletionCase = (arguments_: readonly string[]) => {

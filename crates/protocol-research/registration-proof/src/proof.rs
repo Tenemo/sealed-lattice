@@ -29,13 +29,18 @@ impl RegistrationProof {
         let public_key = statement::encode_key(key.public_key()).unwrap();
         let common = statement::common_bytes();
         let statement_digest = statement::digest(&common, &public_key);
-        let mut context_hash = transcript::context_hasher(role);
+        let relation = registration_relation();
+        let mut context_hash = transcript::context_hasher(&relation, role);
         context_hash.update(statement::header());
         context_hash.update(&common);
         context_hash.update(&public_key);
         let context = context_hash.finalize().into();
-        let mut witness =
-            Witness::from_columns(statement_digest, key.take_proof_columns().unwrap()).unwrap();
+        let mut witness = Witness::from_columns(
+            &relation,
+            statement_digest,
+            key.take_proof_columns().unwrap(),
+        )
+        .unwrap();
         if adversarial_affine {
             let previous = witness.columns[2][0];
             let changed = previous ^ 1;
@@ -45,7 +50,7 @@ impl RegistrationProof {
                 witness.counts[usize::from(changed) * factor] += 1;
             }
         }
-        let mut transcript = Transcript::new(role, context);
+        let mut transcript = Transcript::new(role, context, relation.message_bytes());
         transcript.next();
         let first = FirstOracle::create(role, &witness, excess_degree);
         transcript.respond(&[&first.tree.root()]);
@@ -82,7 +87,7 @@ impl RegistrationProof {
             &inverses,
             &transcript.message,
         );
-        let folding = fri::Fri::create(role, coefficients, &mut transcript);
+        let folding = fri::Fri::create(role, relation.oracles(), coefficients, &mut transcript);
         Self {
             key,
             statement_digest,
@@ -106,7 +111,7 @@ impl RegistrationProof {
         self.key.validate_retained()
     }
     pub fn write(&self, output: &mut impl Write) {
-        output.write_all(b"RWP1").unwrap();
+        output.write_all(self.witness.relation.proof_magic).unwrap();
         output.write_all(&self.statement_digest).unwrap();
         output.write_all(&self.context).unwrap();
         for root in [
@@ -132,7 +137,7 @@ impl RegistrationProof {
         let openings = self.first.openings(&self.witness, &indices);
         let payloads: Vec<&[u8]> = openings
             .iter()
-            .map(|value| &value[4..4 + FIRST_WIDTH])
+            .map(|value| &value[4..4 + self.witness.relation.first_width()])
             .collect();
         self.first
             .tree
@@ -143,7 +148,7 @@ impl RegistrationProof {
             .openings(&self.witness, &self.inverses, &indices);
         let payloads: Vec<&[u8]> = openings
             .iter()
-            .map(|value| &value[4..4 + SECOND_WIDTH])
+            .map(|value| &value[4..4 + self.witness.relation.second_width()])
             .collect();
         self.second
             .tree

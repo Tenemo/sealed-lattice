@@ -1,12 +1,13 @@
 use crate::certification::VerifiedTargetCertificate;
 use linked_release_proof::{
-    parameters::{HEADER_BYTES, SYSTEMATIC},
+    parameters::{RELEASE_HEADER_BYTES, SYSTEMATIC},
     statement::{self, PublicStatement},
 };
 use num_bigint::{BigInt, Sign};
 use registration_credentials::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
 use std::sync::Arc;
+use supported_profile::Profile;
 
 /// Canonical public role bytes; this encoding alone grants no release authority.
 pub fn encode_release_proof_role(
@@ -74,9 +75,10 @@ pub(crate) fn decode_polynomial(
 /// Public operands and original participant position for one certified target.
 /// Neither an uncertified body nor a caller-selected ciphertext enters here.
 pub struct ReleaseContext {
+    profile: Profile,
     certificate: Arc<VerifiedTargetCertificate>,
     position: usize,
-    header: [u8; HEADER_BYTES],
+    header: [u8; RELEASE_HEADER_BYTES],
     constant: VerifiedAggregatePolynomial,
     linear: VerifiedAggregatePolynomial,
     target_linear: Vec<BigInt>,
@@ -92,35 +94,38 @@ impl ReleaseContext {
         let target = certificate.target();
         let inventory = target.inventory();
         let setup = inventory.setup();
+        let profile = setup.profile();
         let ciphertext = target.ciphertext().ok_or(Error::NoResult)?;
         let records = setup.inventory().proposal().proposal().records();
-        if records.len() != 10
-            || position >= records.len()
+        let release_bytes = statement::release_coefficient_bytes(profile);
+        if position >= profile.participants()
+            || records.len() != profile.participants()
             || constant.inventory() != &setup.inventory().identity()
             || linear.inventory() != &setup.inventory().identity()
-            || constant.index() != 44 + 3 * position
-            || linear.index() != 45 + 3 * position
-            || ciphertext.len() != 2 * SYSTEMATIC * 25
+            || constant.index() != profile.share_constant_polynomial(position)
+            || linear.index() != profile.share_linear_polynomial(position)
+            || ciphertext.len() != 2 * SYSTEMATIC * release_bytes
         {
             return Err(Error::Context);
         }
         let public_key = decode_polynomial(
             records[position].public_key(),
-            21,
+            statement::share_coefficient_bytes(),
             &statement::share_modulus(),
         )?;
         let target_linear = decode_polynomial(
-            &ciphertext[SYSTEMATIC * 25..],
-            25,
-            &statement::release_modulus(),
+            &ciphertext[SYSTEMATIC * release_bytes..],
+            release_bytes,
+            &statement::release_modulus(profile),
         )?;
-        let mut header = [0; HEADER_BYTES];
+        let mut header = [0; RELEASE_HEADER_BYTES];
         header[..4].copy_from_slice(b"LRS1");
         header[4..68].copy_from_slice(&inventory.poll().identity());
         header[68..132].copy_from_slice(&setup.inventory().identity());
         header[132..196].copy_from_slice(target.identity());
         header[196..].copy_from_slice(&(position as u16).to_le_bytes());
         Ok(Self {
+            profile,
             certificate,
             position,
             header,
@@ -130,7 +135,10 @@ impl ReleaseContext {
             public_key,
         })
     }
-    pub fn header(&self) -> &[u8; HEADER_BYTES] {
+    pub fn profile(&self) -> Profile {
+        self.profile
+    }
+    pub fn header(&self) -> &[u8; RELEASE_HEADER_BYTES] {
         &self.header
     }
     pub fn position(&self) -> usize {
@@ -164,9 +172,14 @@ impl ReleaseContext {
     }
     pub fn statement(&self, partial: &[u8]) -> Result<PublicStatement, Error> {
         // The parser checks the actual partial, not a producer's range claim.
-        decode_polynomial(partial, 25, &statement::release_modulus())?;
-        let common =
-            setup_witness::contribution::common_polynomial(42).map_err(|_| Error::Context)?;
+        let profile = self.profile;
+        let release_bytes = statement::release_coefficient_bytes(profile);
+        decode_polynomial(partial, release_bytes, &statement::release_modulus(profile))?;
+        let common = setup_witness::contribution::common_polynomial(
+            profile,
+            profile.share_common_polynomial(),
+        )
+        .map_err(|_| Error::Context)?;
         let mut polynomials = [
             common.as_slice(),
             self.public_key(),
@@ -177,12 +190,20 @@ impl ReleaseContext {
         .into_iter()
         .enumerate()
         .map(|(index, values)| {
-            statement::encode_polynomial(values, if index < 4 { 21 } else { 25 })
-                .map_err(|_| Error::Encoding)
+            statement::encode_polynomial(
+                values,
+                if index < 4 {
+                    statement::share_coefficient_bytes()
+                } else {
+                    release_bytes
+                },
+            )
+            .map_err(|_| Error::Encoding)
         })
         .collect::<Result<Vec<_>, _>>()?;
         polynomials.push(partial.to_vec());
         Ok(PublicStatement {
+            profile,
             header: self.header.to_vec(),
             polynomials,
         })

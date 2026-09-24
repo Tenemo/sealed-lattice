@@ -3,8 +3,8 @@ use evaluation_target::release_body::{ReleaseBodyVerifier, VerifiedReleaseBody};
 use registration_credentials::{
     Error,
     release_signing::{
-        MAXIMUM_BODY_BYTES, RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseBodyHasher,
-        ReleaseEnvelope, body_header,
+        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseBodyHasher, ReleaseEnvelope,
+        body_header,
     },
     target_signing::TargetMessage,
 };
@@ -37,6 +37,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
     let close = session.close.as_ref().ok_or(Error::Context)?;
     let owner = close.owner();
     let setup = close.setup();
+    let profile = setup.profile();
     let roster = setup.inventory().proposal();
     match operation {
         // The worker commits the target and complete original entropy journal
@@ -60,7 +61,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             let mut proof_bytes = Vec::new();
             proof.write(&mut proof_bytes);
             drop(proof);
-            let mut body = body_header(context.header(), proof_bytes.len())?;
+            let mut body = body_header(profile, context.header(), proof_bytes.len())?;
             body.extend(&statement.polynomials[5]);
             body.extend(proof_bytes);
             drop(statement);
@@ -99,7 +100,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if session.release.is_some() {
                 return Err(Error::Consumed);
             }
-            let envelope = ReleaseEnvelope::decode(input)?;
+            let envelope = ReleaseEnvelope::decode(profile, input)?;
             let context =
                 evaluation_target::verified_browser_release_context().ok_or(Error::Context)?;
             if context.position() != owner.position()
@@ -218,18 +219,19 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             }
             let body = &input[4..4 + length];
             let message = TargetMessage::parse(body, roster.proposal().records().len())?;
-            let envelope =
-                ReleaseEnvelope::decode(&input[4 + length..4 + length + RELEASE_ENVELOPE_BYTES])?;
+            let envelope = ReleaseEnvelope::decode(
+                profile,
+                &input[4 + length..4 + length + RELEASE_ENVELOPE_BYTES],
+            )?;
             if !message.encrypted()
                 || envelope.target() != message.identity()
                 || envelope.poll() != owner.poll()
                 || envelope.inventory() != owner.inventory()
                 || envelope.position() != owner.position()
-                || envelope.body_length() > MAXIMUM_BODY_BYTES
             {
                 return Err(Error::Context);
             }
-            let hasher = ReleaseBodyHasher::new(envelope.body_length())?;
+            let hasher = ReleaseBodyHasher::new(profile, envelope.body_length())?;
             session.release = Some(ReleaseState {
                 body: Vec::with_capacity(envelope.body_length()),
                 envelope,

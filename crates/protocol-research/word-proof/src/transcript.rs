@@ -7,7 +7,6 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 use stateful_sha3::{Digest, Sha3_512};
-use std::{fs::File, io::Read, path::Path};
 
 pub fn part(state: &mut Sha3_512, bytes: &[u8]) {
     Digest::update(state, (bytes.len() as u32).to_le_bytes());
@@ -21,7 +20,7 @@ pub fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
     }
     state.finalize().into()
 }
-fn wide(domain: &[u8], parts: &[&[u8]]) -> Vec<u8> {
+fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     let mut state = Shake256::default();
     Update::update(&mut state, &(domain.len() as u32).to_le_bytes());
     Update::update(&mut state, domain);
@@ -29,69 +28,44 @@ fn wide(domain: &[u8], parts: &[&[u8]]) -> Vec<u8> {
         Update::update(&mut state, &(value.len() as u32).to_le_bytes());
         Update::update(&mut state, value);
     }
-    let mut result = vec![0; MESSAGE_BYTES];
+    let mut result = vec![0; length];
     XofReader::read(&mut state.finalize_xof(), &mut result);
     result
 }
-pub fn parameters() -> Vec<u8> {
-    let values = relation_parameters();
-    let mut bytes: Vec<u8> = values
+pub fn parameters(relation: &Relation) -> Vec<u8> {
+    let mut bytes: Vec<u8> = relation
+        .relation_parameters()
         .into_iter()
-        .chain(degrees())
+        .chain(relation.degrees())
         .flat_map(|value| (value as u32).to_le_bytes())
         .collect();
-    for index in 0..LOOKUPS {
-        let (column, scale) = lookup(index);
+    for index in 0..relation.lookups() {
+        let (column, scale) = relation.lookup(index);
         bytes.extend((column as u32).to_le_bytes());
         bytes.extend((scale as u32).to_le_bytes());
     }
     bytes
 }
-pub fn context(directory: &Path, role: &[u8], expected_statement: &[u8; 64]) -> [u8; 64] {
-    let mut state = context_hasher(role);
-    let length = statement_length();
-    let mut statement = Sha3_512::new();
-    let mut total = 0;
-    let mut bytes = vec![0; 1 << 20];
-    for index in 0..STATEMENT_PARTS {
-        let name = if index == 0 {
-            "header.bin".to_owned()
-        } else {
-            format!("polynomial-{:02}.bin", index - 1)
-        };
-        let mut file = File::open(directory.join(name)).unwrap();
-        loop {
-            let length = file.read(&mut bytes).unwrap();
-            if length == 0 {
-                break;
-            }
-            Digest::update(&mut state, &bytes[..length]);
-            Digest::update(&mut statement, &bytes[..length]);
-            total += length;
-        }
-    }
-    assert_eq!(total, length);
-    assert_eq!(<[u8; 64]>::from(statement.finalize()), *expected_statement);
-    state.finalize().into()
-}
-pub fn statement_length() -> usize {
-    STATEMENT_BYTES
-}
-pub fn context_hasher(role: &[u8]) -> Sha3_512 {
+/// The statement context before the statement bytes, which the caller
+/// appends.
+pub fn context_hasher(relation: &Relation, role: &[u8]) -> Sha3_512 {
     let mut state = Sha3_512::new();
     part(&mut state, b"bounded-proof/statement");
     for value in [
         role,
-        RELATION_TAG,
+        relation.tag,
         &2u128.to_le_bytes(),
         &crate::field::root(1 << 20).to_le_bytes(),
         &7u128.to_le_bytes(),
-        &parameters(),
+        &parameters(relation),
         &(MODULUS - 1).to_le_bytes(),
     ] {
         part(&mut state, value);
     }
-    Digest::update(&mut state, (statement_length() as u32).to_le_bytes());
+    Digest::update(
+        &mut state,
+        (relation.statement_bytes() as u32).to_le_bytes(),
+    );
     state
 }
 pub struct Transcript {
@@ -103,11 +77,13 @@ pub struct Transcript {
     pub round: u32,
 }
 impl Transcript {
-    pub fn new(role: &[u8], context: [u8; 64]) -> Self {
+    /// Verifier messages and chained states have the relation's message
+    /// length.
+    pub fn new(role: &[u8], context: [u8; 64], message_bytes: usize) -> Self {
         Self {
             role: role.to_vec(),
             context,
-            state: vec![0; MESSAGE_BYTES],
+            state: vec![0; message_bytes],
             message: Vec::new(),
             salts: Vec::new(),
             round: 0,
@@ -123,6 +99,7 @@ impl Transcript {
                 &self.state,
                 &self.round.to_le_bytes(),
             ],
+            self.state.len(),
         );
     }
     pub fn respond(&mut self, parts: &[&[u8]]) {
@@ -140,12 +117,14 @@ impl Transcript {
         ];
         inputs.extend_from_slice(parts);
         let root = hash(b"bounded-proof/message-root", &inputs);
+        let length = self.state.len();
         let digest = wide(
             b"bounded-proof/chain-state",
             &[&self.role, &self.context, &self.message, &root],
+            length,
         );
         self.state[..64].copy_from_slice(&root);
-        self.state[64..].copy_from_slice(&digest[..MESSAGE_BYTES - 64]);
+        self.state[64..].copy_from_slice(&digest[..length - 64]);
         self.salts.push(salt);
     }
 }
@@ -191,11 +170,12 @@ mod tests {
     use super::*;
     #[test]
     fn retained_unused_message_bytes_bind_the_next_state() {
-        let mut left = Transcript::new(b"test", [3; 64]);
-        let mut right = Transcript::new(b"test", [3; 64]);
+        let length = 4096;
+        let mut left = Transcript::new(b"test", [3; 64], length);
+        let mut right = Transcript::new(b"test", [3; 64], length);
         left.next();
         right.next();
-        right.message[MESSAGE_BYTES - 1] ^= 1;
+        right.message[length - 1] ^= 1;
         assert_eq!(
             challenge(&left.message, 0, false),
             challenge(&right.message, 0, false)

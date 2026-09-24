@@ -8,6 +8,7 @@ import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
+import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
@@ -17,6 +18,8 @@ import {
 // setup, close and completion records the reader verifies.
 type NativeRun = {
     case: string;
+    participantCount: number;
+    optionCount: number;
     output: string;
     result: { kind: 'result' | 'no-result'; identifiers?: string[] };
 };
@@ -74,6 +77,24 @@ await runWithLocalRunLog(
             );
             const ceremony = native.output;
             assert.ok((await stat(path.join(ceremony, 'close'))).isDirectory());
+            const scenario = deriveResearchScenario(
+                native.participantCount,
+                native.optionCount,
+            );
+            // Release shares from positions spread evenly over the roster,
+            // so no two are adjacent, and a bad share just after the first.
+            const releaseAuthors = Array.from(
+                { length: scenario.releaseThreshold },
+                (_unused, index) =>
+                    Math.floor(
+                        (index * (scenario.participantCount - 1)) /
+                            (scenario.releaseThreshold - 1),
+                    ),
+            );
+            const badRelease = releaseAuthors[0] + 1;
+            // A bad extra vote takes the first corrupt position's file, since
+            // every corrupt participant withholds its vote.
+            const badVotes = scenario.corrupt.slice(0, 1);
             let directory: string;
             if (selected.name === 'available-records') {
                 assert.equal(native.case, 'native-result');
@@ -83,14 +104,18 @@ await runWithLocalRunLog(
                     'available-completion',
                 );
                 await mkdir(directory);
-                // The native certificate has exactly the seven honest votes,
-                // so every one is needed; corrupt 1 to 3 signed none.
+                // The native certificate has exactly the honest votes, so
+                // every one is needed; the corrupt participants signed none.
+                assert.equal(
+                    scenario.signers.length,
+                    scenario.certificateThreshold,
+                );
                 const files = [
                     'target.bin',
-                    ...[0, 4, 5, 6, 7, 8, 9].map(
+                    ...scenario.signers.map(
                         (index) => 'target-vote-' + index + '.bin',
                     ),
-                    ...[1, 4, 6, 8].flatMap((index) => [
+                    ...releaseAuthors.flatMap((index) => [
                         'release-envelope-' + index + '.bin',
                         'release-' + index + '.bin',
                     ]),
@@ -101,25 +126,41 @@ await runWithLocalRunLog(
                         path.join(directory, file),
                     );
                 // A bad extra vote and a bad extra share precede later valid evidence.
-                const badVote = await readFile(
-                    path.join(original, 'target-vote-4.bin'),
-                );
-                badVote[100] ^= 1;
-                await writeFile(
-                    path.join(directory, 'target-vote-1.bin'),
-                    badVote,
-                    { flag: 'wx' },
-                );
+                for (const position of badVotes) {
+                    const badVote = await readFile(
+                        path.join(
+                            original,
+                            'target-vote-' +
+                                scenario.signers[scenario.signers.length - 1] +
+                                '.bin',
+                        ),
+                    );
+                    badVote[100] ^= 1;
+                    await writeFile(
+                        path.join(
+                            directory,
+                            'target-vote-' + position + '.bin',
+                        ),
+                        badVote,
+                        { flag: 'wx' },
+                    );
+                }
                 await copyFile(
-                    path.join(original, 'release-envelope-2.bin'),
-                    path.join(directory, 'release-envelope-2.bin'),
+                    path.join(
+                        original,
+                        'release-envelope-' + badRelease + '.bin',
+                    ),
+                    path.join(
+                        directory,
+                        'release-envelope-' + badRelease + '.bin',
+                    ),
                 );
                 const badBody = await readFile(
-                    path.join(original, 'release-2.bin'),
+                    path.join(original, 'release-' + badRelease + '.bin'),
                 );
                 badBody[badBody.length - 1] ^= 1;
                 await writeFile(
-                    path.join(directory, 'release-2.bin'),
+                    path.join(directory, 'release-' + badRelease + '.bin'),
                     badBody,
                     {
                         flag: 'wx',
@@ -334,22 +375,29 @@ await runWithLocalRunLog(
             if (selected.name === 'available-records') {
                 const terminal = verified as TerminalResult;
                 assert.equal(terminal.kind, 'result');
-                assert.deepEqual(
-                    terminal.certificateAuthors,
-                    [0, 4, 5, 6, 7, 8, 9],
+                assert.deepEqual(terminal.certificateAuthors, scenario.signers);
+                assert.deepEqual(terminal.releaseAuthors, releaseAuthors);
+                const withheld = scenario.corrupt.filter(
+                    (position) => !badVotes.includes(position),
                 );
-                assert.deepEqual(terminal.releaseAuthors, [1, 4, 6, 8]);
-                assert.deepEqual(terminal.unavailableVotes, [2, 3]);
-                assert.deepEqual(terminal.invalidVotes, [1]);
-                assert.ok(terminal.invalidReleases.includes(2));
+                assert.deepEqual(terminal.unavailableVotes, withheld);
+                assert.deepEqual(terminal.invalidVotes, badVotes);
+                assert.ok(terminal.invalidReleases.includes(badRelease));
+                const absentReleases = Array.from(
+                    { length: scenario.participantCount },
+                    (_unused, position) => position,
+                ).filter(
+                    (position) =>
+                        position !== badRelease &&
+                        !releaseAuthors.includes(position),
+                );
                 for (const file of [
-                    'target-vote-2.bin',
-                    'target-vote-3.bin',
-                    'release-0.bin',
-                    'release-3.bin',
-                    'release-5.bin',
-                    'release-7.bin',
-                    'release-9.bin',
+                    ...withheld.map(
+                        (position) => 'target-vote-' + position + '.bin',
+                    ),
+                    ...absentReleases.map(
+                        (position) => 'release-' + position + '.bin',
+                    ),
                 ])
                     await assert.rejects(stat(path.join(directory, file)), {
                         code: 'ENOENT',

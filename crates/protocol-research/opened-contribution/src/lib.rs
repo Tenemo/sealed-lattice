@@ -3,12 +3,9 @@ use registration_credentials::{
     contribution_authentication::{CommitmentInventory, verify_opening},
     contribution_commitment::ContributionCommitmentHasher,
 };
-use setup_witness::contribution::{common_polynomial, statement_header};
+use setup_witness::{Profile, contribution::common_polynomial};
 use std::sync::Arc;
 use word_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
-
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser;
 
 #[derive(Debug)]
 pub enum Refusal {
@@ -41,6 +38,7 @@ impl VerifiedOpenedContribution {
 /// against the same full proof bytes included in the contribution commitment.
 pub struct OpenedContributionVerifier {
     inventory: Arc<CommitmentInventory>,
+    profile: Profile,
     position: usize,
     commitment: ContributionCommitmentHasher,
     verifier: Verifier,
@@ -63,6 +61,7 @@ impl OpenedContributionVerifier {
         let opening = verify_opening(&inventory, opening_body, opening_signature)
             .map_err(|_| Refusal::Context)?;
         let proposal = inventory.proposal().proposal();
+        let profile = proposal.profile();
         let role = proposal
             .contribution_role(opening.position())
             .map_err(|_| Refusal::Context)?;
@@ -76,13 +75,14 @@ impl OpenedContributionVerifier {
         // This declared value is not trusted: the underlying statement stream
         // recomputes it from fixed predecessors and every supplied polynomial.
         let declared_statement = proof_header[4..68].try_into().map_err(|_| Refusal::Shape)?;
-        let mut verifier =
-            Verifier::new(&role, declared_statement, proof_header).map_err(|_| Refusal::Proof)?;
+        let mut verifier = Verifier::new(profile, &role, declared_statement, proof_header)
+            .map_err(|_| Refusal::Proof)?;
         verifier
-            .push_statement(&statement_header())
+            .push_statement(&profile.setup_statement_header())
             .map_err(|_| Refusal::Statement)?;
         let mut result = Self {
             inventory,
+            profile,
             position: opening.position(),
             commitment,
             verifier,
@@ -95,15 +95,20 @@ impl OpenedContributionVerifier {
         Ok(result)
     }
 
+    /// Supplies every statement polynomial before the next one the body
+    /// owns: the recipients' registered keys and the public common
+    /// polynomials.
     fn fixed_inputs(&mut self) -> Result<(), Refusal> {
+        let profile = self.profile;
         let next_owned = self
             .commitment
             .next_polynomial()
-            .map_or(75, |(index, _)| index);
+            .map_or(profile.setup_polynomials(), |(index, _)| index);
         while self.statement_index < next_owned {
             let index = self.statement_index;
-            if (43..=70).contains(&index) && (index - 43).is_multiple_of(3) {
-                let recipient = (index - 43) / 3;
+            if let Some(recipient) = (0..profile.participants())
+                .find(|recipient| profile.recipient_key_polynomial(*recipient) == index)
+            {
                 let bytes = self.inventory.proposal().proposal().records()[recipient].public_key();
                 for chunk in bytes.chunks(CHUNK_LIMIT) {
                     self.verifier
@@ -111,26 +116,20 @@ impl OpenedContributionVerifier {
                         .map_err(|_| Refusal::Statement)?;
                 }
             } else {
-                let values = common_polynomial(index).map_err(|_| Refusal::Statement)?;
-                let width = if index < 42 {
-                    108
-                } else if index == 42 {
-                    20
-                } else if index == 73 {
-                    5
-                } else {
-                    return Err(Refusal::Statement);
-                };
+                let values = common_polynomial(profile, index).map_err(|_| Refusal::Statement)?;
+                let width = profile
+                    .family_magnitude_bytes(profile.setup_family(index).ok_or(Refusal::Statement)?);
                 let mut buffer = Vec::with_capacity(CHUNK_LIMIT);
+                let mut encoded = vec![0u8; 1 + width];
                 for value in values {
                     let (sign, magnitude) = value.to_bytes_le();
                     if magnitude.len() > width {
                         return Err(Refusal::Statement);
                     }
-                    let mut encoded = [0u8; 109];
+                    encoded.fill(0);
                     encoded[0] = u8::from(sign == Sign::Minus);
                     encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-                    for byte in &encoded[..width + 1] {
+                    for byte in &encoded {
                         buffer.push(*byte);
                         if buffer.len() == CHUNK_LIMIT {
                             self.verifier
@@ -148,7 +147,7 @@ impl OpenedContributionVerifier {
             }
             self.statement_index += 1;
         }
-        if next_owned == 75 {
+        if next_owned == profile.setup_polynomials() {
             self.verifier
                 .finish_statement()
                 .map_err(|_| Refusal::Statement)?;

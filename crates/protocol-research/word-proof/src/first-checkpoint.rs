@@ -11,13 +11,17 @@ use stateful_sha3::{
     Digest, Sha3_512,
     digest::common::hazmat::{SerializableState, SerializedState},
 };
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub const RECORD_BYTES: usize = 16_384;
-const HEADER_FIXED: usize = 4 + 4 + 2 + 64 + 64 + 145;
+const MAGIC: &[u8; 4] = b"FPC3";
 
+// The checkpoint names its profile, whose statement header it carries, and
+// either no recipient key hashes or one for each participant.
 #[derive(Clone)]
 struct Header {
+    profile: Profile,
     column: usize,
     role: Vec<u8>,
     expected: [u8; 64],
@@ -27,7 +31,11 @@ struct Header {
 }
 impl Header {
     fn encode(&self) -> Vec<u8> {
-        let mut bytes = Vec::from(b"FPC2".as_slice());
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend([
+            self.profile.participants() as u8,
+            self.profile.options() as u8,
+        ]);
         bytes.extend((self.column as u32).to_le_bytes());
         bytes.extend((self.role.len() as u16).to_le_bytes());
         bytes.extend(&self.role);
@@ -41,34 +49,38 @@ impl Header {
         bytes
     }
     fn decode(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() < HEADER_FIXED + 1 + 2
-            || bytes.len() > HEADER_FIXED + 1024 + 2 + 10 * 64
-            || &bytes[..4] != b"FPC2"
-        {
+        if bytes.len() < 12 || &bytes[..4] != MAGIC {
             return Err(Error::Operation);
         }
-        let column = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-        let role_length = u16::from_le_bytes(bytes[8..10].try_into().unwrap()) as usize;
+        let profile = Profile::new(usize::from(bytes[4]), usize::from(bytes[5]))
+            .map_err(|_| Error::Operation)?;
+        let statement = profile.setup_statement_header();
+        let column = u32::from_le_bytes(bytes[6..10].try_into().unwrap()) as usize;
+        let role_length = u16::from_le_bytes(bytes[10..12].try_into().unwrap()) as usize;
+        let start = 12 + role_length;
+        let input_start = start + 128 + statement.len();
         if role_length == 0
             || role_length > 1024
-            || column > COLUMNS + 1
-            || bytes.len() < HEADER_FIXED + role_length + 2
+            || column > setup_relation(profile).columns() + 1
+            || bytes.len() < input_start + 2
         {
             return Err(Error::Operation);
         }
-        let start = 10 + role_length;
-        let input_start = HEADER_FIXED + role_length;
         let count =
             u16::from_le_bytes(bytes[input_start..input_start + 2].try_into().unwrap()) as usize;
-        if ![0, 10].contains(&count) || bytes.len() != input_start + 2 + count * 64 {
+        if ![0, profile.participants()].contains(&count)
+            || bytes.len() != input_start + 2 + count * 64
+            || bytes[start + 128..input_start] != statement
+        {
             return Err(Error::Operation);
         }
         Ok(Self {
+            profile,
             column,
-            role: bytes[10..start].to_vec(),
+            role: bytes[12..start].to_vec(),
             expected: bytes[start..start + 64].try_into().unwrap(),
             context: bytes[start + 64..start + 128].try_into().unwrap(),
-            statement: bytes[start + 128..input_start].to_vec(),
+            statement,
             input_hashes: bytes[input_start + 2..]
                 .chunks_exact(64)
                 .map(|hash| hash.try_into().unwrap())
@@ -83,23 +95,24 @@ impl Header {
     }
 }
 
-fn fields() -> [(usize, usize); 5] {
+fn fields(relation: &Relation) -> [(usize, usize); 5] {
     [
-        (COLUMNS * SYSTEMATIC, 2),
-        ((COLUMNS + 1) * MASKS, 16),
+        (relation.columns() * SYSTEMATIC, 2),
+        ((relation.columns() + 1) * MASKS, 16),
         (MAX_DEGREE + 1, 48),
         (DOMAIN, 128),
         (DOMAIN, 201),
     ]
 }
-pub fn record_count() -> usize {
-    fields()
+/// Records of a checkpoint of the relation's first oracle.
+pub fn record_count(relation: &Relation) -> usize {
+    fields(relation)
         .iter()
         .map(|(units, width)| units.div_ceil(RECORD_BYTES / width))
         .sum()
 }
-fn record_layout(mut record: usize) -> Option<(usize, usize, usize, usize)> {
-    for (field, (units, width)) in fields().into_iter().enumerate() {
+fn record_layout(relation: &Relation, mut record: usize) -> Option<(usize, usize, usize, usize)> {
+    for (field, (units, width)) in fields(relation).into_iter().enumerate() {
         let per_record = RECORD_BYTES / width;
         let records = units.div_ceil(per_record);
         if record < records {
@@ -112,15 +125,14 @@ fn record_layout(mut record: usize) -> Option<(usize, usize, usize, usize)> {
 }
 
 pub struct Export {
+    relation: Relation,
     header: Header,
     next: usize,
 }
 impl Export {
-    pub fn begin(prover: &Prover) -> Result<Self, Error> {
-        Self::begin_with_inputs(prover, &[])
-    }
     pub fn begin_with_inputs(prover: &Prover, input_hashes: &[[u8; 64]]) -> Result<Self, Error> {
-        if ![0, 10].contains(&input_hashes.len()) {
+        let profile = prover.profile;
+        if ![0, profile.participants()].contains(&input_hashes.len()) {
             return Err(Error::Operation);
         }
         let Phase::FirstColumn(column) = prover.phase else {
@@ -136,7 +148,9 @@ impl Export {
             return Err(Error::Operation);
         }
         Ok(Self {
+            relation: prover.relation.clone(),
             header: Header {
+                profile,
                 column,
                 role: prover.role.clone(),
                 expected: prover.expected,
@@ -151,11 +165,12 @@ impl Export {
         self.header.encode()
     }
     pub fn complete(&self) -> bool {
-        self.next == record_count()
+        self.next == record_count(&self.relation)
     }
     pub fn seal(&mut self, prover: &Prover, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
-        let (field, start, count, width) = record_layout(self.next).ok_or(())?;
-        if prover.phase != Phase::FirstColumn(self.header.column)
+        let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
+        if prover.profile != self.header.profile
+            || prover.phase != Phase::FirstColumn(self.header.column)
             || prover.role != self.header.role
             || prover.expected != self.header.expected
             || prover.statement_header != self.header.statement
@@ -198,6 +213,7 @@ impl Export {
 }
 
 pub struct Import {
+    relation: Relation,
     header: Header,
     next: usize,
     failed: bool,
@@ -208,15 +224,22 @@ pub struct Import {
     hashers: Vec<Sha3_512>,
 }
 impl Import {
+    pub fn profile(&self) -> Profile {
+        self.header.profile
+    }
     pub fn input_hashes(&self) -> &[[u8; 64]] {
         &self.header.input_hashes
     }
     pub fn role(&self) -> &[u8] {
         &self.header.role
     }
+    pub fn relation(&self) -> &Relation {
+        &self.relation
+    }
     pub fn begin(bytes: &[u8]) -> Result<Self, Error> {
         let header = Header::decode(bytes)?;
         Ok(Self {
+            relation: setup_relation(header.profile),
             header,
             next: 0,
             failed: false,
@@ -228,7 +251,7 @@ impl Import {
         })
     }
     pub fn complete(&self) -> bool {
-        !self.failed && self.next == record_count()
+        !self.failed && self.next == record_count(&self.relation)
     }
     pub fn open(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Error> {
         if self.failed {
@@ -241,7 +264,7 @@ impl Import {
         result
     }
     fn open_record(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Error> {
-        let (field, _, count, width) = record_layout(self.next).ok_or(())?;
+        let (field, _, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if bytes.len() != count * width + 16 {
             return Err(Error::Operation);
         }
@@ -310,14 +333,18 @@ impl Import {
         if !self.complete() {
             return Err(Error::Operation);
         }
-        let witness =
-            Witness::from_columns(self.header.expected, std::mem::take(&mut *self.columns))
-                .map_err(|_| ())?;
-        let mut control = Vec::from((self.header.role.len() as u32).to_le_bytes());
-        control.extend(&self.header.role);
-        control.extend(self.header.expected);
-        let mut prover = Prover::new(&control)?;
-        let mut transcript = Transcript::new(&self.header.role, self.header.context);
+        let witness = Witness::from_columns(
+            &self.relation,
+            self.header.expected,
+            std::mem::take(&mut *self.columns),
+        )
+        .map_err(|_| ())?;
+        let mut prover = Prover::new(self.header.profile, &self.header.role, self.header.expected);
+        let mut transcript = Transcript::new(
+            &self.header.role,
+            self.header.context,
+            self.relation.message_bytes(),
+        );
         transcript.next();
         prover.witness = Some(witness);
         prover.statement_header = self.header.statement;
@@ -327,7 +354,7 @@ impl Import {
             degree_mask: std::mem::take(&mut *self.degree_mask),
             tree: Tree {
                 length: DOMAIN,
-                width: FIRST_WIDTH,
+                width: self.relation.first_width(),
                 stage: 0,
                 role: self.header.role,
                 salts: std::mem::take(&mut *self.salts),

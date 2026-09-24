@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import {
+    encodeResearchProfileTable,
+    researchProfileRecordBytes,
+} from '#tests/research-profile-table-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
-import { completionProfile } from '#tests/supported-profile-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 const unsigned = (value: bigint, bytes: number) => {
@@ -29,18 +32,44 @@ const product = ([a, b]: Fraction, [c, d]: Fraction): Fraction =>
     fraction(a * c, b * d);
 
 describe('tracked research parameter correspondence', () => {
-    it('reconstructs the exact modulus object from independent parameter owners', async () => {
-        const expected = Buffer.concat([
-            Buffer.from('SCP1'),
-            unsigned(completionProfile().ciphertext.modulus, 108),
-            unsigned(shareEncryptionParameters.modulus, 20),
-            unsigned(auxiliaryInputEncryptionParameters.modulus, 5),
-        ]);
-        expect(
-            await readFile(
-                'crates/protocol-research/setup-proof/parameters.bin',
-            ),
-        ).toEqual(expected);
+    it('rebuilds the tracked profile table from the supported-profile owners', async () => {
+        const stored = await readFile(
+            'crates/protocol-research/supported-profile/profiles.bin',
+        );
+        expect(stored).toEqual(encodeResearchProfileTable());
+        // Header: magic, both length-prefixed moduli, their families' common
+        // sample width and the count ranges.
+        expect(stored.subarray(0, 4).toString()).toBe('SPT1');
+        expect(stored.subarray(4, 25)).toEqual(
+            Buffer.concat([
+                Buffer.of(20),
+                unsigned(shareEncryptionParameters.modulus, 20),
+            ]),
+        );
+        expect(stored.subarray(25, 31)).toEqual(
+            Buffer.concat([
+                Buffer.of(5),
+                unsigned(auxiliaryInputEncryptionParameters.modulus, 5),
+            ]),
+        );
+        expect(stored.readUInt16LE(31)).toBe(320);
+        expect([...stored.subarray(33, 37)]).toEqual([3, 20, 2, 20]);
+        expect(stored.length).toBe(37 + 18 * 19 * researchProfileRecordBytes);
+        // The completion record, independently of the search: the FHE
+        // modulus 65537*65319*2^832+1 and the release modulus
+        // 65537*65445*2^160+1, both with Proth witness 7.
+        const offset =
+            37 + ((10 - 3) * 19 + (10 - 2)) * researchProfileRecordBytes;
+        const record = stored.subarray(
+            offset,
+            offset + researchProfileRecordBytes,
+        );
+        expect(record.readUInt16LE(0)).toBe(832);
+        expect(record.readUInt32LE(2)).toBe(65537 * 65319);
+        expect(record.readUInt16LE(6)).toBe(7);
+        expect(record.readUInt16LE(8)).toBe(160);
+        expect(record.readUInt32LE(10)).toBe(65537 * 65445);
+        expect(record.readUInt16LE(14)).toBe(7);
     });
 
     it('certifies every Gaussian CDF threshold using positive-series interval bounds', async () => {

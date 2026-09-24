@@ -22,6 +22,7 @@ setup-aggregate = { path = "../setup-aggregate", default-features = false }
 setup-witness = { path = "../setup-witness" }
 rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
 linked-release-proof = { path = "../linked-release-proof", default-features = false }
+supported-profile = { path = "../supported-profile" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = "=0.2.11"
@@ -33,11 +34,3 @@ ballot-encryption = { path = "../ballot-encryption", default-features = false }
 [[bin]]
 name = "check-target"
 path = "src/bin/check-target.rs"
-
-[[bin]]
-name = "check-program"
-path = "src/bin/check-program.rs"
-
-[[bin]]
-name = "emit-release-proof-role"
-path = "src/bin/emit-release-proof-role.rs"

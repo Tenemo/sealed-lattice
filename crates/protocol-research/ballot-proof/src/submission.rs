@@ -4,6 +4,7 @@ use registration_credentials::{
     ballot_authentication::{BallotEnvelope, verify_ballot_signature},
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
+use supported_profile::Profile;
 
 #[derive(Debug)]
 pub enum Error {
@@ -30,6 +31,7 @@ impl VerifiedBallotSubmission {
 /// Authenticates the envelope only. Its body and proof still require verification.
 #[derive(Clone)]
 pub struct AuthenticatedBallotEnvelope {
+    profile: Profile,
     envelope: BallotEnvelope,
     signature: [u8; 3309],
 }
@@ -52,6 +54,7 @@ pub struct BallotBodyAuthentication {
 impl BallotBodyAuthentication {
     pub fn new(authentication: AuthenticatedBallotEnvelope) -> Result<Self, Error> {
         let hash = registration_credentials::ballot_body::BallotBodyHasher::for_body_length(
+            authentication.profile,
             authentication.envelope().body_length(),
         )
         .map_err(|_| Error::Context)?;
@@ -88,7 +91,8 @@ pub fn authenticate_envelope(
     bytes: &[u8],
     signature: &[u8],
 ) -> Result<AuthenticatedBallotEnvelope, Error> {
-    let envelope = BallotEnvelope::decode(bytes).map_err(|_| Error::Context)?;
+    let profile = setup.profile();
+    let envelope = BallotEnvelope::decode(profile, bytes).map_err(|_| Error::Context)?;
     let signature: [u8; 3309] = signature.try_into().map_err(|_| Error::Signature)?;
     if !verify_ballot_signature(
         setup.inventory().proposal(),
@@ -99,6 +103,7 @@ pub fn authenticate_envelope(
         return Err(Error::Signature);
     }
     Ok(AuthenticatedBallotEnvelope {
+        profile,
         envelope,
         signature,
     })
@@ -125,6 +130,7 @@ pub fn sign_body(
 ) -> Result<(BallotEnvelope, [u8; 3309]), Error> {
     let position = check_setup(body, setup)?;
     let envelope = BallotEnvelope::new(
+        setup.profile(),
         *body.relation().poll(),
         setup.inventory().identity(),
         position,

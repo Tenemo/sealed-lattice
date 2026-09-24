@@ -447,7 +447,10 @@ impl CloseWork {
                 if input.len() != ENVELOPE_BYTES + 3309 {
                     return Err(Error::Shape);
                 }
-                let envelope = BallotEnvelope::decode(&input[..ENVELOPE_BYTES])?;
+                let envelope = BallotEnvelope::decode(
+                    self.context.setup().profile(),
+                    &input[..ENVELOPE_BYTES],
+                )?;
                 credential.restore_retained_ballot_signing(
                     &self.owner,
                     &envelope,

@@ -17,6 +17,7 @@ ballot-proof = { path = "../ballot-proof" }
 evaluation-target = { path = "../evaluation-target" }
 rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
 linked-release-proof = { path = "../linked-release-proof", default-features = false }
+supported-profile = { path = "../supported-profile" }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha3 = "=0.10.9"

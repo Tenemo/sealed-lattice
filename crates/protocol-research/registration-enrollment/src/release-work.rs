@@ -46,6 +46,7 @@ impl ReleaseWork {
         credential.begin_release(&self.owner, setup.inventory().proposal(), &message)?;
         let prepared = key
             .prepare_release(
+                self.context.profile(),
                 *self.context.header(),
                 self.context.encrypted_constant().to_vec(),
                 self.context.encrypted_linear().to_vec(),

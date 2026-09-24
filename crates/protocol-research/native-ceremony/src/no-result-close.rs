@@ -2,6 +2,7 @@ use crate::close::{
     Submission, authenticate, authenticate_responses, close_work, deliver, now_milliseconds, open,
     organize, respond, write_records,
 };
+use crate::scenario::Scenario;
 use ballot_proof::{
     body::SignedBallotVerifier,
     close::{CloseContext, ClosedSlot, VerifiedCloseBarrier},
@@ -9,7 +10,7 @@ use ballot_proof::{
 };
 use registration_credentials::{
     ballot_authentication::BallotEnvelope,
-    ballot_body::{self, BallotBodyHasher, CIPHERTEXT_BYTES, MINIMUM_PROOF_BYTES},
+    ballot_body::{self, BallotBodyHasher},
     contribution_authentication::SignedOpening,
     poll::VerifiedPoll,
 };
@@ -24,22 +25,27 @@ fn invalid_source(
     poll: &Arc<VerifiedPoll>,
     setup: &Arc<VerifiedSetupAggregate>,
     enrollment: &mut Enrollment,
+    scenario: &Scenario,
 ) -> Submission {
     let directory = output.join("ballot");
     std::fs::create_dir(&directory).unwrap();
-    let path = crate::ballot_body_path(&directory, 0);
-    let mut relation = Vec::from(b"LBS1".as_slice());
-    relation.extend(poll.identity());
-    relation.extend(setup.inventory().identity());
-    relation.extend(0u16.to_le_bytes());
-    relation.push(poll.manifest().option_count() as u8);
-    relation.push(poll.top_count() as u8);
-    let header = ballot_body::header(&relation, MINIMUM_PROOF_BYTES).unwrap();
-    let mut hash = BallotBodyHasher::new(&header).unwrap();
+    let path = crate::ballot_body_path(&directory, scenario, 0);
+    let profile = setup.profile();
+    let relation = ballot_proof::statement::header(
+        &poll.identity(),
+        &setup.inventory().identity(),
+        0,
+        poll.manifest().option_count(),
+        usize::from(poll.top_count()),
+    )
+    .unwrap();
+    let proof_bytes = *ballot_body::proof_lengths(profile).start();
+    let header = ballot_body::header(profile, &relation, proof_bytes).unwrap();
+    let mut hash = BallotBodyHasher::new(profile, &header).unwrap();
     let mut file = crate::public_output::PublicOutput::create(&path).unwrap();
     file.write_all(&header).unwrap();
     let zeros = vec![0; 1 << 20];
-    let remaining = CIPHERTEXT_BYTES + MINIMUM_PROOF_BYTES;
+    let remaining = ballot_body::ciphertext_bytes(profile) + proof_bytes;
     for offset in (0..remaining).step_by(zeros.len()) {
         let bytes = &zeros[..zeros.len().min(remaining - offset)];
         file.write_all(bytes).unwrap();
@@ -47,6 +53,7 @@ fn invalid_source(
     }
     file.finish().unwrap();
     let envelope = BallotEnvelope::new(
+        profile,
         poll.identity(),
         setup.inventory().identity(),
         0,
@@ -79,7 +86,7 @@ fn invalid_source(
                 envelope.bytes(),
                 &signature,
                 &path,
-                &output.join("aggregates/after-participant-9"),
+                &crate::aggregate::final_keys(output, profile),
                 mode,
             )
             .is_err(),
@@ -94,7 +101,7 @@ fn invalid_source(
 }
 
 /// Every other participant responds; the organizer then answers and proposes
-/// responses 0 to 6. Without ballots every slot is absent; the corrupt
+/// responses 0 to `n - f - 1`. Without ballots every slot is absent; the corrupt
 /// creator's invalid ballot, held by everyone, is the only usable slot.
 pub fn run(
     output: &Path,
@@ -103,6 +110,7 @@ pub fn run(
     enrollments: &mut [Enrollment],
     openings: &[SignedOpening],
     invalid_only: bool,
+    scenario: &Scenario,
 ) -> VerifiedCloseBarrier {
     let count = enrollments.len();
     let context = CloseContext::new(poll.clone(), setup.clone()).unwrap();
@@ -117,7 +125,8 @@ pub fn run(
             )
         })
         .collect();
-    let invalid = invalid_only.then(|| invalid_source(output, &poll, &setup, &mut enrollments[0]));
+    let invalid =
+        invalid_only.then(|| invalid_source(output, &poll, &setup, &mut enrollments[0], scenario));
     let (intent_body, intent_signature) = open(&mut works, enrollments, now_milliseconds());
     let intent = context
         .authenticate_intent(&intent_body, &intent_signature)

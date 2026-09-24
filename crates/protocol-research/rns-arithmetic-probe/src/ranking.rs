@@ -1,8 +1,10 @@
-use super::{Arithmetic, Polynomial, Transformed, pack, unpack};
+use super::{Arithmetic, Polynomial, Transformed, unpack};
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
 use sha2::{Digest, Sha512};
 use std::collections::BTreeSet;
+pub use supported_profile::DEGREE;
+use supported_profile::{PLAINTEXT_MODULUS, Profile};
 
 #[path = "ranking-plaintext.rs"]
 mod plaintext;
@@ -12,11 +14,17 @@ mod requested_output;
 #[cfg(feature = "numerical-probes")]
 pub use requested_output::probe as requested_output_probe;
 
-pub const DEGREE: usize = 65_536;
-const OPTION_COUNT: usize = 10;
-pub const COEFFICIENT_BYTES: usize = 109;
-pub const STORED_COEFFICIENT_BYTES: usize = 112;
-pub type Ciphertext = [Vec<[u64; 14]>; 2];
+/// The browser's memory bound, the reserve for the runtime and the
+/// module's own state, and the reserve for the host's transfer buffers.
+const MEMORY_BYTES: usize = 671_088_640;
+const RUNTIME_RESERVE_BYTES: usize = 67_108_864;
+const TRANSFER_RESERVE_BYTES: usize = 2_097_152;
+/// Each transform owns four tables of a word per coefficient.
+const TRANSFORM_TABLES: usize = 4;
+/// Every supported profile's ranking program is shorter.
+pub const MAXIMUM_INSTRUCTIONS: usize = 1024;
+
+pub type Ciphertext = [Polynomial; 2];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -51,6 +59,7 @@ pub struct Requirements {
 }
 
 pub struct Engine {
+    profile: Profile,
     arithmetic: Arithmetic,
     program_hash: [u8; 64],
     instructions: Vec<Instruction>,
@@ -70,19 +79,55 @@ fn word(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().unwrap())
 }
 
+/// Bytes of one stored working value of the profile: every coefficient word
+/// of both components.
+pub fn stored_value_bytes(profile: Profile) -> usize {
+    2 * DEGREE * profile.ciphertext_modulus().bits().div_ceil(64) * 8
+}
+/// The stored bytes of a working value: every coefficient word in
+/// little-endian order.
+pub fn stored_bytes(value: &Ciphertext) -> Vec<u8> {
+    value
+        .iter()
+        .flatten()
+        .flat_map(|word| word.to_le_bytes())
+        .collect()
+}
+/// Splits stored bytes into the two components' words. The engine checks a
+/// readback's shape and retained identity before it uses the value.
+pub fn stored_value(bytes: &[u8]) -> Result<Ciphertext, Refusal> {
+    if !bytes.len().is_multiple_of(16) {
+        return Err(Refusal::Shape);
+    }
+    let (first, second) = bytes.split_at(bytes.len() / 2);
+    let words = |bytes: &[u8]| {
+        bytes
+            .chunks_exact(8)
+            .map(|word| u64::from_le_bytes(word.try_into().unwrap()))
+            .collect()
+    };
+    Ok([words(first), words(second)])
+}
+
 impl Engine {
-    pub fn new(program: &[u8], expected_hash: [u8; 64]) -> Result<Self, Refusal> {
+    /// Checks a ranking program for the profile: an input for every roster
+    /// position, comparison weights of the profile's odd comparison degree,
+    /// rank weights of one requested result length and every intermediate
+    /// value used.
+    pub fn new(profile: Profile, program: &[u8], expected_hash: [u8; 64]) -> Result<Self, Refusal> {
         if program.len() < 16 || &program[..4] != b"BRK1" || word(&program[4..8]) != DEGREE as u32 {
             return Err(Refusal::Program);
         }
         let count = word(&program[8..12]) as usize;
-        if !(1..=1024).contains(&count)
+        if !(1..=MAXIMUM_INSTRUCTIONS).contains(&count)
             || program.len() != 16 + 16 * count
             || word(&program[12..16]) as usize != count - 1
             || <[u8; 64]>::from(Sha512::digest(program)) != expected_hash
         {
             return Err(Refusal::Program);
         }
+        let options = profile.options();
+        let comparison_degree = profile.comparison_degree();
         let mut instructions = Vec::with_capacity(count);
         let mut input_positions = BTreeSet::new();
         let mut remaining_uses = vec![0; count];
@@ -110,26 +155,31 @@ impl Engine {
             }
             let parameter = word(&bytes[12..]);
             let valid = match operation {
-                0 => parameter < 10 && input_positions.insert(parameter),
-                1 | 2 | 6 => parameter == 0,
-                3 => (1..=181).contains(&parameter) && parameter % 2 == 1,
-                4 => {
-                    parameter < (OPTION_COUNT * OPTION_COUNT) as u32
-                        && !parameter.is_multiple_of(OPTION_COUNT as u32)
+                0 => {
+                    (parameter as usize) < profile.participants()
+                        && input_positions.insert(parameter)
                 }
-                5 => parameter < (OPTION_COUNT + 2) as u32,
+                1 | 2 | 6 => parameter == 0,
+                3 => (1..=comparison_degree).contains(&(parameter as usize)) && parameter % 2 == 1,
+                4 => {
+                    (parameter as usize) < options * options
+                        && !(parameter as usize).is_multiple_of(options)
+                }
+                5 => (parameter as usize) < options + 2,
                 _ => false,
             };
             if !valid {
                 return Err(Refusal::Program);
             }
+            // Rank weights of family zero give the complete ordering; family
+            // k gives the first k ranks.
             let declared_top_count = match operation {
-                4 => Some(match parameter as usize / OPTION_COUNT {
-                    0 => OPTION_COUNT,
+                4 => Some(match parameter as usize / options {
+                    0 => options,
                     value => value,
                 }),
                 5 if parameter >= 2 => Some(match parameter {
-                    2 => OPTION_COUNT,
+                    2 => options,
                     value => value as usize - 2,
                 }),
                 _ => None,
@@ -146,14 +196,17 @@ impl Engine {
                 parameter,
             });
         }
-        if input_positions.len() != 10 || remaining_uses[..count - 1].contains(&0) {
+        if input_positions.len() != profile.participants()
+            || remaining_uses[..count - 1].contains(&0)
+        {
             return Err(Refusal::Program);
         }
         remaining_uses[count - 1] = 1;
         let (comparison_coefficients, ranking_coefficients, input_offset) =
-            plaintext::parameters(top_count.unwrap_or(OPTION_COUNT));
+            plaintext::parameters(profile, top_count.unwrap_or(options));
         Ok(Self {
-            arithmetic: Arithmetic::new(DEGREE),
+            profile,
+            arithmetic: Arithmetic::new(profile, DEGREE),
             program_hash: expected_hash,
             instructions,
             remaining_uses,
@@ -169,6 +222,10 @@ impl Engine {
         })
     }
 
+    pub fn profile(&self) -> Profile {
+        self.profile
+    }
+
     pub fn instruction(&self) -> Option<&Instruction> {
         self.instructions.get(self.step)
     }
@@ -179,6 +236,17 @@ impl Engine {
 
     pub fn key_count(&self) -> usize {
         self.keys.len()
+    }
+
+    /// Bytes of one canonical public coefficient: a sign byte and the
+    /// magnitude.
+    pub fn coefficient_bytes(&self) -> usize {
+        1 + self.profile.ciphertext_modulus().byte_length()
+    }
+
+    /// The zero ciphertext, which an absent ballot contributes.
+    pub fn zero_value(&self) -> Ciphertext {
+        std::array::from_fn(|_| self.arithmetic.zero())
     }
 
     pub fn requirements(&mut self) -> Result<Requirements, Refusal> {
@@ -192,21 +260,29 @@ impl Engine {
             self.keys.clear();
             self.cache = wanted;
         }
+        let gadget_length = self.arithmetic.gadget_length;
         let key_count = match self.cache {
-            Some(Cache::Multiplication) => 24,
-            Some(Cache::Rotation) => 12,
+            Some(Cache::Multiplication) => 4 * gadget_length,
+            Some(Cache::Rotation) => 2 * gadget_length,
             None => 0,
         };
-        let polynomial_bytes = DEGREE * 14 * 8;
-        let table_bytes = 31 * 4 * DEGREE * 8;
-        let key_bytes = key_count * 18 * DEGREE * 8;
+        let residue_bytes = DEGREE * 8;
+        let polynomial_bytes = self.arithmetic.polynomial_words() * 8;
+        let tensor_primes = self.arithmetic.tensor_primes();
+        let external_primes = self.arithmetic.external_primes;
+        let table_bytes = tensor_primes * TRANSFORM_TABLES * residue_bytes;
+        let key_bytes = key_count * external_primes * residue_bytes;
+        // A multiplication holds its four transformed tensor sources and one
+        // product; a rotation holds its transformed digits and one product.
         let scratch = match instruction.operation {
-            2 => 5 * 31 * DEGREE * 8 + 2 * polynomial_bytes,
-            6 => 7 * 18 * DEGREE * 8,
+            2 => 5 * tensor_primes * residue_bytes + 2 * polynomial_bytes,
+            6 => (gadget_length + 1) * external_primes * residue_bytes,
             _ => 0,
         };
-        let available = 671_088_640usize
-            .checked_sub(67_108_864 + 2_097_152 + table_bytes + key_bytes + scratch)
+        let available = MEMORY_BYTES
+            .checked_sub(
+                RUNTIME_RESERVE_BYTES + TRANSFER_RESERVE_BYTES + table_bytes + key_bytes + scratch,
+            )
             .ok_or(Refusal::Allocation)?;
         let capacity = available / (2 * polynomial_bytes);
         let required: BTreeSet<_> = instruction.inputs.iter().copied().collect();
@@ -251,9 +327,19 @@ impl Engine {
         })
     }
 
-    pub fn key_identity(cache: Cache, ordinal: usize) -> Result<(bool, usize), Refusal> {
-        let (group, digit) = (ordinal / 6, ordinal % 6);
-        let (common, offset) = match (cache, group) {
+    /// Whether a cached key is a public common polynomial, and its setup
+    /// polynomial index. A multiplication uses each gadget coordinate's
+    /// encryption key, first relinearization key, second relinearization
+    /// key and second relinearization common polynomial; a rotation uses
+    /// each coordinate's automorphism key and common polynomial.
+    pub fn key_identity(
+        profile: Profile,
+        cache: Cache,
+        ordinal: usize,
+    ) -> Result<(bool, usize), Refusal> {
+        let gadget_length = profile.gadget_length();
+        let (group, digit) = (ordinal / gadget_length, ordinal % gadget_length);
+        let (common, component) = match (cache, group) {
             (Cache::Multiplication, 0) => (false, 1),
             (Cache::Multiplication, 1) => (false, 2),
             (Cache::Multiplication, 2) => (false, 4),
@@ -262,52 +348,63 @@ impl Engine {
             (Cache::Rotation, 1) => (true, 5),
             _ => return Err(Refusal::Shape),
         };
-        Ok((common, 7 * digit + offset))
+        Ok((common, profile.fhe_polynomial(digit, component)))
     }
 
     pub fn decode_polynomial(&self, bytes: &[u8]) -> Result<Polynomial, Refusal> {
-        if bytes.len() != DEGREE * COEFFICIENT_BYTES {
+        let width = self.coefficient_bytes();
+        if bytes.len() != DEGREE * width {
             return Err(Refusal::Shape);
         }
-        bytes
-            .chunks_exact(COEFFICIENT_BYTES)
-            .map(|bytes| {
-                let magnitude = BigUint::from_bytes_le(&bytes[1..]);
-                if bytes[0] > 1
-                    || magnitude > (&self.arithmetic.modulus >> 1usize)
-                    || (bytes[0] == 1 && magnitude.is_zero())
-                {
-                    return Err(Refusal::Coefficient);
-                }
-                Ok(if bytes[0] == 1 {
-                    pack(&(&self.arithmetic.modulus - magnitude))
-                } else {
-                    pack(&magnitude)
-                })
-            })
-            .collect()
+        let half = &self.arithmetic.modulus >> 1usize;
+        let mut output = Vec::with_capacity(self.arithmetic.polynomial_words());
+        for bytes in bytes.chunks_exact(width) {
+            let magnitude = BigUint::from_bytes_le(&bytes[1..]);
+            if bytes[0] > 1 || magnitude > half || (bytes[0] == 1 && magnitude.is_zero()) {
+                return Err(Refusal::Coefficient);
+            }
+            if bytes[0] == 1 {
+                self.arithmetic
+                    .push(&mut output, &(&self.arithmetic.modulus - magnitude));
+            } else {
+                self.arithmetic.push(&mut output, &magnitude);
+            }
+        }
+        Ok(output)
     }
 
     pub fn load_key(&mut self, ordinal: usize, polynomial: Polynomial) -> Result<(), Refusal> {
         let cache = self.cache.ok_or(Refusal::Phase)?;
-        Self::key_identity(cache, ordinal)?;
-        if ordinal != self.keys.len() || polynomial.len() != DEGREE {
+        Self::key_identity(self.profile, cache, ordinal)?;
+        if ordinal != self.keys.len() {
             return Err(Refusal::Phase);
         }
         self.validate_polynomial(&polynomial)?;
-        self.keys.push(self.arithmetic.transformed(&polynomial, 18));
+        self.keys.push(
+            self.arithmetic
+                .transformed(&polynomial, self.arithmetic.external_primes),
+        );
         Ok(())
     }
 
-    fn validate_polynomial(&self, polynomial: &Polynomial) -> Result<(), Refusal> {
-        if polynomial.len() != DEGREE
-            || polynomial
-                .iter()
+    fn validate_polynomial(&self, polynomial: &[u64]) -> Result<(), Refusal> {
+        if polynomial.len() != self.arithmetic.polynomial_words()
+            || self
+                .arithmetic
+                .coefficients(polynomial)
                 .any(|coefficient| unpack(coefficient) >= self.arithmetic.modulus)
         {
             return Err(Refusal::Coefficient);
         }
         Ok(())
+    }
+
+    /// Checks that both components are canonical polynomials of the
+    /// profile's ciphertext modulus.
+    pub fn validate_value(&self, value: &Ciphertext) -> Result<(), Refusal> {
+        value
+            .iter()
+            .try_for_each(|polynomial| self.validate_polynomial(polynomial))
     }
 
     pub fn load_input(&mut self, position: usize, value: Ciphertext) -> Result<(), Refusal> {
@@ -318,9 +415,7 @@ impl Engine {
         {
             return Err(Refusal::Phase);
         }
-        for polynomial in &value {
-            self.validate_polynomial(polynomial)?;
-        }
+        self.validate_value(&value)?;
         self.input = Some(value);
         Ok(())
     }
@@ -342,12 +437,8 @@ impl Engine {
 
     pub fn value_identity(&self, index: usize, value: &Ciphertext) -> [u8; 64] {
         let mut hash = self.value_hasher(index);
-        for polynomial in value {
-            for coefficient in polynomial {
-                for word in coefficient {
-                    hash.update(word.to_le_bytes());
-                }
-            }
+        for word in value.iter().flatten() {
+            hash.update(word.to_le_bytes());
         }
         hash.finalize().into()
     }
@@ -364,9 +455,7 @@ impl Engine {
     }
 
     pub fn reload(&mut self, index: usize, value: Ciphertext) -> Result<(), Refusal> {
-        for polynomial in &value {
-            self.validate_polynomial(polynomial)?;
-        }
+        self.validate_value(&value)?;
         if !self.requirements()?.reloads.contains(&index)
             || self.stored[index] != Some(self.value_identity(index, &value))
         {
@@ -376,54 +465,30 @@ impl Engine {
         Ok(())
     }
 
-    fn multiply(&self, left: &Ciphertext, right: &Ciphertext) -> Ciphertext {
-        let [mut constant, mut linear, other_linear, quadratic] =
-            self.arithmetic.tensors(left, right);
-        self.arithmetic.add(&mut linear, &other_linear);
-        drop(other_linear);
-        let digits = self.arithmetic.digit_transforms(&quadratic);
-        let intermediate = self.arithmetic.external(&digits, &self.keys[..6]);
-        self.arithmetic.add(
-            &mut linear,
-            &self.arithmetic.external(&digits, &self.keys[6..12]),
-        );
-        drop(digits);
-        drop(quadratic);
-        let digits = self.arithmetic.digit_transforms(&intermediate);
-        self.arithmetic.add(
-            &mut constant,
-            &self.arithmetic.external(&digits, &self.keys[12..18]),
-        );
-        self.arithmetic.add(
-            &mut linear,
-            &self.arithmetic.external(&digits, &self.keys[18..24]),
-        );
-        [constant, linear]
-    }
-
-    fn automorphism(&self, polynomial: &Polynomial) -> Polynomial {
-        let mut output = vec![[0; 14]; DEGREE];
-        for (index, value) in polynomial.iter().enumerate() {
-            let exponent = index * 5;
-            output[exponent % DEGREE] =
-                if (exponent / DEGREE).is_multiple_of(2) || value.iter().all(|word| *word == 0) {
-                    *value
-                } else {
-                    pack(&(&self.arithmetic.modulus - unpack(value)))
-                };
-        }
-        output
-    }
-
     fn add_plaintext(&self, input: &Ciphertext, coefficients: &[i32]) -> Ciphertext {
-        let delta = BigInt::from((&self.arithmetic.modulus - 1u32) / 65537u32);
-        let mut output = input.clone();
-        for (value, plaintext) in output[0].iter_mut().zip(coefficients) {
-            *value = self
-                .arithmetic
-                .normalize(BigInt::from(unpack(value)) + &delta * *plaintext);
+        // The plaintext scale is the rounded quotient of the ciphertext and
+        // plaintext moduli.
+        let delta =
+            BigInt::from((&self.arithmetic.modulus + PLAINTEXT_MODULUS / 2) / PLAINTEXT_MODULUS);
+        let mut constant = Vec::with_capacity(self.arithmetic.polynomial_words());
+        for (value, plaintext) in self.arithmetic.coefficients(&input[0]).zip(coefficients) {
+            self.arithmetic.push_normalized(
+                &mut constant,
+                BigInt::from(unpack(value)) + &delta * *plaintext,
+            );
         }
-        output
+        [constant, input[1].clone()]
+    }
+
+    fn multiply_scalar(&self, input: &Ciphertext, scalar: i32) -> Ciphertext {
+        std::array::from_fn(|part| {
+            let mut output = Vec::with_capacity(self.arithmetic.polynomial_words());
+            for value in self.arithmetic.coefficients(&input[part]) {
+                self.arithmetic
+                    .push_normalized(&mut output, BigInt::from(unpack(value)) * scalar);
+            }
+            output
+        })
     }
 
     pub fn execute(&mut self) -> Result<Vec<usize>, Refusal> {
@@ -434,6 +499,7 @@ impl Engine {
         {
             return Err(Refusal::Phase);
         }
+        let options = self.profile.options();
         let instruction = self.instructions[self.step].clone();
         let output = if instruction.operation == 0 {
             self.input.take().ok_or(Refusal::Phase)?
@@ -448,25 +514,23 @@ impl Engine {
                     }
                     output
                 }
-                2 => self.multiply(left, self.value(instruction.inputs[1])?),
-                3 => {
-                    let scalar = self.comparison_coefficients[instruction.parameter as usize];
-                    std::array::from_fn(|part| {
-                        left[part]
-                            .iter()
-                            .map(|value| {
-                                self.arithmetic
-                                    .normalize(BigInt::from(unpack(value)) * scalar)
-                            })
-                            .collect()
-                    })
-                }
+                2 => self.arithmetic.relinearized_product(
+                    left,
+                    self.value(instruction.inputs[1])?,
+                    &self.keys,
+                ),
+                3 => self.multiply_scalar(
+                    left,
+                    self.comparison_coefficients[instruction.parameter as usize],
+                ),
                 4 => {
-                    let plaintext: Polynomial = self.ranking_coefficients
-                        [instruction.parameter as usize % OPTION_COUNT]
-                        .iter()
-                        .map(|value| self.arithmetic.normalize(BigInt::from(*value)))
-                        .collect();
+                    let mut plaintext = Vec::with_capacity(self.arithmetic.polynomial_words());
+                    for value in
+                        &self.ranking_coefficients[instruction.parameter as usize % options]
+                    {
+                        self.arithmetic
+                            .push_normalized(&mut plaintext, BigInt::from(*value));
+                    }
                     std::array::from_fn(|part| {
                         self.arithmetic.multiply(&plaintext, &left[part], false)
                     })
@@ -478,24 +542,12 @@ impl Engine {
                         constant[0] = self.comparison_coefficients[0];
                         self.add_plaintext(left, &constant)
                     }
-                    parameter if parameter < (OPTION_COUNT + 2) as u32 => {
+                    parameter if (parameter as usize) < options + 2 => {
                         self.add_plaintext(left, &self.ranking_coefficients[0])
                     }
                     _ => return Err(Refusal::Program),
                 },
-                6 => {
-                    let mut constant = self.automorphism(&left[0]);
-                    let shifted = self.automorphism(&left[1]);
-                    let digits = self.arithmetic.digit_transforms(&shifted);
-                    self.arithmetic.add(
-                        &mut constant,
-                        &self.arithmetic.external(&digits, &self.keys[..6]),
-                    );
-                    [
-                        constant,
-                        self.arithmetic.external(&digits, &self.keys[6..12]),
-                    ]
-                }
+                6 => self.arithmetic.rotated(left, &self.keys),
                 _ => return Err(Refusal::Program),
             }
         };
@@ -517,16 +569,20 @@ impl Engine {
         self.step == self.instructions.len()
     }
 
+    /// Switches the result to the profile's release modulus and encodes
+    /// each coefficient as a sign byte and a magnitude.
     pub fn final_switch(&self) -> Result<Vec<u8>, Refusal> {
         if !self.finished() {
             return Err(Refusal::Phase);
         }
-        let release_modulus = ((BigUint::from(65537u32) * 65445u32) << 160usize) + 1u32;
+        let release = self.profile.release_modulus();
+        let width = release.byte_length();
+        let release_modulus = (BigUint::from(release.odd_factor()) << release.exponent()) + 1u32;
         let release_half = &release_modulus >> 1usize;
         let half = &self.arithmetic.modulus >> 1usize;
-        let mut output = Vec::with_capacity(2 * DEGREE * 25);
+        let mut output = Vec::with_capacity(2 * DEGREE * (1 + width));
         for polynomial in self.value(self.step - 1)? {
-            for coefficient in polynomial {
+            for coefficient in self.arithmetic.coefficients(polynomial) {
                 let value = unpack(coefficient);
                 let negative = value > half;
                 let magnitude = if negative {
@@ -547,12 +603,12 @@ impl Engine {
                     residue
                 };
                 let bytes = magnitude.to_bytes_le();
-                if bytes.len() > 24 {
+                if bytes.len() > width {
                     return Err(Refusal::Coefficient);
                 }
                 output.push(u8::from(negative));
                 output.extend(&bytes);
-                output.resize(output.len() + 24 - bytes.len(), 0);
+                output.resize(output.len() + width - bytes.len(), 0);
             }
         }
         Ok(output)

@@ -2,22 +2,72 @@ use crate::arithmetic::{
     MODULUS, add as add_base, multiply as multiply_base, power as power_base,
     subtract as subtract_base,
 };
-use crate::profile::*;
-use crate::statement::{
-    StatementOutput as SetupStatementOutput, StatementStream as SetupStatementStream,
-};
+use crate::statement::StatementOutput;
 use sha3::{
     Digest, Sha3_512, Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 use std::collections::BTreeMap;
+use supported_profile::relation::{
+    DOMAIN as D, MASKS, MAX_DEGREE, QUERY_COUNT as QUERIES, Relation, SYSTEMATIC as H,
+    WITNESS_DEGREE,
+};
 
 type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
+const FOLDS: usize = (D / 2).ilog2() as usize;
 pub const HEADER_LENGTH: usize =
     4 + 64 + 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
 pub const CHUNK_LIMIT: usize = 1 << 20;
+
+/// The public statement parser of one relation. It yields the relation's
+/// affine operator at the verifier's queries.
+pub trait Statement {
+    fn push(&mut self, bytes: &[u8]) -> bool;
+    fn finish(self) -> Option<StatementOutput>;
+}
+
+/// The verifier's own reading of a relation's witness, lookup and oracle
+/// counts and leaf widths.
+struct Shape {
+    words: usize,
+    booleans: usize,
+    columns: usize,
+    lookups: Vec<(usize, u128)>,
+    zero_products: Vec<(usize, usize)>,
+    original: usize,
+    oracles: usize,
+    first_width: usize,
+    second_width: usize,
+    message_bytes: usize,
+}
+impl Shape {
+    fn new(relation: &Relation) -> Self {
+        let columns = relation.words + relation.booleans;
+        let lookups: Vec<_> = (0..relation.words)
+            .map(|column| (column, 1))
+            .chain(relation.narrow.iter().copied())
+            .collect();
+        let original = columns + lookups.len() + 4;
+        Self {
+            words: relation.words,
+            booleans: relation.booleans,
+            columns,
+            oracles: original
+                + relation.booleans
+                + relation.zero_product_pairs.len()
+                + lookups.len()
+                + 2,
+            original,
+            first_width: (columns + 1) * 16 + 48,
+            second_width: (lookups.len() + 2) * 48,
+            lookups,
+            zero_products: relation.zero_product_pairs.clone(),
+            message_bytes: relation.message_bytes,
+        }
+    }
+}
 
 fn add(left: Element, right: Element) -> Element {
     std::array::from_fn(|i| add_base(left[i], right[i]))
@@ -52,27 +102,30 @@ fn encode(value: Element) -> [u8; 48] {
 fn root(length: usize) -> u128 {
     power_base(7, (MODULUS - 1) / length as u128)
 }
-fn degree(index: usize) -> usize {
-    if index < ORIGINAL - 1 {
+fn degree(shape: &Shape, index: usize) -> usize {
+    if index < shape.original - 1 {
         WITNESS_DEGREE
-    } else if index == ORIGINAL - 1 || index == ORACLES - 2 {
+    } else if index == shape.original - 1 || index == shape.oracles - 2 {
         WITNESS_DEGREE - 1
-    } else if index == ORACLES - 1 {
+    } else if index == shape.oracles - 1 {
         H - 2
     } else {
         2 * WITNESS_DEGREE - H
     }
 }
-fn parameter_bytes() -> Vec<u8> {
-    let mut bytes: Vec<u8> = relation_parameters()
+/// The relation parameters, oracle degrees and lookups that a proof's
+/// context binds.
+pub(crate) fn context_parameters(relation: &Relation) -> Vec<u8> {
+    let shape = &Shape::new(relation);
+    let mut bytes: Vec<u8> = [H, QUERIES, MASKS, D, MAX_DEGREE, 2, shape.message_bytes]
         .into_iter()
-        .chain((0..ORACLES).map(degree))
+        .chain(relation.parameters.iter().copied())
+        .chain((0..shape.oracles).map(|index| degree(shape, index)))
         .flat_map(|value| (value as u32).to_le_bytes())
         .collect();
-    for index in 0..LOOKUPS {
-        let (column, scale) = lookup(index);
-        bytes.extend((column as u32).to_le_bytes());
-        bytes.extend((scale as u32).to_le_bytes());
+    for (column, scale) in &shape.lookups {
+        bytes.extend((*column as u32).to_le_bytes());
+        bytes.extend((*scale as u32).to_le_bytes());
     }
     bytes
 }
@@ -88,7 +141,7 @@ fn part(hash: &mut Sha3_512, bytes: &[u8]) {
     Digest::update(hash, (bytes.len() as u32).to_le_bytes());
     Digest::update(hash, bytes);
 }
-fn wide(domain: &[u8], parts: &[&[u8]]) -> Vec<u8> {
+fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     let mut hash = Shake256::default();
     Update::update(&mut hash, &(domain.len() as u32).to_le_bytes());
     Update::update(&mut hash, domain);
@@ -96,7 +149,7 @@ fn wide(domain: &[u8], parts: &[&[u8]]) -> Vec<u8> {
         Update::update(&mut hash, &(value.len() as u32).to_le_bytes());
         Update::update(&mut hash, value);
     }
-    let mut output = vec![0; MESSAGE_BYTES];
+    let mut output = vec![0; length];
     XofReader::read(&mut hash.finalize_xof(), &mut output);
     output
 }
@@ -180,12 +233,12 @@ struct Header {
     terminal: Element,
 }
 impl Header {
-    fn parse(bytes: &[u8]) -> Result<Self, Refusal> {
+    fn parse(bytes: &[u8], magic: &[u8; 4]) -> Result<Self, Refusal> {
         if bytes.len() != HEADER_LENGTH {
             return Err(Refusal::Length);
         }
         let mut reader = Reader::new(bytes);
-        if reader.take(4)? != PROOF_MAGIC {
+        if reader.take(4)? != magic {
             return Err(Refusal::Encoding);
         }
         let statement = reader.take(64)?.try_into().unwrap();
@@ -224,8 +277,9 @@ struct Challenges {
     folds: Vec<Element>,
     queries: Vec<usize>,
 }
-fn challenges(role: &[u8], header: &Header) -> Challenges {
-    let mut state = vec![0; MESSAGE_BYTES];
+fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challenges {
+    let length = shape.message_bytes;
+    let mut state = vec![0; length];
     let mut beta = ZERO;
     let mut alpha = ZERO;
     let mut mask = ZERO;
@@ -235,6 +289,7 @@ fn challenges(role: &[u8], header: &Header) -> Challenges {
         let message = wide(
             b"bounded-proof/verifier-message",
             &[role, &header.context, &state, &(round as u32).to_le_bytes()],
+            length,
         );
         if round == 2 {
             beta = sample(&message, 0, true);
@@ -244,14 +299,14 @@ fn challenges(role: &[u8], header: &Header) -> Challenges {
             mask = sample(&message, 1, false);
         }
         if round == 4 {
-            combination = (0..2 * ORACLES)
+            combination = (0..2 * shape.oracles)
                 .map(|index| sample(&message, index, false))
                 .collect();
         }
         if round >= 4 {
             folds.push(sample(
                 &message,
-                if round == 4 { 2 * ORACLES } else { 0 },
+                if round == 4 { 2 * shape.oracles } else { 0 },
                 false,
             ));
         }
@@ -281,9 +336,10 @@ fn challenges(role: &[u8], header: &Header) -> Challenges {
         let digest = wide(
             b"bounded-proof/chain-state",
             &[role, &header.context, &message, &root],
+            length,
         );
         state[..64].copy_from_slice(&root);
-        state[64..].copy_from_slice(&digest[..MESSAGE_BYTES - 64]);
+        state[64..].copy_from_slice(&digest[..length - 64]);
     }
     let message = wide(
         b"bounded-proof/verifier-message",
@@ -293,6 +349,7 @@ fn challenges(role: &[u8], header: &Header) -> Challenges {
             &state,
             &((FOLDS + 4) as u32).to_le_bytes(),
         ],
+        length,
     );
     let queries = (0..QUERIES)
         .map(|index| {
@@ -346,12 +403,12 @@ impl Point {
             table,
         }
     }
-    fn weight(&self, challenges: &Challenges, index: usize) -> Element {
-        let class = if index < ORIGINAL - 1 {
+    fn weight(&self, shape: &Shape, challenges: &Challenges, index: usize) -> Element {
+        let class = if index < shape.original - 1 {
             0
-        } else if index == ORIGINAL - 1 || index == ORACLES - 2 {
+        } else if index == shape.original - 1 || index == shape.oracles - 2 {
             1
-        } else if index == ORACLES - 1 {
+        } else if index == shape.oracles - 1 {
             3
         } else {
             2
@@ -395,13 +452,14 @@ struct Row {
     quotient_coefficient: Element,
 }
 
-pub struct Verifier {
+pub struct Verifier<S> {
+    shape: Shape,
     role: Vec<u8>,
     header: Header,
     challenges: Challenges,
-    statement: Option<SetupStatementStream>,
+    statement: Option<S>,
     context_hash: Sha3_512,
-    operator: Option<SetupStatementOutput>,
+    operator: Option<StatementOutput>,
     statement_done: bool,
     indices: Vec<usize>,
     points: Vec<Point>,
@@ -416,39 +474,48 @@ pub struct Verifier {
     failed: bool,
     complete: bool,
 }
-impl Verifier {
-    pub fn new(
+impl<S: Statement> Verifier<S> {
+    /// Opens a proof of the relation against its expected statement. The
+    /// statement parser opens only after the proof header fixes its
+    /// challenges.
+    pub(crate) fn open(
+        relation: Relation,
         role: &[u8],
         expected_statement: [u8; 64],
         proof_header: &[u8],
+        open_statement: impl FnOnce(Element, &[u32]) -> Option<S>,
     ) -> Result<Self, Refusal> {
         if role.is_empty() || role.len() > 1024 {
             return Err(Refusal::Context);
         }
-        let header = Header::parse(proof_header)?;
+        let header = Header::parse(proof_header, relation.proof_magic)?;
         if header.statement != expected_statement {
             return Err(Refusal::Context);
         }
-        let challenges = challenges(role, &header);
+        let shape = Shape::new(&relation);
+        let challenges = challenges(&shape, role, &header);
         let indices = requested(&challenges.queries, D);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
-        let statement = SetupStatementStream::new(expected_statement, challenges.alpha, &selected)
-            .map_err(|_| Refusal::Context)?;
+        let statement = open_statement(challenges.alpha, &selected).ok_or(Refusal::Context)?;
         let mut context_hash = Sha3_512::new();
         part(&mut context_hash, b"bounded-proof/statement");
         for value in [
             role,
-            RELATION_TAG,
+            relation.tag,
             &2u128.to_le_bytes(),
             &root(1 << 20).to_le_bytes(),
             &7u128.to_le_bytes(),
-            &parameter_bytes(),
+            &context_parameters(&relation),
             &(MODULUS - 1).to_le_bytes(),
         ] {
             part(&mut context_hash, value);
         }
-        Digest::update(&mut context_hash, (STATEMENT_LENGTH as u32).to_le_bytes());
+        Digest::update(
+            &mut context_hash,
+            (relation.statement_bytes as u32).to_le_bytes(),
+        );
         Ok(Self {
+            shape,
             role: role.to_vec(),
             header,
             challenges,
@@ -479,13 +546,7 @@ impl Verifier {
             return Err(Refusal::Length);
         }
         Digest::update(&mut self.context_hash, bytes);
-        if self
-            .statement
-            .as_mut()
-            .ok_or(Refusal::Stage)?
-            .push(bytes)
-            .is_err()
-        {
+        if !self.statement.as_mut().ok_or(Refusal::Stage)?.push(bytes) {
             self.failed = true;
             return Err(Refusal::Encoding);
         }
@@ -505,7 +566,7 @@ impl Verifier {
                 .take()
                 .ok_or(Refusal::Stage)?
                 .finish()
-                .map_err(|_| Refusal::Encoding)?,
+                .ok_or(Refusal::Encoding)?,
         );
         let table = proof_lookup_table::evaluate_on_proof_domain(&table_coefficients());
         self.points = self
@@ -525,7 +586,7 @@ impl Verifier {
         if self.stage < 3 {
             (
                 D,
-                [FIRST_WIDTH, SECOND_WIDTH, 48][self.stage],
+                [self.shape.first_width, self.shape.second_width, 48][self.stage],
                 self.header.roots[self.stage],
             )
         } else {
@@ -632,9 +693,10 @@ impl Verifier {
         Ok(())
     }
     fn first(&mut self, data: &[u8]) -> Result<(), Refusal> {
+        let shape = &self.shape;
         let mut reader = Reader::new(data);
-        let mut words = Vec::with_capacity(COLS);
-        for _ in 0..COLS {
+        let mut words = Vec::with_capacity(shape.columns);
+        for _ in 0..shape.columns {
             words.push(reader.base()?);
         }
         let multiplicity = reader.base()?;
@@ -652,34 +714,43 @@ impl Verifier {
             );
             combined = add(
                 combined,
-                scale(point.weight(&self.challenges, column), *value),
+                scale(point.weight(shape, &self.challenges, column), *value),
             );
         }
         combined = add(
             combined,
-            scale(point.weight(&self.challenges, COLS), multiplicity),
+            scale(
+                point.weight(shape, &self.challenges, shape.columns),
+                multiplicity,
+            ),
         );
-        for index in 0..BOOLS {
-            let value = words[WORDS + index];
+        for index in 0..shape.booleans {
+            let value = words[shape.words + index];
             let residue = multiply_base(
                 multiply_base(value, subtract_base(value, 1)),
                 point.inverse_vanishing,
             );
             combined = add(
                 combined,
-                scale(point.weight(&self.challenges, ORIGINAL + index), residue),
+                scale(
+                    point.weight(shape, &self.challenges, shape.original + index),
+                    residue,
+                ),
             );
         }
-        for pair in 0..ZERO_PRODUCTS {
-            let (left, right) = zero_product_columns(pair);
+        for (pair, (left, right)) in shape.zero_products.iter().enumerate() {
             let residue = multiply_base(
-                multiply_base(words[left], words[right]),
+                multiply_base(words[*left], words[*right]),
                 point.inverse_vanishing,
             );
             combined = add(
                 combined,
                 scale(
-                    point.weight(&self.challenges, ORIGINAL + BOOLS + pair),
+                    point.weight(
+                        shape,
+                        &self.challenges,
+                        shape.original + shape.booleans + pair,
+                    ),
                     residue,
                 ),
             );
@@ -694,21 +765,25 @@ impl Verifier {
         Ok(())
     }
     fn second(&mut self, data: &[u8]) -> Result<(), Refusal> {
+        let shape = &self.shape;
         let point = &self.points[self.position];
         let row = &mut self.rows[self.position];
         let mut reader = Reader::new(data);
         let mut sum = ZERO;
-        for index in 0..LOOKUPS {
+        let lookups = shape.lookups.len();
+        for (index, (column, factor)) in shape.lookups.iter().enumerate() {
             let value = reader.element()?;
             sum = add(sum, value);
             row.combined = add(
                 row.combined,
-                multiply(point.weight(&self.challenges, COLS + 1 + index), value),
+                multiply(
+                    point.weight(shape, &self.challenges, shape.columns + 1 + index),
+                    value,
+                ),
             );
-            let (column, factor) = lookup(index);
             let denominator = subtract(
                 self.challenges.beta,
-                [multiply_base(row.words[column], factor), 0, 0],
+                [multiply_base(row.words[*column], *factor), 0, 0],
             );
             let residue = scale(
                 subtract(multiply(value, denominator), ONE),
@@ -717,7 +792,11 @@ impl Verifier {
             row.combined = add(
                 row.combined,
                 multiply(
-                    point.weight(&self.challenges, ORIGINAL + BOOLS + ZERO_PRODUCTS + index),
+                    point.weight(
+                        shape,
+                        &self.challenges,
+                        shape.original + shape.booleans + shape.zero_products.len() + index,
+                    ),
                     residue,
                 ),
             );
@@ -727,13 +806,16 @@ impl Verifier {
         row.combined = add(
             row.combined,
             multiply(
-                point.weight(&self.challenges, COLS + 1 + LOOKUPS),
+                point.weight(shape, &self.challenges, shape.columns + 1 + lookups),
                 table_inverse,
             ),
         );
         row.combined = add(
             row.combined,
-            multiply(point.weight(&self.challenges, COLS + 2 + LOOKUPS), mask),
+            multiply(
+                point.weight(shape, &self.challenges, shape.columns + 2 + lookups),
+                mask,
+            ),
         );
         let table_residue = scale(
             subtract(
@@ -747,7 +829,10 @@ impl Verifier {
         );
         row.combined = add(
             row.combined,
-            multiply(point.weight(&self.challenges, ORACLES - 2), table_residue),
+            multiply(
+                point.weight(shape, &self.challenges, shape.oracles - 2),
+                table_residue,
+            ),
         );
         let operator = self.operator.as_ref().ok_or(Refusal::Stage)?;
         let linear = add(
@@ -762,13 +847,13 @@ impl Verifier {
             add(multiply(self.challenges.mask, linear), mask),
             scale(claimed, power_base(H as u128, MODULUS - 2)),
         );
-        let remainder_weight = point.weight(&self.challenges, ORACLES - 1);
+        let remainder_weight = point.weight(shape, &self.challenges, shape.oracles - 1);
         row.combined = add(
             row.combined,
             multiply(remainder_weight, scale(numerator, point.inverse)),
         );
         row.quotient_coefficient = subtract(
-            point.weight(&self.challenges, ORIGINAL - 1),
+            point.weight(shape, &self.challenges, shape.original - 1),
             scale(
                 remainder_weight,
                 multiply_base(point.vanishing, point.inverse),
@@ -912,29 +997,64 @@ impl Verifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
+
+    // A statement that refuses every byte, so no proof it opens completes.
+    struct Refused;
+    impl Statement for Refused {
+        fn push(&mut self, _bytes: &[u8]) -> bool {
+            false
+        }
+        fn finish(self) -> Option<StatementOutput> {
+            None
+        }
+    }
+    fn open(role: &[u8], statement: [u8; 64], bytes: &[u8]) -> Result<Verifier<Refused>, Refusal> {
+        Verifier::open(registration_relation(), role, statement, bytes, |_, _| {
+            Some(Refused)
+        })
+    }
     fn header() -> Vec<u8> {
         let mut bytes = vec![0; HEADER_LENGTH];
-        bytes[..4].copy_from_slice(PROOF_MAGIC);
+        bytes[..4].copy_from_slice(registration_relation().proof_magic);
         bytes
     }
     #[test]
     fn malformed_headers_and_unfinished_streams_cannot_verify() {
+        assert_eq!(HEADER_LENGTH, PROOF_HEADER_BYTES);
         let bytes = header();
-        assert!(Verifier::new(b"role", [0; 64], &bytes).is_ok());
-        assert!(!Verifier::new(b"role", [0; 64], &bytes).unwrap().finish());
-        assert!(Verifier::new(b"", [0; 64], &bytes).is_err());
-        assert!(Verifier::new(b"role", [1; 64], &bytes).is_err());
-        assert!(Verifier::new(b"role", [0; 64], &bytes[..HEADER_LENGTH - 1]).is_err());
+        assert!(open(b"role", [0; 64], &bytes).is_ok());
+        assert!(!open(b"role", [0; 64], &bytes).unwrap().finish());
+        assert!(open(b"", [0; 64], &bytes).is_err());
+        assert!(open(b"role", [1; 64], &bytes).is_err());
+        assert!(open(b"role", [0; 64], &bytes[..HEADER_LENGTH - 1]).is_err());
+        let mut other = bytes.clone();
+        other[..4].copy_from_slice(b"SWP2");
+        assert!(matches!(
+            open(b"role", [0; 64], &other),
+            Err(Refusal::Encoding)
+        ));
+        assert!(matches!(
+            Verifier::<Refused>::open(registration_relation(), b"role", [0; 64], &bytes, |_, _| {
+                None
+            }),
+            Err(Refusal::Context)
+        ));
         for offset in [324, HEADER_LENGTH - 48] {
             let mut changed = bytes.clone();
             changed[offset..offset + 16].copy_from_slice(&MODULUS.to_le_bytes());
             assert!(matches!(
-                Verifier::new(b"role", [0; 64], &changed),
+                open(b"role", [0; 64], &changed),
                 Err(Refusal::Encoding)
             ));
         }
-        let mut verifier = Verifier::new(b"role", [0; 64], &bytes).unwrap();
+        let mut verifier = open(b"role", [0; 64], &bytes).unwrap();
         assert!(matches!(verifier.push_proof(&[0]), Err(Refusal::Stage)));
+        assert!(matches!(
+            verifier.push_statement(&[0]),
+            Err(Refusal::Encoding)
+        ));
+        assert!(matches!(verifier.finish_statement(), Err(Refusal::Stage)));
         assert!(!verifier.finish());
     }
     #[test]

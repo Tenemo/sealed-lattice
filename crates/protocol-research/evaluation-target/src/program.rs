@@ -1,8 +1,12 @@
 use sha2::{Digest, Sha512};
+use supported_profile::{DEGREE, Profile};
+
+/// The comparison polynomial is evaluated in blocks of this many powers.
+const COMPARISON_BLOCK_WIDTH: usize = 16;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    UnsupportedProfile,
+    UnsupportedTopCount,
 }
 
 struct Instruction {
@@ -61,27 +65,33 @@ impl Builder {
         match self.combine_blocks(offset + length / 2, length / 2, blocks, powers) {
             None => Some(lower),
             Some(upper) => {
-                let power = self.power(powers, 16 * length / 2);
+                let power = self.power(powers, COMPARISON_BLOCK_WIDTH * length / 2);
                 let weighted = self.append(2, &[power, upper], 0);
                 Some(self.append(1, &[lower, weighted], 0))
             }
         }
     }
-    fn comparison(&mut self, input: usize) -> usize {
-        let mut powers = vec![None; 182];
+    /// The odd comparison polynomial of the given degree: each block's
+    /// weighted odd powers, combined by powers of the block width.
+    fn comparison(&mut self, input: usize, degree: usize) -> usize {
+        let mut powers = vec![None; degree + 1];
         powers[1] = Some(input);
         let mut blocks = Vec::new();
-        for block in 0usize..12 {
-            let last = 15.min(181 - 16 * block);
+        for block in 0..(degree + 1).div_ceil(COMPARISON_BLOCK_WIDTH) {
+            let last = (COMPARISON_BLOCK_WIDTH - 1).min(degree - COMPARISON_BLOCK_WIDTH * block);
             let terms: Vec<_> = (0..last.div_ceil(2))
                 .map(|index| {
                     let power = self.power(&mut powers, 2 * index + 1);
-                    self.append(3, &[power], (16 * block + 2 * index + 1) as u32)
+                    self.append(
+                        3,
+                        &[power],
+                        (COMPARISON_BLOCK_WIDTH * block + 2 * index + 1) as u32,
+                    )
                 })
                 .collect();
             blocks.push(self.sum(&terms));
         }
-        self.combine_blocks(0, 16, &blocks, &mut powers)
+        self.combine_blocks(0, blocks.len().next_power_of_two(), &blocks, &mut powers)
             .expect("complete comparison polynomial")
     }
     fn encode(self, result: usize) -> Vec<u8> {
@@ -109,7 +119,7 @@ impl Builder {
             renamed[*original] = index;
         }
         let mut bytes = Vec::from(b"BRK1".as_slice());
-        bytes.extend(65_536u32.to_le_bytes());
+        bytes.extend((DEGREE as u32).to_le_bytes());
         bytes.extend((ordered.len() as u32).to_le_bytes());
         bytes.extend((renamed[result] as u32).to_le_bytes());
         for original in ordered {
@@ -137,31 +147,31 @@ pub struct RankingProgram {
     identity: [u8; 64],
 }
 impl RankingProgram {
-    pub fn for_profile(
-        participants: usize,
-        options: usize,
-        top_count: usize,
-    ) -> Result<Self, Error> {
-        if (participants, options) != (10, 10) || !(1..=options).contains(&top_count) {
-            return Err(Error::UnsupportedProfile);
+    /// The encrypted ranking of the profile's accepted ballots: their sum,
+    /// every pairwise comparison, each option's rank over the comparison
+    /// window and the rank-equality weights of the requested result length.
+    pub fn for_profile(profile: Profile, top_count: usize) -> Result<Self, Error> {
+        let options = profile.options();
+        if !(1..=options).contains(&top_count) {
+            return Err(Error::UnsupportedTopCount);
         }
         let mut builder = Builder {
             instructions: Vec::new(),
         };
-        let inputs: Vec<_> = (0..10)
+        let inputs: Vec<_> = (0..profile.participants() as u32)
             .map(|position| builder.append(0, &[], position))
             .collect();
         let sum = builder.sum(&inputs);
         let input = builder.append(5, &[sum], 0);
-        let polynomial = builder.comparison(input);
+        let polynomial = builder.comparison(input, profile.comparison_degree());
         let comparison = builder.append(5, &[polynomial], 1);
         let mut shifted = comparison;
         let mut rank = comparison;
-        for _ in 1..16 {
+        for _ in 1..profile.rank_window() {
             shifted = builder.append(6, &[shifted], 0);
             rank = builder.append(1, &[rank, shifted], 0);
         }
-        let mut powers = vec![None; 10];
+        let mut powers = vec![None; options];
         powers[1] = Some(rank);
         // Family zero retains the complete-ordering encoding. Other families
         // contain rank-equality coefficients only for the requested prefix.
@@ -170,7 +180,7 @@ impl RankingProgram {
         } else {
             (options * top_count) as u32
         };
-        let terms: Vec<_> = (1..10)
+        let terms: Vec<_> = (1..options)
             .map(|exponent| {
                 let power = builder.power(&mut powers, exponent);
                 builder.append(4, &[power], coefficient_base + exponent as u32)
@@ -198,10 +208,15 @@ impl RankingProgram {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rns_arithmetic_probe::ranking::{Engine, MAXIMUM_INSTRUCTIONS};
+
+    fn completion() -> Profile {
+        Profile::new(10, 10).unwrap()
+    }
 
     #[test]
     fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
-        let complete = RankingProgram::for_profile(10, 10, 10).unwrap();
+        let complete = RankingProgram::for_profile(completion(), 10).unwrap();
         // Pinned identity of the independently emitted pre-extension schedule.
         assert_eq!(
             complete
@@ -212,7 +227,7 @@ mod tests {
             "c3872177b99208361bc96dd4127b169a0985dffa819fd648aa8f1d65f7fa93e14230168efbcae815b970d5993edb00587b70a14dc46d5aaf85af0585f0eb3042"
         );
         for top_count in 1..10 {
-            let selected = RankingProgram::for_profile(10, 10, top_count).unwrap();
+            let selected = RankingProgram::for_profile(completion(), top_count).unwrap();
             assert_eq!(selected.bytes().len(), complete.bytes().len());
             assert_eq!(selected.bytes()[..16], complete.bytes()[..16]);
             for (before, after) in complete.bytes()[16..]
@@ -229,29 +244,66 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_requested_result_length_has_an_executable_program() {
-        for top_count in 1..=10 {
-            let program = RankingProgram::for_profile(10, 10, top_count)
-                .expect("A supported requested result length needs its own encrypted program");
-            assert!(
-                rns_arithmetic_probe::ranking::Engine::new(program.bytes(), *program.identity())
-                    .is_ok()
-            );
+    // Counts each operation of a program.
+    fn operations(program: &RankingProgram) -> [usize; 7] {
+        let mut counts = [0; 7];
+        for bytes in program.bytes()[16..].chunks_exact(16) {
+            counts[u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize] += 1;
         }
-        for (participants, options, top_count) in
-            [(10, 10, 0), (10, 10, 11), (9, 10, 1), (10, 9, 1)]
-        {
-            assert!(matches!(
-                RankingProgram::for_profile(participants, options, top_count),
-                Err(Error::UnsupportedProfile)
-            ));
+        counts
+    }
+
+    #[test]
+    fn every_profile_and_requested_result_length_has_an_executable_program() {
+        for profile in Profile::all() {
+            let options = profile.options();
+            for top_count in [1, options] {
+                let program = RankingProgram::for_profile(profile, top_count).unwrap();
+                let counts = operations(&program);
+                // One input per roster position, one weight per odd
+                // comparison coefficient, one rotation per further window
+                // slot, one weight per nonconstant rank-equality power and
+                // three plaintext additions.
+                assert_eq!(counts[0], profile.participants());
+                assert_eq!(counts[3], profile.comparison_degree().div_ceil(2));
+                assert_eq!(counts[6], profile.rank_window() - 1);
+                assert_eq!(counts[4], options - 1);
+                assert_eq!(counts[5], 3);
+                assert!(counts.iter().sum::<usize>() <= MAXIMUM_INSTRUCTIONS);
+            }
+            for top_count in [0, options + 1] {
+                assert!(matches!(
+                    RankingProgram::for_profile(profile, top_count),
+                    Err(Error::UnsupportedTopCount)
+                ));
+            }
+        }
+        for (participants, options) in [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)] {
+            let profile = Profile::new(participants, options).unwrap();
+            for top_count in [1, options] {
+                let program = RankingProgram::for_profile(profile, top_count).unwrap();
+                assert!(Engine::new(profile, program.bytes(), *program.identity()).is_ok());
+            }
+            // A program admits only its own profile.
+            let program = RankingProgram::for_profile(profile, 1).unwrap();
+            let other_options = if options == 2 { 3 } else { options - 1 };
+            let other_participants = if participants == 3 {
+                4
+            } else {
+                participants - 1
+            };
+            for (participants, options) in
+                [(participants, other_options), (other_participants, options)]
+            {
+                let other = Profile::new(participants, options).unwrap();
+                assert!(Engine::new(other, program.bytes(), *program.identity()).is_err());
+            }
         }
     }
 
     #[test]
     fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
-        let program = RankingProgram::for_profile(10, 10, 3).unwrap();
+        let program = RankingProgram::for_profile(completion(), 3).unwrap();
         let weighted = program.bytes()[16..]
             .chunks_exact(16)
             .position(|bytes| u32::from_le_bytes(bytes[..4].try_into().unwrap()) == 4)
@@ -266,25 +318,13 @@ mod tests {
             let mut changed = program.bytes().to_vec();
             changed[parameter_offset..parameter_offset + 4]
                 .copy_from_slice(&parameter.to_le_bytes());
-            assert!(
-                rns_arithmetic_probe::ranking::Engine::new(
-                    &changed,
-                    Sha512::digest(&changed).into()
-                )
-                .is_err()
-            );
+            assert!(Engine::new(completion(), &changed, Sha512::digest(&changed).into()).is_err());
         }
         for constant in [2u32, 12, u32::MAX] {
             let mut changed = program.bytes().to_vec();
             let offset = changed.len() - 4;
             changed[offset..].copy_from_slice(&constant.to_le_bytes());
-            assert!(
-                rns_arithmetic_probe::ranking::Engine::new(
-                    &changed,
-                    Sha512::digest(&changed).into()
-                )
-                .is_err()
-            );
+            assert!(Engine::new(completion(), &changed, Sha512::digest(&changed).into()).is_err());
         }
     }
 }

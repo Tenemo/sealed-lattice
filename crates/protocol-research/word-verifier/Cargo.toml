@@ -7,13 +7,13 @@ autobins = false
 
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-[features]
-default = ["bridge"]
-bridge = []
+crate-type = ["rlib"]
 
 [dependencies]
 proof-lookup-table = { path = "../proof-lookup-table" }
 sha3 = "=0.10.9"
 setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+supported-profile = { path = "../supported-profile" }
+
+[dev-dependencies]
+word-proof = { path = "../word-proof" }

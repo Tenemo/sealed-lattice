@@ -13,12 +13,22 @@ pub enum Error {
     Context,
     Arithmetic,
 }
+// Registration precedes the roster, so its statement uses only the share
+// modulus, which every profile shares.
 pub fn header() -> Vec<u8> {
-    let setup = setup_witness::contribution::statement_header();
     let mut output = Vec::from(b"RKS1".as_slice());
     output.extend((SYSTEMATIC as u32).to_le_bytes());
-    output.extend(&setup[120..140]);
+    output.extend(supported_profile::share_modulus());
     output
+}
+fn key_stream(alpha: Element) -> Result<PolynomialStream, Error> {
+    PolynomialStream::new(
+        supported_profile::share_modulus(),
+        SYSTEMATIC,
+        supported_profile::FHE_LIMB_BITS,
+        alpha,
+    )
+    .map_err(|_| Error::Arithmetic)
 }
 pub fn encode_key(values: &[BigInt]) -> Result<Vec<u8>, Error> {
     if values.len() != SYSTEMATIC {
@@ -42,7 +52,7 @@ pub fn encode_key(values: &[BigInt]) -> Result<Vec<u8>, Error> {
     Ok(output)
 }
 pub fn common_bytes() -> Vec<u8> {
-    encode_key(&setup_witness::contribution::common_polynomial(42).unwrap()).unwrap()
+    encode_key(&setup_witness::contribution::common_share_polynomial()).unwrap()
 }
 pub fn digest(common: &[u8], public_key: &[u8]) -> [u8; 64] {
     let mut hash = Sha3_512::new();
@@ -123,8 +133,8 @@ pub fn operator_from_parts(
     }
 }
 pub fn operator(alpha: Element, common: &[u8], public_key: &[u8]) -> Result<Operator, Error> {
-    let mut first = PolynomialStream::new(1, alpha).map_err(|_| Error::Arithmetic)?;
-    let mut second = PolynomialStream::new(1, alpha).map_err(|_| Error::Arithmetic)?;
+    let mut first = key_stream(alpha)?;
+    let mut second = key_stream(alpha)?;
     for chunk in common.chunks(1 << 20) {
         first.push(chunk).map_err(|_| Error::Encoding)?;
     }
@@ -139,6 +149,7 @@ pub fn operator(alpha: Element, common: &[u8], public_key: &[u8]) -> Result<Oper
 }
 
 pub struct StatementStream {
+    statement_bytes: usize,
     expected: [u8; 64],
     alpha: Element,
     queries: Vec<u32>,
@@ -163,6 +174,7 @@ impl StatementStream {
             return Err(Error::Shape);
         }
         Ok(Self {
+            statement_bytes: registration_relation().statement_bytes(),
             expected,
             alpha,
             queries: queries.to_vec(),
@@ -188,7 +200,7 @@ impl StatementStream {
         result
     }
     fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
-        if bytes.len() > 1 << 20 || bytes.len() > STATEMENT_BYTES - self.consumed {
+        if bytes.len() > 1 << 20 || bytes.len() > self.statement_bytes - self.consumed {
             return Err(Error::Shape);
         }
         self.hash.update(bytes);
@@ -209,8 +221,7 @@ impl StatementStream {
                 return Err(Error::Shape);
             }
             if self.parser.is_none() {
-                self.parser =
-                    Some(PolynomialStream::new(1, self.alpha).map_err(|_| Error::Arithmetic)?);
+                self.parser = Some(key_stream(self.alpha)?);
             }
             let count = bytes.len().min(SYSTEMATIC * 21 - position);
             let chunk = &bytes[..count];
@@ -241,7 +252,7 @@ impl StatementStream {
     }
     pub fn finish(self) -> Result<SetupStatementOutput, Error> {
         if self.failed
-            || self.consumed != STATEMENT_BYTES
+            || self.consumed != self.statement_bytes
             || self.parser.is_some()
             || <[u8; 64]>::from(self.hash.finalize()) != self.expected
         {
@@ -252,7 +263,7 @@ impl StatementStream {
             self.adjoint.ok_or(Error::Shape)?,
             self.public_value.ok_or(Error::Shape)?,
         );
-        let mut coefficients = Vec::with_capacity(COLUMNS * self.queries.len());
+        let mut coefficients = Vec::with_capacity(operator.coefficients.len() * self.queries.len());
         for values in operator.coefficients {
             coefficients.extend(
                 evaluate_public_values(values, &self.queries).map_err(|_| Error::Arithmetic)?,

@@ -7,19 +7,12 @@ autobins = false
 
 
 [lib]
-crate-type = ["rlib", "cdylib"]
-
-[[bin]]
-name = "public-contribution-inputs"
-path = "src/public-contribution-inputs.rs"
-
-[features]
-default = ["bridge"]
-bridge = []
+crate-type = ["rlib"]
 
 [dependencies]
 registration-credentials = { path = "../registration-credentials", default-features = false }
 setup-witness = { path = "../setup-witness" }
+supported-profile = { path = "../supported-profile" }
 word-proof = { path = "../word-proof", default-features = false }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"

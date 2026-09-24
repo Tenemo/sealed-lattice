@@ -108,22 +108,18 @@ describe('supported profile parameters', () => {
             maximumJointSimulationOneNormSum:
                 threshold.exactMaximumJointSimulationCoefficientOneNormSum,
         });
-        // The Rust witnesses fix the ten-participant radices and share range.
-        const convolution = await readFile(
-            'crates/protocol-research/setup-witness/src/convolution.rs',
+        // Independently maintained ten-participant share limb and release
+        // share range. The research parameter correspondence test compares
+        // the Rust profile table with this model.
+        expect(profile.shareLifting.limbBits).toBe(96);
+        expect(profile.releaseLifting.shareBits).toBe(120);
+        // The shared Rust profile crate fixes the FHE and release radices.
+        const shared = await readFile(
+            'crates/protocol-research/supported-profile/src/lib.rs',
             'utf8',
         );
-        expect(convolution).toContain(
-            `pub const RADIX_BITS: usize = ${profile.shareLifting.limbBits};`,
-        );
-        const release = await readFile(
-            'crates/protocol-research/linked-release-proof/src/witness.rs',
-            'utf8',
-        );
-        expect(release).toContain('let release_radix = 1i128 << 48;');
-        expect(release).toContain(
-            `share < -(BigInt::from(1) << ${profile.releaseLifting.shareBits - 1}usize)`,
-        );
+        expect(shared).toContain('pub const FHE_LIMB_BITS: usize = 96;');
+        expect(shared).toContain('pub const RELEASE_LIMB_BITS: usize = 48;');
     });
 
     it('derives degree-one sharing and two-share release for three participants', () => {

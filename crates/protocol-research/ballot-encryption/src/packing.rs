@@ -1,5 +1,5 @@
-pub const DEGREE: usize = 65_536;
-const MODULUS: u32 = 65_537;
+pub use supported_profile::DEGREE;
+use supported_profile::{MAXIMUM_SCORE, PLAINTEXT_MODULUS as MODULUS, Profile};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -14,7 +14,7 @@ pub struct PackingMatrix {
 }
 impl PackingMatrix {
     pub fn new(options: usize) -> Result<Self, Refusal> {
-        if !(2..=20).contains(&options) {
+        if !Profile::option_range().contains(&options) {
             return Err(Refusal::Options);
         }
         let baseline = encode(&vec![1; options])?;
@@ -142,10 +142,13 @@ pub fn encode(scores: &[u8]) -> Result<Vec<i32>, Refusal> {
 }
 /// Refuses option counts and scores outside the supported packing domain.
 pub fn check_scores(scores: &[u8]) -> Result<(), Refusal> {
-    if !(2..=20).contains(&scores.len()) {
+    if !Profile::option_range().contains(&scores.len()) {
         return Err(Refusal::Options);
     }
-    if scores.iter().any(|score| !(1..=10).contains(score)) {
+    if scores
+        .iter()
+        .any(|score| !(1..=MAXIMUM_SCORE).contains(&usize::from(*score)))
+    {
         return Err(Refusal::Scores);
     }
     Ok(())

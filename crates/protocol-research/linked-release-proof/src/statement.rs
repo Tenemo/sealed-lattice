@@ -5,8 +5,32 @@ use crate::{
 use num_bigint::{BigInt, Sign};
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
 use sha3::{Digest, Sha3_512};
+use supported_profile::{
+    Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
+};
 
-const SETUP_PARAMETERS: &[u8; 137] = include_bytes!("../../setup-proof/parameters.bin");
+/// Signed release variables in the order of `Profile::release_variable_bits`.
+pub(crate) const KEY_QUOTIENT: usize = 0;
+pub(crate) const KEY_CARRY: usize = 1;
+pub(crate) const KEY_ERROR: usize = 2;
+pub(crate) const SHARE: usize = 3;
+pub(crate) const DECODING_ERROR: usize = 4;
+pub(crate) const DECODING_QUOTIENT: usize = 5;
+pub(crate) const DECODING_CARRY: usize = 6;
+pub(crate) const NOISE: usize = 7;
+pub(crate) const RELEASE_QUOTIENT: usize = 8;
+pub(crate) const FIRST_RELEASE_CARRY: usize = 9;
+pub(crate) const HEADER_MAGIC: &[u8; 4] = b"LRS1";
+/// Share-modulus polynomials fingerprint in decoding limbs and
+/// release-modulus polynomials in release limbs.
+const DECODING_CHUNK: usize = RELEASE_DECODING_LIMB_BITS / 8;
+const RELEASE_CHUNK: usize = RELEASE_LIMB_BITS / 8;
+/// The common share polynomial, the recipient key and the aggregate share
+/// ciphertext's constant and linear components are share-modulus
+/// polynomials; the target's linear component and the partial decryption are
+/// release-modulus polynomials.
+const SHARE_POLYNOMIALS: usize = 4;
+const POLYNOMIALS: usize = 6;
 #[derive(Debug)]
 pub enum Error {
     Shape,
@@ -15,27 +39,38 @@ pub enum Error {
     Arithmetic,
 }
 pub fn share_modulus() -> BigInt {
-    BigInt::from_bytes_le(Sign::Plus, &SETUP_PARAMETERS[112..132])
+    BigInt::from_bytes_le(Sign::Plus, supported_profile::share_modulus())
 }
-pub fn release_modulus() -> BigInt {
-    ((BigInt::from(65537u32) * 65445u32) << 160usize) + 1u32
+pub fn release_modulus(profile: Profile) -> BigInt {
+    BigInt::from_bytes_le(Sign::Plus, &profile.release_modulus().to_bytes())
 }
-pub(crate) fn modulus_parameters() -> Vec<usize> {
-    let mut values = vec![SHARE_SCALE as usize];
-    for (modulus, width) in [(share_modulus(), 20), (release_modulus(), 24)] {
-        let mut bytes = modulus.to_bytes_le().1;
-        bytes.resize(width, 0);
-        values.push(width);
-        values.extend(
-            bytes
-                .chunks_exact(4)
-                .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()) as usize),
-        );
+/// Bytes of one encoded coefficient: a sign byte and the magnitude.
+pub fn share_coefficient_bytes() -> usize {
+    1 + supported_profile::share_modulus().len()
+}
+pub fn release_coefficient_bytes(profile: Profile) -> usize {
+    1 + profile.release_modulus().byte_length()
+}
+fn coefficient_bytes(profile: Profile, index: usize) -> usize {
+    if index < SHARE_POLYNOMIALS {
+        share_coefficient_bytes()
+    } else {
+        release_coefficient_bytes(profile)
     }
-    values
 }
-pub const SHARE_SCALE: i128 = 998244353;
+/// The release position a header names, when it has the release magic and
+/// names a roster position of the profile.
+pub fn header_position(profile: Profile, header: &[u8]) -> Option<usize> {
+    if header.len() != RELEASE_HEADER_BYTES || &header[..4] != HEADER_MAGIC {
+        return None;
+    }
+    let position = usize::from(u16::from_le_bytes(
+        header[RELEASE_HEADER_BYTES - 2..].try_into().unwrap(),
+    ));
+    (position < profile.participants()).then_some(position)
+}
 pub struct PublicStatement {
+    pub profile: Profile,
     pub header: Vec<u8>,
     pub polynomials: Vec<Vec<u8>>,
 }
@@ -72,6 +107,12 @@ fn fingerprint(bytes: &[u8], chunk: usize, weight: Element) -> Element {
         )
     })
 }
+fn times(values: &[Element], weight: Element) -> Vec<Element> {
+    values
+        .iter()
+        .map(|value| field::multiply(*value, weight))
+        .collect()
+}
 pub fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Error> {
     let mut output = Vec::with_capacity(values.len() * width);
     for value in values {
@@ -94,34 +135,32 @@ struct Polynomial {
     geometric: Element,
     total: Element,
     values: Vec<Element>,
-    buffer: [u8; 25],
-    buffered: usize,
+    buffer: Vec<u8>,
     consumed: usize,
 }
 impl Polynomial {
-    fn new(index: usize, alpha: Element) -> Result<Self, Error> {
-        if index >= 6 || alpha.iter().any(|value| *value >= MODULUS) {
+    fn new(profile: Profile, index: usize, alpha: Element) -> Result<Self, Error> {
+        if index >= POLYNOMIALS || alpha.iter().any(|value| *value >= MODULUS) {
             return Err(Error::Shape);
         }
-        let modulus = if index < 4 {
-            share_modulus()
+        let (modulus, chunk) = if index < SHARE_POLYNOMIALS {
+            (share_modulus(), DECODING_CHUNK)
         } else {
-            release_modulus()
+            (release_modulus(profile), RELEASE_CHUNK)
         };
-        let width = if index < 4 { 21 } else { 25 };
+        let width = coefficient_bytes(profile, index);
         let mut half = (modulus >> 1usize).to_bytes_le().1;
         half.resize(width - 1, 0);
         Ok(Self {
             width,
-            chunk: if index < 4 { 12 } else { 6 },
+            chunk,
             half,
             alpha,
             weight: power(alpha, SYSTEMATIC),
             geometric: ONE,
             total: ZERO,
             values: Vec::with_capacity(SYSTEMATIC),
-            buffer: [0; 25],
-            buffered: 0,
+            buffer: Vec::with_capacity(width),
             consumed: 0,
         })
     }
@@ -131,12 +170,11 @@ impl Polynomial {
         }
         self.consumed += bytes.len();
         while !bytes.is_empty() {
-            let count = bytes.len().min(self.width - self.buffered);
-            self.buffer[self.buffered..self.buffered + count].copy_from_slice(&bytes[..count]);
-            self.buffered += count;
+            let count = bytes.len().min(self.width - self.buffer.len());
+            self.buffer.extend_from_slice(&bytes[..count]);
             bytes = &bytes[count..];
-            if self.buffered == self.width {
-                let magnitude = &self.buffer[1..self.width];
+            if self.buffer.len() == self.width {
+                let magnitude = &self.buffer[1..];
                 if self.buffer[0] > 1
                     || magnitude.iter().rev().cmp(self.half.iter().rev()).is_gt()
                     || (self.buffer[0] == 1 && magnitude.iter().all(|value| *value == 0))
@@ -152,14 +190,14 @@ impl Polynomial {
                 self.total = field::add(self.total, field::multiply(self.geometric, value));
                 self.geometric = field::multiply(self.geometric, self.alpha);
                 self.values.push(value);
-                self.buffered = 0;
+                self.buffer.clear();
             }
         }
         Ok(())
     }
     fn complete(&self) -> Result<(), Error> {
         if self.values.len() != SYSTEMATIC
-            || self.buffered != 0
+            || !self.buffer.is_empty()
             || self.consumed != SYSTEMATIC * self.width
         {
             return Err(Error::Shape);
@@ -186,6 +224,10 @@ impl Polynomial {
     }
 }
 struct Builder {
+    profile: Profile,
+    bits: Vec<usize>,
+    starts: Vec<usize>,
+    words: usize,
     alpha: Element,
     omega: Element,
     geometric: Vec<Element>,
@@ -194,13 +236,9 @@ struct Builder {
     consumed: usize,
 }
 impl Builder {
-    fn new(alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        if header.len() != HEADER_BYTES
-            || &header[..4] != b"LRS1"
-            || u16::from_le_bytes(header[196..198].try_into().unwrap()) >= 10
-        {
-            return Err(Error::Shape);
-        }
+    fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
+        header_position(profile, header).ok_or(Error::Shape)?;
+        let (starts, words) = release_variable_starts(profile);
         let mut value = ONE;
         let geometric = (0..SYSTEMATIC)
             .map(|_| {
@@ -210,10 +248,14 @@ impl Builder {
             })
             .collect();
         Ok(Self {
+            profile,
+            bits: profile.release_variable_bits(),
+            starts,
+            words,
             alpha,
             omega: power(alpha, SYSTEMATIC),
             geometric,
-            coefficients: vec![vec![ZERO; SYSTEMATIC]; COLUMNS],
+            coefficients: vec![vec![ZERO; SYSTEMATIC]; words + 2],
             target: ZERO,
             consumed: 0,
         })
@@ -225,7 +267,7 @@ impl Builder {
         bias_bits: Option<usize>,
         coefficients: &[Element],
     ) {
-        assert!(first + count <= WORDS && coefficients.len() == SYSTEMATIC);
+        assert!(first + count <= self.words && coefficients.len() == SYSTEMATIC);
         let mut weight = 1u128;
         for column in first..first + count {
             for (target, value) in self.coefficients[column].iter_mut().zip(coefficients) {
@@ -239,18 +281,57 @@ impl Builder {
             self.target = field::add(self.target, field::scale(sum, bias));
         }
     }
-    fn variable(&mut self, index: usize, weight: Element) {
-        let values = self
-            .geometric
-            .iter()
-            .map(|value| field::multiply(*value, weight))
-            .collect::<Vec<_>>();
+    /// Adds the words of bits `first..first + width` of a signed variable at
+    /// the given row coefficients. A part holding the variable's top bits,
+    /// or a centered lower part, is offset by half its range.
+    fn part(
+        &mut self,
+        variable: usize,
+        first: usize,
+        width: usize,
+        centered: bool,
+        coefficients: &[Element],
+    ) {
+        assert!(first.is_multiple_of(16) && first + width <= self.bits[variable]);
         self.words(
-            STARTS[index],
-            WIDTHS[index].div_ceil(16),
-            Some(WIDTHS[index]),
-            &values,
+            self.starts[variable] + first / 16,
+            width.div_ceil(16),
+            centered.then_some(width),
+            coefficients,
         );
+    }
+    fn variable(&mut self, variable: usize, weight: Element, geometric: &[Element]) {
+        self.part(
+            variable,
+            0,
+            self.bits[variable],
+            true,
+            &times(geometric, weight),
+        );
+    }
+    /// Adds each release limb of a signed variable at the row coefficients
+    /// times its limb weight. Every limb but the top one is an unsigned
+    /// digit.
+    fn release_limbs(
+        &mut self,
+        variable: usize,
+        coefficients: &[Element],
+        weight: impl Fn(usize) -> Element,
+    ) {
+        let bits = self.bits[variable];
+        let limbs = bits.div_ceil(RELEASE_LIMB_BITS);
+        for limb in 0..limbs {
+            let first = limb * RELEASE_LIMB_BITS;
+            let top = limb + 1 == limbs;
+            let width = if top { bits - first } else { RELEASE_LIMB_BITS };
+            self.part(
+                variable,
+                first,
+                width,
+                top,
+                &times(coefficients, weight(limb)),
+            );
+        }
     }
     fn polynomial(&mut self, index: usize, polynomial: Polynomial) -> Result<(), Error> {
         if index != self.consumed {
@@ -267,10 +348,10 @@ impl Builder {
                 };
                 for (position, value) in polynomial.adjoint()?.into_iter().enumerate() {
                     let value = field::multiply(weight, value);
-                    self.coefficients[WORDS][position] =
-                        field::add(self.coefficients[WORDS][position], value);
-                    self.coefficients[WORDS + 1][position] =
-                        field::subtract(self.coefficients[WORDS + 1][position], value);
+                    self.coefficients[self.words][position] =
+                        field::add(self.coefficients[self.words][position], value);
+                    self.coefficients[self.words + 1][position] =
+                        field::subtract(self.coefficients[self.words + 1][position], value);
                 }
             }
             1 => self.target = field::subtract(self.target, polynomial.total),
@@ -283,19 +364,10 @@ impl Builder {
             4 => {
                 let adjoint = polynomial.adjoint()?;
                 let base = power(self.alpha, 4 * SYSTEMATIC);
-                for limb in 0..3 {
-                    let weight = field::scale(field::multiply(base, power(self.omega, limb)), 4);
-                    let values = adjoint
-                        .iter()
-                        .map(|value| field::multiply(*value, weight))
-                        .collect::<Vec<_>>();
-                    self.words(
-                        STARTS[3] + 3 * limb,
-                        if limb == 2 { 2 } else { 3 },
-                        if limb == 2 { Some(24) } else { None },
-                        &values,
-                    );
-                }
+                let (omega, clearing) = (self.omega, self.profile.clearing_factor() as u128);
+                self.release_limbs(SHARE, &adjoint, |limb| {
+                    field::scale(field::multiply(base, power(omega, limb)), clearing)
+                });
             }
             5 => {
                 self.target = field::add(
@@ -308,103 +380,106 @@ impl Builder {
         Ok(())
     }
     fn finish(mut self) -> Result<Operator, Error> {
-        if self.consumed != 6 {
+        if self.consumed != POLYNOMIALS {
             return Err(Error::Shape);
         }
-        let share_modulus = fingerprint(&share_modulus().to_bytes_le().1, 12, self.omega);
-        let release_modulus = fingerprint(&release_modulus().to_bytes_le().1, 6, self.omega);
-        self.variable(0, field::subtract(ZERO, share_modulus));
-        self.variable(1, field::subtract(self.omega, [1u128 << 96, 0, 0]));
-        self.variable(2, field::subtract(ZERO, ONE));
+        let geometric = std::mem::take(&mut self.geometric);
+        let omega = self.omega;
+        let share_modulus = fingerprint(supported_profile::share_modulus(), DECODING_CHUNK, omega);
+        let release_modulus = fingerprint(
+            &self.profile.release_modulus().to_bytes(),
+            RELEASE_CHUNK,
+            omega,
+        );
+        let decoding_carry = field::subtract(omega, [1u128 << RELEASE_DECODING_LIMB_BITS, 0, 0]);
+        // The recipient key equation.
+        self.variable(
+            KEY_QUOTIENT,
+            field::subtract(ZERO, share_modulus),
+            &geometric,
+        );
+        self.variable(KEY_CARRY, decoding_carry, &geometric);
+        self.variable(KEY_ERROR, field::subtract(ZERO, ONE), &geometric);
+        // The aggregate share's decoding equation, with the share scale times
+        // the centered lower decoding limb and the signed upper part.
         let decryption = power(self.alpha, 2 * SYSTEMATIC);
-        self.variable(4, field::subtract(ZERO, decryption));
         self.variable(
-            5,
+            DECODING_ERROR,
+            field::subtract(ZERO, decryption),
+            &geometric,
+        );
+        self.variable(
+            DECODING_QUOTIENT,
             field::subtract(ZERO, field::multiply(decryption, share_modulus)),
+            &geometric,
         );
         self.variable(
-            6,
-            field::multiply(decryption, field::subtract(self.omega, [1u128 << 96, 0, 0])),
+            DECODING_CARRY,
+            field::multiply(decryption, decoding_carry),
+            &geometric,
         );
-        for limb in 0..2 {
+        let share_bits = self.bits[SHARE];
+        for (limb, first, width) in [
+            (0, 0, RELEASE_DECODING_LIMB_BITS),
+            (
+                1,
+                RELEASE_DECODING_LIMB_BITS,
+                share_bits - RELEASE_DECODING_LIMB_BITS,
+            ),
+        ] {
             let weight = field::scale(
-                field::multiply(decryption, power(self.omega, limb)),
-                signed(-SHARE_SCALE),
+                field::multiply(decryption, power(omega, limb)),
+                signed(-i128::from(SHARE_SCALE)),
             );
-            let values = self
-                .geometric
-                .iter()
-                .map(|value| field::multiply(*value, weight))
-                .collect::<Vec<_>>();
-            self.words(
-                STARTS[3] + 6 * limb,
-                if limb == 0 { 6 } else { 2 },
-                Some(if limb == 0 { 96 } else { 24 }),
-                &values,
-            );
+            self.part(SHARE, first, width, true, &times(&geometric, weight));
         }
-        let offset = BigInt::from(SHARE_SCALE) * (BigInt::from(1) << 95usize);
-        let offset = fingerprint(&offset.to_bytes_le().1, 12, self.omega);
-        let geometric_sum = self.geometric.iter().copied().fold(ZERO, field::add);
+        let offset = BigInt::from(SHARE_SCALE) << (RELEASE_DECODING_LIMB_BITS - 1);
+        let offset = fingerprint(&offset.to_bytes_le().1, DECODING_CHUNK, omega);
+        let geometric_sum = geometric.iter().copied().fold(ZERO, field::add);
         self.target = field::add(
             self.target,
             field::multiply(field::multiply(decryption, offset), geometric_sum),
         );
+        // The partial decryption equation in release limbs.
         let release = power(self.alpha, 4 * SYSTEMATIC);
-        for limb in 0..4 {
-            let weight = field::scale(field::multiply(release, power(self.omega, limb)), 4);
-            let values = self
-                .geometric
-                .iter()
-                .map(|value| field::multiply(*value, weight))
-                .collect::<Vec<_>>();
-            self.words(
-                STARTS[7] + 3 * limb,
-                if limb == 3 { 2 } else { 3 },
-                if limb == 3 { Some(24) } else { None },
-                &values,
-            );
-        }
-        for limb in 0..3 {
-            let weight = field::subtract(
+        let clearing = self.profile.clearing_factor() as u128;
+        self.release_limbs(NOISE, &geometric, |limb| {
+            field::scale(field::multiply(release, power(omega, limb)), clearing)
+        });
+        self.release_limbs(RELEASE_QUOTIENT, &geometric, |limb| {
+            field::subtract(
                 ZERO,
                 field::multiply(
-                    field::multiply(release, power(self.omega, limb)),
+                    field::multiply(release, power(omega, limb)),
                     release_modulus,
                 ),
-            );
-            let values = self
-                .geometric
-                .iter()
-                .map(|value| field::multiply(*value, weight))
-                .collect::<Vec<_>>();
-            self.words(
-                STARTS[8] + 3 * limb,
-                3,
-                if limb == 2 { Some(48) } else { None },
-                &values,
-            );
-        }
-        for limb in 0..5 {
+            )
+        });
+        let release_carry = field::subtract(omega, [1u128 << RELEASE_LIMB_BITS, 0, 0]);
+        let output_limbs = self.profile.release_output_limbs();
+        for limb in 0..output_limbs - 1 {
             self.variable(
-                9 + limb,
-                field::multiply(
-                    field::multiply(release, power(self.omega, limb)),
-                    field::subtract(self.omega, [1u128 << 48, 0, 0]),
-                ),
+                FIRST_RELEASE_CARRY + limb,
+                field::multiply(field::multiply(release, power(omega, limb)), release_carry),
+                &geometric,
             );
         }
+        // Each half of the recipient secret's support follows every limb row.
+        let rows = (4 + output_limbs) * SYSTEMATIC;
         for sign in 0..2 {
-            let weight = power(self.alpha, 10 * SYSTEMATIC + sign);
-            for value in &mut self.coefficients[WORDS + sign] {
+            let weight = power(self.alpha, rows + sign);
+            for value in &mut self.coefficients[self.words + sign] {
                 *value = field::add(*value, weight);
             }
-            self.target = field::add(self.target, field::scale(weight, 128));
+            self.target = field::add(
+                self.target,
+                field::scale(weight, (RECIPIENT_SECRET_SUPPORT / 2) as u128),
+            );
         }
         Ok(Operator {
             coefficients: self.coefficients,
             target: self.target,
-            lookup_weight: power(self.alpha, 10 * SYSTEMATIC + 2),
+            lookup_weight: power(self.alpha, rows + 2),
         })
     }
 }
@@ -418,12 +493,12 @@ impl PublicStatement {
         hash.finalize().into()
     }
     pub fn operator(&self, alpha: Element) -> Result<Operator, Error> {
-        let mut builder = Builder::new(alpha, &self.header)?;
-        if self.polynomials.len() != 6 {
+        let mut builder = Builder::new(self.profile, alpha, &self.header)?;
+        if self.polynomials.len() != POLYNOMIALS {
             return Err(Error::Shape);
         }
         for (index, bytes) in self.polynomials.iter().enumerate() {
-            let mut parser = Polynomial::new(index, alpha)?;
+            let mut parser = Polynomial::new(self.profile, index, alpha)?;
             for chunk in bytes.chunks(1048576) {
                 parser.push(chunk)?;
             }
@@ -433,6 +508,8 @@ impl PublicStatement {
     }
 }
 pub struct StatementStream {
+    profile: Profile,
+    statement_bytes: usize,
     expected: [u8; 64],
     alpha: Element,
     queries: Vec<u32>,
@@ -446,7 +523,12 @@ pub struct StatementStream {
     failed: bool,
 }
 impl StatementStream {
-    pub fn new(expected: [u8; 64], alpha: Element, queries: &[u32]) -> Result<Self, Error> {
+    pub fn new(
+        profile: Profile,
+        expected: [u8; 64],
+        alpha: Element,
+        queries: &[u32],
+    ) -> Result<Self, Error> {
         if alpha.iter().any(|value| *value >= MODULUS)
             || queries.is_empty()
             || queries.len() > 2 * QUERY_COUNT
@@ -456,6 +538,8 @@ impl StatementStream {
             return Err(Error::Shape);
         }
         Ok(Self {
+            profile,
+            statement_bytes: release_relation(profile).statement_bytes(),
             expected,
             alpha,
             queries: queries.to_vec(),
@@ -480,26 +564,26 @@ impl StatementStream {
         result
     }
     fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
-        if bytes.len() > 1048576 || bytes.len() > STATEMENT_BYTES - self.consumed {
+        if bytes.len() > 1048576 || bytes.len() > self.statement_bytes - self.consumed {
             return Err(Error::Shape);
         }
         self.consumed += bytes.len();
         self.hash.update(bytes);
-        if self.header.len() < HEADER_BYTES {
-            let count = bytes.len().min(HEADER_BYTES - self.header.len());
+        if self.header.len() < RELEASE_HEADER_BYTES {
+            let count = bytes.len().min(RELEASE_HEADER_BYTES - self.header.len());
             self.header.extend_from_slice(&bytes[..count]);
             bytes = &bytes[count..];
-            if self.header.len() == HEADER_BYTES {
-                self.builder = Some(Builder::new(self.alpha, &self.header)?);
+            if self.header.len() == RELEASE_HEADER_BYTES {
+                self.builder = Some(Builder::new(self.profile, self.alpha, &self.header)?);
             }
         }
         while !bytes.is_empty() {
-            if self.index >= 6 {
+            if self.index >= POLYNOMIALS {
                 return Err(Error::Shape);
             }
-            let size = SYSTEMATIC * if self.index < 4 { 21 } else { 25 };
+            let size = SYSTEMATIC * coefficient_bytes(self.profile, self.index);
             if self.parser.is_none() {
-                self.parser = Some(Polynomial::new(self.index, self.alpha)?);
+                self.parser = Some(Polynomial::new(self.profile, self.index, self.alpha)?);
             }
             let count = bytes.len().min(size - self.polynomial_bytes);
             self.parser.as_mut().unwrap().push(&bytes[..count])?;
@@ -518,15 +602,15 @@ impl StatementStream {
     }
     pub fn finish(self) -> Result<StatementOutput, Error> {
         if self.failed
-            || self.consumed != STATEMENT_BYTES
-            || self.index != 6
+            || self.consumed != self.statement_bytes
+            || self.index != POLYNOMIALS
             || self.parser.is_some()
             || <[u8; 64]>::from(self.hash.finalize()) != self.expected
         {
             return Err(Error::Binding);
         }
         let operator = self.builder.ok_or(Error::Shape)?.finish()?;
-        let mut coefficients = Vec::with_capacity(COLUMNS * self.queries.len());
+        let mut coefficients = Vec::with_capacity(operator.coefficients.len() * self.queries.len());
         for column in operator.coefficients {
             coefficients.extend(
                 setup_stream_kernel::evaluate_public_values(column, &self.queries)

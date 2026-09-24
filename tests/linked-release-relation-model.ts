@@ -9,6 +9,10 @@ const sharing = shareEncryptionParameters;
 const releaseLimbBits = 48;
 const releaseRadix = 1n << BigInt(releaseLimbBits);
 const releaseCarryBits = 72;
+// The recipient-key and decoding equations split every operand, and the one
+// aggregate share, at a whole word for every profile.
+const decodingLimbBits = 96;
+const decodingRadix = 1n << BigInt(decodingLimbBits);
 // The summed share decryption error stays below the shared radius.
 const decodingErrorBits =
     sharing.aggregateDecryptionErrorRadius.toString(2).length;
@@ -120,7 +124,7 @@ export const compileLinkedReleaseRelationCensus = (
     profile: SupportedProfile,
 ) => {
     const recipientSupport = sharing.encryptionSupportWeight;
-    const radix = 1n << BigInt(profile.shareLifting.limbBits);
+    const radix = decodingRadix;
     const lifting = profile.releaseLifting;
     const shareBits = lifting.shareBits;
     const decodingQuotientBits = 16;
@@ -190,7 +194,7 @@ export const createLinkedReleaseRelationModel = (
     seed = 1n,
 ) => {
     const bounds = compileLinkedReleaseRelationCensus(profile);
-    const radix = 1n << BigInt(profile.shareLifting.limbBits);
+    const radix = decodingRadix;
     const lifting = profile.releaseLifting;
     const releaseModulus = profile.release.modulus;
     const releaseNoiseBits = profile.releaseNoiseBits;

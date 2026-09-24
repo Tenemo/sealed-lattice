@@ -94,7 +94,10 @@ describe('fixed-suite public-matrix sampling', () => {
         // plus distinct common polynomials for sharing and auxiliary scores.
         expect(census.fhePolynomialCount).toBe(18n);
         expect(census.coefficientCount).toBe(18n * 65536n + 65536n + 4096n);
-        expect(census.expandedSampleBytes).toBe(159907840n);
+        // FHE coefficients at 1024 bits, share and auxiliary ones at 320.
+        expect(census.expandedSampleBytes).toBe(
+            (18n * 65536n * 1024n + (65536n + 4096n) * 320n) / 8n,
+        );
         expect(census.distanceBits).toBe(141);
         expect(census.distanceUpperNumerator << 141n).toBeLessThanOrEqual(
             census.distanceUpperDenominator,
@@ -104,7 +107,20 @@ describe('fixed-suite public-matrix sampling', () => {
         );
     });
 
-    it('chooses the least whole-word width whose distance meets the allocation', () => {
+    it('chooses the least whole-word widths whose distances meet the allocation', () => {
+        // The share and auxiliary families, which registration fixes before
+        // the roster is known, stay within half the allocation at 320 bits
+        // and exceed it at 256.
+        const fixed = [
+            [65536n, shareEncryptionParameters.modulus],
+            [4096n, auxiliaryInputEncryptionParameters.modulus],
+        ] as const;
+        const fixedBound = fixed.reduce(
+            (sum, [coefficients, modulus]) => sum + coefficients * modulus,
+            0n,
+        );
+        expect(fixedBound << 129n).toBeLessThanOrEqual(4n << 320n);
+        expect(fixedBound << 129n).toBeGreaterThan(4n << 256n);
         for (const [participantCount, optionCount, width] of [
             [3, 2, 768],
             [10, 10, 1024],
@@ -115,32 +131,38 @@ describe('fixed-suite public-matrix sampling', () => {
                 optionCount,
             );
             const census = compileCommonMatrixSamplingCensus(profile);
-            expect(census.bitsPerCoefficient).toBe(width);
+            expect(census.fheBitsPerCoefficient).toBe(width);
+            expect(census.fixedFamilyBitsPerCoefficient).toBe(320);
             const families = [
                 [
                     3n * profile.gadgetLength * 65536n,
                     profile.ciphertext.modulus,
+                    width,
                 ],
-                [65536n, shareEncryptionParameters.modulus],
-                [4096n, auxiliaryInputEncryptionParameters.modulus],
+                ...fixed.map(
+                    ([coefficients, modulus]) =>
+                        [coefficients, modulus, 320] as const,
+                ),
             ] as const;
-            // The exact distance at the chosen width is at most 2^-128.
+            // The exact distance at the chosen widths is at most 2^-128.
             let numerator = 0n,
                 denominator = 1n;
-            for (const [coefficients, modulus] of families) {
-                const distance = uniformWordResidueDistance(modulus, width);
+            for (const [coefficients, modulus, bits] of families) {
+                const distance = uniformWordResidueDistance(modulus, bits);
                 numerator =
                     numerator * distance.denominator +
                     coefficients * distance.numerator * denominator;
                 denominator *= distance.denominator;
             }
             expect(numerator << 128n).toBeLessThanOrEqual(denominator);
-            // One word fewer leaves the r(Q-r) <= Q^2/4 bound above 2^-128.
-            const bound = families.reduce(
-                (sum, [coefficients, modulus]) => sum + coefficients * modulus,
-                0n,
-            );
-            expect(bound << 128n).toBeGreaterThan(4n << BigInt(width - 64));
+            // One FHE word fewer leaves the r(Q-r) <= Q^2/4 bound above
+            // 2^-128 over the common denominator 4*2^(width-64+320).
+            const fheBound =
+                3n * profile.gadgetLength * 65536n * profile.ciphertext.modulus;
+            expect(
+                ((fheBound << 320n) + (fixedBound << BigInt(width - 64))) <<
+                    128n,
+            ).toBeGreaterThan(4n << BigInt(width - 64 + 320));
         }
     });
 

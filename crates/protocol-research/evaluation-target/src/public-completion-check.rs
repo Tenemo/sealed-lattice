@@ -1,4 +1,4 @@
-use super::{Work, bounded, end, polynomial_name, refusal};
+use super::{Work, bounded, end, polynomial_bytes, polynomial_name, refusal};
 use evaluation_target::{
     certification::CertificateCollector,
     release::ReleaseContext,
@@ -9,7 +9,7 @@ use evaluation_target::{
 use registration_credentials::release_signing::{
     RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES,
 };
-use setup_aggregate::{CHUNK_BYTES, ModulusKind, VerifiedAggregatePolynomial};
+use setup_aggregate::{CHUNK_BYTES, VerifiedAggregatePolynomial};
 use std::{fs::File, io, path::Path, sync::Arc};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -26,10 +26,7 @@ fn read_operand(
     work: &mut Work,
 ) -> io::Result<VerifiedAggregatePolynomial> {
     let setup = target.inventory().setup();
-    let kind =
-        ModulusKind::for_contribution_polynomial(index).ok_or_else(|| refusal("key index"))?;
-    let length = kind.degree() * kind.coefficient_bytes();
-    let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
+    let (length, capacity) = polynomial_bytes(setup.profile(), index)?;
     let mut file = File::open(directory.join(polynomial_name(index)))?;
     if file.metadata()?.len() != length as u64 {
         return Err(refusal("release operand length"));
@@ -58,7 +55,8 @@ pub fn verify(
     if bounded(directory.join("target.bin"), 2048, work)? != target.body() {
         return Err(refusal("published target differs from recomputation"));
     }
-    let count = target.inventory().setup().inventory().confirmations().len();
+    let profile = target.inventory().setup().profile();
+    let count = profile.participants();
     let mut votes = CertificateCollector::new(target.clone());
     let mut unavailable_votes = Vec::new();
     let mut invalid_votes = Vec::new();
@@ -150,8 +148,18 @@ pub fn verify(
             ReleaseContext::new(
                 certificate.clone(),
                 position,
-                read_operand(&target, aggregate, 44 + 3 * position, work)?,
-                read_operand(&target, aggregate, 45 + 3 * position, work)?,
+                read_operand(
+                    &target,
+                    aggregate,
+                    profile.share_constant_polynomial(position),
+                    work,
+                )?,
+                read_operand(
+                    &target,
+                    aggregate,
+                    profile.share_linear_polynomial(position),
+                    work,
+                )?,
             )
             .map_err(refusal)?,
         );

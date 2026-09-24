@@ -723,9 +723,6 @@ pub extern "C" fn contribution_proof_command(
     argument: usize,
     length: usize,
 ) -> u32 {
-    if operation == 1 {
-        return 1;
-    }
     contribution_prover::browser::command(operation, argument, length)
 }
 
@@ -767,7 +764,7 @@ pub extern "C" fn contribution_checkpoint_key(position: usize, length: usize) ->
 pub extern "C" fn retain_proposal(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if !(134..=INPUT_BYTES).contains(&length)
+        if !(136..=INPUT_BYTES).contains(&length)
             || state.retained_context.is_some()
             || state.signed_proposal.is_some()
             || state.contribution.body_started()
@@ -776,15 +773,18 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
             return 1;
         }
         let input = &state.input[..length];
-        let body_length = u32::from_le_bytes(input[130..134].try_into().unwrap()) as usize;
-        if body_length > 2048 || length != 134 + body_length {
+        let body_length = u32::from_le_bytes(input[132..136].try_into().unwrap()) as usize;
+        if body_length > 2048 || length != 136 + body_length {
             return 1;
         }
+        // The option count is the original poll's; the ballot owner check
+        // compares it with the verified poll.
         let Ok(context) = RetainedContributionContext::parse(
             input[..64].try_into().unwrap(),
             input[64..128].try_into().unwrap(),
+            u16::from_le_bytes(input[130..132].try_into().unwrap()) as usize,
             u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize,
-            &input[134..],
+            &input[136..],
         ) else {
             return 1;
         };

@@ -1,9 +1,10 @@
+use ballot_proof::statement::setup_inputs;
 use registration_credentials::{
     contribution_authentication::{CommitmentInventory, SignedOpening},
     poll::VerifiedPoll,
 };
 use setup_aggregate::{
-    CHUNK_BYTES, ModulusKind, VerifiedAggregatePolynomial,
+    CHUNK_BYTES, VerifiedAggregatePolynomial, contribution_family,
     verified::{SetupAggregator, VerifiedSetupAggregate},
 };
 use std::{
@@ -12,6 +13,30 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use supported_profile::{Profile, relation::PROOF_HEADER_BYTES};
+
+/// Bytes of a contribution polynomial and of the largest whole-coefficient
+/// chunk.
+pub fn polynomial_bytes(profile: Profile, index: usize) -> (usize, usize) {
+    let family = contribution_family(profile, index).unwrap();
+    let width = 1 + profile.family_magnitude_bytes(family);
+    (
+        profile.family_degree(family) * width,
+        CHUNK_BYTES / width * width,
+    )
+}
+/// The aggregate after the last contribution.
+pub fn final_keys(output: &Path, profile: Profile) -> PathBuf {
+    output.join(format!(
+        "aggregates/after-participant-{}",
+        profile.participants() - 1
+    ))
+}
+/// The setup indices of the FHE and auxiliary encryption keys, in the
+/// order a ballot statement takes them.
+pub fn ballot_keys(profile: Profile) -> [usize; 2] {
+    setup_inputs(profile).map(|(_, _, key)| key)
+}
 
 pub fn verify(
     inventory: Arc<CommitmentInventory>,
@@ -21,12 +46,13 @@ pub fn verify(
     output: &Path,
 ) -> VerifiedSetupAggregate {
     fs::create_dir(output).unwrap();
+    let profile = inventory.proposal().proposal().profile();
     let mut verifier = SetupAggregator::new(inventory).unwrap();
     for (position, directory) in directories.iter().enumerate() {
         let target = output.join(format!("after-participant-{position}"));
         fs::create_dir(&target).unwrap();
         let mut proof = File::open(directory.join("proof.bin")).unwrap();
-        let mut proof_header = [0; 4004];
+        let mut proof_header = [0; PROOF_HEADER_BYTES];
         proof.read_exact(&mut proof_header).unwrap();
         verifier
             .begin(
@@ -36,12 +62,8 @@ pub fn verify(
                 &proof_header,
             )
             .unwrap();
-        for index in
-            (0..75).filter(|index| ModulusKind::for_contribution_polynomial(*index).is_some())
-        {
-            let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-            let length = kind.degree() * kind.coefficient_bytes();
-            let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
+        for index in profile.contribution_body_polynomials() {
+            let (length, capacity) = polynomial_bytes(profile, index);
             let name = format!("polynomial-{index:02}.bin");
             let mut incoming = File::open(directory.join(&name)).unwrap();
             assert_eq!(incoming.metadata().unwrap().len(), length as u64);
@@ -99,9 +121,7 @@ pub fn read_key(
     index: usize,
     directory: &Path,
 ) -> VerifiedAggregatePolynomial {
-    let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-    let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
-    let total = kind.degree() * kind.coefficient_bytes();
+    let (total, capacity) = polynomial_bytes(setup.profile(), index);
     let mut reader = setup.read_polynomial(index).unwrap();
     let mut file = File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
     assert_eq!(file.metadata().unwrap().len(), total as u64);
@@ -122,12 +142,11 @@ pub fn verify_ballot(
     path: &Path,
     keys: &Path,
 ) -> ballot_proof::body::VerifiedBallotBody {
+    let profile = setup.profile();
     let mut verifier = ballot_proof::body::BallotBodyVerifier::new(poll, setup, 0, header).unwrap();
-    for index in [1, 74] {
+    for index in ballot_keys(profile) {
         verifier.begin_key(index).unwrap();
-        let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-        let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
-        let total = kind.degree() * kind.coefficient_bytes();
+        let (total, capacity) = polynomial_bytes(profile, index);
         let mut file = File::open(keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
         let mut buffer = vec![0; capacity];
         let mut offset = 0;
@@ -164,6 +183,7 @@ pub fn classify_ballot(
     mode: &str,
 ) -> Result<ballot_proof::body::BallotBodyClassification, ballot_proof::body::Error> {
     use ballot_proof::body::{Error, SignedBallotVerifier};
+    let profile = setup.profile();
     let authentication =
         ballot_proof::submission::authenticate_envelope(&setup, envelope, signature)
             .map_err(|_| Error::Context)?;
@@ -174,25 +194,24 @@ pub fn classify_ballot(
         header[0] ^= 1;
     }
     let mut verifier = SignedBallotVerifier::new(poll, setup, authentication, &header)?;
+    let [fhe_key, last_key] = ballot_keys(profile);
     if verifier.requires_keys() {
-        for index in [1, 74] {
+        for index in [fhe_key, last_key] {
             verifier.begin_key(index)?;
-            let kind = ModulusKind::for_contribution_polynomial(index).unwrap();
-            let capacity = CHUNK_BYTES / kind.coefficient_bytes() * kind.coefficient_bytes();
-            let total = kind.degree() * kind.coefficient_bytes();
+            let (total, capacity) = polynomial_bytes(profile, index);
             let mut key = File::open(keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
             let mut buffer = vec![0; capacity];
             let mut offset = 0;
             while offset < total {
                 let count = capacity.min(total - offset);
                 key.read_exact(&mut buffer[..count]).unwrap();
-                if mode == "key" && index == 1 && offset == 0 {
+                if mode == "key" && index == fhe_key && offset == 0 {
                     buffer[1] ^= 1;
                 }
                 verifier.push_key(&buffer[..count])?;
                 offset += count;
             }
-            if mode != "unfinished-keys" || index != 74 {
+            if mode != "unfinished-keys" || index != last_key {
                 verifier.finish_key()?;
             }
         }
@@ -200,7 +219,9 @@ pub fn classify_ballot(
     let total = file.metadata().unwrap().len() as usize - usize::from(mode == "truncated");
     let mut offset = header.len();
     let mut buffer = vec![0; 65521];
-    let changed = header.len() + registration_credentials::ballot_body::CIPHERTEXT_BYTES + 4004;
+    let changed = header.len()
+        + registration_credentials::ballot_body::ciphertext_bytes(profile)
+        + PROOF_HEADER_BYTES;
     while offset < total {
         let count = buffer.len().min(total - offset);
         file.read_exact(&mut buffer[..count]).unwrap();

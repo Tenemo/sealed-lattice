@@ -1,7 +1,6 @@
 use super::{Element, Error, MODULUS, ZERO, arithmetic, minus, multiply, plus};
 
 pub const SYSTEMATIC_SIZE: usize = 65_536;
-pub const DOMAIN_SIZE: usize = 4 * SYSTEMATIC_SIZE;
 pub const QUERY_LIMIT: usize = 2 * 704;
 
 fn scale(value: Element, scalar: u128) -> Element {
@@ -53,10 +52,6 @@ impl Transform {
             }
         }
     }
-}
-
-pub fn validate_indices(indices: &[u32]) -> Result<(), Error> {
-    validate_indices_in(indices, DOMAIN_SIZE)
 }
 
 pub(crate) fn validate_indices_in(indices: &[u32], domain_size: usize) -> Result<(), Error> {
@@ -130,6 +125,7 @@ pub(crate) fn evaluate_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const DOMAIN_SIZE: usize = 4 * SYSTEMATIC_SIZE;
 
     #[test]
     fn transforms_match_every_direct_fourier_coefficient() {
@@ -186,8 +182,14 @@ mod tests {
             vec![DOMAIN_SIZE as u32],
             (0..=QUERY_LIMIT as u32).collect(),
         ] {
-            assert_eq!(validate_indices(&indices), Err(Error::Parameters));
+            assert_eq!(
+                validate_indices_in(&indices, DOMAIN_SIZE),
+                Err(Error::Parameters)
+            );
         }
-        assert_eq!(validate_indices(&[0, (DOMAIN_SIZE - 1) as u32]), Ok(()));
+        assert_eq!(
+            validate_indices_in(&[0, (DOMAIN_SIZE - 1) as u32], DOMAIN_SIZE),
+            Ok(())
+        );
     }
 }

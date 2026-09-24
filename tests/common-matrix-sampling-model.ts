@@ -44,6 +44,33 @@ export const boundedResidueFiberWord = (
     return residue + modulus * (randomWord % count);
 };
 
+// Every sampled coefficient is a whole number of 64-bit words.
+// Registration fixes the common share polynomial before the roster, and so
+// the profile, is known. The share and auxiliary families therefore use one
+// profile-independent width, the least whose distance is at most half the
+// allocation. The FHE width is the least one whose complete distance, with
+// those families, is at most 2^-128.
+const commonMatrixSampling = {
+    wordBits: 64,
+    distanceAllocationBits: 128,
+} as const;
+const sharingModulus = compileSmallLimbProofFieldCensus().modulus * 998244353n;
+// r(Q-r) <= Q^2/4; tensorization adds the coefficient distances.
+const fixedFamilyDistanceNumerator =
+    fixedModulusBfvInputs.polynomialDegree * sharingModulus +
+    auxiliaryInputEncryptionParameters.degree *
+        auxiliaryInputEncryptionParameters.modulus;
+export const fixedFamilyBitsPerCoefficient = (() => {
+    let bits: number = commonMatrixSampling.wordBits;
+    while (
+        fixedFamilyDistanceNumerator <<
+            BigInt(commonMatrixSampling.distanceAllocationBits + 1) >
+        4n << BigInt(bits)
+    )
+        bits += commonMatrixSampling.wordBits;
+    return bits;
+})();
+
 export function compileCommonMatrixInitializationCensus(
     profile: SupportedProfile,
 ) {
@@ -57,22 +84,25 @@ export function compileCommonMatrixInitializationCensus(
             polynomials: matrix.fhePolynomialCount,
             degree: fixedModulusBfvInputs.polynomialDegree,
             modulus: profile.ciphertext.modulus,
+            bitsPerCoefficient: matrix.fheBitsPerCoefficient,
         },
         {
             name: 'Sharing',
             polynomials: 1n,
             degree: fixedModulusBfvInputs.polynomialDegree,
-            modulus: compileSmallLimbProofFieldCensus().modulus * 998244353n,
+            modulus: sharingModulus,
+            bitsPerCoefficient: fixedFamilyBitsPerCoefficient,
         },
         {
             name: 'Auxiliary',
             polynomials: 1n,
             degree: auxiliaryInputEncryptionParameters.degree,
             modulus: auxiliaryInputEncryptionParameters.modulus,
+            bitsPerCoefficient: fixedFamilyBitsPerCoefficient,
         },
     ].map((family) => {
         const maximumFibreSize =
-                ((1n << BigInt(matrix.bitsPerCoefficient)) +
+                ((1n << BigInt(family.bitsPerCoefficient)) +
                     family.modulus -
                     1n) /
                 family.modulus,
@@ -87,7 +117,7 @@ export function compileCommonMatrixInitializationCensus(
             randomBits: coefficients * randomBitsPerCoefficient,
             randomBytes: coefficients * ((randomBitsPerCoefficient + 7n) / 8n),
             programmedPrefixBytes:
-                (coefficients * BigInt(matrix.bitsPerCoefficient)) / 8n,
+                (coefficients * BigInt(family.bitsPerCoefficient)) / 8n,
         };
     });
     return {
@@ -109,13 +139,6 @@ export function compileCommonMatrixInitializationCensus(
     };
 }
 
-// Every sampled coefficient is a whole number of 64-bit words, and the
-// width is the least one whose complete distance is at most 2^-128.
-const commonMatrixSampling = {
-    wordBits: 64,
-    distanceAllocationBits: 128,
-} as const;
-
 export const compileCommonMatrixSamplingCensus = (
     profile: SupportedProfile,
 ) => {
@@ -123,25 +146,26 @@ export const compileCommonMatrixSamplingCensus = (
     // KLSW setup contains a, u, and one independent gadget vector per
     // automorphism. The current ranking consumes one unit automorphism.
     const fhePolynomialCount = (2n + 1n) * profile.gadgetLength;
-    const sharingModulus =
-        compileSmallLimbProofFieldCensus().modulus * 998244353n;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
-    const auxiliaryModulus = auxiliaryInputEncryptionParameters.modulus;
     const coefficientCount =
         fhePolynomialCount * degree + degree + auxiliaryDegree;
-    const distanceUpperNumerator =
-        fhePolynomialCount * degree * profile.ciphertext.modulus +
-        degree * sharingModulus +
-        auxiliaryDegree * auxiliaryModulus;
-    // r(Q-r) <= Q^2/4; tensorization adds the coefficient distances.
-    let bitsPerCoefficient: number = commonMatrixSampling.wordBits;
+    const fheDistanceNumerator =
+        fhePolynomialCount * degree * profile.ciphertext.modulus;
+    const fixedBits = BigInt(fixedFamilyBitsPerCoefficient);
+    // Over the common denominator 4*2^(fheBits+fixedBits).
+    const completeNumerator = (fheBits: number) =>
+        (fheDistanceNumerator << fixedBits) +
+        (fixedFamilyDistanceNumerator << BigInt(fheBits));
+    let fheBitsPerCoefficient: number = commonMatrixSampling.wordBits;
     while (
-        distanceUpperNumerator <<
+        completeNumerator(fheBitsPerCoefficient) <<
             BigInt(commonMatrixSampling.distanceAllocationBits) >
-        4n << BigInt(bitsPerCoefficient)
+        4n << (BigInt(fheBitsPerCoefficient) + fixedBits)
     )
-        bitsPerCoefficient += commonMatrixSampling.wordBits;
-    const distanceUpperDenominator = 4n << BigInt(bitsPerCoefficient);
+        fheBitsPerCoefficient += commonMatrixSampling.wordBits;
+    const distanceUpperNumerator = completeNumerator(fheBitsPerCoefficient);
+    const distanceUpperDenominator =
+        4n << (BigInt(fheBitsPerCoefficient) + fixedBits);
     let distanceBits = 0;
     while (
         distanceUpperNumerator << BigInt(distanceBits + 1) <=
@@ -149,10 +173,14 @@ export const compileCommonMatrixSamplingCensus = (
     )
         distanceBits++;
     return {
-        bitsPerCoefficient,
+        fheBitsPerCoefficient,
+        fixedFamilyBitsPerCoefficient,
         fhePolynomialCount,
         coefficientCount,
-        expandedSampleBytes: coefficientCount * BigInt(bitsPerCoefficient / 8),
+        expandedSampleBytes:
+            (fhePolynomialCount * degree * BigInt(fheBitsPerCoefficient) +
+                (degree + auxiliaryDegree) * fixedBits) /
+            8n,
         distanceUpperNumerator,
         distanceUpperDenominator,
         distanceBits,

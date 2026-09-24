@@ -1,4 +1,5 @@
 use super::*;
+use supported_profile::{RECIPIENT_SECRET_SUPPORT, relation::RELEASE_HEADER_BYTES, share_modulus};
 
 #[derive(Debug)]
 pub enum Error {
@@ -11,7 +12,7 @@ struct KeyOutput {
 impl PolynomialOutput for KeyOutput {
     fn polynomial(&mut self, values: &[BigInt], _modulus: &BigInt, width: usize) {
         assert!(self.values.is_none());
-        assert_eq!(width, 20);
+        assert_eq!(width, share_modulus().len());
         self.values = Some(values.to_vec());
     }
 }
@@ -31,10 +32,15 @@ impl Default for RegistrationKey {
 impl RegistrationKey {
     pub fn new() -> Self {
         let plan = Plan::new(DEGREE);
-        let modulus = BigInt::from_bytes_le(Sign::Plus, &PARAMETERS[112..132]);
-        let common = contribution::common_polynomial(42).unwrap();
+        let modulus = integer(share_modulus());
+        let common = contribution::common_share_polynomial();
         let mut witness = Witness::new();
-        let mut secret = witness.sparse("registration-secret", DEGREE, 256, &plan);
+        let mut secret = witness.sparse(
+            "registration-secret",
+            DEGREE,
+            RECIPIENT_SECRET_SUPPORT,
+            &plan,
+        );
         let mut output = KeyOutput { values: None };
         key(
             &mut witness,
@@ -49,7 +55,7 @@ impl RegistrationKey {
                 automorphism: 1,
                 modulus: &modulus,
                 limbs: 2,
-                width: 20,
+                width: share_modulus().len(),
             },
         );
         assert_eq!(witness.words.len(), 3);
@@ -71,15 +77,17 @@ impl RegistrationKey {
     /// the private key is never exported through the worker interface.
     pub fn prepare_release(
         &self,
-        header: [u8; 198],
+        profile: Profile,
+        header: [u8; RELEASE_HEADER_BYTES],
         encrypted_constant: Vec<BigInt>,
         encrypted_linear: Vec<BigInt>,
         target_linear: Vec<BigInt>,
     ) -> Result<linked_release_proof::PreparedRelease, Error> {
         self.validate_retained()?;
-        let common = contribution::common_polynomial(42).map_err(|_| Error::InvalidState)?;
+        let common = contribution::common_share_polynomial();
         let secret = Zeroizing::new(self.secret.iter().copied().map(i128::from).collect());
         let inputs = linked_release_proof::ReleaseInputs::new(
+            profile,
             common,
             self.public.clone(),
             encrypted_constant,
@@ -91,7 +99,7 @@ impl RegistrationKey {
         linked_release_proof::derive_bound(inputs, header).map_err(|_| Error::InvalidState)
     }
     pub fn validate_retained(&self) -> Result<(), Error> {
-        let public_modulus = BigInt::from_bytes_le(Sign::Plus, &PARAMETERS[112..132]);
+        let public_modulus = integer(share_modulus());
         let public_half = public_modulus >> 1usize;
         if self.secret.len() != DEGREE
             || self.public.len() != DEGREE
@@ -104,9 +112,10 @@ impl RegistrationKey {
         }
         let plan = Plan::new(DEGREE);
         let transformed = Zeroizing::new(plan.sparse_transform(&self.secret));
-        let common = contribution::common_polynomial(42).map_err(|_| Error::InvalidState)?;
-        let products = Zeroizing::new(plan.digit_products(&common, &self.secret, &transformed, 2));
-        let modulus = reduction::Modulus::from_bytes(&PARAMETERS[112..132])
+        let common = contribution::common_share_polynomial();
+        let products =
+            Zeroizing::new(plan.digit_products(&common, &self.secret, &transformed, 2, RADIX_BITS));
+        let modulus = reduction::Modulus::new(share_modulus(), RADIX_BITS)
             .map_err(|_| Error::InvalidState)?;
         for position in 0..DEGREE {
             let raw = Zeroizing::new([

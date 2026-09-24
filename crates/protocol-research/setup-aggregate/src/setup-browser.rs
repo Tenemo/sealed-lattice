@@ -9,6 +9,7 @@ use registration_credentials::{
     roster_input::RosterInputVerifier,
 };
 use std::{cell::RefCell, sync::Arc};
+use supported_profile::relation::PROOF_HEADER_BYTES;
 
 const INPUT_BYTES: usize = 1_572_864;
 struct Session {
@@ -188,7 +189,9 @@ pub extern "C" fn setup_begin_opening(length: usize) -> u32 {
             return 1;
         };
         let packet_length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
-        if packet_length > 4 + 1024 + 3309 || bytes.len() != 4 + packet_length + 12 + 4004 {
+        if packet_length > 4 + 1024 + 3309
+            || bytes.len() != 4 + packet_length + 12 + PROOF_HEADER_BYTES
+        {
             return 1;
         }
         let Some((body, signature)) = packet(&bytes[4..4 + packet_length]) else {
@@ -276,7 +279,7 @@ pub extern "C" fn setup_finish() -> u32 {
         if value
             .aggregator
             .as_ref()
-            .is_none_or(|aggregator| aggregator.accepted() != 10)
+            .is_none_or(|aggregator| !aggregator.complete())
         {
             return 0;
         }

@@ -151,6 +151,21 @@ describe('release linked to the original encrypted aggregate share', () => {
         expect(census.affineRows).toBe(655362n);
     });
 
+    it('keeps the whole-word decoding bounds below the proof field for every roster size', () => {
+        const prime = compileSmallLimbProofFieldCensus().modulus;
+        for (
+            let participantCount = 3;
+            participantCount <= 20;
+            participantCount++
+        ) {
+            const census = compileLinkedReleaseRelationCensus(
+                deriveSupportedProfile(participantCount, 2),
+            );
+            expect(census.trueDecodingCarryBound).toBeLessThan(1n << 29n);
+            expect(census.decodingResidualBound).toBeLessThan(prime);
+        }
+    });
+
     it('links the release at two shares, capped share widths and the largest profile', () => {
         for (const [participantCount, optionCount] of [
             [3, 2],
