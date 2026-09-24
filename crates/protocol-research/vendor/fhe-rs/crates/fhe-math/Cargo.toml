@@ -40,6 +40,7 @@ sha2.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true
+rand = { workspace = true, features = ["thread_rng"] }
 
 [build-dependencies]
 prost-build.workspace = true

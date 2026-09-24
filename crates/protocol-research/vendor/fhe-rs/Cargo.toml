@@ -34,7 +34,9 @@ proptest = "^1.11.0"
 prost = "^0.14.4"
 prost-build = "^0.14.4"
 pulp = "^0.22.3"
-rand = "^0.10.2"
+# Only tests use the operating-system generator, which has no
+# wasm32-unknown-unknown backend.
+rand = { version = "^0.10.2", default-features = false, features = ["std"] }
 rand_chacha = "^0.10.0"
 sha2 = "^0.11.0"
 thiserror = "^2.0.20"

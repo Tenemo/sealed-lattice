@@ -344,6 +344,24 @@ await runWithLocalRunLog(
                 ],
                 'clippy-numerical-probes',
             );
+            // The browser participant module is a wasm32 cdylib whose host
+            // supplies randomness, so its dependency graph must build there
+            // without an operating-system generator.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'check',
+                    '--offline',
+                    '--locked',
+                    '--target',
+                    'wasm32-unknown-unknown',
+                    '-p',
+                    'registration-enrollment',
+                    '--lib',
+                ],
+                'browser-target',
+            );
             await execute(
                 'cargo',
                 [
