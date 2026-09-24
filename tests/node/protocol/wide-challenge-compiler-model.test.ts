@@ -66,7 +66,7 @@ describe('wide verifier messages and short authentication tags', () => {
 
     it('charges routing, verification, and role unions in the conditional compiler bound', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
-        expect(census.chargedQueries).toBe(4n * ((1n << 80n) + (1n << 32n)));
+        expect(census.chargedQueries).toBe(4n * (1n << 80n));
         expect(census.roleBudget).toBe(65536n);
         expect(census.saltBits).toBe(2n * census.tagBits);
         expect(census.merklePrivacyBits).toBe(120);

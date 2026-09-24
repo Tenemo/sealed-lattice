@@ -19,6 +19,7 @@ import {
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { prefixReplacementBaseQueriesPerAccess } from '#tests/oracle-domain-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileProofCompilerChronology } from '#tests/proof-compiler-chronology-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
@@ -242,10 +243,12 @@ let credentialIndependentTerms:
 const statisticalTermsWithoutCredentials = () => {
     if (credentialIndependentTerms !== undefined)
         return credentialIndependentTerms;
-    const evaluated = listSupportedProfiles().map((profile) => ({
-        profile,
-        terms: profileStatisticalTerms(profile),
-    }));
+    const evaluated = listSupportedProfiles().map((profile) => {
+        // The terms charge the proof compiler's caps, which the proofs,
+        // programming points and commitments of every profile must meet.
+        assert.ok(compileProofCompilerChronology(profile).withinCaps);
+        return { profile, terms: profileStatisticalTerms(profile) };
+    });
     const terms = evaluated[0].terms.map((first, index): StatisticalTerm => {
         let largest = { profile: evaluated[0].profile, term: first };
         let varies = false;

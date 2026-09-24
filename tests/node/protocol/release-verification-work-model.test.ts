@@ -37,8 +37,9 @@ describe('public release verification work', () => {
         expect(proofs.attempts).not.toEqual(envelopes.attempts);
     });
 
-    it('crosses the allocation using mandatory calls without confusing an upper bound with a witness', () => {
+    it('crosses the query cap using mandatory calls without confusing an upper bound with a witness', () => {
         const single = compileReleaseVerificationWorkload(attempts(1n));
+        expect(single.queryCap).toBe(1n << 80n);
         const below = compileReleaseVerificationWorkload(
             attempts(single.firstAttemptCountExceedingCoreLowerBound - 1n),
         );
@@ -46,14 +47,14 @@ describe('public release verification work', () => {
             attempts(single.firstAttemptCountExceedingCoreLowerBound),
         );
         expect(below.totals.minimumProofCoreQueries).toBeLessThanOrEqual(
-            1n << 32n,
+            1n << 80n,
         );
-        expect(above.totals.minimumProofCoreQueries).toBeGreaterThan(1n << 32n);
+        expect(above.totals.minimumProofCoreQueries).toBeGreaterThan(1n << 80n);
         const covered = compileReleaseVerificationWorkload(
             attempts(single.maximumAttemptsCoveredByCoreUpperBound),
         );
         expect(covered.totals.maximumProofCoreQueries).toBeLessThanOrEqual(
-            1n << 32n,
+            1n << 80n,
         );
         expect(single.maximumAttemptsCoveredByCoreUpperBound).toBeLessThan(
             single.firstAttemptCountExceedingCoreLowerBound,

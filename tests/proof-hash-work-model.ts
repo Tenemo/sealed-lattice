@@ -16,7 +16,10 @@ import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import {
+    compileWideChallengeCompilerCensus,
+    proofCompilerCaps,
+} from '#tests/wide-challenge-compiler-model.js';
 
 export const byteAlignedSpongePermutations = (
     inputBytes: bigint,
@@ -49,6 +52,63 @@ export const framedProofHashBytes = (
     return (
         4n + domainBytes + parts.reduce((sum, value) => sum + 4n + value, 0n)
     );
+};
+
+// Every salted proof-hash input shape of one role: a leaf of each opened
+// group, in verifier order, and the three message-root shapes.
+export const saltedProofHashInputs = (
+    role: Readonly<{ firstWidth: bigint; secondWidth: bigint }>,
+    roleBytes: bigint,
+) => {
+    const query = compileProofVerifierQueryCensus();
+    const extension =
+        compileSmallLimbProofFieldCensus().packedExtensionElementByteLength;
+    const tag = proofCompilerCaps.tagBits / 8n,
+        salt = proofCompilerCaps.saltBits / 8n;
+    const widths = query.groups.map((_group, index) =>
+        index === 0
+            ? role.firstWidth
+            : index === 1
+              ? role.secondWidth
+              : extension,
+    );
+    return {
+        saltBytes: salt,
+        widths,
+        leaves: widths.map((width) =>
+            framedProofHashBytes('bounded-proof/leaf', [
+                roleBytes,
+                4n,
+                4n,
+                salt,
+                width,
+            ]),
+        ),
+        messageRoots: [
+            framedProofHashBytes('bounded-proof/message-root', [
+                roleBytes,
+                tag,
+                4n,
+                salt,
+                tag,
+            ]),
+            framedProofHashBytes('bounded-proof/message-root', [
+                roleBytes,
+                tag,
+                4n,
+                salt,
+                tag,
+                extension,
+            ]),
+            framedProofHashBytes('bounded-proof/message-root', [
+                roleBytes,
+                tag,
+                4n,
+                salt,
+                extension,
+            ]),
+        ],
+    };
 };
 
 type Work = {
@@ -176,10 +236,8 @@ export const compileProofHashWork = (
     if (roleBytes < 1n || roleBytes > 1024n)
         throw new RangeError('Unsupported verifier role length.');
     const query = compileProofVerifierQueryCensus();
-    const field = compileSmallLimbProofFieldCensus();
     const compiler = compileWideChallengeCompilerCensus(supportedProfile);
-    const tag = compiler.tagBits / 8n,
-        salt = compiler.saltBits / 8n;
+    const tag = compiler.tagBits / 8n;
     const message = BigInt(compiler.challengeBytes);
     const nodeInput = framedProofHashBytes('bounded-proof/node', [
         roleBytes,
@@ -188,20 +246,10 @@ export const compileProofHashWork = (
         tag,
         tag,
     ]);
+    const salted = saltedProofHashInputs(profile, roleBytes);
     const groups = query.groups.map((group, index) => {
-        const width =
-            index === 0
-                ? profile.firstWidth
-                : index === 1
-                  ? profile.secondWidth
-                  : field.packedExtensionElementByteLength;
-        const leafInput = framedProofHashBytes('bounded-proof/leaf', [
-            roleBytes,
-            4n,
-            4n,
-            salt,
-            width,
-        ]);
+        const width = salted.widths[index];
+        const leafInput = salted.leaves[index];
         const leafPrefixPermutations =
             framedProofHashBytes('bounded-proof/leaf', [roleBytes, 4n]) / 72n;
         const nodePrefixPermutations =
@@ -270,41 +318,12 @@ export const compileProofHashWork = (
         ),
         work(
             BigInt(query.messageRootQueries - 2),
-            framedProofHashBytes('bounded-proof/message-root', [
-                roleBytes,
-                tag,
-                4n,
-                salt,
-                tag,
-            ]),
+            salted.messageRoots[0],
             tag,
             72n,
         ),
-        work(
-            1n,
-            framedProofHashBytes('bounded-proof/message-root', [
-                roleBytes,
-                tag,
-                4n,
-                salt,
-                tag,
-                field.packedExtensionElementByteLength,
-            ]),
-            tag,
-            72n,
-        ),
-        work(
-            1n,
-            framedProofHashBytes('bounded-proof/message-root', [
-                roleBytes,
-                tag,
-                4n,
-                salt,
-                field.packedExtensionElementByteLength,
-            ]),
-            tag,
-            72n,
-        ),
+        work(1n, salted.messageRoots[1], tag, 72n),
+        work(1n, salted.messageRoots[2], tag, 72n),
         work(1n, contextInput, tag, 72n),
     ]);
     return {

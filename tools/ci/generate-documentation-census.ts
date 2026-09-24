@@ -125,6 +125,7 @@ import {
     createFalseBinaryRelationTable,
     enumerateRandomizedEncodingViews,
 } from '#tests/polynomial-oracle-boundary-model.js';
+import { compileProofCompilerChronology } from '#tests/proof-compiler-chronology-model.js';
 import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
 import {
     compileProofHashWork,
@@ -2887,7 +2888,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Release verification attempts',
         '',
-        'A valid relation body paired with a correctly signed envelope claiming the wrong body identity is rejected only after complete proof verification. The public context survives that rejection. These counts apply per complete attempt with that context already verified; multiply by the number of attempts. Exact replay, changed envelopes with a fixed proof, and changed proof bodies remain separate populations. Executed calls do not establish distinct oracle points, a simulator lower bound, a lifetime limit or a full reduction cost. The comparisons assign the entire conditional verification allocation to this core alone, before subtracting any other charged work. Signature work, common-polynomial expansion and any additional predecessor reload remain separately chargeable.',
+        'A valid relation body paired with a correctly signed envelope claiming the wrong body identity is rejected only after complete proof verification. The public context survives that rejection. These counts apply per complete attempt with that context already verified; multiply by the number of attempts. Exact replay, changed envelopes with a fixed proof, and changed proof bodies remain separate populations. Executed calls do not establish distinct oracle points, a simulator lower bound, a lifetime limit or a full reduction cost. The calls of every attempt are oracle calls of the experiment, so the comparisons assign the entire query cap to this core alone, before subtracting any other charged work. Signature work, common-polynomial expansion and any additional predecessor reload remain separately chargeable.',
         '',
         table(
             ['Property', 'Value'],
@@ -2919,13 +2920,13 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Full attempts covered by the conditional core allocation using the core upper bound',
+                    'Full attempts within the query cap using the core upper bound',
                     formatCount(
                         releaseVerification.maximumAttemptsCoveredByCoreUpperBound,
                     ),
                 ],
                 [
-                    'First attempt count exceeding the allocation from mandatory core calls alone',
+                    'First attempt count exceeding the query cap from mandatory core calls alone',
                     formatCount(
                         releaseVerification.firstAttemptCountExceedingCoreLowerBound,
                     ),
@@ -3510,7 +3511,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Wide-challenge compiler census',
         '',
-        'Conditional soundness screen for the full word-layout shape under the prefix-BCS lemma. The underlying IOP must separately establish its common-agreement and algebraic transition bounds, and the implementation must meet the charged query, verification, and role budgets. This does not include setup privacy, proof zero knowledge, lattice assumptions, fixed-function assumptions, or phone qualification.',
+        'Conditional soundness screen for the full word-layout shape under the prefix-BCS lemma. The underlying IOP must separately establish its common-agreement and algebraic transition bounds. The query cap bounds every oracle call of an experiment within the target, including honest proving, verification and expansion, and the proof compiler chronology checks the other caps against every supported profile. This does not include setup privacy, proof zero knowledge, lattice assumptions, fixed-function assumptions, or phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -3564,12 +3565,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(wideChallengeCompiler.queryCount),
                 ],
                 [
-                    'Adversarial oracle-query budget',
+                    'Oracle-call cap of the experiment',
                     formatCount(wideChallengeCompiler.adversaryQueries),
-                ],
-                [
-                    'Verification and expansion oracle budget',
-                    formatCount(wideChallengeCompiler.verificationBudget),
                 ],
                 [
                     'Queries after prefix and role routing',
@@ -3616,6 +3613,49 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(wideChallengeCompiler.failureBits),
                 ],
             ],
+        ),
+        '',
+        '## Proof compiler chronology',
+        '',
+        'Proofs, programming points and commitments that one poll emits under the lifecycle rules owned by the construction analysis, against the caps the compiler charges. One registration, contribution, ballot and release proof per participant: duplicate registration is outside the claim, the other purposes occupy one-shot slots, a restored participant replays identical bytes and one that loses unfinished work stops. The direct simulator programs one verifier message per simulated proof. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
+        '',
+        table(
+            [
+                'Participants',
+                'Honest proofs per purpose',
+                'Honest proofs',
+                'Accepted proof roles',
+                'Programmed verifier messages',
+                'Committed nodes per proof',
+                'Widest non-salt input bits',
+            ],
+            supportedProfiles.profiles.map((row) => {
+                const chronologies = row.map((profile) =>
+                    compileProofCompilerChronology(profile),
+                );
+                const [first] = chronologies;
+                if (!chronologies.every((value) => value.withinCaps))
+                    throw new Error(
+                        'A supported profile exceeds a charged compiler cap.',
+                    );
+                return [
+                    formatCount(row[0].participantCount),
+                    formatCount(first.honestProofsPerPurpose),
+                    formatCount(first.honestProofs),
+                    formatCount(first.acceptedRoles),
+                    formatCount(first.programmedMessages),
+                    rangeOf(
+                        chronologies.map(
+                            (value) => value.committedNodesPerProof,
+                        ),
+                    ),
+                    rangeOf(
+                        chronologies.map(
+                            (value) => value.widestNonSaltInputBits,
+                        ),
+                    ),
+                ];
+            }),
         ),
         '',
         '## Full word-proof encoding census',

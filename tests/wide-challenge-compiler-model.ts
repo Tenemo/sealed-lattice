@@ -59,15 +59,16 @@ export const jointModuloDensityBound = (
 };
 
 // The compiler's charged caps are the same for every supported profile. The
-// ledger charges them; the emitted chronology must stay within them.
+// ledger charges them, and the proof chronology model checks that one poll of
+// every profile stays within them. The query cap bounds every oracle call of
+// the experiment, including honest proving, verification and expansion, and
+// prefix and role routing make at most four base calls of each.
 const adversaryQueries = 1n << 80n;
-const verificationBudget = 1n << 32n;
 const roleBudget = 1n << 16n;
 const tagBits = 512n;
 export const proofCompilerCaps = {
     adversaryQueries,
-    verificationBudget,
-    chargedQueries: 4n * (adversaryQueries + verificationBudget),
+    chargedQueries: 4n * adversaryQueries,
     roleBudget,
     tagBits,
     saltBits: 2n * tagBits,
@@ -187,7 +188,7 @@ export const compileWideChallengeCompilerCensus = (
     const failureNumerator =
         roleBudget *
         (24n * chargedQueries ** 2n * roundErrorNumerator * tagSpace +
-            (120n * chargedQueries ** 3n + 2n * verificationBudget) *
+            (120n * chargedQueries ** 3n + 2n * chargedQueries) *
                 roundErrorDenominator);
     const failureDenominator = roundErrorDenominator * tagSpace;
     let failureBits = 0;

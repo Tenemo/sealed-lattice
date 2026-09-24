@@ -35,8 +35,9 @@ export const compileReleaseVerificationWorkload = (
     // it independently. The role-bound context hash is already in the core.
     const plainStatementDigestPasses = 2n;
     const completedBodyDigestPasses = 1n;
-    const selectedVerificationQueryBudget =
-        proofCompilerCaps.verificationBudget;
+    // Every attempt's calls are oracle calls of the experiment, which the
+    // query cap bounds together with the adversary's.
+    const queryCap = proofCompilerCaps.adversaryQueries;
     return {
         attempts: { ...attempts },
         count,
@@ -63,14 +64,14 @@ export const compileReleaseVerificationWorkload = (
             envelopeVerificationCalls: count,
             commonPolynomialCalls: count,
         },
-        selectedVerificationQueryBudget,
-        // These compare only the proof core with the selected conditional
-        // allocation, before subtracting other charged work. They are neither
-        // runtime limits nor full-wrapper bounds.
+        queryCap,
+        // These compare only the proof core with the whole query cap, before
+        // subtracting other charged work. They are neither runtime limits nor
+        // full-wrapper bounds.
         maximumAttemptsCoveredByCoreUpperBound:
-            selectedVerificationQueryBudget / maximumProofCoreQueries,
+            queryCap / maximumProofCoreQueries,
         firstAttemptCountExceedingCoreLowerBound:
-            selectedVerificationQueryBudget / minimumProofCoreQueries + 1n,
+            queryCap / minimumProofCoreQueries + 1n,
         // Repeated execution is not necessarily a new random-oracle point.
         // Changed envelopes with a fixed body still reuse the proof inputs.
         distinctProofOracleInputs: null,
