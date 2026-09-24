@@ -45,6 +45,13 @@ import {
 } from '#tests/common-matrix-sampling-model.js';
 import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
 import {
+    ceilingLog2,
+    compileComposedSecurityLedger,
+    compileReductionWork,
+    compileUnitCallCostSensitivity,
+    keccakReferenceCost,
+} from '#tests/composed-security-ledger-model.js';
+import {
     sparseRoutingWork,
     labelledHashExtractionWork,
     prefixOracleWork,
@@ -281,6 +288,19 @@ export const renderDocumentationCensus = (): string => {
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
     const fixedModulusBfv = compileFixedModulusBfvCensus();
     const supportedProfiles = compileSupportedProfileCensus();
+    const securityLedger = compileComposedSecurityLedger();
+    const populationLedger = compileComposedSecurityLedger(
+        securityLedger.maximumCredentialPopulation,
+    );
+    const largestLedgerProfile =
+        securityLedger.profiles[securityLedger.profiles.length - 1];
+    const largestRosterWork = compileReductionWork(
+        largestLedgerProfile.potentialCredentialCount,
+        largestLedgerProfile.extractedCommitmentCount,
+    );
+    const unitCallCost = compileUnitCallCostSensitivity();
+    const signedExponent = (exponent: bigint): string =>
+        `\`${exponent < 0n ? '-' : ''}${(exponent < 0n ? -exponent : exponent).toLocaleString('en-US')}\``;
     const distinctJoined = (values: readonly (bigint | number)[]): string =>
         [...new Set(values.map((value) => value.toString()))]
             .map((value) => formatCount(BigInt(value)))
@@ -5108,6 +5128,125 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(supportedProfiles.maximumRankingErrorBits),
                 ],
             ],
+        ),
+        '',
+        '## Composed security ledger',
+        '',
+        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler; roster-dependent terms take the largest roster and the others keep their ten-participant models. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        '',
+        table(
+            ['Statistical term', 'Bound exponent'],
+            [
+                ...securityLedger.statistical.terms.map((term) => [
+                    term.name,
+                    signedExponent(
+                        ceilingLog2({
+                            numerator: term.numerator,
+                            denominator:
+                                1n <<
+                                securityLedger.statistical.denominatorBits,
+                        }),
+                    ),
+                ]),
+                [
+                    'Subtotal',
+                    signedExponent(securityLedger.statistical.subtotalExponent),
+                ],
+            ],
+        ),
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Security target bits',
+                    formatCount(securityLedger.securityTargetBits),
+                ],
+                ['Budget groups', formatCount(securityLedger.groups.length)],
+                [
+                    'Budget bits per group',
+                    formatCount(securityLedger.budgetBits),
+                ],
+                [
+                    'Permutation charge gates',
+                    formatCount(keccakReferenceCost.permutationCharge),
+                ],
+                [
+                    'Widest SHAKE rate bits',
+                    formatCount(keccakReferenceCost.widestRateBits),
+                ],
+                [
+                    'Extraction routing coefficient exponent, per squared cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.quadraticCoefficient),
+                    ),
+                ],
+                [
+                    'Cell routing coefficient exponent, per cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.linearCoefficient),
+                    ),
+                ],
+                [
+                    'Extraction selection coefficient exponent, per cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.extractionCoefficient),
+                    ),
+                ],
+                [
+                    'Plain reduction coefficient exponent at the largest roster, per cost',
+                    signedExponent(
+                        ceilingLog2(largestRosterWork.plainCoefficient),
+                    ),
+                ],
+                [
+                    'Largest honest credential population for ML-DSA-65',
+                    formatCount(securityLedger.maximumCredentialPopulation),
+                ],
+                [
+                    'Identity collision exponent, per cost',
+                    signedExponent(securityLedger.identityCollisionExponent),
+                ],
+                [
+                    'FHE Ring-LWE requirement if every call cost one gate',
+                    formatCount(unitCallCost.requiredBits),
+                ],
+            ],
+        ),
+        '',
+        'Required bits by participant count, with one potential honest credential per participant:',
+        '',
+        table(
+            [
+                'Participants',
+                'Extracted commitments',
+                ...largestLedgerProfile.hybrids.map(
+                    (row) =>
+                        `${row.assumption}, ${row.reduction === 'plain' ? 'without' : 'with'} extraction`,
+                ),
+            ],
+            securityLedger.profiles.map((profile) => [
+                formatCount(profile.participantCount),
+                formatCount(profile.extractedCommitmentCount),
+                ...profile.hybrids.map((row) => formatCount(row.requiredBits)),
+            ]),
+        ),
+        '',
+        table(
+            [
+                'Assumption',
+                'Required bits, one credential per participant',
+                'Required bits at the largest credential population',
+            ],
+            securityLedger.maximumRequiredBits.map((row) => [
+                row.assumption,
+                formatCount(row.requiredBits),
+                formatCount(
+                    populationLedger.maximumRequiredBits.find(
+                        (value) => value.assumption === row.assumption,
+                    )!.requiredBits,
+                ),
+            ]),
         ),
         '',
         '## Proof-field coefficient-fold bounds',

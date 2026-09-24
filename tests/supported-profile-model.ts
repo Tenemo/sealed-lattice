@@ -426,7 +426,7 @@ const shareLiftings = new Map<
     ReturnType<typeof deriveWideShareLiftingLayout>
 >();
 
-const deriveSupportedShareLifting = (participantCount: number) => {
+export const deriveSupportedShareLifting = (participantCount: number) => {
     let lifting = shareLiftings.get(participantCount);
     if (lifting === undefined) {
         lifting = deriveWideShareLiftingLayout({
