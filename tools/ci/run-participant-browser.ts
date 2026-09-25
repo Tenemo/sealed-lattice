@@ -633,10 +633,10 @@ await runWithLocalRunLog(
                 );
                 await participant(position);
             };
-            // Runs an operation in a halting client. The browser closes once
-            // its participant enters the generation, as a crash right after
-            // that commit would close it, and the next visit runs the
-            // runtime's own worker again.
+            // Runs an operation in a halting client. The browser crashes once
+            // its participant enters the generation, with no shutdown work
+            // after that commit, and the next visit runs the runtime's own
+            // worker again.
             const interruptions: {
                 position: number;
                 operation: string;
@@ -668,7 +668,7 @@ await runWithLocalRunLog(
                         if ((await headGeneration(position)) === generation)
                             break;
                     }
-                    await chromes[position]?.close();
+                    await chromes[position]?.crash();
                     chromes[position] = undefined;
                     await assert.rejects(halted);
                 } finally {
@@ -1897,10 +1897,10 @@ await runWithLocalRunLog(
                             : { kind: 'result', identifiers: expectedResult },
                         scope:
                             mode === 'empty'
-                                ? "Browser registration, roster agreement, setup contribution and setup verification with no ballot cast, close responses that list nothing under the organizer's proposal, a participant refused a ballot after its intent lock, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. Honest browsers close right after their participants durably enter each close and target generation, and each next visit continues from the retained state. Relay views that relabel or replay votes or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good."
+                                ? "Browser registration, roster agreement, setup contribution and setup verification with no ballot cast, close responses that list nothing under the organizer's proposal, a participant refused a ballot after its intent lock, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. Honest browsers crash right after their participants durably enter each close and target generation, and each next visit continues from the retained state. Relay views that relabel or replay votes or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good."
                                 : noResult
-                                  ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. Honest browsers close right after their participants durably enter each ballot, close and target generation, and each next visit continues from the retained state. Relay views that relabel or replay votes or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good."
-                                  : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts. Honest browsers close right after their participants durably enter each ballot, close, target and release generation, and each next visit continues from the retained state. Relay views that relabel, replay or alter votes and shares or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.",
+                                  ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. Honest browsers crash right after their participants durably enter each ballot, close and target generation, and each next visit continues from the retained state. Relay views that relabel or replay votes or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good."
+                                  : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts. Honest browsers crash right after their participants durably enter each ballot, close, target and release generation, and each next visit continues from the retained state. Relay views that relabel, replay or alter votes and shares or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.",
                     },
                     null,
                     2,

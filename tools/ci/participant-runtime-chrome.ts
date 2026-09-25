@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { access, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
+import { killProcessTree } from '#tools/ci/run-command.js';
+
 // Drives an installed release Chrome over its DevTools socket with Runtime
 // and Page control only. Network inspection would retain payloads and change
 // the storage workload, so it is never enabled. Each participant has its own
@@ -21,6 +23,9 @@ export type ChromeParticipant = Readonly<{
     launchArguments: readonly string[];
     evaluate(expression: string): Promise<unknown>;
     close(): Promise<void>;
+    // Ends the browser's process tree at once, as a crash would, without
+    // the shutdown work a close lets it finish.
+    crash(): Promise<void>;
 }>;
 
 const chromeExecutable = () =>
@@ -89,23 +94,43 @@ export const launchChromeParticipant = async (
                 }),
             );
         });
-    const close = async () => {
-        await Promise.race([
-            send('Browser.close').catch(() => undefined),
-            new Promise((resolve) => setTimeout(resolve, 2000)),
-        ]);
-        socket?.close();
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        await new Promise<void>((resolve, reject) => {
+    const exited = () => child.exitCode !== null || child.signalCode !== null;
+    const exit = (onDeadline: () => void, message: string) =>
+        new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
-                child.kill();
-                reject(new Error('Chrome did not close within its deadline.'));
+                onDeadline();
+                reject(new Error(message));
             }, 10_000);
             child.once('exit', () => {
                 clearTimeout(timer);
                 resolve();
             });
         });
+    const close = async () => {
+        await Promise.race([
+            send('Browser.close').catch(() => undefined),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+        ]);
+        socket?.close();
+        if (exited()) return;
+        await exit(
+            () => child.kill(),
+            'Chrome did not close within its deadline.',
+        );
+    };
+    const crash = async () => {
+        socket?.close();
+        if (exited()) return;
+        const termination = killProcessTree(child, { signal: 'SIGKILL' });
+        if (!termination.succeeded)
+            throw new Error(
+                'Chrome could not be terminated: ' +
+                    JSON.stringify(termination),
+            );
+        await exit(
+            () => undefined,
+            'Chrome did not exit after its termination.',
+        );
     };
     try {
         const endpoint = await new Promise<string>((resolve, reject) => {
@@ -198,6 +223,7 @@ export const launchChromeParticipant = async (
             version,
             launchArguments,
             close,
+            crash,
             evaluate: async (expression) => {
                 const result = await send(
                     'Runtime.evaluate',
