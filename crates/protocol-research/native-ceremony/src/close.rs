@@ -452,7 +452,8 @@ pub fn run(
     let first_honest = scenario.first_honest_responder();
     let close_time = now_milliseconds() + 2;
     // The equivocator signs two on-time envelopes over one body, then a late
-    // one, each from its own fork.
+    // one, each from its own fork. Their times are fixed against the close
+    // time, so however long signing takes, the first two stay on time.
     let Restored {
         equivocator,
         organizer: mut organizer_restored,
@@ -485,8 +486,8 @@ pub fn run(
                     body: base.body.clone(),
                 }
             };
-            let a = equivocate(&mut first, now_milliseconds());
-            let b = equivocate(&mut second, now_milliseconds() + 1);
+            let a = equivocate(&mut first, close_time - 2);
+            let b = equivocate(&mut second, close_time - 1);
             assert_ne!(a.envelope.identity(), b.envelope.identity());
             let late = equivocate(&mut late_fork, close_time + 1);
             (
