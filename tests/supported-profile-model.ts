@@ -17,6 +17,8 @@ import { deriveWideShareLiftingLayout } from '#tests/wide-share-lifting-model.js
 // fixed. Every threshold, interpolation bound, lifting width and modulus of
 // a supported profile is derived from its participant and option counts.
 const supportedOptionCounts = { minimum: 2, maximum: 20 } as const;
+// A valid ballot scores every option within this range.
+export const ballotScoreRange = { minimum: 1, maximum: 10 } as const;
 export const supportedProfileRules = {
     // Moduli are the largest primes t*k*2^(b-32)+1 below 2^b with odd k.
     modulusOddFactorBits: 32,

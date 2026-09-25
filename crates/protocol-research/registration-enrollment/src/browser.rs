@@ -894,6 +894,20 @@ pub extern "C" fn participant_ballot_command(
     })
 }
 
+/// The aggregate polynomial the retained ballot reads as its key at this
+/// ordinal; the maximum value when no ballot or no such key exists.
+#[unsafe(no_mangle)]
+pub extern "C" fn participant_ballot_key_index(ordinal: usize) -> usize {
+    SESSION.with(|session| {
+        session
+            .borrow()
+            .ballot
+            .as_ref()
+            .and_then(|ballot| ballot.key_index(ordinal))
+            .unwrap_or(usize::MAX)
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn participant_close_command(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|session| {

@@ -36,6 +36,8 @@ const kernelFunctions = [
     'verify_roster_signature',
     'retain_proposal',
     'retained_proposal_identity_pointer',
+    'participant_ballot_command',
+    'participant_ballot_key_index',
     'contribution_signing',
     'contribution_output_pointer',
     'contribution_output_length',

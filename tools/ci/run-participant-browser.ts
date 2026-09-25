@@ -223,6 +223,7 @@ await runWithLocalRunLog(
             'Browser registration and roster agreement',
             'Browser setup contribution',
             'Browser setup verification',
+            'Browser signed ballots',
         ],
         scriptName: 'research:participant',
     },
@@ -366,6 +367,17 @@ await runWithLocalRunLog(
                 { length: participantCount },
                 (_unused, position) => position,
             );
+            // Each participant scores every option differently, across the
+            // descriptor's score range.
+            const { minimumScore, maximumScore } = runtime.descriptor.ballot;
+            const ballotScores = (position: number) =>
+                Array.from(
+                    { length: optionCount },
+                    (_unused, option) =>
+                        minimumScore +
+                        ((position * (optionCount + 1) + option) %
+                            (maximumScore - minimumScore + 1)),
+                );
             const everyone = async (operation: string, generation: number) => {
                 const results = await Promise.all(
                     positions.map((position) => run(position, operation)),
@@ -465,8 +477,51 @@ await runWithLocalRunLog(
             await everyone('open', 11);
             // Every participant verifies the complete setup and retains its
             // reference once.
+            // A ballot needs the verified setup.
+            await expectStatus(0, 'ballot', 'refused', {
+                scores: ballotScores(0),
+            });
             await everyone('verify-setup', 12);
             await expectStatus(0, 'verify-setup', 'refused');
+            // Every participant signs one ballot. A signed ballot refuses other
+            // scores and is only delivered again.
+            await Promise.all(
+                positions.map(async (position) => {
+                    assert.equal(
+                        (
+                            await run(position, 'ballot', {
+                                scores: ballotScores(position),
+                            })
+                        ).generation,
+                        17,
+                    );
+                }),
+            );
+            await expectStatus(0, 'ballot', 'refused', {
+                scores: ballotScores(1),
+            });
+            assert.equal((await run(0, 'ballot')).generation, 17);
+            const ballotBounds = runtime.descriptor.ballot;
+            for (const position of positions) {
+                const directory = path.join(
+                    publicDirectory,
+                    `ballot-${String(position)}`,
+                );
+                const envelope = await readFile(
+                    path.join(directory, 'envelope.bin'),
+                );
+                const body = await stat(path.join(directory, 'body.bin'));
+                assert.equal(envelope.length, ballotBounds.envelopeBytes);
+                assert.equal(envelope.readBigUInt64LE(142), BigInt(body.size));
+                assert.ok(
+                    body.size >= ballotBounds.minimumBodyBytes &&
+                        body.size <= ballotBounds.maximumBodyBytes,
+                );
+                assert.equal(
+                    (await stat(path.join(directory, 'signature.bin'))).size,
+                    runtime.descriptor.registration.signatureBytes,
+                );
+            }
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -477,7 +532,7 @@ await runWithLocalRunLog(
                         recordIds,
                         runtimeIdentity: runtime.identity.runtime,
                         peakProcessTreeBytes: peaks,
-                        scope: 'Browser registration, roster agreement, setup contribution and setup verification in the maintained participant runtime in external Chrome. Ballots and later protocol stages are not exercised.',
+                        scope: 'Browser registration, roster agreement, setup contribution, setup verification and signed ballots in the maintained participant runtime in external Chrome. Closing and later protocol stages are not exercised.',
                     },
                     null,
                     2,

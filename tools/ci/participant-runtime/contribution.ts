@@ -1404,6 +1404,18 @@ export const resumeContribution = async (
 export const contributionRecords = (session: ContributionSession) =>
     contributionInventory(session.context.descriptor, session.state);
 
+// The signed opening, as retained.
+export const storedOpening = async (
+    session: ContributionSession,
+): Promise<SignedPacket> => {
+    if (session.root.head.generation < 11)
+        throw new Error('No opening is retained.');
+    return {
+        body: await openSigning(session, 'openingBody'),
+        signature: await openSigning(session, 'openingSignature'),
+    };
+};
+
 // The confirmation inventory this participant opened and its identity, as
 // the retained opening body names it.
 export const openedInventory = async (session: ContributionSession) => {

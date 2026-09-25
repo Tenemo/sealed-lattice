@@ -104,6 +104,38 @@ const readCachedChunk = async (
     return new Uint8Array(await value.arrayBuffer());
 };
 
+// Streams the final public aggregate of one body polynomial from the cache
+// in the whole-coefficient chunks setup verification wrote. The consumer
+// checks the bytes against the retained setup reference.
+export const readFinalAggregate = async (
+    context: ParticipantContext,
+    expandedIndex: number,
+    consume: (offset: number, bytes: Uint8Array) => void,
+) => {
+    const { kernel, descriptor } = context;
+    const polynomial = descriptor.contribution.polynomials.find(
+        (value) => value.expandedIndex === expandedIndex,
+    );
+    if (polynomial === undefined)
+        throw new Error('No body polynomial has this index.');
+    const width = polynomial.bytes / polynomial.coefficients;
+    const capacity = Math.floor(kernel.setup_chunk_capacity() / width) * width;
+    const cache = await openSetupCache();
+    try {
+        for (let offset = 0; offset < polynomial.bytes; offset += capacity)
+            consume(
+                offset,
+                await readCachedChunk(
+                    cache,
+                    [descriptor.participantCount - 1, expandedIndex, offset],
+                    Math.min(capacity, polynomial.bytes - offset),
+                ),
+            );
+    } finally {
+        cache.close();
+    }
+};
+
 // Verifies one opening, streams its body polynomials in whole-coefficient
 // chunks against the running aggregate, and then its proof.
 const verifyContribution = async (

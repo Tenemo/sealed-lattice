@@ -45,6 +45,14 @@ export const unsigned32 = (value: number): Uint8Array => {
     return bytes;
 };
 
+export const unsigned64 = (value: bigint): Uint8Array => {
+    if (value < 0n || value > 0xffff_ffff_ffff_ffffn)
+        throw new Error('Value exceeds an unsigned 64-bit integer.');
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, value, true);
+    return bytes;
+};
+
 const view = (bytes: Uint8Array) =>
     new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
@@ -53,6 +61,9 @@ export const readUnsigned16 = (bytes: Uint8Array, offset: number): number =>
 
 export const readUnsigned32 = (bytes: Uint8Array, offset: number): number =>
     view(bytes).getUint32(offset, true);
+
+export const readUnsigned64 = (bytes: Uint8Array, offset: number): bigint =>
+    view(bytes).getBigUint64(offset, true);
 
 export const sha512 = async (bytes: Uint8Array): Promise<Uint8Array> =>
     new Uint8Array(

@@ -108,17 +108,25 @@ export const compileBallotRandomnessBudget = (profile: SupportedProfile) => {
         extraProofReads++;
     const maximumProofBytes =
         proof.minimumRequestedRandomBytes + extraProofReads * readBytes;
+    const sampleBytes = setupGaussianParameters.sampleBits / 8n;
     const gaussianBytes =
         2n *
         sparse.reduce((sum, value) => sum + value.degree, 0n) *
-        (setupGaussianParameters.sampleBits / 8n);
+        sampleBytes;
     const sparseBytes = sparse.reduce(
         (sum, value) => sum + 4n * value.draws,
         0n,
     );
-    const maximumEncryptionBytes = rounded(
-        gaussianBytes + sparseBytes,
-        readBytes,
+    // Each encryption reads whole blocks from its own buffered stream: its
+    // sparse secret's draws, then two error vectors of its degree.
+    const maximumEncryptionBytes = sparse.reduce(
+        (sum, value) =>
+            sum +
+            rounded(
+                4n * value.draws + 2n * value.degree * sampleBytes,
+                readBytes,
+            ),
+        0n,
     );
     const exhaustionBound = combine([
         proofFailure(extraProofReads),

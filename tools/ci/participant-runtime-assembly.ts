@@ -7,16 +7,22 @@ import path from 'node:path';
 import binaryen from 'binaryen';
 import { build } from 'tsdown';
 
+import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
-import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import {
+    ballotScoreRange,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import type { ParticipantDescriptor } from '#tools/ci/participant-runtime/descriptor.js';
 import { runCommandAndCaptureOutput } from '#tools/ci/run-command.js';
@@ -48,6 +54,9 @@ export const deriveParticipantDescriptor = (
     const relation = compileSetupContributionRelationCensus(profile);
     const authentication =
         compileContributionAuthenticationCensus(participantCount);
+    const ballotBody = compileBallotBodyCensus(profile);
+    const ballotCustody = compileParticipantBallotCustody(profile);
+    const randomness = compileBallotRandomnessBudget(profile);
     return {
         participantCount,
         optionCount,
@@ -105,6 +114,29 @@ export const deriveParticipantDescriptor = (
                 length: number(record.length),
             })),
             checkpointLengths: custody.checkpointLengths.map(number),
+        },
+        ballot: {
+            minimumScore: ballotScoreRange.minimum,
+            maximumScore: ballotScoreRange.maximum,
+            recordBytes: number(randomness.recordBytes),
+            randomBudgets: [
+                number(randomness.maximumEncryptionBytes),
+                number(randomness.maximumProofBytes),
+            ],
+            journalRecords: number(randomness.recordCount),
+            maximumStateBytes: number(ballotCustody.maximumStateBytes),
+            minimumBodyBytes: number(
+                ballotBody.headerBytes +
+                    ballotBody.ciphertextBytes +
+                    ballotBody.minimumProofBytes,
+            ),
+            maximumBodyBytes: number(ballotBody.maximumBodyBytes),
+            envelopeBytes: number(ballotBody.envelopeBytes),
+            requiredStorageBytes: number(
+                ballotCustody.maximumJournalAndBodyBytes +
+                    ballotCustody.maximumStateBytes +
+                    custody.maximumRootBytes,
+            ),
         },
     };
 };

@@ -55,6 +55,19 @@ export type ParticipantDescriptor = Readonly<{
         }>[];
         checkpointLengths: readonly number[];
     }>;
+    ballot: Readonly<{
+        minimumScore: number;
+        maximumScore: number;
+        recordBytes: number;
+        // The encryption and proof randomness banks, in journal order.
+        randomBudgets: readonly number[];
+        journalRecords: number;
+        maximumStateBytes: number;
+        minimumBodyBytes: number;
+        maximumBodyBytes: number;
+        envelopeBytes: number;
+        requiredStorageBytes: number;
+    }>;
 }>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -126,12 +139,36 @@ const validContribution = (value: unknown): boolean => {
     );
 };
 
+const ballotScalars = [
+    'minimumScore',
+    'maximumScore',
+    'recordBytes',
+    'journalRecords',
+    'maximumStateBytes',
+    'minimumBodyBytes',
+    'maximumBodyBytes',
+    'envelopeBytes',
+    'requiredStorageBytes',
+] as const;
+
+const validBallot = (value: unknown): boolean => {
+    if (
+        !isRecord(value) ||
+        Object.keys(value).length !== ballotScalars.length + 1 ||
+        !ballotScalars.every((name) => positive(value[name])) ||
+        !Array.isArray(value.randomBudgets)
+    )
+        return false;
+    const budgets: unknown[] = value.randomBudgets;
+    return budgets.length === 2 && budgets.every(positive);
+};
+
 export const parseParticipantDescriptor = (
     value: unknown,
 ): ParticipantDescriptor => {
     if (
         !isRecord(value) ||
-        Object.keys(value).length !== 5 ||
+        Object.keys(value).length !== 6 ||
         !positive(value.participantCount) ||
         !positive(value.optionCount) ||
         !positiveFields(value.registration, [
@@ -150,7 +187,8 @@ export const parseParticipantDescriptor = (
             'maximumRootBytes',
             'setupReferenceBytes',
         ]) ||
-        !validContribution(value.contribution)
+        !validContribution(value.contribution) ||
+        !validBallot(value.ballot)
     )
         throw new Error('Malformed participant runtime descriptor.');
     return value as ParticipantDescriptor;

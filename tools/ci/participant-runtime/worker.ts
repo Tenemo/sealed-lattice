@@ -1,8 +1,16 @@
 import { stopParticipant } from '../protocol-participant-stop.js';
 
 import {
+    beginBallot,
+    completeBallot,
+    parseBallotScores,
+    publishBallot,
+    resumeBallot,
+} from './ballot.js';
+import {
     concatenate,
     encodeText,
+    equalBytes,
     fromHexadecimal,
     hexadecimal,
     sha512,
@@ -307,6 +315,40 @@ const execute = async (
                 session,
                 await verifySetup(session, relay),
             );
+            break;
+        }
+        case 'ballot': {
+            // Generation twelve starts an attempt with the requested scores.
+            // A retained attempt continues only with its locked scores, and a
+            // signed ballot is only delivered again.
+            const generation = root.head.generation;
+            const scores =
+                parameters.scores === undefined
+                    ? undefined
+                    : parseBallotScores(context.descriptor, parameters.scores);
+            if (
+                generation < 12 ||
+                generation > 17 ||
+                (parameters.scores !== undefined && scores === undefined) ||
+                (generation === 12 && scores === undefined) ||
+                (generation === 17 && scores !== undefined)
+            )
+                return { status: 'refused' };
+            const contribution = await resumeContribution(context, root);
+            let session;
+            if (scores !== undefined && generation === 12)
+                session = await beginBallot(contribution, scores);
+            else {
+                session = await resumeBallot(contribution);
+                if (
+                    scores !== undefined &&
+                    !equalBytes(scores, session.state.scores)
+                )
+                    return { status: 'refused' };
+            }
+            await completeBallot(session);
+            root = contribution.root;
+            await publishBallot(session, relay);
             break;
         }
         default:

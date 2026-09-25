@@ -14,12 +14,20 @@ describe('bounded ballot randomness', () => {
         expect(budget.maximumProofBytes).toBe(proofMinimum + 3n * 65536n);
         expect(budget.gaussianBytes).toBe(2n * (65536n + 4096n) * 20n);
         expect(budget.sparseBytes).toBe(4n * (2048n + 512n));
-        expect(budget.maximumEncryptionBytes).toBe(43n * 65536n);
-        expect(budget.totalRandomBytes).toBe(153290752n);
+        // Each encryption reads whole 65,536-byte blocks from its own stream.
+        // The FHE secret's 2,048 sparse draws and two 65,536-coefficient
+        // error vectors of 20-byte samples fill 41 blocks; the auxiliary
+        // secret's 512 draws and two 4,096-coefficient vectors fill 3.
+        expect(budget.maximumEncryptionBytes).toBe((41n + 3n) * 65536n);
+        expect(budget.totalRandomBytes).toBe(
+            budget.maximumProofBytes + (41n + 3n) * 65536n,
+        );
         expect(budget.recordCount).toBe(147n);
         expect(budget.maximumContextBytes).toBe(159n);
         expect(budget.maximumRootPlaintextBytes).toBe(4875n);
-        expect(budget.encryptedJournalBytes).toBe(153290752n + 147n * 16n);
+        expect(budget.encryptedJournalBytes).toBe(
+            budget.totalRandomBytes + 147n * 16n,
+        );
         expect(budget.uninterruptedRootKeyCreations).toBe(148n);
         expect(budget.maximumDistinctGcmBlocksPerRecordKey).toBe(65538n);
         expect(budget.exhaustionBits).toBeGreaterThanOrEqual(128n);
