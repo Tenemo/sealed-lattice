@@ -1,9 +1,9 @@
 import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
-import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
+import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
@@ -67,20 +67,25 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     // credential-keyed SHA3-512 tag that the ballot step checks before parsing.
     const setupReferenceBytes =
         4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
+    // The close suffix collects deliveries alongside every ballot phase.
+    const close = compileParticipantCloseCustody(profile);
     const maximumWithBallot =
-        maximumCompletedMetadataBytes + 4n + ballot.maximumStateBytes;
+        maximumCompletedMetadataBytes +
+        4n +
+        ballot.maximumStateBytes +
+        4n +
+        close.collectingBytes;
     const completedBallotBytes = ballot.phaseBytes.find(
         (value) => value.phase === 17,
     )!.bytes;
     // A voter's completed ballot precedes its close state; a nonvoter's
     // close state is the same size.
-    const close = compileCloseWireCensus(profile);
     const maximumWithClose =
         maximumCompletedMetadataBytes +
         4n +
         completedBallotBytes +
         4n +
-        close.maximumParticipantStateBytes;
+        close.maximumStateBytes;
     const targetSigning = compileTargetSigningStateCensus();
     const maximumWithTargetSigning =
         maximumWithClose + 4n + targetSigning.maximumStateBytes;
@@ -132,7 +137,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumRootRecords,
         setupReferenceBytes,
         maximumRootBytes,
-        maximumCloseStateBytes: close.maximumParticipantStateBytes,
+        maximumCloseStateBytes: close.maximumStateBytes,
         maximumTargetSigningStateBytes: targetSigning.maximumStateBytes,
         maximumPublicBodyCiphertextBytes,
         maximumSigningPlaintextBytes,

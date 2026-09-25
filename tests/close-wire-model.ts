@@ -27,9 +27,6 @@ export const closeContexts = {
 // proposal entry is a two-byte responder position and a response identity.
 const entryBytes = 2n + identityBytes;
 const maximumListedEnvelopesPerSlot = 2n;
-// The participant root prefixes each retained completed message, and the
-// close state as a whole, with six bytes.
-const entryPrefixBytes = 6n;
 export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
     const participantCount = supportedProfile.participantCount;
     const profile = deriveCloseProfile(participantCount);
@@ -72,6 +69,14 @@ export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
         participants -
         faultBound +
         faultBound * 2n * maximumListedEnvelopesPerSlot;
+    // Delivery adds a new envelope to a slot only while fewer than two are
+    // known, and every held body is known. The organizer alone also learns
+    // the envelopes listed by the first response of each other responder, at
+    // most two for each corrupt slot.
+    const maximumKnownEnvelopes = maximumHeldBodies;
+    const maximumOrganizerKnownEnvelopes =
+        maximumKnownEnvelopes +
+        (participants - 1n) * faultBound * maximumListedEnvelopesPerSlot;
     // Every participant's response may list two envelopes for a corrupt slot.
     const maximumRosterListedEnvelopes =
         participants -
@@ -115,13 +120,7 @@ export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
         maximumReceivedBodies,
         maximumReceivedBodyBytes:
             maximumReceivedBodies * ballot.maximumSignedBodyBytes,
-        // The completed locked intent, the own response and, for the
-        // organizer, the proposal. A signing intent keeps 32 coins instead of
-        // its larger signature.
-        maximumParticipantStateBytes:
-            entryPrefixBytes +
-            (entryPrefixBytes + intentBodyBytes + signatureBytes) +
-            (entryPrefixBytes + maximumResponseBodyBytes + signatureBytes) +
-            (entryPrefixBytes + proposalBodyBytes + signatureBytes),
+        maximumKnownEnvelopes,
+        maximumOrganizerKnownEnvelopes,
     };
 };

@@ -1,6 +1,6 @@
 use crate::close::{
     Submission, authenticate, authenticate_responses, close_work, deliver, now_milliseconds, open,
-    organize, respond, write_records,
+    organize, replay, respond, write_records,
 };
 use crate::scenario::Scenario;
 use ballot_proof::{
@@ -154,10 +154,26 @@ pub fn run(
     let (own, proposal) = organize(
         &mut works[0],
         &mut enrollments[0].credential,
-        &[],
+        count,
         &arrivals,
     );
     responses[0] = own;
+    for position in 0..count {
+        let fresh = close_work(
+            &enrollments[position],
+            &poll,
+            &setup,
+            &openings[position],
+            position,
+        );
+        replay(
+            &works[position],
+            fresh,
+            &mut enrollments[position].credential,
+            &responses[position],
+            (position == 0).then_some(proposal.as_slice()),
+        );
+    }
     let bodies: Vec<AuthenticatedBallotBody> = held
         .iter()
         .map(|submission| authenticate(&setup, submission, &mut hashed))

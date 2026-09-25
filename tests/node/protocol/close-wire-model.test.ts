@@ -94,11 +94,20 @@ describe('close wire census', () => {
             expect(value.maximumReceivedBodyBytes).toBe(
                 value.maximumReceivedBodies * ballot.maximumSignedBodyBytes,
             );
-            expect(value.maximumParticipantStateBytes).toBe(
-                6n +
-                    (6n + 202n + signatureBytes) +
-                    (6n + value.maximumResponseBodyBytes + signatureBytes) +
-                    (6n + value.proposalBodyBytes + signatureBytes),
+            // Delivery keeps one known envelope for an honest slot and two
+            // for a corrupt one; each of the other n - 1 responses the
+            // organizer retains adds two for every corrupt slot.
+            expect(value.maximumKnownEnvelopes).toBe(
+                BigInt(participants) + faultBound,
+            );
+            expect(value.maximumOrganizerKnownEnvelopes).toBe(
+                BigInt(participants) +
+                    faultBound +
+                    (BigInt(participants) - 1n) * 2n * faultBound,
+            );
+            // Every response the organizer learns from is one of the roster's.
+            expect(value.maximumOrganizerKnownEnvelopes).toBe(
+                value.maximumRosterListedEnvelopes,
             );
         }
         // Conflicting corrupt envelopes add only envelope metadata: at the

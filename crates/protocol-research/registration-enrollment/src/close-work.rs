@@ -39,6 +39,17 @@ impl Prepared {
 /// `envelopes` also include known envelopes whose bodies it does not hold.
 /// The organizer signs its own response only when it can propose, so its
 /// listing makes every slot with two known envelopes conflicting.
+///
+/// Delivery adds a new envelope to a slot only while fewer than two are
+/// known, since a response lists at most two. The organizer also learns the
+/// envelopes listed by the first authenticated response of each responder,
+/// and no other participant takes responses. A relay therefore cannot grow
+/// the retained set beyond two envelopes per slot and per retained response,
+/// and the intent lock discards late envelopes.
+///
+/// Every accepted delivery changes the state: an already known envelope, an
+/// already held body and a later response of a responder are refused. A
+/// persistent log of accepted inputs therefore stays within these bounds.
 pub struct CloseWork {
     owner: Arc<RetainedBallotOwner>,
     context: CloseContext,
@@ -50,13 +61,22 @@ pub struct CloseWork {
     prepared: Option<Prepared>,
 }
 
+/// A length-prefixed body and its signature, filling the bytes.
 fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
-    let length =
-        u32::from_le_bytes(bytes.get(..4).ok_or(Error::Shape)?.try_into().unwrap()) as usize;
-    if length > maximum || bytes.len() != 4 + length + 3309 {
+    let (packet, rest) = leading_packet(bytes, maximum)?;
+    if !rest.is_empty() {
         return Err(Error::Shape);
     }
-    Ok((&bytes[4..4 + length], &bytes[4 + length..]))
+    Ok(packet[4..].split_at(packet.len() - 4 - 3309))
+}
+/// A packet and the bytes that follow it.
+fn leading_packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
+    let length =
+        u32::from_le_bytes(bytes.get(..4).ok_or(Error::Shape)?.try_into().unwrap()) as usize;
+    if length > maximum || bytes.len() < 4 + length + 3309 {
+        return Err(Error::Shape);
+    }
+    Ok(bytes.split_at(4 + length + 3309))
 }
 impl CloseWork {
     pub fn new(
@@ -113,21 +133,39 @@ impl CloseWork {
     fn roster(&self) -> &registration_credentials::roster_authentication::OrganizerSignedRoster {
         self.context.setup().inventory().proposal()
     }
-    fn remember(&mut self, authentication: &AuthenticatedBallotEnvelope) -> Result<(), Error> {
-        let identity = authentication.envelope().identity();
-        if self
-            .envelopes
+    fn known(&self, identity: &[u8; 64]) -> bool {
+        self.envelopes
             .iter()
-            .any(|value| value.envelope().identity() == identity)
+            .any(|value| value.envelope().identity() == *identity)
+    }
+    /// Refuses a delivered envelope that no response could need: a late one
+    /// once the intent is locked, or a new one for a slot that already has two
+    /// known envelopes.
+    fn admit(&self, authentication: &AuthenticatedBallotEnvelope) -> Result<(), Error> {
+        let envelope = authentication.envelope();
+        if self
+            .intent
+            .as_ref()
+            .is_some_and(|intent| envelope.ballot_time() > intent.message().close_time())
         {
-            return Ok(());
+            return Err(Error::Context);
         }
-        // Retained responses list at most two envelopes for each slot.
-        if self.envelopes.len() >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT * self.count() * self.count() {
-            return Err(Error::Shape);
+        if !self.known(&envelope.identity())
+            && self
+                .envelopes
+                .iter()
+                .filter(|value| value.envelope().position() == envelope.position())
+                .count()
+                >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT
+        {
+            return Err(Error::Consumed);
         }
-        self.envelopes.push(authentication.clone());
         Ok(())
+    }
+    fn remember(&mut self, authentication: &AuthenticatedBallotEnvelope) {
+        if !self.known(&authentication.envelope().identity()) {
+            self.envelopes.push(authentication.clone());
+        }
     }
     fn is_organizer(&self) -> bool {
         self.owner.position() == self.context.organizer()
@@ -156,9 +194,9 @@ impl CloseWork {
                 Ok(body)
             }
             // Authenticates and locks the first close intent. The root persists
-            // that lock before any response is prepared. Held bodies timed
-            // after the close time can never be listed or needed, so the lock
-            // discards them and frees their slots.
+            // that lock before any response is prepared. Held bodies and known
+            // envelopes timed after the close time can never be listed or
+            // needed, so the lock discards them and frees their slots.
             2 => {
                 if !ready || self.intent.is_some() {
                     return Err(Error::Consumed);
@@ -180,6 +218,8 @@ impl CloseWork {
                 let close_time = intent.message().close_time();
                 self.held
                     .retain(|body| body.authentication().envelope().ballot_time() <= close_time);
+                self.envelopes
+                    .retain(|value| value.envelope().ballot_time() <= close_time);
                 self.intent = Some(intent);
                 Ok(Vec::new())
             }
@@ -187,7 +227,8 @@ impl CloseWork {
             // participant's own ballot. A response lists at most two envelopes
             // for one slot, so a third body for a slot, which only a corrupt
             // author can sign, is refused before it is transferred, as is a
-            // body timed after a locked close time.
+            // body timed after a locked close time or a new envelope for a
+            // slot with two known ones.
             3 => {
                 if !ready || input.len() != ENVELOPE_BYTES + 3309 {
                     return Err(Error::Shape);
@@ -198,14 +239,8 @@ impl CloseWork {
                     &input[ENVELOPE_BYTES..],
                 )
                 .map_err(|_| Error::Crypto)?;
+                self.admit(&authentication)?;
                 let envelope = authentication.envelope();
-                if self
-                    .intent
-                    .as_ref()
-                    .is_some_and(|intent| envelope.ballot_time() > intent.message().close_time())
-                {
-                    return Err(Error::Context);
-                }
                 let slot = self.held.iter().filter(|value| {
                     value.authentication().envelope().position() == envelope.position()
                 });
@@ -243,7 +278,7 @@ impl CloseWork {
                     .ok_or(Error::Context)?
                     .finish()
                     .map_err(|_| Error::Crypto)?;
-                self.remember(body.authentication())?;
+                self.remember(body.authentication());
                 self.held.push(body);
                 Ok(Vec::new())
             }
@@ -282,31 +317,65 @@ impl CloseWork {
                 self.prepared = Some(Prepared::Response(message));
                 Ok(body)
             }
-            // A response to the locked intent, for the organizer's proposal.
+            // A response to the locked intent, for the organizer's proposal,
+            // followed by each envelope it lists that the organizer does not
+            // know, with its signature. Only the first response of a responder
+            // is retained, and its envelopes join the known set only once it
+            // authenticates; a later one is refused.
             7 => {
                 if !ready {
                     return Err(Error::Consumed);
                 }
-                let (body, signature) = packet(
-                    input,
-                    maximum_close_message_bytes(ClosePurpose::Response, self.count()),
-                )?;
-                let response = self
-                    .context
-                    .authenticate_response(
-                        self.intent.as_ref().ok_or(Error::Context)?,
-                        body,
-                        signature,
-                        &self.envelopes,
-                    )
-                    .map_err(|_| Error::Crypto)?;
-                if !self
+                if !self.is_organizer() {
+                    return Err(Error::Context);
+                }
+                let intent = self.intent.as_ref().ok_or(Error::Context)?;
+                let maximum = maximum_close_message_bytes(ClosePurpose::Response, self.count());
+                let (leading, rest) = leading_packet(input, maximum)?;
+                let (body, signature) = packet(leading, maximum)?;
+                let submission = ENVELOPE_BYTES + 3309;
+                if !rest.len().is_multiple_of(submission) {
+                    return Err(Error::Shape);
+                }
+                let message = CloseResponseMessage::parse(body, self.count())?;
+                if self
                     .responses
                     .iter()
-                    .any(|value| value.message().responder() == response.message().responder())
+                    .any(|value| value.message().responder() == message.responder())
                 {
-                    self.responses.push(response);
+                    return Err(Error::Consumed);
                 }
+                let mut supplied: Vec<AuthenticatedBallotEnvelope> = Vec::new();
+                for bytes in rest.chunks_exact(submission) {
+                    let authentication = authenticate_envelope(
+                        self.context.setup(),
+                        &bytes[..ENVELOPE_BYTES],
+                        &bytes[ENVELOPE_BYTES..],
+                    )
+                    .map_err(|_| Error::Crypto)?;
+                    let identity = authentication.envelope().identity();
+                    if self.known(&identity)
+                        || supplied
+                            .iter()
+                            .any(|value| value.envelope().identity() == identity)
+                        || !message
+                            .listed()
+                            .iter()
+                            .any(|(_, listed)| *listed == identity)
+                    {
+                        return Err(Error::Context);
+                    }
+                    supplied.push(authentication);
+                }
+                let available: Vec<_> = self.envelopes.iter().chain(&supplied).cloned().collect();
+                let response = self
+                    .context
+                    .authenticate_response(intent, body, signature, &available)
+                    .map_err(|_| Error::Crypto)?;
+                for authentication in &supplied {
+                    self.remember(authentication);
+                }
+                self.responses.push(response);
                 Ok(Vec::new())
             }
             // Signing is reachable only after the root commits this body and
@@ -458,9 +527,10 @@ impl CloseWork {
                 )?;
                 Ok(Vec::new())
             }
-            // A known envelope whose body this participant does not hold. It
-            // authenticates another participant's response, and a second known
-            // on-time envelope for a slot lets the honest listing name both.
+            // A known envelope whose body this participant does not hold. A
+            // second known on-time envelope for a slot lets the honest listing
+            // name both; a slot's third is refused like its third body, and an
+            // envelope already known like a body already held.
             12 => {
                 if !ready || input.len() != ENVELOPE_BYTES + 3309 {
                     return Err(Error::Shape);
@@ -471,7 +541,11 @@ impl CloseWork {
                     &input[ENVELOPE_BYTES..],
                 )
                 .map_err(|_| Error::Crypto)?;
-                self.remember(&authentication)?;
+                self.admit(&authentication)?;
+                if self.known(&authentication.envelope().identity()) {
+                    return Err(Error::Consumed);
+                }
+                self.remember(&authentication);
                 Ok(Vec::new())
             }
             // The bodies the organizer still needs, as consecutive two-byte

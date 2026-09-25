@@ -116,6 +116,7 @@ import {
     shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
+import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import {
     compileParticipantCustodyCensus,
     compileParticipantVaultKeyClasses,
@@ -186,6 +187,7 @@ import {
     completionProfile,
     completionProfileCounts,
     deriveSupportedProfile,
+    listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
@@ -245,6 +247,10 @@ export const renderDocumentationCensus = (): string => {
     const participantCustody = compileParticipantCustodyCensus(completion);
     const participantBallotCustody =
         compileParticipantBallotCustody(completion);
+    const participantCloseCustody = compileParticipantCloseCustody(completion);
+    const largestCloseCustody = compileParticipantCloseCustody(
+        listSupportedProfiles().slice(-1)[0],
+    );
     const participantReleaseCustody =
         compileParticipantReleaseCustody(completion);
     const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
@@ -3151,6 +3157,81 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.bytes),
                 ]),
             ],
+        ),
+        '',
+        '## Participant close custody',
+        '',
+        'Private close suffix and record bounds, excluding the already retained participant root and its earlier records. The suffix retains the accepted close inputs in arrival order with one key per encrypted record, so restoration replays them into the same state through the owning state machine. Before an intent the suffix only collects, alongside every ballot phase. Known envelopes and held bodies bound the delivery events, since the state machine refuses an input that changes nothing, and only the organizer adds one event per other responder and retains its proposal body and coins when its response completes. The per-roster table uses the completion option count, and the held bodies dominate the record bytes. The encoded suffix supplies no verification or signing authority by itself.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Maximum close state bytes',
+                    formatCount(participantCloseCustody.maximumStateBytes),
+                ],
+                [
+                    'Maximum collecting state bytes',
+                    formatCount(participantCloseCustody.collectingBytes),
+                ],
+                [
+                    'Maximum close events',
+                    formatCount(participantCloseCustody.maximumEvents),
+                ],
+                [
+                    'Maximum close records',
+                    formatCount(participantCloseCustody.maximumRecords),
+                ],
+                [
+                    'Maximum encrypted close record bytes',
+                    formatCount(
+                        participantCloseCustody.maximumEncryptedRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum organizer encrypted close record bytes',
+                    formatCount(
+                        participantCloseCustody.maximumOrganizerEncryptedRecordBytes,
+                    ),
+                ],
+                [
+                    'Maximum organizer encrypted close record bytes at the largest profile',
+                    formatCount(
+                        largestCloseCustody.maximumOrganizerEncryptedRecordBytes,
+                    ),
+                ],
+                ...participantCloseCustody.phaseBytes.map((value) => [
+                    'Phase ' + value.phase + ' state bytes',
+                    formatCount(value.bytes),
+                ]),
+            ],
+        ),
+        '',
+        table(
+            [
+                'Participants',
+                'Maximum close state bytes',
+                'Maximum close events',
+                'Maximum close records',
+                'Maximum encrypted close record bytes',
+                'Maximum organizer encrypted close record bytes',
+            ],
+            thresholdProfiles.map(({ participantCount }) => {
+                const value = compileParticipantCloseCustody(
+                    deriveSupportedProfile(
+                        participantCount,
+                        completionProfileCounts.optionCount,
+                    ),
+                );
+                return [
+                    formatCount(participantCount),
+                    formatCount(value.maximumStateBytes),
+                    formatCount(value.maximumEvents),
+                    formatCount(value.maximumRecords),
+                    formatCount(value.maximumEncryptedRecordBytes),
+                    formatCount(value.maximumOrganizerEncryptedRecordBytes),
+                ];
+            }),
         ),
         '',
         '## Participant release custody',
@@ -6375,7 +6456,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Close wire census',
         '',
-        'Exact canonical lengths of the signed close messages and bounds on the archived closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares, archive framing and storage-engine overhead.',
+        'Exact canonical lengths of the signed close messages and bounds on the archived closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. Delivery adds a new envelope to a slot only while fewer than two are known, and the lock also discards late envelopes. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Only the organizer takes responses; it retains the first of each responder with exactly the listed envelopes it did not know. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares, archive framing and storage-engine overhead.',
         '',
         table(
             ['Property', 'Value'],
@@ -6414,7 +6495,8 @@ export const renderDocumentationCensus = (): string => {
                 'Barrier signature checks',
                 'Maximum held bodies',
                 'Maximum received bodies',
-                'Maximum close state bytes',
+                'Maximum known envelopes',
+                'Maximum organizer known envelopes',
             ],
             thresholdProfiles.map(({ participantCount }) => {
                 const value = compileCloseWireCensus(
@@ -6433,7 +6515,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.barrierSignatureVerifications),
                     formatCount(value.maximumHeldBodies),
                     formatCount(value.maximumReceivedBodies),
-                    formatCount(value.maximumParticipantStateBytes),
+                    formatCount(value.maximumKnownEnvelopes),
+                    formatCount(value.maximumOrganizerKnownEnvelopes),
                 ];
             }),
         ),
