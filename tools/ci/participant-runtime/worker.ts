@@ -403,9 +403,14 @@ const execute = async (
         }
         case 'target': {
             // Target signing follows the completed close; a signed vote is
-            // only delivered again.
+            // only delivered again. A release that followed the completed
+            // close spent the target purpose without a vote.
             const generation = root.head.generation;
-            if (generation < completedClosePhase(enrollment.isOrganizer))
+            if (
+                generation < completedClosePhase(enrollment.isOrganizer) ||
+                (generation >= releasePhase.journal &&
+                    root.manifest.suffixes.target?.length === 0)
+            )
                 return { status: 'refused' };
             const contribution = await resumeContribution(context, root);
             const session = await resumeClose(
@@ -425,10 +430,16 @@ const execute = async (
             };
         }
         case 'release': {
-            // Release follows this participant's signed target; a signed
-            // release is only delivered again.
+            // Release follows this participant's signed target, or its
+            // completed close when it signed no target and a certificate
+            // already exists; a pending target signature cannot be
+            // bypassed. A signed release is only delivered again.
             const generation = root.head.generation;
-            if (generation < targetPhase.signed) return { status: 'refused' };
+            if (
+                generation !== completedClosePhase(enrollment.isOrganizer) &&
+                generation < targetPhase.signed
+            )
+                return { status: 'refused' };
             const contribution = await resumeContribution(context, root);
             const session = await resumeRelease(
                 await resumeClose(contribution, enrollment.isOrganizer),
@@ -448,9 +459,11 @@ const execute = async (
                               },
                           };
                 await reverifySetup(contribution, relay);
+                const encrypted = await advanceRelease(session, relay);
                 released = {
                     ...resumed,
-                    encrypted: await advanceRelease(session, relay),
+                    predecessor: session.state?.predecessor,
+                    encrypted,
                 };
             }
             root = contribution.root;

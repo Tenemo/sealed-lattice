@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { completedClosePhase } from '#tools/ci/participant-runtime/close-state.js';
 import {
     decodeReleaseState,
     encodeReleaseState,
@@ -32,8 +33,9 @@ const stateAt = (
     phase: number,
     targetLength: number,
     bodyLength: number,
+    predecessor: number = targetPhase.signed,
 ): ReleaseState => ({
-    predecessor: targetPhase.signed,
+    predecessor,
     target: filled(targetLength, 5),
     journalKeys:
         phase === releasePhase.signed
@@ -61,21 +63,32 @@ const stateAt = (
 const phases = Object.values(releasePhase);
 
 describe('participant release state', () => {
-    it('round-trips every phase at the body bounds', () => {
-        for (const phase of phases)
-            for (const bodyLength of [
-                bounds.minimumBodyBytes,
-                bounds.maximumBodyBytes,
-            ]) {
-                const state = stateAt(phase, 7, bodyLength);
-                expect(
-                    decodeReleaseState(
-                        descriptor,
-                        phase,
-                        encodeReleaseState(phase, state),
-                    ),
-                ).toEqual(state);
-            }
+    it('round-trips every phase after a signed target or a completed close', () => {
+        for (const organizer of [false, true])
+            for (const predecessor of [
+                targetPhase.signed,
+                completedClosePhase(organizer),
+            ])
+                for (const phase of phases)
+                    for (const bodyLength of [
+                        bounds.minimumBodyBytes,
+                        bounds.maximumBodyBytes,
+                    ]) {
+                        const state = stateAt(
+                            phase,
+                            7,
+                            bodyLength,
+                            predecessor,
+                        );
+                        expect(
+                            decodeReleaseState(
+                                descriptor,
+                                phase,
+                                organizer,
+                                encodeReleaseState(phase, state),
+                            ),
+                        ).toEqual(state);
+                    }
     });
 
     it('bounds each phase by the census', () => {
@@ -96,9 +109,13 @@ describe('participant release state', () => {
     });
 
     it('refuses a state of another phase, count or length', () => {
-        const refused = (generation: number, bytes: Uint8Array) =>
+        const refused = (
+            generation: number,
+            bytes: Uint8Array,
+            organizer = false,
+        ) =>
             expect(() =>
-                decodeReleaseState(descriptor, generation, bytes),
+                decodeReleaseState(descriptor, generation, organizer, bytes),
             ).toThrow();
         const body = encodeReleaseState(
             releasePhase.body,
@@ -113,9 +130,15 @@ describe('participant release state', () => {
         const marker = body.slice();
         marker[0] ^= 1;
         refused(releasePhase.body, marker);
+        // A release follows a signed target or the participant's own
+        // completed close, never a pending signature or another role's close.
         const predecessor = body.slice();
         predecessor[4] = targetPhase.intent;
         refused(releasePhase.body, predecessor);
+        for (const organizer of [false, true]) {
+            predecessor[4] = completedClosePhase(!organizer);
+            refused(releasePhase.body, predecessor, organizer);
+        }
         // The body must fit its bounds and its record count.
         refused(
             releasePhase.body,

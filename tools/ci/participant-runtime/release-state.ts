@@ -9,12 +9,15 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
+import { completedClosePhase } from './close-state.js';
 import type { ParticipantDescriptor } from './descriptor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
 import { targetPhase } from './target-state.js';
 
-// The release suffix follows the signed target. Generation 25 appends the
+// The release suffix follows the signed target, or the completed close when
+// the participant signed no target and a certificate already exists; the
+// target field then stays empty. Generation 25 appends the
 // journal of original random bytes one encrypted record per transition, and
 // the append of its final record enters generation 26. Generation 27 retains
 // the generated body's records and its envelope, 28 also the signing coins
@@ -37,7 +40,7 @@ const prefixBytes = marker.length + 1 + 2 + 2 + 4 + 2;
 const coinBytes = 32;
 
 export type ReleaseState = Readonly<{
-    // The target generation the release follows.
+    // The signed-target or completed-close generation the release follows.
     predecessor: number;
     // The certified target body.
     target: Uint8Array;
@@ -87,6 +90,7 @@ export const releaseRecordLengths = (
 export const decodeReleaseState = (
     descriptor: ParticipantDescriptor,
     generation: number,
+    organizer: boolean,
     bytes: Uint8Array,
 ): ReleaseState => {
     const bounds = descriptor.release;
@@ -96,7 +100,8 @@ export const decodeReleaseState = (
         bytes.length < prefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
-        bytes[marker.length] !== targetPhase.signed
+        (bytes[marker.length] !== targetPhase.signed &&
+            bytes[marker.length] !== completedClosePhase(organizer))
     )
         throw new Error('The release state is malformed.');
     const targetLength = readUnsigned16(bytes, marker.length + 1);
@@ -139,7 +144,7 @@ export const decodeReleaseState = (
         );
     const envelopeEnd = tailStart + (withBody ? bounds.envelopeBytes : 0);
     return {
-        predecessor: targetPhase.signed,
+        predecessor: bytes[marker.length],
         target: bytes.slice(prefixBytes, keysStart),
         journalKeys: keys(keysStart, journalCount),
         bodyLength,

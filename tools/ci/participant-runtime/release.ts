@@ -7,6 +7,7 @@ import {
     sha512,
     unsigned32,
 } from './bytes.js';
+import { completedClosePhase } from './close-state.js';
 import { completedCloseRecords, restoreCompletedClose } from './close.js';
 import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
@@ -43,10 +44,13 @@ import {
     resumeTarget,
 } from './target.js';
 
-// A participant's release of its share of the certified target. Each visit
-// restores the completed close and the signed target, evaluates the target
-// again from the public close records and certifies it from the published
-// votes; only the certificate verifier creates the release context. The
+// A participant's release of its share of the certified target. The release
+// follows the participant's own signed target, or its completed close when it
+// signed no target and a certificate already exists; a pending target
+// signature cannot be bypassed. Each visit restores the completed close and
+// any signed target, evaluates the target again from the public close records
+// and certifies it from the published votes; only the certificate verifier
+// creates the release context. The
 // journal of original random bytes enters the root before any private
 // generation, and the module proves the release from that journal alone, so
 // an interrupted generation replays the same bytes. The body and envelope
@@ -57,9 +61,19 @@ const randomRequestBytes = 65_536;
 
 export type ReleaseSession = {
     readonly close: CloseSession;
-    readonly target: TargetState;
-    readonly targetDigest: Uint8Array;
+    // The participant's own signed target, when the release follows it.
+    readonly signed: TargetState | undefined;
+    // The certified target body and its digest, once known: from the signed
+    // target or the retained release state, or from the first certified
+    // evaluation of a release that follows the completed close.
+    target: Readonly<{ body: Uint8Array; digest: Uint8Array }> | undefined;
     state: ReleaseState | undefined;
+};
+
+const releaseTarget = (session: ReleaseSession) => {
+    if (session.target === undefined)
+        throw new Error('No certified target is retained.');
+    return session.target;
 };
 
 const generationOf = (session: ReleaseSession) =>
@@ -73,37 +87,58 @@ const words = (bytes: Uint8Array) =>
 const recordCount = (state: ReleaseState | undefined) =>
     state === undefined ? 0 : state.journalKeys.length + state.bodyKeys.length;
 
-// Decodes the retained release state beneath the signed target. Every listed
+// Decodes the retained release state beneath its predecessor. A release that
+// follows the completed close keeps an empty target field. Every listed
 // release record must be stored and nothing else.
 export const resumeRelease = async (
     close: CloseSession,
 ): Promise<ReleaseSession> => {
     const { root, context } = close.contribution;
-    const target = resumeTarget(close);
-    if (target === undefined || root.head.generation < targetPhase.signed)
-        throw new Error('No signed target is retained.');
+    const { generation } = root.head;
+    const closed = completedClosePhase(close.organizer);
+    if (generation !== closed && generation < targetPhase.signed)
+        throw new Error('No completed close or signed target is retained.');
     const bytes = root.manifest.suffixes.release;
     const state =
-        root.head.generation < releasePhase.journal
+        generation < releasePhase.journal
             ? undefined
             : bytes === undefined
               ? undefined
               : decodeReleaseState(
                     context.descriptor,
-                    root.head.generation,
+                    generation,
+                    close.organizer,
                     bytes,
                 );
-    if (root.head.generation >= releasePhase.journal && state === undefined)
+    if (generation >= releasePhase.journal && state === undefined)
         throw new Error('No release state is retained.');
-    if (state !== undefined && !equalBytes(state.target, target.body))
+    const followsClose = generation === closed || state?.predecessor === closed;
+    if (
+        followsClose &&
+        generation !== closed &&
+        root.manifest.suffixes.target?.length !== 0
+    )
+        throw new Error('The release names another predecessor.');
+    const signed = followsClose ? undefined : resumeTarget(close);
+    if (!followsClose && signed === undefined)
+        throw new Error('No signed target is retained.');
+    if (
+        state !== undefined &&
+        signed !== undefined &&
+        !equalBytes(state.target, signed.body)
+    )
         throw new Error('The release names another target.');
     const snapshot = await snapshotParticipant(context.database);
     if (snapshot.counts.release !== recordCount(state))
         throw new Error('The release records changed.');
+    const body = signed?.body ?? state?.target;
     return {
         close,
-        target,
-        targetDigest: await sha512(target.body),
+        signed,
+        target:
+            body === undefined
+                ? undefined
+                : { body, digest: await sha512(body) },
         state,
     };
 };
@@ -231,7 +266,7 @@ const openReleaseRecord = (
             key: (journal ? state.journalKeys : state.bodyKeys)[index],
             additionalData: releaseRecordAssociatedData(
                 session.close.records,
-                session.targetDigest,
+                releaseTarget(session).digest,
                 kind,
                 index,
                 length,
@@ -259,7 +294,7 @@ const sealReleaseRecord = async (
     ...(await sealRecord(
         releaseRecordAssociatedData(
             session.close.records,
-            session.targetDigest,
+            releaseTarget(session).digest,
             kind,
             index,
             bytes.length,
@@ -295,7 +330,11 @@ const commitRelease = async (
             generation: transition.generation,
             manifest: {
                 ...root.manifest,
-                suffixes: { ...root.manifest.suffixes, release: encoded },
+                suffixes: {
+                    ...root.manifest.suffixes,
+                    target: root.manifest.suffixes.target ?? new Uint8Array(),
+                    release: encoded,
+                },
             },
             predecessorRecords: [
                 ...dataRecordInventory(root.manifest),
@@ -307,7 +346,7 @@ const commitRelease = async (
                     : releaseRecordInventory(
                           descriptor,
                           close.records,
-                          session.targetDigest,
+                          releaseTarget(session).digest,
                           session.state,
                       )),
             ],
@@ -345,8 +384,11 @@ const appendJournal = async (session: ReleaseSession) => {
     );
     while (generationOf(session) < releasePhase.ready) {
         const state: ReleaseState = session.state ?? {
-            predecessor: targetPhase.signed,
-            target: session.target.body,
+            predecessor:
+                session.signed === undefined
+                    ? completedClosePhase(session.close.organizer)
+                    : targetPhase.signed,
+            target: releaseTarget(session).body,
             journalKeys: [],
             bodyLength: 0,
             bodyKeys: [],
@@ -447,7 +489,7 @@ const proveRelease = async (session: ReleaseSession) => {
     try {
         await loadJournal(session);
         handlers.random = journalRandomness(kernel);
-        envelope = releaseCommand(context, 0, session.target.body);
+        envelope = releaseCommand(context, 0, releaseTarget(session).body);
     } finally {
         handlers.random = undefined;
         // Clears any journal bytes the prover left unread.
@@ -549,10 +591,12 @@ const signRelease = async (session: ReleaseSession) => {
 
 // Restores the signed target the credential retains, so a release can only
 // follow that target.
-const restoreSignedTarget = (session: ReleaseSession) => {
-    const { context } = session.close.contribution;
+const restoreSignedTarget = (
+    context: ParticipantContext,
+    signed: TargetState,
+) => {
     const { kernel } = context;
-    const { body, vote } = session.target;
+    const { body, vote } = signed;
     sessionInput(context, concatenate(unsigned32(body.length), body, vote));
     if (
         kernel.participant_finality_command(
@@ -573,13 +617,22 @@ export const advanceRelease = async (
     const { close } = session;
     const { context } = close.contribution;
     await restoreCompletedClose(close);
-    restoreSignedTarget(session);
+    if (session.signed !== undefined)
+        restoreSignedTarget(context, session.signed);
     const evaluated = await evaluateClosedTarget(context, relay);
-    if (!equalBytes(evaluated.body, session.target.body))
+    if (
+        session.target !== undefined &&
+        !equalBytes(evaluated.body, session.target.body)
+    )
         throw new PublicInputFailure(
             'The public close records name another target.',
         );
     if (!(await certifyTarget(context, relay))) return false;
+    // A release that follows the completed close takes the certified target.
+    session.target ??= {
+        body: evaluated.body,
+        digest: await sha512(evaluated.body),
+    };
     await establishReleaseContext(context, close.records.position);
     await appendJournal(session);
     if (generationOf(session) === releasePhase.ready)
