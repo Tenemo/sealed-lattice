@@ -4,6 +4,7 @@ import {
     mkdtemp,
     open,
     readFile,
+    rm,
     stat,
     writeFile,
 } from 'node:fs/promises';
@@ -220,6 +221,8 @@ await runWithLocalRunLog(
         lanes: [
             'Participant runtime assembly',
             'Browser registration and roster agreement',
+            'Browser setup contribution',
+            'Browser setup verification',
         ],
         scriptName: 'research:participant',
     },
@@ -232,6 +235,8 @@ await runWithLocalRunLog(
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
+        // The participants' private state lives only as long as the run.
+        let profiles: string | undefined;
         let guardFailure: Error | undefined;
         try {
             assert.ok(
@@ -246,9 +251,10 @@ await runWithLocalRunLog(
             const publicDirectory = path.join(log.runDirectoryPath, 'public');
             await mkdir(publicDirectory);
             relay = await startRelay(runtime, publicDirectory);
-            const profiles = await mkdtemp(
+            profiles = await mkdtemp(
                 path.join(root, 'temp/participant-browser-'),
             );
+            const profileDirectory = profiles;
             const peaks = new Array<number>(participantCount).fill(0);
             monitor = (async () => {
                 while (sampling) {
@@ -277,7 +283,10 @@ await runWithLocalRunLog(
                 const existing = chromes[position];
                 if (existing !== undefined) return existing;
                 const chrome = await launchChromeParticipant(
-                    path.join(profiles, `participant-${String(position)}`),
+                    path.join(
+                        profileDirectory,
+                        `participant-${String(position)}`,
+                    ),
                     origin(position),
                 );
                 chromes[position] = chrome;
@@ -291,21 +300,31 @@ await runWithLocalRunLog(
                 });
                 return chrome;
             };
-            const run = async (
+            const request = async (
                 position: number,
                 operation: string,
                 parameters: Record<string, unknown> = {},
             ) => {
                 const chrome = await participant(position);
                 const started = performance.now();
-                const result = (await Promise.race([
-                    chrome.evaluate(
-                        `window.runParticipant(${JSON.stringify(operation)}, ${JSON.stringify(parameters)})`,
-                    ),
-                    delay(operationMilliseconds).then(() => {
-                        throw new Error('Participant operation deadline.');
-                    }),
-                ])) as WorkerResult;
+                // The deadline ends with its operation so that no timer
+                // outlives the run.
+                const deadline = new AbortController();
+                let result: WorkerResult;
+                try {
+                    result = (await Promise.race([
+                        chrome.evaluate(
+                            `window.runParticipant(${JSON.stringify(operation)}, ${JSON.stringify(parameters)})`,
+                        ),
+                        delay(operationMilliseconds, undefined, {
+                            signal: deadline.signal,
+                        }).then(() => {
+                            throw new Error('Participant operation deadline.');
+                        }),
+                    ])) as WorkerResult;
+                } finally {
+                    deadline.abort();
+                }
                 if (guardFailure !== undefined) throw guardFailure;
                 log.writeEvent({
                     eventType: 'participant-operation',
@@ -316,13 +335,43 @@ await runWithLocalRunLog(
                         result,
                     },
                 });
-                assert.equal(
-                    result.status,
-                    'completed',
+                return result;
+            };
+            const run = async (
+                position: number,
+                operation: string,
+                parameters: Record<string, unknown> = {},
+            ) => {
+                const result = await request(position, operation, parameters);
+                assert.ok(
+                    result.status === 'completed',
                     `${operation} at position ${String(position)}: ${JSON.stringify(result)}`,
                 );
-                assert.ok(result.status === 'completed');
                 return result.details;
+            };
+            const expectStatus = async (
+                position: number,
+                operation: string,
+                status: WorkerResult['status'],
+                parameters: Record<string, unknown> = {},
+            ) => {
+                const result = await request(position, operation, parameters);
+                assert.equal(
+                    result.status,
+                    status,
+                    `${operation} at position ${String(position)}: ${JSON.stringify(result)}`,
+                );
+            };
+            const positions = Array.from(
+                { length: participantCount },
+                (_unused, position) => position,
+            );
+            const everyone = async (operation: string, generation: number) => {
+                const results = await Promise.all(
+                    positions.map((position) => run(position, operation)),
+                );
+                for (const details of results)
+                    assert.equal(details.generation, generation);
             };
             const { createCanonicalManifest } =
                 await import('#packages/sdk/dist/index.js');
@@ -381,13 +430,43 @@ await runWithLocalRunLog(
                 ),
             );
             for (const details of accepted) assert.equal(details.generation, 3);
-            // A second proposal and a second enrollment are refused, and every
-            // participant restores its retained state.
-            for (let position = 0; position < participantCount; position++) {
+            // A second proposal, acceptance or enrollment is refused, and
+            // every participant restores its retained state.
+            await expectStatus(0, 'propose-roster', 'refused', { recordIds });
+            await expectStatus(1, 'accept-roster', 'refused', { recordIds });
+            await expectStatus(1, 'create', 'refused', {
+                role: 'join',
+                poll: organizer.poll,
+                definition: hexadecimal(definition),
+                definitionSignature: hexadecimal(definitionSignature),
+                username: 'Participant again',
+            });
+            for (const position of positions) {
                 const status = await run(position, 'status');
                 assert.equal(status.generation, 3);
                 assert.equal(status.poll, organizer.poll);
             }
+            // Every participant generates and retains its contribution body
+            // and confirms it. No opening precedes the complete confirmation
+            // inventory.
+            await everyone('contribute', 7);
+            await expectStatus(0, 'contribute', 'refused');
+            assert.equal((await run(0, 'confirm')).generation, 9);
+            await expectStatus(0, 'open', 'pending');
+            assert.equal((await run(0, 'status')).generation, 9);
+            await Promise.all(
+                positions.slice(1).map(async (position) => {
+                    assert.equal(
+                        (await run(position, 'confirm')).generation,
+                        9,
+                    );
+                }),
+            );
+            await everyone('open', 11);
+            // Every participant verifies the complete setup and retains its
+            // reference once.
+            await everyone('verify-setup', 12);
+            await expectStatus(0, 'verify-setup', 'refused');
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -398,7 +477,7 @@ await runWithLocalRunLog(
                         recordIds,
                         runtimeIdentity: runtime.identity.runtime,
                         peakProcessTreeBytes: peaks,
-                        scope: 'Browser registration and roster agreement through the maintained participant runtime in external Chrome. Later protocol stages are not exercised.',
+                        scope: 'Browser registration, roster agreement, setup contribution and setup verification in the maintained participant runtime in external Chrome. Ballots and later protocol stages are not exercised.',
                     },
                     null,
                     2,
@@ -413,6 +492,8 @@ await runWithLocalRunLog(
                 await chrome?.close().catch(() => undefined);
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));
+            if (profiles !== undefined)
+                await rm(profiles, { recursive: true, force: true });
             await releaseLock();
         }
     },

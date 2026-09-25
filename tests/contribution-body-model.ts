@@ -83,12 +83,19 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         value *= parameters.gadgetBase
     )
         gadgetCount++;
-    const polynomials: { expandedIndex: number; bytes: bigint }[] = [];
+    // Each polynomial's coefficient count; its bytes are that count of
+    // sign-and-magnitude coefficients of one width.
+    const polynomials: {
+        expandedIndex: number;
+        bytes: bigint;
+        coefficients: bigint;
+    }[] = [];
     for (let gadget = 0; gadget < gadgetCount; gadget++)
         for (const offset of [1, 2, 4, 6])
             polynomials.push({
                 expandedIndex: 7 * gadget + offset,
                 bytes: fhePolynomialBytes,
+                coefficients: parameters.polynomialDegree,
             });
     const sharingStart = 7 * gadgetCount;
     for (let participant = 0; participant < participantCount; participant++)
@@ -96,6 +103,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
             polynomials.push({
                 expandedIndex: sharingStart + 3 * participant + offset,
                 bytes: recipient.publicKeyBytes,
+                coefficients: recipient.degree,
             });
     polynomials.push({
         expandedIndex: sharingStart + 3 * participantCount + 2,
@@ -103,6 +111,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
             auxiliaryInputEncryptionParameters.degree,
             auxiliaryInputEncryptionParameters.modulus,
         ),
+        coefficients: auxiliaryInputEncryptionParameters.degree,
     });
     const headerBytes = contributionBodyHeaderBytes;
     const polynomialPayloadBytes = polynomials.reduce(

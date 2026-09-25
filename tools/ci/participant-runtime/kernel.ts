@@ -36,8 +36,39 @@ const kernelFunctions = [
     'verify_roster_signature',
     'retain_proposal',
     'retained_proposal_identity_pointer',
+    'contribution_signing',
     'contribution_output_pointer',
     'contribution_output_length',
+    'begin_contribution',
+    'contribution_proof_input_pointer',
+    'contribution_proof_input_capacity',
+    'contribution_proof_command',
+    'contribution_proof_phase',
+    'contribution_proof_output_pointer',
+    'contribution_proof_output_length',
+    'contribution_checkpoint_records',
+    'contribution_checkpoint_command',
+    'contribution_checkpoint_key',
+    'setup_input_pointer',
+    'setup_input_capacity',
+    'setup_chunk_capacity',
+    'setup_roster_begin',
+    'setup_roster_record',
+    // One when the organizer's proposal verifies.
+    'setup_roster_finish',
+    'setup_confirmation',
+    // One when every confirmation is known.
+    'setup_inventory_finish',
+    'setup_begin_opening',
+    'setup_polynomial',
+    'setup_proof',
+    // One when the contribution is accepted.
+    'setup_finish_contribution',
+    'setup_accepted',
+    // One when the setup is complete.
+    'setup_finish',
+    'setup_inventory_pointer',
+    'retain_setup',
 ] as const;
 
 type KernelFunction = (...values: number[]) => number;
@@ -167,6 +198,31 @@ export const readKernel = (
 
 export const writeInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
     writeKernel(kernel, kernel.input_pointer(), bytes, kernel.input_capacity());
+
+// Writes the setup verifier's input at an offset; a polynomial's previous
+// aggregate chunk follows its incoming chunk.
+export const writeSetupInput = (
+    kernel: ParticipantKernel,
+    bytes: Uint8Array,
+    offset = 0,
+) => {
+    const capacity = kernel.setup_input_capacity();
+    if (offset > capacity) throw new Error('Module input exceeds its buffer.');
+    writeKernel(
+        kernel,
+        kernel.setup_input_pointer() + offset,
+        bytes,
+        capacity - offset,
+    );
+};
+
+export const writeProofInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
+    writeKernel(
+        kernel,
+        kernel.contribution_proof_input_pointer(),
+        bytes,
+        kernel.contribution_proof_input_capacity(),
+    );
 
 export const writeOwnRegistrationInput = (
     kernel: ParticipantKernel,

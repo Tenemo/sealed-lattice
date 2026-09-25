@@ -39,7 +39,7 @@ export const registrationPath = (
 
 // The ordered registration body digests a proposal lists: the fourth tuple
 // value holds its own length, the count and one digest per participant.
-const proposalRecordIds = (body: Uint8Array): string[] => {
+export const proposalRecordIds = (body: Uint8Array): string[] => {
     const fields = tupleFields(body);
     const bodies = fields[3];
     if (

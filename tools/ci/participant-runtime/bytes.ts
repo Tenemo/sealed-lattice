@@ -48,6 +48,9 @@ export const unsigned32 = (value: number): Uint8Array => {
 const view = (bytes: Uint8Array) =>
     new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
+export const readUnsigned16 = (bytes: Uint8Array, offset: number): number =>
+    view(bytes).getUint16(offset, true);
+
 export const readUnsigned32 = (bytes: Uint8Array, offset: number): number =>
     view(bytes).getUint32(offset, true);
 

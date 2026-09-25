@@ -7,10 +7,15 @@ import path from 'node:path';
 import binaryen from 'binaryen';
 import { build } from 'tsdown';
 
+import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
+import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import type { ParticipantDescriptor } from '#tools/ci/participant-runtime/descriptor.js';
@@ -38,6 +43,11 @@ export const deriveParticipantDescriptor = (
     const key = compileRegistrationKeyRelationCensus();
     const enrollment = compileRegistrationEnrollmentCensus();
     const custody = compileParticipantCustodyCensus(profile);
+    const body = compileContributionBodyCensus(profile);
+    const checkpoint = compileFirstOracleCheckpointCensus(profile);
+    const relation = compileSetupContributionRelationCensus(profile);
+    const authentication =
+        compileContributionAuthenticationCensus(participantCount);
     return {
         participantCount,
         optionCount,
@@ -62,6 +72,39 @@ export const deriveParticipantDescriptor = (
             maximumRecords: number(custody.maximumRootRecords),
             maximumRootBytes: number(custody.maximumRootBytes),
             setupReferenceBytes: number(custody.setupReferenceBytes),
+        },
+        contribution: {
+            expandedPolynomials: number(
+                relation.expandedStatementPolynomialCount,
+            ),
+            firstOracleColumns: relation.wordColumns + relation.booleanColumns,
+            statementBytes: number(relation.expandedStatementByteLength),
+            saltBytes: number(body.saltBytes),
+            bodyHeaderBytes: number(body.headerBytes),
+            proofHeaderBytes: number(
+                compileFullWordProofLayout(profile).headerBytes,
+            ),
+            minimumProofBytes: number(body.minimumProofBytes),
+            maximumProofBytes: number(body.maximumProofBytes),
+            maximumStateBytes: number(custody.maximumMetadataBytes),
+            maximumCheckpointHeaderBytes: number(checkpoint.maximumHeaderBytes),
+            confirmationBodyBytes: number(authentication.confirmationBodyBytes),
+            openingBodyBytes: number(authentication.openingBodyBytes),
+            confirmationPacketBytes: number(
+                authentication.confirmationPacketBytes,
+            ),
+            requiredStorageBytes: number(custody.maximumRetainedPayloadBytes),
+            polynomials: body.polynomials.map((polynomial) => ({
+                expandedIndex: polynomial.expandedIndex,
+                bytes: number(polynomial.bytes),
+                coefficients: number(polynomial.coefficients),
+            })),
+            publicRecords: custody.publicRecords.map((record) => ({
+                object: record.object,
+                offset: number(record.offset),
+                length: number(record.length),
+            })),
+            checkpointLengths: custody.checkpointLengths.map(number),
         },
     };
 };

@@ -187,14 +187,24 @@ impl Credential {
         let body = self.retained_confirmation_body(context, &computed)?;
         self.sign_computed_confirmation(body, computed, coins)
     }
-    /// Checks the signing position before any commitment work. Restoration
-    /// uses the same owner checks without requiring an unlocked purpose.
+    /// Checks the signing position before any new commitment work.
     pub fn validate_confirmation_position(
         &self,
         proposal: &OrganizerSignedRoster,
         position: usize,
     ) -> Result<(), Error> {
         self.check_unlocked(SigningPurpose::Confirmation)?;
+        self.check_confirmation_position(proposal, position)
+    }
+    /// Checks the owner of a body before its commitment is hashed, without
+    /// requiring an unlocked purpose. Signing still requires it, so a restored
+    /// owner rebuilds the commitment of its completed confirmation but signs
+    /// nothing new.
+    pub fn validate_body_position(
+        &self,
+        proposal: &OrganizerSignedRoster,
+        position: usize,
+    ) -> Result<(), Error> {
         self.check_confirmation_position(proposal, position)
     }
     fn check_confirmation_position(
@@ -498,4 +508,145 @@ pub fn verify_opening(
         position,
         salt,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        foundation::{
+            RegistrationHeader, StabilizedDisplayText,
+            ceremony::{Manifest, OptionDefinition},
+            normalize_username,
+        },
+        poll::{PollDraft, verify_poll},
+        registration::VerifiedRegistration,
+        roster::RosterProposal,
+        roster_authentication::verify_roster_proposal,
+    };
+
+    // Three credentials whose completed bodies a signed roster lists in
+    // order, with the organizer first.
+    fn signed_roster() -> (Vec<Credential>, OrganizerSignedRoster) {
+        let text =
+            |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
+        let options = (0..2)
+            .map(|index| {
+                OptionDefinition::new(
+                    index,
+                    format!("option-{index}"),
+                    text(&format!("Option {index}")),
+                )
+                .unwrap()
+            })
+            .collect();
+        let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1).unwrap();
+        let mut credentials: Vec<_> = (1..4)
+            .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))
+            .collect();
+        let packet = credentials[0]
+            .create_poll(draft, [4; 64], [5; 32], [6; 32])
+            .unwrap();
+        let poll = verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap();
+        let records = credentials
+            .iter_mut()
+            .zip(1..)
+            .map(|(credential, body)| {
+                credential.completed_body = Some([body; 64]);
+                Arc::new(VerifiedRegistration::for_roster(
+                    RegistrationHeader {
+                        username: normalize_username(b"Participant").unwrap(),
+                        poll: poll.identity(),
+                        runtime: poll.runtime(),
+                        signing_public: *credential.signing_public(),
+                        mailbox_public: *credential.mailbox_public(),
+                        recipient_key_hash: [0; 64],
+                        proof_length: 0,
+                    },
+                    [body; 64],
+                ))
+            })
+            .collect();
+        let proposal = RosterProposal::new(&poll, records).unwrap();
+        let signature = credentials[0]
+            .sign_roster_proposal(&proposal, [7; 32])
+            .unwrap();
+        (
+            credentials,
+            verify_roster_proposal(proposal, &signature).unwrap(),
+        )
+    }
+
+    fn commitment(
+        roster: &OrganizerSignedRoster,
+        position: usize,
+        digest: u8,
+    ) -> ComputedContributionCommitment {
+        ComputedContributionCommitment {
+            proposal: roster.proposal().identity(),
+            position,
+            digest: [digest; 64],
+            salt: Zeroizing::new([3; 64]),
+        }
+    }
+
+    #[test]
+    fn a_restored_owner_reinstalls_its_confirmation_but_signs_no_other() {
+        let (mut credentials, roster) = signed_roster();
+        let verify = |confirmation: SignedConfirmation| {
+            verify_confirmation(&roster, confirmation.body(), confirmation.signature()).unwrap()
+        };
+        let own = verify(
+            credentials[1]
+                .sign_confirmation(&roster, commitment(&roster, 1, 9), [8; 32])
+                .unwrap(),
+        );
+        let other = verify(
+            credentials[2]
+                .sign_confirmation(&roster, commitment(&roster, 2, 9), [8; 32])
+                .unwrap(),
+        );
+        // The root shows the proposal and the confirmation used, so the
+        // restored owner unlocks every purpose but those two.
+        let mut restored = Credential::from_seeds([2; 32], [32; 32], [62; 32]);
+        restored.completed_body = Some([2; 64]);
+        restored.locked_purposes =
+            SigningPurpose::Proposal.mask() | SigningPurpose::Confirmation.mask();
+        assert!(matches!(
+            restored.validate_confirmation_position(&roster, 1),
+            Err(Error::Consumed)
+        ));
+        restored.validate_body_position(&roster, 1).unwrap();
+        for position in [0, 2, 3] {
+            assert!(restored.validate_body_position(&roster, position).is_err());
+        }
+        assert!(matches!(
+            restored.sign_confirmation(&roster, commitment(&roster, 1, 9), [8; 32]),
+            Err(Error::Consumed)
+        ));
+        // A different body, another owner's confirmation, or another owner's
+        // position installs nothing.
+        for (computed, confirmation) in [
+            (commitment(&roster, 1, 10), &own),
+            (commitment(&roster, 1, 9), &other),
+            (commitment(&roster, 2, 9), &other),
+        ] {
+            assert!(
+                restored
+                    .restore_confirmation(&roster, computed, confirmation)
+                    .is_err()
+            );
+        }
+        restored
+            .restore_confirmation(&roster, commitment(&roster, 1, 9), &own)
+            .unwrap();
+        assert!(matches!(
+            restored.restore_confirmation(&roster, commitment(&roster, 1, 9), &own),
+            Err(Error::Consumed)
+        ));
+        assert!(matches!(
+            restored.validate_body_position(&roster, 1),
+            Err(Error::Consumed)
+        ));
+    }
 }

@@ -28,6 +28,17 @@ impl VerifiedRegistration {
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
     }
+    /// A record with only the verified header and body digest that a roster
+    /// proposal reads; it carries no key or registration proof.
+    #[cfg(test)]
+    pub(crate) fn for_roster(header: RegistrationHeader, body_digest: [u8; 64]) -> Self {
+        Self {
+            header,
+            body_digest,
+            proof_hash: [0; 64],
+            public_key: Vec::new(),
+        }
+    }
 }
 
 pub struct RegistrationVerifier {
@@ -193,11 +204,9 @@ mod tests {
             .create_poll(draft, [4; 64], [5; 32], [6; 32])
             .unwrap();
         let poll = verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap();
-        // A roster proposal reads only the verified headers and body digests,
-        // so these records need no registration proof.
         let record = |credential: &Credential| {
-            Arc::new(VerifiedRegistration {
-                header: RegistrationHeader {
+            Arc::new(VerifiedRegistration::for_roster(
+                RegistrationHeader {
                     username: normalize_username(b"Participant").unwrap(),
                     poll: poll.identity(),
                     runtime: poll.runtime(),
@@ -206,10 +215,8 @@ mod tests {
                     recipient_key_hash: [0; 64],
                     proof_length: 0,
                 },
-                body_digest: [0; 64],
-                proof_hash: [0; 64],
-                public_key: Vec::new(),
-            })
+                [0; 64],
+            ))
         };
         let members: Vec<_> = (10..30)
             .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))

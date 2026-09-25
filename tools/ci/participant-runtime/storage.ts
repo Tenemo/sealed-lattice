@@ -72,6 +72,25 @@ export const readParticipantValue = async (
     return value;
 };
 
+// Adds records that no root references yet in one strict transaction. Only
+// generated output is staged this way; the next root lists it and its
+// transition checks every staged record before it commits.
+export const addParticipantRecords = async (
+    database: IDBDatabase,
+    store: ParticipantStore,
+    records: readonly Readonly<{ key: IDBValidKey; bytes: Uint8Array }>[],
+): Promise<void> => {
+    const transaction = database.transaction(store, 'readwrite', {
+        durability: 'strict',
+    });
+    const done = transactionCompletion(transaction);
+    for (const record of records)
+        transaction
+            .objectStore(store)
+            .add(new Blob([new Uint8Array(record.bytes)]), record.key);
+    await done;
+};
+
 // One consistent read of the root authority and every store's cardinality.
 export const snapshotParticipant = async (database: IDBDatabase) => {
     const transaction = database.transaction(

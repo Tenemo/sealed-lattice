@@ -724,6 +724,11 @@ pub extern "C" fn contribution_proof_input_pointer() -> usize {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn contribution_proof_input_capacity() -> usize {
+    contribution_prover::browser::input_capacity()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn contribution_proof_command(
     operation: u32,
     argument: usize,

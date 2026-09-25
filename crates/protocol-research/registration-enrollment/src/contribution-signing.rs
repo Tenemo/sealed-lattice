@@ -44,7 +44,7 @@ impl ContributionSigning {
         if self.context.is_some() {
             return Err(Error::Consumed);
         }
-        credential.validate_confirmation_position(&proposal, position)?;
+        credential.validate_body_position(&proposal, position)?;
         let hasher =
             ContributionCommitmentHasher::new(proposal.proposal(), position, salt, header)?;
         self.context = Some(BodyContext::Public(proposal));

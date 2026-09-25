@@ -96,8 +96,39 @@ export const streamPublic = (
 export const readPublic = (relay: PublicRelay, name: string, maximum: number) =>
     readBounded(relay.origin + '/public/' + name, maximum);
 
-// Publishes one record in transfer chunks. The relay keeps the first bytes
-// at each offset and accepts only an identical retransmission.
+// Publishes bytes of one record at an offset. The relay keeps the first
+// bytes at each offset and accepts only an identical retransmission.
+export const publishChunk = async (
+    relay: PublicRelay,
+    name: string,
+    offset: number,
+    bytes: Uint8Array,
+) => {
+    if (bytes.length > transferChunkBytes)
+        throw new Error('A publication chunk exceeds its bound.');
+    const controller = new AbortController();
+    let response: Response;
+    try {
+        response = await withDeadline(controller, () =>
+            fetch(
+                relay.origin + '/publish/' + name + '?offset=' + String(offset),
+                {
+                    method: 'POST',
+                    body: new Blob([new Uint8Array(bytes)]),
+                    signal: controller.signal,
+                },
+            ),
+        );
+    } catch (error) {
+        throw new PublicInputFailure(
+            'Public delivery is unavailable: ' + describe(error),
+        );
+    }
+    if (!response.ok)
+        throw new PublicInputFailure('Public delivery was refused.');
+};
+
+// Publishes one record in transfer chunks.
 export const publishRecord = async (
     relay: PublicRelay,
     name: string,
@@ -108,37 +139,12 @@ export const publishRecord = async (
         offset < bytes.length || offset === 0;
         offset += transferChunkBytes
     ) {
-        const controller = new AbortController();
-        let response: Response;
-        try {
-            response = await withDeadline(controller, () =>
-                fetch(
-                    relay.origin +
-                        '/publish/' +
-                        name +
-                        '?offset=' +
-                        String(offset),
-                    {
-                        method: 'POST',
-                        body: new Blob([
-                            new Uint8Array(
-                                bytes.subarray(
-                                    offset,
-                                    offset + transferChunkBytes,
-                                ),
-                            ),
-                        ]),
-                        signal: controller.signal,
-                    },
-                ),
-            );
-        } catch (error) {
-            throw new PublicInputFailure(
-                'Public delivery is unavailable: ' + describe(error),
-            );
-        }
-        if (!response.ok)
-            throw new PublicInputFailure('Public delivery was refused.');
+        await publishChunk(
+            relay,
+            name,
+            offset,
+            bytes.subarray(offset, offset + transferChunkBytes),
+        );
         if (bytes.length === 0) break;
     }
 };

@@ -48,6 +48,17 @@ fn packet(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
 pub extern "C" fn setup_input_pointer() -> usize {
     SESSION.with(|value| value.borrow_mut().input.as_mut_ptr() as usize)
 }
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_input_capacity() -> usize {
+    INPUT_BYTES
+}
+/// The largest aggregated chunk. Its incoming bytes start the input buffer
+/// and the previous aggregate follows at this offset.
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_chunk_capacity() -> usize {
+    CHUNK_BYTES
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
     SESSION.with(|value| {

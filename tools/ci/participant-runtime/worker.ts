@@ -9,6 +9,18 @@ import {
 } from './bytes.js';
 import { PublicInputFailure } from './context.js';
 import type { ParticipantContext } from './context.js';
+import {
+    beginContribution,
+    confirmContribution,
+    continueContribution,
+    generateContribution,
+    openContribution,
+    publishConfirmation,
+    publishOpening,
+    restoreCheckpoint,
+    resumeContribution,
+    storedConfirmation,
+} from './contribution.js';
 import { parseParticipantDescriptor } from './descriptor.js';
 import type { ParticipantDescriptor } from './descriptor.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
@@ -32,6 +44,7 @@ import {
     reverifyRoster,
     signRoster,
 } from './roster.js';
+import { retainSetup, verifySetup } from './setup.js';
 import { openParticipantDatabase } from './storage.js';
 
 // The application page supplies the descriptor and the exact identities of
@@ -238,6 +251,62 @@ const execute = async (
             );
             if (accepted === undefined) return { status: 'refused' };
             root = accepted;
+            break;
+        }
+        case 'contribute': {
+            // Generation and continuation each draw their randomness once;
+            // an interrupted intent cannot resume.
+            if (root.head.generation < 3 || root.head.generation >= 7)
+                return { status: 'refused' };
+            if (root.head.generation === 4 || root.head.generation === 6)
+                throw new Error('Interrupted contribution work cannot resume.');
+            let session;
+            if (root.head.generation === 3) {
+                session = await beginContribution(
+                    context,
+                    root,
+                    await reverifyRoster(context, relay, root, enrollment),
+                );
+                await generateContribution(session);
+            } else {
+                session = await resumeContribution(context, root);
+                await restoreCheckpoint(session, relay);
+            }
+            await continueContribution(session);
+            root = session.root;
+            break;
+        }
+        case 'confirm': {
+            if (root.head.generation < 7) return { status: 'refused' };
+            const session = await resumeContribution(context, root);
+            const confirmation =
+                root.head.generation >= 9
+                    ? await storedConfirmation(session)
+                    : await confirmContribution(session);
+            root = session.root;
+            await publishConfirmation(session, relay, confirmation);
+            break;
+        }
+        case 'open': {
+            if (root.head.generation < 9) return { status: 'refused' };
+            const session = await resumeContribution(
+                context,
+                root,
+                await reverifyRoster(context, relay, root, enrollment),
+            );
+            await confirmContribution(session);
+            const opening = await openContribution(session, relay);
+            root = session.root;
+            await publishOpening(session, relay, opening);
+            break;
+        }
+        case 'verify-setup': {
+            if (root.head.generation !== 11) return { status: 'refused' };
+            const session = await resumeContribution(context, root);
+            root = await retainSetup(
+                session,
+                await verifySetup(session, relay),
+            );
             break;
         }
         default:

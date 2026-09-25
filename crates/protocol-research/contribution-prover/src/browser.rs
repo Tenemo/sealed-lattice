@@ -18,6 +18,8 @@ use word_proof::{
 use zeroize::Zeroize;
 
 const CHUNK: usize = 1 << 20;
+/// The input buffer: one polynomial chunk, or one checkpoint import context.
+const INPUT_BYTES: usize = 1_572_864;
 struct PublicOutput {
     profile: Profile,
     hash: Sha3_512,
@@ -323,7 +325,7 @@ struct Session {
     checkpoint_import: Option<first_checkpoint::Import>,
     restore_keys: Vec<Option<Vec<u8>>>,
 }
-thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; 1_572_864], output: Vec::new(), work: None, stopped: false, checkpoint_export: None, checkpoint_import: None, restore_keys: Vec::new() }); }
+thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; INPUT_BYTES], output: Vec::new(), work: None, stopped: false, checkpoint_export: None, checkpoint_import: None, restore_keys: Vec::new() }); }
 /// Initializes an embedded prover from the owning verifier's immutable proposal.
 /// The participant worker persists its one-shot intent before invoking this.
 pub fn begin_verified(
@@ -348,6 +350,10 @@ pub fn begin_verified(
 }
 pub fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
+}
+/// The input buffer's length; the host never writes more.
+pub fn input_capacity() -> usize {
+    INPUT_BYTES
 }
 
 /// Records of the checkpoint being imported, or else of the running proof's
