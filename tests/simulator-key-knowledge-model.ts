@@ -18,8 +18,10 @@ export const inputRecoveryReductions: readonly Reduction[] = [
         releaseSimulationAlreadyInstalled: true,
     },
     {
+        // The composed order switches recovery to the auxiliary key only
+        // after the sharing ciphertexts, so they recover with the FHE secret.
         name: 'Honest-recipient sharing ciphertext',
-        recovery: 'auxiliary',
+        recovery: 'fhe',
         unknownKey: 'recipient',
         potentiallyBadKey: null,
         releaseSimulationAlreadyInstalled: true,

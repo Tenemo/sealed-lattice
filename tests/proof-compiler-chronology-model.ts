@@ -6,7 +6,9 @@ import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-mod
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
-// Proof purposes with at most one honest proof per participant in a poll.
+// Proof purposes of a poll. Every honest registration carries one
+// registration proof, and each participant emits at most one proof of every
+// other purpose.
 export const proofPurposes = [
     'registration',
     'setup',
@@ -15,18 +17,25 @@ export const proofPurposes = [
 ] as const;
 
 // The proofs, programming points and commitments that one poll of a supported
-// profile emits, against the caps the proof compiler charges. The claim
-// excludes duplicate registration; contribution, ballot and release occupy
-// one-shot slots, and one target is certified outside the charged
+// profile emits, against the caps the proof compiler charges. Every honest
+// registration publishes its registration proof before any roster exists,
+// including one the roster leaves out, and uses its own credential, so the
+// honest credential population bounds the honest registrations of a poll; by
+// default there is one per participant. Contribution, ballot and release
+// occupy one-shot slots, and one target is certified outside the charged
 // authentication events. A restored participant replays identical bytes and a
 // participant that loses unfinished work stops, so no honest proof is
 // generated twice. The query cap already bounds every oracle call of an
 // experiment within the target, including honest verification and expansion.
-export const compileProofCompilerChronology = (profile: SupportedProfile) => {
+export const compileProofCompilerChronology = (
+    profile: SupportedProfile,
+    honestRegistrations = BigInt(profile.participantCount),
+) => {
     const participants = BigInt(profile.participantCount);
+    if (honestRegistrations < participants)
+        throw new RangeError('The registrations must cover the roster.');
     const purposes = BigInt(proofPurposes.length);
-    const honestProofsPerPurpose = participants;
-    const honestProofs = purposes * honestProofsPerPurpose;
+    const honestProofs = honestRegistrations + (purposes - 1n) * participants;
     // Honest participants accept proofs only for the confirmed roster's
     // registration records and positions, one role per purpose each.
     const acceptedRoles = purposes * participants;
@@ -59,7 +68,7 @@ export const compileProofCompilerChronology = (profile: SupportedProfile) => {
         0n,
     );
     return {
-        honestProofsPerPurpose,
+        honestRegistrations,
         honestProofs,
         acceptedRoles,
         programmedMessages,
@@ -67,7 +76,7 @@ export const compileProofCompilerChronology = (profile: SupportedProfile) => {
         roles,
         widestNonSaltInputBits,
         withinCaps:
-            honestProofs <= proofCompilerCaps.roleBudget &&
+            honestProofs <= proofCompilerCaps.honestProofBudget &&
             acceptedRoles <= proofCompilerCaps.roleBudget &&
             programmedMessages <= proofCompilerCaps.programmedMessageBudget &&
             committedNodesPerProof <= proofCompilerCaps.committedNodeBudget &&

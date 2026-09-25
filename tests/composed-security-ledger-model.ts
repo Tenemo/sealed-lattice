@@ -216,7 +216,8 @@ export const profileStatisticalTerms = (
         {
             name: 'Wide-message proof soundness',
             numerator: dyadic(
-                compiler.failureNumerator,
+                soundnessHops(BigInt(profile.participantCount)) *
+                    compiler.failureNumerator,
                 compiler.failureDenominator,
             ),
         },
@@ -251,6 +252,14 @@ export const profileStatisticalTerms = (
     ];
 };
 
+// No efficient game can test a corrupt statement while a key is uniform, so
+// soundness is not a stop event. Every hop whose identity holds only for true
+// corrupt statements pays it: the released output, the recovery subset before
+// and after each honest recipient key leaves, the three recovery switches and
+// the terminal output.
+export const soundnessHops = (participantCount: bigint) =>
+    2n * participantCount + 5n;
+
 let credentialIndependentTerms:
     | Readonly<{ adversaryQueries: bigint; terms: readonly StatisticalTerm[] }>
     | undefined;
@@ -263,8 +272,12 @@ const statisticalTermsWithoutCredentials = () => {
         return credentialIndependentTerms;
     const evaluated = listSupportedProfiles().map((profile) => {
         // The terms charge the proof compiler's caps, which the proofs,
-        // programming points and commitments of every profile must meet.
-        assert.ok(compileProofCompilerChronology(profile).withinCaps);
+        // programming points and commitments of every profile must meet with
+        // a registration for every honest credential of the population.
+        assert.ok(
+            compileProofCompilerChronology(profile, maximumCredentialPopulation)
+                .withinCaps,
+        );
         return { profile, terms: profileStatisticalTerms(profile) };
     });
     const terms = evaluated[0].terms.map((first, index): StatisticalTerm => {
@@ -559,15 +572,22 @@ const guessingSteps = (participantCount: bigint) =>
 
 // Every honest participant can contribute, receive shares and vote. A
 // ciphertext replacement passes through a uniform value, so it takes two
-// steps, and a key that must end good leaves for uniform and returns. Each
-// step's reduction succeeds only when its guesses are right.
-export const computationalHybrids = (participantCount: bigint) =>
+// steps, and a key that must end good leaves for uniform and returns. Every
+// honest registration publishes its recipient key before any roster exists,
+// so the share-encryption steps take every registration key out and back, not
+// only the recipients'. Each step's reduction succeeds only when its guesses
+// are right.
+export const computationalHybrids = (
+    participantCount: bigint,
+    honestRegistrations = participantCount,
+) =>
     [
         {
             assumption: 'Share-encryption Ring-LWE',
-            hybrid: 'Honest recipient keys out and back around their honest-to-honest sharing ciphertexts',
+            hybrid: 'Honest registration keys out and back around their honest-to-honest sharing ciphertexts',
             reduction: 'plain',
-            multiplicity: 2n * participantCount * (participantCount + 1n),
+            multiplicity:
+                2n * honestRegistrations + 2n * participantCount ** 2n,
             guesses: 1n,
         },
         {
@@ -631,6 +651,13 @@ export const requiredAssumptionBits = (
 export const signatureCategoryBits = 192n;
 export const signatureReductionFactor = 2n;
 
+// The largest honest credential population with
+// U*(2T)^2/2^192 <= T/2^(80+budgetBits) at T = 2^80.
+const maximumCredentialPopulation =
+    (1n <<
+        (signatureCategoryBits - 2n * securityTargetBits - ledgerBudgetBits)) /
+    signatureReductionFactor ** 2n;
+
 export const compileComposedSecurityLedger = (
     potentialCredentialCount?: bigint,
 ) => {
@@ -641,7 +668,10 @@ export const compileComposedSecurityLedger = (
     const profiles = supportedParticipantCounts.map((participantCount) => {
         const credentials =
             potentialCredentialCount ?? BigInt(participantCount);
-        assert.ok(credentials >= BigInt(participantCount));
+        assert.ok(
+            credentials >= BigInt(participantCount) &&
+                credentials <= maximumCredentialPopulation,
+        );
         const extracted =
             compileCommitmentExtractionBound(
                 participantCount,
@@ -651,29 +681,23 @@ export const compileComposedSecurityLedger = (
             participantCount,
             potentialCredentialCount: credentials,
             extractedCommitmentCount: extracted,
-            hybrids: computationalHybrids(BigInt(participantCount)).map(
-                (row) => {
-                    const ratio = reductionRatioAt(work, row.reduction, target);
-                    return {
-                        ...row,
-                        reductionRatioExponent: ceilingLog2(ratio),
-                        requiredBits: requiredAssumptionBits(
-                            row.multiplicity,
-                            row.guesses,
-                            ratio,
-                        ),
-                    };
-                },
-            ),
+            hybrids: computationalHybrids(
+                BigInt(participantCount),
+                credentials,
+            ).map((row) => {
+                const ratio = reductionRatioAt(work, row.reduction, target);
+                return {
+                    ...row,
+                    reductionRatioExponent: ceilingLog2(ratio),
+                    requiredBits: requiredAssumptionBits(
+                        row.multiplicity,
+                        row.guesses,
+                        ratio,
+                    ),
+                };
+            }),
         };
     });
-    // U*(2T)^2/2^192 <= T/2^(80+budgetBits) at T = 2^80.
-    const maximumCredentialPopulation =
-        (1n <<
-            (signatureCategoryBits -
-                2n * securityTargetBits -
-                ledgerBudgetBits)) /
-        signatureReductionFactor ** 2n;
     // Every identity is a 512-bit SHAKE256 output: the ideal identity bound
     // 296*(q+2)^3/2^512 with q <= T, over T.
     const identityCollisionRatio = rational(

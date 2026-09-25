@@ -68,10 +68,14 @@ describe('wide verifier messages and short authentication tags', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
         expect(census.chargedQueries).toBe(4n * (1n << 80n));
         expect(census.roleBudget).toBe(65536n);
+        expect(census.honestProofBudget).toBe(1n << 28n);
         expect(census.saltBits).toBe(2n * census.tagBits);
-        expect(census.merklePrivacyBits).toBe(120);
-        expect(census.programmedMessageBudget).toBe(32n * 65536n);
-        expect(census.reprogrammingBits).toBeGreaterThanOrEqual(190);
+        // 2 * 2^28 honest proofs * 2^23 nodes over 2^160.
+        expect(census.merklePrivacyBits).toBe(108);
+        // One programmed message per honest proof: sqrt(9 * 2^56 * 2^82 /
+        // 2^513) lies between 2^-186 and 2^-185.
+        expect(census.programmedMessageBudget).toBe(census.honestProofBudget);
+        expect(census.reprogrammingBits).toBe(185);
         expect(census.failureBits).toBeGreaterThanOrEqual(80);
         expect(
             census.failureNumerator << BigInt(census.failureBits),

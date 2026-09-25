@@ -105,9 +105,9 @@ export const compileProofRandomnessBudgets = (profile: SupportedProfile) => {
     const compiler = compileWideChallengeCompilerCensus(profile);
     const bufferBytes = 65_536n;
     const failureAllocationBits = 128n;
-    // This is the compiler's explicit conditional cap, not an established
-    // count for the unfinished protocol or unlimited participant restarts.
-    const invocationCap = compiler.roleBudget;
+    // Each role's simulator runs at most once per honest proof, which the
+    // compiler's honest-proof budget bounds; restarts replay completed proofs.
+    const invocationCap = compiler.honestProofBudget;
     const layouts = [
         ['registration', compileRegistrationWordProofLayout()],
         ['setup contribution', compileFullWordProofLayout(profile)],

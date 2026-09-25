@@ -99,7 +99,7 @@ describe('bounded randomness for complete proof simulation', () => {
             expect(value.failure.numerator << 128n).toBeLessThanOrEqual(
                 1n << value.failure.denominatorBits,
             );
-            expect(value.invocationCap).toBe(65_536n);
+            expect(value.invocationCap).toBe(1n << 28n);
             expect(value.extraReads).toBeGreaterThan(0n);
             const previousPositions =
                 (value.simulatorBaselineBytes +
@@ -110,7 +110,10 @@ describe('bounded randomness for complete proof simulation', () => {
                 pairs = (pairs * (previousPositions - index + 1n)) / index;
             const rejectedWords = 133n * (1n << 64n) - 1n;
             expect(
-                (65_536n * pairs * rejectedWords ** value.extraReads) << 128n,
+                (value.invocationCap *
+                    pairs *
+                    rejectedWords ** value.extraReads) <<
+                    128n,
             ).toBeGreaterThan(1n << (128n * value.extraReads));
         }
     });

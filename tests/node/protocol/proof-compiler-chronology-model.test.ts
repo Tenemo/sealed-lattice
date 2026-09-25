@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { compileComposedSecurityLedger } from '#tests/composed-security-ledger-model.js';
 import {
     compileProofCompilerChronology,
     proofPurposes,
@@ -7,6 +8,8 @@ import {
 import { framedProofHashBytes } from '#tests/proof-hash-work-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
+
+const population = compileComposedSecurityLedger().maximumCredentialPopulation;
 
 describe('proof compiler chronology', () => {
     it('emits one proof and one programmed message per participant and purpose', () => {
@@ -19,7 +22,7 @@ describe('proof compiler chronology', () => {
                 deriveSupportedProfile(participantCount, optionCount),
             );
             expect(proofPurposes).toHaveLength(4);
-            expect(chronology.honestProofsPerPurpose).toBe(
+            expect(chronology.honestRegistrations).toBe(
                 BigInt(participantCount),
             );
             expect(chronology.honestProofs).toBe(4n * BigInt(participantCount));
@@ -29,6 +32,30 @@ describe('proof compiler chronology', () => {
             expect(chronology.programmedMessages).toBe(chronology.honestProofs);
             expect(chronology.withinCaps).toBe(true);
         }
+    });
+
+    it('simulates a registration proof for every honest credential of the population', () => {
+        const profile = deriveSupportedProfile(20, 20);
+        // Registrations the roster leaves out still published their proofs,
+        // while the corrupt roles an honest participant accepts stay the
+        // roster's.
+        const chronology = compileProofCompilerChronology(profile, population);
+        expect(chronology.honestRegistrations).toBe(population);
+        expect(chronology.honestProofs).toBe(population + 3n * 20n);
+        expect(chronology.acceptedRoles).toBe(80n);
+        expect(chronology.programmedMessages).toBe(chronology.honestProofs);
+        expect(chronology.withinCaps).toBe(true);
+        const overflow = compileProofCompilerChronology(
+            profile,
+            proofCompilerCaps.honestProofBudget - 3n * 20n + 1n,
+        );
+        expect(overflow.honestProofs).toBe(
+            proofCompilerCaps.honestProofBudget + 1n,
+        );
+        expect(overflow.withinCaps).toBe(false);
+        expect(() => compileProofCompilerChronology(profile, 19n)).toThrow(
+            'The registrations must cover the roster.',
+        );
     });
 
     it('counts every tree node and message root of the emitted proof domain', () => {
@@ -88,17 +115,16 @@ describe('proof compiler chronology', () => {
     it('depends on replaying rather than regenerating proofs after a restart', () => {
         const chronology = compileProofCompilerChronology(
             deriveSupportedProfile(20, 20),
+            population,
         );
-        // Eighty slots within 65,536 proofs allow 819 generations per slot;
-        // regenerating each proof at every restart would exceed the role
-        // union at the 820th.
-        const failingGenerations = 820n;
-        expect(chronology.honestProofs * failingGenerations).toBeGreaterThan(
-            proofCompilerCaps.roleBudget,
+        // The honest proofs of the largest population fill more than half the
+        // budget, so generating every proof a second time would exceed it.
+        expect(2n * chronology.honestProofs).toBeGreaterThan(
+            proofCompilerCaps.honestProofBudget,
         );
-        expect(
-            chronology.honestProofs * (failingGenerations - 1n),
-        ).toBeLessThanOrEqual(proofCompilerCaps.roleBudget);
+        expect(chronology.honestProofs).toBeLessThanOrEqual(
+            proofCompilerCaps.honestProofBudget,
+        );
         expect(chronology.programmedMessages).toBeLessThanOrEqual(
             proofCompilerCaps.programmedMessageBudget,
         );

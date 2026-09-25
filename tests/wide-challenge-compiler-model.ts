@@ -60,22 +60,28 @@ export const jointModuloDensityBound = (
 
 // The compiler's charged caps are the same for every supported profile. The
 // ledger charges them, and the proof chronology model checks that one poll of
-// every profile stays within them. The query cap bounds every oracle call of
-// the experiment, including honest proving, verification and expansion, and
-// prefix and role routing make at most four base calls of each.
+// every profile, with a registration for every honest credential of the
+// largest population, stays within them. The query cap bounds every oracle
+// call of the experiment, including honest proving, verification and
+// expansion, and prefix and role routing make at most four base calls of each.
+// The role budget bounds the corrupt roles whose proofs can be accepted, and
+// the honest-proof budget the simulated honest proofs, each of which programs
+// one verifier message.
 const adversaryQueries = 1n << 80n;
 const roleBudget = 1n << 16n;
+const honestProofBudget = 1n << 28n;
 const tagBits = 512n;
 export const proofCompilerCaps = {
     adversaryQueries,
     chargedQueries: 4n * adversaryQueries,
     roleBudget,
+    honestProofBudget,
     tagBits,
     saltBits: 2n * tagBits,
     relativeBalanceBits: 160n,
     maximumNonSaltInputBits: 1n << 40n,
     committedNodeBudget: 1n << 23n,
-    programmedMessageBudget: 32n * roleBudget,
+    programmedMessageBudget: honestProofBudget,
 } as const;
 
 export const compileProofCompilerCapCensus = () => {
@@ -94,9 +100,9 @@ export const compileProofCompilerCapCensus = () => {
         balanceTailPower - maximumNonSaltInputBits - tagBits - 2n;
     if (balanceFailureExponent < 256n)
         throw new Error('The all-input hash-balance exception is too large.');
-    // Two privacy replacements per node, with a role union. Charge epsilon
+    // Two privacy replacements per node of every honest proof. Charge epsilon
     // per replacement instead of the smaller epsilon/2 total-variation bound.
-    const merklePrivacyNumerator = 2n * roleBudget * committedNodeBudget;
+    const merklePrivacyNumerator = 2n * honestProofBudget * committedNodeBudget;
     const merklePrivacyDenominator = 1n << relativeBalanceBits;
     let merklePrivacyBits = 0;
     while (

@@ -19,6 +19,7 @@ import {
     securityTargetBits,
     signatureCategoryBits,
     signatureReductionFactor,
+    soundnessHops,
     sparseRoutingCoefficients,
     supportedParticipantCounts,
 } from '#tests/composed-security-ledger-model.js';
@@ -30,6 +31,7 @@ import {
     listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 const ledger = compileComposedSecurityLedger();
 const target = 1n << securityTargetBits;
@@ -213,9 +215,19 @@ describe('composed security ledger', () => {
     });
 
     it('counts hybrid multiplicities from the honest roles', () => {
-        for (const participantCount of supportedParticipantCounts) {
+        for (const [participantCount, extraRegistrations] of [
+            ...supportedParticipantCounts.map((count) => [count, 0] as const),
+            [3, 2],
+            [20, 7],
+        ] as const) {
             const honest = Array.from(
                 { length: participantCount },
+                (_unused, index) => index,
+            );
+            // Registrations the roster leaves out publish keys too, but no
+            // share is encrypted to them.
+            const registrations = Array.from(
+                { length: participantCount + extraRegistrations },
                 (_unused, index) => index,
             );
             // Each step replaces one assumption instance. A ciphertext moves
@@ -228,14 +240,16 @@ describe('composed security ledger', () => {
             const steps = new Map<string, readonly string[]>([
                 [
                     'Share-encryption Ring-LWE:plain',
-                    honest.flatMap((recipient) => [
-                        `recipient key ${recipient} out`,
-                        ...honest.flatMap((contributor) =>
-                            replaceCiphertext(
-                                `share ${contributor} to ${recipient}`,
-                            ),
-                        ),
-                        `recipient key ${recipient} back`,
+                    registrations.flatMap((registration) => [
+                        `registration key ${registration} out`,
+                        ...(registration < participantCount
+                            ? honest.flatMap((contributor) =>
+                                  replaceCiphertext(
+                                      `share ${contributor} to ${registration}`,
+                                  ),
+                              )
+                            : []),
+                        `registration key ${registration} back`,
                     ]),
                 ],
                 [
@@ -267,7 +281,10 @@ describe('composed security ledger', () => {
                     ],
                 ],
             ]);
-            const rows = computationalHybrids(BigInt(participantCount));
+            const rows = computationalHybrids(
+                BigInt(participantCount),
+                BigInt(registrations.length),
+            );
             expect(rows).toHaveLength(steps.size);
             for (const row of rows) {
                 const rowSteps = steps.get(
@@ -353,6 +370,43 @@ describe('composed security ledger', () => {
             expect(
                 numerator << BigInt(fixedModulusBfvInputs.statisticalBits),
             ).toBeLessThanOrEqual(2n * lifting.sharingRadius);
+        }
+    });
+
+    it('charges proof soundness at every hop that relies on it', () => {
+        for (const participantCount of [3, 10, 20]) {
+            const honest = Array.from(
+                { length: participantCount },
+                (_unused, index) => index,
+            );
+            // Hops whose identity holds only for true corrupt statements.
+            const hops = [
+                'released output',
+                ...honest.flatMap((recipient) => [
+                    `recovery without recipient ${recipient}`,
+                    `recovery with recipient ${recipient}`,
+                ]),
+                'recovery to the auxiliary key',
+                'recovery to the FHE literal tail',
+                'recovery back to the auxiliary key',
+                'terminal output',
+            ];
+            expect(soundnessHops(BigInt(participantCount))).toBe(
+                BigInt(hops.length),
+            );
+            const profile = deriveSupportedProfile(participantCount, 10);
+            const compiler = compileWideChallengeCompilerCensus(profile);
+            const exactNumerator =
+                BigInt(hops.length) * compiler.failureNumerator;
+            const term = profileStatisticalTerms(profile).find(
+                (value) => value.name === 'Wide-message proof soundness',
+            )!;
+            expect(
+                term.numerator * compiler.failureDenominator,
+            ).toBeGreaterThanOrEqual(exactNumerator << 256n);
+            expect(
+                (term.numerator - 1n) * compiler.failureDenominator,
+            ).toBeLessThan(exactNumerator << 256n);
         }
     });
 
