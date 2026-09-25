@@ -15,6 +15,15 @@ import {
     hexadecimal,
     sha512,
 } from './bytes.js';
+import { completedClosePhase } from './close-state.js';
+import {
+    advanceClose,
+    closeEvents,
+    isCloseComplete,
+    parseCloseRequest,
+    publishClose,
+    resumeClose,
+} from './close.js';
 import { PublicInputFailure } from './context.js';
 import type { ParticipantContext } from './context.js';
 import {
@@ -52,8 +61,10 @@ import {
     reverifyRoster,
     signRoster,
 } from './roster.js';
-import { retainSetup, verifySetup } from './setup.js';
+import { retainSetup, reverifySetup, verifySetup } from './setup.js';
 import { openParticipantDatabase } from './storage.js';
+import { targetPhase } from './target-state.js';
+import { publishTarget, signTarget } from './target.js';
 
 // The application page supplies the descriptor and the exact identities of
 // the code it verified; the worker fetches the module itself and recomputes
@@ -320,7 +331,7 @@ const execute = async (
         case 'ballot': {
             // Generation twelve starts an attempt with the requested scores.
             // A retained attempt continues only with its locked scores, and a
-            // signed ballot is only delivered again.
+            // signed ballot is only delivered again, also after an intent.
             const generation = root.head.generation;
             const scores =
                 parameters.scores === undefined
@@ -328,10 +339,9 @@ const execute = async (
                     : parseBallotScores(context.descriptor, parameters.scores);
             if (
                 generation < 12 ||
-                generation > 17 ||
                 (parameters.scores !== undefined && scores === undefined) ||
                 (generation === 12 && scores === undefined) ||
-                (generation === 17 && scores !== undefined)
+                (generation >= 17 && scores !== undefined)
             )
                 return { status: 'refused' };
             const contribution = await resumeContribution(context, root);
@@ -341,8 +351,9 @@ const execute = async (
             else {
                 session = await resumeBallot(contribution);
                 if (
-                    scores !== undefined &&
-                    !equalBytes(scores, session.state.scores)
+                    session === undefined ||
+                    (scores !== undefined &&
+                        !equalBytes(scores, session.state.scores))
                 )
                     return { status: 'refused' };
             }
@@ -350,6 +361,61 @@ const execute = async (
             root = contribution.root;
             await publishBallot(session, relay);
             break;
+        }
+        case 'close': {
+            // Only the organizer opens the close, and only before an intent
+            // and with no ballot attempt pending.
+            const request = parseCloseRequest(context.descriptor, parameters);
+            const generation = root.head.generation;
+            if (
+                request === undefined ||
+                generation < 12 ||
+                (request.closeTime !== undefined &&
+                    (!enrollment.isOrganizer ||
+                        (generation !== 12 && generation !== 17)))
+            )
+                return { status: 'refused' };
+            const contribution = await resumeContribution(context, root);
+            const session = await resumeClose(
+                contribution,
+                enrollment.isOrganizer,
+            );
+            if (!isCloseComplete(session)) {
+                await reverifySetup(contribution, relay);
+                await advanceClose(session, relay, request);
+            }
+            root = contribution.root;
+            await publishClose(session, relay);
+            return {
+                status: 'completed',
+                details: {
+                    ...summary(root, enrollment),
+                    closeEvents: closeEvents(session),
+                },
+            };
+        }
+        case 'target': {
+            // Target signing follows the completed close; a signed vote is
+            // only delivered again.
+            const generation = root.head.generation;
+            if (generation < completedClosePhase(enrollment.isOrganizer))
+                return { status: 'refused' };
+            const contribution = await resumeContribution(context, root);
+            const session = await resumeClose(
+                contribution,
+                enrollment.isOrganizer,
+            );
+            let signed = {};
+            if (generation < targetPhase.signed) {
+                await reverifySetup(contribution, relay);
+                signed = await signTarget(session, relay);
+            }
+            root = contribution.root;
+            await publishTarget(session, relay);
+            return {
+                status: 'completed',
+                details: { ...summary(root, enrollment), ...signed },
+            };
         }
         default:
             return { status: 'refused' };

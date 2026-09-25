@@ -48,12 +48,6 @@ impl BallotWork {
     pub fn into_owner(self) -> RetainedBallotOwner {
         self.owner
     }
-    /// The aggregate polynomial the ballot reads as its key at this ordinal.
-    pub fn key_index(&self, ordinal: usize) -> Option<usize> {
-        setup_inputs(self.inputs.profile())
-            .get(ordinal)
-            .map(|input| input.2)
-    }
     pub fn new(
         credential: &Credential,
         proposal: &RetainedContributionContext,

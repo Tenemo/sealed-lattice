@@ -985,6 +985,28 @@ pub fn run(
             .unwrap(),
         wanted_bytes(&all_wanted)
     );
+    // Each wanted body is named by the identity the close work reports for
+    // its envelope, and bytes that are not an envelope have none.
+    for submission in &all_wanted {
+        assert_eq!(
+            lacking
+                .command(
+                    &mut enrollments[0].credential,
+                    14,
+                    0,
+                    submission.envelope.bytes()
+                )
+                .unwrap(),
+            submission.envelope.identity()
+        );
+    }
+    let mut malformed = all_wanted[0].envelope.bytes().to_vec();
+    malformed[0] ^= 1;
+    assert!(
+        lacking
+            .command(&mut enrollments[0].credential, 14, 0, &malformed)
+            .is_err()
+    );
     for operation in [6, 9] {
         assert!(matches!(
             lacking.command(&mut enrollments[0].credential, operation, 0, &[]),

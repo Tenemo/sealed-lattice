@@ -9,11 +9,14 @@ import { build } from 'tsdown';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
+import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
@@ -23,6 +26,7 @@ import {
     ballotScoreRange,
     deriveSupportedProfile,
 } from '#tests/supported-profile-model.js';
+import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import type { ParticipantDescriptor } from '#tools/ci/participant-runtime/descriptor.js';
 import { runCommandAndCaptureOutput } from '#tools/ci/run-command.js';
@@ -57,6 +61,9 @@ export const deriveParticipantDescriptor = (
     const ballotBody = compileBallotBodyCensus(profile);
     const ballotCustody = compileParticipantBallotCustody(profile);
     const randomness = compileBallotRandomnessBudget(profile);
+    const closeWire = compileCloseWireCensus(profile);
+    const closeCustody = compileParticipantCloseCustody(profile);
+    const targetState = compileTargetSigningStateCensus();
     return {
         participantCount,
         optionCount,
@@ -125,6 +132,7 @@ export const deriveParticipantDescriptor = (
             ],
             journalRecords: number(randomness.recordCount),
             maximumStateBytes: number(ballotCustody.maximumStateBytes),
+            headerBytes: number(ballotBody.headerBytes),
             minimumBodyBytes: number(
                 ballotBody.headerBytes +
                     ballotBody.ciphertextBytes +
@@ -137,6 +145,38 @@ export const deriveParticipantDescriptor = (
                     ballotCustody.maximumStateBytes +
                     custody.maximumRootBytes,
             ),
+        },
+        close: {
+            quorum: number(closeWire.closeQuorum),
+            submissionBytes: number(closeWire.submissionBytes),
+            intentBodyBytes: number(closeWire.intentBodyBytes),
+            minimumResponseBodyBytes: number(
+                closeWire.minimumResponseBodyBytes,
+            ),
+            maximumResponseBodyBytes: number(
+                closeWire.maximumResponseBodyBytes,
+            ),
+            proposalBodyBytes: number(closeWire.proposalBodyBytes),
+            maximumResponseRecordBytes: number(
+                closeWire.maximumResponsePacketBytes +
+                    closeWire.maximumResponseEntries *
+                        closeWire.submissionBytes,
+            ),
+            maximumEvents: number(closeCustody.maximumEvents),
+            maximumRecords: number(closeCustody.maximumRecords),
+            maximumStateBytes: number(closeCustody.maximumStateBytes),
+        },
+        target: {
+            maximumBodyBytes: number(targetState.maximumBodyBytes),
+            votePacketBytes: number(targetState.packetBytes),
+            maximumStateBytes: number(targetState.maximumStateBytes),
+        },
+        evaluation: {
+            polynomialDegree: number(fixedModulusBfvInputs.polynomialDegree),
+            // Whole 64-bit words of the ciphertext modulus's bit length.
+            storedCoefficientBytes:
+                8 *
+                Math.ceil(profile.ciphertext.modulus.toString(2).length / 64),
         },
     };
 };

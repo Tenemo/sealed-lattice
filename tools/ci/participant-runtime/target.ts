@@ -1,0 +1,660 @@
+import { ballotDirectory, retainedBallotRecords } from './ballot.js';
+import {
+    concatenate,
+    equalBytes,
+    hexadecimal,
+    readUnsigned16,
+    readUnsigned32,
+    unsigned32,
+} from './bytes.js';
+import { completedClosePhase } from './close-state.js';
+import {
+    closeDirectory,
+    completedCloseRecords,
+    envelopeIdentity,
+    readPublishedSubmission,
+    restoreCompletedClose,
+} from './close.js';
+import type { CloseSession } from './close.js';
+import { PublicInputFailure, sessionInput } from './context.js';
+import type { ParticipantContext } from './context.js';
+import { contributionRecords } from './contribution.js';
+import { moduleChunkBytes, readKernel, writeChunkInput } from './kernel.js';
+import { publishRecord, readPublic, streamPublic } from './public.js';
+import type { PublicRelay } from './public.js';
+import { commitRoot, dataRecordInventory } from './root.js';
+import { readFinalAggregate } from './setup.js';
+import {
+    decodeTargetState,
+    encodeTargetState,
+    targetPhase,
+} from './target-state.js';
+import type { TargetState } from './target-state.js';
+
+// A participant's target signing. It verifies the organizer's close barrier
+// from the public close records, classifies each usable ballot, evaluates
+// the public ranking target and retains the exact target body with fresh
+// signing coins before its target vote exists. An interrupted signing
+// evaluates again and must reproduce the retained body. The values the
+// evaluation spills are public work in their own database, which each
+// evaluation clears first; the engine checks every value it reads back.
+
+const coinBytes = 32;
+const listedEntryBytes = 2 + 64;
+const unusedWord = 0xff_ff_ff_ff;
+const completionDirectory = 'completion/';
+const evaluationDatabase = 'sealed-lattice-public-evaluation';
+const evaluationStore = 'values';
+
+// The own ballot's status in the target, by the finality work's code.
+const ballotStatuses = ['not cast', 'late', 'included', 'omitted'] as const;
+
+const words = (bytes: Uint8Array) => {
+    if (bytes.length % 4 !== 0)
+        throw new Error('The evaluation returned partial words.');
+    return Array.from({ length: bytes.length / 4 }, (_unused, index) =>
+        readUnsigned32(bytes, 4 * index),
+    );
+};
+
+const streamBody = (
+    context: ParticipantContext,
+    relay: PublicRelay,
+    author: number,
+    accept: (bytes: Uint8Array) => void | Promise<void>,
+) =>
+    streamPublic(
+        relay,
+        ballotDirectory(author) + 'body.bin',
+        context.descriptor.ballot.maximumBodyBytes,
+        accept,
+    );
+
+const barrierCommand = (
+    context: ParticipantContext,
+    operation: number,
+    input: Uint8Array = new Uint8Array(),
+) => {
+    const { kernel } = context;
+    writeChunkInput(kernel, kernel.close_input_pointer(), input);
+    return kernel.close_command(operation, input.length) === 0;
+};
+
+const requireBarrier = (
+    context: ParticipantContext,
+    operation: number,
+    input: Uint8Array,
+    reason: string,
+) => {
+    if (!barrierCommand(context, operation, input))
+        throw new PublicInputFailure(reason);
+};
+
+// Verifies the organizer's close barrier from the public close records: the
+// intent, the proposal's named responses with every envelope they list, and
+// the body of each usable slot. Returns each usable slot's submission by its
+// author.
+const verifyCloseBarrier = async (
+    context: ParticipantContext,
+    relay: PublicRelay,
+) => {
+    const { descriptor, kernel } = context;
+    const { close, registration } = descriptor;
+    const { signatureBytes } = registration;
+    if (!barrierCommand(context, 1))
+        throw new Error('The close verifier has no verified setup.');
+    requireBarrier(
+        context,
+        2,
+        await readPublic(
+            relay,
+            closeDirectory + 'intent.bin',
+            4 + close.intentBodyBytes + signatureBytes,
+        ),
+        'The close intent was refused.',
+    );
+    const proposal = await readPublic(
+        relay,
+        closeDirectory + 'proposal.bin',
+        4 + close.proposalBodyBytes + signatureBytes,
+    );
+    if (proposal.length !== 4 + close.proposalBodyBytes + signatureBytes)
+        throw new PublicInputFailure('The close proposal is incomplete.');
+    // The proposal ends with its named responders and their responses.
+    const listed = new Map<
+        string,
+        { author: number; submission: Uint8Array }
+    >();
+    for (let index = 0; index < close.quorum; index++) {
+        const responder = readUnsigned16(
+            proposal,
+            4 +
+                close.proposalBodyBytes -
+                (close.quorum - index) * listedEntryBytes,
+        );
+        const response = await readPublic(
+            relay,
+            closeDirectory + 'response-' + String(responder) + '.bin',
+            4 + close.maximumResponseBodyBytes + signatureBytes,
+        );
+        const length = response.length < 4 ? 0 : readUnsigned32(response, 0);
+        if (
+            length < close.minimumResponseBodyBytes ||
+            response.length !== 4 + length + signatureBytes
+        )
+            throw new PublicInputFailure('A close response is malformed.');
+        for (
+            let offset = 4 + close.minimumResponseBodyBytes;
+            offset + listedEntryBytes <= 4 + length;
+            offset += listedEntryBytes
+        ) {
+            const identity = response.subarray(
+                offset + 2,
+                offset + listedEntryBytes,
+            );
+            if (listed.has(hexadecimal(identity))) continue;
+            const author = readUnsigned16(response, offset);
+            const submission = await readPublishedSubmission(
+                descriptor,
+                relay,
+                author,
+            );
+            const reported =
+                submission === undefined
+                    ? undefined
+                    : envelopeIdentity(context, submission);
+            if (
+                submission === undefined ||
+                reported === undefined ||
+                !equalBytes(reported, identity)
+            )
+                throw new PublicInputFailure(
+                    'A listed envelope is unavailable.',
+                );
+            requireBarrier(
+                context,
+                3,
+                submission,
+                'A listed envelope was refused.',
+            );
+            listed.set(hexadecimal(identity), { author, submission });
+        }
+        requireBarrier(context, 7, response, 'A close response was refused.');
+    }
+    // Before any body is delivered, the usable-slot bodies the proposal still
+    // needs are all of them.
+    requireBarrier(context, 8, proposal, 'The close proposal was refused.');
+    const missing = readKernel(
+        kernel,
+        kernel.close_missing_pointer(),
+        kernel.close_missing_count() * 64,
+    );
+    const usable = new Map<number, Uint8Array>();
+    for (let offset = 0; offset < missing.length; offset += 64) {
+        const identity = missing.subarray(offset, offset + 64);
+        const slot = listed.get(hexadecimal(identity));
+        if (slot === undefined)
+            throw new Error('The close verifier needs an unlisted body.');
+        requireBarrier(context, 4, identity, 'A usable body was refused.');
+        await streamBody(context, relay, slot.author, (bytes) => {
+            requireBarrier(context, 5, bytes, 'A usable body was refused.');
+        });
+        requireBarrier(
+            context,
+            6,
+            new Uint8Array(),
+            'A usable body was refused.',
+        );
+        usable.set(slot.author, slot.submission);
+    }
+    requireBarrier(context, 9, proposal, 'The close barrier was refused.');
+    return usable;
+};
+
+const classifierInput = (context: ParticipantContext, bytes: Uint8Array) => {
+    const { kernel } = context;
+    writeChunkInput(kernel, kernel.ballot_body_input_pointer(), bytes);
+    return bytes.length;
+};
+
+// Starts the owning signed-ballot classifier on a usable submission and its
+// body header, and delivers the encryption keys from the verified aggregate
+// while the body relation needs them.
+const beginClassification = async (
+    context: ParticipantContext,
+    submission: Uint8Array,
+    header: Uint8Array,
+) => {
+    const { kernel } = context;
+    if (
+        kernel.ballot_classification_begin(
+            classifierInput(context, concatenate(submission, header)),
+        ) !== 0
+    )
+        throw new PublicInputFailure('A usable ballot was refused.');
+    for (
+        let ordinal = 0;
+        kernel.ballot_classification_requires_keys() === 1;
+        ordinal++
+    ) {
+        const index = kernel.participant_ballot_key_index(ordinal) >>> 0;
+        if (
+            index === unusedWord ||
+            kernel.ballot_classification_key_begin(index) !== 0
+        )
+            throw new Error('The ballot classifier refused its key.');
+        await readFinalAggregate(context, index, (_offset, bytes) => {
+            if (
+                kernel.ballot_classification_key_chunk(
+                    classifierInput(context, bytes),
+                ) !== 0
+            )
+                throw new PublicInputFailure('A ballot key was refused.');
+        });
+        if (kernel.ballot_classification_key_finish() !== 0)
+            throw new PublicInputFailure('A ballot key was refused.');
+    }
+};
+
+// Classifies one usable ballot as valid or invalid. The body must be the one
+// the barrier authenticated, or the classifier refuses it.
+const classifyBallot = async (
+    context: ParticipantContext,
+    relay: PublicRelay,
+    author: number,
+    submission: Uint8Array,
+) => {
+    const { kernel, descriptor } = context;
+    const { headerBytes } = descriptor.ballot;
+    let header: Uint8Array = new Uint8Array();
+    await streamBody(context, relay, author, async (bytes) => {
+        let rest = bytes;
+        if (header.length < headerBytes) {
+            const taken = rest.subarray(0, headerBytes - header.length);
+            header = concatenate(header, taken);
+            rest = rest.subarray(taken.length);
+            if (header.length < headerBytes) return;
+            await beginClassification(context, submission, header);
+        }
+        if (
+            rest.length > 0 &&
+            kernel.ballot_classification_chunk(
+                classifierInput(context, rest),
+            ) !== 0
+        )
+            throw new PublicInputFailure('A usable ballot was refused.');
+    });
+    const classification =
+        header.length === headerBytes
+            ? kernel.ballot_classification_finish()
+            : 0;
+    if (classification === 0)
+        throw new PublicInputFailure('A usable ballot changed.');
+    return classification === 1;
+};
+
+const tryEvaluationCommand = (
+    context: ParticipantContext,
+    operation: number,
+    argument = 0,
+    input: Uint8Array = new Uint8Array(),
+) => {
+    const { kernel } = context;
+    writeChunkInput(kernel, kernel.evaluation_target_input_pointer(), input);
+    if (
+        kernel.evaluation_target_command(operation, argument, input.length) !==
+        0
+    )
+        return undefined;
+    return readKernel(
+        kernel,
+        kernel.evaluation_target_output_pointer(),
+        kernel.evaluation_target_output_length(),
+    );
+};
+
+const evaluationCommand = (
+    context: ParticipantContext,
+    operation: number,
+    argument = 0,
+    input: Uint8Array = new Uint8Array(),
+) => {
+    const output = tryEvaluationCommand(context, operation, argument, input);
+    if (output === undefined)
+        throw new Error(
+            'The evaluation refused operation ' + String(operation) + '.',
+        );
+    return output;
+};
+
+// Delivers one incoming evaluation input in chunks and finishes it. A refusal
+// means the bytes are not the ones the engine expects.
+const deliverEvaluationInput = async (
+    context: ParticipantContext,
+    produce: (accept: (bytes: Uint8Array) => void) => Promise<unknown>,
+    reason: string,
+) => {
+    await produce((bytes) => {
+        if (tryEvaluationCommand(context, 12, 0, bytes) === undefined)
+            throw new PublicInputFailure(reason);
+    });
+    if (tryEvaluationCommand(context, 13) === undefined)
+        throw new PublicInputFailure(reason);
+};
+
+const request = <Value>(value: IDBRequest<Value>) =>
+    new Promise<Value>((resolve, reject) => {
+        value.onsuccess = () => resolve(value.result);
+        value.onerror = () =>
+            reject(new PublicInputFailure('The evaluation storage failed.'));
+    });
+
+const completion = (transaction: IDBTransaction) =>
+    new Promise<void>((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = () =>
+            reject(new PublicInputFailure('The evaluation storage failed.'));
+    });
+
+const openEvaluationStorage = async () => {
+    const opened = indexedDB.open(evaluationDatabase, 1);
+    opened.onupgradeneeded = () =>
+        opened.result.createObjectStore(evaluationStore);
+    return request(opened);
+};
+
+const writeEvaluationStorage = async (
+    storage: IDBDatabase,
+    write: (store: IDBObjectStore) => void,
+) => {
+    const transaction = storage.transaction(evaluationStore, 'readwrite');
+    const done = completion(transaction);
+    write(transaction.objectStore(evaluationStore));
+    await done;
+};
+
+const readStoredChunk = async (
+    storage: IDBDatabase,
+    node: number,
+    offset: number,
+    length: number,
+) => {
+    const transaction = storage.transaction(evaluationStore, 'readonly');
+    const done = completion(transaction);
+    const value = await request<unknown>(
+        transaction.objectStore(evaluationStore).get([node, offset]),
+    );
+    await done;
+    if (!(value instanceof Blob) || value.size !== length)
+        throw new PublicInputFailure('A stored evaluation value is missing.');
+    return new Uint8Array(await value.arrayBuffer());
+};
+
+// Runs the public ranking evaluation from the closed inventory. The engine
+// names each step's keys, ballot input, and values to spill or reload; a
+// spilled value is read back through the engine before it leaves memory.
+const evaluate = async (context: ParticipantContext, relay: PublicRelay) => {
+    const { kernel, descriptor } = context;
+    const { polynomialDegree, storedCoefficientBytes } = descriptor.evaluation;
+    const coefficients = 2 * polynomialDegree;
+    const chunkCoefficients = Math.floor(
+        moduleChunkBytes / storedCoefficientBytes,
+    );
+    const chunks = (node: number) =>
+        Array.from(
+            { length: Math.ceil(coefficients / chunkCoefficients) },
+            (_unused, index) => {
+                const offset = index * chunkCoefficients;
+                return {
+                    node,
+                    offset,
+                    count: Math.min(chunkCoefficients, coefficients - offset),
+                };
+            },
+        );
+    const storage = await openEvaluationStorage();
+    try {
+        await writeEvaluationStorage(storage, (store) => store.clear());
+        const deliverStored = (operation: number, node: number) => {
+            evaluationCommand(context, operation, node);
+            return deliverEvaluationInput(
+                context,
+                async (accept) => {
+                    for (const chunk of chunks(node))
+                        accept(
+                            await readStoredChunk(
+                                storage,
+                                chunk.node,
+                                chunk.offset,
+                                chunk.count * storedCoefficientBytes,
+                            ),
+                        );
+                },
+                'A stored evaluation value changed.',
+            );
+        };
+        evaluationCommand(context, 2);
+        while (
+            kernel.evaluation_target_body_length() === 0 &&
+            kernel.evaluation_target_finished() !== 1
+        ) {
+            const required = words(evaluationCommand(context, 10));
+            const [, loaded, keyCount, spillCount, reloadCount, author] =
+                required;
+            if (required.length !== 7 + spillCount + reloadCount)
+                throw new Error('The evaluation requirements are malformed.');
+            for (const node of required.slice(7, 7 + spillCount)) {
+                for (const chunk of chunks(node)) {
+                    const bytes = evaluationCommand(
+                        context,
+                        16,
+                        node,
+                        concatenate(
+                            unsigned32(chunk.offset),
+                            unsigned32(chunk.count),
+                        ),
+                    );
+                    if (bytes.length !== chunk.count * storedCoefficientBytes)
+                        throw new Error('An evaluation spill is incomplete.');
+                    await writeEvaluationStorage(storage, (store) =>
+                        store.put(new Blob([new Uint8Array(bytes)]), [
+                            node,
+                            chunk.offset,
+                        ]),
+                    );
+                }
+                await deliverStored(17, node);
+            }
+            for (const node of required.slice(7 + spillCount))
+                await deliverStored(18, node);
+            for (let ordinal = loaded; ordinal < keyCount; ordinal++) {
+                const [index] = words(evaluationCommand(context, 11));
+                if (index !== unusedWord)
+                    await deliverEvaluationInput(
+                        context,
+                        (accept) =>
+                            readFinalAggregate(
+                                context,
+                                index,
+                                (_offset, bytes) => accept(bytes),
+                            ),
+                        'An evaluation key was refused.',
+                    );
+            }
+            if (author !== unusedWord) {
+                const [length] = words(evaluationCommand(context, 14, author));
+                if (length > 0)
+                    await deliverEvaluationInput(
+                        context,
+                        (accept) => streamBody(context, relay, author, accept),
+                        'An accepted ballot changed.',
+                    );
+            }
+            const retired = words(evaluationCommand(context, 15));
+            await writeEvaluationStorage(storage, (store) => {
+                for (const node of retired.slice(1))
+                    store.delete(
+                        IDBKeyRange.bound([node], [node + 1], false, true),
+                    );
+            });
+        }
+        if (kernel.evaluation_target_body_length() === 0)
+            evaluationCommand(context, 19);
+        await writeEvaluationStorage(storage, (store) => store.clear());
+    } finally {
+        storage.close();
+    }
+    return readKernel(
+        kernel,
+        kernel.evaluation_target_body_pointer(),
+        kernel.evaluation_target_body_length(),
+    );
+};
+
+const finalityCommand = (
+    context: ParticipantContext,
+    operation: number,
+    input: Uint8Array = new Uint8Array(),
+) => {
+    const { kernel } = context;
+    sessionInput(context, input);
+    if (kernel.participant_finality_command(operation, input.length) !== 0)
+        throw new Error(
+            'The finality work refused operation ' + String(operation) + '.',
+        );
+    return readKernel(
+        kernel,
+        kernel.contribution_output_pointer(),
+        kernel.contribution_output_length(),
+    );
+};
+
+// The retained target signing state, or undefined before it begins.
+const resumeTarget = (close: CloseSession): TargetState | undefined => {
+    const { root, context } = close.contribution;
+    if (root.head.generation < targetPhase.intent) return undefined;
+    const bytes = root.manifest.suffixes.target;
+    if (bytes === undefined) throw new Error('No target state is retained.');
+    return decodeTargetState(
+        context.descriptor,
+        root.head.generation,
+        close.organizer,
+        bytes,
+    );
+};
+
+const commitTarget = async (
+    close: CloseSession,
+    generation: number,
+    state: TargetState,
+) => {
+    const { contribution } = close;
+    const { context, root } = contribution;
+    const encoded = encodeTargetState(generation, state);
+    if (encoded.length > context.descriptor.target.maximumStateBytes)
+        throw new Error('The target state exceeds its bound.');
+    contribution.root = await commitRoot(
+        context.database,
+        context.runtime,
+        context.descriptor,
+        root,
+        {
+            generation,
+            manifest: {
+                ...root.manifest,
+                suffixes: { ...root.manifest.suffixes, target: encoded },
+            },
+            predecessorRecords: [
+                ...dataRecordInventory(root.manifest),
+                ...contributionRecords(contribution),
+                ...retainedBallotRecords(contribution, close.records),
+                ...completedCloseRecords(close),
+            ],
+        },
+    );
+};
+
+// Evaluates the target from the public close records and signs this
+// participant's target vote. The owning setup verifier must have verified
+// the complete setup in this instance first. Returns the own ballot's status
+// in the target and how many usable ballots were valid.
+export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
+    const { contribution } = close;
+    const { context } = contribution;
+    await restoreCompletedClose(close);
+    const usable = await verifyCloseBarrier(context, relay);
+    evaluationCommand(context, 0);
+    let valid = 0;
+    for (
+        let author = 0;
+        author < context.descriptor.participantCount;
+        author++
+    ) {
+        const submission = usable.get(author);
+        if (
+            submission !== undefined &&
+            (await classifyBallot(context, relay, author, submission))
+        )
+            valid++;
+        // Each slot takes the classification just made, or none.
+        evaluationCommand(context, 1);
+    }
+    const body = await evaluate(context, relay);
+    const finality = finalityCommand(context, 0);
+    if (!equalBytes(finality.subarray(1), body))
+        throw new Error('The finality work names another target.');
+    let state = resumeTarget(close);
+    if (state === undefined) {
+        state = {
+            predecessor: completedClosePhase(close.organizer),
+            body,
+            coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
+            vote: new Uint8Array(),
+        };
+        await commitTarget(close, targetPhase.intent, state);
+    } else if (!equalBytes(state.body, body))
+        throw new PublicInputFailure(
+            'The public close records name another target.',
+        );
+    const vote = finalityCommand(
+        context,
+        1,
+        concatenate(state.body, state.coins),
+    );
+    await commitTarget(close, targetPhase.signed, {
+        ...state,
+        coins: new Uint8Array(),
+        vote,
+    });
+    const code = finality[0];
+    if (code >= ballotStatuses.length)
+        throw new Error('The finality work reported no ballot status.');
+    return { ballotStatus: ballotStatuses[code], validBallots: valid };
+};
+
+// Delivers the signed target vote, and the organizer the target body.
+export const publishTarget = async (
+    close: CloseSession,
+    relay: PublicRelay,
+) => {
+    const state = resumeTarget(close);
+    if (
+        state === undefined ||
+        close.contribution.root.head.generation < targetPhase.signed
+    )
+        return;
+    await publishRecord(
+        relay,
+        completionDirectory +
+            'target-vote-' +
+            String(close.records.position) +
+            '.bin',
+        state.vote,
+    );
+    if (close.organizer)
+        await publishRecord(
+            relay,
+            completionDirectory + 'target.bin',
+            state.body,
+        );
+};

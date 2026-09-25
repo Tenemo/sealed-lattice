@@ -38,6 +38,34 @@ const kernelFunctions = [
     'retained_proposal_identity_pointer',
     'participant_ballot_command',
     'participant_ballot_key_index',
+    'participant_close_command',
+    'participant_finality_command',
+    // The public close barrier verifier.
+    'close_input_pointer',
+    'close_command',
+    'close_missing_pointer',
+    'close_missing_count',
+    // The signed ballot classifier. Finish returns one for a valid body, two
+    // for an invalid one and zero when classification refused.
+    'ballot_body_input_pointer',
+    'ballot_classification_begin',
+    // One when the body relation needs its encryption keys.
+    'ballot_classification_requires_keys',
+    'ballot_classification_key_begin',
+    'ballot_classification_key_chunk',
+    'ballot_classification_key_finish',
+    'ballot_classification_chunk',
+    'ballot_classification_finish',
+    // The public ranking evaluation.
+    'evaluation_target_input_pointer',
+    'evaluation_target_output_pointer',
+    'evaluation_target_output_length',
+    'evaluation_target_command',
+    'evaluation_target_body_pointer',
+    'evaluation_target_body_length',
+    'evaluation_target_ciphertext_length',
+    // One when every evaluation step has run.
+    'evaluation_target_finished',
     'contribution_signing',
     'contribution_output_pointer',
     'contribution_output_length',
@@ -225,6 +253,16 @@ export const writeProofInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
         bytes,
         kernel.contribution_proof_input_capacity(),
     );
+
+// The close verifier, ballot classifier and evaluation each read one input
+// buffer of a mebibyte.
+export const moduleChunkBytes = 1 << 20;
+
+export const writeChunkInput = (
+    kernel: ParticipantKernel,
+    pointer: number,
+    bytes: Uint8Array,
+) => writeKernel(kernel, pointer, bytes, moduleChunkBytes);
 
 export const writeOwnRegistrationInput = (
     kernel: ParticipantKernel,

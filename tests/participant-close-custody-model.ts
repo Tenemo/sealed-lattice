@@ -5,12 +5,14 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // The close suffix retains the close inputs the participant's state machine
 // accepted, in arrival order, so restoration replays them into the same
-// state. Each event holds its kind, its record count and one key per
-// encrypted record: a known envelope has one record, a held body its envelope
-// record and its body records, and a response the organizer takes one record
-// with the packet and the envelopes delivered with it. The participant's own
-// ballot references the completed ballot suffix and adds no record. Before an
-// intent the suffix only collects, alongside every ballot phase.
+// state. Each event holds its kind, its record count, the serial that
+// locates its records, its payload length and one key per encrypted record:
+// a known envelope has one record, a held body its envelope record and its
+// body records, and a response the organizer takes one record with the
+// packet and the envelopes delivered with it. The participant's own ballot
+// references the completed ballot suffix and adds no record, and neither
+// does the locked intent, whose event fixes where replay applies it. Before
+// an intent the suffix only collects, alongside every ballot phase.
 export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     const wire = compileCloseWireCensus(profile);
     const ballot = compileBallotBodyCensus(profile);
@@ -21,7 +23,8 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     const coinBytes = 32n;
     // Marker and event count.
     const prefixBytes = 4n + 4n;
-    const eventBytes = (records: bigint) => 1n + 2n + keyBytes * records;
+    const eventBytes = (records: bigint) =>
+        1n + 2n + 4n + 4n + keyBytes * records;
     // Delivery adds one event per new known envelope and per held body; only
     // the organizer takes responses, one retained event per other responder.
     const deliveryEventBytes =
@@ -29,7 +32,9 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
         wire.maximumHeldBodies * eventBytes(1n + maximumBodyRecords);
     const maximumResponseEvents = participants - 1n;
     const organizerEventBytes =
-        deliveryEventBytes + maximumResponseEvents * eventBytes(1n);
+        deliveryEventBytes +
+        eventBytes(0n) +
+        maximumResponseEvents * eventBytes(1n);
     const responseSigningBytes = 4n + wire.maximumResponseBodyBytes + coinBytes;
     const proposalSigningBytes = wire.proposalBodyBytes + coinBytes;
     const phaseBytes = [
@@ -96,6 +101,7 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
         maximumEvents:
             wire.maximumKnownEnvelopes +
             wire.maximumHeldBodies +
+            1n +
             maximumResponseEvents,
         maximumRecords:
             wire.maximumKnownEnvelopes +

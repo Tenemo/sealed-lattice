@@ -63,10 +63,37 @@ export type ParticipantDescriptor = Readonly<{
         randomBudgets: readonly number[];
         journalRecords: number;
         maximumStateBytes: number;
+        headerBytes: number;
         minimumBodyBytes: number;
         maximumBodyBytes: number;
         envelopeBytes: number;
         requiredStorageBytes: number;
+    }>;
+    close: Readonly<{
+        quorum: number;
+        // An envelope and its signature.
+        submissionBytes: number;
+        intentBodyBytes: number;
+        minimumResponseBodyBytes: number;
+        maximumResponseBodyBytes: number;
+        proposalBodyBytes: number;
+        // A response the organizer takes, with every envelope it may list.
+        maximumResponseRecordBytes: number;
+        maximumEvents: number;
+        maximumRecords: number;
+        maximumStateBytes: number;
+    }>;
+    target: Readonly<{
+        maximumBodyBytes: number;
+        // The signer's position, the target identity and the signature.
+        votePacketBytes: number;
+        maximumStateBytes: number;
+    }>;
+    // A stored working value of the public evaluation: both ciphertext
+    // components' coefficients, each of whole little-endian words.
+    evaluation: Readonly<{
+        polynomialDegree: number;
+        storedCoefficientBytes: number;
     }>;
 }>;
 
@@ -145,6 +172,7 @@ const ballotScalars = [
     'recordBytes',
     'journalRecords',
     'maximumStateBytes',
+    'headerBytes',
     'minimumBodyBytes',
     'maximumBodyBytes',
     'envelopeBytes',
@@ -163,12 +191,25 @@ const validBallot = (value: unknown): boolean => {
     return budgets.length === 2 && budgets.every(positive);
 };
 
+const closeScalars = [
+    'quorum',
+    'submissionBytes',
+    'intentBodyBytes',
+    'minimumResponseBodyBytes',
+    'maximumResponseBodyBytes',
+    'proposalBodyBytes',
+    'maximumResponseRecordBytes',
+    'maximumEvents',
+    'maximumRecords',
+    'maximumStateBytes',
+] as const;
+
 export const parseParticipantDescriptor = (
     value: unknown,
 ): ParticipantDescriptor => {
     if (
         !isRecord(value) ||
-        Object.keys(value).length !== 6 ||
+        Object.keys(value).length !== 9 ||
         !positive(value.participantCount) ||
         !positive(value.optionCount) ||
         !positiveFields(value.registration, [
@@ -188,7 +229,17 @@ export const parseParticipantDescriptor = (
             'setupReferenceBytes',
         ]) ||
         !validContribution(value.contribution) ||
-        !validBallot(value.ballot)
+        !validBallot(value.ballot) ||
+        !positiveFields(value.close, closeScalars) ||
+        !positiveFields(value.target, [
+            'maximumBodyBytes',
+            'votePacketBytes',
+            'maximumStateBytes',
+        ]) ||
+        !positiveFields(value.evaluation, [
+            'polynomialDegree',
+            'storedCoefficientBytes',
+        ])
     )
         throw new Error('Malformed participant runtime descriptor.');
     return value as ParticipantDescriptor;

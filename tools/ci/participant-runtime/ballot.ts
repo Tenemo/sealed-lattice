@@ -11,19 +11,24 @@ import {
     unsigned32,
     unsigned64,
 } from './bytes.js';
+import { closeRecordInventory, decodeCloseState } from './close-state.js';
 import { describe, PublicInputFailure, sessionInput } from './context.js';
 import type { ParticipantContext } from './context.js';
-import {
-    contributionRecords,
-    openedInventory,
-    storedOpening,
-} from './contribution.js';
+import { contributionRecords, storedOpening } from './contribution.js';
 import type { ContributionSession } from './contribution.js';
 import type { ParticipantDescriptor } from './descriptor.js';
 import { readKernel } from './kernel.js';
 import type { KernelHandlers } from './kernel.js';
 import { publishChunk, publishRecord } from './public.js';
 import type { PublicRelay } from './public.js';
+import {
+    openRecord,
+    recordContext,
+    recordKeyBytes,
+    sealedLength,
+    sealRecord,
+} from './records.js';
+import type { RecordContext } from './records.js';
 import {
     commitRoot,
     dataKind,
@@ -32,7 +37,7 @@ import {
     StoragePending,
 } from './root.js';
 import { readFinalAggregate } from './setup.js';
-import { readParticipantValue, snapshotParticipant } from './storage.js';
+import { snapshotParticipant } from './storage.js';
 
 // A participant's ballot beneath its authenticated root. Generation 13 locks
 // the attempt's scores and ballot time and appends the randomness journal
@@ -42,12 +47,13 @@ import { readParticipantValue, snapshotParticipant } from './storage.js';
 // signature, retiring the journal and the scores. Every append commits its
 // record with a root sealed under a fresh key, so a repeated generation is
 // not nonce reuse. An interruption replays the same journal and must
-// reproduce the retained envelope.
+// reproduce the retained envelope. A signed ballot stays retained unchanged
+// through the later generations, and a participant without a ballot keeps
+// an empty suffix.
 
 const phase = { locked: 13, ready: 14, body: 15, signing: 16, signed: 17 };
 const marker = encodeText('BST1');
 const envelopeMarker = encodeText('LBE2');
-const keyBytes = 32;
 const coinBytes = 32;
 const journalKind = 0;
 const bodyKind = 1;
@@ -64,14 +70,6 @@ type BallotState = Readonly<{
     envelope: Uint8Array;
     coins: Uint8Array;
     signature: Uint8Array;
-}>;
-
-// What a ballot record is bound to besides its kind, index and length.
-type RecordContext = Readonly<{
-    poll: Uint8Array;
-    runtime: Uint8Array;
-    inventory: Uint8Array;
-    position: number;
 }>;
 
 export type BallotSession = {
@@ -214,7 +212,7 @@ const decodeBallotState = (
     )
         throw new Error('The ballot journal is inconsistent.');
     const journalKeys = Array.from({ length: journalCount }, () =>
-        take(keyBytes),
+        take(recordKeyBytes),
     );
     const bodyLength = readUnsigned32(take(4), 0);
     const bodyCount = readUnsigned16(take(2), 0);
@@ -228,7 +226,9 @@ const decodeBallotState = (
               (generation > phase.body && bodyCount !== bodyRecords)
     )
         throw new Error('The retained ballot body is inconsistent.');
-    const bodyKeys = Array.from({ length: bodyCount }, () => take(keyBytes));
+    const bodyKeys = Array.from({ length: bodyCount }, () =>
+        take(recordKeyBytes),
+    );
     const envelope =
         generation >= phase.body
             ? take(bounds.envelopeBytes)
@@ -280,11 +280,6 @@ const recordAssociatedData = (
         unsigned32(length),
     );
 
-const recordCipher = (key: Uint8Array, usage: 'encrypt' | 'decrypt') =>
-    crypto.subtle.importKey('raw', new Uint8Array(key), 'AES-GCM', false, [
-        usage,
-    ]);
-
 type SealedRecord = Readonly<{
     kind: number;
     index: number;
@@ -292,30 +287,21 @@ type SealedRecord = Readonly<{
     ciphertext: Uint8Array;
 }>;
 
-const sealRecord = async (
+const sealBallotRecord = async (
     context: RecordContext,
     kind: number,
     index: number,
     bytes: Uint8Array,
-): Promise<SealedRecord> => {
-    const key = crypto.getRandomValues(new Uint8Array(keyBytes));
-    const ciphertext = new Uint8Array(
-        await crypto.subtle.encrypt(
-            {
-                name: 'AES-GCM',
-                iv: new Uint8Array(12),
-                additionalData: new Uint8Array(
-                    recordAssociatedData(context, kind, index, bytes.length),
-                ),
-            },
-            await recordCipher(key, 'encrypt'),
-            new Uint8Array(bytes),
-        ),
-    );
-    return { kind, index, key, ciphertext };
-};
+): Promise<SealedRecord> => ({
+    kind,
+    index,
+    ...(await sealRecord(
+        recordAssociatedData(context, kind, index, bytes.length),
+        bytes,
+    )),
+});
 
-const openRecord = async (
+const openBallotRecord = (
     session: BallotSession,
     kind: number,
     index: number,
@@ -326,51 +312,46 @@ const openRecord = async (
             ? session.state.journalKeys
             : session.state.bodyKeys;
     const length = recordLength(context.descriptor, session.state, kind, index);
-    const blob = await readParticipantValue(context.database, 'ballot', [
-        kind,
-        index,
-    ]);
-    if (!(blob instanceof Blob) || blob.size !== length + 16)
-        throw new Error('A ballot record is missing.');
-    return new Uint8Array(
-        await crypto.subtle.decrypt(
-            {
-                name: 'AES-GCM',
-                iv: new Uint8Array(12),
-                additionalData: new Uint8Array(
-                    recordAssociatedData(session.records, kind, index, length),
-                ),
-            },
-            await recordCipher(keys[index], 'decrypt'),
-            new Uint8Array(await blob.arrayBuffer()),
-        ),
+    return openRecord(
+        context.database,
+        'ballot',
+        [kind, index],
+        {
+            key: keys[index],
+            additionalData: recordAssociatedData(
+                session.records,
+                kind,
+                index,
+                length,
+            ),
+        },
+        length,
     );
 };
 
 // The ballot records a state lists; the predecessor check opens each under
 // its own key.
-const ballotInventory = (session: BallotSession): ParticipantStoredRecord[] =>
+const ballotInventory = (
+    descriptor: ParticipantDescriptor,
+    records: RecordContext,
+    state: BallotState,
+): ParticipantStoredRecord[] =>
     (
         [
-            [journalKind, session.state.journalKeys],
-            [bodyKind, session.state.bodyKeys],
+            [journalKind, state.journalKeys],
+            [bodyKind, state.bodyKeys],
         ] as const
     ).flatMap(([kind, keys]) =>
         keys.map((key, index) => {
-            const length = recordLength(
-                session.contribution.context.descriptor,
-                session.state,
-                kind,
-                index,
-            );
+            const length = recordLength(descriptor, state, kind, index);
             return {
                 store: 'ballot',
                 key: [kind, index],
-                byteLength: length + 16,
+                byteLength: sealedLength(length),
                 encryption: {
                     key,
                     additionalData: recordAssociatedData(
-                        session.records,
+                        records,
                         kind,
                         index,
                         length,
@@ -379,6 +360,64 @@ const ballotInventory = (session: BallotSession): ParticipantStoredRecord[] =>
             };
         }),
     );
+
+// The ballot a root retains: none at generation twelve or without a ballot,
+// the attempt's phase through generation seventeen, and the signed ballot
+// after it.
+const retainedBallotState = (
+    contribution: ContributionSession,
+    records: RecordContext,
+): BallotState | undefined => {
+    const { root, context } = contribution;
+    const bytes = root.manifest.suffixes.ballot;
+    if (bytes === undefined) throw new Error('The ballot suffix is missing.');
+    if (bytes.length === 0) {
+        if (
+            root.head.generation >= phase.locked &&
+            root.head.generation <= phase.signed
+        )
+            throw new Error('A ballot phase retains no ballot.');
+        return undefined;
+    }
+    return decodeBallotState(
+        context.descriptor,
+        records,
+        Math.min(root.head.generation, phase.signed),
+        bytes,
+    );
+};
+
+// The ballot records the current root lists.
+export const retainedBallotRecords = (
+    contribution: ContributionSession,
+    records: RecordContext,
+): ParticipantStoredRecord[] => {
+    const state = retainedBallotState(contribution, records);
+    return state === undefined
+        ? []
+        : ballotInventory(contribution.context.descriptor, records, state);
+};
+
+// The close records the root lists while a ballot is pending; the close log
+// only collects through the ballot phases.
+const collectedCloseRecords = (
+    contribution: ContributionSession,
+    records: RecordContext,
+) => {
+    const { root, context } = contribution;
+    const bytes = root.manifest.suffixes.close;
+    if (bytes === undefined) throw new Error('The close suffix is missing.');
+    return closeRecordInventory(
+        context.descriptor,
+        records,
+        decodeCloseState(
+            context.descriptor,
+            root.head.generation,
+            false,
+            bytes,
+        ),
+    );
+};
 
 type BallotTransition = Readonly<{
     generation: number;
@@ -412,7 +451,12 @@ const commitBallot = async (
             predecessorRecords: [
                 ...dataRecordInventory(root.manifest),
                 ...contributionRecords(contribution),
-                ...ballotInventory(session),
+                ...ballotInventory(
+                    context.descriptor,
+                    session.records,
+                    session.state,
+                ),
+                ...collectedCloseRecords(contribution, session.records),
             ],
             write: (transaction) => {
                 const store = transaction.objectStore('ballot');
@@ -436,22 +480,13 @@ const commitBallot = async (
     session.state = transition.state;
     if (transition.added !== undefined)
         (
-            await openRecord(
+            await openBallotRecord(
                 session,
                 transition.added.kind,
                 transition.added.index,
             )
         ).fill(0);
 };
-
-const recordContext = async (
-    contribution: ContributionSession,
-): Promise<RecordContext> => ({
-    poll: contribution.root.manifest.poll,
-    runtime: contribution.context.runtime,
-    inventory: (await openedInventory(contribution)).identity,
-    position: contribution.records.position,
-});
 
 // Locks a ballot attempt: the scores and the ballot time enter the root
 // before any journal randomness exists.
@@ -472,9 +507,10 @@ export const beginBallot = async (
         estimate.quota - estimate.usage < descriptor.ballot.requiredStorageBytes
     )
         throw new StoragePending('The origin lacks room for a ballot.');
+    const records = await recordContext(contribution);
     const session: BallotSession = {
         contribution,
-        records: await recordContext(contribution),
+        records,
         state: {
             scores: scores.slice(),
             ballotTime: BigInt(Date.now()),
@@ -503,39 +539,72 @@ export const beginBallot = async (
             predecessorRecords: [
                 ...dataRecordInventory(root.manifest),
                 ...contributionRecords(contribution),
+                ...collectedCloseRecords(contribution, records),
             ],
         },
     );
     return session;
 };
 
-// Decodes the retained ballot. Every listed record must be stored and
-// nothing else.
+// Decodes the retained ballot, or undefined when the root retains none.
+// Every listed record must be stored and nothing else.
 export const resumeBallot = async (
     contribution: ContributionSession,
-): Promise<BallotSession> => {
-    const { context, root } = contribution;
-    const bytes = root.manifest.suffixes.ballot;
-    if (
-        root.head.generation < phase.locked ||
-        root.head.generation > phase.signed ||
-        bytes === undefined
-    )
-        throw new Error('No ballot is retained.');
+): Promise<BallotSession | undefined> => {
+    const { context } = contribution;
     const records = await recordContext(contribution);
-    const state = decodeBallotState(
-        context.descriptor,
-        records,
-        root.head.generation,
-        bytes,
-    );
+    const state = retainedBallotState(contribution, records);
     const snapshot = await snapshotParticipant(context.database);
     if (
         snapshot.counts.ballot !==
-        state.journalKeys.length + state.bodyKeys.length
+        (state === undefined
+            ? 0
+            : state.journalKeys.length + state.bodyKeys.length)
     )
         throw new Error('The ballot records changed.');
-    return { contribution, records, state };
+    return state === undefined ? undefined : { contribution, records, state };
+};
+
+// The input that starts the module's ballot or close work from the retained
+// poll, opening and setup reference.
+export const ballotWorkInput = async (
+    contribution: ContributionSession,
+    inventory: Uint8Array,
+) => {
+    const { database } = contribution.context;
+    const { manifest } = contribution.root;
+    const definition = await readDataKind(
+        database,
+        manifest,
+        dataKind.pollDefinition,
+    );
+    const definitionSignature = await readDataKind(
+        database,
+        manifest,
+        dataKind.pollSignature,
+    );
+    const reference = await readDataKind(
+        database,
+        manifest,
+        dataKind.setupReference,
+    );
+    const opening = await storedOpening(contribution);
+    const packet = concatenate(
+        unsigned32(opening.body.length),
+        opening.body,
+        opening.signature,
+    );
+    return concatenate(
+        manifest.poll,
+        contribution.context.runtime,
+        unsigned32(definition.length),
+        definition,
+        definitionSignature,
+        inventory,
+        unsigned32(packet.length),
+        packet,
+        reference,
+    );
 };
 
 const ballotCommand = (
@@ -567,44 +636,12 @@ const ballotCommand = (
 const startBallotWork = async (session: BallotSession) => {
     const { contribution } = session;
     const { context } = contribution;
-    const { database, kernel } = context;
-    const { manifest } = contribution.root;
-    const definition = await readDataKind(
-        database,
-        manifest,
-        dataKind.pollDefinition,
-    );
-    const definitionSignature = await readDataKind(
-        database,
-        manifest,
-        dataKind.pollSignature,
-    );
-    const reference = await readDataKind(
-        database,
-        manifest,
-        dataKind.setupReference,
-    );
-    const opening = await storedOpening(contribution);
-    const packet = concatenate(
-        unsigned32(opening.body.length),
-        opening.body,
-        opening.signature,
-    );
+    const { kernel } = context;
     ballotCommand(
         context,
         0,
         0,
-        concatenate(
-            manifest.poll,
-            context.runtime,
-            unsigned32(definition.length),
-            definition,
-            definitionSignature,
-            session.records.inventory,
-            unsigned32(packet.length),
-            packet,
-            reference,
-        ),
+        await ballotWorkInput(contribution, session.records.inventory),
     );
     for (let ordinal = 0; ordinal < ballotKeys; ordinal++) {
         const index = kernel.participant_ballot_key_index(ordinal) >>> 0;
@@ -636,7 +673,7 @@ const prepareJournal = async (session: BallotSession) => {
                 offset += crypto.getRandomValues(
                     bytes.subarray(offset, offset + randomRequestBytes),
                 ).length;
-            added = await sealRecord(
+            added = await sealBallotRecord(
                 session.records,
                 journalKind,
                 index,
@@ -664,7 +701,9 @@ const journalRandomness = async (session: BallotSession) => {
     const { recordBytes, randomBudgets } = descriptor.ballot;
     const banks: Uint8Array[][] = randomBudgets.map(() => []);
     for (const [index, entry] of journalLayout(descriptor).entries())
-        banks[entry.bank].push(await openRecord(session, journalKind, index));
+        banks[entry.bank].push(
+            await openBallotRecord(session, journalKind, index),
+        );
     const used = banks.map(() => 0);
     const serve = (bank: number, target: Uint8Array) => {
         if (target.length > randomBudgets[bank] - used[bank])
@@ -732,7 +771,12 @@ const retainBody = async (session: BallotSession) => {
         try {
             if (bytes.length !== length)
                 throw new Error('A ballot body record is incomplete.');
-            added = await sealRecord(session.records, bodyKind, index, bytes);
+            added = await sealBallotRecord(
+                session.records,
+                bodyKind,
+                index,
+                bytes,
+            );
         } finally {
             bytes.fill(0);
         }
@@ -753,17 +797,10 @@ const importBody = async (session: BallotSession) => {
     const { context } = session.contribution;
     ballotCommand(context, 5, 0, session.state.envelope);
     let offset = 0;
-    for (let index = 0; index < session.state.bodyKeys.length; index++) {
-        const bytes = await openRecord(session, bodyKind, index);
-        try {
-            ballotCommand(context, 6, offset, bytes);
-            offset += bytes.length;
-        } finally {
-            bytes.fill(0);
-        }
-    }
-    if (offset !== session.state.bodyLength)
-        throw new Error('The retained ballot body is incomplete.');
+    await readBallotBody(session, (bytes) => {
+        ballotCommand(context, 6, offset, bytes);
+        offset += bytes.length;
+    });
     ballotCommand(context, 7);
     if (!equalBytes(ballotCommand(context, 10), session.state.envelope))
         throw new Error('The verified ballot changed its envelope.');
@@ -838,15 +875,38 @@ export const completeBallot = async (session: BallotSession) => {
     });
 };
 
-const ballotDirectory = (position: number) =>
+export const ballotDirectory = (position: number) =>
     'ballot-' + String(position) + '/';
+
+// Streams the retained body record by record, clearing each after use.
+export const readBallotBody = async (
+    session: BallotSession,
+    consume: (bytes: Uint8Array) => void | Promise<void>,
+) => {
+    let offset = 0;
+    for (let index = 0; index < session.state.bodyKeys.length; index++) {
+        const bytes = await openBallotRecord(session, bodyKind, index);
+        try {
+            await consume(bytes);
+            offset += bytes.length;
+        } finally {
+            bytes.fill(0);
+        }
+    }
+    if (offset !== session.state.bodyLength)
+        throw new Error('The retained ballot body is incomplete.');
+};
+
+// Whether the retained ballot is signed.
+export const isSignedBallot = (session: BallotSession) =>
+    session.state.signature.length > 0;
 
 // Delivers the signed ballot from its authenticated records.
 export const publishBallot = async (
     session: BallotSession,
     relay: PublicRelay,
 ) => {
-    if (session.contribution.root.head.generation !== phase.signed)
+    if (!isSignedBallot(session))
         throw new Error('No signed ballot is retained.');
     const directory = ballotDirectory(session.records.position);
     await publishRecord(
@@ -860,13 +920,8 @@ export const publishBallot = async (
         session.state.signature,
     );
     let offset = 0;
-    for (let index = 0; index < session.state.bodyKeys.length; index++) {
-        const bytes = await openRecord(session, bodyKind, index);
-        try {
-            await publishChunk(relay, directory + 'body.bin', offset, bytes);
-            offset += bytes.length;
-        } finally {
-            bytes.fill(0);
-        }
-    }
+    await readBallotBody(session, async (bytes) => {
+        await publishChunk(relay, directory + 'body.bin', offset, bytes);
+        offset += bytes.length;
+    });
 };

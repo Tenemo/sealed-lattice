@@ -224,6 +224,8 @@ await runWithLocalRunLog(
             'Browser setup contribution',
             'Browser setup verification',
             'Browser signed ballots',
+            'Browser close responses',
+            'Browser target votes',
         ],
         scriptName: 'research:participant',
     },
@@ -522,6 +524,198 @@ await runWithLocalRunLog(
                     runtime.descriptor.registration.signatureBytes,
                 );
             }
+            // The organizer's close time is the second-latest ballot time, so
+            // a strictly later ballot is late: the intent lock retires it
+            // wherever it was delivered, and no response lists it.
+            const ballotTimes = await Promise.all(
+                positions.map(async (position) =>
+                    Number(
+                        (
+                            await readFile(
+                                path.join(
+                                    publicDirectory,
+                                    `ballot-${String(position)}`,
+                                    'envelope.bin',
+                                ),
+                            )
+                        ).readBigUInt64LE(134),
+                    ),
+                ),
+            );
+            const closeTime = [...ballotTimes].sort(
+                (left, right) => left - right,
+            )[participantCount - 2];
+            const onTime = (position: number) =>
+                ballotTimes[position] <= closeTime;
+            const others = (position: number) =>
+                positions.filter((other) => other !== position);
+            const submissions = (kind: string, authors: readonly number[]) =>
+                authors.map((position) => ({ kind, position }));
+            // Every other participant collects the published ballots, its own
+            // first, before any intent exists.
+            await Promise.all(
+                positions.slice(1).map(async (position) => {
+                    const details = await run(position, 'close', {
+                        deliver: others(position),
+                    });
+                    assert.equal(details.generation, 17);
+                    assert.deepEqual(details.closeEvents, [
+                        ...submissions('own', [position]),
+                        ...submissions('held', others(position)),
+                    ]);
+                }),
+            );
+            // The organizer learns one on-time envelope without its body,
+            // opens the close and locks its own intent.
+            const announced = others(0).find(onTime);
+            assert.ok(announced !== undefined);
+            const organizerDeliveries = others(0).filter(
+                (position) => position !== announced,
+            );
+            await expectStatus(1, 'close', 'refused', { closeTime });
+            const opened = await run(0, 'close', {
+                deliver: organizerDeliveries,
+                announce: [announced],
+                closeTime,
+            });
+            assert.equal(opened.generation, 19);
+            const organizerCollected = [
+                ...submissions('own', [0].filter(onTime)),
+                ...submissions('held', organizerDeliveries.filter(onTime)),
+                ...submissions('known', [announced]),
+            ];
+            assert.deepEqual(opened.closeEvents, [
+                ...organizerCollected,
+                { kind: 'lock' },
+            ]);
+            await expectStatus(0, 'close', 'refused', { closeTime });
+            // Every other participant locks the intent and responds at once.
+            await Promise.all(
+                positions.slice(1).map(async (position) => {
+                    const details = await run(position, 'close');
+                    assert.equal(details.generation, 21);
+                    assert.deepEqual(details.closeEvents, [
+                        ...submissions('own', [position].filter(onTime)),
+                        ...submissions('held', others(position).filter(onTime)),
+                        { kind: 'lock' },
+                    ]);
+                }),
+            );
+            // The organizer takes the other responses, fetches the body they
+            // list that it lacks, responds and proposes.
+            const concluded = await run(0, 'close');
+            assert.equal(concluded.generation, 22);
+            assert.deepEqual(concluded.closeEvents, [
+                ...organizerCollected,
+                { kind: 'lock' },
+                ...submissions('response', others(0)),
+                ...submissions('held', [announced]),
+            ]);
+            // Completed close work is only delivered again.
+            assert.equal((await run(1, 'close')).generation, 21);
+            assert.equal((await run(0, 'close')).generation, 22);
+            const closeBounds = runtime.descriptor.close;
+            const signatureBytes =
+                runtime.descriptor.registration.signatureBytes;
+            const closeDirectory = path.join(publicDirectory, 'close');
+            const intent = await readFile(
+                path.join(closeDirectory, 'intent.bin'),
+            );
+            assert.equal(
+                intent.length,
+                4 + closeBounds.intentBodyBytes + signatureBytes,
+            );
+            assert.equal(
+                intent.readBigUInt64LE(4 + closeBounds.intentBodyBytes - 8),
+                BigInt(closeTime),
+            );
+            for (const position of positions) {
+                const response = await readFile(
+                    path.join(
+                        closeDirectory,
+                        `response-${String(position)}.bin`,
+                    ),
+                );
+                const length = response.readUInt32LE(0);
+                assert.ok(
+                    length >= closeBounds.minimumResponseBodyBytes &&
+                        length <= closeBounds.maximumResponseBodyBytes,
+                );
+                assert.equal(response.length, 4 + length + signatureBytes);
+                // The listing holds exactly the on-time ballots.
+                const listed = [];
+                for (
+                    let offset = 4 + closeBounds.minimumResponseBodyBytes;
+                    offset < 4 + length;
+                    offset += 66
+                )
+                    listed.push(response.readUInt16LE(offset));
+                assert.deepEqual(listed, positions.filter(onTime));
+            }
+            // The proposal names the organizer's response and the first other
+            // responses it took, up to the close quorum.
+            const proposal = await readFile(
+                path.join(closeDirectory, 'proposal.bin'),
+            );
+            assert.equal(
+                proposal.length,
+                4 + closeBounds.proposalBodyBytes + signatureBytes,
+            );
+            const named = [];
+            for (let index = 0; index < closeBounds.quorum; index++)
+                named.push(
+                    proposal.readUInt16LE(
+                        4 +
+                            closeBounds.proposalBodyBytes -
+                            (closeBounds.quorum - index) * 66,
+                    ),
+                );
+            assert.deepEqual(named, positions.slice(0, closeBounds.quorum));
+            // Every participant verifies the barrier, classifies each usable
+            // ballot, evaluates the target and signs its vote. Every on-time
+            // ballot is usable and valid, and a late one is reported late.
+            const onTimeCount = positions.filter(onTime).length;
+            await Promise.all(
+                positions.map(async (position) => {
+                    const details = await run(position, 'target');
+                    assert.equal(details.generation, 24);
+                    assert.equal(
+                        details.ballotStatus,
+                        onTime(position) ? 'included' : 'late',
+                    );
+                    assert.equal(details.validBallots, onTimeCount);
+                }),
+            );
+            // A signed vote is only delivered again.
+            const repeated = await run(1, 'target');
+            assert.equal(repeated.generation, 24);
+            assert.equal(repeated.ballotStatus, undefined);
+            const targetBounds = runtime.descriptor.target;
+            const completionDirectory = path.join(
+                publicDirectory,
+                'completion',
+            );
+            const target = await readFile(
+                path.join(completionDirectory, 'target.bin'),
+            );
+            assert.ok(
+                target.length > 0 &&
+                    target.length <= targetBounds.maximumBodyBytes,
+            );
+            // Every vote names its signer and one target identity.
+            const targetIdentities = new Set<string>();
+            for (const position of positions) {
+                const vote = await readFile(
+                    path.join(
+                        completionDirectory,
+                        `target-vote-${String(position)}.bin`,
+                    ),
+                );
+                assert.equal(vote.length, targetBounds.votePacketBytes);
+                assert.equal(vote.readUInt16LE(0), position);
+                targetIdentities.add(vote.subarray(2, 66).toString('hex'));
+            }
+            assert.equal(targetIdentities.size, 1);
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -532,7 +726,11 @@ await runWithLocalRunLog(
                         recordIds,
                         runtimeIdentity: runtime.identity.runtime,
                         peakProcessTreeBytes: peaks,
-                        scope: 'Browser registration, roster agreement, setup contribution, setup verification and signed ballots in the maintained participant runtime in external Chrome. Closing and later protocol stages are not exercised.',
+                        closeTime,
+                        lateBallots: positions.filter(
+                            (position) => !onTime(position),
+                        ),
+                        scope: "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes in the maintained participant runtime in external Chrome. Release and later protocol stages are not exercised.",
                     },
                     null,
                     2,

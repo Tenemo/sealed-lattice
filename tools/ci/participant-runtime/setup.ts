@@ -1,5 +1,5 @@
 import { concatenate, equalBytes, unsigned16, unsigned32 } from './bytes.js';
-import { collectingCloseState } from './close.js';
+import { collectingCloseState, encodeCloseState } from './close-state.js';
 import { PublicInputFailure } from './context.js';
 import type { ParticipantContext } from './context.js';
 import {
@@ -275,16 +275,18 @@ const verifyContribution = async (
 };
 
 // Verifies the complete setup behind this participant's opening and has the
-// original credential emit its retained setup reference.
-export const verifySetup = async (
+// original credential emit its retained setup reference. A first
+// verification starts from an empty aggregate cache; a later one overwrites
+// each chunk in place, so an interrupted verification keeps the final
+// aggregate a pending ballot reads.
+const verifyCompleteSetup = async (
     session: ContributionSession,
     relay: PublicRelay,
+    clearCache: boolean,
 ): Promise<Uint8Array> => {
     const { context } = session;
     const { kernel, descriptor, database } = context;
     const { manifest } = session.root;
-    if (session.root.head.generation !== 11)
-        throw new Error('No opened contribution awaits setup verification.');
     const definition = await readDataKind(
         database,
         manifest,
@@ -383,7 +385,7 @@ export const verifySetup = async (
         throw new Error('The setup verifier refused the inventory.');
     const cache = await openSetupCache();
     try {
-        await writeCache(cache, (store) => store.clear());
+        if (clearCache) await writeCache(cache, (store) => store.clear());
         for (
             let position = 0;
             position < descriptor.participantCount;
@@ -416,6 +418,37 @@ export const verifySetup = async (
     return reference;
 };
 
+export const verifySetup = (
+    session: ContributionSession,
+    relay: PublicRelay,
+): Promise<Uint8Array> => {
+    if (session.root.head.generation !== 11)
+        throw new Error('No opened contribution awaits setup verification.');
+    return verifyCompleteSetup(session, relay, true);
+};
+
+// Verifies the complete setup again in this instance for work that needs the
+// verified setup itself. It must reproduce the retained setup reference.
+export const reverifySetup = async (
+    session: ContributionSession,
+    relay: PublicRelay,
+) => {
+    if (session.root.head.generation < 12)
+        throw new Error('No setup reference is retained.');
+    const reference = await verifyCompleteSetup(session, relay, false);
+    if (
+        !equalBytes(
+            reference,
+            await readDataKind(
+                session.context.database,
+                session.root.manifest,
+                dataKind.setupReference,
+            ),
+        )
+    )
+        throw new Error('The verified setup differs from the retained one.');
+};
+
 // Retains the setup reference. The ballot suffix starts empty and the close
 // log collects from here on.
 export const retainSetup = async (
@@ -440,7 +473,7 @@ export const retainSetup = async (
                 suffixes: {
                     ...root.manifest.suffixes,
                     ballot: new Uint8Array(),
-                    close: collectingCloseState(),
+                    close: encodeCloseState(12, false, collectingCloseState()),
                 },
             },
             predecessorRecords: [

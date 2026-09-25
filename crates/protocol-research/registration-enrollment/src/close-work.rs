@@ -565,6 +565,13 @@ impl CloseWork {
                     })
                     .collect())
             }
+            // The submission identity of an envelope of this poll's profile,
+            // which listings and wanted bodies name. It changes no state.
+            14 => Ok(
+                BallotEnvelope::decode(self.context.setup().profile(), input)?
+                    .identity()
+                    .to_vec(),
+            ),
             _ => Err(Error::Shape),
         }
     }

@@ -894,16 +894,21 @@ pub extern "C" fn participant_ballot_command(
     })
 }
 
-/// The aggregate polynomial the retained ballot reads as its key at this
-/// ordinal; the maximum value when no ballot or no such key exists.
+/// The aggregate polynomial a ballot of the retained poll encrypts under at
+/// this ordinal, which ballot creation and classification read as their
+/// keys; the maximum value when no poll is retained or no such key exists.
 #[unsafe(no_mangle)]
 pub extern "C" fn participant_ballot_key_index(ordinal: usize) -> usize {
     SESSION.with(|session| {
         session
             .borrow()
-            .ballot
+            .retained_context
             .as_ref()
-            .and_then(|ballot| ballot.key_index(ordinal))
+            .and_then(|context| {
+                ballot_proof::statement::setup_inputs(context.profile())
+                    .get(ordinal)
+                    .map(|input| input.2)
+            })
             .unwrap_or(usize::MAX)
     })
 }
