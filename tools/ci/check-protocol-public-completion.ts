@@ -14,6 +14,7 @@ import path from 'node:path';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import { layParticipantCeremony } from '#tools/ci/participant-public-ceremony.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import {
     directoryArchiveStore,
@@ -29,9 +30,9 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
 
-// A passed native research run. Its ceremony directory holds the public
-// setup, close and completion records the reader verifies.
-type NativeRun = {
+// A passed research run. Its ceremony directory holds the public setup,
+// close and completion records the reader verifies.
+type ResearchRun = {
     case: string;
     participantCount: number;
     optionCount: number;
@@ -81,20 +82,51 @@ await runWithLocalRunLog(
             assert.ok(freemem() >= 2147483648);
             const summary = JSON.parse(
                 await readFile(path.join(source, 'summary.json'), 'utf8'),
-            ) as { result: string };
+            ) as { result: string; scriptName: string };
             assert.equal(summary.result, 'passed');
-            const native = JSON.parse(
-                await readFile(path.join(source, 'result.json'), 'utf8'),
-            ) as NativeRun;
-            assert.match(
-                native.case,
-                /^native-(?:result|empty|invalid-only)$/u,
-            );
-            const ceremony = native.output;
+            // A browser cohort's relayed records are laid out as the reader
+            // takes them, and supply only the archived closure.
+            let participantCeremony: string | undefined;
+            let run: ResearchRun;
+            if (summary.scriptName === 'research:participant') {
+                assert.equal(
+                    selected.name,
+                    'archived-records',
+                    'A browser participant run supplies only its archived records.',
+                );
+                participantCeremony = path.resolve(
+                    'temp',
+                    'participant-ceremony-' +
+                        path.basename(log.runDirectoryPath),
+                );
+                const participant = await layParticipantCeremony(
+                    source,
+                    participantCeremony,
+                );
+                run = {
+                    case: 'browser-result',
+                    participantCount: participant.participantCount,
+                    optionCount: participant.optionCount,
+                    output: participantCeremony,
+                    result: {
+                        kind: 'result',
+                        identifiers: [...participant.result],
+                    },
+                };
+            } else {
+                run = JSON.parse(
+                    await readFile(path.join(source, 'result.json'), 'utf8'),
+                ) as ResearchRun;
+                assert.match(
+                    run.case,
+                    /^native-(?:result|empty|invalid-only)$/u,
+                );
+            }
+            const ceremony = run.output;
             assert.ok((await stat(path.join(ceremony, 'close'))).isDirectory());
             const scenario = deriveResearchScenario(
-                native.participantCount,
-                native.optionCount,
+                run.participantCount,
+                run.optionCount,
             );
             // Release shares from positions spread evenly over the roster,
             // so no two are adjacent, and a bad share just after the first.
@@ -112,7 +144,7 @@ await runWithLocalRunLog(
             const badVotes = scenario.corrupt.slice(0, 1);
             let directory: string;
             if (selected.name === 'available-records') {
-                assert.equal(native.case, 'native-result');
+                assert.equal(run.case, 'native-result');
                 const original = path.join(ceremony, 'completion');
                 directory = path.join(
                     log.runDirectoryPath,
@@ -183,7 +215,7 @@ await runWithLocalRunLog(
                 );
             } else if (selected.name === 'archived-records') {
                 // Every record the owning verifiers depend on is archived
-                // from the native run, then retrieved by a fresh reader.
+                // from the source run, then retrieved by a fresh reader.
                 directory = path.join(ceremony, 'completion');
                 assert.ok((await stat(directory)).isDirectory());
             } else {
@@ -265,6 +297,7 @@ await runWithLocalRunLog(
                 'crates/protocol-research/evaluation-target/src/public-completion-check.rs',
                 'crates/protocol-research/evaluation-target/src/bin/check-target.rs',
                 'tools/ci/protocol-public-archive.ts',
+                'tools/ci/participant-public-ceremony.ts',
                 import.meta.filename,
             ])
                 await writeFile(
@@ -385,7 +418,7 @@ await runWithLocalRunLog(
             ) as Record<string, unknown> & { participantCount: number };
             const emptyCase = report.ciphertextSha512 === '';
             const participantCount = report.participantCount;
-            assert.equal(emptyCase, native.result.kind === 'no-result');
+            assert.equal(emptyCase, run.result.kind === 'no-result');
             assert.ok(
                 verified.certificateAuthors.length >=
                     participantCount - Math.floor((participantCount - 1) / 3),
@@ -405,11 +438,11 @@ await runWithLocalRunLog(
                 assert.ok(
                     verified.kind === 'result' || verified.kind === 'no-result',
                 );
-                assert.equal(verified.kind, native.result.kind);
+                assert.equal(verified.kind, run.result.kind);
                 if (!emptyCase)
                     assert.deepEqual(
                         verified.identifiers,
-                        native.result.identifiers,
+                        run.result.identifiers,
                     );
             }
             if (selected.name === 'available-records') {
@@ -771,7 +804,13 @@ await runWithLocalRunLog(
                             selected.name === 'available-records'
                                 ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
                                 : selected.name === 'archived-records'
-                                  ? 'The records the owning verifiers depend on are published through the maintained public archive to three local replicas, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader or departure chronology is exercised.'
+                                  ? (participantCeremony === undefined
+                                        ? ''
+                                        : "A browser cohort's relayed records are laid out as the native reader takes them in a scratch directory. ") +
+                                    'The records the owning verifiers depend on are published through the maintained public archive to three local replicas, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader ' +
+                                    (participantCeremony === undefined
+                                        ? 'or departure chronology is exercised.'
+                                        : "is exercised; only the source cohort's own departures precede the archive.")
                                   : selected.stage === 'certificate'
                                     ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
                                     : selected.stage === 'release'
@@ -784,6 +823,8 @@ await runWithLocalRunLog(
                 ) + '\n',
                 { flag: 'wx' },
             );
+            if (participantCeremony !== undefined)
+                await rm(participantCeremony, { recursive: true });
             process.stdout.write(log.runDirectoryPath + '\n');
         } finally {
             await releaseLock();

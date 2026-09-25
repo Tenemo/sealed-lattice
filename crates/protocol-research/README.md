@@ -50,14 +50,14 @@ pnpm run research:protocol:public -- available-records <native-result-run>
 
 This case supplies the certificate's votes and a nonconsecutive release subset, leaves other files absent, and injects corrupt extras. It recomputes setup, the close barrier and evaluation before consuming completion records. This is a retrieval test after generation; it does not demonstrate participants disappearing before their later actions.
 
-The records a passed native run's verified result depends on can also travel through the maintained public archive:
+The records a passed native run's or browser participant run's verified result depends on can also travel through the maintained public archive:
 
 ```text
 pnpm run build
-pnpm run research:protocol:public -- archived-records <native-run>
+pnpm run research:protocol:public -- archived-records <native-or-participant-run>
 ```
 
-The reader first verifies the native records and lists every public input its accepted result depends on: setup, the close intent, proposal and named responses, their listed envelopes, the usable bodies and the accepted votes and release shares. The case publishes exactly those files as one archive closure bound to the poll identity to three local replicas with the built SDK client. After the source and one acknowledging replica are gone, a fresh reader retrieves the closure, rebuilds the reader input only from authenticated records and must reach the same target and terminal while depending on exactly the retrieved files. A reader bound to another poll and a closure without one usable body are refused. A roster whose public records exceed the archive client's maximum retrieval bytes cannot be archived as one closure. Local replicas on one host are not independent fault domains, and no browser reader or departure chronology is exercised.
+A participant run's relayed records are first laid out as the native reader takes them: registrations in roster order under the poll and runtime identities the reader is given, and an index of the published envelopes. The reader first verifies the records and lists every public input its accepted result depends on: setup, the close intent, proposal and named responses, their listed envelopes, the usable bodies and the accepted votes and release shares. The case publishes exactly those files as one archive closure bound to the poll identity to three local replicas with the built SDK client. After the source and one acknowledging replica are gone, a fresh reader retrieves the closure, rebuilds the reader input only from authenticated records and must reach the same target and terminal while depending on exactly the retrieved files. A reader bound to another poll and a closure without one usable body are refused. A roster whose public records exceed the archive client's maximum retrieval bytes cannot be archived as one closure. Local replicas on one host are not independent fault domains, and no browser reader is exercised; only a participant run's own departures precede its archive.
 
 The public setup and close records of a passed native run can also be checked against a directory containing actual participant messages:
 
