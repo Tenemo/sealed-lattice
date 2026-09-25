@@ -45,6 +45,13 @@ import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { instantiateParticipantKernel } from './kernel.js';
 import { publishRecord, readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
+import { releasePhase } from './release-state.js';
+import {
+    advanceRelease,
+    computeResult,
+    publishRelease,
+    resumeRelease,
+} from './release.js';
 import {
     authenticateRoot,
     dataKind,
@@ -415,6 +422,64 @@ const execute = async (
             return {
                 status: 'completed',
                 details: { ...summary(root, enrollment), ...signed },
+            };
+        }
+        case 'release': {
+            // Release follows this participant's signed target; a signed
+            // release is only delivered again.
+            const generation = root.head.generation;
+            if (generation < targetPhase.signed) return { status: 'refused' };
+            const contribution = await resumeContribution(context, root);
+            const session = await resumeRelease(
+                await resumeClose(contribution, enrollment.isOrganizer),
+            );
+            let released = {};
+            if (generation < releasePhase.signed) {
+                // A release continued from an earlier visit reports the
+                // generation and journal records it resumed from.
+                const resumed =
+                    session.state === undefined
+                        ? {}
+                        : {
+                              resumedFrom: {
+                                  generation,
+                                  journalRecords:
+                                      session.state.journalKeys.length,
+                              },
+                          };
+                await reverifySetup(contribution, relay);
+                released = {
+                    ...resumed,
+                    encrypted: await advanceRelease(session, relay),
+                };
+            }
+            root = contribution.root;
+            await publishRelease(session, relay);
+            return {
+                status: 'completed',
+                details: { ...summary(root, enrollment), ...released },
+            };
+        }
+        case 'result': {
+            // Any participant past its close combines the published release
+            // shares in its own module; the result is not published.
+            if (
+                root.head.generation <
+                completedClosePhase(enrollment.isOrganizer)
+            )
+                return { status: 'refused' };
+            const contribution = await resumeContribution(context, root);
+            const session = await resumeClose(
+                contribution,
+                enrollment.isOrganizer,
+            );
+            await reverifySetup(contribution, relay);
+            return {
+                status: 'completed',
+                details: {
+                    ...summary(root, enrollment),
+                    ...(await computeResult(session, relay)),
+                },
             };
         }
         default:

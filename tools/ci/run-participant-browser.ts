@@ -44,6 +44,9 @@ const basePort = 43_600;
 // The host guard for each participant's Chrome process tree.
 const participantMemoryLimit = 3_221_225_472;
 const operationMilliseconds = 3_600_000;
+// The last participant starts its ballot this much later, so that its ballot
+// time alone is the latest and the organizer's close time makes it late.
+const lateBallotMilliseconds = 2_000;
 
 // The relay's layout: lower-case path segments of letters, digits, dots and
 // hyphens, with no traversal.
@@ -226,6 +229,8 @@ await runWithLocalRunLog(
             'Browser signed ballots',
             'Browser close responses',
             'Browser target votes',
+            'Browser release shares',
+            'Browser result',
         ],
         scriptName: 'research:participant',
     },
@@ -282,14 +287,16 @@ await runWithLocalRunLog(
             })();
             const origin = (position: number) =>
                 `http://127.0.0.1:${String(basePort + position)}`;
+            const profile = (position: number) =>
+                path.join(profileDirectory, `participant-${String(position)}`);
+            // A departed participant's browser and private state are gone.
+            const departed = new Set<number>();
             const participant = async (position: number) => {
+                assert.ok(!departed.has(position), 'The participant departed.');
                 const existing = chromes[position];
                 if (existing !== undefined) return existing;
                 const chrome = await launchChromeParticipant(
-                    path.join(
-                        profileDirectory,
-                        `participant-${String(position)}`,
-                    ),
+                    profile(position),
                     origin(position),
                 );
                 chromes[position] = chrome;
@@ -370,8 +377,10 @@ await runWithLocalRunLog(
                 (_unused, position) => position,
             );
             // Each participant scores every option differently, across the
-            // descriptor's score range.
+            // descriptor's score range, and the result lists one option fewer
+            // than the complete ranking.
             const { minimumScore, maximumScore } = runtime.descriptor.ballot;
+            const topCount = Math.max(1, optionCount - 1);
             const ballotScores = (position: number) =>
                 Array.from(
                     { length: optionCount },
@@ -401,7 +410,7 @@ await runWithLocalRunLog(
             const organizer = await run(0, 'create', {
                 role: 'creator',
                 manifest: hexadecimal(manifest.canonicalBytes),
-                topCount: optionCount,
+                topCount,
                 username: 'Organizer',
             });
             assert.equal(organizer.isOrganizer, true);
@@ -485,10 +494,14 @@ await runWithLocalRunLog(
             });
             await everyone('verify-setup', 12);
             await expectStatus(0, 'verify-setup', 'refused');
-            // Every participant signs one ballot. A signed ballot refuses other
-            // scores and is only delivered again.
+            // Every participant signs one ballot, the last one starting later.
+            // A signed ballot refuses other scores and is only delivered
+            // again.
+            const lastPosition = participantCount - 1;
             await Promise.all(
                 positions.map(async (position) => {
+                    if (position === lastPosition)
+                        await delay(lateBallotMilliseconds);
                     assert.equal(
                         (
                             await run(position, 'ballot', {
@@ -547,6 +560,10 @@ await runWithLocalRunLog(
             )[participantCount - 2];
             const onTime = (position: number) =>
                 ballotTimes[position] <= closeTime;
+            assert.deepEqual(
+                positions.filter((position) => !onTime(position)),
+                [lastPosition],
+            );
             const others = (position: number) =>
                 positions.filter((other) => other !== position);
             const submissions = (kind: string, authors: readonly number[]) =>
@@ -716,6 +733,168 @@ await runWithLocalRunLog(
                 targetIdentities.add(vote.subarray(2, 66).toString('hex'));
             }
             assert.equal(targetIdentities.size, 1);
+            // Every vote is published, so the certificate exists. The
+            // organizer then departs before any release exists: its browser
+            // closes and its private state is deleted.
+            const organizerPosition = 0;
+            await chromes[organizerPosition]?.close();
+            chromes[organizerPosition] = undefined;
+            departed.add(organizerPosition);
+            await rm(profile(organizerPosition), {
+                recursive: true,
+                maxRetries: 10,
+                retryDelay: 500,
+            });
+            const remaining = positions.filter(
+                (position) => !departed.has(position),
+            );
+            // Counts a participant's retained release records from its own
+            // page, reading none of them.
+            const storedReleaseRecords = async (position: number) =>
+                Number(
+                    await (
+                        await participant(position)
+                    ).evaluate(`new Promise((resolve, reject) => {
+    const opening = indexedDB.open('sealed-lattice-participant');
+    opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+        const database = opening.result;
+        const counting = database.transaction('release').objectStore('release').count();
+        counting.onsuccess = () => { database.close(); resolve(counting.result); };
+        counting.onerror = () => { database.close(); reject(counting.error); };
+    };
+})`),
+                );
+            // Every remaining participant certifies the target from the
+            // published votes, appends its journal of original random bytes,
+            // and generates and signs its release share. The first one's
+            // browser closes once a third of its journal is committed, and
+            // its next visit continues from the retained records.
+            const { journalRecords } = runtime.descriptor.release;
+            const interruptedPosition = remaining[0];
+            const interruptionRecords = Math.ceil(journalRecords / 3);
+            const interruptRelease = async () => {
+                const interrupted = request(interruptedPosition, 'release');
+                for (;;) {
+                    const outcome = await Promise.race([
+                        interrupted.then(
+                            () => 'settled',
+                            () => 'settled',
+                        ),
+                        delay(1000, 'waiting'),
+                    ]);
+                    assert.equal(
+                        outcome,
+                        'waiting',
+                        'The release ended before its interruption.',
+                    );
+                    if (
+                        (await storedReleaseRecords(interruptedPosition)) >=
+                        interruptionRecords
+                    )
+                        break;
+                }
+                await chromes[interruptedPosition]?.close();
+                chromes[interruptedPosition] = undefined;
+                await assert.rejects(interrupted);
+                const details = await run(interruptedPosition, 'release');
+                assert.equal(details.generation, 29);
+                assert.equal(details.encrypted, true);
+                const resumedFrom = details.resumedFrom as {
+                    generation: number;
+                    journalRecords: number;
+                };
+                assert.equal(resumedFrom.generation, 25);
+                assert.ok(
+                    resumedFrom.journalRecords >= interruptionRecords &&
+                        resumedFrom.journalRecords < journalRecords,
+                );
+                return resumedFrom;
+            };
+            const [resumedFrom] = await Promise.all([
+                interruptRelease(),
+                ...remaining.slice(1).map(async (position) => {
+                    const details = await run(position, 'release');
+                    assert.equal(details.generation, 29);
+                    assert.equal(details.encrypted, true);
+                    assert.equal(details.resumedFrom, undefined);
+                }),
+            ]);
+            // A signed release is only delivered again.
+            const rereleased = await run(2, 'release');
+            assert.equal(rereleased.generation, 29);
+            assert.equal(rereleased.encrypted, undefined);
+            const releaseBounds = runtime.descriptor.release;
+            for (const position of departed)
+                for (const name of ['release-', 'release-envelope-'])
+                    await assert.rejects(
+                        stat(
+                            path.join(
+                                completionDirectory,
+                                name + String(position) + '.bin',
+                            ),
+                        ),
+                        { code: 'ENOENT' },
+                    );
+            for (const position of remaining) {
+                const body = await stat(
+                    path.join(
+                        completionDirectory,
+                        `release-${String(position)}.bin`,
+                    ),
+                );
+                assert.ok(
+                    body.size >= releaseBounds.minimumBodyBytes &&
+                        body.size <= releaseBounds.maximumBodyBytes,
+                );
+                const packet = await readFile(
+                    path.join(
+                        completionDirectory,
+                        `release-envelope-${String(position)}.bin`,
+                    ),
+                );
+                assert.equal(
+                    packet.length,
+                    releaseBounds.envelopeBytes + signatureBytes,
+                );
+                // The envelope ends with the body length and identity.
+                assert.equal(
+                    Number(
+                        packet.readBigUInt64LE(
+                            releaseBounds.envelopeBytes - 64 - 8,
+                        ),
+                    ),
+                    body.size,
+                );
+            }
+            // A remaining participant combines the published shares into the
+            // requested prefix of the ranking of the on-time ballots' score
+            // totals, ties to the lower option. The departed organizer's share
+            // is absent, so the first share it tries is unavailable.
+            const totals = Array.from(
+                { length: optionCount },
+                (_unused, option) =>
+                    positions
+                        .filter(onTime)
+                        .reduce(
+                            (total, position) =>
+                                total + ballotScores(position)[option],
+                            0,
+                        ),
+            );
+            const expectedResult = Array.from(
+                { length: optionCount },
+                (_unused, option) => option,
+            )
+                .sort(
+                    (left, right) =>
+                        totals[right] - totals[left] || left - right,
+                )
+                .slice(0, topCount)
+                .map((option) => `option-${String(option)}`);
+            const result = await run(1, 'result');
+            assert.equal(result.encrypted, true);
+            assert.deepEqual(result.identifiers, expectedResult);
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -730,7 +909,14 @@ await runWithLocalRunLog(
                         lateBallots: positions.filter(
                             (position) => !onTime(position),
                         ),
-                        scope: "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes in the maintained participant runtime in external Chrome. Release and later protocol stages are not exercised.",
+                        departed: [...departed],
+                        interrupted: {
+                            position: interruptedPosition,
+                            resumedFrom,
+                        },
+                        topCount,
+                        result: expectedResult,
+                        scope: "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal, and the combined shorter result in the maintained participant runtime in external Chrome.",
                     },
                     null,
                     2,

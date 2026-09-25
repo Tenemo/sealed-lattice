@@ -89,6 +89,17 @@ export type ParticipantDescriptor = Readonly<{
         votePacketBytes: number;
         maximumStateBytes: number;
     }>;
+    release: Readonly<{
+        recordBytes: number;
+        // The journal of original random bytes the release proof draws.
+        journalBytes: number;
+        journalRecords: number;
+        bodyHeaderBytes: number;
+        minimumBodyBytes: number;
+        maximumBodyBytes: number;
+        envelopeBytes: number;
+        maximumStateBytes: number;
+    }>;
     // A stored working value of the public evaluation: both ciphertext
     // components' coefficients, each of whole little-endian words.
     evaluation: Readonly<{
@@ -209,7 +220,7 @@ export const parseParticipantDescriptor = (
 ): ParticipantDescriptor => {
     if (
         !isRecord(value) ||
-        Object.keys(value).length !== 9 ||
+        Object.keys(value).length !== 10 ||
         !positive(value.participantCount) ||
         !positive(value.optionCount) ||
         !positiveFields(value.registration, [
@@ -234,6 +245,16 @@ export const parseParticipantDescriptor = (
         !positiveFields(value.target, [
             'maximumBodyBytes',
             'votePacketBytes',
+            'maximumStateBytes',
+        ]) ||
+        !positiveFields(value.release, [
+            'recordBytes',
+            'journalBytes',
+            'journalRecords',
+            'bodyHeaderBytes',
+            'minimumBodyBytes',
+            'maximumBodyBytes',
+            'envelopeBytes',
             'maximumStateBytes',
         ]) ||
         !positiveFields(value.evaluation, [

@@ -42,7 +42,7 @@ import type { TargetState } from './target-state.js';
 const coinBytes = 32;
 const listedEntryBytes = 2 + 64;
 const unusedWord = 0xff_ff_ff_ff;
-const completionDirectory = 'completion/';
+export const completionDirectory = 'completion/';
 const evaluationDatabase = 'sealed-lattice-public-evaluation';
 const evaluationStore = 'values';
 
@@ -530,7 +530,7 @@ const finalityCommand = (
 };
 
 // The retained target signing state, or undefined before it begins.
-const resumeTarget = (close: CloseSession): TargetState | undefined => {
+export const resumeTarget = (close: CloseSession): TargetState | undefined => {
     const { root, context } = close.contribution;
     if (root.head.generation < targetPhase.intent) return undefined;
     const bytes = root.manifest.suffixes.target;
@@ -574,17 +574,17 @@ const commitTarget = async (
     );
 };
 
-// Evaluates the target from the public close records and signs this
-// participant's target vote. The owning setup verifier must have verified
-// the complete setup in this instance first. Returns the own ballot's status
-// in the target and how many usable ballots were valid.
-export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
-    const { contribution } = close;
-    const { context } = contribution;
-    await restoreCompletedClose(close);
+// Verifies the close barrier, classifies each usable ballot and evaluates
+// the target in this instance. Returns the target body and how many usable
+// ballots were valid. The completed close must be restored first, after the
+// owning setup verifier verified the complete setup in this instance.
+export const evaluateClosedTarget = async (
+    context: ParticipantContext,
+    relay: PublicRelay,
+) => {
     const usable = await verifyCloseBarrier(context, relay);
     evaluationCommand(context, 0);
-    let valid = 0;
+    let validBallots = 0;
     for (
         let author = 0;
         author < context.descriptor.participantCount;
@@ -595,11 +595,22 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
             submission !== undefined &&
             (await classifyBallot(context, relay, author, submission))
         )
-            valid++;
+            validBallots++;
         // Each slot takes the classification just made, or none.
         evaluationCommand(context, 1);
     }
-    const body = await evaluate(context, relay);
+    return { body: await evaluate(context, relay), validBallots };
+};
+
+// Evaluates the target from the public close records and signs this
+// participant's target vote. The owning setup verifier must have verified
+// the complete setup in this instance first. Returns the own ballot's status
+// in the target and how many usable ballots were valid.
+export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
+    const { contribution } = close;
+    const { context } = contribution;
+    await restoreCompletedClose(close);
+    const { body, validBallots } = await evaluateClosedTarget(context, relay);
     const finality = finalityCommand(context, 0);
     if (!equalBytes(finality.subarray(1), body))
         throw new Error('The finality work names another target.');
@@ -629,7 +640,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const code = finality[0];
     if (code >= ballotStatuses.length)
         throw new Error('The finality work reported no ballot status.');
-    return { ballotStatus: ballotStatuses[code], validBallots: valid };
+    return { ballotStatus: ballotStatuses[code], validBallots };
 };
 
 // Delivers the signed target vote, and the organizer the target body.

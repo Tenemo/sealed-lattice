@@ -11,7 +11,8 @@ import type { ParticipantDescriptor } from './descriptor.js';
 // The target signing suffix follows the completed close: the participant's
 // signed response, and for the organizer its signed proposal. Generation 23
 // retains the exact evaluated target body and the signing coins before the
-// signature exists; generation 24 retains the body and the completed vote.
+// signature exists; generation 24 retains the body and the completed vote,
+// which later generations keep unchanged.
 
 export const targetPhase = { intent: 23, signed: 24 } as const;
 const marker = encodeText('TST1');
@@ -41,9 +42,9 @@ export const decodeTargetState = (
     bytes: Uint8Array,
 ): TargetState => {
     const { maximumBodyBytes, votePacketBytes } = descriptor.target;
+    const signed = generation >= targetPhase.signed;
     if (
-        (generation !== targetPhase.intent &&
-            generation !== targetPhase.signed) ||
+        generation < targetPhase.intent ||
         bytes.length < marker.length + 3 ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         bytes[marker.length] !== completedClosePhase(organizer)
@@ -51,8 +52,7 @@ export const decodeTargetState = (
         throw new Error('The target state is malformed.');
     const length = readUnsigned16(bytes, marker.length + 1);
     const start = marker.length + 3;
-    const tail =
-        generation === targetPhase.intent ? coinBytes : votePacketBytes;
+    const tail = signed ? votePacketBytes : coinBytes;
     if (
         length === 0 ||
         length > maximumBodyBytes ||
@@ -63,7 +63,7 @@ export const decodeTargetState = (
     return {
         predecessor: bytes[marker.length],
         body: bytes.slice(start, start + length),
-        coins: generation === targetPhase.intent ? rest : new Uint8Array(),
-        vote: generation === targetPhase.signed ? rest : new Uint8Array(),
+        coins: signed ? new Uint8Array() : rest,
+        vote: signed ? rest : new Uint8Array(),
     };
 };

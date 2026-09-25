@@ -18,6 +18,7 @@ import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
@@ -64,6 +65,7 @@ export const deriveParticipantDescriptor = (
     const closeWire = compileCloseWireCensus(profile);
     const closeCustody = compileParticipantCloseCustody(profile);
     const targetState = compileTargetSigningStateCensus();
+    const releaseCustody = compileParticipantReleaseCustody(profile);
     return {
         participantCount,
         optionCount,
@@ -170,6 +172,16 @@ export const deriveParticipantDescriptor = (
             maximumBodyBytes: number(targetState.maximumBodyBytes),
             votePacketBytes: number(targetState.packetBytes),
             maximumStateBytes: number(targetState.maximumStateBytes),
+        },
+        release: {
+            recordBytes: number(releaseCustody.recordBytes),
+            journalBytes: number(releaseCustody.totalRandomBytes),
+            journalRecords: number(releaseCustody.journalRecords),
+            bodyHeaderBytes: number(releaseCustody.bodyHeaderBytes),
+            minimumBodyBytes: number(releaseCustody.minimumBodyBytes),
+            maximumBodyBytes: number(releaseCustody.maximumBodyBytes),
+            envelopeBytes: number(releaseCustody.envelopeBytes),
+            maximumStateBytes: number(releaseCustody.maximumStateBytes),
         },
         evaluation: {
             polynomialDegree: number(fixedModulusBfvInputs.polynomialDegree),

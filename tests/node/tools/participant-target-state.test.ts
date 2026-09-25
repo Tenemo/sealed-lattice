@@ -53,6 +53,15 @@ describe('participant target signing state', () => {
                         signed,
                     ),
                 ).toEqual({ ...value, coins: new Uint8Array() });
+                // Later generations keep the completed vote unchanged.
+                expect(
+                    decodeTargetState(
+                        descriptor,
+                        targetPhase.signed + 5,
+                        organizer,
+                        signed,
+                    ),
+                ).toEqual({ ...value, coins: new Uint8Array() });
             }
     });
 

@@ -40,6 +40,16 @@ const kernelFunctions = [
     'participant_ballot_key_index',
     'participant_close_command',
     'participant_finality_command',
+    'participant_release_command',
+    // The release journal's entropy queue.
+    'release_entropy_input_pointer',
+    'release_entropy_output_pointer',
+    'release_entropy_command',
+    // The target certificate, release contexts and release shares.
+    'completion_input_pointer',
+    'completion_output_pointer',
+    'completion_output_length',
+    'completion_command',
     // The public close barrier verifier.
     'close_input_pointer',
     'close_command',
