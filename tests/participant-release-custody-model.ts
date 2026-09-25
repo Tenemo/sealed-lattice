@@ -79,12 +79,12 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
     const targetBytes = compileTargetSigningStateCensus().maximumBodyBytes;
     const phaseBytes = [
         {
-            phase: 26,
+            phase: 25,
             bytes: prefixBytes + targetBytes + 32n * (journalRecords - 1n),
         },
-        { phase: 27, bytes: prefixBytes + targetBytes + 32n * journalRecords },
+        { phase: 26, bytes: prefixBytes + targetBytes + 32n * journalRecords },
         {
-            phase: 28,
+            phase: 27,
             bytes:
                 prefixBytes +
                 targetBytes +
@@ -92,7 +92,7 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
                 envelopeBytes,
         },
         {
-            phase: 29,
+            phase: 28,
             bytes:
                 prefixBytes +
                 targetBytes +
@@ -101,7 +101,7 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
                 32n,
         },
         {
-            phase: 30,
+            phase: 29,
             bytes:
                 prefixBytes +
                 targetBytes +
