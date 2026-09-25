@@ -1,4 +1,4 @@
-import { ballotDirectory, retainedBallotRecords } from './ballot.js';
+import { retainedBallotRecords, submissionDirectory } from './ballot.js';
 import {
     concatenate,
     equalBytes,
@@ -57,15 +57,20 @@ const words = (bytes: Uint8Array) => {
     );
 };
 
+// A usable slot's authenticated submission and its envelope identity, which
+// addresses its body.
+type UsableSlot = Readonly<{ submission: Uint8Array; identity: Uint8Array }>;
+
 const streamBody = (
     context: ParticipantContext,
     relay: PublicRelay,
     author: number,
+    identity: Uint8Array,
     accept: (bytes: Uint8Array) => void | Promise<void>,
 ) =>
     streamPublic(
         relay,
-        ballotDirectory(author) + 'body.bin',
+        submissionDirectory(author, identity) + 'body.bin',
         context.descriptor.ballot.maximumBodyBytes,
         accept,
     );
@@ -92,8 +97,7 @@ const requireBarrier = (
 
 // Verifies the organizer's close barrier from the public close records: the
 // intent, the proposal's named responses with every envelope they list, and
-// the body of each usable slot. Returns each usable slot's submission by its
-// author.
+// the body of each usable slot. Returns each usable slot by its author.
 const verifyCloseBarrier = async (
     context: ParticipantContext,
     relay: PublicRelay,
@@ -158,6 +162,7 @@ const verifyCloseBarrier = async (
                 descriptor,
                 relay,
                 author,
+                identity,
             );
             const reported =
                 submission === undefined
@@ -189,14 +194,14 @@ const verifyCloseBarrier = async (
         kernel.close_missing_pointer(),
         kernel.close_missing_count() * 64,
     );
-    const usable = new Map<number, Uint8Array>();
+    const usable = new Map<number, UsableSlot>();
     for (let offset = 0; offset < missing.length; offset += 64) {
         const identity = missing.subarray(offset, offset + 64);
         const slot = listed.get(hexadecimal(identity));
         if (slot === undefined)
             throw new Error('The close verifier needs an unlisted body.');
         requireBarrier(context, 4, identity, 'A usable body was refused.');
-        await streamBody(context, relay, slot.author, (bytes) => {
+        await streamBody(context, relay, slot.author, identity, (bytes) => {
             requireBarrier(context, 5, bytes, 'A usable body was refused.');
         });
         requireBarrier(
@@ -205,7 +210,10 @@ const verifyCloseBarrier = async (
             new Uint8Array(),
             'A usable body was refused.',
         );
-        usable.set(slot.author, slot.submission);
+        usable.set(slot.author, {
+            submission: slot.submission,
+            identity: identity.slice(),
+        });
     }
     requireBarrier(context, 9, proposal, 'The close barrier was refused.');
     return usable;
@@ -262,12 +270,12 @@ const classifyBallot = async (
     context: ParticipantContext,
     relay: PublicRelay,
     author: number,
-    submission: Uint8Array,
+    { submission, identity }: UsableSlot,
 ) => {
     const { kernel, descriptor } = context;
     const { headerBytes } = descriptor.ballot;
     let header: Uint8Array = new Uint8Array();
-    await streamBody(context, relay, author, async (bytes) => {
+    await streamBody(context, relay, author, identity, async (bytes) => {
         let rest = bytes;
         if (header.length < headerBytes) {
             const taken = rest.subarray(0, headerBytes - header.length);
@@ -392,8 +400,13 @@ const readStoredChunk = async (
 
 // Runs the public ranking evaluation from the closed inventory. The engine
 // names each step's keys, ballot input, and values to spill or reload; a
-// spilled value is read back through the engine before it leaves memory.
-const evaluate = async (context: ParticipantContext, relay: PublicRelay) => {
+// spilled value is read back through the engine before it leaves memory. A
+// ballot input is the body of the barrier's usable slot of its author.
+const evaluate = async (
+    context: ParticipantContext,
+    relay: PublicRelay,
+    usable: ReadonlyMap<number, UsableSlot>,
+) => {
     const { kernel, descriptor } = context;
     const { polynomialDegree, storedCoefficientBytes } = descriptor.evaluation;
     const coefficients = 2 * polynomialDegree;
@@ -483,10 +496,20 @@ const evaluate = async (context: ParticipantContext, relay: PublicRelay) => {
             }
             if (author !== unusedWord) {
                 const [length] = words(evaluationCommand(context, 14, author));
-                if (length > 0)
+                const slot = usable.get(author);
+                if (length > 0 && slot === undefined)
+                    throw new Error('The evaluation needs an unusable ballot.');
+                if (length > 0 && slot !== undefined)
                     await deliverEvaluationInput(
                         context,
-                        (accept) => streamBody(context, relay, author, accept),
+                        (accept) =>
+                            streamBody(
+                                context,
+                                relay,
+                                author,
+                                slot.identity,
+                                accept,
+                            ),
                         'An accepted ballot changed.',
                     );
             }
@@ -584,16 +607,16 @@ export const evaluateClosedTarget = async (
         author < context.descriptor.participantCount;
         author++
     ) {
-        const submission = usable.get(author);
+        const slot = usable.get(author);
         if (
-            submission !== undefined &&
-            (await classifyBallot(context, relay, author, submission))
+            slot !== undefined &&
+            (await classifyBallot(context, relay, author, slot))
         )
             validBallots++;
         // Each slot takes the classification just made, or none.
         evaluationCommand(context, 1);
     }
-    return { body: await evaluate(context, relay), validBallots };
+    return { body: await evaluate(context, relay, usable), validBallots };
 };
 
 // Evaluates the target from the public close records and signs this

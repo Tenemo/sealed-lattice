@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
+    cp,
     mkdir,
     mkdtemp,
     open,
+    readdir,
     readFile,
     rm,
     stat,
@@ -53,8 +55,9 @@ const basePort = 43_600;
 const participantMemoryLimit = 3_221_225_472;
 const operationMilliseconds = 3_600_000;
 // A late ballot starts this much later, so that the organizer's close time
-// makes exactly the late ballots late.
-const lateBallotMilliseconds = 2_000;
+// makes exactly the late ballots late. It exceeds the variation in the time
+// from a ballot request to its attempt lock across concurrent browsers.
+const lateBallotMilliseconds = 5_000;
 
 // The relay's layout: lower-case path segments of letters, digits, dots and
 // hyphens, with no traversal.
@@ -67,6 +70,8 @@ type Relay = Readonly<{
     // What the relay serves each participant instead of a stored record:
     // other bytes, or nothing when the value is undefined.
     views: Map<string, Buffer | undefined>[];
+    // Publications the relay refuses to store.
+    refused: Set<string>;
 }>;
 
 const readBody = async (request: IncomingMessage, maximum: number) => {
@@ -127,6 +132,7 @@ const startRelay = async (
         { length: participantCount },
         () => new Map<string, Buffer | undefined>(),
     );
+    const refused = new Set<string>();
     const html = page(runtime);
     const handle = async (
         origin: string,
@@ -175,6 +181,7 @@ const startRelay = async (
             request.headers.origin !== origin ||
             !url.pathname.startsWith('/publish/') ||
             !publicPath.test(name) ||
+            refused.has(name) ||
             !Number.isSafeInteger(offset) ||
             offset < 0 ||
             (owners.get(name) ?? origin) !== origin
@@ -233,7 +240,7 @@ const startRelay = async (
         });
         servers.push(server);
     }
-    return { servers, owners, views };
+    return { servers, owners, views, refused };
 };
 
 await runWithLocalRunLog(
@@ -264,6 +271,9 @@ await runWithLocalRunLog(
             root,
         );
         const chromes: (ChromeParticipant | undefined)[] = [];
+        // The equivocator's copies of its private state, each its own Chrome
+        // process at the equivocator's origin.
+        const copies = new Map<string, ChromeParticipant>();
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
@@ -271,8 +281,25 @@ await runWithLocalRunLog(
         let profiles: string | undefined;
         let guardFailure: Error | undefined;
         try {
+            const {
+                maximumCorruptParticipantCount,
+                minimumTurnout,
+                releaseThreshold,
+            } = deriveSupportedProfile(participantCount, optionCount);
+            // In a result run the last corrupt position equivocates, as in
+            // the native result ceremony: two copies of its private state
+            // sign two more ballots.
+            const equivocator =
+                noResult || maximumCorruptParticipantCount === 0
+                    ? undefined
+                    : maximumCorruptParticipantCount;
+            const copyNames =
+                equivocator === undefined ? [] : ['conflicting', 'late'];
             assert.ok(
-                freemem() >= 2 * participantCount * participantMemoryLimit,
+                freemem() >=
+                    2 *
+                        (participantCount + copyNames.length) *
+                        participantMemoryLimit,
                 'Insufficient host memory for the browser cohort.',
             );
             const descriptor = deriveParticipantDescriptor(
@@ -283,30 +310,51 @@ await runWithLocalRunLog(
             const publicDirectory = path.join(log.runDirectoryPath, 'public');
             await mkdir(publicDirectory);
             relay = await startRelay(runtime, publicDirectory);
-            const { views } = relay;
+            const { views, refused: refusedPublications } = relay;
             profiles = await mkdtemp(
                 path.join(root, 'temp/participant-browser-'),
             );
             const profileDirectory = profiles;
             const peaks = new Array<number>(participantCount).fill(0);
+            const copyPeaks = new Map<string, number>();
+            // Samples one Chrome process tree against the guard.
+            const sample = async (
+                chrome: ChromeParticipant,
+                details: Readonly<{ position: number; copy?: string }>,
+            ) => {
+                const bytes = await readProtocolProcessTree(
+                    chrome.processIdentifier,
+                );
+                if (bytes === undefined) return 0;
+                log.writeEvent({
+                    eventType: 'participant-process-memory',
+                    details: { ...details, bytes },
+                });
+                if (bytes > participantMemoryLimit)
+                    guardFailure ??= new Error(
+                        'Participant process-tree memory guard exceeded.',
+                    );
+                return bytes;
+            };
             monitor = (async () => {
                 while (sampling) {
-                    for (const [position, chrome] of chromes.entries()) {
-                        if (chrome === undefined) continue;
-                        const bytes = await readProtocolProcessTree(
-                            chrome.processIdentifier,
-                        );
-                        if (bytes === undefined) continue;
-                        peaks[position] = Math.max(peaks[position], bytes);
-                        log.writeEvent({
-                            eventType: 'participant-process-memory',
-                            details: { position, bytes },
-                        });
-                        if (bytes > participantMemoryLimit)
-                            guardFailure ??= new Error(
-                                'Participant process-tree memory guard exceeded.',
+                    for (const [position, chrome] of chromes.entries())
+                        if (chrome !== undefined)
+                            peaks[position] = Math.max(
+                                peaks[position],
+                                await sample(chrome, { position }),
                             );
-                    }
+                    for (const [copy, chrome] of copies)
+                        copyPeaks.set(
+                            copy,
+                            Math.max(
+                                copyPeaks.get(copy) ?? 0,
+                                await sample(chrome, {
+                                    position: equivocator ?? 0,
+                                    copy,
+                                }),
+                            ),
+                        );
                     await delay(2000);
                 }
             })();
@@ -335,12 +383,19 @@ await runWithLocalRunLog(
                 });
                 return chrome;
             };
+            // Runs one operation in a participant's page, or in a copy of its
+            // private state.
             const request = async (
                 position: number,
                 operation: string,
                 parameters: Record<string, unknown> = {},
+                copy?: string,
             ) => {
-                const chrome = await participant(position);
+                const chrome =
+                    copy === undefined
+                        ? await participant(position)
+                        : copies.get(copy);
+                assert.ok(chrome !== undefined, 'The copy is not running.');
                 const started = performance.now();
                 // The deadline ends with its operation so that no timer
                 // outlives the run.
@@ -365,6 +420,7 @@ await runWithLocalRunLog(
                     eventType: 'participant-operation',
                     details: {
                         position,
+                        ...(copy === undefined ? {} : { copy }),
                         operation,
                         milliseconds: performance.now() - started,
                         result,
@@ -520,52 +576,146 @@ await runWithLocalRunLog(
             await everyone('verify-setup', 12);
             await expectStatus(0, 'verify-setup', 'refused');
             // Every participant signs one ballot, the late ones starting later.
-            // A result closes with every ballot but the last on time, and a
-            // no-result target with the ones just before the last, one fewer
-            // than the minimum turnout. A signed ballot refuses other scores
-            // and is only delivered again.
-            const { minimumTurnout, releaseThreshold } = deriveSupportedProfile(
-                participantCount,
-                optionCount,
-            );
+            // A result closes with every ballot but the last on time, or with
+            // every ballot when a position equivocates, and a no-result target
+            // with the ones just before the last, one fewer than the minimum
+            // turnout. A signed ballot refuses other scores and is only
+            // delivered again.
             const lastPosition = participantCount - 1;
             const onTimeCount = noResult
                 ? minimumTurnout - 1
-                : participantCount - 1;
+                : equivocator === undefined
+                  ? participantCount - 1
+                  : participantCount;
+            // The equivocator's slot is conflicting, so no ballot of it counts.
+            const validCount =
+                onTimeCount - (equivocator === undefined ? 0 : 1);
             assert.ok(
-                onTimeCount >= 1 && onTimeCount >= minimumTurnout !== noResult,
+                validCount >= 1 && validCount >= minimumTurnout !== noResult,
             );
-            const onTimeBallots = positions.slice(
-                lastPosition - onTimeCount,
-                lastPosition,
-            );
+            const onTimeBallots = noResult
+                ? positions.slice(lastPosition - onTimeCount, lastPosition)
+                : positions.slice(0, onTimeCount);
             const lateBallots = positions.filter(
                 (position) => !onTimeBallots.includes(position),
             );
-            await Promise.all(
-                positions.map(async (position) => {
+            // Before its ballot the equivocator copies its private state,
+            // and each copy runs as its own Chrome process at the same origin.
+            // The relay refuses the pointer to the equivocator's ballot until
+            // every ballot is signed, so that the pointer it stores names the
+            // original ballot.
+            const pointerName = (author: number) =>
+                'ballot-' + String(author) + '/submission.bin';
+            const copyProfile = (copy: string) =>
+                profile(equivocator ?? 0) + '-' + copy;
+            if (equivocator !== undefined) {
+                await chromes[equivocator]?.close();
+                chromes[equivocator] = undefined;
+                for (const copy of copyNames) {
+                    // Crash reporting state is not participant state, and its
+                    // handler can outlive the browser.
+                    await cp(profile(equivocator), copyProfile(copy), {
+                        recursive: true,
+                        errorOnExist: true,
+                        force: false,
+                        filter: (source) =>
+                            path.relative(profile(equivocator), source) !==
+                            'Crashpad',
+                    });
+                    const chrome = await launchChromeParticipant(
+                        copyProfile(copy),
+                        origin(equivocator),
+                    );
+                    copies.set(copy, chrome);
+                    log.writeEvent({
+                        eventType: 'participant-browser',
+                        details: {
+                            position: equivocator,
+                            copy,
+                            version: chrome.version,
+                            launchArguments: chrome.launchArguments,
+                        },
+                    });
+                }
+                // The original browser runs again before any ballot starts.
+                await participant(equivocator);
+                refusedPublications.add(pointerName(equivocator));
+            }
+            const refusedDelivery = {
+                status: 'pending',
+                reason: 'Public delivery was refused.',
+            };
+            await Promise.all([
+                ...positions.map(async (position) => {
                     if (lateBallots.includes(position))
                         await delay(lateBallotMilliseconds);
-                    assert.equal(
-                        (
-                            await run(position, 'ballot', {
-                                scores: ballotScores(position),
-                            })
-                        ).generation,
-                        17,
-                    );
+                    const scores = ballotScores(position);
+                    if (position === equivocator)
+                        assert.deepEqual(
+                            await request(position, 'ballot', { scores }),
+                            refusedDelivery,
+                        );
+                    else
+                        assert.equal(
+                            (await run(position, 'ballot', { scores }))
+                                .generation,
+                            17,
+                        );
                 }),
-            );
+                // Each copy signs other scores, the late one starting later.
+                ...(equivocator === undefined
+                    ? []
+                    : copyNames.map(async (copy, index) => {
+                          if (copy === 'late')
+                              await delay(lateBallotMilliseconds);
+                          assert.deepEqual(
+                              await request(
+                                  equivocator,
+                                  'ballot',
+                                  {
+                                      scores: ballotScores(
+                                          participantCount + index,
+                                      ),
+                                  },
+                                  copy,
+                              ),
+                              refusedDelivery,
+                          );
+                      })),
+            ]);
+            if (equivocator !== undefined) {
+                // The original ballot is only delivered again, now with its
+                // pointer, and the copies' private state is deleted.
+                refusedPublications.delete(pointerName(equivocator));
+                assert.equal((await run(equivocator, 'ballot')).generation, 17);
+                for (const [copy, chrome] of copies) {
+                    await chrome.close();
+                    copies.delete(copy);
+                    await rm(copyProfile(copy), {
+                        recursive: true,
+                        maxRetries: 10,
+                        retryDelay: 500,
+                    });
+                }
+            }
             await expectStatus(0, 'ballot', 'refused', {
                 scores: ballotScores(1),
             });
             assert.equal((await run(0, 'ballot')).generation, 17);
             const ballotBounds = runtime.descriptor.ballot;
-            for (const position of positions) {
-                const directory = path.join(
+            // An author's pointer names the directory of its submission.
+            const submissionDirectory = async (author: number) =>
+                path.join(
                     publicDirectory,
-                    `ballot-${String(position)}`,
+                    'ballot-' + String(author),
+                    (
+                        await readFile(
+                            path.join(publicDirectory, pointerName(author)),
+                        )
+                    ).toString('hex'),
                 );
+            for (const position of positions) {
+                const directory = await submissionDirectory(position);
                 const envelope = await readFile(
                     path.join(directory, 'envelope.bin'),
                 );
@@ -584,23 +734,55 @@ await runWithLocalRunLog(
             // The organizer's close time is the latest on-time ballot time, so
             // a strictly later ballot is late: the intent lock retires it
             // wherever it was delivered, and no response lists it.
+            const ballotTime = async (directory: string) =>
+                Number(
+                    (
+                        await readFile(path.join(directory, 'envelope.bin'))
+                    ).readBigUInt64LE(134),
+                );
             const ballotTimes = await Promise.all(
                 positions.map(async (position) =>
-                    Number(
-                        (
-                            await readFile(
-                                path.join(
-                                    publicDirectory,
-                                    `ballot-${String(position)}`,
-                                    'envelope.bin',
-                                ),
-                            )
-                        ).readBigUInt64LE(134),
-                    ),
+                    ballotTime(await submissionDirectory(position)),
                 ),
             );
+            // The equivocator's directory also holds one ballot from each
+            // copy, the late copy's timed last.
+            const equivocation =
+                equivocator === undefined
+                    ? undefined
+                    : await (async () => {
+                          const directory = path.join(
+                              publicDirectory,
+                              'ballot-' + String(equivocator),
+                          );
+                          const original = path.basename(
+                              await submissionDirectory(equivocator),
+                          );
+                          const copied = await Promise.all(
+                              (await readdir(directory))
+                                  .filter(
+                                      (entry) =>
+                                          /^[0-9a-f]{128}$/u.test(entry) &&
+                                          entry !== original,
+                                  )
+                                  .map(async (identity) => ({
+                                      identity,
+                                      time: await ballotTime(
+                                          path.join(directory, identity),
+                                      ),
+                                  })),
+                          );
+                          assert.equal(copied.length, copyNames.length);
+                          const [conflicting, late] = copied.sort(
+                              (left, right) => left.time - right.time,
+                          );
+                          return { position: equivocator, conflicting, late };
+                      })();
             const closeTime = Math.max(
                 ...onTimeBallots.map((position) => ballotTimes[position]),
+                ...(equivocation === undefined
+                    ? []
+                    : [equivocation.conflicting.time]),
             );
             const onTime = (position: number) =>
                 ballotTimes[position] <= closeTime;
@@ -608,10 +790,22 @@ await runWithLocalRunLog(
                 positions.filter((position) => !onTime(position)),
                 lateBallots,
             );
+            if (equivocation !== undefined)
+                assert.ok(equivocation.late.time > closeTime);
             const others = (position: number) =>
                 positions.filter((other) => other !== position);
             const submissions = (kind: string, authors: readonly number[]) =>
                 authors.map((position) => ({ kind, position }));
+            // The relay's pointer to the equivocator's ballot names its late
+            // copy's ballot to the last participant, and its conflicting
+            // copy's to the organizer's first collection.
+            const pointerTo = (identity: string) =>
+                Buffer.from(identity, 'hex');
+            if (equivocation !== undefined)
+                views[lastPosition].set(
+                    pointerName(equivocation.position),
+                    pointerTo(equivocation.late.identity),
+                );
             // Every other participant collects the published ballots, its own
             // first, before any intent exists.
             await Promise.all(
@@ -626,9 +820,30 @@ await runWithLocalRunLog(
                     ]);
                 }),
             );
-            // The organizer learns one on-time envelope without its body,
-            // opens the close and locks its own intent.
-            const announced = others(0).find(onTime);
+            views[lastPosition].clear();
+            const equivocatorHeld =
+                equivocation === undefined ? [] : [equivocation.position];
+            if (equivocation !== undefined) {
+                views[0].set(
+                    pointerName(equivocation.position),
+                    pointerTo(equivocation.conflicting.identity),
+                );
+                const collected = await run(0, 'close', {
+                    deliver: equivocatorHeld,
+                });
+                views[0].clear();
+                assert.equal(collected.generation, 17);
+                assert.deepEqual(collected.closeEvents, [
+                    ...submissions('own', [0]),
+                    ...submissions('held', equivocatorHeld),
+                ]);
+            }
+            // The organizer learns one honest on-time envelope without its
+            // body, opens the close and locks its own intent. It then holds
+            // both of the equivocator's on-time envelopes.
+            const announced = others(0).find(
+                (position) => onTime(position) && position !== equivocator,
+            );
             assert.ok(announced !== undefined);
             const organizerDeliveries = others(0).filter(
                 (position) => position !== announced,
@@ -642,6 +857,7 @@ await runWithLocalRunLog(
             assert.equal(opened.generation, 19);
             const organizerCollected = [
                 ...submissions('own', [0].filter(onTime)),
+                ...submissions('held', equivocatorHeld),
                 ...submissions('held', organizerDeliveries.filter(onTime)),
                 ...submissions('known', [announced]),
             ];
@@ -651,13 +867,21 @@ await runWithLocalRunLog(
             ]);
             await expectStatus(0, 'close', 'refused', { closeTime });
             // Every other participant locks the intent and responds at once.
+            // The last participant's lock retires the late ballot it held
+            // from the equivocator.
+            const heldOnTime = (position: number) =>
+                others(position).filter(
+                    (author) =>
+                        onTime(author) &&
+                        !(author === equivocator && position === lastPosition),
+                );
             await Promise.all(
                 positions.slice(1).map(async (position) => {
                     const details = await run(position, 'close');
                     assert.equal(details.generation, 21);
                     assert.deepEqual(details.closeEvents, [
                         ...submissions('own', [position].filter(onTime)),
-                        ...submissions('held', others(position).filter(onTime)),
+                        ...submissions('held', heldOnTime(position)),
                         { kind: 'lock' },
                     ]);
                 }),
@@ -703,7 +927,10 @@ await runWithLocalRunLog(
                         length <= closeBounds.maximumResponseBodyBytes,
                 );
                 assert.equal(response.length, 4 + length + signatureBytes);
-                // The listing holds exactly the on-time ballots.
+                // The listing holds exactly the on-time ballots its responder
+                // holds: the organizer lists both of the equivocator's
+                // on-time envelopes, which makes its slot conflicting, and
+                // the last participant, which held only the late one, none.
                 const listed = [];
                 for (
                     let offset = 4 + closeBounds.minimumResponseBodyBytes;
@@ -711,7 +938,20 @@ await runWithLocalRunLog(
                     offset += 66
                 )
                     listed.push(response.readUInt16LE(offset));
-                assert.deepEqual(listed, positions.filter(onTime));
+                assert.deepEqual(
+                    listed,
+                    positions
+                        .filter(onTime)
+                        .flatMap((author) =>
+                            author !== equivocator
+                                ? [author]
+                                : position === 0
+                                  ? [author, author]
+                                  : position === lastPosition
+                                    ? []
+                                    : [author],
+                        ),
+                );
             }
             // The proposal names the organizer's response and the first other
             // responses it took, up to the close quorum.
@@ -744,7 +984,11 @@ await runWithLocalRunLog(
             );
             // Every voter verifies the barrier, classifies each usable
             // ballot, evaluates the target and signs its vote. Every on-time
-            // ballot is usable and valid, and a late one is reported late.
+            // ballot but the equivocator's is usable and valid, and a late
+            // one is reported late. The equivocator is a non-voter.
+            assert.ok(
+                equivocator === undefined || nonVoters.includes(equivocator),
+            );
             await Promise.all(
                 voters.map(async (position) => {
                     const details = await run(position, 'target');
@@ -753,7 +997,7 @@ await runWithLocalRunLog(
                         details.ballotStatus,
                         onTime(position) ? 'included' : 'late',
                     );
-                    assert.equal(details.validBallots, onTimeCount);
+                    assert.equal(details.validBallots, validCount);
                 }),
             );
             // A signed vote is only delivered again.
@@ -975,15 +1219,19 @@ await runWithLocalRunLog(
             // The last remaining participant combines the published shares
             // into the requested prefix of the ranking of the on-time ballots'
             // score totals, ties to the lower option, or finds that the
-            // certified target carries no result. The departed organizer's
-            // share is absent, so the first share it tries is unavailable, and
-            // the lowest remaining shares include a non-voter's when one
-            // exists and the interrupted voter's.
+            // certified target carries no result. The equivocator's ballots
+            // are not counted. The departed organizer's share is absent, so the
+            // first share it tries is unavailable, and the lowest remaining
+            // shares include a non-voter's when one exists and the interrupted
+            // voter's.
             const totals = Array.from(
                 { length: optionCount },
                 (_unused, option) =>
                     positions
-                        .filter(onTime)
+                        .filter(
+                            (position) =>
+                                onTime(position) && position !== equivocator,
+                        )
                         .reduce(
                             (total, position) =>
                                 total + ballotScores(position)[option],
@@ -1168,11 +1416,21 @@ await runWithLocalRunLog(
                         recordIds,
                         runtimeIdentity: runtime.identity.runtime,
                         peakProcessTreeBytes: peaks,
+                        copyPeakProcessTreeBytes: Object.fromEntries(copyPeaks),
                         closeTime,
                         lateBallots,
                         nonVoters,
                         departed: [...departed],
                         interrupted: interruption,
+                        equivocation:
+                            equivocation === undefined
+                                ? undefined
+                                : {
+                                      position: equivocation.position,
+                                      conflicting:
+                                          equivocation.conflicting.identity,
+                                      late: equivocation.late.identity,
+                                  },
                         forgeries: {
                             votes: {
                                 position: voteProbe,
@@ -1197,7 +1455,7 @@ await runWithLocalRunLog(
                             : { kind: 'result', identifiers: expectedResult },
                         scope: noResult
                             ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one on-time ballot fewer than the minimum turnout, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. A relay view that relabels or replays votes leaves its participant pending, and altered retained state stops a participant for good."
-                            : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. Relay views that relabel, replay or alter votes and shares leave their participants pending, and altered retained state stops a participant for good.",
+                            : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts. Relay views that relabel, replay or alter votes and shares leave their participants pending, and altered retained state stops a participant for good.",
                     },
                     null,
                     2,
@@ -1208,7 +1466,7 @@ await runWithLocalRunLog(
         } finally {
             sampling = false;
             await monitor;
-            for (const chrome of chromes)
+            for (const chrome of [...chromes, ...copies.values()])
                 await chrome?.close().catch(() => undefined);
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));

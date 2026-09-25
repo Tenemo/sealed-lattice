@@ -3,18 +3,20 @@ import type { ParticipantIdentities } from '../protocol-participant-predecessor.
 import type { ParticipantKernel } from './kernel.js';
 
 // The purposes whose identities the participant module derives, each under
-// its own domain. The target purpose yields the certified target's own
-// identity.
+// its own domain. The target and envelope purposes yield the certified
+// target's and a ballot envelope's own identities.
 export const custodyPurpose = {
     root: 0,
     record: 1,
     enrollmentInput: 2,
     target: 3,
+    envelope: 4,
 } as const;
 type CustodyPurpose = (typeof custodyPurpose)[keyof typeof custodyPurpose];
 
 // Derives one identity in the participant module, whose SHAKE256 framing is
-// the only hash the runtime binds into its retained state.
+// the only hash the runtime binds into its retained state or addresses public
+// records by.
 export const custodyIdentity = (
     kernel: ParticipantKernel,
     purpose: CustodyPurpose,

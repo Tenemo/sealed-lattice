@@ -1,20 +1,26 @@
-//! Identities the participant runtime binds into its retained state. The
-//! module computes them so that the host carries no hash of its own.
+//! Identities the participant runtime binds into its retained state or
+//! addresses public records by. The module computes them so that the host
+//! carries no hash of its own.
 
 use crate::Error;
-use registration_credentials::{identity::IdentityHasher, target_signing::TARGET_IDENTITY_DOMAIN};
+use registration_credentials::{
+    ballot_authentication::ENVELOPE_IDENTITY_DOMAIN, identity::IdentityHasher,
+    target_signing::TARGET_IDENTITY_DOMAIN,
+};
 
 /// The bytes one absorb call reads from the host.
 pub const INPUT_BYTES: usize = 1 << 16;
 
 /// The closed set of purposes the host may request, each under its own
-/// domain. The target purpose yields the certified target's own identity.
+/// domain. The target and envelope purposes yield the certified target's and
+/// a ballot envelope's own identities.
 fn domain(purpose: u32) -> Option<&'static str> {
     Some(match purpose {
         0 => "sealed-lattice/participant-root/v1",
         1 => "sealed-lattice/participant-record/v1",
         2 => "sealed-lattice/enrollment-input/v1",
         3 => TARGET_IDENTITY_DOMAIN,
+        4 => ENVELOPE_IDENTITY_DOMAIN,
         _ => return None,
     })
 }
@@ -104,7 +110,10 @@ mod browser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use registration_credentials::foundation::{CanonicalItem, hash_foundation_tuple_512};
+    use registration_credentials::{
+        ballot_authentication::ENVELOPE_BYTES,
+        foundation::{CanonicalItem, hash_foundation_tuple_512},
+    };
 
     fn identity(state: &mut State, purpose: u32, bytes: &[u8], fragment: usize) -> [u8; 64] {
         state.begin(purpose, bytes.len()).unwrap();
@@ -118,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    fn separates_purposes_and_matches_the_target_identity() {
+    fn separates_purposes_and_matches_the_target_and_envelope_identities() {
         let body: Vec<u8> = (0..INPUT_BYTES + 91)
             .map(|index| (index % 253) as u8)
             .collect();
@@ -130,15 +139,25 @@ mod tests {
         .unwrap()
         .into_bytes();
         assert_eq!(identity(&mut state, 3, &body[..2048], 100), target);
-        let identities: Vec<_> = (0..4)
+        let envelope = hash_foundation_tuple_512(
+            ENVELOPE_IDENTITY_DOMAIN,
+            &[CanonicalItem::variable_bytes(&body[..ENVELOPE_BYTES]).unwrap()],
+        )
+        .unwrap()
+        .into_bytes();
+        assert_eq!(
+            identity(&mut state, 4, &body[..ENVELOPE_BYTES], 50),
+            envelope
+        );
+        let identities: Vec<_> = (0..5)
             .map(|purpose| identity(&mut state, purpose, &body, INPUT_BYTES))
             .collect();
-        for purpose in 0..4 {
+        for purpose in 0..5 {
             assert_eq!(
                 identity(&mut state, purpose as u32, &body, 7_000),
                 identities[purpose]
             );
-            for other in purpose + 1..4 {
+            for other in purpose + 1..5 {
                 assert_ne!(identities[purpose], identities[other]);
             }
         }
@@ -147,7 +166,7 @@ mod tests {
     #[test]
     fn refuses_unknown_purposes_and_wrong_lengths() {
         let mut state = State::default();
-        assert!(state.begin(4, 1).is_err());
+        assert!(state.begin(5, 1).is_err());
         assert!(state.absorb(1).is_err());
         assert!(state.finish().is_err());
         state.begin(1, 2).unwrap();

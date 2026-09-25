@@ -1,10 +1,11 @@
 import {
-    ballotDirectory,
     ballotWorkInput,
     isSignedBallot,
     readBallotBody,
     resumeBallot,
     retainedBallotRecords,
+    submissionDirectory,
+    submissionPointer,
 } from './ballot.js';
 import type { BallotSession } from './ballot.js';
 import {
@@ -542,14 +543,16 @@ const deliverOwnBallot = async (session: CloseSession) => {
     learnSubmission(session, serial, ballot.state.envelope);
 };
 
-// A published ballot's envelope and signature, or undefined when the relay
-// lacks them.
+// The envelope and signature published under an author and envelope
+// identity, or undefined when the relay lacks them. The caller checks that
+// the envelope has that identity.
 export const readPublishedSubmission = async (
     descriptor: ParticipantDescriptor,
     relay: PublicRelay,
     author: number,
+    identity: Uint8Array,
 ) => {
-    const directory = ballotDirectory(author);
+    const directory = submissionDirectory(author, identity);
     try {
         const submission = concatenate(
             await readPublic(
@@ -572,9 +575,30 @@ export const readPublishedSubmission = async (
     }
 };
 
+// The submission an author's pointer names, or undefined when the relay lacks
+// it. The pointer only proposes an identity; the module authenticates what it
+// names.
+const readAnnouncedSubmission = async (
+    descriptor: ParticipantDescriptor,
+    relay: PublicRelay,
+    author: number,
+) => {
+    let identity: Uint8Array;
+    try {
+        identity = await readPublic(relay, submissionPointer(author), 64);
+    } catch (error) {
+        if (error instanceof PublicInputFailure) return undefined;
+        throw error;
+    }
+    return identity.length === 64
+        ? readPublishedSubmission(descriptor, relay, author, identity)
+        : undefined;
+};
+
 // Delivers a published ballot with its body, sealing each body record as it
 // passes the module. An expected identity restricts delivery to that
-// envelope. A refused, late or incomplete submission changes nothing.
+// envelope; otherwise the author's pointer names it. A refused, late or
+// incomplete submission changes nothing.
 const deliverBallot = async (
     session: CloseSession,
     relay: PublicRelay,
@@ -583,11 +607,23 @@ const deliverBallot = async (
 ) => {
     const { context } = session.contribution;
     const { descriptor } = context;
-    const submission = await readPublishedSubmission(descriptor, relay, author);
+    const submission =
+        expected === undefined
+            ? await readAnnouncedSubmission(descriptor, relay, author)
+            : await readPublishedSubmission(
+                  descriptor,
+                  relay,
+                  author,
+                  expected,
+              );
+    const identity =
+        submission === undefined
+            ? undefined
+            : envelopeIdentity(context, submission);
     if (
         submission === undefined ||
-        (expected !== undefined &&
-            !namesEnvelope(context, submission, expected)) ||
+        identity === undefined ||
+        (expected !== undefined && !equalBytes(identity, expected)) ||
         tryCloseCommand(context, 3, 0, submission) === undefined
     )
         return;
@@ -620,7 +656,7 @@ const deliverBallot = async (
         if (accepted)
             await streamPublic(
                 relay,
-                ballotDirectory(author) + 'body.bin',
+                submissionDirectory(author, identity) + 'body.bin',
                 length,
                 async (bytes) => {
                     for (let start = 0; start < bytes.length && accepted;) {
@@ -659,7 +695,7 @@ const announceBallot = async (
     author: number,
 ) => {
     const { context } = session.contribution;
-    const submission = await readPublishedSubmission(
+    const submission = await readAnnouncedSubmission(
         context.descriptor,
         relay,
         author,
@@ -809,6 +845,7 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 descriptor,
                 relay,
                 readUnsigned16(response, offset),
+                identity,
             );
             if (
                 submission !== undefined &&

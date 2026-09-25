@@ -72,8 +72,9 @@ const readParticipantRun = async (run: string): Promise<ParticipantRun> => {
 
 // Lays out a browser cohort's relayed records as the native public reader
 // takes them. The relay names each registration record by its body digest and
-// each ballot by its author; the reader takes registrations in roster order
-// and an index of submitted envelopes with their bodies. The context holds the
+// each ballot submission by its author and envelope identity; the reader takes
+// registrations in roster order and an index of submitted envelopes with their
+// bodies. The context holds the
 // poll and runtime identities the reader is given, and every other file is
 // relayed bytes. Only the owning verifiers accept any of them.
 export const layParticipantCeremony = async (
@@ -109,7 +110,8 @@ export const layParticipantCeremony = async (
             path.join(relay, 'registration', id),
             path.join(ceremony, 'participant-' + String(position)),
         );
-    // Each published ballot in author order; its body keeps its relayed path.
+    // Each published submission in author and identity order, whether or not
+    // its author's pointer names it; its body keeps its relayed path.
     const authors = (await readdir(relay))
         .map((entry) => ballotDirectory.exec(entry)?.[1])
         .filter((author) => author !== undefined)
@@ -123,17 +125,25 @@ export const layParticipantCeremony = async (
     await mkdir(close, { recursive: true });
     const lines: string[] = [];
     for (const author of authors) {
-        const directory = path.join(relay, 'ballot-' + String(author));
-        const name = 'submission-' + String(lines.length) + '.bin';
-        await writeFile(
-            path.join(close, name),
-            Buffer.concat([
-                await readFile(path.join(directory, 'envelope.bin')),
-                await readFile(path.join(directory, 'signature.bin')),
-            ]),
-            { flag: 'wx' },
-        );
-        lines.push(name + ' ballot-' + String(author) + '/body.bin\n');
+        const directory = 'ballot-' + String(author);
+        const identities = (await readdir(path.join(relay, directory)))
+            .filter((entry) => identity.test(entry))
+            .sort();
+        for (const envelopeIdentity of identities) {
+            const submission = path.join(relay, directory, envelopeIdentity);
+            const name = 'submission-' + String(lines.length) + '.bin';
+            await writeFile(
+                path.join(close, name),
+                Buffer.concat([
+                    await readFile(path.join(submission, 'envelope.bin')),
+                    await readFile(path.join(submission, 'signature.bin')),
+                ]),
+                { flag: 'wx' },
+            );
+            lines.push(
+                name + ' ' + directory + '/' + envelopeIdentity + '/body.bin\n',
+            );
+        }
     }
     await writeFile(path.join(close, 'submissions.txt'), lines.join(''), {
         flag: 'wx',

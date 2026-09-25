@@ -4,6 +4,7 @@ import {
     concatenate,
     encodeText,
     equalBytes,
+    hexadecimal,
     readUnsigned16,
     readUnsigned32,
     readUnsigned64,
@@ -17,6 +18,7 @@ import type { ParticipantContext } from './context.js';
 import { contributionRecords, storedOpening } from './contribution.js';
 import type { ContributionSession } from './contribution.js';
 import type { ParticipantDescriptor } from './descriptor.js';
+import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel } from './kernel.js';
 import type { KernelHandlers } from './kernel.js';
 import { publishChunk, publishRecord } from './public.js';
@@ -858,8 +860,14 @@ export const completeBallot = async (session: BallotSession) => {
     });
 };
 
-export const ballotDirectory = (position: number) =>
-    'ballot-' + String(position) + '/';
+// Each submission's records are stored under its author and envelope
+// identity, so that a listed envelope or usable body is retrieved by the
+// identity a response names. The author's pointer names its own submission's
+// identity for delivery.
+export const submissionPointer = (author: number) =>
+    'ballot-' + String(author) + '/submission.bin';
+export const submissionDirectory = (author: number, identity: Uint8Array) =>
+    'ballot-' + String(author) + '/' + hexadecimal(identity) + '/';
 
 // Streams the retained body record by record, clearing each after use.
 export const readBallotBody = async (
@@ -884,14 +892,21 @@ export const readBallotBody = async (
 export const isSignedBallot = (session: BallotSession) =>
     session.state.signature.length > 0;
 
-// Delivers the signed ballot from its authenticated records.
+// Delivers the signed ballot from its authenticated records, then the
+// pointer that names it, so a pointer never names an incomplete submission.
 export const publishBallot = async (
     session: BallotSession,
     relay: PublicRelay,
 ) => {
     if (!isSignedBallot(session))
         throw new Error('No signed ballot is retained.');
-    const directory = ballotDirectory(session.records.position);
+    const identity = custodyIdentity(
+        session.contribution.context.kernel,
+        custodyPurpose.envelope,
+        session.state.envelope,
+    );
+    const { position } = session.records;
+    const directory = submissionDirectory(position, identity);
     await publishRecord(
         relay,
         directory + 'envelope.bin',
@@ -907,4 +922,5 @@ export const publishBallot = async (
         await publishChunk(relay, directory + 'body.bin', offset, bytes);
         offset += bytes.length;
     });
+    await publishRecord(relay, submissionPointer(position), identity);
 };

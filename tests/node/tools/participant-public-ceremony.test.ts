@@ -18,6 +18,16 @@ const hexadecimal = (fill: number) => Buffer.alloc(64, fill).toString('hex');
 const recordIds = [hexadecimal(0xc2), hexadecimal(0x0f), hexadecimal(0xa5)];
 const poll = hexadecimal(0x11);
 const runtimeIdentity = hexadecimal(0x22);
+// Each submission's records sit under its author and envelope identity. The
+// middle participant published no ballot and the last published two, whose
+// identities differ from their arrival order; one pointer names one of them.
+const submissions = [
+    { author: 2, identity: hexadecimal(0xb0), fill: 3 },
+    { author: 0, identity: hexadecimal(0xe1), fill: 1 },
+    { author: 2, identity: hexadecimal(0x3c), fill: 5 },
+];
+const submissionDirectory = (author: number, identity: string) =>
+    'ballot-' + String(author) + '/' + identity + '/';
 const registrationFiles = [
     'polynomial-01.bin',
     'proof.bin',
@@ -77,28 +87,26 @@ describe('browser relay ceremony layout', () => {
             'completion/release-envelope-2.bin',
         ])
             await write(name, name);
-        // The middle participant published no ballot.
-        for (const author of [2, 0]) {
+        for (const { author, identity, fill } of submissions) {
+            const directory = submissionDirectory(author, identity);
+            await write(directory + 'envelope.bin', Buffer.alloc(214, fill));
             await write(
-                'ballot-' + String(author) + '/envelope.bin',
-                Buffer.alloc(214, author + 1),
+                directory + 'signature.bin',
+                Buffer.alloc(3309, fill + 7),
             );
-            await write(
-                'ballot-' + String(author) + '/signature.bin',
-                Buffer.alloc(3309, author + 7),
-            );
-            await write(
-                'ballot-' + String(author) + '/body.bin',
-                'body of ' + String(author),
-            );
+            await write(directory + 'body.bin', 'body ' + String(fill));
         }
+        await write(
+            'ballot-2/submission.bin',
+            Buffer.from(hexadecimal(0xb0), 'hex'),
+        );
     });
     afterEach(async () => {
         assert.ok(root.startsWith(temporaryRoot + path.sep));
         await rm(root, { recursive: true, force: true });
     });
 
-    it('orders registrations by roster position and indexes each ballot', async () => {
+    it('orders registrations by roster position and indexes each submission', async () => {
         const ceremony = path.join(root, 'view', 'ceremony');
         const participant = await layParticipantCeremony(run, ceremony);
         expect(participant.recordIds).toEqual(recordIds);
@@ -154,9 +162,18 @@ describe('browser relay ceremony layout', () => {
                 'utf8',
             ),
         ).toBe(
-            'submission-0.bin ballot-0/body.bin\nsubmission-1.bin ballot-2/body.bin\n',
+            [submissions[1], submissions[2], submissions[0]]
+                .map(
+                    ({ author, identity }, ordinal) =>
+                        'submission-' +
+                        String(ordinal) +
+                        '.bin ' +
+                        submissionDirectory(author, identity) +
+                        'body.bin\n',
+                )
+                .join(''),
         );
-        for (const [ordinal, author] of [0, 2].entries())
+        for (const [ordinal, fill] of [1, 5, 3].entries())
             expect(
                 await readFile(
                     path.join(
@@ -166,13 +183,19 @@ describe('browser relay ceremony layout', () => {
                 ),
             ).toEqual(
                 Buffer.concat([
-                    Buffer.alloc(214, author + 1),
-                    Buffer.alloc(3309, author + 7),
+                    Buffer.alloc(214, fill),
+                    Buffer.alloc(3309, fill + 7),
                 ]),
             );
         expect(
-            await readFile(path.join(ceremony, 'ballot-2/body.bin'), 'utf8'),
-        ).toBe('body of 2');
+            await readFile(
+                path.join(
+                    ceremony,
+                    submissionDirectory(2, hexadecimal(0x3c)) + 'body.bin',
+                ),
+                'utf8',
+            ),
+        ).toBe('body 5');
     });
 
     it('carries a certified no-result terminal', async () => {
@@ -221,9 +244,11 @@ describe('browser relay ceremony layout', () => {
             /no roster position/u,
         );
         await rm(path.join(relay, 'ballot-3'), { recursive: true });
-        await rm(path.join(relay, 'ballot-2/signature.bin'));
+        const unsigned =
+            submissionDirectory(2, hexadecimal(0x3c)) + 'signature.bin';
+        await rm(path.join(relay, unsigned));
         await expect(lay('unsigned-ballot')).rejects.toThrow();
-        await write('ballot-2/signature.bin', Buffer.alloc(3309));
+        await write(unsigned, Buffer.alloc(3309));
         await rm(path.join(relay, 'registration', recordIds[1]), {
             recursive: true,
         });
