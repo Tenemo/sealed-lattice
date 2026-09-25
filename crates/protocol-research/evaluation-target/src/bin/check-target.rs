@@ -37,8 +37,33 @@ struct Work {
     written_bytes: u64,
     retained_bytes: u64,
     peak_retained_bytes: u64,
+    /// The named public input directories.
+    roots: Vec<(&'static str, PathBuf)>,
+    /// Every public input the verified result depends on, as a route below
+    /// one of the roots. A candidate that is refused or unused adds none.
+    dependencies: BTreeSet<String>,
 }
 impl Work {
+    fn depend(&mut self, path: &Path) -> io::Result<()> {
+        // A native run keeps its completion directory inside the ceremony
+        // directory, so the most specific root names the route.
+        let (name, relative) = self
+            .roots
+            .iter()
+            .filter_map(|(name, root)| Some((*name, path.strip_prefix(root).ok()?)))
+            .min_by_key(|(_, relative)| relative.components().count())
+            .ok_or_else(|| refusal("dependency outside the public inputs"))?;
+        let mut route = String::from(name);
+        for component in relative.components() {
+            let Component::Normal(part) = component else {
+                return Err(refusal("dependency route"));
+            };
+            route.push('/');
+            route.push_str(part.to_str().ok_or_else(|| refusal("dependency route"))?);
+        }
+        self.dependencies.insert(route);
+        Ok(())
+    }
     fn read(&mut self, file: &mut File, bytes: &mut [u8]) -> io::Result<()> {
         file.read_exact(bytes)?;
         self.read_bytes += bytes.len() as u64;
@@ -233,6 +258,13 @@ fn main() -> io::Result<()> {
     if !(3..=20).contains(&count) {
         return Err(refusal("participant count"));
     }
+    work.roots.push(("ceremony", ceremony.to_path_buf()));
+    if let Some(directory) = arguments.get(3) {
+        work.roots.push(("completion", PathBuf::from(directory)));
+    }
+    for name in ["context.bin", "poll-definition.bin", "poll-signature.bin"] {
+        work.depend(&ceremony.join(name))?;
+    }
     let mut control = bounded(ceremony.join("context.bin"), 128, &mut work)?;
     if control.len() != 128 {
         return Err(refusal("context length"));
@@ -250,6 +282,14 @@ fn main() -> io::Result<()> {
     let mut buffer = vec![0; CHUNK_BYTES];
     for position in 0..count {
         let directory = ceremony.join(format!("participant-{position}"));
+        for name in [
+            "registration-header.bin",
+            "signature.bin",
+            "polynomial-01.bin",
+            "proof.bin",
+        ] {
+            work.depend(&directory.join(name))?;
+        }
         let header = bounded(directory.join("registration-header.bin"), 4096, &mut work)?;
         let mut control = Vec::from((position as u16).to_le_bytes());
         control.extend((header.len() as u32).to_le_bytes());
@@ -281,6 +321,7 @@ fn main() -> io::Result<()> {
     }
     let proposal = roster.finish().map_err(refusal)?;
     let poll = Arc::new(roster.into_poll());
+    work.depend(&ceremony.join("proposal-signature.bin"))?;
     let proposal = Arc::new(
         verify_roster_proposal(
             proposal,
@@ -293,6 +334,9 @@ fn main() -> io::Result<()> {
         .collect();
     let mut confirmations = Vec::new();
     for directory in &contributions {
+        for name in ["confirmation.bin", "confirmation-signature.bin"] {
+            work.depend(&directory.join(name))?;
+        }
         let body = bounded(directory.join("confirmation.bin"), 2048, &mut work)?;
         let signature = bounded(
             directory.join("confirmation-signature.bin"),
@@ -308,6 +352,14 @@ fn main() -> io::Result<()> {
     for (position, directory) in contributions.iter().enumerate() {
         let stage = scratch.join(format!("aggregate-{position}"));
         fs::create_dir(&stage)?;
+        for name in [
+            "opening.bin",
+            "opening-signature.bin",
+            "body-header.bin",
+            "proof.bin",
+        ] {
+            work.depend(&directory.join(name))?;
+        }
         let opening = bounded(directory.join("opening.bin"), 2048, &mut work)?;
         let signature = bounded(directory.join("opening-signature.bin"), 3309, &mut work)?;
         let header = bounded(directory.join("body-header.bin"), 12, &mut work)?;
@@ -320,6 +372,7 @@ fn main() -> io::Result<()> {
         for index in &indices {
             let (length, capacity) = polynomial_bytes(profile, *index)?;
             let name = polynomial_name(*index);
+            work.depend(&directory.join(&name))?;
             let mut incoming = File::open(directory.join(&name))?;
             let mut prior = if position == 0 {
                 None
@@ -387,6 +440,9 @@ fn main() -> io::Result<()> {
     let setup_milliseconds = started.elapsed().as_secs_f64() * 1000.0;
     let close = CloseContext::new(poll.clone(), setup.clone()).map_err(refusal)?;
     let records = ceremony.join("close");
+    for name in ["intent.bin", "proposal.bin", "submissions.txt"] {
+        work.depend(&records.join(name))?;
+    }
     let intent_packet = close_packet(
         &records,
         "intent.bin",
@@ -419,6 +475,7 @@ fn main() -> io::Result<()> {
     let mut response_packets = Vec::new();
     let mut needed = BTreeSet::new();
     for (responder, _) in named.responses() {
+        work.depend(&records.join(format!("response-{responder}.bin")))?;
         let bytes = close_packet(
             &records,
             &format!("response-{responder}.bin"),
@@ -461,6 +518,7 @@ fn main() -> io::Result<()> {
         if !needed.contains(&identity) || bodies.contains_key(&identity) {
             continue;
         }
+        work.depend(&records.join(name))?;
         bodies.insert(identity, contained(ceremony, relative)?);
         envelopes.push(authentication);
     }
@@ -497,6 +555,7 @@ fn main() -> io::Result<()> {
             .clone();
         let mut authenticated =
             BallotBodyAuthentication::new(authentication.clone()).map_err(refusal)?;
+        work.depend(&path)?;
         let mut body = File::open(&path)?;
         let mut header = [0; ballot_body::HEADER_BYTES];
         work.read(&mut body, &mut header)?;
@@ -624,8 +683,19 @@ fn main() -> io::Result<()> {
         };
         work.save(&output.join(name), terminal.as_bytes())?;
     }
+    let routes: String = work
+        .dependencies
+        .iter()
+        .map(|route| route.clone() + "\n")
+        .collect();
+    work.save(&output.join("dependencies.txt"), routes.as_bytes())?;
+    let poll_identity: String = poll
+        .identity()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     let report = format!(
-        "{{\"participantCount\":{count},\"accepted\":{accepted:?},\"conflicting\":{conflicting:?},\"targetIdentity\":\"{identity}\",\"ciphertextSha512\":\"{ciphertext_identity}\",\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
+        "{{\"participantCount\":{count},\"pollIdentity\":\"{poll_identity}\",\"accepted\":{accepted:?},\"conflicting\":{conflicting:?},\"targetIdentity\":\"{identity}\",\"ciphertextSha512\":\"{ciphertext_identity}\",\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
         started.elapsed().as_secs_f64() * 1000.0,
         work.read_bytes + spool.work.read_bytes,
         work.written_bytes + spool.work.written_bytes,
@@ -636,4 +706,37 @@ fn main() -> io::Result<()> {
     fs::write(output.join("result.json"), &report)?;
     print!("{report}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Path, PathBuf, Work};
+
+    #[test]
+    fn a_nested_completion_directory_names_its_own_routes() {
+        let mut work = Work::default();
+        work.roots.push(("ceremony", PathBuf::from("run/ceremony")));
+        work.roots
+            .push(("completion", PathBuf::from("run/ceremony/completion")));
+        for path in [
+            "run/ceremony/completion/target.bin",
+            "run/ceremony/close/intent.bin",
+            "run/ceremony/completion/target.bin",
+        ] {
+            work.depend(Path::new(path)).unwrap();
+        }
+        assert_eq!(
+            work.dependencies.into_iter().collect::<Vec<_>>(),
+            ["ceremony/close/intent.bin", "completion/target.bin"]
+        );
+    }
+
+    #[test]
+    fn a_path_outside_every_root_or_leaving_it_is_refused() {
+        let mut work = Work::default();
+        work.roots.push(("ceremony", PathBuf::from("run/ceremony")));
+        assert!(work.depend(Path::new("run/other/intent.bin")).is_err());
+        assert!(work.depend(Path::new("run/ceremony/../other.bin")).is_err());
+        assert!(work.dependencies.is_empty());
+    }
 }

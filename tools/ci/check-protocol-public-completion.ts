@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import {
+    copyFile,
+    mkdir,
+    readFile,
+    rm,
+    writeFile,
+    stat,
+} from 'node:fs/promises';
 import { freemem } from 'node:os';
 import path from 'node:path';
 
+import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
+import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import {
+    directoryArchiveStore,
+    encodeArchiveRoutes,
+    materializeArchiveRoutes,
+    type ArchiveRoute,
+} from '#tools/ci/protocol-public-archive.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
@@ -166,6 +181,11 @@ await runWithLocalRunLog(
                         flag: 'wx',
                     },
                 );
+            } else if (selected.name === 'archived-records') {
+                // Every record the owning verifiers depend on is archived
+                // from the native run, then retrieved by a fresh reader.
+                directory = path.join(ceremony, 'completion');
+                assert.ok((await stat(directory)).isDirectory());
             } else {
                 assert.ok(selected.completionDirectory);
                 directory = path.resolve(selected.completionDirectory);
@@ -244,6 +264,7 @@ await runWithLocalRunLog(
             for (const file of [
                 'crates/protocol-research/evaluation-target/src/public-completion-check.rs',
                 'crates/protocol-research/evaluation-target/src/bin/check-target.rs',
+                'tools/ci/protocol-public-archive.ts',
                 import.meta.filename,
             ])
                 await writeFile(
@@ -251,89 +272,108 @@ await runWithLocalRunLog(
                     await readFile(file),
                     { flag: 'wx' },
                 );
-            const controller = new AbortController();
-            let active = false,
-                monitor: Promise<void> | undefined,
-                peakMemory = 0,
-                samples = 0;
-            const exitCode = await runCommandsInSeries(
-                [
+            // One reader process over a ceremony and completion directory,
+            // inside the process-tree memory guard.
+            const verifyRecords = async (
+                ceremonyDirectory: string,
+                completionDirectory: string,
+                outputDirectory: string,
+                scratchDirectory: string,
+                slug: string,
+            ) => {
+                const controller = new AbortController();
+                let active = false,
+                    monitor: Promise<void> | undefined,
+                    peakMemory = 0,
+                    samples = 0;
+                const exitCode = await runCommandsInSeries(
+                    [
+                        {
+                            command: executable,
+                            args: [
+                                ceremonyDirectory,
+                                scratchDirectory,
+                                outputDirectory,
+                                completionDirectory,
+                                ...(selected.stage !== 'terminal'
+                                    ? [selected.stage]
+                                    : []),
+                            ],
+                            env: environment,
+                            workingDirectoryPath: workspace,
+                            description:
+                                'Verify only available completion records',
+                            logFileSlug: slug,
+                        },
+                    ],
                     {
-                        command: executable,
-                        args: [
-                            ceremony,
-                            scratch,
-                            output,
-                            directory,
-                            ...(selected.stage !== 'terminal'
-                                ? [selected.stage]
-                                : []),
-                        ],
-                        env: environment,
-                        workingDirectoryPath: workspace,
-                        description: 'Verify only available completion records',
-                        logFileSlug: 'verification',
-                    },
-                ],
-                {
-                    runLog: log,
-                    outputMode: 'inherit',
-                    signal: AbortSignal.any([
-                        controller.signal,
-                        AbortSignal.timeout(900000),
-                    ]),
-                    observer: {
-                        onCommandStart({ processIdentifier }) {
-                            assert.ok(processIdentifier);
-                            active = true;
-                            monitor = (async () => {
-                                while (active) {
-                                    const bytes =
-                                        await readProtocolProcessTree(
-                                            processIdentifier,
-                                        );
-                                    if (bytes !== undefined) {
-                                        samples++;
-                                        peakMemory = Math.max(
-                                            peakMemory,
-                                            bytes,
-                                        );
-                                        log.writeEvent({
-                                            eventType:
-                                                'threshold-reader-memory',
-                                            details: {
+                        runLog: log,
+                        outputMode: 'inherit',
+                        signal: AbortSignal.any([
+                            controller.signal,
+                            AbortSignal.timeout(900000),
+                        ]),
+                        observer: {
+                            onCommandStart({ processIdentifier }) {
+                                assert.ok(processIdentifier);
+                                active = true;
+                                monitor = (async () => {
+                                    while (active) {
+                                        const bytes =
+                                            await readProtocolProcessTree(
+                                                processIdentifier,
+                                            );
+                                        if (bytes !== undefined) {
+                                            samples++;
+                                            peakMemory = Math.max(
+                                                peakMemory,
                                                 bytes,
-                                                limit: 1073741824,
-                                            },
-                                        });
-                                        assert.ok(
-                                            bytes <= 1073741824,
-                                            'Reader process-tree memory guard exceeded.',
-                                        );
+                                            );
+                                            log.writeEvent({
+                                                eventType:
+                                                    'threshold-reader-memory',
+                                                details: {
+                                                    bytes,
+                                                    limit: 1073741824,
+                                                },
+                                            });
+                                            assert.ok(
+                                                bytes <= 1073741824,
+                                                'Reader process-tree memory guard exceeded.',
+                                            );
+                                        }
+                                        if (active)
+                                            await new Promise((resolve) =>
+                                                setTimeout(resolve, 1000),
+                                            );
                                     }
-                                    if (active)
-                                        await new Promise((resolve) =>
-                                            setTimeout(resolve, 1000),
-                                        );
-                                }
-                            })().catch((error) => controller.abort(error));
-                        },
-                        onCommandExit() {
-                            active = false;
+                                })().catch((error) => controller.abort(error));
+                            },
+                            onCommandExit() {
+                                active = false;
+                            },
                         },
                     },
-                },
-            ).finally(async () => {
-                active = false;
-                await monitor;
-            });
-            assert.equal(
-                controller.signal.aborted,
-                false,
-                String(controller.signal.reason),
+                ).finally(async () => {
+                    active = false;
+                    await monitor;
+                });
+                assert.equal(
+                    controller.signal.aborted,
+                    false,
+                    String(controller.signal.reason),
+                );
+                assert.ok(samples > 0);
+                return { exitCode, peakMemory, samples };
+            };
+            const { exitCode, peakMemory, samples } = await verifyRecords(
+                ceremony,
+                directory,
+                output,
+                scratch,
+                'verification',
             );
             assert.equal(exitCode, 0);
-            assert.ok(samples > 0);
             const verified = JSON.parse(
                 await readFile(
                     path.join(output, selected.stage + '.json'),
@@ -403,6 +443,308 @@ await runWithLocalRunLog(
                         code: 'ENOENT',
                     });
             }
+            let archive: Record<string, unknown> | undefined;
+            if (selected.name === 'archived-records') {
+                const { createPublicArchive } =
+                    await import('#packages/sdk/dist/index.js');
+                const context = String(report.pollIdentity);
+                assert.match(context, /^[0-9a-f]{128}$/u);
+                const dependencies = (
+                    await readFile(
+                        path.join(output, 'dependencies.txt'),
+                        'utf8',
+                    )
+                )
+                    .trimEnd()
+                    .split('\n');
+                const archiveScratch = path.resolve(
+                    'temp',
+                    'public-archive-' + path.basename(log.runDirectoryPath),
+                );
+                await mkdir(archiveScratch);
+                // The needed submissions keep their index order under new
+                // consecutive transport names; the index lists only them.
+                const routes: ArchiveRoute[] = [];
+                const lines: string[] = [];
+                const submissionIndex = await readFile(
+                    path.join(ceremony, 'close', 'submissions.txt'),
+                    'utf8',
+                );
+                // A close that lists no submission has an empty index.
+                for (const line of submissionIndex === ''
+                    ? []
+                    : submissionIndex.trimEnd().split(/\r?\n/u)) {
+                    const [name, body] = line.split(' ');
+                    assert.ok(body, 'Malformed submission index line.');
+                    if (!dependencies.includes('ceremony/close/' + name))
+                        continue;
+                    const renamed = 'submission-' + lines.length + '.bin';
+                    routes.push({
+                        route: 'ceremony/close/' + renamed,
+                        file: path.join(ceremony, 'close', name),
+                    });
+                    lines.push(renamed + ' ' + body);
+                }
+                const index = path.join(archiveScratch, 'submissions.txt');
+                await writeFile(
+                    index,
+                    lines.map((line) => line + '\n').join(''),
+                    { flag: 'wx' },
+                );
+                for (const route of dependencies) {
+                    if (/^ceremony\/close\/submission-\d+\.bin$/u.test(route))
+                        continue;
+                    const [root, ...parts] = route.split('/');
+                    assert.ok(root === 'ceremony' || root === 'completion');
+                    routes.push({
+                        route,
+                        file:
+                            route === 'ceremony/close/submissions.txt'
+                                ? index
+                                : path.join(
+                                      root === 'ceremony'
+                                          ? ceremony
+                                          : directory,
+                                      ...parts,
+                                  ),
+                    });
+                }
+                assert.equal(
+                    lines.length,
+                    dependencies.filter((route) =>
+                        /^ceremony\/close\/submission-\d+\.bin$/u.test(route),
+                    ).length,
+                );
+                const kernel = new URL(
+                    '../../packages/wasm/dist/sealed-lattice-kernel.wasm',
+                    import.meta.url,
+                );
+                const runtime = await createFoundationCeremonyRuntimeLoader(
+                    kernel,
+                    {
+                        expectedKernelSha256Hex: createHash('sha256')
+                            .update(await readFile(kernel))
+                            .digest('hex'),
+                    },
+                )();
+                const keys = Array.from(
+                    { length: 3 },
+                    () => generateKeyPairSync('ml-dsa-65').privateKey,
+                );
+                const policy = {
+                    faultBound: 1,
+                    verificationKeys: keys.map((key) =>
+                        createPublicKey(key)
+                            .export({ format: 'der', type: 'spki' })
+                            .subarray(-1952),
+                    ),
+                };
+                const limits = {
+                    maximumRecords: 65_536,
+                    maximumTotalBytes: 4_294_967_291,
+                };
+                const replicas: Awaited<
+                    ReturnType<typeof startPublicArchiveReplica>
+                >[] = [];
+                let shutdown: PromiseSettledResult<void>[] = [];
+                try {
+                    for (let position = 0; position < keys.length; position++)
+                        replicas.push(
+                            await startPublicArchiveReplica({
+                                directory: path.join(
+                                    archiveScratch,
+                                    'replica-' + position,
+                                ),
+                                context,
+                                policy,
+                                replicaPosition: position,
+                                privateKey: keys[position],
+                                runtime,
+                                ...limits,
+                            }),
+                        );
+                    const configuration = (archiveContext: string) => ({
+                        context: archiveContext,
+                        faultBound: policy.faultBound,
+                        replicas: replicas.map((replica, position) => ({
+                            baseUrl: replica.baseUrl,
+                            verificationKey: policy.verificationKeys[position],
+                        })),
+                        ...limits,
+                    });
+                    const publisher = await createPublicArchive(
+                        configuration(context),
+                    );
+                    const sourceStore = await directoryArchiveStore(
+                        path.join(archiveScratch, 'source'),
+                    );
+                    const target = await readFile(
+                        path.join(output, 'target.bin'),
+                    );
+                    const encoded = await encodeArchiveRoutes(
+                        publisher,
+                        routes,
+                        target,
+                        sourceStore,
+                    );
+                    assert.ok(
+                        encoded.records <= limits.maximumRecords &&
+                            encoded.byteLength <= limits.maximumTotalBytes,
+                        'The closure exceeds the archive retrieval bounds.',
+                    );
+                    const acknowledged = await publisher.publish(
+                        encoded.root,
+                        sourceStore,
+                    );
+                    assert.ok(acknowledged.length > policy.faultBound);
+                    // Readers have only the replicas, and one acknowledging
+                    // replica is gone.
+                    const unavailableReplica = acknowledged[0];
+                    await replicas[unavailableReplica].close();
+                    // A reader bound to another poll refuses every record.
+                    const otherContext =
+                        context.slice(0, -1) +
+                        (context.endsWith('0') ? '1' : '0');
+                    await assert.rejects(
+                        (
+                            await createPublicArchive(
+                                configuration(otherContext),
+                            )
+                        ).retrieve(
+                            encoded.root,
+                            await directoryArchiveStore(
+                                path.join(archiveScratch, 'other-context'),
+                            ),
+                        ),
+                    );
+                    const reader = await createPublicArchive(
+                        configuration(context),
+                    );
+                    const retrievedStore = await directoryArchiveStore(
+                        path.join(archiveScratch, 'retrieved'),
+                    );
+                    const retrieved = await reader.retrieve(
+                        encoded.root,
+                        retrievedStore,
+                    );
+                    assert.equal(retrieved.recordCount, encoded.records);
+                    assert.equal(retrieved.byteLength, encoded.byteLength);
+                    const materialize = async (name: string) => {
+                        const directoryPath = path.join(archiveScratch, name);
+                        const materialized = await materializeArchiveRoutes(
+                            reader,
+                            encoded.root,
+                            retrievedStore,
+                            directoryPath,
+                        );
+                        assert.deepEqual(
+                            materialized.routes,
+                            routes.map((value) => value.route).sort(),
+                        );
+                        assert.deepEqual(
+                            Buffer.from(materialized.payload),
+                            target,
+                        );
+                        return directoryPath;
+                    };
+                    // The owning verifiers accept the retrieved files and
+                    // depend on every one of them.
+                    const reconstruction = await materialize('reconstruction');
+                    const archivedOutput = path.join(
+                        log.runDirectoryPath,
+                        'verification-archived',
+                    );
+                    const archived = await verifyRecords(
+                        path.join(reconstruction, 'ceremony'),
+                        path.join(reconstruction, 'completion'),
+                        archivedOutput,
+                        scratch + '-archived',
+                        'verification-archived',
+                    );
+                    assert.equal(archived.exitCode, 0);
+                    assert.deepEqual(
+                        (
+                            await readFile(
+                                path.join(archivedOutput, 'dependencies.txt'),
+                                'utf8',
+                            )
+                        )
+                            .trimEnd()
+                            .split('\n'),
+                        routes.map((value) => value.route).sort(),
+                    );
+                    assert.deepEqual(
+                        await readFile(path.join(archivedOutput, 'target.bin')),
+                        target,
+                    );
+                    const archivedReport = JSON.parse(
+                        await readFile(
+                            path.join(archivedOutput, 'result.json'),
+                            'utf8',
+                        ),
+                    ) as Record<string, unknown>;
+                    assert.equal(archivedReport.pollIdentity, context);
+                    const archivedTerminal = JSON.parse(
+                        await readFile(
+                            path.join(archivedOutput, 'terminal.json'),
+                            'utf8',
+                        ),
+                    ) as TerminalResult;
+                    assert.equal(archivedTerminal.kind, verified.kind);
+                    assert.deepEqual(
+                        archivedTerminal.identifiers,
+                        (verified as TerminalResult).identifiers,
+                    );
+                    // A closure without one usable body is refused.
+                    const omittedRoute = lines
+                        .map((line) => 'ceremony/' + line.split(' ')[1])
+                        .find((route) =>
+                            routes.some((value) => value.route === route),
+                        );
+                    let omittedExitCode: number | undefined;
+                    if (omittedRoute !== undefined) {
+                        const omitted = await materialize('omitted');
+                        await rm(
+                            path.join(omitted, ...omittedRoute.split('/')),
+                        );
+                        omittedExitCode = (
+                            await verifyRecords(
+                                path.join(omitted, 'ceremony'),
+                                path.join(omitted, 'completion'),
+                                path.join(
+                                    log.runDirectoryPath,
+                                    'verification-omitted',
+                                ),
+                                scratch + '-omitted',
+                                'verification-omitted',
+                            )
+                        ).exitCode;
+                        assert.notEqual(omittedExitCode, 0);
+                    }
+                    archive = {
+                        context,
+                        routes: routes.length,
+                        records: encoded.records,
+                        byteLength: encoded.byteLength,
+                        root: encoded.root,
+                        acknowledged,
+                        unavailableReplica,
+                        retrieved,
+                        archivedPeakMemory: archived.peakMemory,
+                        omittedRoute,
+                        omittedExitCode,
+                    };
+                } finally {
+                    shutdown = await Promise.allSettled(
+                        replicas.map((replica) => replica.close()),
+                    );
+                }
+                assert.ok(
+                    shutdown.every((value) => value.status === 'fulfilled'),
+                    'Replica shutdown failed.',
+                );
+                await rm(archiveScratch, { recursive: true });
+            }
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -421,17 +763,20 @@ await runWithLocalRunLog(
                         [selected.stage]: verified,
                         peakMemory,
                         samples,
+                        archive,
                         executableSha512: createHash('sha512')
                             .update(await readFile(executable))
                             .digest('hex'),
                         scope:
                             selected.name === 'available-records'
                                 ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
-                                : selected.stage === 'certificate'
-                                  ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
-                                  : selected.stage === 'release'
-                                    ? 'One supplied release message passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct a terminal. This is component evidence, not terminal availability or a complete security argument.'
-                                    : 'Public setup, close barrier, usable-slot classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
+                                : selected.name === 'archived-records'
+                                  ? 'The records the owning verifiers depend on are published through the maintained public archive to three local replicas, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader or departure chronology is exercised.'
+                                  : selected.stage === 'certificate'
+                                    ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
+                                    : selected.stage === 'release'
+                                      ? 'One supplied release message passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct a terminal. This is component evidence, not terminal availability or a complete security argument.'
+                                      : 'Public setup, close barrier, usable-slot classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
                         result: report,
                     },
                     null,

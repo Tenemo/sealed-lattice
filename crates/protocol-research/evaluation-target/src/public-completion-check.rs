@@ -55,6 +55,7 @@ pub fn verify(
     if bounded(directory.join("target.bin"), 2048, work)? != target.body() {
         return Err(refusal("published target differs from recomputation"));
     }
+    work.depend(&directory.join("target.bin"))?;
     let profile = target.inventory().setup().profile();
     let count = profile.participants();
     let mut votes = CertificateCollector::new(target.clone());
@@ -80,10 +81,14 @@ pub fn verify(
             }
         };
         let accepted_before = votes.accepted();
-        if votes.insert(&packet).is_err() {
-            invalid_votes.push(position);
-            assert_eq!(votes.accepted(), accepted_before);
-            continue;
+        match votes.insert(&packet) {
+            Ok(true) => work.depend(&directory.join(format!("target-vote-{position}.bin")))?,
+            Ok(false) => {}
+            Err(_) => {
+                invalid_votes.push(position);
+                assert_eq!(votes.accepted(), accepted_before);
+                continue;
+            }
         }
         assert!(!votes.insert(&packet).map_err(refusal)?);
     }
@@ -240,6 +245,12 @@ pub fn verify(
         };
         assert!(collector.insert(share.clone()).map_err(refusal)?);
         assert!(!collector.insert(share.clone()).map_err(refusal)?);
+        for name in [
+            format!("release-envelope-{position}.bin"),
+            format!("release-{position}.bin"),
+        ] {
+            work.depend(&directory.join(name))?;
+        }
         if stage == Stage::Release {
             assert!(matches!(
                 collector.result(),

@@ -315,6 +315,38 @@ export const renderDocumentationCensus = (): string => {
     const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
+    const contributionBodies = supportedProfiles.profiles.map((row) =>
+        row.map((profile) => compileContributionBodyCensus(profile)),
+    );
+    // A roster's contributions, which every participant verifies and every
+    // archived closure carries, at the option count with the largest bodies.
+    const contributionCorpus = contributionBodies.map((row, index) => ({
+        participants: supportedProfiles.profiles[index][0].participantCount,
+        bytes: row.reduce(
+            (largest, body) =>
+                body.maximumAllContributorBodies > largest
+                    ? body.maximumAllContributorBodies
+                    : largest,
+            0n,
+        ),
+    }));
+    // The mobile runtime's public corpus planning target plus its fifty
+    // percent variance, and its bound on one canonical transport stream,
+    // which also caps the bytes one archive retrieval or replica holds.
+    const publicCorpusVarianceCeiling = (2_147_483_648n * 3n) / 2n;
+    const transportStreamBound = 4_294_967_291n;
+    const countsAbove = (bound: bigint): string => {
+        const counts = contributionCorpus
+            .filter((entry) => entry.bytes > bound)
+            .map((entry) => entry.participants);
+        if (counts.length === 0) return 'none';
+        if (counts.length === 1) return formatCount(counts[0]);
+        return counts.every(
+            (count, index) => index === 0 || count === counts[index - 1] + 1,
+        )
+            ? `${formatCount(counts[0])} to ${formatCount(counts[counts.length - 1])}`
+            : counts.map((count) => formatCount(count)).join(', ');
+    };
     const securityLedger = compileComposedSecurityLedger();
     const populationLedger = compileComposedSecurityLedger(
         securityLedger.maximumCredentialPopulation,
@@ -5293,9 +5325,10 @@ export const renderDocumentationCensus = (): string => {
                 'Setup affine rows',
                 'Verifier message bytes',
                 'Largest contribution body bytes',
+                'All contribution body bytes',
                 'Largest ballot body bytes',
             ],
-            supportedProfiles.profiles.map((row) => [
+            supportedProfiles.profiles.map((row, index) => [
                 formatCount(row[0].participantCount),
                 rangeOf(
                     row.map(
@@ -5324,10 +5357,13 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ),
                 rangeOf(
-                    row.map(
-                        (profile) =>
-                            compileContributionBodyCensus(profile)
-                                .maximumBodyBytes,
+                    contributionBodies[index].map(
+                        (body) => body.maximumBodyBytes,
+                    ),
+                ),
+                rangeOf(
+                    contributionBodies[index].map(
+                        (body) => body.maximumAllContributorBodies,
                     ),
                 ),
                 rangeOf(
@@ -5337,6 +5373,30 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ),
             ]),
+        ),
+        '',
+        'Every participant verifies, and every archived closure carries, all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target, and its bound on one canonical transport stream also caps the bytes one archive retrieval or replica holds. A participant count is listed when some option count exceeds the bound.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Public corpus variance ceiling',
+                    formatCount(publicCorpusVarianceCeiling),
+                ],
+                [
+                    'Participant counts whose contributions exceed the variance ceiling',
+                    countsAbove(publicCorpusVarianceCeiling),
+                ],
+                [
+                    'One canonical transport stream bound',
+                    formatCount(transportStreamBound),
+                ],
+                [
+                    'Participant counts whose contributions exceed the stream bound',
+                    countsAbove(transportStreamBound),
+                ],
+            ],
         ),
         '',
         '## Composed security ledger',
