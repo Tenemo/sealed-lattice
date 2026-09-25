@@ -104,14 +104,19 @@ await runWithLocalRunLog(
                     participantCeremony,
                 );
                 run = {
-                    case: 'browser-result',
+                    case: 'browser-' + participant.result.kind,
                     participantCount: participant.participantCount,
                     optionCount: participant.optionCount,
                     output: participantCeremony,
-                    result: {
-                        kind: 'result',
-                        identifiers: [...participant.result],
-                    },
+                    result:
+                        participant.result.kind === 'result'
+                            ? {
+                                  kind: 'result',
+                                  identifiers: [
+                                      ...participant.result.identifiers,
+                                  ],
+                              }
+                            : { kind: 'no-result' },
                 };
             } else {
                 run = JSON.parse(

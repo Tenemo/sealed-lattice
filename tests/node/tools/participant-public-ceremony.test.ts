@@ -43,7 +43,10 @@ describe('browser relay ceremony layout', () => {
                 poll,
                 recordIds,
                 runtimeIdentity,
-                result: ['option-1', 'option-0'],
+                result: {
+                    kind: 'result',
+                    identifiers: ['option-1', 'option-0'],
+                },
                 ...fields,
             }),
         );
@@ -99,7 +102,10 @@ describe('browser relay ceremony layout', () => {
         const ceremony = path.join(root, 'view', 'ceremony');
         const participant = await layParticipantCeremony(run, ceremony);
         expect(participant.recordIds).toEqual(recordIds);
-        expect(participant.result).toEqual(['option-1', 'option-0']);
+        expect(participant.result).toEqual({
+            kind: 'result',
+            identifiers: ['option-1', 'option-0'],
+        });
         expect(await readFile(path.join(ceremony, 'context.bin'))).toEqual(
             Buffer.concat([
                 Buffer.from(poll, 'hex'),
@@ -169,6 +175,15 @@ describe('browser relay ceremony layout', () => {
         ).toBe('body of 2');
     });
 
+    it('carries a certified no-result terminal', async () => {
+        await writeRun({ result: { kind: 'no-result' } });
+        const participant = await layParticipantCeremony(
+            run,
+            path.join(root, 'no-result'),
+        );
+        expect(participant.result).toEqual({ kind: 'no-result' });
+    });
+
     it('refuses a malformed run, a colliding name and missing records', async () => {
         const lay = (name: string) =>
             layParticipantCeremony(run, path.join(root, name));
@@ -178,7 +193,11 @@ describe('browser relay ceremony layout', () => {
             { recordIds: recordIds.slice(1) },
             { recordIds: [recordIds[0], recordIds[0], recordIds[2]] },
             { participantCount: 0, recordIds: [] },
-            { result: [1] },
+            { result: ['option-1', 'option-0'] },
+            { result: { kind: 'result', identifiers: [1] } },
+            { result: { kind: 'result', identifiers: [] } },
+            { result: { kind: 'no-result', identifiers: [] } },
+            { result: { kind: 'other' } },
         ]) {
             await writeRun(fields);
             await expect(lay('malformed')).rejects.toThrow(/Malformed/u);

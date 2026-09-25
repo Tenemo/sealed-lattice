@@ -4,14 +4,17 @@ import path from 'node:path';
 
 // A passed browser participant run: the poll and runtime identities a reader
 // is given, the registration body digests in roster order, and the ranking
-// the participants combined.
+// the participants combined, or none for a certified no-result target.
 export type ParticipantRun = Readonly<{
     participantCount: number;
     optionCount: number;
     poll: string;
     recordIds: readonly string[];
     runtimeIdentity: string;
-    result: readonly string[];
+    result: Readonly<
+        | { kind: 'result'; identifiers: readonly string[] }
+        | { kind: 'no-result' }
+    >;
 }>;
 
 const identity = /^[0-9a-f]{128}$/u;
@@ -21,6 +24,19 @@ const isCount = (value: unknown): value is number =>
     Number.isSafeInteger(value) && (value as number) > 0;
 const isIdentity = (value: unknown): value is string =>
     typeof value === 'string' && identity.test(value);
+const isTerminal = (value: unknown): value is ParticipantRun['result'] => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value))
+        return false;
+    const fields = value as Record<string, unknown>;
+    const { kind, identifiers } = fields;
+    return kind === 'no-result'
+        ? Object.keys(fields).length === 1
+        : kind === 'result' &&
+              Object.keys(fields).length === 2 &&
+              Array.isArray(identifiers) &&
+              identifiers.length > 0 &&
+              identifiers.every((option) => typeof option === 'string');
+};
 
 const readParticipantRun = async (run: string): Promise<ParticipantRun> => {
     const value = JSON.parse(
@@ -43,11 +59,7 @@ const readParticipantRun = async (run: string): Promise<ParticipantRun> => {
             new Set(recordIds).size === participantCount,
         'Malformed participant run roster.',
     );
-    assert.ok(
-        Array.isArray(result) &&
-            result.every((option) => typeof option === 'string'),
-        'Malformed participant run result.',
-    );
+    assert.ok(isTerminal(result), 'Malformed participant run result.');
     return {
         participantCount,
         optionCount,
