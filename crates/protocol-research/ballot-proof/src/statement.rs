@@ -579,8 +579,8 @@ impl StatementStream {
 pub(crate) mod tests {
     use super::*;
     use ballot_encryption::packing::PackingWitness;
+    use registration_credentials::identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity};
     use setup_aggregate::{RetainedAggregatePolynomial, RetainedSetupInputs};
-    use sha2::Sha512;
     use supported_profile::DEGREE;
 
     /// A uniform public key of the family, retained through the same
@@ -612,7 +612,7 @@ pub(crate) mod tests {
         record.extend([7; 64]);
         for body_index in profile.contribution_body_polynomials() {
             record.extend(if body_index == index {
-                <[u8; 64]>::from(Sha512::digest(&bytes))
+                identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).unwrap()
             } else {
                 [0; 64]
             });

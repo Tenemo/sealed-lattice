@@ -285,20 +285,20 @@ const verifyCompleteSetup = async (
     clearCache: boolean,
 ): Promise<Uint8Array> => {
     const { context } = session;
-    const { kernel, descriptor, database } = context;
+    const { kernel, descriptor } = context;
     const { manifest } = session.root;
     const definition = await readDataKind(
-        database,
+        context,
         manifest,
         dataKind.pollDefinition,
     );
     const definitionSignature = await readDataKind(
-        database,
+        context,
         manifest,
         dataKind.pollSignature,
     );
     const recordIds = proposalRecordIds(
-        await readDataKind(database, manifest, dataKind.proposal),
+        await readDataKind(context, manifest, dataKind.proposal),
     );
     const begin = concatenate(
         manifest.poll,
@@ -362,7 +362,7 @@ const verifyCompleteSetup = async (
             throw new PublicInputFailure('A registration record was refused.');
     }
     const proposalSignature = await readDataKind(
-        database,
+        context,
         manifest,
         dataKind.proposalSignature,
     );
@@ -440,7 +440,7 @@ export const reverifySetup = async (
         !equalBytes(
             reference,
             await readDataKind(
-                session.context.database,
+                session.context,
                 session.root.manifest,
                 dataKind.setupReference,
             ),
@@ -457,30 +457,24 @@ export const retainSetup = async (
 ): Promise<AuthenticatedRoot> => {
     const { context, root } = session;
     const added = [{ kind: dataKind.setupReference, bytes: reference }];
-    return commitRoot(
-        context.database,
-        context.runtime,
-        context.descriptor,
-        root,
-        {
-            generation: 12,
-            manifest: {
-                ...root.manifest,
-                references: [
-                    ...root.manifest.references,
-                    ...(await referenceData(added)),
-                ],
-                suffixes: {
-                    ...root.manifest.suffixes,
-                    ballot: new Uint8Array(),
-                    close: encodeCloseState(12, false, collectingCloseState()),
-                },
-            },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...contributionRecords(session),
+    return commitRoot(context, root, {
+        generation: 12,
+        manifest: {
+            ...root.manifest,
+            references: [
+                ...root.manifest.references,
+                ...referenceData(context, added),
             ],
-            addedData: added,
+            suffixes: {
+                ...root.manifest.suffixes,
+                ballot: new Uint8Array(),
+                close: encodeCloseState(12, false, collectingCloseState()),
+            },
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...contributionRecords(session),
+        ],
+        addedData: added,
+    });
 };

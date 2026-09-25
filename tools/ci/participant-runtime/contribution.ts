@@ -6,7 +6,6 @@ import {
     equalBytes,
     readUnsigned16,
     readUnsigned32,
-    sha512,
     tupleFields,
     unsigned16,
     unsigned32,
@@ -14,6 +13,7 @@ import {
 import { PublicInputFailure, sessionInput } from './context.js';
 import type { ParticipantContext } from './context.js';
 import type { ParticipantDescriptor } from './descriptor.js';
+import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel, writeProofInput } from './kernel.js';
 import { publishChunk, publishRecord, readPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -396,7 +396,7 @@ type SealedOutput = Readonly<{
 }>;
 
 const sealRecord = async (
-    context: RecordContext,
+    session: ContributionSession,
     object: number,
     offset: number,
     bytes: Uint8Array,
@@ -409,7 +409,7 @@ const sealRecord = async (
                 name: 'AES-GCM',
                 iv: new Uint8Array(12),
                 additionalData: new Uint8Array(
-                    recordAssociatedData(context, location),
+                    recordAssociatedData(session.records, location),
                 ),
             },
             await recordCipher(key, 'encrypt'),
@@ -417,7 +417,15 @@ const sealRecord = async (
         ),
     );
     return {
-        record: { ...location, key, hash: await sha512(ciphertext) },
+        record: {
+            ...location,
+            key,
+            hash: custodyIdentity(
+                session.context.kernel,
+                custodyPurpose.record,
+                ciphertext,
+            ),
+        },
         ciphertext,
     };
 };
@@ -434,7 +442,16 @@ const openRecord = async (
     if (!(blob instanceof Blob) || blob.size !== record.length + 16)
         throw new Error('A contribution record is missing.');
     const ciphertext = new Uint8Array(await blob.arrayBuffer());
-    if (!equalBytes(await sha512(ciphertext), record.hash))
+    if (
+        !equalBytes(
+            custodyIdentity(
+                session.context.kernel,
+                custodyPurpose.record,
+                ciphertext,
+            ),
+            record.hash,
+        )
+    )
         throw new Error('A contribution record changed.');
     const bytes = new Uint8Array(
         await crypto.subtle.decrypt(
@@ -475,7 +492,7 @@ const contributionInventory = (
         store: 'contribution',
         key: [record.object, record.offset],
         byteLength: record.length + 16,
-        sha512: record.hash,
+        identity: record.hash,
         ...(context === undefined
             ? {}
             : {
@@ -489,7 +506,7 @@ const contributionInventory = (
         store: 'checkpoint',
         key: index,
         byteLength: descriptor.contribution.checkpointLengths[index],
-        sha512: record.hash,
+        identity: record.hash,
     })),
 ];
 
@@ -532,38 +549,32 @@ const commitContribution = async (
                       ),
               )
             : [];
-    session.root = await commitRoot(
-        context.database,
-        context.runtime,
-        descriptor,
-        root,
-        {
-            generation: transition.generation,
-            manifest: {
-                ...root.manifest,
-                suffixes: {
-                    ...root.manifest.suffixes,
-                    contribution: encodeContributionState(transition.state),
-                },
-            },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...predecessor,
-                ...staged,
-            ],
-            write: (transaction) => {
-                for (const output of transition.signing ?? [])
-                    transaction
-                        .objectStore('contribution')
-                        .add(new Blob([new Uint8Array(output.ciphertext)]), [
-                            output.record.object,
-                            output.record.offset,
-                        ]);
-                if (transition.clearCheckpoint === true)
-                    transaction.objectStore('checkpoint').clear();
+    session.root = await commitRoot(context, root, {
+        generation: transition.generation,
+        manifest: {
+            ...root.manifest,
+            suffixes: {
+                ...root.manifest.suffixes,
+                contribution: encodeContributionState(transition.state),
             },
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...predecessor,
+            ...staged,
+        ],
+        write: (transaction) => {
+            for (const output of transition.signing ?? [])
+                transaction
+                    .objectStore('contribution')
+                    .add(new Blob([new Uint8Array(output.ciphertext)]), [
+                        output.record.object,
+                        output.record.offset,
+                    ]);
+            if (transition.clearCheckpoint === true)
+                transaction.objectStore('checkpoint').clear();
+        },
+    });
     session.state = transition.state;
     for (const output of transition.signing ?? [])
         (await openRecord(session, output.record)).fill(0);
@@ -687,7 +698,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
                     throw new Error('Generated body output is noncanonical.');
                 outputs.push(
                     await sealRecord(
-                        session.records,
+                        session,
                         record.object,
                         record.offset,
                         record.bytes,
@@ -836,7 +847,10 @@ export const generateContribution = async (session: ContributionSession) => {
             const sealed = proverOutput(context);
             if (sealed.length !== length)
                 throw new Error('A checkpoint record has another length.');
-            privateRecords.push({ key, hash: await sha512(sealed) });
+            privateRecords.push({
+                key,
+                hash: custodyIdentity(kernel, custodyPurpose.record, sealed),
+            });
             batch.push({ key: index, bytes: sealed });
             if (
                 batch.length === 64 ||
@@ -900,7 +914,12 @@ export const restoreCheckpoint = async (
         if (!(blob instanceof Blob) || blob.size !== length)
             throw new Error('A checkpoint record is missing.');
         const sealed = new Uint8Array(await blob.arrayBuffer());
-        if (!equalBytes(await sha512(sealed), record.hash))
+        if (
+            !equalBytes(
+                custodyIdentity(context.kernel, custodyPurpose.record, sealed),
+                record.hash,
+            )
+        )
             throw new Error('A checkpoint record changed.');
         const input = concatenate(record.key, sealed);
         try {
@@ -911,11 +930,7 @@ export const restoreCheckpoint = async (
         }
     }
     const recordIds = proposalRecordIds(
-        await readDataKind(
-            context.database,
-            session.root.manifest,
-            dataKind.proposal,
-        ),
+        await readDataKind(context, session.root.manifest, dataKind.proposal),
     );
     for (const [position, id] of recordIds.entries()) {
         const key = await readPublic(
@@ -952,7 +967,7 @@ export const continueContribution = async (session: ContributionSession) => {
     let proofBytes = 0;
     const sealProof = async () => {
         const output = await sealRecord(
-            session.records,
+            session,
             proofObject(descriptor),
             proofBytes,
             buffer.subarray(0, used),
@@ -1111,7 +1126,7 @@ export const confirmContribution = async (
     const commitment = await bodyCommitment(session);
     if (session.root.head.generation === 7) {
         const output = await sealRecord(
-            session.records,
+            session,
             signingObject(descriptor, 'confirmationBody'),
             0,
             signing(context, signingCommand.confirmationBody),
@@ -1148,7 +1163,7 @@ export const confirmContribution = async (
         if (!equalBytes(signed.body, body))
             throw new Error('The signer changed the confirmation.');
         const output = await sealRecord(
-            session.records,
+            session,
             signingObject(descriptor, 'confirmationSignature'),
             0,
             signed.signature,
@@ -1264,13 +1279,13 @@ export const openContribution = async (
     if (session.root.head.generation === 9) {
         const outputs = [
             await sealRecord(
-                session.records,
+                session,
                 signingObject(descriptor, 'inventory'),
                 0,
                 inventory,
             ),
             await sealRecord(
-                session.records,
+                session,
                 signingObject(descriptor, 'openingBody'),
                 0,
                 signing(context, signingCommand.openingBody),
@@ -1306,7 +1321,7 @@ export const openContribution = async (
         if (!equalBytes(signed.body, body))
             throw new Error('The signer changed the opening.');
         const output = await sealRecord(
-            session.records,
+            session,
             signingObject(descriptor, 'openingSignature'),
             0,
             signed.signature,
@@ -1362,7 +1377,7 @@ export const resumeContribution = async (
     let identity: Uint8Array;
     if (verified === undefined) {
         const proposal = await readDataKind(
-            context.database,
+            context,
             root.manifest,
             dataKind.proposal,
         );

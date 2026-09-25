@@ -65,11 +65,6 @@ export const readUnsigned32 = (bytes: Uint8Array, offset: number): number =>
 export const readUnsigned64 = (bytes: Uint8Array, offset: number): bigint =>
     view(bytes).getBigUint64(offset, true);
 
-export const sha512 = async (bytes: Uint8Array): Promise<Uint8Array> =>
-    new Uint8Array(
-        await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
-    );
-
 // The values of a canonical tuple: a two-byte schema identifier and two-byte
 // version, a four-byte value count, then per value a two-byte type and a
 // four-byte length before its bytes.

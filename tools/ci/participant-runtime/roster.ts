@@ -190,27 +190,21 @@ export const proposeRoster = async (
     );
     if (context.kernel.validate_roster_signer() !== 0) return undefined;
     const proposalCoins = crypto.getRandomValues(new Uint8Array(32));
-    const locked = await commitRoot(
-        context.database,
-        context.runtime,
-        context.descriptor,
-        root,
-        {
-            generation: 2,
-            manifest: {
-                ...root.manifest,
-                references: [
-                    ...root.manifest.references,
-                    ...(await referenceData([
-                        { kind: dataKind.proposal, bytes: proposal.body },
-                    ])),
-                ],
-                proposalCoins,
-            },
-            predecessorRecords: dataRecordInventory(root.manifest),
-            addedData: [{ kind: dataKind.proposal, bytes: proposal.body }],
+    const locked = await commitRoot(context, root, {
+        generation: 2,
+        manifest: {
+            ...root.manifest,
+            references: [
+                ...root.manifest.references,
+                ...referenceData(context, [
+                    { kind: dataKind.proposal, bytes: proposal.body },
+                ]),
+            ],
+            proposalCoins,
         },
-    );
+        predecessorRecords: dataRecordInventory(root.manifest),
+        addedData: [{ kind: dataKind.proposal, bytes: proposal.body }],
+    });
     return signRoster(context, locked, proposal);
 };
 
@@ -241,15 +235,15 @@ export const signRoster = async (
     if (!verifySignature(context, signature))
         throw new Error('The proposal signature did not verify.');
     const { proposalCoins: _retired, ...manifest } = root.manifest;
-    return commitRoot(context.database, context.runtime, descriptor, root, {
+    return commitRoot(context, root, {
         generation: 3,
         manifest: {
             ...manifest,
             references: [
                 ...manifest.references,
-                ...(await referenceData([
+                ...referenceData(context, [
                     { kind: dataKind.proposalSignature, bytes: signature },
-                ])),
+                ]),
             ],
         },
         predecessorRecords: dataRecordInventory(root.manifest),
@@ -287,24 +281,18 @@ export const acceptRoster = async (
         { kind: dataKind.proposal, bytes: proposal.body },
         { kind: dataKind.proposalSignature, bytes: signature },
     ];
-    return commitRoot(
-        context.database,
-        context.runtime,
-        context.descriptor,
-        root,
-        {
-            generation: 3,
-            manifest: {
-                ...root.manifest,
-                references: [
-                    ...root.manifest.references,
-                    ...(await referenceData(added)),
-                ],
-            },
-            predecessorRecords: dataRecordInventory(root.manifest),
-            addedData: added,
+    return commitRoot(context, root, {
+        generation: 3,
+        manifest: {
+            ...root.manifest,
+            references: [
+                ...root.manifest.references,
+                ...referenceData(context, added),
+            ],
         },
-    );
+        predecessorRecords: dataRecordInventory(root.manifest),
+        addedData: added,
+    });
 };
 
 // Verifies the retained proposal again from its public records so that the
@@ -316,7 +304,7 @@ export const reverifyRoster = async (
     enrollment: RestoredEnrollment,
 ): Promise<VerifiedProposal> => {
     const stored = await readDataKind(
-        context.database,
+        context,
         root.manifest,
         dataKind.proposal,
     );
@@ -331,7 +319,7 @@ export const reverifyRoster = async (
         throw new Error('The retained proposal differs from its records.');
     if (root.head.generation >= 3) {
         const signature = await readDataKind(
-            context.database,
+            context,
             root.manifest,
             dataKind.proposalSignature,
         );

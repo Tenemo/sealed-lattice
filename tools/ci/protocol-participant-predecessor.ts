@@ -4,11 +4,17 @@ export type ParticipantStoredRecord = Readonly<{
     store: string;
     key: number | number[];
     byteLength: number;
-    sha512?: Uint8Array;
+    identity?: Uint8Array;
     encryption?: Readonly<{
         key: Uint8Array;
         additionalData: Uint8Array;
     }>;
+}>;
+
+// The identities the caller derives for a sealed root and a stored record.
+export type ParticipantIdentities = Readonly<{
+    root: (bytes: Uint8Array) => Uint8Array | Promise<Uint8Array>;
+    record: (bytes: Uint8Array) => Uint8Array | Promise<Uint8Array>;
 }>;
 
 // The expected manifest is the immutable authenticated predecessor, never the
@@ -23,15 +29,12 @@ export async function validateParticipantPredecessor(
         maximumRootBytes: number;
         recordStores: readonly string[];
         records: readonly ParticipantStoredRecord[];
+        identities: ParticipantIdentities;
     }>,
 ): Promise<void> {
     const equal = (left: Uint8Array, right: Uint8Array) =>
         left.length === right.length &&
         left.every((value, index) => value === right[index]);
-    const digest = async (bytes: Uint8Array) =>
-        new Uint8Array(
-            await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
-        );
     const hexadecimal = (bytes: Uint8Array) =>
         Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join(
             '',
@@ -61,8 +64,9 @@ export async function validateParticipantPredecessor(
             !Number.isSafeInteger(record.byteLength) ||
             record.byteLength <= 0 ||
             record.byteLength > 1_572_864 ||
-            (record.sha512 === undefined && record.encryption === undefined) ||
-            (record.sha512 !== undefined && record.sha512.length !== 64) ||
+            (record.identity === undefined &&
+                record.encryption === undefined) ||
+            (record.identity !== undefined && record.identity.length !== 64) ||
             (record.encryption !== undefined &&
                 (record.encryption.key.length !== 32 ||
                     record.byteLength <= 16)) ||
@@ -102,7 +106,7 @@ export async function validateParticipantPredecessor(
         !('length' in key.algorithm) ||
         key.algorithm.length !== 256 ||
         key.usages.slice().sort().join(',') !== 'decrypt,encrypt' ||
-        hexadecimal(await digest(root)) !== expected.head.hash
+        hexadecimal(await expected.identities.root(root)) !== expected.head.hash
     )
         throw new Error('Participant predecessor authority changed.');
     const nonce = new Uint8Array(12);
@@ -133,8 +137,13 @@ export async function validateParticipantPredecessor(
             throw new Error('Required predecessor record is missing.');
         const bytes = new Uint8Array(await blob.arrayBuffer());
         try {
-            if (record.sha512 !== undefined) {
-                if (!equal(await digest(bytes), record.sha512))
+            if (record.identity !== undefined) {
+                if (
+                    !equal(
+                        await expected.identities.record(bytes),
+                        record.identity,
+                    )
+                )
                     throw new Error('Predecessor record bytes changed.');
             }
             if (record.encryption !== undefined) {

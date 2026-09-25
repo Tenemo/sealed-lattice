@@ -3,7 +3,7 @@ use crate::{
     verified::{AggregatePolynomial, Refusal, VerifiedSetupAggregate},
 };
 use num_bigint::BigInt;
-use sha2::{Digest, Sha512};
+use registration_credentials::identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN};
 use supported_profile::Profile;
 
 /// Immutable coefficients read from exactly one owning aggregate reference.
@@ -141,7 +141,7 @@ pub struct AggregatePolynomialReader {
     inventory: [u8; 64],
     expected: AggregatePolynomial,
     decoder: PolynomialAdder,
-    hash: Sha512,
+    hash: IdentityHasher,
     coefficients: Vec<BigInt>,
     offset: usize,
     failed: bool,
@@ -156,11 +156,13 @@ impl AggregatePolynomialReader {
         if profile.setup_polynomial_bytes(expected.index()) != Some(expected.bytes()) {
             return Err(Refusal::Context);
         }
+        let hash = IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], expected.bytes())
+            .map_err(|_| Refusal::Context)?;
         Ok(Self {
             inventory,
             expected,
             decoder: PolynomialAdder::new(profile, family),
-            hash: Sha512::new(),
+            hash,
             coefficients: Vec::with_capacity(profile.family_degree(family)),
             offset: 0,
             failed: false,
@@ -187,7 +189,7 @@ impl AggregatePolynomialReader {
                         .map_err(|_| Refusal::Body)?,
                 );
             }
-            self.hash.update(bytes);
+            self.hash.absorb(bytes).map_err(|_| Refusal::Body)?;
             self.offset += bytes.len();
             Ok(())
         })();
@@ -208,7 +210,7 @@ impl AggregatePolynomialReader {
         if self.failed || self.offset != self.expected.bytes() {
             return Err(Refusal::Incomplete);
         }
-        let digest: [u8; 64] = self.hash.finalize().into();
+        let digest = self.hash.finish().map_err(|_| Refusal::PreviousAggregate)?;
         if &digest != self.expected.digest() {
             return Err(Refusal::PreviousAggregate);
         }
@@ -234,7 +236,8 @@ mod private_tests {
         record.extend([9; 64]);
         for index in profile.contribution_body_polynomials() {
             record.extend(if index == key {
-                <[u8; 64]>::from(Sha512::digest(&values))
+                registration_credentials::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &values)
+                    .unwrap()
             } else {
                 [0; 64]
             });

@@ -13,6 +13,8 @@ pub mod ballot;
 pub mod close_work;
 #[path = "contribution-signing.rs"]
 pub mod contribution_signing;
+#[path = "custody-identity.rs"]
+pub mod custody_identity;
 #[path = "finality-work.rs"]
 pub mod finality_work;
 #[path = "release-work.rs"]

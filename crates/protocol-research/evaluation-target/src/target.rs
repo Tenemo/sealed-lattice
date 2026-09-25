@@ -8,12 +8,12 @@ use registration_credentials::{
     ballot_authentication::BallotEnvelope,
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
     foundation::{CanonicalItem, CanonicalTuple, hash_foundation_tuple_512},
+    identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
-    target_signing::{TargetMessage, minimum_turnout},
+    target_signing::{TARGET_IDENTITY_DOMAIN, TargetMessage, minimum_turnout},
 };
 use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE, Engine};
 use setup_aggregate::verified::VerifiedSetupAggregate;
-use sha2::{Digest, Sha512};
 use std::{io::Read, sync::Arc};
 
 #[derive(Debug)]
@@ -167,11 +167,13 @@ impl ClassifiedClosedInventory {
             let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
             for index in required.spills {
                 let value = engine.value(index).map_err(|_| Error::Arithmetic)?;
-                let expected = engine.value_identity(index, value);
+                let expected = engine
+                    .value_identity(index, value)
+                    .map_err(|_| Error::Arithmetic)?;
                 store.put(index, value)?;
                 let restored = store.get(index)?;
                 if engine.validate_value(&restored).is_err()
-                    || engine.value_identity(index, &restored) != expected
+                    || engine.value_identity(index, &restored) != Ok(expected)
                 {
                     return Err(Error::Storage);
                 }
@@ -213,7 +215,9 @@ impl ClassifiedClosedInventory {
                             .find(|value| value.index() == index)
                             .ok_or(Error::Context)?;
                         let bytes = exact_bytes(inputs.aggregate(index)?, DEGREE * width)?;
-                        if <[u8; 64]>::from(Sha512::digest(&bytes)) != *metadata.digest() {
+                        if identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).ok()
+                            != Some(*metadata.digest())
+                        {
                             return Err(Error::PublicInput);
                         }
                         bytes
@@ -367,7 +371,7 @@ impl VerifiedEvaluationTarget {
             return Err(Error::Encoding);
         }
         let identity = hash_foundation_tuple_512(
-            "sealed-lattice/evaluation-target-id/v1",
+            TARGET_IDENTITY_DOMAIN,
             &[CanonicalItem::variable_bytes(&body).map_err(|_| Error::Encoding)?],
         )
         .map_err(|_| Error::Encoding)?

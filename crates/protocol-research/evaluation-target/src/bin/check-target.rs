@@ -17,7 +17,6 @@ use registration_credentials::{
 };
 use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value, stored_value_bytes};
 use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};
-use sha2::{Digest, Sha512};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
@@ -645,14 +644,11 @@ fn main() -> io::Result<()> {
         .evaluate(&mut operands, &mut spool)
         .map_err(refusal)?;
     work.save(&output.join("target.bin"), target.body())?;
-    let ciphertext_identity = if let Some(ciphertext) = target.ciphertext() {
+    let ciphertext_bytes = if let Some(ciphertext) = target.ciphertext() {
         work.save(&output.join("ciphertext.bin"), ciphertext)?;
-        Sha512::digest(ciphertext)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        ciphertext.len()
     } else {
-        String::new()
+        0
     };
     if !spool.indices.is_empty() {
         return Err(refusal("unretired evaluation storage"));
@@ -695,7 +691,7 @@ fn main() -> io::Result<()> {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let report = format!(
-        "{{\"participantCount\":{count},\"pollIdentity\":\"{poll_identity}\",\"accepted\":{accepted:?},\"conflicting\":{conflicting:?},\"targetIdentity\":\"{identity}\",\"ciphertextSha512\":\"{ciphertext_identity}\",\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
+        "{{\"participantCount\":{count},\"pollIdentity\":\"{poll_identity}\",\"accepted\":{accepted:?},\"conflicting\":{conflicting:?},\"targetIdentity\":\"{identity}\",\"ciphertextBytes\":{ciphertext_bytes},\"setupMilliseconds\":{setup_milliseconds},\"throughClassificationMilliseconds\":{classified_milliseconds},\"totalMilliseconds\":{},\"readBytes\":{},\"writtenBytes\":{},\"peakSetupStorageBytes\":{},\"peakEvaluationStorageBytes\":{},\"retainedBytes\":{}}}\n",
         started.elapsed().as_secs_f64() * 1000.0,
         work.read_bytes + spool.work.read_bytes,
         work.written_bytes + spool.work.written_bytes,

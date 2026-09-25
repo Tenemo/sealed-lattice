@@ -437,46 +437,35 @@ const commitBallot = async (
     const encoded = encodeBallotState(transition.generation, transition.state);
     if (encoded.length > context.descriptor.ballot.maximumStateBytes)
         throw new Error('The ballot state exceeds its bound.');
-    contribution.root = await commitRoot(
-        context.database,
-        context.runtime,
-        context.descriptor,
-        root,
-        {
-            generation: transition.generation,
-            manifest: {
-                ...root.manifest,
-                suffixes: { ...root.manifest.suffixes, ballot: encoded },
-            },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...contributionRecords(contribution),
-                ...ballotInventory(
-                    context.descriptor,
-                    session.records,
-                    session.state,
-                ),
-                ...collectedCloseRecords(contribution, session.records),
-            ],
-            write: (transaction) => {
-                const store = transaction.objectStore('ballot');
-                if (transition.added !== undefined)
-                    store.add(
-                        new Blob([new Uint8Array(transition.added.ciphertext)]),
-                        [transition.added.kind, transition.added.index],
-                    );
-                if (transition.retireJournal === true)
-                    store.delete(
-                        IDBKeyRange.bound(
-                            [journalKind],
-                            [bodyKind],
-                            false,
-                            true,
-                        ),
-                    );
-            },
+    contribution.root = await commitRoot(context, root, {
+        generation: transition.generation,
+        manifest: {
+            ...root.manifest,
+            suffixes: { ...root.manifest.suffixes, ballot: encoded },
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...contributionRecords(contribution),
+            ...ballotInventory(
+                context.descriptor,
+                session.records,
+                session.state,
+            ),
+            ...collectedCloseRecords(contribution, session.records),
+        ],
+        write: (transaction) => {
+            const store = transaction.objectStore('ballot');
+            if (transition.added !== undefined)
+                store.add(
+                    new Blob([new Uint8Array(transition.added.ciphertext)]),
+                    [transition.added.kind, transition.added.index],
+                );
+            if (transition.retireJournal === true)
+                store.delete(
+                    IDBKeyRange.bound([journalKind], [bodyKind], false, true),
+                );
+        },
+    });
     session.state = transition.state;
     if (transition.added !== undefined)
         (
@@ -522,27 +511,21 @@ export const beginBallot = async (
             signature: new Uint8Array(),
         },
     };
-    contribution.root = await commitRoot(
-        context.database,
-        context.runtime,
-        descriptor,
-        root,
-        {
-            generation: phase.locked,
-            manifest: {
-                ...root.manifest,
-                suffixes: {
-                    ...root.manifest.suffixes,
-                    ballot: encodeBallotState(phase.locked, session.state),
-                },
+    contribution.root = await commitRoot(context, root, {
+        generation: phase.locked,
+        manifest: {
+            ...root.manifest,
+            suffixes: {
+                ...root.manifest.suffixes,
+                ballot: encodeBallotState(phase.locked, session.state),
             },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...contributionRecords(contribution),
-                ...collectedCloseRecords(contribution, records),
-            ],
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...contributionRecords(contribution),
+            ...collectedCloseRecords(contribution, records),
+        ],
+    });
     return session;
 };
 
@@ -571,20 +554,20 @@ export const ballotWorkInput = async (
     contribution: ContributionSession,
     inventory: Uint8Array,
 ) => {
-    const { database } = contribution.context;
+    const { context } = contribution;
     const { manifest } = contribution.root;
     const definition = await readDataKind(
-        database,
+        context,
         manifest,
         dataKind.pollDefinition,
     );
     const definitionSignature = await readDataKind(
-        database,
+        context,
         manifest,
         dataKind.pollSignature,
     );
     const reference = await readDataKind(
-        database,
+        context,
         manifest,
         dataKind.setupReference,
     );

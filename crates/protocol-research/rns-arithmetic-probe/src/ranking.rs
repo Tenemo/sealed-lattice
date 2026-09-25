@@ -1,7 +1,10 @@
 use super::{Arithmetic, Polynomial, Transformed, unpack};
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
-use sha2::{Digest, Sha512};
+use registration_credentials::{
+    foundation::CanonicalItem,
+    identity::{IdentityHasher, identity},
+};
 use std::collections::BTreeSet;
 pub use supported_profile::DEGREE;
 use supported_profile::{PLAINTEXT_MODULUS, Profile};
@@ -23,6 +26,14 @@ const TRANSFER_RESERVE_BYTES: usize = 2_097_152;
 const TRANSFORM_TABLES: usize = 4;
 /// Every supported profile's ranking program is shorter.
 pub const MAXIMUM_INSTRUCTIONS: usize = 1024;
+/// The identity of a ranking program's complete bytecode.
+const RANKING_PROGRAM_DOMAIN: &str = "sealed-lattice/ranking-program/v1";
+/// The identity of one stored working value under its program and index.
+const EVALUATION_VALUE_DOMAIN: &str = "sealed-lattice/public-evaluation-work/v2";
+
+pub fn program_identity(program: &[u8]) -> Result<[u8; 64], Refusal> {
+    identity(RANKING_PROGRAM_DOMAIN, program).map_err(|_| Refusal::Program)
+}
 
 pub type Ciphertext = [Polynomial; 2];
 
@@ -152,7 +163,7 @@ impl Engine {
         if !(1..=MAXIMUM_INSTRUCTIONS).contains(&count)
             || program.len() != 16 + 16 * count
             || word(&program[12..16]) as usize != count - 1
-            || <[u8; 64]>::from(Sha512::digest(program)) != expected_hash
+            || program_identity(program) != Ok(expected_hash)
         {
             return Err(Refusal::Program);
         }
@@ -456,25 +467,37 @@ impl Engine {
             .ok_or(Refusal::Phase)
     }
 
-    pub fn value_hasher(&self, index: usize) -> Sha512 {
-        let mut hash = Sha512::new();
-        hash.update(b"sealed-lattice/public-evaluation-work/1");
-        hash.update(self.program_hash);
-        hash.update((index as u32).to_le_bytes());
-        hash
+    /// Absorbs a stored value's bytes in order; see [`stored_bytes`].
+    pub fn value_hasher(&self, index: usize) -> Result<IdentityHasher, Refusal> {
+        IdentityHasher::new(
+            EVALUATION_VALUE_DOMAIN,
+            &[
+                CanonicalItem::hash512(self.program_hash),
+                CanonicalItem::unsigned64(index as u64),
+            ],
+            stored_value_bytes(self.profile),
+        )
+        .map_err(|_| Refusal::Identity)
     }
 
-    pub fn value_identity(&self, index: usize, value: &Ciphertext) -> [u8; 64] {
-        let mut hash = self.value_hasher(index);
-        for word in value.iter().flatten() {
-            hash.update(word.to_le_bytes());
+    pub fn value_identity(&self, index: usize, value: &Ciphertext) -> Result<[u8; 64], Refusal> {
+        let mut hash = self.value_hasher(index)?;
+        let mut buffer = [0_u8; 8192];
+        for polynomial in value {
+            for words in polynomial.chunks(buffer.len() / 8) {
+                for (bytes, word) in buffer.chunks_exact_mut(8).zip(words) {
+                    bytes.copy_from_slice(&word.to_le_bytes());
+                }
+                hash.absorb(&buffer[..8 * words.len()])
+                    .map_err(|_| Refusal::Identity)?;
+            }
         }
-        hash.finalize().into()
+        hash.finish().map_err(|_| Refusal::Identity)
     }
 
     pub fn retire_to_storage(&mut self, index: usize, identity: [u8; 64]) -> Result<(), Refusal> {
         if !self.requirements()?.spills.contains(&index)
-            || self.value_identity(index, self.value(index)?) != identity
+            || self.value_identity(index, self.value(index)?)? != identity
         {
             return Err(Refusal::Identity);
         }
@@ -486,7 +509,7 @@ impl Engine {
     pub fn reload(&mut self, index: usize, value: Ciphertext) -> Result<(), Refusal> {
         self.validate_value(&value)?;
         if !self.requirements()?.reloads.contains(&index)
-            || self.stored[index] != Some(self.value_identity(index, &value))
+            || self.stored[index] != Some(self.value_identity(index, &value)?)
         {
             return Err(Refusal::Identity);
         }

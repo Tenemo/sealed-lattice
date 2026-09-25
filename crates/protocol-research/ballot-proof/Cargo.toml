@@ -19,7 +19,6 @@ registration-credentials = { path = "../registration-credentials", default-featu
 setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
 num-bigint = "=0.5.1"
 sha3 = "=0.10.9"
-sha2 = "=0.10.9"
 setup-witness = { path = "../setup-witness" }
 stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
 zeroize = "=1.8.2"

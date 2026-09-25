@@ -288,41 +288,31 @@ const commitClose = async (
     );
     if (encoded.length > descriptor.close.maximumStateBytes)
         throw new Error('The close state exceeds its bound.');
-    contribution.root = await commitRoot(
-        context.database,
-        context.runtime,
-        descriptor,
-        root,
-        {
-            generation: transition.generation,
-            manifest: {
-                ...root.manifest,
-                suffixes: { ...root.manifest.suffixes, close: encoded },
-            },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...contributionRecords(contribution),
-                ...retainedBallotRecords(contribution, session.records),
-                ...closeRecordInventory(
-                    descriptor,
-                    session.records,
-                    session.state,
-                ),
-            ],
-            write: (transaction) => {
-                const store = transaction.objectStore('close');
-                for (const serial of transition.retired ?? [])
-                    store.delete(
-                        IDBKeyRange.bound([serial], [serial + 1], false, true),
-                    );
-                for (const record of transition.added ?? [])
-                    store.add(new Blob([new Uint8Array(record.ciphertext)]), [
-                        record.serial,
-                        record.index,
-                    ]);
-            },
+    contribution.root = await commitRoot(context, root, {
+        generation: transition.generation,
+        manifest: {
+            ...root.manifest,
+            suffixes: { ...root.manifest.suffixes, close: encoded },
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...contributionRecords(contribution),
+            ...retainedBallotRecords(contribution, session.records),
+            ...closeRecordInventory(descriptor, session.records, session.state),
+        ],
+        write: (transaction) => {
+            const store = transaction.objectStore('close');
+            for (const serial of transition.retired ?? [])
+                store.delete(
+                    IDBKeyRange.bound([serial], [serial + 1], false, true),
+                );
+            for (const record of transition.added ?? [])
+                store.add(new Blob([new Uint8Array(record.ciphertext)]), [
+                    record.serial,
+                    record.index,
+                ]);
+        },
+    });
     session.state = transition.state;
     for (const record of transition.added ?? []) {
         const event = transition.state.events.find(

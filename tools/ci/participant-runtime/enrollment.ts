@@ -6,13 +6,17 @@ import {
     encodeText,
     equalBytes,
     hexadecimal,
-    sha512,
     tupleFields,
     unsigned16,
     unsigned32,
 } from './bytes.js';
 import { ownRegistrationInput, sessionInput } from './context.js';
 import type { ParticipantContext } from './context.js';
+import {
+    custodyIdentities,
+    custodyIdentity,
+    custodyPurpose,
+} from './identity.js';
 import { readKernel } from './kernel.js';
 import {
     authenticateRoot,
@@ -154,12 +158,12 @@ export const createEnrollment = async (
     const key = await createRootKey();
     const intentPlaintext = concatenate(
         encodeText('INI2'),
-        await sha512(input),
+        custodyIdentity(kernel, custodyPurpose.enrollmentInput, input),
     );
     const intent = await sealRoot(key, 0, associatedData, intentPlaintext);
     const intentHead = {
         generation: 0,
-        hash: hexadecimal(await sha512(intent)),
+        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, intent)),
     };
     await commitParticipantState({
         database,
@@ -269,7 +273,7 @@ export const createEnrollment = async (
             kind: record.kind,
             offset: record.offset,
             length: record.bytes.length,
-            hash: await sha512(record.bytes),
+            hash: custodyIdentity(kernel, custodyPurpose.record, record.bytes),
         });
     const plaintext = encodeManifest(
         { dataKeys, poll, references, suffixes: {} },
@@ -282,7 +286,10 @@ export const createEnrollment = async (
     // distinct generation nonces.
     const sealed = await sealRoot(key, 1, associatedData, plaintext);
     plaintext.fill(0);
-    const head = { generation: 1, hash: hexadecimal(await sha512(sealed)) };
+    const head = {
+        generation: 1,
+        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
+    };
     await commitParticipantState({
         database,
         stores: participantStores,
@@ -295,6 +302,7 @@ export const createEnrollment = async (
                 maximumRootBytes: descriptor.root.maximumRootBytes,
                 recordStores: participantRecordStores,
                 records: [],
+                identities: custodyIdentities(kernel),
             }),
         write: (transaction) => {
             for (const record of records)
@@ -309,7 +317,7 @@ export const createEnrollment = async (
         },
     });
     for (const record of records) record.bytes.fill(0);
-    const root = await authenticateRoot(database, runtime, descriptor);
+    const root = await authenticateRoot(context);
     if (root.head.generation !== 1 || root.head.hash !== head.hash)
         throw new Error('Enrollment readback failed.');
     return root;
@@ -335,9 +343,9 @@ export const restoreEnrollment = async (
     root: AuthenticatedRoot,
     created: boolean,
 ): Promise<RestoredEnrollment> => {
-    const { database, kernel, runtime } = context;
+    const { kernel, runtime } = context;
     const manifest = root.manifest;
-    const read = (kind: number) => readDataKind(database, manifest, kind);
+    const read = (kind: number) => readDataKind(context, manifest, kind);
     const header = await read(dataKind.header);
     const signature = await read(dataKind.signature);
     const definition = await read(dataKind.pollDefinition);
@@ -366,7 +374,7 @@ export const restoreEnrollment = async (
     own(2);
     for (const reference of manifest.references)
         if (reference.kind === dataKind.proof)
-            own(3, await readDataRecord(database, reference));
+            own(3, await readDataRecord(context, reference));
     own(4);
     const proofHash = readKernel(
         kernel,

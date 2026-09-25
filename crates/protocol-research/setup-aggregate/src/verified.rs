@@ -1,7 +1,9 @@
 use crate::{CHUNK_BYTES, PolynomialAdder};
 use opened_contribution::OpenedContributionVerifier;
-use registration_credentials::contribution_authentication::CommitmentInventory;
-use sha2::{Digest, Sha512};
+use registration_credentials::{
+    contribution_authentication::CommitmentInventory,
+    identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
+};
 use std::sync::Arc;
 use supported_profile::Profile;
 
@@ -68,8 +70,10 @@ struct Pending {
     verifier: OpenedContributionVerifier,
     ordinal: usize,
     offset: usize,
-    previous_hash: Sha512,
-    output_hash: Sha512,
+    // The identities of the polynomial in progress: the previous aggregate
+    // read back from the host, and the new aggregate.
+    previous_hash: Option<IdentityHasher>,
+    output_hash: Option<IdentityHasher>,
     outputs: Vec<AggregatePolynomial>,
     failed: bool,
 }
@@ -131,8 +135,8 @@ impl SetupAggregator {
             verifier,
             ordinal: 0,
             offset: 0,
-            previous_hash: Sha512::new(),
-            output_hash: Sha512::new(),
+            previous_hash: None,
+            output_hash: None,
             outputs: Vec::new(),
             failed: false,
         });
@@ -171,20 +175,33 @@ impl SetupAggregator {
                 .verifier
                 .polynomial(index, offset, incoming)
                 .map_err(|_| Refusal::Body)?;
-            if self.accepted == 0 {
-                previous_and_output.fill(0);
-            } else {
-                pending.previous_hash.update(&*previous_and_output);
+            let identity = || {
+                IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes).map_err(|_| Refusal::Body)
+            };
+            if offset == 0 {
+                pending.previous_hash = (self.accepted > 0).then(identity).transpose()?;
+                pending.output_hash = Some(identity()?);
+            }
+            match pending.previous_hash.as_mut() {
+                None => previous_and_output.fill(0),
+                Some(hash) => hash
+                    .absorb(previous_and_output)
+                    .map_err(|_| Refusal::PreviousAggregate)?,
             }
             PolynomialAdder::new(self.profile, family)
                 .add_into(incoming, previous_and_output)
                 .map_err(|_| Refusal::Body)?;
-            pending.output_hash.update(&*previous_and_output);
+            pending
+                .output_hash
+                .as_mut()
+                .ok_or(Refusal::Order)?
+                .absorb(previous_and_output)
+                .map_err(|_| Refusal::Body)?;
             pending.offset += incoming.len();
             if pending.offset == bytes {
-                if self.accepted > 0 {
+                if let Some(hash) = pending.previous_hash.take() {
                     let expected = &self.previous[pending.ordinal];
-                    let digest: [u8; 64] = pending.previous_hash.clone().finalize().into();
+                    let digest = hash.finish().map_err(|_| Refusal::PreviousAggregate)?;
                     if expected.index != index
                         || expected.bytes != bytes
                         || expected.digest != digest
@@ -192,13 +209,17 @@ impl SetupAggregator {
                         return Err(Refusal::PreviousAggregate);
                     }
                 }
+                let digest = pending
+                    .output_hash
+                    .take()
+                    .ok_or(Refusal::Order)?
+                    .finish()
+                    .map_err(|_| Refusal::Body)?;
                 pending.outputs.push(AggregatePolynomial {
                     index,
                     bytes,
-                    digest: pending.output_hash.clone().finalize().into(),
+                    digest,
                 });
-                pending.previous_hash = Sha512::new();
-                pending.output_hash = Sha512::new();
                 pending.ordinal += 1;
                 pending.offset = 0;
             }
@@ -271,7 +292,8 @@ mod retained_tests {
         let expected = AggregatePolynomial {
             index,
             bytes: bytes.len(),
-            digest: Sha512::digest(&bytes).into(),
+            digest: registration_credentials::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes)
+                .unwrap(),
         };
         (expected, bytes, values)
     }

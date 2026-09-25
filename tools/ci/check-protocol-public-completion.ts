@@ -416,7 +416,7 @@ await runWithLocalRunLog(
             const report = JSON.parse(
                 await readFile(path.join(output, 'result.json'), 'utf8'),
             ) as Record<string, unknown> & { participantCount: number };
-            const emptyCase = report.ciphertextSha512 === '';
+            const emptyCase = report.ciphertextBytes === 0;
             const participantCount = report.participantCount;
             assert.equal(emptyCase, run.result.kind === 'no-result');
             assert.ok(

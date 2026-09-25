@@ -4,7 +4,6 @@ import {
     equalBytes,
     readUnsigned32,
     readUnsigned64,
-    sha512,
     unsigned32,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
@@ -13,6 +12,7 @@ import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
 import type { ParticipantContext } from './context.js';
 import { contributionRecords } from './contribution.js';
+import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel, writeChunkInput } from './kernel.js';
 import type { KernelHandlers, ParticipantKernel } from './kernel.js';
 import {
@@ -138,7 +138,14 @@ export const resumeRelease = async (
         target:
             body === undefined
                 ? undefined
-                : { body, digest: await sha512(body) },
+                : {
+                      body,
+                      digest: custodyIdentity(
+                          context.kernel,
+                          custodyPurpose.target,
+                          body,
+                      ),
+                  },
         state,
     };
 };
@@ -321,54 +328,48 @@ const commitRelease = async (
     const encoded = encodeReleaseState(transition.generation, transition.state);
     if (encoded.length > descriptor.release.maximumStateBytes)
         throw new Error('The release state exceeds its bound.');
-    contribution.root = await commitRoot(
-        context.database,
-        context.runtime,
-        descriptor,
-        root,
-        {
-            generation: transition.generation,
-            manifest: {
-                ...root.manifest,
-                suffixes: {
-                    ...root.manifest.suffixes,
-                    target: root.manifest.suffixes.target ?? new Uint8Array(),
-                    release: encoded,
-                },
-            },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...contributionRecords(contribution),
-                ...retainedBallotRecords(contribution, close.records),
-                ...completedCloseRecords(close),
-                ...(session.state === undefined
-                    ? []
-                    : releaseRecordInventory(
-                          descriptor,
-                          close.records,
-                          releaseTarget(session).digest,
-                          session.state,
-                      )),
-            ],
-            write: (transaction) => {
-                const store = transaction.objectStore('release');
-                if (transition.retireJournal === true)
-                    store.delete(
-                        IDBKeyRange.bound(
-                            [releaseRecordKind.journal],
-                            [releaseRecordKind.body],
-                            false,
-                            true,
-                        ),
-                    );
-                for (const record of transition.added ?? [])
-                    store.add(new Blob([new Uint8Array(record.ciphertext)]), [
-                        record.kind,
-                        record.index,
-                    ]);
+    contribution.root = await commitRoot(context, root, {
+        generation: transition.generation,
+        manifest: {
+            ...root.manifest,
+            suffixes: {
+                ...root.manifest.suffixes,
+                target: root.manifest.suffixes.target ?? new Uint8Array(),
+                release: encoded,
             },
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...contributionRecords(contribution),
+            ...retainedBallotRecords(contribution, close.records),
+            ...completedCloseRecords(close),
+            ...(session.state === undefined
+                ? []
+                : releaseRecordInventory(
+                      descriptor,
+                      close.records,
+                      releaseTarget(session).digest,
+                      session.state,
+                  )),
+        ],
+        write: (transaction) => {
+            const store = transaction.objectStore('release');
+            if (transition.retireJournal === true)
+                store.delete(
+                    IDBKeyRange.bound(
+                        [releaseRecordKind.journal],
+                        [releaseRecordKind.body],
+                        false,
+                        true,
+                    ),
+                );
+            for (const record of transition.added ?? [])
+                store.add(new Blob([new Uint8Array(record.ciphertext)]), [
+                    record.kind,
+                    record.index,
+                ]);
+        },
+    });
     session.state = transition.state;
     for (const record of transition.added ?? [])
         (await openReleaseRecord(session, record.kind, record.index)).fill(0);
@@ -631,7 +632,11 @@ export const advanceRelease = async (
     // A release that follows the completed close takes the certified target.
     session.target ??= {
         body: evaluated.body,
-        digest: await sha512(evaluated.body),
+        digest: custodyIdentity(
+            context.kernel,
+            custodyPurpose.target,
+            evaluated.body,
+        ),
     };
     await establishReleaseContext(context, close.records.position);
     await appendJournal(session);

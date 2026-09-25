@@ -5,11 +5,11 @@ use ballot_proof::body::BallotBodyClassification;
 use num_bigint::Sign;
 use registration_credentials::{
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
+    identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
 };
 use rns_arithmetic_probe::ranking::{DEGREE, Engine, stored_value, stored_value_bytes};
 use setup_aggregate::verified::VerifiedSetupAggregate;
-use sha2::{Digest, Sha512};
 use std::{cell::RefCell, sync::Arc};
 
 const CHUNK_BYTES: usize = 1 << 20;
@@ -24,7 +24,8 @@ struct Incoming {
     length: usize,
     received: usize,
     bytes: Vec<u8>,
-    hash: Sha512,
+    /// The identity of a key polynomial or stored value.
+    hash: Option<IdentityHasher>,
     expected: Option<[u8; 64]>,
     /// A ballot body's hasher and the end of its FHE ciphertext.
     ballot: Option<(BallotBodyHasher, usize)>,
@@ -64,7 +65,7 @@ impl State {
         destination: Destination,
         length: usize,
         expected: Option<[u8; 64]>,
-        hash: Sha512,
+        hash: Option<IdentityHasher>,
         ballot: Option<(BallotBodyHasher, usize)>,
     ) -> Result<(), Error> {
         if self.incoming.is_some() {
@@ -97,7 +98,12 @@ impl State {
                     .extend(&bytes[first - value.received..last - value.received]);
             }
         } else {
-            value.hash.update(bytes);
+            value
+                .hash
+                .as_mut()
+                .ok_or(Error::Incomplete)?
+                .absorb(bytes)
+                .map_err(|_| Error::PublicInput)?;
             value.bytes.extend(bytes);
         }
         value.received += length;
@@ -111,7 +117,11 @@ impl State {
         let digest = if let Some((hash, _)) = incoming.ballot {
             hash.finish().map_err(|_| Error::PublicInput)?
         } else {
-            incoming.hash.finalize().into()
+            incoming
+                .hash
+                .ok_or(Error::Incomplete)?
+                .finish()
+                .map_err(|_| Error::PublicInput)?
         };
         if incoming.expected.is_some_and(|expected| expected != digest) {
             return Err(Error::PublicInput);
@@ -289,11 +299,13 @@ impl State {
                         .ok_or(Error::Context)?;
                     let expected = *metadata.digest();
                     let bytes = metadata.bytes();
+                    let hash = IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes)
+                        .map_err(|_| Error::Context)?;
                     self.begin(
                         Destination::Key(ordinal),
                         bytes,
                         Some(expected),
-                        Sha512::new(),
+                        Some(hash),
                         None,
                     )?;
                     self.word(index);
@@ -344,7 +356,7 @@ impl State {
                         Destination::Ballot(argument),
                         bytes,
                         Some(expected),
-                        Sha512::new(),
+                        None,
                         Some((hash, end)),
                     )?;
                     self.word(bytes);
@@ -403,10 +415,14 @@ impl State {
                     }
                     (
                         Destination::Readback(argument),
-                        Some(engine.value_identity(
-                            argument,
-                            engine.value(argument).map_err(|_| Error::Storage)?,
-                        )),
+                        Some(
+                            engine
+                                .value_identity(
+                                    argument,
+                                    engine.value(argument).map_err(|_| Error::Storage)?,
+                                )
+                                .map_err(|_| Error::Storage)?,
+                        ),
                     )
                 } else {
                     if !required.reloads.contains(&argument) {
@@ -414,9 +430,9 @@ impl State {
                     }
                     (Destination::Reload(argument), None)
                 };
-                let hash = engine.value_hasher(argument);
+                let hash = engine.value_hasher(argument).map_err(|_| Error::Storage)?;
                 let bytes = stored_value_bytes(engine.profile());
-                self.begin(destination, bytes, expected, hash, None)
+                self.begin(destination, bytes, expected, Some(hash), None)
             }
             19 => {
                 if argument != 0 || length != 0 || !self.engine()?.finished() {

@@ -13,7 +13,6 @@ import {
     equalBytes,
     fromHexadecimal,
     hexadecimal,
-    sha512,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
 import {
@@ -103,12 +102,20 @@ export type WorkerResult = Readonly<
 const runtimeLabel = 'participant-runtime/7';
 const maximumModuleBytes = 8_388_608;
 
+// The pinned delivery digest that gates executing the module, and the runtime
+// identity derived from the delivered files' digests. Neither is an identity
+// the participant binds into protocol or retained state.
+const deliveryDigest = async (bytes: Uint8Array) =>
+    new Uint8Array(
+        await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
+    );
+
 const fetchModule = async (origin: string, expected: string) => {
     const module = await readBounded(
         origin + '/participant.wasm',
         maximumModuleBytes,
     );
-    if (hexadecimal(await sha512(module)) !== expected)
+    if (hexadecimal(await deliveryDigest(module)) !== expected)
         throw new PublicInputFailure('The participant module changed.');
     return module;
 };
@@ -118,13 +125,13 @@ const runtimeIdentity = async (
     descriptor: ParticipantDescriptor,
     module: Uint8Array,
 ) =>
-    sha512(
+    deliveryDigest(
         concatenate(
             encodeText(runtimeLabel),
             fromHexadecimal(command.identity.source),
-            await sha512(module),
+            await deliveryDigest(module),
             fromHexadecimal(command.identity.worker),
-            await sha512(encodeText(JSON.stringify(descriptor))),
+            await deliveryDigest(encodeText(JSON.stringify(descriptor))),
         ),
     );
 
@@ -145,8 +152,7 @@ const publishRecords = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
 ) => {
-    const read = (kind: number) =>
-        readDataKind(context.database, root.manifest, kind);
+    const read = (kind: number) => readDataKind(context, root.manifest, kind);
     const id = hexadecimal(enrollment.bodyDigest);
     for (const [kind, file] of [
         [dataKind.publicKey, registrationFile.publicKey],
@@ -225,11 +231,7 @@ const execute = async (
         return { status: 'completed', details: summary(root, enrollment) };
     }
     started();
-    let root = await authenticateRoot(
-        context.database,
-        context.runtime,
-        context.descriptor,
-    );
+    let root = await authenticateRoot(context);
     const enrollment = await restoreEnrollment(context, root, false);
     if (
         parameters.poll !== undefined &&

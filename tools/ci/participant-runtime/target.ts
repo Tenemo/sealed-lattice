@@ -553,25 +553,19 @@ const commitTarget = async (
     const encoded = encodeTargetState(generation, state);
     if (encoded.length > context.descriptor.target.maximumStateBytes)
         throw new Error('The target state exceeds its bound.');
-    contribution.root = await commitRoot(
-        context.database,
-        context.runtime,
-        context.descriptor,
-        root,
-        {
-            generation,
-            manifest: {
-                ...root.manifest,
-                suffixes: { ...root.manifest.suffixes, target: encoded },
-            },
-            predecessorRecords: [
-                ...dataRecordInventory(root.manifest),
-                ...contributionRecords(contribution),
-                ...retainedBallotRecords(contribution, close.records),
-                ...completedCloseRecords(close),
-            ],
+    contribution.root = await commitRoot(context, root, {
+        generation,
+        manifest: {
+            ...root.manifest,
+            suffixes: { ...root.manifest.suffixes, target: encoded },
         },
-    );
+        predecessorRecords: [
+            ...dataRecordInventory(root.manifest),
+            ...contributionRecords(contribution),
+            ...retainedBallotRecords(contribution, close.records),
+            ...completedCloseRecords(close),
+        ],
+    });
 };
 
 // Verifies the close barrier, classifies each usable ballot and evaluates

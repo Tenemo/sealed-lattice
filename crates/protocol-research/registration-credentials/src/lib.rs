@@ -11,6 +11,7 @@ pub mod contribution_commitment;
 mod custody;
 pub use custody::SigningPurpose;
 pub mod foundation;
+pub mod identity;
 pub mod poll;
 pub mod registration;
 #[path = "release-signing.rs"]

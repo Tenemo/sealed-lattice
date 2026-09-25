@@ -1,4 +1,4 @@
-use sha2::{Digest, Sha512};
+use rns_arithmetic_probe::ranking::program_identity;
 use supported_profile::{DEGREE, Profile};
 
 /// The comparison polynomial is evaluated in blocks of this many powers.
@@ -7,6 +7,7 @@ const COMPARISON_BLOCK_WIDTH: usize = 16;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     UnsupportedTopCount,
+    Encoding,
 }
 
 struct Instruction {
@@ -194,7 +195,7 @@ impl RankingProgram {
         };
         let result = builder.append(5, &[sum], constant);
         let bytes = builder.encode(result);
-        let identity = Sha512::digest(&bytes).into();
+        let identity = program_identity(&bytes).map_err(|_| Error::Encoding)?;
         Ok(Self { bytes, identity })
     }
     pub fn bytes(&self) -> &[u8] {
@@ -224,7 +225,7 @@ mod tests {
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>(),
-            "c3872177b99208361bc96dd4127b169a0985dffa819fd648aa8f1d65f7fa93e14230168efbcae815b970d5993edb00587b70a14dc46d5aaf85af0585f0eb3042"
+            "fea389f6318ffe0fcb36050c9ba22fb24aa60b8462fe026eb20a63b0f8d312a0d6e2fb3666fc6655f0bd602178c808b42fe8a1682ab566a41184042ccae83cf8"
         );
         for top_count in 1..10 {
             let selected = RankingProgram::for_profile(completion(), top_count).unwrap();
@@ -318,13 +319,17 @@ mod tests {
             let mut changed = program.bytes().to_vec();
             changed[parameter_offset..parameter_offset + 4]
                 .copy_from_slice(&parameter.to_le_bytes());
-            assert!(Engine::new(completion(), &changed, Sha512::digest(&changed).into()).is_err());
+            assert!(
+                Engine::new(completion(), &changed, program_identity(&changed).unwrap()).is_err()
+            );
         }
         for constant in [2u32, 12, u32::MAX] {
             let mut changed = program.bytes().to_vec();
             let offset = changed.len() - 4;
             changed[offset..].copy_from_slice(&constant.to_le_bytes());
-            assert!(Engine::new(completion(), &changed, Sha512::digest(&changed).into()).is_err());
+            assert!(
+                Engine::new(completion(), &changed, program_identity(&changed).unwrap()).is_err()
+            );
         }
     }
 }

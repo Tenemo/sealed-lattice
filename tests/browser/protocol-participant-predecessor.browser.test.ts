@@ -22,10 +22,14 @@ const done = (transaction: IDBTransaction) =>
                 transaction.error ?? new Error('Fixture transaction aborted.'),
             );
     });
-const hash = async (bytes: Uint8Array) =>
+// The validator compares the identities its caller derives. These stand-ins
+// give the root and record purposes different identities.
+const standIn = (purpose: number) => async (bytes: Uint8Array) =>
     new Uint8Array(
-        await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
+        await crypto.subtle.digest('SHA-512', Uint8Array.of(purpose, ...bytes)),
     );
+const rootIdentity = standIn(0),
+    recordIdentity = standIn(1);
 
 // The root nonce for generation 16, written independently of the helper.
 const generationSixteenNonce = Uint8Array.of(
@@ -66,7 +70,7 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
     );
     const head = {
         generation,
-        hash: Array.from(await hash(root), (byte) =>
+        hash: Array.from(await rootIdentity(root), (byte) =>
             byte.toString(16).padStart(2, '0'),
         ).join(''),
     };
@@ -110,7 +114,7 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
                 store: 'data',
                 key: [4, 0],
                 byteLength: data.length,
-                sha512: await hash(data),
+                identity: await recordIdentity(data),
             },
             {
                 store: 'journal',
@@ -119,6 +123,7 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
                 encryption: { key: rawKey, additionalData },
             },
         ] as ParticipantStoredRecord[],
+        identities: { root: rootIdentity, record: recordIdentity },
     };
     const commit = () =>
         commitParticipantState({
@@ -173,7 +178,7 @@ describe('required predecessor records', () => {
         const value = await fixture();
         value.expected.records[1] = {
             ...value.expected.records[1],
-            sha512: await hash(value.journal),
+            identity: await recordIdentity(value.journal),
         };
         await value.commit();
         expect(await value.generation()).toBe(17);
@@ -185,10 +190,10 @@ describe('required predecessor records', () => {
             const value = await fixture();
             value.expected.records[1] = {
                 ...value.expected.records[1],
-                sha512: await hash(value.journal),
+                identity: await recordIdentity(value.journal),
             };
             const record = value.expected.records[1];
-            if (fault === 'hash') record.sha512![0] ^= 1;
+            if (fault === 'hash') record.identity![0] ^= 1;
             if (fault === 'key') record.encryption!.key[0] ^= 1;
             if (fault === 'context') record.encryption!.additionalData[0] ^= 1;
             await expect(value.commit()).rejects.toThrow();

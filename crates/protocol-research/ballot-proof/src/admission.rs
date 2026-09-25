@@ -3,9 +3,11 @@ use crate::{
     parameters::BALLOT_HEADER_BYTES,
     statement::{self, coefficient_bytes, encode_polynomial, polynomial_bytes, setup_inputs},
 };
-use registration_credentials::poll::VerifiedPoll;
+use registration_credentials::{
+    identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN, identity},
+    poll::VerifiedPoll,
+};
 use setup_aggregate::verified::VerifiedSetupAggregate;
-use sha2::{Digest, Sha512};
 use supported_profile::Profile;
 
 /// Proof-valid linked ciphertexts under this verifier's own setup.
@@ -38,7 +40,8 @@ pub struct BallotRelationVerifier {
     header_offset: usize,
     polynomial: usize,
     polynomial_bytes: usize,
-    hash: Sha512,
+    // The identity of the common or key polynomial in progress.
+    hash: Option<IdentityHasher>,
     statement_done: bool,
     statement: [u8; 64],
 }
@@ -74,7 +77,8 @@ impl BallotRelationVerifier {
                 .map_err(|_| Refusal::Context)?;
             let bytes = encode_polynomial(&common, coefficient_bytes(profile, family))
                 .map_err(|_| Refusal::Context)?;
-            expected_inputs[2 * slot] = Sha512::digest(bytes).into();
+            expected_inputs[2 * slot] =
+                identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).map_err(|_| Refusal::Context)?;
             let key = setup
                 .polynomials()
                 .iter()
@@ -90,7 +94,7 @@ impl BallotRelationVerifier {
             header_offset: 0,
             polynomial: 0,
             polynomial_bytes: 0,
-            hash: Sha512::new(),
+            hash: None,
             statement_done: false,
             statement,
         })
@@ -127,7 +131,17 @@ impl BallotRelationVerifier {
             let length = polynomial_bytes(self.profile, self.polynomial);
             let count = bytes.len().min(length - self.polynomial_bytes);
             if self.polynomial % 4 < 2 {
-                self.hash.update(&bytes[..count]);
+                if self.polynomial_bytes == 0 {
+                    self.hash = Some(
+                        IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], length)
+                            .map_err(|_| Refusal::Context)?,
+                    );
+                }
+                self.hash
+                    .as_mut()
+                    .ok_or(Refusal::Stage)?
+                    .absorb(&bytes[..count])
+                    .map_err(|_| Refusal::Context)?;
             }
             bytes = &bytes[count..];
             self.polynomial_bytes += count;
@@ -135,7 +149,13 @@ impl BallotRelationVerifier {
                 if self.polynomial % 4 < 2 {
                     let expected =
                         self.expected_inputs[self.polynomial / 4 * 2 + self.polynomial % 4];
-                    if <[u8; 64]>::from(std::mem::take(&mut self.hash).finalize()) != expected {
+                    let digest = self
+                        .hash
+                        .take()
+                        .ok_or(Refusal::Stage)?
+                        .finish()
+                        .map_err(|_| Refusal::Context)?;
+                    if digest != expected {
                         return Err(Refusal::Context);
                     }
                 }

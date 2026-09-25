@@ -8,11 +8,16 @@ import {
     equalBytes,
     hexadecimal,
     readUnsigned32,
-    sha512,
     unsigned32,
 } from './bytes.js';
 import { describe } from './context.js';
+import type { ParticipantContext } from './context.js';
 import type { ParticipantDescriptor } from './descriptor.js';
+import {
+    custodyIdentities,
+    custodyIdentity,
+    custodyPurpose,
+} from './identity.js';
 import {
     isParticipantHead,
     isRootKey,
@@ -328,10 +333,9 @@ export type AuthenticatedRoot = Readonly<{
 // generation and decodes the manifest. The data record count must match the
 // manifest and no stop marker may exist.
 export const authenticateRoot = async (
-    database: IDBDatabase,
-    runtime: Uint8Array,
-    descriptor: ParticipantDescriptor,
+    context: ParticipantContext,
 ): Promise<AuthenticatedRoot> => {
+    const { database, kernel, runtime, descriptor } = context;
     const snapshot = await snapshotParticipant(database);
     if (
         snapshot.counts.key !== 1 ||
@@ -344,7 +348,10 @@ export const authenticateRoot = async (
         !isParticipantHead(snapshot.head) ||
         snapshot.head.generation < 1 ||
         snapshot.head.generation > lastGeneration ||
-        snapshot.head.hash !== hexadecimal(await sha512(snapshot.root))
+        snapshot.head.hash !==
+            hexadecimal(
+                custodyIdentity(kernel, custodyPurpose.root, snapshot.root),
+            )
     )
         throw new Error('Missing or inconsistent participant authority.');
     const plaintext = await openRoot(
@@ -365,24 +372,29 @@ export const authenticateRoot = async (
 
 // Reads one data record and checks its reference hash.
 export const readDataRecord = async (
-    database: IDBDatabase,
+    context: ParticipantContext,
     reference: RecordReference,
 ) => {
-    const blob = await readParticipantValue(database, 'data', [
+    const blob = await readParticipantValue(context.database, 'data', [
         reference.kind,
         reference.offset,
     ]);
     if (!(blob instanceof Blob) || blob.size !== reference.length)
         throw new Error('A participant data record is missing.');
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    if (!equalBytes(await sha512(bytes), reference.hash))
+    if (
+        !equalBytes(
+            custodyIdentity(context.kernel, custodyPurpose.record, bytes),
+            reference.hash,
+        )
+    )
         throw new Error('A participant data record changed.');
     return bytes;
 };
 
 // Reads every chunk of one data kind in order.
 export const readDataKind = async (
-    database: IDBDatabase,
+    context: ParticipantContext,
     manifest: ParticipantManifest,
     kind: number,
 ) =>
@@ -390,7 +402,7 @@ export const readDataKind = async (
         ...(await Promise.all(
             manifest.references
                 .filter((reference) => reference.kind === kind)
-                .map((reference) => readDataRecord(database, reference)),
+                .map((reference) => readDataRecord(context, reference)),
         )),
     );
 
@@ -401,7 +413,7 @@ export const dataRecordInventory = (
         store: 'data',
         key: [reference.kind, reference.offset],
         byteLength: reference.length,
-        sha512: reference.hash,
+        identity: reference.hash,
     }));
 
 export type RootTransition = Readonly<{
@@ -415,7 +427,8 @@ export type RootTransition = Readonly<{
     write?: (transaction: IDBTransaction) => void;
 }>;
 
-export const referenceData = async (
+export const referenceData = (
+    context: ParticipantContext,
     records: readonly Readonly<{ kind: number; bytes: Uint8Array }>[],
 ) => {
     const references: RecordReference[] = [];
@@ -432,7 +445,11 @@ export const referenceData = async (
                 kind: record.kind,
                 offset: start,
                 length: chunk.length,
-                hash: await sha512(chunk),
+                hash: custodyIdentity(
+                    context.kernel,
+                    custodyPurpose.record,
+                    chunk,
+                ),
             });
             offsets.set(record.kind, start + chunk.length);
         }
@@ -443,12 +460,11 @@ export const referenceData = async (
 // records only after the exact predecessor authenticates inside the same
 // strict transaction; then reads the committed root back.
 export const commitRoot = async (
-    database: IDBDatabase,
-    runtime: Uint8Array,
-    descriptor: ParticipantDescriptor,
+    context: ParticipantContext,
     predecessor: AuthenticatedRoot,
     transition: RootTransition,
 ): Promise<AuthenticatedRoot> => {
+    const { database, kernel, runtime, descriptor } = context;
     const associatedData = rootAssociatedData(runtime);
     const plaintext = encodeManifest(
         transition.manifest,
@@ -465,7 +481,7 @@ export const commitRoot = async (
     );
     const head: ParticipantHead = {
         generation: transition.generation,
-        hash: hexadecimal(await sha512(sealed)),
+        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
     };
     const added = (transition.addedData ?? []).flatMap((record) => {
         const chunks = [];
@@ -487,6 +503,7 @@ export const commitRoot = async (
             maximumRootBytes: descriptor.root.maximumRootBytes,
             recordStores: participantRecordStores,
             records: transition.predecessorRecords,
+            identities: custodyIdentities(kernel),
         });
     try {
         await commitParticipantState({
@@ -544,6 +561,6 @@ export const commitRoot = async (
     for (const reference of manifest.references.slice(
         predecessor.manifest.references.length,
     ))
-        await readDataRecord(database, reference);
+        await readDataRecord(context, reference);
     return { head, plaintext: reopened, manifest };
 };

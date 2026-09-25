@@ -674,11 +674,11 @@ export const compileComposedSecurityLedger = (
                 2n * securityTargetBits -
                 ledgerBudgetBits)) /
         signatureReductionFactor ** 2n;
-    // SHA-512 collision resistance read as advantage at most T^3/2^512, and the
-    // ideal 512-bit identity bound 296*(q+2)^3/2^512 with q <= T, over T.
-    const identityCollisionRatio = addRationals(
-        rational(target * target, 1n << 512n),
-        rational(296n * (target + 2n) ** 3n, (1n << 512n) * target),
+    // Every identity is a 512-bit SHAKE256 output: the ideal identity bound
+    // 296*(q+2)^3/2^512 with q <= T, over T.
+    const identityCollisionRatio = rational(
+        296n * (target + 2n) ** 3n,
+        (1n << 512n) * target,
     );
     const assumptions = [
         ...new Set(computationalHybrids(1n).map((row) => row.assumption)),

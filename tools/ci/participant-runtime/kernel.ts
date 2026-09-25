@@ -109,6 +109,13 @@ const kernelFunctions = [
     'setup_finish',
     'setup_inventory_pointer',
     'retain_setup',
+    // The identities the runtime binds into its retained state.
+    'custody_identity_input_pointer',
+    'custody_identity_input_capacity',
+    'custody_identity_output_pointer',
+    'custody_identity_begin',
+    'custody_identity_absorb',
+    'custody_identity_finish',
 ] as const;
 
 type KernelFunction = (...values: number[]) => number;

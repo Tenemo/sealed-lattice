@@ -1,8 +1,11 @@
-use super::{Ciphertext, DEGREE, Engine, Refusal, plaintext};
+use super::{Ciphertext, DEGREE, Engine, Refusal, plaintext, stored_bytes};
 use num_bigint::BigInt;
 use num_traits::Zero;
-use sha2::{Digest, Sha512};
+use registration_credentials::identity::identity;
 use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
+
+/// The diagnostic identity of every loaded input and its position.
+const PROBE_INPUT_DOMAIN: &str = "sealed-lattice/requested-output-probe-input/v2";
 
 const PRIME: u64 = PLAINTEXT_MODULUS as u64;
 
@@ -97,8 +100,8 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
         return Err(Refusal::Program);
     }
     let bytes = program(profile, top_count);
-    let identity: [u8; 64] = Sha512::digest(&bytes).into();
-    let mut engine = Engine::new(profile, &bytes, identity)?;
+    let program = super::program_identity(&bytes)?;
+    let mut engine = Engine::new(profile, &bytes, program)?;
     let secret = engine.arithmetic.small(&super::super::secret(
         DEGREE,
         participants,
@@ -127,8 +130,7 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
             slots[(option * options + requested) * profile.rank_window()] = *rank;
         }
     }
-    let mut input_hash = Sha512::new();
-    input_hash.update(b"sealed-lattice/requested-output-probe-input/v1");
+    let mut inputs = Vec::new();
     while !engine.finished() {
         let requirements = engine.requirements()?;
         if requirements.cache.is_some()
@@ -168,10 +170,8 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
                     .collect();
                 engine.add_plaintext(&encrypted_zero, &plaintext::encode(&powered))
             };
-            input_hash.update((position as u32).to_le_bytes());
-            for word in input.iter().flatten() {
-                input_hash.update(word.to_le_bytes());
-            }
+            inputs.extend((position as u32).to_le_bytes());
+            inputs.extend(stored_bytes(&input));
             engine.load_input(position, input)?;
         }
         engine.execute()?;
@@ -191,8 +191,8 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
     Ok(format!(
         "{{\"participants\":{participants},\"options\":{options},\"topCount\":{top_count},\"degree\":{DEGREE},\"optionPositions\":{:?},\"inputIdentity\":\"{}\",\"programIdentity\":\"{}\",\"ciphertextIdentity\":\"{}\"}}",
         &order[..top_count],
-        to_hex(&input_hash.finalize()),
-        to_hex(&identity),
-        to_hex(&engine.value_identity(engine.step() - 1, engine.value(engine.step() - 1)?)),
+        to_hex(&identity(PROBE_INPUT_DOMAIN, &inputs).map_err(|_| Refusal::Identity)?),
+        to_hex(&program),
+        to_hex(&engine.value_identity(engine.step() - 1, engine.value(engine.step() - 1)?)?),
     ))
 }
