@@ -576,10 +576,10 @@ export const readPublishedSubmission = async (
 };
 
 // The submission an author's pointer names, or undefined when the relay lacks
-// it. The pointer only proposes an identity; the module authenticates what it
-// names.
+// it or serves one that is not that author's envelope with that identity. The
+// pointer only proposes an identity; the module authenticates what it names.
 const readAnnouncedSubmission = async (
-    descriptor: ParticipantDescriptor,
+    context: ParticipantContext,
     relay: PublicRelay,
     author: number,
 ) => {
@@ -590,8 +590,19 @@ const readAnnouncedSubmission = async (
         if (error instanceof PublicInputFailure) return undefined;
         throw error;
     }
-    return identity.length === 64
-        ? readPublishedSubmission(descriptor, relay, author, identity)
+    const submission =
+        identity.length === 64
+            ? await readPublishedSubmission(
+                  context.descriptor,
+                  relay,
+                  author,
+                  identity,
+              )
+            : undefined;
+    return submission !== undefined &&
+        readUnsigned16(submission, envelopeAuthorOffset) === author &&
+        namesEnvelope(context, submission, identity)
+        ? submission
         : undefined;
 };
 
@@ -609,7 +620,7 @@ const deliverBallot = async (
     const { descriptor } = context;
     const submission =
         expected === undefined
-            ? await readAnnouncedSubmission(descriptor, relay, author)
+            ? await readAnnouncedSubmission(context, relay, author)
             : await readPublishedSubmission(
                   descriptor,
                   relay,
@@ -695,11 +706,7 @@ const announceBallot = async (
     author: number,
 ) => {
     const { context } = session.contribution;
-    const submission = await readAnnouncedSubmission(
-        context.descriptor,
-        relay,
-        author,
-    );
+    const submission = await readAnnouncedSubmission(context, relay, author);
     if (
         submission === undefined ||
         tryCloseCommand(context, 12, 0, submission) === undefined

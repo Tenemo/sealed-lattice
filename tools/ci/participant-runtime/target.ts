@@ -592,9 +592,10 @@ const commitTarget = async (
 };
 
 // Verifies the close barrier, classifies each usable ballot and evaluates
-// the target in this instance. Returns the target body and how many usable
-// ballots were valid. The completed close must be restored first, after the
-// owning setup verifier verified the complete setup in this instance.
+// the target in this instance. Returns the target body, how many slots were
+// usable and how many usable ballots were valid. The completed close must be
+// restored first, after the owning setup verifier verified the complete setup
+// in this instance.
 export const evaluateClosedTarget = async (
     context: ParticipantContext,
     relay: PublicRelay,
@@ -616,18 +617,26 @@ export const evaluateClosedTarget = async (
         // Each slot takes the classification just made, or none.
         evaluationCommand(context, 1);
     }
-    return { body: await evaluate(context, relay, usable), validBallots };
+    return {
+        body: await evaluate(context, relay, usable),
+        usableBallots: usable.size,
+        validBallots,
+    };
 };
 
 // Evaluates the target from the public close records and signs this
 // participant's target vote. The owning setup verifier must have verified
 // the complete setup in this instance first. Returns the own ballot's status
-// in the target and how many usable ballots were valid.
+// in the target, how many slots were usable and how many usable ballots were
+// valid.
 export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const { contribution } = close;
     const { context } = contribution;
     await restoreCompletedClose(close);
-    const { body, validBallots } = await evaluateClosedTarget(context, relay);
+    const { body, usableBallots, validBallots } = await evaluateClosedTarget(
+        context,
+        relay,
+    );
     const finality = finalityCommand(context, 0);
     if (!equalBytes(finality.subarray(1), body))
         throw new Error('The finality work names another target.');
@@ -657,7 +666,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const code = finality[0];
     if (code >= ballotStatuses.length)
         throw new Error('The finality work reported no ballot status.');
-    return { ballotStatus: ballotStatuses[code], validBallots };
+    return { ballotStatus: ballotStatuses[code], usableBallots, validBallots };
 };
 
 // Delivers the signed target vote, and the organizer the target body.

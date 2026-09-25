@@ -141,8 +141,14 @@ const text = (value: unknown) => {
     return value;
 };
 
-// Byte parameters cross the page boundary as lower-case hexadecimal.
-const bytes = (value: unknown) => fromHexadecimal(text(value));
+// Byte parameters cross the page boundary as lower-case hexadecimal; any
+// other text is a malformed request, not a local fault.
+const bytes = (value: unknown) => {
+    const encoded = text(value);
+    if (!/^(?:[0-9a-f]{2})*$/u.test(encoded))
+        throw new PublicInputFailure('Malformed byte parameter.');
+    return fromHexadecimal(encoded);
+};
 
 // Publishes every public record the current root holds: the registration
 // record, and the organizer's poll, proposal and proposal signature.
@@ -528,32 +534,51 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
         const opened = database;
         return await navigator.locks.request(
             'sealed-lattice-participant',
-            async () => {
-                const { kernel, handlers } =
-                    await instantiateParticipantKernel(module);
-                return execute(
-                    { database: opened, kernel, handlers, descriptor, runtime },
-                    relay,
-                    command,
-                    () => {
-                        authorityStarted = true;
-                    },
-                );
+            async (): Promise<WorkerResult> => {
+                try {
+                    const { kernel, handlers } =
+                        await instantiateParticipantKernel(module);
+                    return await execute(
+                        {
+                            database: opened,
+                            kernel,
+                            handlers,
+                            descriptor,
+                            runtime,
+                        },
+                        relay,
+                        command,
+                        () => {
+                            authorityStarted = true;
+                        },
+                    );
+                } catch (error) {
+                    // A local failure after authority started stops the
+                    // participant before any other operation takes the lock.
+                    if (
+                        !authorityStarted ||
+                        error instanceof PublicInputFailure ||
+                        error instanceof StoragePending
+                    )
+                        throw error;
+                    const stop = await stopParticipant(opened);
+                    return {
+                        status: 'stopped',
+                        reason:
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                        stopPersistence: stop.stopPersistence,
+                    };
+                }
             },
         );
     } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        if (error instanceof PublicInputFailure)
-            return { status: 'pending', reason };
-        if (error instanceof StoragePending)
-            return { status: 'pending', reason };
-        if (database === undefined || !authorityStarted)
-            return { status: 'pending', reason };
-        const stop = await stopParticipant(database);
+        // Public input, pending storage and failures before authority
+        // started leave the participant pending.
         return {
-            status: 'stopped',
-            reason,
-            stopPersistence: stop.stopPersistence,
+            status: 'pending',
+            reason: error instanceof Error ? error.message : String(error),
         };
     } finally {
         database?.close();

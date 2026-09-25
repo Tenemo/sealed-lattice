@@ -74,8 +74,9 @@ const readParticipantRun = async (run: string): Promise<ParticipantRun> => {
 // takes them. The relay names each registration record by its body digest and
 // each ballot submission by its author and envelope identity; the reader takes
 // registrations in roster order and an index of submitted envelopes with their
-// bodies. The context holds the
-// poll and runtime identities the reader is given, and every other file is
+// bodies. Each body takes a short derived path, because an archive route that
+// named its envelope identity would exceed the route bound. The context holds
+// the poll and runtime identities the reader is given, and every other file is
 // relayed bytes. Only the owning verifiers accept any of them.
 export const layParticipantCeremony = async (
     run: string,
@@ -94,7 +95,7 @@ export const layParticipantCeremony = async (
             !entry.startsWith('participant-'),
             'A relayed record takes a derived name.',
         );
-        if (entry !== 'registration')
+        if (entry !== 'registration' && !ballotDirectory.test(entry))
             await copy(path.join(relay, entry), path.join(ceremony, entry));
     }
     await writeFile(
@@ -111,7 +112,8 @@ export const layParticipantCeremony = async (
             path.join(ceremony, 'participant-' + String(position)),
         );
     // Each published submission in author and identity order, whether or not
-    // its author's pointer names it; its body keeps its relayed path.
+    // its author's pointer names it; its body takes the author's directory and
+    // its ordinal among that author's submissions.
     const authors = (await readdir(relay))
         .map((entry) => ballotDirectory.exec(entry)?.[1])
         .filter((author) => author !== undefined)
@@ -129,7 +131,7 @@ export const layParticipantCeremony = async (
         const identities = (await readdir(path.join(relay, directory)))
             .filter((entry) => identity.test(entry))
             .sort();
-        for (const envelopeIdentity of identities) {
+        for (const [ordinal, envelopeIdentity] of identities.entries()) {
             const submission = path.join(relay, directory, envelopeIdentity);
             const name = 'submission-' + String(lines.length) + '.bin';
             await writeFile(
@@ -140,9 +142,12 @@ export const layParticipantCeremony = async (
                 ]),
                 { flag: 'wx' },
             );
-            lines.push(
-                name + ' ' + directory + '/' + envelopeIdentity + '/body.bin\n',
+            const body = directory + '/' + String(ordinal) + '/body.bin';
+            await copy(
+                path.join(submission, 'body.bin'),
+                path.join(ceremony, body),
             );
+            lines.push(name + ' ' + body + '\n');
         }
     }
     await writeFile(path.join(close, 'submissions.txt'), lines.join(''), {

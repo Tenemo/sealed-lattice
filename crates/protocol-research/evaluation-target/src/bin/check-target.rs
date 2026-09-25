@@ -565,16 +565,17 @@ fn main() -> io::Result<()> {
         if classifier.requires_keys() {
             for (_, _, index) in setup_inputs(profile) {
                 classifier.begin_key(index).map_err(refusal)?;
-                let (_, capacity) = polynomial_bytes(profile, index)?;
+                // Whole-coefficient chunks, as the key reader takes them.
+                let (length, capacity) = polynomial_bytes(profile, index)?;
                 let mut key = File::open(aggregate.join(polynomial_name(index)))?;
-                loop {
-                    let count = key.read(&mut buffer[..capacity])?;
-                    work.read_bytes += count as u64;
-                    if count == 0 {
-                        break;
-                    }
+                let mut offset = 0;
+                while offset < length {
+                    let count = capacity.min(length - offset);
+                    work.read(&mut key, &mut buffer[..count])?;
                     classifier.push_key(&buffer[..count]).map_err(refusal)?;
+                    offset += count;
                 }
+                end(&mut key)?;
                 classifier.finish_key().map_err(refusal)?;
             }
         }

@@ -251,13 +251,33 @@ const snapshotSources = async (
     }
 };
 
+// A corrupt participant's client claims the honest runtime: its worker
+// fetches and hashes the honest module as the honest worker does, then
+// compiles the module at the client's own path, which signs authentic invalid
+// ballots. Its page checks the patched worker's digest instead.
+export type CorruptParticipantClient = Readonly<{
+    feature: string;
+    path: string;
+    module: Buffer;
+    worker: Buffer;
+    moduleDigest: string;
+    workerDigest: string;
+}>;
+
 // Builds the scalar participant module and the bundled worker from tracked
 // sources, checks the module's scalar code, imports and memory, and computes
-// the runtime identity the worker recomputes.
+// the runtime identity the worker recomputes. When requested, it also builds
+// the invalid-ballot client from the same sources.
 export const assembleParticipantRuntime = async (
     runLog: ActiveLocalRunLog,
     descriptor: ParticipantDescriptor,
-): Promise<ParticipantRuntime> => {
+    invalidBallot: boolean,
+): Promise<
+    Readonly<{
+        runtime: ParticipantRuntime;
+        invalidBallotClient: CorruptParticipantClient | undefined;
+    }>
+> => {
     const execute = async (
         command: string,
         args: string[],
@@ -303,65 +323,79 @@ export const assembleParticipantRuntime = async (
         '-C',
         `link-arg=--max-memory=${String(maximumMemoryBytes)}`,
     ];
-    const targetDirectory = path.join(root, 'temp/participant-runtime-target');
     const { RUSTFLAGS: _ignored, ...inherited } = process.env;
-    await execute(
-        'cargo',
-        [
-            '+1.95.0',
-            'build',
-            '--offline',
-            '--locked',
-            '--release',
-            '-p',
-            'registration-enrollment',
-            '--lib',
-            '--target',
-            'wasm32-unknown-unknown',
-        ],
-        'participant-module',
-        {
-            ...inherited,
-            CARGO_ENCODED_RUSTFLAGS: flags.join(rustflagSeparator),
-            CARGO_INCREMENTAL: '0',
-            CARGO_TARGET_DIR: targetDirectory,
-        },
-    );
-    const module = await readFile(
-        path.join(
-            targetDirectory,
-            'wasm32-unknown-unknown/release/registration_enrollment.wasm',
-        ),
-    );
-    const inspected = binaryen.readBinary(module);
-    try {
-        assert.equal(
-            /\b(?:v128|i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\./u.test(
-                inspected.emitText(),
+    // Each module has its own target directory, so neither build can read
+    // the other's output.
+    const buildModule = async (feature: string | undefined) => {
+        const prefix = feature === undefined ? '' : feature + '-';
+        const targetDirectory = path.join(
+            root,
+            'temp/participant-runtime-' + prefix + 'target',
+        );
+        await execute(
+            'cargo',
+            [
+                '+1.95.0',
+                'build',
+                '--offline',
+                '--locked',
+                '--release',
+                '-p',
+                'registration-enrollment',
+                ...(feature === undefined ? [] : ['--features', feature]),
+                '--lib',
+                '--target',
+                'wasm32-unknown-unknown',
+            ],
+            prefix + 'participant-module',
+            {
+                ...inherited,
+                CARGO_ENCODED_RUSTFLAGS: flags.join(rustflagSeparator),
+                CARGO_INCREMENTAL: '0',
+                CARGO_TARGET_DIR: targetDirectory,
+            },
+        );
+        const module = await readFile(
+            path.join(
+                targetDirectory,
+                'wasm32-unknown-unknown/release/registration_enrollment.wasm',
             ),
-            false,
-            'The participant module contains vector instructions.',
         );
-        const memory = inspected.getMemoryInfo();
+        const inspected = binaryen.readBinary(module);
+        try {
+            assert.equal(
+                /\b(?:v128|i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\./u.test(
+                    inspected.emitText(),
+                ),
+                false,
+                'The participant module contains vector instructions.',
+            );
+            const memory = inspected.getMemoryInfo();
+            assert.ok(
+                !memory.shared &&
+                    !memory.is64 &&
+                    memory.max === maximumMemoryBytes / 65_536,
+                'The participant module memory is not the bounded scalar memory.',
+            );
+        } finally {
+            inspected.dispose();
+        }
+        const compiled = await WebAssembly.compile(module);
+        const imports = WebAssembly.Module.imports(compiled);
         assert.ok(
-            !memory.shared &&
-                !memory.is64 &&
-                memory.max === maximumMemoryBytes / 65_536,
-            'The participant module memory is not the bounded scalar memory.',
+            imports.every(
+                (value) =>
+                    value.kind === 'function' &&
+                    allowedImports.includes(value.module + '.' + value.name),
+            ),
+            'The participant module declares an unexpected import.',
         );
-    } finally {
-        inspected.dispose();
-    }
-    const compiled = await WebAssembly.compile(module);
-    const imports = WebAssembly.Module.imports(compiled);
-    assert.ok(
-        imports.every(
-            (value) =>
-                value.kind === 'function' &&
-                allowedImports.includes(value.module + '.' + value.name),
-        ),
-        'The participant module declares an unexpected import.',
-    );
+        return module;
+    };
+    const module = await buildModule(undefined);
+    const invalidBallotModule = invalidBallot
+        ? await buildModule('invalid-ballot')
+        : undefined;
     const bundle = path.join(root, 'temp/participant-runtime-bundle');
     await rm(bundle, { recursive: true, force: true });
     await build({
@@ -425,18 +459,65 @@ export const assembleParticipantRuntime = async (
             createHash('sha512').update(JSON.stringify(descriptor)).digest(),
         )
         .digest('hex');
+    const invalidBallotClient =
+        invalidBallotModule === undefined
+            ? undefined
+            : (() => {
+                  const clientPath = 'invalid-ballot-participant.wasm';
+                  const honestCompile =
+                      'await WebAssembly.compile(new Uint8Array(moduleBytes))';
+                  const bundled = worker.toString('utf8');
+                  assert.equal(
+                      bundled.split(honestCompile).length,
+                      2,
+                      'The worker bundle does not compile its module once.',
+                  );
+                  // The replacement names only globals, so it holds whatever
+                  // names the bundler chose.
+                  const patched = Buffer.from(
+                      bundled.replace(
+                          honestCompile,
+                          'await WebAssembly.compile(await (await fetch(location.origin + "/' +
+                              clientPath +
+                              '")).arrayBuffer())',
+                      ),
+                  );
+                  const client = {
+                      feature: 'invalid-ballot',
+                      path: clientPath,
+                      module: invalidBallotModule,
+                      worker: patched,
+                      moduleDigest: sha512(invalidBallotModule),
+                      workerDigest: sha512(patched),
+                  };
+                  assert.notEqual(
+                      client.moduleDigest,
+                      identity.module,
+                      'The invalid-ballot module equals the honest module.',
+                  );
+                  return client;
+              })();
     for (const [name, bytes] of [
         ['participant.wasm', module],
         ['worker.js', worker],
         ['descriptor.json', Buffer.from(JSON.stringify(descriptor) + '\n')],
+        ...(invalidBallotClient === undefined
+            ? []
+            : ([
+                  [invalidBallotClient.path, invalidBallotClient.module],
+                  ['invalid-ballot-worker.js', invalidBallotClient.worker],
+              ] as const)),
     ] as const)
         await writeFile(path.join(runLog.runDirectoryPath, name), bytes, {
             flag: 'wx',
         });
     return {
-        module,
-        worker,
-        descriptor,
-        identity: { runtime, ...identity },
+        runtime: {
+            module,
+            worker,
+            descriptor,
+            identity: { runtime, ...identity },
+        },
+        invalidBallotClient,
     };
 };

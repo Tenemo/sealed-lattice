@@ -32,6 +32,10 @@ use std::{
 use supported_profile::{MAXIMUM_SCORE, Profile};
 use zeroize::Zeroizing;
 
+// Every participant of this ceremony creates honest ballots; a corrupt
+// participant's build of the ballot proof never reaches it.
+const _: () = assert!(!ballot_proof::private_ballot::FALSE_STATEMENT);
+
 fn write(path: impl AsRef<Path>, bytes: &[u8]) {
     let mut output = public_output::PublicOutput::create(path).unwrap();
     output.write_all(bytes).unwrap();

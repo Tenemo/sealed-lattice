@@ -156,22 +156,33 @@ describe('browser relay ceremony layout', () => {
             expect(await readFile(path.join(ceremony, name), 'utf8')).toBe(
                 name,
             );
+        // Each body takes its author's directory and its ordinal in that
+        // author's identity order, and no relayed identity or pointer is
+        // carried.
+        const bodies = [
+            'ballot-0/0/body.bin',
+            'ballot-2/0/body.bin',
+            'ballot-2/1/body.bin',
+        ];
         expect(
             await readFile(
                 path.join(ceremony, 'close/submissions.txt'),
                 'utf8',
             ),
         ).toBe(
-            [submissions[1], submissions[2], submissions[0]]
+            bodies
                 .map(
-                    ({ author, identity }, ordinal) =>
-                        'submission-' +
-                        String(ordinal) +
-                        '.bin ' +
-                        submissionDirectory(author, identity) +
-                        'body.bin\n',
+                    (body, ordinal) =>
+                        'submission-' + String(ordinal) + '.bin ' + body + '\n',
                 )
                 .join(''),
+        );
+        for (const [ordinal, fill] of [1, 5, 3].entries())
+            expect(
+                await readFile(path.join(ceremony, bodies[ordinal]), 'utf8'),
+            ).toBe('body ' + String(fill));
+        expect((await readdir(path.join(ceremony, 'ballot-2'))).sort()).toEqual(
+            ['0', '1'],
         );
         for (const [ordinal, fill] of [1, 5, 3].entries())
             expect(
@@ -187,15 +198,6 @@ describe('browser relay ceremony layout', () => {
                     Buffer.alloc(3309, fill + 7),
                 ]),
             );
-        expect(
-            await readFile(
-                path.join(
-                    ceremony,
-                    submissionDirectory(2, hexadecimal(0x3c)) + 'body.bin',
-                ),
-                'utf8',
-            ),
-        ).toBe('body 5');
     });
 
     it('carries a certified no-result terminal', async () => {

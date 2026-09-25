@@ -343,6 +343,28 @@ await runWithLocalRunLog(
                 ],
                 'clippy-numerical-probes',
             );
+            // A corrupt participant's browser module signs false ballot
+            // statements only under its explicit feature; lint that build.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'clippy',
+                    '--offline',
+                    '--locked',
+                    '--target',
+                    'wasm32-unknown-unknown',
+                    '-p',
+                    'registration-enrollment',
+                    '--features',
+                    'invalid-ballot',
+                    '--lib',
+                    '--',
+                    '-D',
+                    'warnings',
+                ],
+                'clippy-invalid-ballot',
+            );
             // The browser participant and completion modules are wasm32
             // cdylibs whose host supplies randomness, so their dependency
             // graphs must build there without an operating-system generator.

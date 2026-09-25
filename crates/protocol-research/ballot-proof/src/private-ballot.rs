@@ -74,6 +74,20 @@ fn envelope(
     .map_err(|_| Error::Context)
 }
 
+/// Whether this build is a corrupt participant's, whose ballot creation
+/// proves a false statement. An honest consumer asserts that it is not, so
+/// Cargo's feature unification cannot bring the feature into its build.
+pub const FALSE_STATEMENT: bool = cfg!(feature = "invalid-ballot");
+
+/// A corrupt participant's runtime changes one ciphertext coefficient by one
+/// before proving, so its proof cannot meet the affine relation and the
+/// ballot it signs is authentic and invalid.
+#[cfg(feature = "invalid-ballot")]
+fn falsify(mut public: PublicStatement) -> PublicStatement {
+    public.polynomials[2][1] ^= 1;
+    public
+}
+
 /// Executes and checks one private computation under original retained inputs.
 /// It returns public bytes and an envelope, never a public setup capability.
 /// The ballot time was fixed when the attempt was locked.
@@ -88,6 +102,8 @@ pub fn create(
         .map_err(|_| Error::Context)?;
     let profile = encryption.context.profile();
     let public = PublicStatement::from_encryption(&encryption).map_err(|_| Error::Encoding)?;
+    #[cfg(feature = "invalid-ballot")]
+    let public = falsify(public);
     let mut columns = columns::from_encryption(&encryption).map_err(|_| Error::Encoding)?;
     let witness = Witness::from_columns(
         &ballot_relation(profile),
@@ -97,11 +113,13 @@ pub fn create(
     .map_err(|_| Error::Encoding)?;
     let role = private_proof_role(&encryption.context).map_err(|_| Error::Context)?;
     let context = encryption.into_context();
-    let proof = BallotProof::create(&role, &public, witness, false);
+    let proof = BallotProof::create(&role, &public, witness, FALSE_STATEMENT);
     let mut proof_bytes = Vec::with_capacity(*ballot_body::proof_lengths(profile).end());
     proof.write(&mut proof_bytes);
     drop(proof);
-    verify_expanded(&context, &public, &proof_bytes)?;
+    if !FALSE_STATEMENT {
+        verify_expanded(&context, &public, &proof_bytes)?;
+    }
     let mut body = ballot_body::header(profile, &public.header, proof_bytes.len())
         .map_err(|_| Error::Encoding)?;
     body.reserve_exact(ballot_body::ciphertext_bytes(profile) + proof_bytes.len());

@@ -9,6 +9,10 @@ autobins = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[features]
+# A corrupt participant's runtime, which signs authentic invalid ballots.
+invalid-ballot = ["ballot-proof/invalid-ballot"]
+
 [dependencies]
 registration-credentials = { path = "../registration-credentials", default-features = false }
 registration-proof = { path = "../registration-proof", default-features = false }

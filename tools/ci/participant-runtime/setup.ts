@@ -367,8 +367,12 @@ const verifyCompleteSetup = async (
         dataKind.proposalSignature,
     );
     writeSetupInput(kernel, proposalSignature);
+    // The retained proposal and signature are authenticated, so a refusal
+    // means the relay served other valid registrations under their names.
     if (kernel.setup_roster_finish(proposalSignature.length) !== 1)
-        throw new Error('The setup verifier refused the retained proposal.');
+        throw new PublicInputFailure(
+            'The published registrations are not the retained roster.',
+        );
     // The confirmations are the ones this participant's opening signed.
     const opened = await openedInventory(session);
     const packetBytes = descriptor.contribution.confirmationPacketBytes;

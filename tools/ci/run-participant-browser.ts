@@ -25,7 +25,10 @@ import {
     assembleParticipantRuntime,
     deriveParticipantDescriptor,
 } from '#tools/ci/participant-runtime-assembly.js';
-import type { ParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
+import type {
+    CorruptParticipantClient,
+    ParticipantRuntime,
+} from '#tools/ci/participant-runtime-assembly.js';
 import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
@@ -35,7 +38,9 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // participant runtime: each participant is its own origin with its own
 // external Chrome profile, and a local relay only stores and serves the
 // public records the participants publish. A no-result run closes with one
-// on-time ballot fewer than the minimum turnout.
+// valid on-time ballot fewer than the minimum turnout, and with a corrupt
+// participant's authentic invalid ballot on time when the profile tolerates
+// one.
 const commandArguments = process.argv
     .slice(2)
     .filter((value) => value !== '--');
@@ -86,9 +91,11 @@ const readBody = async (request: IncomingMessage, maximum: number) => {
     return Buffer.concat(parts);
 };
 
-const page = (runtime: ParticipantRuntime) =>
+// The page checks the delivered worker against the digest it names, which
+// is the runtime's own worker except on a corrupt client's page.
+const page = (runtime: ParticipantRuntime, workerDigest: string) =>
     `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
-const runtime = ${JSON.stringify({ descriptor: runtime.descriptor, identity: runtime.identity })};
+const runtime = ${JSON.stringify({ descriptor: runtime.descriptor, identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -96,7 +103,7 @@ window.runParticipant = async (operation, parameters) => {
         new Uint8Array(await crypto.subtle.digest('SHA-512', bytes)),
         (value) => value.toString(16).padStart(2, '0'),
     ).join('');
-    if (digest !== runtime.identity.worker) throw new Error('The worker changed.');
+    if (digest !== runtime.worker) throw new Error('The worker changed.');
     const url = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
     const worker = new Worker(url, { type: 'module' });
     return new Promise((resolve, reject) => {
@@ -123,9 +130,15 @@ window.runParticipant = async (operation, parameters) => {
 };
 </script>`;
 
+// Every origin serves the runtime's page, worker and module, except that a
+// corrupt participant's origin serves its client's page and worker and its
+// client's module beside the honest one.
 const startRelay = async (
     runtime: ParticipantRuntime,
     publicDirectory: string,
+    corrupt:
+        | Readonly<{ position: number; client: CorruptParticipantClient }>
+        | undefined,
 ): Promise<Relay> => {
     const owners = new Map<string, string>();
     const views = Array.from(
@@ -133,23 +146,53 @@ const startRelay = async (
         () => new Map<string, Buffer | undefined>(),
     );
     const refused = new Set<string>();
-    const html = page(runtime);
+    const assets = (position: number) => {
+        const client =
+            corrupt?.position === position ? corrupt.client : undefined;
+        return new Map([
+            [
+                '/',
+                {
+                    type: 'text/html',
+                    bytes: Buffer.from(
+                        page(
+                            runtime,
+                            client?.workerDigest ?? runtime.identity.worker,
+                        ),
+                    ),
+                },
+            ],
+            [
+                '/worker.js',
+                {
+                    type: 'text/javascript',
+                    bytes: client?.worker ?? runtime.worker,
+                },
+            ],
+            [
+                '/participant.wasm',
+                { type: 'application/wasm', bytes: runtime.module },
+            ],
+            ...(client === undefined
+                ? []
+                : [
+                      [
+                          '/' + client.path,
+                          { type: 'application/wasm', bytes: client.module },
+                      ] as const,
+                  ]),
+        ]);
+    };
     const handle = async (
         origin: string,
+        served: ReadonlyMap<string, Readonly<{ type: string; bytes: Buffer }>>,
         view: Map<string, Buffer | undefined>,
         request: IncomingMessage,
         response: ServerResponse,
     ) => {
         const url = new URL(request.url ?? '/', origin);
         if (request.method === 'GET') {
-            const asset =
-                url.pathname === '/'
-                    ? { type: 'text/html', bytes: Buffer.from(html) }
-                    : url.pathname === '/worker.js'
-                      ? { type: 'text/javascript', bytes: runtime.worker }
-                      : url.pathname === '/participant.wasm'
-                        ? { type: 'application/wasm', bytes: runtime.module }
-                        : undefined;
+            const asset = served.get(url.pathname);
             if (asset !== undefined) {
                 response.writeHead(200, {
                     'Content-Type': asset.type,
@@ -228,11 +271,14 @@ const startRelay = async (
     const servers: Server[] = [];
     for (let position = 0; position < participantCount; position++) {
         const origin = `http://127.0.0.1:${String(basePort + position)}`;
+        const served = assets(position);
         const server = createServer((request, response) => {
-            handle(origin, views[position], request, response).catch(() => {
-                response.writeHead(500);
-                response.end();
-            });
+            handle(origin, served, views[position], request, response).catch(
+                () => {
+                    response.writeHead(500);
+                    response.end();
+                },
+            );
         });
         await new Promise<void>((resolve, reject) => {
             server.once('error', reject);
@@ -293,8 +339,18 @@ await runWithLocalRunLog(
                 noResult || maximumCorruptParticipantCount === 0
                     ? undefined
                     : maximumCorruptParticipantCount;
+            // The corrupt positions follow the organizer, as in the native
+            // ceremonies; forgeries and altered state are shown to honest ones.
+            const honest = (position: number) =>
+                position === 0 || position > maximumCorruptParticipantCount;
             const copyNames =
                 equivocator === undefined ? [] : ['conflicting', 'late'];
+            // In a no-result run the last corrupt position runs a client that
+            // signs an authentic invalid ballot, and casts it on time.
+            const invalidAuthor =
+                noResult && maximumCorruptParticipantCount > 0
+                    ? maximumCorruptParticipantCount
+                    : undefined;
             assert.ok(
                 freemem() >=
                     2 *
@@ -306,10 +362,34 @@ await runWithLocalRunLog(
                 participantCount,
                 optionCount,
             );
-            const runtime = await assembleParticipantRuntime(log, descriptor);
+            const { runtime, invalidBallotClient } =
+                await assembleParticipantRuntime(
+                    log,
+                    descriptor,
+                    invalidAuthor !== undefined,
+                );
+            const corrupt =
+                invalidAuthor === undefined || invalidBallotClient === undefined
+                    ? undefined
+                    : { position: invalidAuthor, client: invalidBallotClient };
+            assert.equal(corrupt === undefined, invalidAuthor === undefined);
+            const corruptClient =
+                corrupt === undefined
+                    ? undefined
+                    : {
+                          position: corrupt.position,
+                          feature: corrupt.client.feature,
+                          module: corrupt.client.moduleDigest,
+                          worker: corrupt.client.workerDigest,
+                      };
+            if (corruptClient !== undefined)
+                log.writeEvent({
+                    eventType: 'participant-corrupt-client',
+                    details: corruptClient,
+                });
             const publicDirectory = path.join(log.runDirectoryPath, 'public');
             await mkdir(publicDirectory);
-            relay = await startRelay(runtime, publicDirectory);
+            relay = await startRelay(runtime, publicDirectory, corrupt);
             const { views, refused: refusedPublications } = relay;
             profiles = await mkdtemp(
                 path.join(root, 'temp/participant-browser-'),
@@ -538,6 +618,17 @@ await runWithLocalRunLog(
             // every participant restores its retained state.
             await expectStatus(0, 'propose-roster', 'refused', { recordIds });
             await expectStatus(1, 'accept-roster', 'refused', { recordIds });
+            // A malformed request is refused as public input; the participant
+            // continues below.
+            assert.deepEqual(
+                await request(1, 'accept-roster', {
+                    recordIds: recordIds.map((id) => id.toUpperCase()),
+                }),
+                {
+                    status: 'pending',
+                    reason: 'Malformed proposed record identifiers.',
+                },
+            );
             await expectStatus(1, 'create', 'refused', {
                 role: 'join',
                 poll: organizer.poll,
@@ -556,7 +647,10 @@ await runWithLocalRunLog(
             await everyone('contribute', 7);
             await expectStatus(0, 'contribute', 'refused');
             assert.equal((await run(0, 'confirm')).generation, 9);
-            await expectStatus(0, 'open', 'pending');
+            assert.deepEqual(await request(0, 'open'), {
+                status: 'pending',
+                reason: 'A public record is unavailable.',
+            });
             assert.equal((await run(0, 'status')).generation, 9);
             await Promise.all(
                 positions.slice(1).map(async (position) => {
@@ -577,25 +671,38 @@ await runWithLocalRunLog(
             await expectStatus(0, 'verify-setup', 'refused');
             // Every participant signs one ballot, the late ones starting later.
             // A result closes with every ballot but the last on time, or with
-            // every ballot when a position equivocates, and a no-result target
-            // with the ones just before the last, one fewer than the minimum
-            // turnout. A signed ballot refuses other scores and is only
-            // delivered again.
+            // every ballot when a position equivocates. A no-result target has
+            // one valid on-time ballot fewer than the minimum turnout, from the
+            // honest positions just before the last, and the invalid author's
+            // ballot on time, which would meet the turnout if it counted. A
+            // signed ballot refuses other scores and is only delivered again.
             const lastPosition = participantCount - 1;
             const onTimeCount = noResult
-                ? minimumTurnout - 1
+                ? minimumTurnout - 1 + (invalidAuthor === undefined ? 0 : 1)
                 : equivocator === undefined
                   ? participantCount - 1
                   : participantCount;
-            // The equivocator's slot is conflicting, so no ballot of it counts.
-            const validCount =
+            // The equivocator's slot is conflicting, so no ballot of it counts,
+            // and the invalid author's slot is usable but its ballot invalid.
+            const usableCount =
                 onTimeCount - (equivocator === undefined ? 0 : 1);
+            const validCount =
+                usableCount - (invalidAuthor === undefined ? 0 : 1);
             assert.ok(
                 validCount >= 1 && validCount >= minimumTurnout !== noResult,
             );
             const onTimeBallots = noResult
-                ? positions.slice(lastPosition - onTimeCount, lastPosition)
+                ? [
+                      ...(invalidAuthor === undefined ? [] : [invalidAuthor]),
+                      ...positions
+                          .filter(
+                              (position) =>
+                                  position !== lastPosition && honest(position),
+                          )
+                          .slice(1 - minimumTurnout),
+                  ].sort((left, right) => left - right)
                 : positions.slice(0, onTimeCount);
+            assert.equal(onTimeBallots.length, onTimeCount);
             const lateBallots = positions.filter(
                 (position) => !onTimeBallots.includes(position),
             );
@@ -984,10 +1091,14 @@ await runWithLocalRunLog(
             );
             // Every voter verifies the barrier, classifies each usable
             // ballot, evaluates the target and signs its vote. Every on-time
-            // ballot but the equivocator's is usable and valid, and a late
-            // one is reported late. The equivocator is a non-voter.
+            // ballot but the equivocator's is usable, every usable ballot but
+            // the invalid author's is valid, and a late one is reported late.
+            // The equivocator and the invalid author are non-voters.
             assert.ok(
-                equivocator === undefined || nonVoters.includes(equivocator),
+                [equivocator, invalidAuthor].every(
+                    (position) =>
+                        position === undefined || nonVoters.includes(position),
+                ),
             );
             await Promise.all(
                 voters.map(async (position) => {
@@ -997,6 +1108,7 @@ await runWithLocalRunLog(
                         details.ballotStatus,
                         onTime(position) ? 'included' : 'late',
                     );
+                    assert.equal(details.usableBallots, usableCount);
                     assert.equal(details.validBallots, validCount);
                 }),
             );
@@ -1248,7 +1360,7 @@ await runWithLocalRunLog(
                 )
                 .slice(0, topCount)
                 .map((option) => `option-${String(option)}`);
-            // Meanwhile a malicious relay shows each other remaining
+            // Meanwhile a malicious relay shows each other remaining honest
             // participant forged records in its own view. Each view would
             // complete the work only if a forgery counted, so its participant
             // stays pending. One view hides the second voter's vote behind the
@@ -1259,7 +1371,8 @@ await runWithLocalRunLog(
             // for each other remaining slot but the last release threshold
             // minus one.
             const probes = remaining.filter(
-                (position) => position !== combiningPosition,
+                (position) =>
+                    position !== combiningPosition && honest(position),
             );
             const voteProbe = probes[0];
             const shareProbe = probes[probes.length - 1];
@@ -1325,6 +1438,29 @@ await runWithLocalRunLog(
                     shareForgeries.set(publicName('release-', position), body);
                 }
             }
+            // A third view swaps the first two registrations under each
+            // other's body digests. Each is a valid registration for the
+            // poll, so only the retained roster tells them apart, and every
+            // visit verifies the setup again from them first.
+            const registrationForgeries = new Map<string, Buffer>();
+            for (const [from, to] of [
+                [0, 1],
+                [1, 0],
+            ] as const)
+                for (const file of await readdir(
+                    path.join(publicDirectory, 'registration', recordIds[from]),
+                ))
+                    registrationForgeries.set(
+                        'registration/' + recordIds[to] + '/' + file,
+                        await readFile(
+                            path.join(
+                                publicDirectory,
+                                'registration',
+                                recordIds[from],
+                                file,
+                            ),
+                        ),
+                    );
             const probe = async (
                 position: number,
                 forgeries: ReadonlyMap<string, Buffer>,
@@ -1357,6 +1493,12 @@ await runWithLocalRunLog(
                                 shareForgeries,
                                 'The release shares are incomplete.',
                             );
+                        if (position === voteProbe)
+                            await probe(
+                                position,
+                                registrationForgeries,
+                                'The published registrations are not the retained roster.',
+                            );
                     },
                 ),
             ]);
@@ -1365,11 +1507,16 @@ await runWithLocalRunLog(
                 result.identifiers,
                 noResult ? [] : expectedResult,
             );
-            // Altered retained state stops a participant at its next visit,
-            // and the stop outlasts restoring the exact bytes. The first byte
-            // of its first data record is flipped from its own page, and a
-            // second flip restores it.
-            const stoppedPosition = remaining[0];
+            // None of the forged views stopped its participant: with the
+            // relay's own records it combines the same outcome.
+            const recovered = await run(voteProbe, 'result');
+            assert.equal(recovered.encrypted, result.encrypted);
+            assert.deepEqual(recovered.identifiers, result.identifiers);
+            // Altered retained state stops an honest participant at its next
+            // visit, and the stop outlasts restoring the exact bytes. The
+            // first byte of its first data record is flipped from its own
+            // page, and a second flip restores it.
+            const stoppedPosition = probes[0];
             const flipDataRecord = async () =>
                 (await participant(stoppedPosition))
                     .evaluate(`new Promise((resolve, reject) => {
@@ -1415,6 +1562,7 @@ await runWithLocalRunLog(
                         poll: organizer.poll,
                         recordIds,
                         runtimeIdentity: runtime.identity.runtime,
+                        corruptClient,
                         peakProcessTreeBytes: peaks,
                         copyPeakProcessTreeBytes: Object.fromEntries(copyPeaks),
                         closeTime,
@@ -1436,6 +1584,10 @@ await runWithLocalRunLog(
                                 position: voteProbe,
                                 paths: [...voteForgeries.keys()],
                             },
+                            registrations: {
+                                position: voteProbe,
+                                paths: [...registrationForgeries.keys()],
+                            },
                             ...(noResult
                                 ? {}
                                 : {
@@ -1454,7 +1606,7 @@ await runWithLocalRunLog(
                             ? { kind: 'no-result' }
                             : { kind: 'result', identifiers: expectedResult },
                         scope: noResult
-                            ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one on-time ballot fewer than the minimum turnout, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. A relay view that relabels or replays votes leaves its participant pending, and altered retained state stops a participant for good."
+                            ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. A relay view that relabels or replays votes leaves its participant pending, and altered retained state stops a participant for good."
                             : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts. Relay views that relabel, replay or alter votes and shares leave their participants pending, and altered retained state stops a participant for good.",
                     },
                     null,

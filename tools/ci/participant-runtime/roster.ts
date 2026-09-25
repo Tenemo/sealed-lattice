@@ -1,7 +1,6 @@
 import {
     concatenate,
     equalBytes,
-    fromHexadecimal,
     hexadecimal,
     readUnsigned32,
     tupleFields,
@@ -330,8 +329,12 @@ export const reverifyRoster = async (
 };
 
 export const parseRecordIds = (value: unknown): string[] => {
-    if (!Array.isArray(value) || !value.every((id) => typeof id === 'string'))
+    if (
+        !Array.isArray(value) ||
+        !value.every(
+            (id) => typeof id === 'string' && /^[0-9a-f]{128}$/u.test(id),
+        )
+    )
         throw new PublicInputFailure('Malformed proposed record identifiers.');
-    fromHexadecimal(value.join(''));
-    return value;
+    return value as string[];
 };
