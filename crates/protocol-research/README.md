@@ -71,6 +71,14 @@ All three modes recompute setup, the close barrier from the archived intent, res
 
 The public reader retains the accepted target-vote packets in its output's `certificate-records/` directory, using each authenticated author's position. The run report identifies that directory for archive construction. Candidate file positions are transport labels and need not match the author encoded in a vote; archive extraction must use the retained packets. Retrieval still requires the owning certificate verifier.
 
+The maintained participant runtime runs registration and roster agreement in external desktop Chrome:
+
+```text
+pnpm run research:participant -- 3 2
+```
+
+The runner builds the scalar participant module and the bundled worker from tracked sources, checks that the module contains no vector instructions and declares exactly its bounded memory, and derives every bound the worker enforces from the profile's models. The page runs the worker only after checking its hash, and before any operation the worker checks the module's hash and recomputes the runtime identity over the sources, module, worker and descriptor. Each participant uses its own disk-backed Chrome profile under `temp/`, and each Chrome process tree runs under a memory guard. The organizer creates the poll and registers, the other participants join, and every participant verifies all registration records before the organizer signs the roster proposal or another participant accepts it. Each root transition commits under a fresh key only after its exact predecessor authenticates. Later protocol stages are not exercised, and a desktop result is development evidence, not supported-phone qualification.
+
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
 All sources, parameters, toolchain selection and third-party code needed by the native generation case are tracked. That case uses `temp/` only for run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.

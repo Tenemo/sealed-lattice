@@ -7,7 +7,6 @@
                 "tools/ci/sdk-package-tsdown.config.ts",
             ],
             "project": ["tests/**/*.ts", "tools/**/*.ts"],
-            "ignoreDependencies": ["binaryen"],
         },
         "packages/sdk": {
             "entry": ["src/index.ts", "tests/**/*.test.ts"],

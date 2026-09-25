@@ -90,6 +90,8 @@ export const compileRegistrationEnrollmentCensus = () => {
         recipientAssociatedBytes: 4n + 4n + proofRoleBytes + 3n * 64n,
         signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
         rootAssociatedBytes: 4n + 64n,
+        // The restore control ends with the two-byte mask of signing
+        // purposes that the authenticated root shows unused.
         maximumRestoreInputBytes:
             128n +
             4n +
@@ -99,7 +101,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             key.publicKeyBytes +
             recipientCapsuleBytes +
             signingCapsuleBytes +
-            1n,
+            2n,
         maximumRetainedPayloadBytes:
             key.publicKeyBytes +
             key.maximumProofBytes +

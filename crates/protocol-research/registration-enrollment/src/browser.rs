@@ -36,6 +36,12 @@ pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
 }
 
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn input_capacity() -> usize {
+    INPUT_BYTES
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn poll_identity_pointer() -> usize {
     SESSION.with(|state| state.borrow().poll_identity.as_ptr() as usize)

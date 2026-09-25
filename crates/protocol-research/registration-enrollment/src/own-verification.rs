@@ -101,6 +101,11 @@ pub(super) fn verified() -> Option<Arc<VerifiedRegistration>> {
 pub extern "C" fn own_registration_input_pointer() -> usize {
     STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
 }
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn own_registration_input_capacity() -> usize {
+    CONTROL_BYTES
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn own_registration_command(operation: u32, length: usize) -> u32 {
     STATE.with(|state| u32::from(state.borrow_mut().command(operation, length).is_err()))

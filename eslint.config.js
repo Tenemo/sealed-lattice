@@ -229,6 +229,7 @@ export default defineConfig(
             'tests/node/protocol/public-archive.kernel.test.ts',
             'tests/node/protocol/public-archive-route.kernel.test.ts',
             'tools/ci/check-protocol-public-completion.ts',
+            'tools/ci/run-participant-browser.ts',
         ],
         rules: {
             'import-x/extensions': [

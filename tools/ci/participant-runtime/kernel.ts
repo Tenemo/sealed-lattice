@@ -1,0 +1,180 @@
+// The participant scalar module's exports that the worker calls. A command
+// returns zero on success unless its comment says otherwise; the owning Rust
+// state machine decides acceptance.
+const kernelFunctions = [
+    'input_pointer',
+    'input_capacity',
+    'poll_identity_pointer',
+    'validate_creator',
+    'validate_join',
+    'prepare_creator',
+    'prepare_join',
+    'restore',
+    'check_retained',
+    'own_registration_input_pointer',
+    'own_registration_input_capacity',
+    'own_registration_command',
+    'own_registration_proof_hash_pointer',
+    'own_registration_body_digest_pointer',
+    'own_registration_username_pointer',
+    'own_registration_username_length',
+    'roster_begin',
+    'roster_record_begin',
+    'roster_record_key',
+    'roster_record_key_finish',
+    'roster_record_proof',
+    'roster_record_finish',
+    // One when the proposal is complete.
+    'roster_finish',
+    'roster_body_pointer',
+    'roster_body_length',
+    'roster_identity_pointer',
+    'validate_roster_signer',
+    'sign_roster_proposal',
+    'roster_signature_pointer',
+    // One when the signature verifies.
+    'verify_roster_signature',
+    'retain_proposal',
+    'retained_proposal_identity_pointer',
+    'contribution_output_pointer',
+    'contribution_output_length',
+] as const;
+
+type KernelFunction = (...values: number[]) => number;
+export type ParticipantKernel = Readonly<
+    Record<(typeof kernelFunctions)[number], KernelFunction> & {
+        memory: WebAssembly.Memory;
+    }
+>;
+
+// The randomness each import draws: registration and credential generation,
+// contribution witnesses, proofs, and ballot encryption.
+type RandomSource = 'enrollment' | 'witness' | 'proof' | 'ballot';
+
+export type KernelHandlers = {
+    random?: (source: RandomSource, target: Uint8Array<ArrayBuffer>) => void;
+    staged?: (kind: number, offset: number, bytes: Uint8Array) => void;
+    contribution?: (object: number, offset: number, bytes: Uint8Array) => void;
+};
+
+// Randomness requests are bounded before any view of module memory exists.
+const maximumRandomRequest = 65_536;
+
+export type LoadedKernel = Readonly<{
+    kernel: ParticipantKernel;
+    // Handlers for the current operation; an absent handler refuses.
+    handlers: KernelHandlers;
+}>;
+
+export const instantiateParticipantKernel = async (
+    module: WebAssembly.Module,
+): Promise<LoadedKernel> => {
+    const handlers: KernelHandlers = {};
+    const instantiated: { memory?: WebAssembly.Memory } = {};
+    const view = (pointer: number, length: number) => {
+        if (instantiated.memory === undefined)
+            throw new Error('The participant module is not ready.');
+        return new Uint8Array(
+            instantiated.memory.buffer,
+            pointer >>> 0,
+            length >>> 0,
+        );
+    };
+    const random =
+        (source: RandomSource) => (pointer: number, length: number) => {
+            if (handlers.random === undefined || length > maximumRandomRequest)
+                throw new Error('Unexpected participant randomness request.');
+            handlers.random(source, view(pointer, length));
+            return 0;
+        };
+    const instance = await WebAssembly.instantiate(module, {
+        enrollment: {
+            fill_random: random('enrollment'),
+            staged_chunk: (
+                kind: number,
+                offset: number,
+                pointer: number,
+                length: number,
+            ) => {
+                if (handlers.staged === undefined)
+                    throw new Error('Unexpected enrollment record.');
+                handlers.staged(
+                    kind,
+                    offset >>> 0,
+                    view(pointer, length).slice(),
+                );
+                return 0;
+            },
+        },
+        setup_witness: { fill_random: random('witness') },
+        word_proof: { fill_random: random('proof') },
+        ballot: { fill_random: random('ballot') },
+        ballot_proof: {
+            public_chunk: () => {
+                throw new Error('Unexpected detached ballot proof output.');
+            },
+        },
+        contribution: {
+            public_chunk: (
+                object: number,
+                offset: number,
+                pointer: number,
+                length: number,
+            ) => {
+                if (handlers.contribution === undefined)
+                    throw new Error('Unexpected contribution record.');
+                handlers.contribution(
+                    object,
+                    offset >>> 0,
+                    view(pointer, length).slice(),
+                );
+                return 0;
+            },
+        },
+    });
+    const exports = instance.exports;
+    if (!(exports.memory instanceof WebAssembly.Memory))
+        throw new Error('The participant module has no memory.');
+    instantiated.memory = exports.memory;
+    for (const name of kernelFunctions)
+        if (typeof exports[name] !== 'function')
+            throw new Error('The participant module lacks ' + name + '.');
+    return { kernel: exports as unknown as ParticipantKernel, handlers };
+};
+
+// The module may grow its memory during any call, so every access takes a
+// fresh view of the current buffer. A write never exceeds the capacity of
+// the module buffer it fills.
+const writeKernel = (
+    kernel: ParticipantKernel,
+    pointer: number,
+    bytes: Uint8Array,
+    capacity: number,
+): void => {
+    if (bytes.length > capacity)
+        throw new Error('Module input exceeds its buffer.');
+    new Uint8Array(kernel.memory.buffer, pointer >>> 0, bytes.length).set(
+        bytes,
+    );
+};
+
+export const readKernel = (
+    kernel: ParticipantKernel,
+    pointer: number,
+    length: number,
+): Uint8Array =>
+    new Uint8Array(kernel.memory.buffer, pointer >>> 0, length >>> 0).slice();
+
+export const writeInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
+    writeKernel(kernel, kernel.input_pointer(), bytes, kernel.input_capacity());
+
+export const writeOwnRegistrationInput = (
+    kernel: ParticipantKernel,
+    bytes: Uint8Array,
+) =>
+    writeKernel(
+        kernel,
+        kernel.own_registration_input_pointer(),
+        bytes,
+        kernel.own_registration_input_capacity(),
+    );
