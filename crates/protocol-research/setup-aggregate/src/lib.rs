@@ -85,53 +85,6 @@ impl PolynomialAdder {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser {
-    use super::*;
-    use std::cell::RefCell;
-    struct Session {
-        input: Vec<u8>,
-        adder: Option<PolynomialAdder>,
-    }
-    thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; 2 * CHUNK_BYTES], adder: None }); }
-    #[unsafe(no_mangle)]
-    pub extern "C" fn aggregate_input_pointer() -> usize {
-        SESSION.with(|value| value.borrow_mut().input.as_mut_ptr() as usize)
-    }
-    #[unsafe(no_mangle)]
-    pub extern "C" fn aggregate_begin(participants: usize, options: usize, index: usize) -> u32 {
-        SESSION.with(|value| {
-            let mut value = value.borrow_mut();
-            value.adder = Profile::new(participants, options)
-                .ok()
-                .and_then(|profile| {
-                    contribution_family(profile, index)
-                        .map(|family| PolynomialAdder::new(profile, family))
-                });
-            u32::from(value.adder.is_none())
-        })
-    }
-    #[unsafe(no_mangle)]
-    pub extern "C" fn aggregate_add(length: usize) -> u32 {
-        SESSION.with(|value| {
-            let mut value = value.borrow_mut();
-            let Session { input, adder } = &mut *value;
-            let Some(adder) = adder else {
-                return 1;
-            };
-            if length > CHUNK_BYTES {
-                return 1;
-            }
-            let (incoming, remaining) = input.split_at_mut(CHUNK_BYTES);
-            u32::from(
-                adder
-                    .add_into(&incoming[..length], &mut remaining[..length])
-                    .is_err(),
-            )
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

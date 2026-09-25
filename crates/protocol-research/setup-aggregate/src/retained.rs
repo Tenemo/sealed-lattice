@@ -31,15 +31,6 @@ impl RetainedAggregatePolynomial {
         &self.coefficients
     }
 }
-impl From<VerifiedAggregatePolynomial> for RetainedAggregatePolynomial {
-    fn from(value: VerifiedAggregatePolynomial) -> Self {
-        Self {
-            inventory: value.inventory,
-            index: value.index,
-            coefficients: value.coefficients,
-        }
-    }
-}
 
 /// Parsed local references only. Their provenance is the owning setup verifier's
 /// result, keyed to the participant's credential when retained; the consumer

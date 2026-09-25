@@ -14,7 +14,6 @@ struct State {
     input: Vec<u8>,
     pending: Option<RegistrationVerifier>,
     verified: Option<Arc<VerifiedRegistration>>,
-    header: Vec<u8>,
 }
 impl State {
     fn new() -> Self {
@@ -22,7 +21,6 @@ impl State {
             input: vec![0; CONTROL_BYTES],
             pending: None,
             verified: None,
-            header: Vec::new(),
         }
     }
     fn begin(&mut self, bytes: &[u8]) -> Result<(), Error> {
@@ -83,7 +81,6 @@ impl State {
                 .push_proof(&self.input[..length]),
             4 if length == 0 => {
                 let verified = self.pending.take().ok_or(Error::Consumed)?.finish()?;
-                self.header = verified.header().encode()?;
                 self.verified = Some(Arc::new(verified));
                 Ok(())
             }
@@ -109,14 +106,6 @@ pub extern "C" fn own_registration_input_capacity() -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn own_registration_command(operation: u32, length: usize) -> u32 {
     STATE.with(|state| u32::from(state.borrow_mut().command(operation, length).is_err()))
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn own_registration_header_pointer() -> usize {
-    STATE.with(|state| state.borrow().header.as_ptr() as usize)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn own_registration_header_length() -> usize {
-    STATE.with(|state| state.borrow().header.len())
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn own_registration_username_pointer() -> usize {

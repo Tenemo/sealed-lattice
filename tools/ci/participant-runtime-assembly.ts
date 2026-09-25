@@ -196,7 +196,6 @@ export const deriveParticipantDescriptor = (
 // The imports the participant module may declare, by module and name.
 const allowedImports = [
     'ballot.fill_random',
-    'ballot_proof.public_chunk',
     'contribution.public_chunk',
     'enrollment.fill_random',
     'enrollment.staged_chunk',

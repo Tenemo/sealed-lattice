@@ -7,10 +7,7 @@ use crate::{
 };
 use num_bigint::{BigInt, Sign};
 use registration_credentials::poll::VerifiedPoll;
-use setup_aggregate::{
-    RetainedAggregatePolynomial, VerifiedAggregatePolynomial, verified::VerifiedSetupAggregate,
-};
-use std::sync::Arc;
+use setup_aggregate::RetainedAggregatePolynomial;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, AUXILIARY_SECRET_SUPPORT, FHE_SECRET_SUPPORT,
     Family, PLAINTEXT_MODULUS, Profile,
@@ -291,18 +288,6 @@ pub fn check_ballot_scores(poll: &VerifiedPoll, scores: &[u8]) -> Result<(), Ref
 impl LinkedBallotWitness {
     pub fn into_context(self) -> BallotComputationContext {
         self.context
-    }
-    pub fn create(
-        poll: Arc<VerifiedPoll>,
-        setup: Arc<VerifiedSetupAggregate>,
-        fhe_key: VerifiedAggregatePolynomial,
-        auxiliary_key: VerifiedAggregatePolynomial,
-        position: usize,
-        scores: &[u8],
-    ) -> Result<Self, Refusal> {
-        let context = BallotComputationContext::from_verified(poll, &setup, position)
-            .map_err(|_| Refusal::Context)?;
-        Self::create_with_context(context, fhe_key.into(), auxiliary_key.into(), scores)
     }
     pub fn create_with_context(
         context: BallotComputationContext,

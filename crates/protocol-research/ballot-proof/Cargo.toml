@@ -9,7 +9,7 @@ crate-type = ["rlib"]
 
 [features]
 default = ["bridge"]
-bridge = ["ballot-encryption/bridge", "setup-aggregate/bridge"]
+bridge = ["setup-aggregate/bridge"]
 # A corrupt participant's runtime: ballot creation proves a false statement.
 invalid-ballot = []
 

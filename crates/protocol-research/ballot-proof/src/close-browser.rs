@@ -234,14 +234,6 @@ pub extern "C" fn close_input_pointer() -> usize {
 pub extern "C" fn close_command(operation: u32, length: usize) -> u32 {
     SESSION.with(|session| u32::from(session.borrow_mut().command(operation, length).is_err()))
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn close_envelope_count() -> usize {
-    SESSION.with(|session| session.borrow().envelopes.len())
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn close_body_count() -> usize {
-    SESSION.with(|session| session.borrow().bodies.len())
-}
 /// Consecutive 64-byte envelope identities of the missing usable-slot bodies.
 #[unsafe(no_mangle)]
 pub extern "C" fn close_missing_pointer() -> usize {
@@ -250,20 +242,6 @@ pub extern "C" fn close_missing_pointer() -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn close_missing_count() -> usize {
     SESSION.with(|session| session.borrow().missing.len() / 64)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn close_response_count() -> usize {
-    SESSION.with(|session| session.borrow().responses.len())
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn close_proposal_identity_pointer() -> usize {
-    SESSION.with(|session| {
-        session
-            .borrow()
-            .barrier
-            .as_ref()
-            .map_or(0, |barrier| barrier.proposal().identity().as_ptr() as usize)
-    })
 }
 
 pub(super) fn take_barrier() -> Option<VerifiedCloseBarrier> {

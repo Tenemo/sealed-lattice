@@ -4,8 +4,6 @@ pub mod body;
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
 #[path = "body-browser.rs"]
 mod body_browser;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-mod browser;
 pub mod close;
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
 #[path = "close-browser.rs"]
@@ -17,9 +15,6 @@ pub mod field;
 #[path = "../../word-proof/src/oracles.rs"]
 pub mod oracles;
 pub mod parameters;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
-#[path = "prover-browser.rs"]
-mod prover_browser;
 #[path = "../../word-proof/src/random.rs"]
 mod random;
 pub mod statement;

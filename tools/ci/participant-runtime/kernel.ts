@@ -187,11 +187,6 @@ export const instantiateParticipantKernel = async (
         setup_witness: { fill_random: random('witness') },
         word_proof: { fill_random: random('proof') },
         ballot: { fill_random: random('ballot') },
-        ballot_proof: {
-            public_chunk: () => {
-                throw new Error('Unexpected detached ballot proof output.');
-            },
-        },
         contribution: {
             public_chunk: (
                 object: number,

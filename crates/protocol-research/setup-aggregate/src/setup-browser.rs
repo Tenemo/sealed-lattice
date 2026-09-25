@@ -1,5 +1,5 @@
 use crate::{
-    AggregatePolynomialReader, CHUNK_BYTES, VerifiedAggregatePolynomial,
+    CHUNK_BYTES,
     verified::{SetupAggregator, VerifiedSetupAggregate},
 };
 use registration_credentials::{
@@ -21,11 +21,9 @@ struct Session {
     aggregator: Option<SetupAggregator>,
     verified: Option<Arc<VerifiedSetupAggregate>>,
     inventory: [u8; 64],
-    key_reader: Option<AggregatePolynomialReader>,
-    loaded_key: Option<VerifiedAggregatePolynomial>,
 }
 thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session {
-    input: vec![0; INPUT_BYTES], roster: None, proposal: None, poll: None, confirmations: Vec::new(), aggregator: None, verified: None, inventory: [0;64], key_reader: None, loaded_key: None,
+    input: vec![0; INPUT_BYTES], roster: None, proposal: None, poll: None, confirmations: Vec::new(), aggregator: None, verified: None, inventory: [0;64],
 }); }
 
 pub fn context() -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)> {
@@ -33,9 +31,6 @@ pub fn context() -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)> {
         let value = value.borrow();
         Some((value.poll.clone()?, value.verified.clone()?))
     })
-}
-pub fn take_loaded_key() -> Option<VerifiedAggregatePolynomial> {
-    SESSION.with(|value| value.borrow_mut().loaded_key.take())
 }
 fn packet(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     let length = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
@@ -76,8 +71,6 @@ pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
         value.aggregator = None;
         value.verified = None;
         value.inventory.fill(0);
-        value.key_reader = None;
-        value.loaded_key = None;
         0
     })
 }
@@ -311,105 +304,5 @@ pub extern "C" fn setup_inventory_pointer() -> usize {
         } else {
             value.inventory.as_ptr() as usize
         }
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_count() -> usize {
-    SESSION.with(|value| {
-        value
-            .borrow()
-            .verified
-            .as_ref()
-            .map_or(0, |verified| verified.polynomials().len())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_index(ordinal: usize) -> usize {
-    SESSION.with(|value| {
-        value
-            .borrow()
-            .verified
-            .as_ref()
-            .and_then(|verified| verified.polynomials().get(ordinal))
-            .map_or(0, |polynomial| polynomial.index())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_bytes(ordinal: usize) -> usize {
-    SESSION.with(|value| {
-        value
-            .borrow()
-            .verified
-            .as_ref()
-            .and_then(|verified| verified.polynomials().get(ordinal))
-            .map_or(0, |polynomial| polynomial.bytes())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_digest_pointer(ordinal: usize) -> usize {
-    SESSION.with(|value| {
-        value
-            .borrow()
-            .verified
-            .as_ref()
-            .and_then(|verified| verified.polynomials().get(ordinal))
-            .map_or(0, |polynomial| polynomial.digest().as_ptr() as usize)
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_read_begin(index: usize) -> u32 {
-    SESSION.with(|value| {
-        let mut value = value.borrow_mut();
-        value.loaded_key = None;
-        value.key_reader = None;
-        let Some(verified) = &value.verified else {
-            return 1;
-        };
-        let Ok(reader) = verified.read_polynomial(index) else {
-            return 1;
-        };
-        value.key_reader = Some(reader);
-        0
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_read_chunk(offset: usize, length: usize) -> u32 {
-    SESSION.with(|value| {
-        let mut value = value.borrow_mut();
-        let Session {
-            input, key_reader, ..
-        } = &mut *value;
-        let Some(reader) = key_reader else {
-            return 1;
-        };
-        let Some(bytes) = input.get(..length) else {
-            return 1;
-        };
-        u32::from(reader.push(offset, bytes).is_err())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_read_finish() -> u32 {
-    SESSION.with(|value| {
-        let mut value = value.borrow_mut();
-        let Some(reader) = value.key_reader.take() else {
-            return 0;
-        };
-        let Ok(loaded) = reader.finish() else {
-            return 0;
-        };
-        value.loaded_key = Some(loaded);
-        1
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_key_read_count() -> usize {
-    SESSION.with(|value| {
-        value
-            .borrow()
-            .loaded_key
-            .as_ref()
-            .map_or(0, |key| key.coefficients().len())
     })
 }

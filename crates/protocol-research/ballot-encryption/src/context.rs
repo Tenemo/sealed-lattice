@@ -1,5 +1,5 @@
 use registration_credentials::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
-use setup_aggregate::{RetainedSetupInputs, verified::VerifiedSetupAggregate};
+use setup_aggregate::RetainedSetupInputs;
 use std::sync::Arc;
 use supported_profile::Profile;
 
@@ -13,28 +13,6 @@ pub struct BallotComputationContext {
     position: usize,
 }
 impl BallotComputationContext {
-    pub fn from_verified(
-        poll: Arc<VerifiedPoll>,
-        setup: &VerifiedSetupAggregate,
-        position: usize,
-    ) -> Result<Self, Error> {
-        let profile = setup.profile();
-        if position >= profile.participants()
-            || profile.options() != poll.manifest().option_count()
-            || setup.inventory().proposal().proposal().records()[0]
-                .header()
-                .poll
-                != poll.identity()
-        {
-            return Err(Error);
-        }
-        Ok(Self {
-            poll,
-            profile,
-            inventory: setup.inventory().identity(),
-            position,
-        })
-    }
     pub fn from_retained(
         poll: Arc<VerifiedPoll>,
         owner: &RetainedBallotOwner,
