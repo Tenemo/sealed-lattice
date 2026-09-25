@@ -311,7 +311,10 @@ await runWithLocalRunLog(
                     { flag: 'wx' },
                 );
             // One reader process over a ceremony and completion directory,
-            // inside the process-tree memory guard.
+            // inside the process-tree memory guard. The reader verifies one
+            // setup contribution per participant, which dominates its
+            // duration.
+            const verificationTimeout = 900_000 * scenario.participantCount;
             const verifyRecords = async (
                 ceremonyDirectory: string,
                 completionDirectory: string,
@@ -349,7 +352,7 @@ await runWithLocalRunLog(
                         outputMode: 'inherit',
                         signal: AbortSignal.any([
                             controller.signal,
-                            AbortSignal.timeout(900000),
+                            AbortSignal.timeout(verificationTimeout),
                         ]),
                         observer: {
                             onCommandStart({ processIdentifier }) {
