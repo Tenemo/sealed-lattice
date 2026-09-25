@@ -1241,14 +1241,20 @@ await runWithLocalRunLog(
             // signed proposal before delivering it.
             await interrupt(0, 'close', {}, 21);
             await interrupt(0, 'close', {}, 22);
+            // Its next visit restores the completed close without replaying
+            // the log, so the retained events name no author or responder;
+            // the published proposal below names the responses it took.
             const concluded = await run(0, 'close');
             assert.equal(concluded.generation, 22);
-            assert.deepEqual(concluded.closeEvents, [
-                ...organizerCollected,
-                { kind: 'lock' },
-                ...submissions('response', others(0)),
-                ...submissions('held', announcedList),
-            ]);
+            assert.deepEqual(
+                concluded.closeEvents,
+                [
+                    ...organizerCollected,
+                    { kind: 'lock' },
+                    ...submissions('response', others(0)),
+                    ...submissions('held', announcedList),
+                ].map(({ kind }) => ({ kind })),
+            );
             // Completed close work is only delivered again.
             assert.equal((await run(1, 'close')).generation, 21);
             assert.equal((await run(0, 'close')).generation, 22);
