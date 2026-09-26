@@ -1,5 +1,6 @@
+use super::word_arithmetic::{MAXIMUM_WORDS, larger, words_of};
 use super::{Arithmetic, Polynomial, Transformed, unpack};
-use num_bigint::{BigInt, BigUint};
+use num_bigint::BigUint;
 use num_traits::Zero;
 use registration_credentials::{
     foundation::CanonicalItem,
@@ -396,18 +397,29 @@ impl Engine {
         if bytes.len() != DEGREE * width {
             return Err(Refusal::Shape);
         }
-        let half = &self.arithmetic.modulus >> 1usize;
-        let mut output = Vec::with_capacity(self.arithmetic.polynomial_words());
-        for bytes in bytes.chunks_exact(width) {
-            let magnitude = BigUint::from_bytes_le(&bytes[1..]);
-            if bytes[0] > 1 || magnitude > half || (bytes[0] == 1 && magnitude.is_zero()) {
+        let words = self.arithmetic.words;
+        let mut output = self.arithmetic.zero();
+        let mut magnitude = [0u64; MAXIMUM_WORDS];
+        let magnitude = &mut magnitude[..words];
+        for (bytes, coefficient) in bytes
+            .chunks_exact(width)
+            .zip(output.chunks_exact_mut(words))
+        {
+            magnitude.fill(0);
+            for (index, byte) in bytes[1..].iter().enumerate() {
+                magnitude[index / 8] |= u64::from(*byte) << (8 * (index % 8));
+            }
+            let zero = magnitude.iter().all(|word| *word == 0);
+            if bytes[0] > 1
+                || larger(magnitude, &self.arithmetic.wide.half)
+                || (bytes[0] == 1 && zero)
+            {
                 return Err(Refusal::Coefficient);
             }
             if bytes[0] == 1 {
-                self.arithmetic
-                    .push(&mut output, &(&self.arithmetic.modulus - magnitude));
+                self.arithmetic.wide.negate(magnitude, coefficient);
             } else {
-                self.arithmetic.push(&mut output, &magnitude);
+                coefficient.copy_from_slice(magnitude);
             }
         }
         Ok(output)
@@ -429,10 +441,10 @@ impl Engine {
 
     fn validate_polynomial(&self, polynomial: &[u64]) -> Result<(), Refusal> {
         if polynomial.len() != self.arithmetic.polynomial_words()
-            || self
+            || !self
                 .arithmetic
                 .coefficients(polynomial)
-                .any(|coefficient| unpack(coefficient) >= self.arithmetic.modulus)
+                .all(|coefficient| self.arithmetic.wide.is_canonical(coefficient))
         {
             return Err(Refusal::Coefficient);
         }
@@ -518,26 +530,37 @@ impl Engine {
     }
 
     fn add_plaintext(&self, input: &Ciphertext, coefficients: &[i32]) -> Ciphertext {
+        assert_eq!(coefficients.len(), DEGREE);
+        let words = self.arithmetic.words;
+        let wide = &self.arithmetic.wide;
         // The plaintext scale is the rounded quotient of the ciphertext and
         // plaintext moduli.
-        let delta =
-            BigInt::from((&self.arithmetic.modulus + PLAINTEXT_MODULUS / 2) / PLAINTEXT_MODULUS);
-        let mut constant = Vec::with_capacity(self.arithmetic.polynomial_words());
-        for (value, plaintext) in self.arithmetic.coefficients(&input[0]).zip(coefficients) {
-            self.arithmetic.push_normalized(
-                &mut constant,
-                BigInt::from(unpack(value)) + &delta * *plaintext,
-            );
+        let delta = words_of(
+            &((&self.arithmetic.modulus + PLAINTEXT_MODULUS / 2) / PLAINTEXT_MODULUS),
+            words,
+        );
+        let mut constant = input[0].clone();
+        let (mut term, mut sum) = ([0u64; MAXIMUM_WORDS], [0u64; MAXIMUM_WORDS]);
+        let (term, sum) = (&mut term[..words], &mut sum[..words]);
+        for (value, plaintext) in constant.chunks_exact_mut(words).zip(coefficients) {
+            wide.multiply_signed(&delta, i64::from(*plaintext), term);
+            wide.add(value, term, sum);
+            value.copy_from_slice(sum);
         }
         [constant, input[1].clone()]
     }
 
     fn multiply_scalar(&self, input: &Ciphertext, scalar: i32) -> Ciphertext {
+        let words = self.arithmetic.words;
         std::array::from_fn(|part| {
-            let mut output = Vec::with_capacity(self.arithmetic.polynomial_words());
-            for value in self.arithmetic.coefficients(&input[part]) {
+            let mut output = self.arithmetic.zero();
+            for (product, value) in output
+                .chunks_exact_mut(words)
+                .zip(self.arithmetic.coefficients(&input[part]))
+            {
                 self.arithmetic
-                    .push_normalized(&mut output, BigInt::from(unpack(value)) * scalar);
+                    .wide
+                    .multiply_signed(value, i64::from(scalar), product);
             }
             output
         })
@@ -576,13 +599,10 @@ impl Engine {
                     self.comparison_coefficients[instruction.parameter as usize],
                 ),
                 4 => {
-                    let mut plaintext = Vec::with_capacity(self.arithmetic.polynomial_words());
-                    for value in
-                        &self.ranking_coefficients[instruction.parameter as usize % options]
-                    {
-                        self.arithmetic
-                            .push_normalized(&mut plaintext, BigInt::from(*value));
-                    }
+                    let coefficients =
+                        &self.ranking_coefficients[instruction.parameter as usize % options];
+                    assert_eq!(coefficients.len(), DEGREE);
+                    let plaintext = self.arithmetic.signed(coefficients);
                     std::array::from_fn(|part| {
                         self.arithmetic.multiply(&plaintext, &left[part], false)
                     })

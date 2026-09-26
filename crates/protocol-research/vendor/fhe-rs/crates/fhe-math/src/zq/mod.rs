@@ -83,6 +83,66 @@ impl Deref for Modulus {
     }
 }
 
+/// The low and high words of the product of two words. WebAssembly has no
+/// widening multiplication, and a 128-bit product there calls a library
+/// routine that multiplies four words, so the product is built from four
+/// 32-bit partial products instead.
+#[inline(always)]
+const fn widening_mul(a: u64, b: u64) -> (u64, u64) {
+    if cfg!(target_arch = "wasm32") {
+        partial_widening_mul(a, b)
+    } else {
+        let product = (a as u128) * (b as u128);
+        (product as u64, (product >> 64) as u64)
+    }
+}
+
+/// The low and high words of the product of two words from four 32-bit
+/// partial products.
+#[inline(always)]
+const fn partial_widening_mul(a: u64, b: u64) -> (u64, u64) {
+    let (a_lo, a_hi) = (a & 0xffff_ffff, a >> 32);
+    let (b_lo, b_hi) = (b & 0xffff_ffff, b >> 32);
+    let low = a_lo * b_lo;
+    let first = a_hi * b_lo;
+    let second = a_lo * b_hi;
+    let middle = (low >> 32) + (first & 0xffff_ffff) + (second & 0xffff_ffff);
+    (
+        (low & 0xffff_ffff) | (middle << 32),
+        a_hi * b_hi + (first >> 32) + (second >> 32) + (middle >> 32),
+    )
+}
+
+/// The high word of the product of two words.
+#[inline(always)]
+const fn mul_hi(a: u64, b: u64) -> u64 {
+    if cfg!(target_arch = "wasm32") {
+        partial_mul_hi(a, b)
+    } else {
+        widening_mul(a, b).1
+    }
+}
+
+/// The high word of the product of two words from four 32-bit partial
+/// products. On WebAssembly, LLVM recognizes the high word of four 32-bit
+/// partial products and forms it again from a 128-bit multiplication, so one
+/// half is hidden from it.
+#[inline(always)]
+const fn partial_mul_hi(a: u64, b: u64) -> u64 {
+    let (a_lo, a_hi) = (a & 0xffff_ffff, core::hint::black_box(a >> 32));
+    let (b_lo, b_hi) = (b & 0xffff_ffff, b >> 32);
+    let low = a_lo * b_lo;
+    let first = a_hi.wrapping_mul(b_lo);
+    let second = a_lo * b_hi;
+    let middle = (low >> 32)
+        .wrapping_add(first & 0xffff_ffff)
+        .wrapping_add(second & 0xffff_ffff);
+    a_hi.wrapping_mul(b_hi)
+        .wrapping_add(first >> 32)
+        .wrapping_add(second >> 32)
+        .wrapping_add(middle >> 32)
+}
+
 impl Modulus {
     /// Create a modulus from an integer of at most 62 bits.
     pub fn new(p: u64) -> Result<Self> {
@@ -135,7 +195,8 @@ impl Modulus {
     #[must_use]
     pub const fn mul(&self, a: u64, b: u64) -> u64 {
         debug_assert!(a < self.p && b < self.p);
-        self.reduce_u128((a as u128) * (b as u128))
+        let (lo, hi) = widening_mul(a, b);
+        Self::reduce1(self.lazy_reduce_words(lo, hi), self.p)
     }
 
     /// Performs the modular multiplication of a and b in constant time.
@@ -146,7 +207,8 @@ impl Modulus {
     /// about the values being multiplied.
     const unsafe fn mul_vt(&self, a: u64, b: u64) -> u64 {
         debug_assert!(a < self.p && b < self.p);
-        unsafe { Self::reduce1_vt(self.lazy_reduce_u128((a as u128) * (b as u128)), self.p) }
+        let (lo, hi) = widening_mul(a, b);
+        unsafe { Self::reduce1_vt(self.lazy_reduce_words(lo, hi), self.p) }
     }
 
     /// Optimized modular multiplication of a and b in constant time.
@@ -230,8 +292,8 @@ impl Modulus {
         debug_assert!(b < self.p);
         debug_assert!(b_shoup == self.shoup(b));
 
-        let q = ((a as u128) * (b_shoup as u128)) >> 64;
-        let r = ((a as u128) * (b as u128) - q * (self.p as u128)) as u64;
+        let q = mul_hi(a, b_shoup);
+        let r = a.wrapping_mul(b).wrapping_sub(q.wrapping_mul(self.p));
 
         debug_assert!(r < 2 * self.p);
 
@@ -696,14 +758,7 @@ impl Modulus {
     /// The output is in the interval [0, 2 * p).
     #[must_use]
     pub const fn lazy_reduce_u128(&self, a: u128) -> u64 {
-        let a_lo = a as u64;
-        let a_hi = (a >> 64) as u64;
-        let p_lo_lo = ((a_lo as u128) * (self.barrett_lo as u128)) >> 64;
-        let p_hi_lo = (a_hi as u128) * (self.barrett_lo as u128);
-        let p_lo_hi = (a_lo as u128) * (self.barrett_hi as u128);
-
-        let q = ((p_lo_hi + p_hi_lo + p_lo_lo) >> 64) + (a_hi as u128) * (self.barrett_hi as u128);
-        let r = (a - q * (self.p as u128)) as u64;
+        let r = self.lazy_reduce_words(a as u64, (a >> 64) as u64);
 
         debug_assert!((r as u128) < 2 * (self.p as u128));
         debug_assert!(r % self.p == (a % (self.p as u128)) as u64);
@@ -711,15 +766,31 @@ impl Modulus {
         r
     }
 
+    /// Lazy modular reduction of the value with the given low and high words
+    /// in constant time, the Barrett quotient's words built from words.
+    /// The output is in the interval [0, 2 * p).
+    #[inline(always)]
+    const fn lazy_reduce_words(&self, a_lo: u64, a_hi: u64) -> u64 {
+        let p_lo_lo = mul_hi(a_lo, self.barrett_lo);
+        let (p_hi_lo_lo, p_hi_lo_hi) = widening_mul(a_hi, self.barrett_lo);
+        let (p_lo_hi_lo, p_lo_hi_hi) = widening_mul(a_lo, self.barrett_hi);
+        // The quotient is the high word of the three partial products' sum
+        // plus the high partial product, which fits one word.
+        let (sum, first_carry) = p_lo_hi_lo.overflowing_add(p_hi_lo_lo);
+        let (_, second_carry) = sum.overflowing_add(p_lo_lo);
+        let q = p_lo_hi_hi
+            .wrapping_add(p_hi_lo_hi)
+            .wrapping_add(first_carry as u64)
+            .wrapping_add(second_carry as u64)
+            .wrapping_add(a_hi.wrapping_mul(self.barrett_hi));
+        a_lo.wrapping_sub(q.wrapping_mul(self.p))
+    }
+
     /// Lazy modular reduction of a in constant time.
     /// The output is in the interval [0, 2 * p).
     #[must_use]
     pub const fn lazy_reduce(&self, a: u64) -> u64 {
-        let p_lo_lo = ((a as u128) * (self.barrett_lo as u128)) >> 64;
-        let p_lo_hi = (a as u128) * (self.barrett_hi as u128);
-
-        let q = (p_lo_hi + p_lo_lo) >> 64;
-        let r = (a as u128 - q * (self.p as u128)) as u64;
+        let r = self.lazy_reduce_words(a, 0);
 
         debug_assert!((r as u128) < 2 * (self.p as u128));
         debug_assert!(r % self.p == a % self.p);
@@ -825,7 +896,43 @@ mod tests {
             .boxed()
     }
 
+    // The partial products WebAssembly uses give the double-word product.
+    fn assert_partial_products(a: u64, b: u64) {
+        let product = (a as u128) * (b as u128);
+        assert_eq!(
+            super::partial_widening_mul(a, b),
+            (product as u64, (product >> 64) as u64)
+        );
+        assert_eq!(super::partial_mul_hi(a, b), (product >> 64) as u64);
+    }
+
+    #[test]
+    fn partial_products_at_word_edges() {
+        let edges = [
+            0,
+            1,
+            2,
+            0xffff_ffff,
+            0x1_0000_0000,
+            0x1_0000_0001,
+            (1 << 62) - 57,
+            1 << 63,
+            u64::MAX - 1,
+            u64::MAX,
+        ];
+        for a in edges {
+            for b in edges {
+                assert_partial_products(a, b);
+            }
+        }
+    }
+
     proptest! {
+        #[test]
+        fn partial_products(a: u64, b: u64) {
+            assert_partial_products(a, b);
+        }
+
         #[test]
         fn constructor(p: u64) {
             // 63 and 64-bit integers do not work.

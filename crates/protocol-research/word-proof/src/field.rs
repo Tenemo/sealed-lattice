@@ -17,18 +17,7 @@ pub fn scale(value: Element, scalar: u128) -> Element {
     value.map(|value| base::multiply(value, scalar))
 }
 pub fn multiply(left: Element, right: Element) -> Element {
-    let mut result = ZERO;
-    for (first, a) in left.iter().enumerate() {
-        for (second, b) in right.iter().enumerate() {
-            let mut value = base::multiply(*a, *b);
-            if first + second >= 3 {
-                value = base::add(value, value);
-            }
-            let index = (first + second) % 3;
-            result[index] = base::add(result[index], value);
-        }
-    }
-    result
+    base::multiply_extension(left, right)
 }
 pub fn inverse(value: Element) -> Element {
     assert_ne!(value, ZERO);
@@ -79,16 +68,72 @@ pub fn encode(value: Element) -> [u8; 48] {
 
 pub struct Transform {
     pub length: usize,
+    // Each stage's twiddles lie together: the stage of width w keeps the w/2
+    // powers of a primitive w-th root at offset w/2 - 1.
     forward: Vec<u128>,
     backward: Vec<u128>,
     inverse_length: u128,
 }
 
+// The stage twiddles of a transform of the given length and root.
+fn stage_twiddles(root: u128, length: usize) -> Vec<u128> {
+    let mut powers = vec![1; length / 2];
+    for index in 1..powers.len() {
+        powers[index] = base::multiply(powers[index - 1], root);
+    }
+    let mut twiddles = Vec::with_capacity(length - 1);
+    let mut width = 2;
+    while width <= length {
+        let stride = length / width;
+        twiddles.extend((0..width / 2).map(|index| powers[index * stride]));
+        width *= 2;
+    }
+    twiddles
+}
+
+// An in-place iterative transform of bit-reversed values: each stage's
+// first butterfly has twiddle one, and the width-two stage has no other.
+fn butterflies<T: Copy>(
+    values: &mut [T],
+    twiddles: &[u128],
+    add: impl Fn(T, T) -> T,
+    subtract: impl Fn(T, T) -> T,
+    scale: impl Fn(T, u128) -> T,
+) {
+    let log = values.len().ilog2();
+    for index in 0..values.len() {
+        let reversed = index.reverse_bits() >> (usize::BITS - log);
+        if index < reversed {
+            values.swap(index, reversed);
+        }
+    }
+    let mut width = 2;
+    while width <= values.len() {
+        let stage = &twiddles[width / 2 - 1..width - 1];
+        for block in values.chunks_exact_mut(width) {
+            let (left, right) = block.split_at_mut(width / 2);
+            let (lower, upper) = (left[0], right[0]);
+            left[0] = add(lower, upper);
+            right[0] = subtract(lower, upper);
+            for ((lower, upper), twiddle) in left[1..]
+                .iter_mut()
+                .zip(right[1..].iter_mut())
+                .zip(&stage[1..])
+            {
+                let value = scale(*upper, *twiddle);
+                let old = *lower;
+                *lower = add(old, value);
+                *upper = subtract(old, value);
+            }
+        }
+        width *= 2;
+    }
+}
+
 fn selected_forward<T: Copy>(
     values: &mut [T],
     selected: &[(usize, usize)],
-    powers: &[u128],
-    length: usize,
+    twiddles: &[u128],
     output: &mut [T],
     operations: &(
         impl Fn(T, T) -> T,
@@ -114,67 +159,39 @@ fn selected_forward<T: Copy>(
             odd.push((index / 2, destination));
         }
     }
-    let stride = length / values.len();
+    let stage = &twiddles[values.len() / 2 - 1..values.len() - 1];
     let (left, right) = values.split_at_mut(values.len() / 2);
-    for (index, (lower, upper)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
+    for ((lower, upper), twiddle) in left.iter_mut().zip(right.iter_mut()).zip(stage) {
         let original = *lower;
         if !even.is_empty() {
             *lower = operations.0(original, *upper);
         }
         if !odd.is_empty() {
-            *upper = operations.2(operations.1(original, *upper), powers[index * stride]);
+            *upper = operations.2(operations.1(original, *upper), *twiddle);
         }
     }
-    selected_forward(left, &even, powers, length, output, operations);
-    selected_forward(right, &odd, powers, length, output, operations);
+    selected_forward(left, &even, twiddles, output, operations);
+    selected_forward(right, &odd, twiddles, output, operations);
 }
 
 impl Transform {
     pub fn new(length: usize) -> Self {
         let root = root(length);
-        let inverse = base::power(root, MODULUS - 2);
-        let powers = |value| {
-            let mut result = vec![1; length / 2];
-            for index in 1..result.len() {
-                result[index] = base::multiply(result[index - 1], value);
-            }
-            result
-        };
         Self {
             length,
-            forward: powers(root),
-            backward: powers(inverse),
+            forward: stage_twiddles(root, length),
+            backward: stage_twiddles(base::power(root, MODULUS - 2), length),
             inverse_length: base::power(length as u128, MODULUS - 2),
         }
     }
     pub fn base(&self, values: &mut [u128], inverse: bool) {
         assert_eq!(values.len(), self.length);
-        let log = self.length.ilog2();
-        for index in 0..self.length {
-            let reversed = index.reverse_bits() >> (usize::BITS - log);
-            if index < reversed {
-                values.swap(index, reversed);
-            }
-        }
         let twiddles = if inverse {
             &self.backward
         } else {
             &self.forward
         };
-        let mut width = 2;
-        while width <= self.length {
-            let stride = self.length / width;
-            for block in values.chunks_exact_mut(width) {
-                let (left, right) = block.split_at_mut(width / 2);
-                for (index, (lower, upper)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
-                    let value = base::multiply(*upper, twiddles[index * stride]);
-                    let old = *lower;
-                    *lower = base::add(old, value);
-                    *upper = base::subtract(old, value);
-                }
-            }
-            width *= 2;
-        }
+        butterflies(values, twiddles, base::add, base::subtract, base::multiply);
         if inverse {
             for value in values {
                 *value = base::multiply(*value, self.inverse_length);
@@ -195,7 +212,6 @@ impl Transform {
             values,
             &selected,
             &self.forward,
-            self.length,
             &mut output,
             &(base::add, base::subtract, base::multiply),
         );
@@ -215,7 +231,6 @@ impl Transform {
             values,
             &selected,
             &self.forward,
-            self.length,
             &mut output,
             &(add, subtract, scale),
         );
@@ -223,32 +238,12 @@ impl Transform {
     }
     pub fn extension(&self, values: &mut [Element], inverse: bool) {
         assert_eq!(values.len(), self.length);
-        let log = self.length.ilog2();
-        for index in 0..self.length {
-            let reversed = index.reverse_bits() >> (usize::BITS - log);
-            if index < reversed {
-                values.swap(index, reversed);
-            }
-        }
         let twiddles = if inverse {
             &self.backward
         } else {
             &self.forward
         };
-        let mut width = 2;
-        while width <= self.length {
-            let stride = self.length / width;
-            for block in values.chunks_exact_mut(width) {
-                let (left, right) = block.split_at_mut(width / 2);
-                for (index, (lower, upper)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
-                    let value = scale(*upper, twiddles[index * stride]);
-                    let old = *lower;
-                    *lower = add(old, value);
-                    *upper = subtract(old, value);
-                }
-            }
-            width *= 2;
-        }
+        butterflies(values, twiddles, add, subtract, scale);
         if inverse {
             for value in values {
                 *value = scale(*value, self.inverse_length);

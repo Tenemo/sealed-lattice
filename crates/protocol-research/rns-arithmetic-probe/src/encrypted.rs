@@ -1,10 +1,18 @@
-use fhe_math::{ntt::NttOperator, rns::RnsContext, zq::Modulus};
-use num_bigint::{BigInt, BigUint, Sign};
-use num_traits::{ToPrimitive, Zero};
+use fhe_math::{ntt::NttOperator, zq::Modulus};
+use num_bigint::BigUint;
+#[cfg(any(test, feature = "numerical-probes"))]
+use num_bigint::{BigInt, Sign};
+use num_traits::ToPrimitive;
 use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
 
 #[path = "ranking.rs"]
 pub mod ranking;
+#[path = "word-arithmetic.rs"]
+mod word_arithmetic;
+
+#[cfg(any(test, feature = "numerical-probes"))]
+use word_arithmetic::words_of;
+use word_arithmetic::{Lift, MAXIMUM_WORDS, WideModulus, extract, larger};
 
 /// Canonical coefficients below the ciphertext modulus, each in the
 /// arithmetic's count of little-endian 64-bit words, in coefficient order.
@@ -26,46 +34,37 @@ fn unpack(value: &[u64]) -> BigUint {
             .collect::<Vec<_>>(),
     )
 }
-fn larger(left: &[u64], right: &[u64]) -> bool {
-    left.iter().rev().cmp(right.iter().rev()).is_gt()
-}
-fn residue(value: &[u64], prime: u64) -> u64 {
-    let mut result = 0u128;
-    for word in value.iter().rev() {
-        result = ((result << 64) | *word as u128) % prime as u128;
-    }
-    result as u64
-}
-/// Bits `start..start + bits` of a canonical coefficient modulo a prime, by
-/// Horner's rule over the digit's 64-bit words from the most significant.
-fn digit_residue(value: &[u64], start: usize, bits: usize, prime: u64) -> u64 {
-    let mut result = 0u128;
-    for word in (0..bits.div_ceil(64)).rev() {
-        let bit = start + 64 * word;
-        let index = bit / 64;
-        let shift = bit % 64;
-        let mut part = value.get(index).copied().unwrap_or(0) >> shift;
-        if shift > 0 {
-            part |= value.get(index + 1).copied().unwrap_or(0) << (64 - shift);
-        }
-        let width = bits - 64 * word;
-        if width < 64 {
-            part &= (1 << width) - 1;
-        }
-        result = ((result << 64) | part as u128) % prime as u128;
-    }
-    result as u64
-}
-/// The least prefix of the primes whose product exceeds the bound.
+/// The least prefix of the primes whose product covers the bound.
 fn prefix(primes: &[u64], bound: &BigUint) -> usize {
     let mut product = BigUint::from(1u32);
     for (index, prime) in primes.iter().enumerate() {
         product *= *prime;
-        if &product > bound {
+        if Lift::covers(&product, index + 1, bound) {
             return index + 1;
         }
     }
-    panic!("The tensor primes exceed every smaller bound.");
+    panic!("The tensor primes cover every smaller bound.");
+}
+/// The residue of little-endian words plus an initial residue: the sum of
+/// the words' lazy Shoup products with the prime's word powers, each below
+/// twice the prime, reduced by the Shoup quotient of one.
+fn words_residue(prime: &Modulus, powers: &[(u64, u64)], words: &[u64], initial: u64) -> u64 {
+    let mut sum = initial;
+    for (word, (power, quotient)) in words.iter().zip(powers) {
+        sum += prime.lazy_mul_shoup(*word, *power, *quotient);
+    }
+    prime.mul_shoup(sum, 1, powers[0].1)
+}
+/// Bits `start..start + bits` of a canonical coefficient as words, one for
+/// every 64 bits of the digit.
+fn digit_words(coefficient: &[u64], start: usize, bits: usize, output: &mut [u64]) {
+    for (part, word) in output.iter_mut().enumerate() {
+        let width = bits - 64 * part;
+        *word = extract(coefficient, start + 64 * part);
+        if width < 64 {
+            *word &= (1 << width) - 1;
+        }
+    }
 }
 
 struct Arithmetic {
@@ -73,29 +72,38 @@ struct Arithmetic {
     words: usize,
     gadget_length: usize,
     modulus: BigUint,
+    #[cfg(any(test, feature = "numerical-probes"))]
     signed_modulus: BigInt,
-    half: Vec<u64>,
-    primes: Vec<u64>,
+    wide: WideModulus,
     reductions: Vec<Modulus>,
+    /// Each prime's residues of 2^(64 j) for the coefficient words j, with
+    /// their Shoup quotients. A coefficient's residue sums its words' lazy
+    /// products, each below twice the prime, so a sum of at most 16 words'
+    /// products and one more prime stays below 2^64.
+    word_powers: Vec<Vec<(u64, u64)>>,
+    /// Each prime's residue of the negated ciphertext modulus, which a
+    /// centered negative coefficient adds.
+    negated_modulus: Vec<u64>,
     transforms: Vec<NttOperator>,
-    modulus_residues: Vec<u64>,
     key_primes: usize,
     external_primes: usize,
-    key_context: RnsContext,
-    external_context: RnsContext,
-    tensor_context: RnsContext,
+    key_lift: Lift,
+    external_lift: Lift,
+    tensor_lift: Lift,
 }
 
 impl Arithmetic {
     /// Exact arithmetic modulo the profile's ciphertext modulus. Plaintext
     /// and secret products, gadget external products and ciphertext tensors
-    /// each lift from the least prefix of the primes whose product exceeds
+    /// each lift from the least prefix of the primes whose product covers
     /// twice their centered bound.
     fn new(profile: Profile, degree: usize) -> Self {
         let ciphertext = profile.ciphertext_modulus();
         let modulus = (BigUint::from(ciphertext.odd_factor()) << ciphertext.exponent()) + 1u64;
         let words = ciphertext.bits().div_ceil(64);
+        assert!(words <= MAXIMUM_WORDS);
         let gadget_length = profile.gadget_length();
+        assert!(Profile::gadget_base_bits().div_ceil(64) <= words);
         let half_modulus = &modulus >> 1usize;
         let degree_factor = degree as u64;
         // A plaintext coefficient is at most half the plaintext modulus and
@@ -114,7 +122,7 @@ impl Arithmetic {
         let mut primes = Vec::new();
         let mut product = BigUint::from(1u64);
         let mut limit = 1u64 << 58;
-        while product <= tensor_bound {
+        while !Lift::covers(&product, primes.len(), &tensor_bound) {
             limit = super::proth_prime(58, limit);
             primes.push(limit);
             product *= limit;
@@ -130,31 +138,55 @@ impl Arithmetic {
             .iter()
             .map(|prime| NttOperator::new(prime, degree).unwrap())
             .collect();
-        let mut half = Vec::with_capacity(words);
-        push_words(&mut half, &half_modulus, words);
+        let word_powers = reductions
+            .iter()
+            .map(|prime| {
+                let mut power = 1;
+                (0..words)
+                    .map(|_| {
+                        let current = (power, prime.shoup(power));
+                        power = prime.mul(power, ((1u128 << 64) % u128::from(**prime)) as u64);
+                        current
+                    })
+                    .collect()
+            })
+            .collect();
+        let lift = |count: usize, tensor: bool| {
+            Lift::new(
+                &primes[..count],
+                &reductions[..count],
+                &modulus,
+                PLAINTEXT_MODULUS,
+                tensor,
+            )
+        };
         Self {
             degree,
             words,
             gadget_length,
+            #[cfg(any(test, feature = "numerical-probes"))]
             signed_modulus: BigInt::from(modulus.clone()),
-            half,
-            modulus_residues: primes
+            wide: WideModulus::new(&modulus),
+            negated_modulus: primes
                 .iter()
-                .map(|prime| (&modulus % prime).to_u64().unwrap())
+                .map(|prime| {
+                    let residue = (&modulus % *prime).to_u64().unwrap();
+                    (prime - residue) % prime
+                })
                 .collect(),
+            key_lift: lift(key_primes, false),
+            external_lift: lift(external_primes, false),
+            tensor_lift: lift(primes.len(), true),
             modulus,
             key_primes,
             external_primes,
-            key_context: RnsContext::new(&primes[..key_primes]).unwrap(),
-            external_context: RnsContext::new(&primes[..external_primes]).unwrap(),
-            tensor_context: RnsContext::new(&primes).unwrap(),
-            primes,
+            word_powers,
             reductions,
             transforms,
         }
     }
     fn tensor_primes(&self) -> usize {
-        self.primes.len()
+        self.tensor_lift.count
     }
     fn polynomial_words(&self) -> usize {
         self.degree * self.words
@@ -165,15 +197,25 @@ impl Arithmetic {
     fn coefficients<'a>(&self, polynomial: &'a [u64]) -> std::slice::ChunksExact<'a, u64> {
         polynomial.chunks_exact(self.words)
     }
+    #[cfg(any(test, feature = "numerical-probes"))]
     fn push(&self, output: &mut Polynomial, value: &BigUint) {
-        push_words(output, value, self.words);
+        output.extend(words_of(value, self.words));
     }
+    #[cfg(any(test, feature = "numerical-probes"))]
     fn push_normalized(&self, output: &mut Polynomial, value: BigInt) {
         let mut value = value % &self.signed_modulus;
         if value.sign() == Sign::Minus {
             value += &self.signed_modulus;
         }
         self.push(output, value.magnitude());
+    }
+    /// A polynomial of signed coefficients of magnitude below the modulus.
+    fn signed(&self, values: &[i32]) -> Polynomial {
+        let mut output = self.zero();
+        for (coefficient, value) in output.chunks_exact_mut(self.words).zip(values) {
+            self.wide.signed(i64::from(*value), coefficient);
+        }
+        output
     }
     #[cfg(any(test, feature = "numerical-probes"))]
     fn uniform(&self, mut seed: u64) -> Polynomial {
@@ -199,52 +241,45 @@ impl Arithmetic {
         }
         output
     }
-    fn project(&self, polynomial: &[u64], prime: usize) -> Vec<u64> {
-        self.coefficients(polynomial)
-            .map(|value| {
-                let current = residue(value, self.primes[prime]);
-                if larger(value, &self.half) {
-                    self.reductions[prime].sub(current, self.modulus_residues[prime])
-                } else {
-                    current
-                }
-            })
-            .collect()
+    /// The primes' residues of the centered coefficients, a coefficient's
+    /// words read once for all of them.
+    fn projections(&self, polynomial: &[u64], primes: std::ops::Range<usize>) -> Transformed {
+        let mut output: Transformed = primes
+            .clone()
+            .map(|_| Vec::with_capacity(self.degree))
+            .collect();
+        for value in self.coefficients(polynomial) {
+            let negative = larger(value, &self.wide.half);
+            for (((residues, prime), powers), negated) in output
+                .iter_mut()
+                .zip(&self.reductions[primes.clone()])
+                .zip(&self.word_powers[primes.clone()])
+                .zip(&self.negated_modulus[primes.clone()])
+            {
+                residues.push(words_residue(
+                    prime,
+                    powers,
+                    value,
+                    if negative { *negated } else { 0 },
+                ));
+            }
+        }
+        output
     }
-    fn finish(
-        &self,
-        mut products: Vec<Vec<u64>>,
-        context: &RnsContext,
-        tensor: bool,
-    ) -> Polynomial {
+    fn finish(&self, mut products: Vec<Vec<u64>>, lift: &Lift) -> Polynomial {
+        assert_eq!(products.len(), lift.count);
         for (index, values) in products.iter_mut().enumerate() {
             self.transforms[index].backward(values);
         }
-        let half_context = context.modulus() >> 1usize;
-        let mut residues = vec![0; products.len()];
-        let mut output = Vec::with_capacity(self.polynomial_words());
-        for position in 0..self.degree {
-            for (residue, values) in residues.iter_mut().zip(&products) {
-                *residue = values[position];
-            }
-            let value = context.lift((&residues).into());
-            let negative = value > half_context;
-            let magnitude = if negative {
-                context.modulus() - value
-            } else {
-                value
-            };
-            let reduced = if tensor {
-                (magnitude * PLAINTEXT_MODULUS + (&self.modulus >> 1usize)) / &self.modulus
-                    % &self.modulus
-            } else {
-                magnitude % &self.modulus
-            };
-            if negative && !reduced.is_zero() {
-                self.push(&mut output, &(&self.modulus - reduced));
-            } else {
-                self.push(&mut output, &reduced);
-            }
+        let mut output = self.zero();
+        for (position, coefficient) in output.chunks_exact_mut(self.words).enumerate() {
+            lift.coefficient(
+                &products,
+                position,
+                &self.reductions,
+                &self.wide,
+                coefficient,
+            );
         }
         output
     }
@@ -254,35 +289,29 @@ impl Arithmetic {
         } else {
             self.key_primes
         };
-        let mut products = Vec::with_capacity(count);
-        for index in 0..count {
-            let mut first = self.project(left, index);
-            let mut second = self.project(right, index);
-            self.transforms[index].forward(&mut first);
+        let mut products = self.transformed(left, count);
+        for (index, product) in products.iter_mut().enumerate() {
+            let mut second = self.projections(right, index..index + 1).remove(0);
             self.transforms[index].forward(&mut second);
-            for (first, second) in first.iter_mut().zip(second) {
+            for (first, second) in product.iter_mut().zip(second) {
                 *first = self.reductions[index].mul(*first, second);
             }
-            products.push(first);
         }
         self.finish(
             products,
             if tensor {
-                &self.tensor_context
+                &self.tensor_lift
             } else {
-                &self.key_context
+                &self.key_lift
             },
-            tensor,
         )
     }
     fn transformed(&self, value: &[u64], count: usize) -> Transformed {
-        (0..count)
-            .map(|prime| {
-                let mut projected = self.project(value, prime);
-                self.transforms[prime].forward(&mut projected);
-                projected
-            })
-            .collect()
+        let mut projected = self.projections(value, 0..count);
+        for (values, transform) in projected.iter_mut().zip(&self.transforms) {
+            transform.forward(values);
+        }
+        projected
     }
     fn tensors(&self, first: &[Polynomial; 2], second: &[Polynomial; 2]) -> [Polynomial; 4] {
         let count = self.tensor_primes();
@@ -303,29 +332,42 @@ impl Arithmetic {
                         .collect()
                 })
                 .collect();
-            self.finish(products, &self.tensor_context, true)
+            self.finish(products, &self.tensor_lift)
         })
     }
     /// Each gadget digit of the canonical coefficients, transformed modulo
-    /// every external-product prime.
+    /// every external-product prime. A digit's words are read once for every
+    /// prime.
     fn digit_transforms(&self, value: &[u64]) -> Vec<Transformed> {
         let bits = Profile::gadget_base_bits();
-        (0..self.gadget_length)
-            .map(|digit| {
+        let parts = bits.div_ceil(64);
+        let mut output: Vec<Transformed> = (0..self.gadget_length)
+            .map(|_| {
                 (0..self.external_primes)
-                    .map(|prime| {
-                        let mut digits: Vec<u64> = self
-                            .coefficients(value)
-                            .map(|value| {
-                                digit_residue(value, bits * digit, bits, self.primes[prime])
-                            })
-                            .collect();
-                        self.transforms[prime].forward(&mut digits);
-                        digits
-                    })
+                    .map(|_| Vec::with_capacity(self.degree))
                     .collect()
             })
-            .collect()
+            .collect();
+        let mut words = [0u64; MAXIMUM_WORDS];
+        let words = &mut words[..parts];
+        for coefficient in self.coefficients(value) {
+            for (digit, transformed) in output.iter_mut().enumerate() {
+                digit_words(coefficient, bits * digit, bits, words);
+                for ((residues, prime), powers) in transformed
+                    .iter_mut()
+                    .zip(&self.reductions)
+                    .zip(&self.word_powers)
+                {
+                    residues.push(words_residue(prime, powers, words, 0));
+                }
+            }
+        }
+        for transformed in &mut output {
+            for (digits, transform) in transformed.iter_mut().zip(&self.transforms) {
+                transform.forward(digits);
+            }
+        }
+        output
     }
     fn external(&self, digits: &[Transformed], keys: &[Transformed]) -> Polynomial {
         assert_eq!(keys.len(), self.gadget_length);
@@ -339,7 +381,7 @@ impl Arithmetic {
                 }
             }
         }
-        self.finish(products, &self.external_context, false)
+        self.finish(products, &self.external_lift)
     }
     /// The product of two ciphertexts, relinearized with each gadget
     /// coordinate's encryption key, first relinearization key, second
@@ -373,12 +415,10 @@ impl Arithmetic {
             let exponent = index * 5;
             let position = exponent % self.degree;
             let target = &mut output[position * self.words..(position + 1) * self.words];
-            if (exponent / self.degree).is_multiple_of(2) || value.iter().all(|word| *word == 0) {
+            if (exponent / self.degree).is_multiple_of(2) {
                 target.copy_from_slice(value);
             } else {
-                let mut negated = Vec::with_capacity(self.words);
-                self.push(&mut negated, &(&self.modulus - unpack(value)));
-                target.copy_from_slice(&negated);
+                self.wide.negate(value, target);
             }
         }
         output
@@ -400,14 +440,15 @@ impl Arithmetic {
         ]
     }
     fn add(&self, target: &mut Polynomial, other: &[u64]) {
-        let mut output = Vec::with_capacity(target.len());
-        for (target, other) in self.coefficients(target).zip(self.coefficients(other)) {
-            self.push(
-                &mut output,
-                &((unpack(target) + unpack(other)) % &self.modulus),
-            );
+        let mut sum = [0u64; MAXIMUM_WORDS];
+        let sum = &mut sum[..self.words];
+        for (target, other) in target
+            .chunks_exact_mut(self.words)
+            .zip(self.coefficients(other))
+        {
+            self.wide.add(target, other, sum);
+            target.copy_from_slice(sum);
         }
-        *target = output;
     }
     #[cfg(any(test, feature = "numerical-probes"))]
     fn affine(
@@ -442,13 +483,6 @@ impl Arithmetic {
             .collect()
     }
 }
-fn push_words(output: &mut Vec<u64>, value: &BigUint, words: usize) {
-    let digits = value.to_u64_digits();
-    assert!(digits.len() <= words);
-    output.extend(&digits);
-    output.resize(output.len() + words - digits.len(), 0);
-}
-
 /// A synthetic aggregate secret of one sparse support per setup contributor.
 #[cfg(any(test, feature = "numerical-probes"))]
 fn secret(degree: usize, contributors: usize, weight: usize, mut seed: u64) -> Vec<i16> {
@@ -485,6 +519,7 @@ fn ephemeral(degree: usize, weight: usize, mut seed: u64) -> Vec<i16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_traits::Zero;
 
     // The profile's moduli, gadget and prime prefixes at a small ring degree,
     // checked against exact integer arithmetic.
@@ -569,18 +604,54 @@ mod tests {
     #[test]
     fn digit_residues_match_big_integer_digits_at_every_offset() {
         let prime = super::super::proth_prime(58, 1 << 58);
+        let reduction = Modulus::new(prime).unwrap();
+        let mut power = 1;
+        let powers: Vec<(u64, u64)> = (0..16)
+            .map(|_| {
+                let current = (power, reduction.shoup(power));
+                power = reduction.mul(power, ((1u128 << 64) % u128::from(prime)) as u64);
+                current
+            })
+            .collect();
         for words in [9, 14, 16] {
             let mut state = 0x5eed ^ words as u64;
-            let value: Vec<u64> = (0..words).map(|_| next(&mut state)).collect();
-            let integer = unpack(&value);
-            for bits in [1, 63, 64, 65, 144] {
-                for start in [0, 1, 63, 64, 100, 144 * 3, 64 * words - bits] {
-                    let digit = (&integer >> start) & ((BigUint::from(1u32) << bits) - 1u32);
-                    assert_eq!(
-                        digit_residue(&value, start, bits, prime),
-                        (digit % prime).to_u64().unwrap(),
-                        "words={words}, bits={bits}, start={start}"
-                    );
+            let mut values: Vec<Vec<u64>> = vec![vec![u64::MAX; words], vec![0; words]];
+            values.push((0..words).map(|_| next(&mut state)).collect());
+            for value in values {
+                let integer = unpack(&value);
+                assert_eq!(
+                    words_residue(&reduction, &powers, &value, 0),
+                    (&integer % prime).to_u64().unwrap()
+                );
+                assert_eq!(
+                    words_residue(&reduction, &powers, &value, prime - 1),
+                    ((&integer + prime - 1u32) % prime).to_u64().unwrap()
+                );
+                for bits in [1, 63, 64, 65, 144] {
+                    for start in [
+                        0,
+                        1,
+                        63,
+                        64,
+                        100,
+                        144 * 3,
+                        64 * words - bits,
+                        64 * words - 1,
+                    ] {
+                        let digit = (&integer >> start) & ((BigUint::from(1u32) << bits) - 1u32);
+                        let mut output = vec![0; bits.div_ceil(64)];
+                        digit_words(&value, start, bits, &mut output);
+                        assert_eq!(
+                            unpack(&output),
+                            digit,
+                            "words={words}, bits={bits}, start={start}"
+                        );
+                        assert_eq!(
+                            words_residue(&reduction, &powers, &output, 0),
+                            (digit % prime).to_u64().unwrap(),
+                            "words={words}, bits={bits}, start={start}"
+                        );
+                    }
                 }
             }
         }

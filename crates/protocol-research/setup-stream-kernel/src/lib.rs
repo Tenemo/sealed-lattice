@@ -3,7 +3,7 @@
 mod arithmetic;
 mod query;
 mod setup;
-use arithmetic::{MODULUS, add, multiply, subtract};
+use arithmetic::{Columns, MODULUS, add, multiply, subtract};
 pub use setup::{
     ProverFixedTerm, ProverOperatorPlan, SetupStatementOutput, SetupStatementStream,
     prover_operator_plan, setup_polynomial_stream,
@@ -26,18 +26,7 @@ fn minus(left: Element, right: Element) -> Element {
     std::array::from_fn(|index| subtract(left[index], right[index]))
 }
 fn times(left: Element, right: Element) -> Element {
-    let mut result = ZERO;
-    for (row, first) in left.iter().enumerate() {
-        for (column, second) in right.iter().enumerate() {
-            let mut product = multiply(*first, *second);
-            if row + column >= 3 {
-                product = add(product, product);
-            }
-            let index = (row + column) % 3;
-            result[index] = add(result[index], product);
-        }
-    }
-    result
+    arithmetic::multiply_extension(left, right)
 }
 // The limb of `radix_bits` bits at `limb` of a little-endian magnitude.
 fn limb_value(bytes: &[u8], limb: usize, radix_bits: usize) -> u128 {
@@ -47,6 +36,30 @@ fn limb_value(bytes: &[u8], limb: usize, radix_bits: usize) -> u128 {
     let available = bytes.len().saturating_sub(first).min(13);
     word[..available].copy_from_slice(&bytes[first..first + available]);
     (u128::from_le_bytes(word) >> (start % 8)) & ((1u128 << radix_bits) - 1)
+}
+// The powers of a limb weight, one for each limb of a magnitude of the given
+// byte length.
+fn limb_powers(bytes: usize, radix_bits: usize, weight: Element) -> Vec<Element> {
+    let mut power = ONE;
+    (0..(8 * bytes).div_ceil(radix_bits))
+        .map(|_| {
+            let current = power;
+            power = times(power, weight);
+            current
+        })
+        .collect()
+}
+// Sum of the limbs of a little-endian magnitude weighted by the powers of its
+// limb weight, each coordinate reduced once.
+fn fingerprint_with(bytes: &[u8], radix_bits: usize, powers: &[Element]) -> Element {
+    let mut sums = [Columns::ZERO; 3];
+    for (limb, power) in powers.iter().enumerate() {
+        let value = limb_value(bytes, limb, radix_bits);
+        for (sum, coordinate) in sums.iter_mut().zip(power) {
+            sum.add_product(value, *coordinate);
+        }
+    }
+    sums.map(Columns::reduce)
 }
 // Sum of the limbs of a little-endian magnitude weighted by powers of weight.
 fn fingerprint_in(bytes: &[u8], radix_bits: usize, weight: Element) -> Element {
@@ -95,6 +108,8 @@ pub struct PolynomialStream {
     half_modulus: Vec<u8>,
     alpha: Element,
     limb_weight: Element,
+    // The powers of the limb weight, one for each limb of a magnitude.
+    limb_powers: Vec<Element>,
     position_weight: Element,
     total: Element,
     coefficients: Vec<Element>,
@@ -138,13 +153,15 @@ impl PolynomialStream {
                 (modulus[index] >> 1) | ((modulus.get(index + 1).copied().unwrap_or(0) & 1) << 7)
             })
             .collect();
+        let limb_weight = power(alpha, degree);
         Ok(Self {
             degree,
             width: modulus.len() + 1,
             radix_bits,
             half_modulus,
             alpha,
-            limb_weight: power(alpha, degree),
+            limb_weight,
+            limb_powers: limb_powers(modulus.len(), radix_bits, limb_weight),
             position_weight: ONE,
             total: ZERO,
             coefficients: if retain_coefficients {
@@ -173,7 +190,7 @@ impl PolynomialStream {
         {
             return Err(Error::Encoding);
         }
-        let result = fingerprint_in(magnitude, self.radix_bits, self.limb_weight);
+        let result = fingerprint_with(magnitude, self.radix_bits, &self.limb_powers);
         Ok(if negative {
             minus(ZERO, result)
         } else {
@@ -301,6 +318,19 @@ mod tests {
             [(1 << 95) + 5 + 3 * 16, 0, 0]
         );
         assert_eq!(fingerprint_in(&bytes, 95, weight), [5 + 3 * 33, 0, 0]);
+        // Precomputed powers give the same fingerprint for an extension
+        // weight, including a magnitude with every limb bit set.
+        let weight = [17, MODULUS - 5, 1 << 90];
+        for (bytes, radix_bits) in [(&bytes[..], 96), (&bytes[..], 17), (&[0xff; 73][..], 64)] {
+            assert_eq!(
+                fingerprint_with(
+                    bytes,
+                    radix_bits,
+                    &limb_powers(bytes.len(), radix_bits, weight)
+                ),
+                fingerprint_in(bytes, radix_bits, weight)
+            );
+        }
         assert_eq!(limb_value(&[0xff; 20], 1, 95), (1 << 65) - 1);
     }
 

@@ -1,4 +1,7 @@
+// The shared proof-field module also carries the extension product, which
+// the convolution does not use.
 #[path = "../../setup-stream-kernel/src/arithmetic.rs"]
+#[allow(dead_code)]
 mod field;
 use field::{MODULUS, add, multiply, power, subtract};
 use num_bigint::BigInt;

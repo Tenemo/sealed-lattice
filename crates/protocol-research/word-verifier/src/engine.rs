@@ -79,18 +79,7 @@ fn scale(value: Element, factor: u128) -> Element {
     value.map(|entry| multiply_base(entry, factor))
 }
 fn multiply(left: Element, right: Element) -> Element {
-    let mut result = ZERO;
-    for (first, a) in left.iter().enumerate() {
-        for (second, b) in right.iter().enumerate() {
-            let mut value = multiply_base(*a, *b);
-            if first + second >= 3 {
-                value = add_base(value, value);
-            }
-            let index = (first + second) % 3;
-            result[index] = add_base(result[index], value);
-        }
-    }
-    result
+    crate::arithmetic::multiply_extension(left, right)
 }
 fn encode(value: Element) -> [u8; 48] {
     let mut bytes = [0; 48];
