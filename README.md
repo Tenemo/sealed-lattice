@@ -19,7 +19,7 @@ The [security policy](SECURITY.md#intended-security-model) summarizes the advers
 
 The candidate construction combines exact threshold homomorphic encryption from a dealerless fixed-roster setup, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. A conditional composed argument covers setup, proofs, closing, and release under stated lattice and signature assumptions, but it has no independent review, so the composition is not established, and every run so far is development evidence rather than qualification.
 
-The application and library must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or a bypass around certified target-bound result release. Any future result-related interface may return only positively verified protocol capabilities and the authorized terminal result.
+The application and library must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or a bypass around certified target-bound result release. Every result-related interface returns only positively verified protocol capabilities and the authorized terminal result.
 
 ## Current implementation boundary
 
