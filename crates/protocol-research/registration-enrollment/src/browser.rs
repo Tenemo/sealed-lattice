@@ -775,7 +775,15 @@ pub extern "C" fn contribution_checkpoint_key(position: usize, length: usize) ->
 pub extern "C" fn retain_proposal(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if !(136..=INPUT_BYTES).contains(&length)
+        // The proposal names the poll and runtime of this instance's verified
+        // registration, whose poll fixes the option count.
+        let (Some(verified), Some(options)) = (
+            crate::own_verification::verified(),
+            crate::own_verification::verified_option_count(),
+        ) else {
+            return 1;
+        };
+        if !(134..=INPUT_BYTES).contains(&length)
             || state.retained_context.is_some()
             || state.signed_proposal.is_some()
             || state.contribution.body_started()
@@ -784,18 +792,20 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
             return 1;
         }
         let input = &state.input[..length];
-        let body_length = u32::from_le_bytes(input[132..136].try_into().unwrap()) as usize;
-        if body_length > 2048 || length != 136 + body_length {
+        let body_length = u32::from_le_bytes(input[130..134].try_into().unwrap()) as usize;
+        if body_length > 2048
+            || length != 134 + body_length
+            || input[..64] != verified.header().poll
+            || input[64..128] != verified.header().runtime
+        {
             return 1;
         }
-        // The option count is the original poll's; the ballot owner check
-        // compares it with the verified poll.
         let Ok(context) = RetainedContributionContext::parse(
             input[..64].try_into().unwrap(),
             input[64..128].try_into().unwrap(),
-            u16::from_le_bytes(input[130..132].try_into().unwrap()) as usize,
+            options,
             u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize,
-            &input[136..],
+            &input[134..],
         ) else {
             return 1;
         };

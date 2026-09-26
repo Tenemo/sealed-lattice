@@ -1461,7 +1461,6 @@ export const resumeContribution = async (
             root.manifest.poll,
             context.runtime,
             unsigned16(state.position),
-            unsigned16(descriptor.optionCount),
             unsigned32(proposal.length),
             proposal,
         );

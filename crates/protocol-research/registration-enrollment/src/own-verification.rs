@@ -13,6 +13,9 @@ const CONTROL_BYTES: usize =
 struct State {
     input: Vec<u8>,
     pending: Option<RegistrationVerifier>,
+    // The option count of the poll that the pending or verified registration
+    // names; no later input can replace it.
+    options: usize,
     verified: Option<Arc<VerifiedRegistration>>,
 }
 impl State {
@@ -20,6 +23,7 @@ impl State {
         Self {
             input: vec![0; CONTROL_BYTES],
             pending: None,
+            options: 0,
             verified: None,
         }
     }
@@ -53,6 +57,7 @@ impl State {
             &bytes[header_start..header_start + header_bytes],
             &bytes[header_start + header_bytes..],
         )?);
+        self.options = poll.manifest().option_count();
         Ok(())
     }
     fn command(&mut self, operation: u32, length: usize) -> Result<(), Error> {
@@ -92,6 +97,14 @@ thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
 
 pub(super) fn verified() -> Option<Arc<VerifiedRegistration>> {
     STATE.with(|state| state.borrow().verified.clone())
+}
+
+/// The option count of the poll this instance verified the registration of.
+pub(super) fn verified_option_count() -> Option<usize> {
+    STATE.with(|state| {
+        let state = state.borrow();
+        state.verified.as_ref().map(|_| state.options)
+    })
 }
 
 #[unsafe(no_mangle)]
