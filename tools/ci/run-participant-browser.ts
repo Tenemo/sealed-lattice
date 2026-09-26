@@ -17,11 +17,11 @@ import { freemem } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
+import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import { completedClosePhase } from '#tools/ci/participant-runtime/close-state.js';
-import { targetPhase } from '#tools/ci/participant-runtime/target-state.js';
-import type { WorkerResult } from '#tools/ci/participant-runtime/worker.js';
 import {
     assembleParticipantRuntime,
     deriveParticipantDescriptor,

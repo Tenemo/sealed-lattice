@@ -1,6 +1,5 @@
-import type { ParticipantIdentities } from '../protocol-participant-predecessor.js';
-
 import type { ParticipantKernel } from './kernel.js';
+import type { ParticipantIdentities } from './predecessor.js';
 
 // The purposes whose identities the participant module derives, each under
 // its own domain. The target and envelope purposes yield the certified

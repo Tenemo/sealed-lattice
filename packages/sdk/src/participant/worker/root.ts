@@ -1,7 +1,3 @@
-import { validateParticipantPredecessor } from '../protocol-participant-predecessor.js';
-import type { ParticipantStoredRecord } from '../protocol-participant-predecessor.js';
-import { commitParticipantState } from '../protocol-participant-state-transaction.js';
-
 import {
     concatenate,
     encodeText,
@@ -18,6 +14,9 @@ import {
     custodyIdentity,
     custodyPurpose,
 } from './identity.js';
+import type { ParticipantStoredRecord } from './predecessor.js';
+import { validateParticipantPredecessor } from './predecessor.js';
+import { commitParticipantState } from './state-transaction.js';
 import {
     isParticipantHead,
     isRootKey,

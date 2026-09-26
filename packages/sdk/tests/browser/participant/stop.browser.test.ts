@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { stopParticipant } from '#tools/ci/protocol-participant-stop.js';
+import { stopParticipant } from '#packages/sdk/src/participant/worker/stop.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];

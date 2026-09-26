@@ -1,6 +1,3 @@
-import { validateParticipantPredecessor } from '../protocol-participant-predecessor.js';
-import { commitParticipantState } from '../protocol-participant-state-transaction.js';
-
 import {
     concatenate,
     encodeText,
@@ -18,6 +15,7 @@ import {
     custodyPurpose,
 } from './identity.js';
 import { readKernel } from './kernel.js';
+import { validateParticipantPredecessor } from './predecessor.js';
 import {
     authenticateRoot,
     chunkBytes,
@@ -31,6 +29,7 @@ import {
     sealRoot,
 } from './root.js';
 import type { AuthenticatedRoot, RecordReference } from './root.js';
+import { commitParticipantState } from './state-transaction.js';
 import {
     participantRecordStores,
     participantStores,

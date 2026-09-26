@@ -7,11 +7,11 @@ import {
     collectingCloseState,
     decodeCloseState,
     encodeCloseState,
-} from '#tools/ci/participant-runtime/close-state.js';
+} from '#packages/sdk/src/participant/worker/close-state.js';
 import type {
     CloseEvent,
     CloseState,
-} from '#tools/ci/participant-runtime/close-state.js';
+} from '#packages/sdk/src/participant/worker/close-state.js';
 import { deriveParticipantDescriptor } from '#tools/ci/participant-runtime-assembly.js';
 
 const descriptor = deriveParticipantDescriptor(3, 2);

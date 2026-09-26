@@ -1,5 +1,3 @@
-import type { ParticipantStoredRecord } from '../protocol-participant-predecessor.js';
-
 import {
     concatenate,
     encodeText,
@@ -19,6 +17,7 @@ import {
     writeContributionSeed,
     writeProofInput,
 } from './kernel.js';
+import type { ParticipantStoredRecord } from './predecessor.js';
 import { publishChunk, publishRecord, readPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {

@@ -1,5 +1,3 @@
-import type { ParticipantStoredRecord } from '../protocol-participant-predecessor.js';
-
 import {
     concatenate,
     encodeText,
@@ -10,6 +8,7 @@ import {
     unsigned32,
 } from './bytes.js';
 import type { ParticipantDescriptor } from './descriptor.js';
+import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
 

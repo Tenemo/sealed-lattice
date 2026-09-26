@@ -1,4 +1,4 @@
-import type { ParticipantTransactionReader } from './protocol-participant-state-transaction.js';
+import type { ParticipantTransactionReader } from './state-transaction.js';
 
 export type ParticipantStoredRecord = Readonly<{
     store: string;

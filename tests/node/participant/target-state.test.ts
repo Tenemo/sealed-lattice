@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
-import { completedClosePhase } from '#tools/ci/participant-runtime/close-state.js';
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import {
     decodeTargetState,
     encodeTargetState,
     targetPhase,
-} from '#tools/ci/participant-runtime/target-state.js';
+} from '#packages/sdk/src/participant/worker/target-state.js';
+import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 import { deriveParticipantDescriptor } from '#tools/ci/participant-runtime-assembly.js';
 
 const descriptor = deriveParticipantDescriptor(3, 2);

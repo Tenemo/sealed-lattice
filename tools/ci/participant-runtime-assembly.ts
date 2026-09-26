@@ -7,6 +7,7 @@ import path from 'node:path';
 import binaryen from 'binaryen';
 import { build } from 'tsdown';
 
+import type { ParticipantDescriptor } from '#packages/sdk/src/participant/worker/descriptor.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
@@ -29,7 +30,6 @@ import {
 } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
-import type { ParticipantDescriptor } from '#tools/ci/participant-runtime/descriptor.js';
 import { runCommandAndCaptureOutput } from '#tools/ci/run-command.js';
 
 // The participant module's linear memory never exceeds the absolute bound.
@@ -37,7 +37,7 @@ const maximumMemoryBytes = 671_088_640;
 const rustflagSeparator = '\x1f';
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
-const runtimeSources = path.join(root, 'tools/ci/participant-runtime');
+const runtimeSources = path.join(root, 'packages/sdk/src/participant/worker');
 
 const number = (value: bigint) => {
     const converted = Number(value);
@@ -414,7 +414,7 @@ export const assembleParticipantRuntime = async (
         sourcemap: false,
         target: 'es2022',
         treeshake: true,
-        tsconfig: path.join(root, 'tsconfig.tools.json'),
+        tsconfig: path.join(root, 'packages/sdk/tsconfig.json'),
     });
     const outputs = (await readdir(bundle)).filter((name) =>
         /\.m?js$/u.test(name),
@@ -424,12 +424,7 @@ export const assembleParticipantRuntime = async (
     const files: { file: string; sha512: string; bytes: number }[] = [];
     await snapshotSources(runLog, workspace, files);
     await snapshotSources(runLog, runtimeSources, files);
-    for (const file of [
-        'tools/ci/participant-runtime-assembly.ts',
-        'tools/ci/protocol-participant-predecessor.ts',
-        'tools/ci/protocol-participant-state-transaction.ts',
-        'tools/ci/protocol-participant-stop.ts',
-    ]) {
+    for (const file of ['tools/ci/participant-runtime-assembly.ts']) {
         const bytes = await readFile(path.join(root, file));
         const destination = path.join(runLog.runDirectoryPath, 'sources', file);
         await mkdir(path.dirname(destination), { recursive: true });

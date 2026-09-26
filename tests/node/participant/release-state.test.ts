@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
-import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-import { completedClosePhase } from '#tools/ci/participant-runtime/close-state.js';
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import {
     decodeReleaseState,
     encodeReleaseState,
@@ -10,9 +8,11 @@ import {
     releaseRecordInventory,
     releaseRecordKind,
     releaseRecordLengths,
-} from '#tools/ci/participant-runtime/release-state.js';
-import type { ReleaseState } from '#tools/ci/participant-runtime/release-state.js';
-import { targetPhase } from '#tools/ci/participant-runtime/target-state.js';
+} from '#packages/sdk/src/participant/worker/release-state.js';
+import type { ReleaseState } from '#packages/sdk/src/participant/worker/release-state.js';
+import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
+import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { deriveParticipantDescriptor } from '#tools/ci/participant-runtime-assembly.js';
 
 const descriptor = deriveParticipantDescriptor(3, 2);

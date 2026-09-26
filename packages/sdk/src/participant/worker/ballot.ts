@@ -1,5 +1,3 @@
-import type { ParticipantStoredRecord } from '../protocol-participant-predecessor.js';
-
 import {
     concatenate,
     encodeText,
@@ -21,6 +19,7 @@ import type { ParticipantDescriptor } from './descriptor.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel } from './kernel.js';
 import type { KernelHandlers } from './kernel.js';
+import type { ParticipantStoredRecord } from './predecessor.js';
 import { publishChunk, publishRecord } from './public.js';
 import type { PublicRelay } from './public.js';
 import {

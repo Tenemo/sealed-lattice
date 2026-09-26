@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     commitParticipantState,
     type ParticipantTransactionReader,
-} from '#tools/ci/protocol-participant-state-transaction.js';
+} from '#packages/sdk/src/participant/worker/state-transaction.js';
 
 const databases: IDBDatabase[] = [];
 const stores = ['head', 'root', 'key', 'records'];

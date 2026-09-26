@@ -1,5 +1,3 @@
-import { stopParticipant } from '../protocol-participant-stop.js';
-
 import {
     beginBallot,
     completeBallot,
@@ -70,6 +68,7 @@ import {
     signRoster,
 } from './roster.js';
 import { retainSetup, reverifySetup, verifySetup } from './setup.js';
+import { stopParticipant } from './stop.js';
 import { openParticipantDatabase } from './storage.js';
 import { targetPhase } from './target-state.js';
 import { publishTarget, signTarget } from './target.js';

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ParticipantKernel } from '#tools/ci/participant-runtime/kernel.js';
-import { journalRandomness } from '#tools/ci/participant-runtime/release.js';
+import type { ParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
+import { journalRandomness } from '#packages/sdk/src/participant/worker/release.js';
 
 // A module memory whose entropy queue serves a fixed journal once, in order.
 const journalKernel = (journal: Uint8Array) => {
