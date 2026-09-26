@@ -878,4 +878,107 @@ describe('public archive through the real scalar kernel and local storage hosts'
         ).rejects.toThrow('Invalid archive host limits');
         await rm(directory, { recursive: true });
     });
+
+    it('sends a record only to replicas that lack it and acknowledges a closure they hold', async () => {
+        const directory = await mkdtemp(
+            path.resolve('temp/public-archive-store-'),
+        );
+        const hosts = await Promise.all(
+            keys.slice(0, 2).map((privateKey, replicaPosition) =>
+                startPublicArchiveReplica({
+                    directory: path.join(directory, String(replicaPosition)),
+                    context,
+                    policy,
+                    replicaPosition,
+                    privateKey,
+                    runtime,
+                    maximumRecords: 4,
+                    maximumTotalBytes: 4096,
+                    maximumStoredRecords: 4,
+                    maximumStoredBytes: 4096,
+                }),
+            ),
+        );
+        // The third replica reports the records it is told it holds and
+        // refuses every upload, retention and read.
+        const held = new Map<string, number>();
+        const methods: string[] = [];
+        const holding = createServer((request, response) => {
+            methods.push(request.method ?? '');
+            const length = held.get((request.url ?? '').split('/').pop() ?? '');
+            if (request.method !== 'HEAD') response.writeHead(405).end();
+            else if (length === undefined) response.writeHead(404).end();
+            else response.writeHead(200, { 'Content-Length': length }).end();
+        });
+        await new Promise<void>((resolve) => {
+            holding.listen(0, '127.0.0.1', resolve);
+        });
+        const address = holding.address();
+        if (address === null || typeof address === 'string')
+            throw new Error('Holding fixture has no address.');
+        try {
+            const archive = await createPublicArchive({
+                context,
+                faultBound: 1,
+                replicas: [
+                    ...hosts.map((host, index) => ({
+                        baseUrl: host.baseUrl,
+                        verificationKey: policy.verificationKeys[index],
+                    })),
+                    {
+                        baseUrl: `http://127.0.0.1:${String(address.port)}/`,
+                        verificationKey: policy.verificationKeys[2],
+                    },
+                ],
+                maximumRecords: 4,
+                maximumTotalBytes: 4096,
+            });
+            const leaf = archive.encodeRecord(
+                'ballot-envelope',
+                [],
+                Uint8Array.of(7),
+            );
+            const root = archive.encodeRecord(
+                'ballot-submission',
+                [leaf.reference],
+                new Uint8Array(),
+            );
+            // No replica holds the closure, so none acknowledges it.
+            await expect(archive.retain(root.reference)).rejects.toThrow();
+            held.set(leaf.reference.identity, leaf.reference.byteLength);
+            methods.length = 0;
+            expect(await archive.store(leaf)).toEqual([0, 1, 2]);
+            expect(methods).toEqual(['HEAD']);
+            expect(await archive.store(root)).toEqual([0, 1]);
+            expect([...(await archive.retain(root.reference))].sort()).toEqual([
+                0, 1,
+            ]);
+            expect((await archive.fetch(root.reference)).bytes).toEqual(
+                root.bytes,
+            );
+            // Bytes that fail their own reference are never sent.
+            methods.length = 0;
+            await expect(
+                archive.store({ reference: leaf.reference, bytes: root.bytes }),
+            ).rejects.toThrow();
+            expect(methods).toEqual([]);
+            // One remaining replica is not more than the fault bound.
+            await hosts[1].close();
+            await expect(
+                archive.store(
+                    archive.encodeRecord(
+                        'ballot-envelope',
+                        [],
+                        Uint8Array.of(8),
+                    ),
+                ),
+            ).rejects.toThrow('Too few archive replicas');
+        } finally {
+            for (const host of hosts) await host.close();
+            await new Promise<void>((resolve) => {
+                holding.close(() => resolve());
+            });
+        }
+        await rm(directory, { recursive: true });
+    });
 });

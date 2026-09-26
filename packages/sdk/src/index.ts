@@ -13,6 +13,10 @@ import {
 } from '@sealed-lattice/wasm';
 
 import {
+    foundationKernelSha256,
+    foundationKernelUrl,
+} from './foundation-kernel.js';
+import {
     foundationManifestInputFromPollSpec,
     type PollSpec,
     type PollSpecValidation,
@@ -33,6 +37,7 @@ export type {
 export { openParticipant } from './participant/participant.js';
 export type {
     Participant,
+    ParticipantArchive,
     ParticipantEnrollment,
     ParticipantOptions,
     ParticipantRequest,
@@ -40,17 +45,9 @@ export type {
     ParticipantSummary,
 } from './participant/participant.js';
 
-const foundationKernelUrl = new URL(
-    './sealed-lattice-kernel.wasm',
-    import.meta.url,
-);
-declare const __SEALED_LATTICE_KERNEL_SHA256_HEX__: string | undefined;
 const loadFoundationCeremonyRuntime: () => Promise<FoundationCeremonyRuntime> =
     createFoundationCeremonyRuntimeLoader(foundationKernelUrl, {
-        expectedKernelSha256Hex:
-            typeof __SEALED_LATTICE_KERNEL_SHA256_HEX__ === 'undefined'
-                ? undefined
-                : __SEALED_LATTICE_KERNEL_SHA256_HEX__,
+        expectedKernelSha256Hex: foundationKernelSha256,
     });
 
 /** Public-byte custody and retrieval only; this does not authorize a poll transition. */

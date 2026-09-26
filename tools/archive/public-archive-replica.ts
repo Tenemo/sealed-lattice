@@ -190,6 +190,21 @@ export const startPublicArchiveReplica = async (
     const server = createServer((request, response) => {
         const work = async (): Promise<void> => {
             try {
+                // Browser participants store and read records from other
+                // origins; every record is public and no request carries
+                // credentials.
+                response.setHeader('Access-Control-Allow-Origin', '*');
+                if (request.method === 'OPTIONS') {
+                    response
+                        .writeHead(204, {
+                            'Access-Control-Allow-Methods':
+                                'GET, HEAD, PUT, POST',
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Max-Age': '600',
+                        })
+                        .end();
+                    return;
+                }
                 const url = request.url ?? '';
                 const recordMatch = /^\/records\/([a-f0-9]{128})$/u.exec(url);
                 const discoveryMatch = new RegExp(
@@ -244,6 +259,15 @@ export const startPublicArchiveReplica = async (
                             'Content-Length': bytes.byteLength,
                         })
                         .end(bytes);
+                } else if (recordMatch !== null && request.method === 'HEAD') {
+                    // Whether the host stores the record, so that a publisher
+                    // sends only what it lacks; retention checks it again.
+                    const length = storedLengths.get(recordMatch[1]);
+                    if (length === undefined) response.writeHead(404).end();
+                    else
+                        response
+                            .writeHead(200, { 'Content-Length': length })
+                            .end();
                 } else if (url === '/retain' && request.method === 'POST') {
                     const value: unknown = JSON.parse(
                         new TextDecoder('utf-8', { fatal: true }).decode(

@@ -1,3 +1,11 @@
+import type { ArchiveReference } from '@sealed-lattice/wasm';
+
+import {
+    foundationKernelSha256,
+    foundationKernelUrl,
+} from '../foundation-kernel.js';
+
+import { hexadecimal } from './worker/bytes.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
 
@@ -29,11 +37,30 @@ export type ParticipantOptions = Readonly<{
      */
     namespace: string;
     /**
-     * The relay's absolute HTTP or HTTPS base URL, without a query or
-     * fragment. It serves each public record at `public/<name>` and accepts
-     * its publication at `publish/<name>?offset=<offset>`.
+     * The relay's absolute HTTP or HTTPS base URL, without credentials, a
+     * query or a fragment. It serves each public record at `public/<name>`
+     * and accepts its publication at `publish/<name>?offset=<offset>`.
      */
     relay: string;
+    /**
+     * The archive replicas that retain the poll's transcript once a
+     * participant archives its verified result, with the fault bound `b`
+     * the application trusts: at least `2b + 1` and at most 32 replicas.
+     */
+    archive?: ParticipantArchive;
+}>;
+
+export type ParticipantArchive = Readonly<{
+    faultBound: number;
+    replicas: readonly Readonly<{
+        /**
+         * An HTTPS URL, or HTTP on a loopback address, without credentials, a
+         * query or a fragment.
+         */
+        baseUrl: string;
+        /** The replica's raw ML-DSA-65 verification key. */
+        verificationKey: Uint8Array;
+    }>[];
 }>;
 
 /** Creates a poll as its organizer, or joins a poll from its signed definition. Bytes are lower-case hexadecimal. */
@@ -88,8 +115,17 @@ export type ParticipantRequest = Readonly<
               | 'verify-setup'
               | 'target'
               | 'release'
-              | 'result';
+              | 'archive'
+              | 'transcripts';
           parameters?: PollBinding;
+      }
+    | {
+          operation: 'result';
+          parameters?: PollBinding &
+              Readonly<{
+                  /** An archived transcript's index to read instead of the relay. */
+                  transcript?: ArchiveReference;
+              }>;
       }
 >;
 
@@ -152,9 +188,30 @@ const runWorker = (
         worker.postMessage(command);
     });
 
+// A base URL is absolute HTTP or HTTPS without credentials, a query or a
+// fragment, and its path ends with a slash so that every name extends it.
+const baseUrl = (value: unknown) => {
+    const url =
+        typeof value === 'string' && URL.canParse(value)
+            ? new URL(value)
+            : undefined;
+    if (
+        url === undefined ||
+        (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+        url.username !== '' ||
+        url.password !== '' ||
+        url.search !== '' ||
+        url.hash !== ''
+    )
+        return undefined;
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    return url;
+};
+
 /**
- * Opens the participant whose local state the namespace names. The relay is
- * untrusted: the participant verifies every record it reads.
+ * Opens the participant whose local state the namespace names. The relay and
+ * the archive replicas are untrusted: the participant verifies every record
+ * it reads.
  */
 export const openParticipant = (options: ParticipantOptions): Participant => {
     const runtime =
@@ -173,28 +230,68 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
         throw new TypeError(
             'A participant namespace has 1 to 64 lower-case letters, digits and inner hyphens.',
         );
-    const relay = URL.canParse(options.relay)
-        ? new URL(options.relay)
-        : undefined;
+    const relay = baseUrl(options.relay)?.href;
+    if (relay === undefined)
+        throw new TypeError(
+            'The relay is an absolute HTTP or HTTPS URL without credentials, a query or a fragment.',
+        );
+    const archive = options.archive;
+    const kernelSha256 = foundationKernelSha256;
+    if (archive !== undefined && kernelSha256 === undefined)
+        throw new Error(
+            'Build the SDK through its package script so the foundation kernel is pinned.',
+        );
+    // The archive client accepts HTTP only on a loopback address.
+    const replicas = archive?.replicas.map((replica) => {
+        const url = baseUrl(replica.baseUrl);
+        if (
+            url === undefined ||
+            (url.protocol === 'http:' &&
+                url.hostname !== '127.0.0.1' &&
+                url.hostname !== 'localhost') ||
+            !(replica.verificationKey instanceof Uint8Array) ||
+            replica.verificationKey.length !== 1952
+        )
+            throw new TypeError(
+                'An archive replica has an HTTPS or loopback HTTP base URL without credentials, a query or a fragment, and an ML-DSA-65 verification key.',
+            );
+        return {
+            baseUrl: url.href,
+            verificationKey: hexadecimal(replica.verificationKey),
+        };
+    });
     if (
-        relay === undefined ||
-        (relay.protocol !== 'https:' && relay.protocol !== 'http:') ||
-        relay.search !== '' ||
-        relay.hash !== ''
+        archive !== undefined &&
+        (!Number.isSafeInteger(archive.faultBound) ||
+            archive.faultBound < 0 ||
+            replicas === undefined ||
+            replicas.length < 2 * archive.faultBound + 1 ||
+            replicas.length > 32 ||
+            new Set(replicas.map((replica) => replica.baseUrl)).size !==
+                replicas.length)
     )
         throw new TypeError(
-            'The relay is an absolute HTTP or HTTPS URL without a query or fragment.',
+            'An archive has 2b + 1 to 32 distinct replicas for its fault bound b.',
         );
-    if (!relay.pathname.endsWith('/')) relay.pathname += '/';
     return {
         run: (request) =>
             runWorker(runtime.worker, {
                 operation: request.operation,
                 parameters: request.parameters ?? {},
                 namespace,
-                relay: relay.href,
+                relay,
                 module: participantModuleUrl.href,
                 identity: runtime.identity,
+                ...(archive === undefined
+                    ? {}
+                    : {
+                          archive: {
+                              faultBound: archive.faultBound,
+                              replicas,
+                              kernel: foundationKernelUrl.href,
+                              kernelSha256,
+                          },
+                      }),
             }),
     };
 };

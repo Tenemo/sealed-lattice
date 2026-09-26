@@ -444,3 +444,62 @@ export const readTranscript = async (
     }
     return { routes, targetBody };
 };
+
+/**
+ * Opens an authenticated index for reading its files by route. The index,
+ * every part and every file record come from the replicas one record at a
+ * time, and each file's chunks when the file is read.
+ */
+export const openTranscript = async (
+    archive: PublicArchive,
+    index: ArchiveReference,
+    signal?: AbortSignal,
+) => {
+    const { parts, targetBody } = readTranscriptIndex(
+        archive,
+        index,
+        (await archive.fetch(index, signal)).bytes,
+    );
+    const files = new Map<
+        string,
+        Readonly<{ length: bigint; chunks: readonly ArchiveReference[] }>
+    >();
+    let previous: string | undefined;
+    for (const [position, reference] of parts.entries()) {
+        const { record: part } = await archive.fetch(reference, signal);
+        checkPart(part, position);
+        for (const fileReference of part.dependencies) {
+            const { record: file } = await archive.fetch(fileReference, signal);
+            const { route, length } = readFileRecord(file);
+            if (previous !== undefined && byRoute(previous, route) >= 0)
+                throw new TypeError(
+                    'Transcript routes are not in ascending order.',
+                );
+            previous = route;
+            files.set(route, { length, chunks: file.dependencies });
+        }
+    }
+    return {
+        targetBody,
+        /** The length a file declares, or nothing when no file has the route. */
+        length: (route: string) => files.get(route)?.length,
+        /** Passes one file's chunks in order and returns its length. */
+        read: async (
+            route: string,
+            accept: (bytes: Uint8Array) => void | Promise<void>,
+        ) => {
+            const file = files.get(route);
+            if (file === undefined)
+                throw new RangeError('The transcript has no such file.');
+            for (const [position, reference] of file.chunks.entries()) {
+                const { record: chunk } = await archive.fetch(
+                    reference,
+                    signal,
+                );
+                checkChunk(chunk, file.length, file.chunks.length, position);
+                await accept(chunk.payload);
+            }
+            return file.length;
+        },
+    };
+};

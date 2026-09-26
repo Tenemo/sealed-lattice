@@ -47,6 +47,25 @@ export type PublicArchive = Readonly<{
         destination: PublicArchiveStore,
         signal?: AbortSignal,
     ): Promise<Readonly<{ recordCount: number; byteLength: number }>>;
+    /** One record from the first replica that serves its exact bytes. */
+    fetch(
+        reference: ArchiveReference,
+        signal?: AbortSignal,
+    ): Promise<Readonly<{ record: ArchiveRecord; bytes: Uint8Array }>>;
+    /**
+     * Sends one record to every replica that does not hold it and returns the
+     * positions that hold it, more than the fault bound. Holding a record is
+     * not retention: only an acknowledged root's closure is retained.
+     */
+    store(
+        record: Readonly<{ reference: ArchiveReference; bytes: Uint8Array }>,
+        signal?: AbortSignal,
+    ): Promise<readonly number[]>;
+    /** Acknowledgements for a root whose closure the replicas already hold. */
+    retain(
+        root: ArchiveReference,
+        signal?: AbortSignal,
+    ): Promise<readonly number[]>;
     /** Hints only: neither a complete inventory nor an absence or order claim. */
     discover(signal?: AbortSignal): AsyncIterable<readonly ArchiveReference[]>;
 }>;
@@ -213,6 +232,110 @@ export const openPublicArchive = (
         return { recordCount: lengths.size, byteLength };
     };
 
+    // Resolves with the authenticated positions once more than the fault
+    // bound acknowledge the root, without waiting for an unavailable replica
+    // after that. Each attempt first makes its replica hold the closure.
+    const acknowledge = (
+        root: ArchiveReference,
+        prepare: (position: number, signal: AbortSignal) => Promise<void>,
+        signal?: AbortSignal,
+    ): Promise<readonly number[]> => {
+        const controller = new AbortController();
+        const combined =
+            signal === undefined
+                ? controller.signal
+                : AbortSignal.any([signal, controller.signal]);
+        const attempt = async (
+            position: number,
+        ): Promise<ArchiveAcknowledgement> => {
+            await prepare(position, combined);
+            const response = await fetch(endpoint(position, 'retain'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ context, root }),
+                signal: combined,
+                credentials: 'omit',
+                redirect: 'error',
+            });
+            return {
+                replicaPosition: position,
+                signature: await readResponse(response, 3309),
+            };
+        };
+        const acknowledgements: ArchiveAcknowledgement[] = [];
+        const failures: unknown[] = [];
+        return new Promise<readonly number[]>((resolve, reject) => {
+            let settled = 0;
+            for (let position = 0; position < replicas.length; position++) {
+                void attempt(position)
+                    .then((acknowledgement) => {
+                        acknowledgements.push(acknowledgement);
+                        try {
+                            resolve(
+                                runtime.authenticateArchiveAcknowledgements(
+                                    policy,
+                                    context,
+                                    root,
+                                    acknowledgements,
+                                ),
+                            );
+                        } catch (error) {
+                            if (
+                                !(error instanceof FoundationKernelCommandError)
+                            )
+                                throw error;
+                        }
+                    })
+                    .catch((error: unknown) => {
+                        failures.push(error);
+                    })
+                    .finally(() => {
+                        settled++;
+                        if (settled === replicas.length)
+                            reject(
+                                (failures[0] instanceof Error
+                                    ? failures[0]
+                                    : undefined) ??
+                                    new Error(
+                                        'Insufficient authenticated archive acknowledgements.',
+                                    ),
+                            );
+                    });
+            }
+        }).finally(() => controller.abort());
+    };
+    const fetchRecord = async (
+        reference: ArchiveReference,
+        signal?: AbortSignal,
+    ): Promise<{ record: ArchiveRecord; bytes: Uint8Array }> => {
+        const controller = new AbortController();
+        const combined =
+            signal === undefined
+                ? controller.signal
+                : AbortSignal.any([signal, controller.signal]);
+        try {
+            return await firstSuccessful(
+                replicas.map(async (_replica, position) => {
+                    const response = await fetch(
+                        endpoint(position, 'records/' + reference.identity),
+                        {
+                            signal: combined,
+                            credentials: 'omit',
+                            redirect: 'error',
+                        },
+                    );
+                    const bytes = await readResponse(
+                        response,
+                        reference.byteLength,
+                    );
+                    return { bytes, record: checked(reference, bytes) };
+                }),
+            );
+        } finally {
+            controller.abort();
+        }
+    };
+
     return {
         encodeRecord: (purpose, dependencies, payload) =>
             runtime.encodeArchiveRecord({
@@ -222,102 +345,45 @@ export const openPublicArchive = (
                 payload,
             }),
         readRecord: checked,
-        publish: async (rootInput, source, signal) => {
+        publish: (rootInput, source, signal) => {
             const root = {
                 identity: rootInput.identity,
                 byteLength: rootInput.byteLength,
             };
-            const controller = new AbortController();
-            const combined =
-                signal === undefined
-                    ? controller.signal
-                    : AbortSignal.any([signal, controller.signal]);
-            const attempt = async (
-                position: number,
-            ): Promise<ArchiveAcknowledgement> => {
-                await walk(
-                    root,
-                    async (reference) => {
-                        const bytes = await source.get(reference.identity);
-                        if (bytes === undefined)
-                            throw new Error(
-                                'Required public archive source bytes are missing.',
+            // Every attempt transfers the complete closure to its replica.
+            return acknowledge(
+                root,
+                async (position, combined) => {
+                    await walk(
+                        root,
+                        async (reference) => {
+                            const bytes = await source.get(reference.identity);
+                            if (bytes === undefined)
+                                throw new Error(
+                                    'Required public archive source bytes are missing.',
+                                );
+                            const record = checked(reference, bytes);
+                            const response = await fetch(
+                                endpoint(
+                                    position,
+                                    'records/' + reference.identity,
+                                ),
+                                {
+                                    method: 'PUT',
+                                    body: Uint8Array.from(bytes),
+                                    signal: combined,
+                                    credentials: 'omit',
+                                    redirect: 'error',
+                                },
                             );
-                        const record = checked(reference, bytes);
-                        const response = await fetch(
-                            endpoint(position, 'records/' + reference.identity),
-                            {
-                                method: 'PUT',
-                                body: Uint8Array.from(bytes),
-                                signal: combined,
-                                credentials: 'omit',
-                                redirect: 'error',
-                            },
-                        );
-                        await readResponse(response, 0);
-                        return record;
-                    },
-                    combined,
-                );
-                const response = await fetch(endpoint(position, 'retain'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ context, root }),
-                    signal: combined,
-                    credentials: 'omit',
-                    redirect: 'error',
-                });
-                return {
-                    replicaPosition: position,
-                    signature: await readResponse(response, 3309),
-                };
-            };
-            // Do not wait for an unavailable replica after an authenticated
-            // quorum. Every attempt has its own complete-closure transfer.
-            const acknowledgements: ArchiveAcknowledgement[] = [];
-            const failures: unknown[] = [];
-            return await new Promise<readonly number[]>((resolve, reject) => {
-                let settled = 0;
-                for (let position = 0; position < replicas.length; position++) {
-                    void attempt(position)
-                        .then((acknowledgement) => {
-                            acknowledgements.push(acknowledgement);
-                            try {
-                                resolve(
-                                    runtime.authenticateArchiveAcknowledgements(
-                                        policy,
-                                        context,
-                                        root,
-                                        acknowledgements,
-                                    ),
-                                );
-                            } catch (error) {
-                                if (
-                                    !(
-                                        error instanceof
-                                        FoundationKernelCommandError
-                                    )
-                                )
-                                    throw error;
-                            }
-                        })
-                        .catch((error: unknown) => {
-                            failures.push(error);
-                        })
-                        .finally(() => {
-                            settled++;
-                            if (settled === replicas.length)
-                                reject(
-                                    (failures[0] instanceof Error
-                                        ? failures[0]
-                                        : undefined) ??
-                                        new Error(
-                                            'Insufficient authenticated archive acknowledgements.',
-                                        ),
-                                );
-                        });
-                }
-            }).finally(() => controller.abort());
+                            await readResponse(response, 0);
+                            return record;
+                        },
+                        combined,
+                    );
+                },
+                signal,
+            );
         },
         retrieve: async (root, destination, signal) =>
             walk(
@@ -335,46 +401,80 @@ export const openPublicArchive = (
                                 throw error;
                         }
                     }
-                    const controller = new AbortController();
-                    const combined =
-                        signal === undefined
-                            ? controller.signal
-                            : AbortSignal.any([signal, controller.signal]);
-                    try {
-                        const recovered = await firstSuccessful(
-                            replicas.map(async (_replica, position) => {
-                                const response = await fetch(
-                                    endpoint(
-                                        position,
-                                        'records/' + reference.identity,
-                                    ),
-                                    {
-                                        signal: combined,
-                                        credentials: 'omit',
-                                        redirect: 'error',
-                                    },
-                                );
-                                const bytes = await readResponse(
-                                    response,
-                                    reference.byteLength,
-                                );
-                                return {
-                                    bytes,
-                                    record: checked(reference, bytes),
-                                };
-                            }),
-                        );
-                        await destination.put(
-                            reference.identity,
-                            recovered.bytes,
-                        );
-                        return recovered.record;
-                    } finally {
-                        controller.abort();
-                    }
+                    const recovered = await fetchRecord(reference, signal);
+                    await destination.put(reference.identity, recovered.bytes);
+                    return recovered.record;
                 },
                 signal,
             ),
+        fetch: async (referenceInput, signal) => {
+            const reference = {
+                identity: referenceInput.identity,
+                byteLength: referenceInput.byteLength,
+            };
+            if (!isReference(reference))
+                throw new TypeError('Invalid archive reference.');
+            return fetchRecord(reference, signal);
+        },
+        store: async (value, signal) => {
+            const reference = {
+                identity: value.reference.identity,
+                byteLength: value.reference.byteLength,
+            };
+            checked(reference, value.bytes);
+            const held = await Promise.all(
+                replicas.map(async (_replica, position) => {
+                    const url = endpoint(
+                        position,
+                        'records/' + reference.identity,
+                    );
+                    try {
+                        const present = await fetch(url, {
+                            method: 'HEAD',
+                            signal,
+                            credentials: 'omit',
+                            redirect: 'error',
+                        });
+                        if (
+                            present.ok &&
+                            present.headers.get('Content-Length') ===
+                                String(reference.byteLength)
+                        )
+                            return true;
+                        await readResponse(
+                            await fetch(url, {
+                                method: 'PUT',
+                                body: Uint8Array.from(value.bytes),
+                                signal,
+                                credentials: 'omit',
+                                redirect: 'error',
+                            }),
+                            0,
+                        );
+                        return true;
+                    } catch (error) {
+                        signal?.throwIfAborted();
+                        if (!(error instanceof Error)) throw error;
+                        return false;
+                    }
+                }),
+            );
+            const positions = held.flatMap((holds, position) =>
+                holds ? [position] : [],
+            );
+            if (positions.length <= policy.faultBound)
+                throw new Error('Too few archive replicas hold the record.');
+            return positions;
+        },
+        retain: async (rootInput, signal) => {
+            const root = {
+                identity: rootInput.identity,
+                byteLength: rootInput.byteLength,
+            };
+            if (!isReference(root))
+                throw new TypeError('Invalid archive reference.');
+            return acknowledge(root, () => Promise.resolve(), signal);
+        },
         discover: async function* (signal) {
             const controller = new AbortController();
             const combined =

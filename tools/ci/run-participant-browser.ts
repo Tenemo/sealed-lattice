@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import {
     cp,
     mkdir,
@@ -16,13 +16,16 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { freemem } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { participantDatabaseName } from '#packages/sdk/src/participant/worker/storage.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
+import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
@@ -101,6 +104,10 @@ type Relay = Readonly<{
     // The halting client a participant's origin serves instead of the
     // runtime's page and worker while one is set.
     halting: Map<number, HaltingClient>;
+    // The archive every honest page configures once the replicas run.
+    archive: { configuration: string | undefined };
+    // Positions the relay serves no public record.
+    withheld: Set<number>;
 }>;
 
 // Records a participant may publish from its contribution before its signed
@@ -161,11 +168,30 @@ const participantDatabase = participantDatabaseName(participantNamespace);
 
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
-// beside the packaged module.
+// beside the packaged module and kernel, and names the archive once its
+// replicas run.
 const participantPage = `<!doctype html><meta charset="utf-8"><title>Participant</title><script type="module">
 import { openParticipant } from '/sdk/index.js';
-const participant = openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay: location.origin + '/' });
-window.runParticipant = (operation, parameters) => participant.run({ operation, parameters });
+const bytes = (value) => Uint8Array.from(value.match(/../g), (byte) => Number.parseInt(byte, 16));
+window.runParticipant = async (operation, parameters) => {
+    const response = await fetch('/archive.json', { cache: 'no-store' });
+    const archive = response.ok ? await response.json() : undefined;
+    return openParticipant({
+        namespace: ${JSON.stringify(participantNamespace)},
+        relay: location.origin + '/',
+        ...(archive === undefined
+            ? {}
+            : {
+                  archive: {
+                      faultBound: archive.faultBound,
+                      replicas: archive.replicas.map((replica) => ({
+                          baseUrl: replica.baseUrl,
+                          verificationKey: bytes(replica.verificationKey),
+                      })),
+                  },
+              }),
+    }).run({ operation, parameters });
+};
 </script>`;
 
 // A patched client's page checks the patched worker against the digest it
@@ -225,6 +251,8 @@ const startRelay = async (
     );
     const refused = new Set<string>();
     const earlyContributionRecords: string[] = [];
+    const archive: Relay['archive'] = { configuration: undefined };
+    const withheld = new Set<number>();
     const assets = (position: number) => {
         const client =
             corrupt?.position === position ? corrupt.client : undefined;
@@ -245,6 +273,10 @@ const startRelay = async (
                 '/sdk/participant.wasm',
                 { type: 'application/wasm', bytes: runtime.module },
             ],
+            [
+                '/sdk/sealed-lattice-kernel.wasm',
+                { type: 'application/wasm', bytes: runtime.kernel },
+            ],
             ...(client === undefined
                 ? []
                 : ([
@@ -263,6 +295,7 @@ const startRelay = async (
         origin: string,
         served: ReadonlyMap<string, Readonly<{ type: string; bytes: Buffer }>>,
         view: ReadonlyMap<string, ViewedRecord>,
+        servesPublic: boolean,
         request: IncomingMessage,
         response: ServerResponse,
     ) => {
@@ -277,8 +310,23 @@ const startRelay = async (
                 response.end(asset.bytes);
                 return;
             }
+            if (
+                url.pathname === '/archive.json' &&
+                archive.configuration !== undefined
+            ) {
+                response.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'no-store',
+                });
+                response.end(archive.configuration);
+                return;
+            }
             const name = url.pathname.slice('/public/'.length);
-            if (url.pathname.startsWith('/public/') && publicPath.test(name)) {
+            if (
+                servesPublic &&
+                url.pathname.startsWith('/public/') &&
+                publicPath.test(name)
+            ) {
                 const file = path.join(publicDirectory, name);
                 const viewed = view.get(name);
                 const bytes = !view.has(name)
@@ -387,6 +435,7 @@ const startRelay = async (
                           ],
                       ]),
                 views[position],
+                !withheld.has(position),
                 request,
                 response,
             ).catch(() => {
@@ -407,6 +456,8 @@ const startRelay = async (
         refused,
         earlyContributionRecords,
         halting,
+        archive,
+        withheld,
     };
 };
 
@@ -415,6 +466,9 @@ type ForeignPoll = Readonly<{
     run: string;
     poll: string;
     recordIds: readonly string[];
+    // The registration of the registrant its organizer left out of the
+    // roster, when the other poll's run records one.
+    leftOut: string | undefined;
     publicDirectory: string;
 }>;
 
@@ -445,6 +499,15 @@ const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
             ),
         'The foreign poll names a malformed poll or roster.',
     );
+    const leftOutDigest = (
+        result.leftOut as { bodyDigest?: unknown } | undefined
+    )?.bodyDigest;
+    assert.ok(
+        leftOutDigest === undefined ||
+            (typeof leftOutDigest === 'string' &&
+                identifierPattern.test(leftOutDigest)),
+        'The foreign poll names a malformed registrant left out of its roster.',
+    );
     const publicDirectory = path.join(directory, 'public');
     assert.ok(
         (await stat(publicDirectory)).isDirectory(),
@@ -454,6 +517,7 @@ const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
         run: path.relative(root, directory).split(path.sep).join('/'),
         poll,
         recordIds: recordIds.map(String),
+        leftOut: leftOutDigest,
         publicDirectory,
     };
 };
@@ -517,6 +581,10 @@ const foreignRecordView = async (
             registration === null
                 ? undefined
                 : foreign.recordIds.indexOf(registration[1]);
+        // The registrant the other poll's organizer left out of its roster
+        // has no roster position to take in this poll.
+        if (registration !== null && registration[1] === foreign.leftOut)
+            continue;
         assert.ok(
             position === undefined || position >= 0,
             'A foreign registration is not in its roster.',
@@ -2307,6 +2375,140 @@ await runWithLocalRunLog(
             const recovered = await run(voteProbe, 'result');
             assert.equal(recovered.encrypted, result.encrypted);
             assert.deepEqual(recovered.identifiers, result.identifiers);
+            // The combining participant archives the transcript of its
+            // verified outcome to three local replicas and a fourth that
+            // never answers, with fault bound one. After one of the three
+            // stops, the voter probe, served no public record by the relay,
+            // finds the transcript among the archive's hints and reaches the
+            // same outcome from the replicas alone.
+            const archiveKeys = Array.from(
+                { length: 4 },
+                () => generateKeyPairSync('ml-dsa-65').privateKey,
+            );
+            const archivePolicy = {
+                faultBound: 1,
+                verificationKeys: archiveKeys.map((key) =>
+                    createPublicKey(key)
+                        .export({ type: 'spki', format: 'der' })
+                        .subarray(-1952),
+                ),
+            };
+            const archiveRuntime = await createFoundationCeremonyRuntimeLoader(
+                pathToFileURL(
+                    path.join(
+                        root,
+                        'packages/sdk/dist/sealed-lattice-kernel.wasm',
+                    ),
+                ),
+                {
+                    expectedKernelSha256Hex: createHash('sha256')
+                        .update(runtime.kernel)
+                        .digest('hex'),
+                },
+            )();
+            const replicas: Awaited<
+                ReturnType<typeof startPublicArchiveReplica>
+            >[] = [];
+            const silentReplica = createServer(() => {
+                /* A replica that accepts connections and never answers. */
+            });
+            await new Promise<void>((resolve) => {
+                silentReplica.listen(0, '127.0.0.1', resolve);
+            });
+            const silentAddress = silentReplica.address();
+            assert.ok(
+                silentAddress !== null && typeof silentAddress === 'object',
+            );
+            const archiveContext = organizer.poll;
+            assert.ok(typeof archiveContext === 'string');
+            let archived: Record<string, unknown> | undefined;
+            let listed:
+                | readonly Readonly<{ identity: string; byteLength: number }>[]
+                | undefined;
+            try {
+                for (const [replicaPosition, privateKey] of archiveKeys
+                    .slice(0, 3)
+                    .entries())
+                    replicas.push(
+                        await startPublicArchiveReplica({
+                            directory: path.join(
+                                profileDirectory,
+                                'archive',
+                                String(replicaPosition),
+                            ),
+                            context: archiveContext,
+                            policy: archivePolicy,
+                            replicaPosition,
+                            privateKey,
+                            runtime: archiveRuntime,
+                            maximumRecords: 65_536,
+                            maximumTotalBytes: 4_294_967_291,
+                            maximumStoredRecords: 65_536,
+                            maximumStoredBytes: 4_294_967_291,
+                        }),
+                    );
+                relay.archive.configuration = JSON.stringify({
+                    faultBound: archivePolicy.faultBound,
+                    replicas: [
+                        ...replicas.map((replica) => replica.baseUrl),
+                        `http://127.0.0.1:${String(silentAddress.port)}/`,
+                    ].map((baseUrl, replicaPosition) => ({
+                        baseUrl,
+                        verificationKey:
+                            archivePolicy.verificationKeys[
+                                replicaPosition
+                            ].toString('hex'),
+                    })),
+                });
+                archived = await run(combiningPosition, 'archive');
+                assert.equal(archived.encrypted, result.encrypted);
+                assert.deepEqual(archived.identifiers, result.identifiers);
+                const transcript = archived.transcript as Readonly<{
+                    identity: string;
+                    byteLength: number;
+                }>;
+                await replicas[0].close();
+                relay.withheld.add(voteProbe);
+                try {
+                    await expectStatus(voteProbe, 'result', 'pending');
+                    listed = (await run(voteProbe, 'transcripts'))
+                        .transcripts as NonNullable<typeof listed>;
+                    assert.ok(
+                        listed.some(
+                            (index) => index.identity === transcript.identity,
+                        ),
+                    );
+                    // Every hint is tried until one verifies; a forged one
+                    // leaves the participant pending.
+                    let fromArchive: Record<string, unknown> | undefined;
+                    for (const index of listed) {
+                        const attempt = await request(voteProbe, 'result', {
+                            transcript: index,
+                        });
+                        if (attempt.status === 'completed') {
+                            fromArchive = attempt.details;
+                            break;
+                        }
+                        assert.equal(attempt.status, 'pending');
+                    }
+                    assert.ok(fromArchive !== undefined);
+                    assert.equal(fromArchive.encrypted, result.encrypted);
+                    assert.deepEqual(
+                        fromArchive.identifiers,
+                        result.identifiers,
+                    );
+                } finally {
+                    relay.withheld.delete(voteProbe);
+                }
+            } finally {
+                relay.archive.configuration = undefined;
+                for (const replica of replicas) await replica.close();
+                silentReplica.closeAllConnections();
+                await new Promise<void>((resolve) => {
+                    silentReplica.close(() => resolve());
+                });
+            }
+            assert.ok(archived !== undefined && listed !== undefined);
             // Altered retained state stops an honest participant at its next
             // visit, and the stop outlasts restoring the exact bytes. The
             // first byte of its first data record is flipped from its own
@@ -2366,6 +2568,7 @@ await runWithLocalRunLog(
                     : [
                           `Relay views that serve another poll's ${prose(foreignProbes.map(({ family }) => family))} under this poll's names leave a participant pending.`,
                       ]),
+                'The last remaining participant archives the transcript of its verified outcome to three local replicas and a fourth that never answers, with fault bound one; after one of the three stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Local replicas on one host are not independent fault domains.',
             ].join(' ');
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
@@ -2422,6 +2625,17 @@ await runWithLocalRunLog(
                         stopped: {
                             position: stoppedPosition,
                             record: alteredRecord,
+                        },
+                        archive: {
+                            archivist: combiningPosition,
+                            transcript: archived.transcript,
+                            parts: archived.parts,
+                            records: archived.records,
+                            byteLength: archived.byteLength,
+                            unavailableReplica: 0,
+                            silentReplica: 3,
+                            reader: voteProbe,
+                            hints: listed.length,
                         },
                         foreignPoll:
                             foreign === undefined

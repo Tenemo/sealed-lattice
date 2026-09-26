@@ -12,6 +12,7 @@ export type {
 export {
     createFoundationCeremonyRuntimeLoader,
     FoundationKernelCommandError,
+    openPinnedFoundationCeremonyRuntime,
 } from './foundation-ceremony-runtime.js';
 export type {
     CanonicalFoundationActionDefinition,

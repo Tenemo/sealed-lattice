@@ -78,17 +78,26 @@ import {
 } from './storage.js';
 import { targetPhase } from './target-state.js';
 import { publishTarget, signTarget } from './target.js';
+import {
+    createTranscriptRecorder,
+    discoverTranscripts,
+    openArchive,
+    openTranscriptSource,
+} from './transcript.js';
+import type { WorkerArchive } from './transcript.js';
 
 // The application's SDK supplies the namespace of the participant's local
-// state, the relay's base URL, the module's URL and the identities its build
-// recorded; the worker fetches the module itself and recomputes the runtime
-// identity that every retained root binds. Every bound comes from the module
-// and the retained state, never from the page.
+// state, the relay's base URL, the module's URL, the identities its build
+// recorded and, when the application configures one, the archive; the worker
+// fetches the module itself and recomputes the runtime identity that every
+// retained root binds. Every bound comes from the module and the retained
+// state, never from the page.
 type WorkerCommand = Readonly<{
     operation: string;
     namespace: string;
     relay: string;
     module: string;
+    archive?: WorkerArchive;
     identity: Readonly<{
         runtime: string;
         source: string;
@@ -136,20 +145,57 @@ const httpUrl = (value: unknown) => {
         : undefined;
 };
 
-// The relay's base URL ends with a slash and has no query or fragment, so
-// every record name extends its path.
-const isWellFormed = (command: WorkerCommand) => {
-    const relay = httpUrl(command.relay);
+// A base URL ends with a slash and has no query or fragment, so every
+// record name extends its path.
+const isBaseUrl = (value: unknown) => {
+    const url = httpUrl(value);
     return (
-        typeof command.namespace === 'string' &&
-        participantNamespacePattern.test(command.namespace) &&
-        relay !== undefined &&
-        relay.pathname.endsWith('/') &&
-        relay.search === '' &&
-        relay.hash === '' &&
-        httpUrl(command.module) !== undefined
+        url !== undefined &&
+        url.pathname.endsWith('/') &&
+        url.search === '' &&
+        url.hash === ''
     );
 };
+
+// An archive names its fault bound, 1 to 32 replicas with their ML-DSA-65
+// verification keys, and the foundation kernel with its SHA-256 digest.
+const isArchive = (archive: unknown) => {
+    if (archive === undefined) return true;
+    if (typeof archive !== 'object' || archive === null) return false;
+    const { faultBound, replicas, kernel, kernelSha256 } = archive as Record<
+        string,
+        unknown
+    >;
+    return (
+        Number.isSafeInteger(faultBound) &&
+        (faultBound as number) >= 0 &&
+        Array.isArray(replicas) &&
+        replicas.length >= 1 &&
+        replicas.length <= 32 &&
+        replicas.every((replica: unknown) => {
+            if (typeof replica !== 'object' || replica === null) return false;
+            const { baseUrl, verificationKey } = replica as Record<
+                string,
+                unknown
+            >;
+            return (
+                isBaseUrl(baseUrl) &&
+                typeof verificationKey === 'string' &&
+                /^[0-9a-f]{3904}$/u.test(verificationKey)
+            );
+        }) &&
+        httpUrl(kernel) !== undefined &&
+        typeof kernelSha256 === 'string' &&
+        /^[0-9a-f]{64}$/u.test(kernelSha256)
+    );
+};
+
+const isWellFormed = (command: WorkerCommand) =>
+    typeof command.namespace === 'string' &&
+    participantNamespacePattern.test(command.namespace) &&
+    isBaseUrl(command.relay) &&
+    httpUrl(command.module) !== undefined &&
+    isArchive(command.archive);
 
 const runtimeIdentity = async (command: WorkerCommand, module: Uint8Array) =>
     deliveryDigest(
@@ -174,6 +220,22 @@ const bytes = (value: unknown) => {
     if (!/^(?:[0-9a-f]{2})*$/u.test(encoded))
         throw new PublicInputFailure('Malformed byte parameter.');
     return fromHexadecimal(encoded);
+};
+
+// An archived transcript's index: its identity and its record's length.
+const transcriptReference = (value: unknown) => {
+    if (typeof value !== 'object' || value === null)
+        throw new PublicInputFailure('Malformed transcript parameter.');
+    const { identity, byteLength } = value as Record<string, unknown>;
+    if (
+        typeof identity !== 'string' ||
+        !/^[0-9a-f]{128}$/u.test(identity) ||
+        !Number.isSafeInteger(byteLength) ||
+        (byteLength as number) < 1 ||
+        (byteLength as number) > 1_572_864
+    )
+        throw new PublicInputFailure('Malformed transcript parameter.');
+    return { identity, byteLength: byteLength as number };
 };
 
 // Publishes every public record the current root holds: the registration
@@ -575,14 +637,48 @@ const execute = async (
                 details: { ...summary(root, enrollment), ...released },
             };
         }
-        case 'result': {
+        case 'result':
+        case 'archive': {
             // Any participant past its close combines the published release
-            // shares in its own module; the result is not published.
+            // shares in its own module; the result is not published. The
+            // visit reads the relay or the archived transcript the request
+            // names, and archiving sends every record it reads to the
+            // replicas as one transcript, acknowledged once verified.
             if (
                 root.head.generation <
-                completedClosePhase(enrollment.isOrganizer)
+                    completedClosePhase(enrollment.isOrganizer) ||
+                (parameters.transcript !== undefined &&
+                    command.operation === 'archive')
             )
                 return { status: 'refused' };
+            const archived =
+                command.operation === 'archive' ||
+                parameters.transcript !== undefined;
+            if (archived && command.archive === undefined)
+                return { status: 'refused' };
+            const archive =
+                command.archive === undefined || !archived
+                    ? undefined
+                    : await openArchive(
+                          command.archive,
+                          hexadecimal(root.manifest.poll),
+                      );
+            const recorder =
+                archive === undefined || command.operation !== 'archive'
+                    ? undefined
+                    : createTranscriptRecorder(archive);
+            const source: PublicRelay =
+                archive !== undefined && parameters.transcript !== undefined
+                    ? {
+                          ...relay,
+                          transcript: await openTranscriptSource(
+                              archive,
+                              transcriptReference(parameters.transcript),
+                          ),
+                      }
+                    : recorder === undefined
+                      ? relay
+                      : { ...relay, recorder };
             const contribution = await resumeContribution(
                 profileContext(),
                 root,
@@ -591,12 +687,40 @@ const execute = async (
                 contribution,
                 enrollment.isOrganizer,
             );
-            await reverifySetup(contribution, relay);
+            await reverifySetup(contribution, source);
+            const result = await computeResult(session, source);
+            const transcript =
+                recorder === undefined ? undefined : await recorder.archive();
             return {
                 status: 'completed',
                 details: {
                     ...summary(root, enrollment),
-                    ...(await computeResult(session, relay)),
+                    ...result,
+                    ...(transcript === undefined
+                        ? {}
+                        : {
+                              transcript: transcript.index,
+                              parts: transcript.parts.length,
+                              records: transcript.records,
+                              byteLength: transcript.byteLength,
+                          }),
+                },
+            };
+        }
+        case 'transcripts': {
+            // The transcripts the archive holds for the poll are hints for a
+            // later result visit, which verifies whichever it reads.
+            if (command.archive === undefined) return { status: 'refused' };
+            return {
+                status: 'completed',
+                details: {
+                    ...summary(root, enrollment),
+                    transcripts: await discoverTranscripts(
+                        await openArchive(
+                            command.archive,
+                            hexadecimal(root.manifest.poll),
+                        ),
+                    ),
                 },
             };
         }

@@ -12,6 +12,7 @@ import {
 } from './foundation-contract.js';
 import {
     instantiateFoundationKernelCommandRuntime,
+    instantiatePinnedFoundationKernelCommandRuntime,
     type FoundationKernelCommandRuntime,
     type FoundationKernelLoaderOptions,
 } from './foundation-kernel/kernel-runtime.js';
@@ -654,6 +655,21 @@ const archiveReceiptRequest = (
     writeArchiveReference(request, root);
     return request;
 };
+
+/**
+ * Opens the foundation runtime over kernel bytes the caller fetched, after
+ * checking them against the SHA-256 digest its build recorded.
+ */
+export const openPinnedFoundationCeremonyRuntime = async (
+    bytes: ArrayBuffer,
+    expectedKernelSha256Hex: string,
+): Promise<FoundationCeremonyRuntime> =>
+    openFoundationCeremonyRuntime(
+        await instantiatePinnedFoundationKernelCommandRuntime(
+            bytes,
+            expectedKernelSha256Hex,
+        ),
+    );
 
 export const createFoundationCeremonyRuntimeLoader = (
     foundationKernelUrl: URL,

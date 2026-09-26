@@ -27,10 +27,15 @@ const allowedImports = [
 ];
 
 // The sources the participant module and worker are built from, beside the
-// Rust workspace: the worker's own sources and the scripts that build both.
+// Rust workspace: the worker's own sources, the archive client, transcript
+// format and foundation runtime the worker bundles, and the scripts that
+// build both.
 const sourceDirectories = [
     'crates/protocol-research',
     'packages/sdk/src/participant/worker',
+    'packages/sdk/src/public-archive.ts',
+    'packages/sdk/src/transcript-archive.ts',
+    'packages/wasm/src',
 ];
 const buildScripts = [
     'tools/ci/build-participant-module.ts',

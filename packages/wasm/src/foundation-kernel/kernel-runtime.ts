@@ -342,11 +342,9 @@ const runKernelCommand = (
 };
 
 const instantiateKernelCommandRuntime = async (
-    foundationKernelUrl: URL,
-    options: FoundationKernelLoaderOptions,
+    bytes: ArrayBuffer,
+    expectedKernelSha256Hex: string | undefined,
 ): Promise<FoundationKernelCommandRuntime> => {
-    const expectedKernelSha256Hex = requireKernelIntegrityExpectation(options);
-    const bytes = await resolveKernelBytes(foundationKernelUrl);
     if (expectedKernelSha256Hex !== undefined) {
         await verifyKernelIntegrity(bytes, expectedKernelSha256Hex);
     }
@@ -412,8 +410,25 @@ const instantiateKernelCommandRuntime = async (
     };
 };
 
-export const instantiateFoundationKernelCommandRuntime = (
+export const instantiateFoundationKernelCommandRuntime = async (
     foundationKernelUrl: URL,
     options: FoundationKernelLoaderOptions = {},
+): Promise<FoundationKernelCommandRuntime> => {
+    const expectedKernelSha256Hex = requireKernelIntegrityExpectation(options);
+    return instantiateKernelCommandRuntime(
+        await resolveKernelBytes(foundationKernelUrl),
+        expectedKernelSha256Hex,
+    );
+};
+
+// Instantiates kernel bytes the caller already holds after checking their
+// SHA-256 digest, so a bundle that fetches the kernel itself carries no file
+// system access.
+export const instantiatePinnedFoundationKernelCommandRuntime = (
+    bytes: ArrayBuffer,
+    expectedKernelSha256Hex: string,
 ): Promise<FoundationKernelCommandRuntime> =>
-    instantiateKernelCommandRuntime(foundationKernelUrl, options);
+    instantiateKernelCommandRuntime(
+        bytes,
+        requireKernelIntegrityExpectation({ expectedKernelSha256Hex }),
+    );
