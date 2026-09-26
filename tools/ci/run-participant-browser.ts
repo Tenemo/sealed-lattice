@@ -681,10 +681,18 @@ await runWithLocalRunLog(
                 mode === 'no-result' && maximumCorruptParticipantCount > 0
                     ? maximumCorruptParticipantCount
                     : undefined;
+            // The host holds twice the guard of every browser that can run at
+            // once: the participants and the registrant left out during
+            // registration, whose browser ends at the roster, and later the
+            // participants and the equivocator's copies. A copy that loses
+            // state replaces its participant's browser.
             assert.ok(
                 freemem() >=
                     2 *
-                        (leftOut + 1 + copyNames.length) *
+                        Math.max(
+                            leftOut + 1,
+                            participantCount + copyNames.length,
+                        ) *
                         participantMemoryLimit,
                 'Insufficient host memory for the browser cohort.',
             );
