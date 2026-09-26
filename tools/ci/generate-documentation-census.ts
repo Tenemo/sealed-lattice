@@ -333,7 +333,7 @@ export const renderDocumentationCensus = (): string => {
     }));
     // The mobile runtime's public corpus planning target plus its fifty
     // percent variance, and its bound on one canonical transport stream,
-    // which also caps the bytes one archive retrieval or replica holds.
+    // which also caps the bytes one archive retrieval holds.
     const publicCorpusVarianceCeiling = (2_147_483_648n * 3n) / 2n;
     const transportStreamBound = 4_294_967_291n;
     const countsAbove = (bound: bigint): string => {
@@ -5388,7 +5388,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'Every participant verifies, and every archived closure carries, all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target, and its bound on one canonical transport stream also caps the bytes one archive retrieval or replica holds. A participant count is listed when some option count exceeds the bound.',
+        'Every participant verifies, and every archived closure carries, all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target, and its bound on one canonical transport stream also caps the bytes one archive retrieval holds, so a larger closure is archived in several parts. A participant count is listed when some option count exceeds the bound.',
         '',
         table(
             ['Property', 'Value'],

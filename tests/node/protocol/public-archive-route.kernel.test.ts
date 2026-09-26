@@ -10,21 +10,35 @@ import {
     type PublicArchiveStore,
 } from '#packages/sdk/dist/index.js';
 import {
-    archiveChunkPurpose,
-    archiveRootPurpose,
+    retrieveTranscript,
+    transcriptChunkBytes,
+    transcriptChunkPurpose,
+    transcriptFilePurpose,
+    transcriptIndexPurpose,
+    transcriptPartPurpose,
+} from '#packages/sdk/src/transcript-archive.js';
+import {
     encodeArchiveRoutes,
     materializeArchiveRoutes,
 } from '#tools/ci/protocol-public-archive.js';
 
 const context = '07'.repeat(64);
 const otherContext = '08'.repeat(64);
-// The client only encodes and reads records here; no replica is contacted.
+const limits = { maximumRecords: 64, maximumTotalBytes: 8 << 20 };
+// The client only encodes and reads records here, and retrieval finds every
+// record already stored; no replica is contacted.
 const verificationKeys = Array.from({ length: 3 }, () =>
     createPublicKey(generateKeyPairSync('ml-dsa-65').privateKey)
         .export({ type: 'spki', format: 'der' })
         .subarray(-1952),
 );
-const client = (archiveContext: string) =>
+const client = (
+    archiveContext: string,
+    archiveLimits: Readonly<{
+        maximumRecords: number;
+        maximumTotalBytes: number;
+    }> = limits,
+) =>
     createPublicArchive({
         context: archiveContext,
         faultBound: 1,
@@ -32,8 +46,7 @@ const client = (archiveContext: string) =>
             baseUrl: `http://127.0.0.1:9/replica/${String(position)}/`,
             verificationKey,
         })),
-        maximumRecords: 64,
-        maximumTotalBytes: 8 << 20,
+        ...archiveLimits,
     });
 const memoryStore = () => {
     const records = new Map<string, Uint8Array>();
@@ -65,6 +78,12 @@ const routes = () =>
         route,
         file: path.join(directory, 'source', ...route.split('/')),
     }));
+const expectFiles = async (target: string) => {
+    for (const [route, bytes] of Object.entries(files))
+        expect(await readFile(path.join(target, ...route.split('/')))).toEqual(
+            bytes,
+        );
+};
 
 beforeAll(async () => {
     directory = await mkdtemp(path.resolve('temp/public-archive-route-'));
@@ -79,54 +98,139 @@ afterAll(async () => {
     await rm(directory, { recursive: true });
 });
 
-describe('public archive route map through the real scalar kernel', () => {
+describe('archived transcript through the real scalar kernel', () => {
     it('reproduces every routed file from its authenticated chunks', async () => {
         const { records, store } = memoryStore();
         const encoded = await encodeArchiveRoutes(
             archive,
             routes(),
-            Buffer.from('root'),
+            Buffer.from('target body'),
             store,
+            limits,
         );
-        // Four file records, four chunk records and the root.
-        expect(encoded.records).toBe(9);
-        expect(records.size).toBe(9);
-        expect(encoded.byteLength).toBe(
-            [...records.values()].reduce(
-                (total, bytes) => total + bytes.byteLength,
+        // Four file records, four chunk records, one part and the index.
+        expect(encoded.parts).toHaveLength(1);
+        expect(encoded.parts[0].records).toBe(9);
+        expect(encoded.records).toBe(10);
+        expect(records.size).toBe(10);
+        const storedBytes = (identities: Iterable<string>) =>
+            [...identities].reduce(
+                (total, identity) => total + records.get(identity)!.byteLength,
                 0,
+            );
+        expect(encoded.byteLength).toBe(storedBytes(records.keys()));
+        expect(encoded.parts[0].byteLength).toBe(
+            storedBytes(
+                [...records.keys()].filter(
+                    (identity) => identity !== encoded.index.identity,
+                ),
             ),
+        );
+        expect(await retrieveTranscript(archive, encoded.index, store)).toEqual(
+            encoded.parts,
         );
         const target = path.join(directory, 'round-trip');
         const materialized = await materializeArchiveRoutes(
             archive,
-            encoded.root,
+            encoded.index,
             store,
             target,
         );
         expect(materialized.routes).toEqual(Object.keys(files).sort());
-        expect(Buffer.from(materialized.payload).toString()).toBe('root');
-        for (const [route, bytes] of Object.entries(files))
-            expect(
-                await readFile(path.join(target, ...route.split('/'))),
-            ).toEqual(bytes);
+        expect(Buffer.from(materialized.targetBody).toString()).toBe(
+            'target body',
+        );
+        await expectFiles(target);
+        // Another encoding of the same files reaches the same records.
+        const again = memoryStore();
+        expect(
+            (
+                await encodeArchiveRoutes(
+                    archive,
+                    routes().reverse(),
+                    Buffer.from('target body'),
+                    again.store,
+                    limits,
+                )
+            ).index,
+        ).toEqual(encoded.index);
+        expect([...again.records.keys()].sort()).toEqual(
+            [...records.keys()].sort(),
+        );
+    });
+
+    it('splits a transcript beyond one retrieval into consecutive parts', async () => {
+        // Four records per retrieval: the intent and the empty index with
+        // their part, the two-chunk file with its part, and the target
+        // with its part.
+        const small = { maximumRecords: 4, maximumTotalBytes: 8 << 20 };
+        const splitting = await client(context, small);
+        const { records, store } = memoryStore();
+        const encoded = await encodeArchiveRoutes(
+            splitting,
+            routes(),
+            Buffer.from('target body'),
+            store,
+            small,
+        );
+        expect(encoded.parts.map((part) => part.records)).toEqual([4, 4, 3]);
+        expect(encoded.records).toBe(records.size);
+        expect(encoded.records - 1).toBeGreaterThan(small.maximumRecords);
+        // Each part is one retrieval within the limits.
+        expect(
+            await retrieveTranscript(splitting, encoded.index, store),
+        ).toEqual(encoded.parts);
+        const target = path.join(directory, 'parts');
+        const materialized = await materializeArchiveRoutes(
+            splitting,
+            encoded.index,
+            store,
+            target,
+        );
+        expect(materialized.routes).toEqual(Object.keys(files).sort());
+        await expectFiles(target);
+        // A file whose own closure exceeds one retrieval is refused.
+        await expect(
+            encodeArchiveRoutes(
+                await client(context, { ...small, maximumRecords: 3 }),
+                routes(),
+                Buffer.from('target body'),
+                memoryStore().store,
+                { ...small, maximumRecords: 3 },
+            ),
+        ).rejects.toThrow('exceeds one retrieval');
     });
 
     it.each([
         'ceremony/../poll-definition.bin',
         'ceremony/./context.bin',
-        'transcript/context.bin',
-        'ceremony',
+        '.hidden/context.bin',
+        '/ceremony/context.bin',
         'ceremony/close/',
+        'ceremony//close',
+        'ceremony/' + 'a'.repeat(247),
     ])('refuses the noncanonical route %s', async (route) => {
         await expect(
             encodeArchiveRoutes(
                 archive,
                 [{ route, file: routes()[0].file }],
-                Buffer.from('root'),
+                Buffer.from('target body'),
                 memoryStore().store,
+                limits,
             ),
         ).rejects.toThrow('canonical');
+    });
+
+    it('refuses a repeated route', async () => {
+        await expect(
+            encodeArchiveRoutes(
+                archive,
+                [...routes(), routes()[0]],
+                Buffer.from('target body'),
+                memoryStore().store,
+                limits,
+            ),
+        ).rejects.toThrow('repeated');
     });
 
     it('refuses changed, missing and other-poll records', async () => {
@@ -134,19 +238,22 @@ describe('public archive route map through the real scalar kernel', () => {
         const encoded = await encodeArchiveRoutes(
             archive,
             routes(),
-            Buffer.from('root'),
+            Buffer.from('target body'),
             store,
+            limits,
         );
         await expect(
             materializeArchiveRoutes(
                 await client(otherContext),
-                encoded.root,
+                encoded.index,
                 store,
                 path.join(directory, 'other-context'),
             ),
         ).rejects.toThrow();
         const [identity, bytes] = [...records].find(
-            ([key]) => key !== encoded.root.identity,
+            ([key]) =>
+                key !== encoded.index.identity &&
+                key !== encoded.parts[0].root.identity,
         )!;
         const changed = Uint8Array.from(bytes);
         changed[changed.length - 1] ^= 1;
@@ -154,7 +261,7 @@ describe('public archive route map through the real scalar kernel', () => {
         await expect(
             materializeArchiveRoutes(
                 archive,
-                encoded.root,
+                encoded.index,
                 store,
                 path.join(directory, 'changed'),
             ),
@@ -163,14 +270,14 @@ describe('public archive route map through the real scalar kernel', () => {
         await expect(
             materializeArchiveRoutes(
                 archive,
-                encoded.root,
+                encoded.index,
                 store,
                 path.join(directory, 'missing'),
             ),
         ).rejects.toThrow('missing');
     });
 
-    it('refuses unordered routes, wrong lengths and a foreign root', async () => {
+    it('refuses malformed files, unordered routes and parts, and foreign roots', async () => {
         const { store } = memoryStore();
         const put = async (
             purpose: string,
@@ -181,48 +288,178 @@ describe('public archive route map through the real scalar kernel', () => {
             await store.put(value.reference.identity, value.bytes);
             return value.reference;
         };
-        const length = (value: number) => {
+        const header = (length: number, route: string) => {
             const bytes = Buffer.alloc(8);
-            bytes.writeBigUInt64LE(BigInt(value));
+            bytes.writeBigUInt64LE(BigInt(length));
+            return Buffer.concat([bytes, Buffer.from(route)]);
+        };
+        const position = (value: number) => {
+            const bytes = Buffer.alloc(2);
+            bytes.writeUInt16LE(value);
             return bytes;
         };
-        const chunk = await put(archiveChunkPurpose, [], Buffer.from('abc'));
-        const first = await put('ceremony/a.bin', [chunk], length(3));
-        const second = await put('ceremony/b.bin', [chunk], length(3));
-        const short = await put('ceremony/c.bin', [chunk], length(5));
+        const listing = (
+            parts: readonly Readonly<{
+                identity: string;
+                byteLength: number;
+            }>[],
+        ) => {
+            const bytes = Buffer.alloc(2 + parts.length * 72);
+            bytes.writeUInt16LE(parts.length);
+            for (const [index, part] of parts.entries()) {
+                bytes.write(part.identity, 2 + index * 72, 'hex');
+                bytes.writeBigUInt64LE(
+                    BigInt(part.byteLength),
+                    2 + index * 72 + 64,
+                );
+            }
+            return bytes;
+        };
+        const chunk = await put(transcriptChunkPurpose, [], Buffer.from('abc'));
+        const full = await put(
+            transcriptChunkPurpose,
+            [],
+            Buffer.alloc(transcriptChunkBytes, 1),
+        );
+        const empty = await put(transcriptChunkPurpose, [], Buffer.alloc(0));
+        const file = (length: number, route: string, chunks = [chunk]) =>
+            put(transcriptFilePurpose, chunks, header(length, route));
+        const first = await file(3, 'ceremony/a.bin');
+        const second = await file(3, 'ceremony/b.bin');
+        const part = async (dependencies: Parameters<typeof put>[1], at = 0) =>
+            put(transcriptPartPurpose, dependencies, position(at));
+        const index = async (
+            parts: Parameters<typeof listing>[0],
+            dependencies: Parameters<typeof put>[1] = [],
+        ) => put(transcriptIndexPurpose, dependencies, listing(parts));
+        const single = async (
+            fileReference: Parameters<typeof put>[1][number],
+        ) => index([await part([fileReference])]);
+        const firstPart = await part([first]);
+        const secondPart = await part([second], 1);
         for (const [name, root, message] of [
             [
                 'unordered',
-                await put(archiveRootPurpose, [second, first], Buffer.alloc(0)),
+                await index([await part([second, first])]),
                 'ascending',
             ],
             [
                 'repeated',
-                await put(archiveRootPurpose, [first, first], Buffer.alloc(0)),
+                await index([await part([first, first])]),
                 'ascending',
             ],
+            ['short', await single(await file(5, 'ceremony/c.bin')), 'length'],
+            ['long', await single(await file(2, 'ceremony/d.bin')), 'length'],
             [
-                'short',
-                await put(archiveRootPurpose, [short], Buffer.alloc(0)),
+                'unfilled chunk',
+                await single(
+                    await file(transcriptChunkBytes + 3, 'ceremony/d1.bin', [
+                        chunk,
+                        full,
+                    ]),
+                ),
                 'length',
             ],
             [
-                'foreign',
-                await put(
-                    'sealed-lattice/other-root/v1',
-                    [first],
-                    Buffer.alloc(0),
+                'extra chunk',
+                await single(await file(3, 'ceremony/d2.bin', [chunk, empty])),
+                'length',
+            ],
+            [
+                'empty chunk',
+                await single(await file(0, 'ceremony/d3.bin', [empty])),
+                'length',
+            ],
+            [
+                'routeless',
+                await single(
+                    await put(transcriptFilePurpose, [chunk], header(3, '')),
+                ),
+                'malformed',
+            ],
+            [
+                'escaping',
+                await single(await file(3, 'ceremony/../e.bin')),
+                'canonical',
+            ],
+            [
+                'foreign file',
+                await single(
+                    await put(
+                        'sealed-lattice/other-file/v1',
+                        [chunk],
+                        header(3, 'ceremony/f.bin'),
+                    ),
                 ),
                 'purpose',
             ],
-        ] as const)
+            [
+                'chunk with dependencies',
+                await single(
+                    await file(3, 'ceremony/g.bin', [
+                        await put(
+                            transcriptChunkPurpose,
+                            [chunk],
+                            Buffer.from('abc'),
+                        ),
+                    ]),
+                ),
+                'malformed',
+            ],
+            ['empty part', await index([await part([])]), 'empty'],
+            [
+                'swapped parts',
+                await index([secondPart, firstPart]),
+                'another position',
+            ],
+            [
+                'repeated part',
+                await index([firstPart, firstPart]),
+                'another position',
+            ],
+            [
+                'routes across parts',
+                await index([await part([second]), await part([first], 1)]),
+                'ascending',
+            ],
+            ['no parts', await index([]), 'malformed'],
+            [
+                'index dependencies',
+                await index([firstPart], [firstPart]),
+                'dependencies',
+            ],
+            [
+                'part as index',
+                await put(transcriptPartPurpose, [], listing([firstPart])),
+                'purpose',
+            ],
+            [
+                'foreign part',
+                await index([
+                    await put(
+                        'sealed-lattice/other-part/v1',
+                        [first],
+                        position(0),
+                    ),
+                ]),
+                'purpose',
+            ],
+            [
+                'foreign root',
+                await put(
+                    'sealed-lattice/other-root/v1',
+                    [],
+                    listing([firstPart]),
+                ),
+                'purpose',
+            ],
+        ] as const) {
+            const target = path.join(directory, name.replace(/ /gu, '-'));
             await expect(
-                materializeArchiveRoutes(
-                    archive,
-                    root,
-                    store,
-                    path.join(directory, name),
+                retrieveTranscript(archive, root, store).then(() =>
+                    materializeArchiveRoutes(archive, root, store, target),
                 ),
             ).rejects.toThrow(message);
+        }
     });
 });

@@ -50,7 +50,9 @@ const isReference = (value: unknown): value is ArchiveReference => {
 };
 
 /** Local executable archive host. Distinct directories on this host do not
- * establish independent fault domains. Private replica keys stay with its owner. */
+ * establish independent fault domains. Private replica keys stay with its owner.
+ * One retained root's closure stays within the retrieval limits, and the host
+ * stores at most its capacity across every root it retains. */
 export const startPublicArchiveReplica = async (
     input: Readonly<{
         directory: string;
@@ -61,6 +63,8 @@ export const startPublicArchiveReplica = async (
         runtime: PublicArchiveRuntime;
         maximumRecords: number;
         maximumTotalBytes: number;
+        maximumStoredRecords: number;
+        maximumStoredBytes: number;
     }>,
 ) => {
     const directory = path.resolve(input.directory);
@@ -72,7 +76,11 @@ export const startPublicArchiveReplica = async (
         input.maximumRecords > 65_536 ||
         !Number.isSafeInteger(input.maximumTotalBytes) ||
         input.maximumTotalBytes < 1 ||
-        input.maximumTotalBytes > 4_294_967_291
+        input.maximumTotalBytes > 4_294_967_291 ||
+        !Number.isSafeInteger(input.maximumStoredRecords) ||
+        input.maximumStoredRecords < 1 ||
+        !Number.isSafeInteger(input.maximumStoredBytes) ||
+        input.maximumStoredBytes < 1
     )
         throw new RangeError('Invalid archive host limits.');
     const key = createPublicKey(input.privateKey)
@@ -109,8 +117,8 @@ export const startPublicArchiveReplica = async (
         const length = (await stat(path.join(directory, 'records', name))).size;
         if (
             length > maximumRecordBytes ||
-            storedLengths.size >= input.maximumRecords ||
-            length > input.maximumTotalBytes - storedBytes
+            storedLengths.size >= input.maximumStoredRecords ||
+            length > input.maximumStoredBytes - storedBytes
         )
             throw new RangeError('Existing archive exceeds host limits.');
         storedLengths.set(name, length);
@@ -203,9 +211,9 @@ export const startPublicArchiveReplica = async (
                         storedLengths.get(recordMatch[1]) ?? 0;
                     if (
                         (!storedLengths.has(recordMatch[1]) &&
-                            storedLengths.size >= input.maximumRecords) ||
+                            storedLengths.size >= input.maximumStoredRecords) ||
                         bytes.byteLength - previousLength >
-                            input.maximumTotalBytes - storedBytes
+                            input.maximumStoredBytes - storedBytes
                     )
                         throw new RangeError('Archive storage limit reached.');
                     await persist(

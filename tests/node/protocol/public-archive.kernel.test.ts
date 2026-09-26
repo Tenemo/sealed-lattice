@@ -10,6 +10,7 @@ import {
     mkdtemp,
     readFile,
     realpath,
+    rm,
     rmdir,
     unlink,
     writeFile,
@@ -212,6 +213,8 @@ describe('public archive through the real scalar kernel and local storage hosts'
             runtime,
             maximumRecords: Number(census.maximumRecords),
             maximumTotalBytes: 4_294_967_291,
+            maximumStoredRecords: Number(census.maximumRecords),
+            maximumStoredBytes: 4_294_967_291,
         });
         let passed = false;
         try {
@@ -308,6 +311,8 @@ describe('public archive through the real scalar kernel and local storage hosts'
                     runtime,
                     maximumRecords: 4,
                     maximumTotalBytes: 4096,
+                    maximumStoredRecords: 4,
+                    maximumStoredBytes: 4096,
                 }),
             ),
         );
@@ -370,6 +375,7 @@ describe('public archive through the real scalar kernel and local storage hosts'
                 silent.close(() => resolve());
             });
         }
+        await rm(directory, { recursive: true });
     });
     it('matches independent record bounds at empty and maximum payloads', () => {
         const census = compilePublicArchiveResourceCensus();
@@ -538,6 +544,8 @@ describe('public archive through the real scalar kernel and local storage hosts'
             runtime,
             maximumRecords,
             maximumTotalBytes,
+            maximumStoredRecords: maximumRecords,
+            maximumStoredBytes: maximumTotalBytes,
         }));
         const hosts = await Promise.all(inputs.map(startPublicArchiveReplica));
         try {
@@ -671,6 +679,7 @@ describe('public archive through the real scalar kernel and local storage hosts'
         } finally {
             for (const host of hosts) await host.close();
         }
+        await rm(directory, { recursive: true });
     });
 
     it('does not acknowledge a missing dependency, accept a substitution, or publish from lost source state', async () => {
@@ -689,6 +698,8 @@ describe('public archive through the real scalar kernel and local storage hosts'
             runtime,
             maximumRecords: 4,
             maximumTotalBytes: 4096,
+            maximumStoredRecords: 4,
+            maximumStoredBytes: 4096,
         });
         try {
             const archive = await createPublicArchive({
@@ -767,5 +778,104 @@ describe('public archive through the real scalar kernel and local storage hosts'
         } finally {
             await host.close();
         }
+        await rm(directory, { recursive: true });
+    });
+
+    it('bounds each retained closure by one retrieval and all stored records by the capacity', async () => {
+        const directory = await mkdtemp(
+            path.resolve('temp/public-archive-capacity-'),
+        );
+        // One retrieval carries two records, and the host stores seven.
+        const input = {
+            directory,
+            context,
+            policy: {
+                faultBound: 0,
+                verificationKeys: [policy.verificationKeys[0]],
+            },
+            replicaPosition: 0,
+            privateKey: keys[0],
+            runtime,
+            maximumRecords: 2,
+            maximumTotalBytes: 4096,
+            maximumStoredRecords: 7,
+            maximumStoredBytes: 4096,
+        };
+        const host = await startPublicArchiveReplica(input);
+        try {
+            const configuration = (maximumRecords: number) => ({
+                context,
+                faultBound: 0,
+                replicas: [
+                    {
+                        baseUrl: host.baseUrl,
+                        verificationKey: policy.verificationKeys[0],
+                    },
+                ],
+                maximumRecords,
+                maximumTotalBytes: 4096,
+            });
+            const archive = await createPublicArchive(configuration(2));
+            const source = store();
+            const submission = async (values: readonly number[]) => {
+                const leaves = values.map((value) =>
+                    archive.encodeRecord(
+                        'ballot-envelope',
+                        [],
+                        Uint8Array.of(value),
+                    ),
+                );
+                const root = archive.encodeRecord(
+                    'ballot-submission',
+                    leaves.map((leaf) => leaf.reference),
+                    new Uint8Array(),
+                );
+                for (const record of [...leaves, root])
+                    await source.storage.put(
+                        record.reference.identity,
+                        record.bytes,
+                    );
+                return {
+                    root: root.reference,
+                    byteLength: [...leaves, root].reduce(
+                        (sum, record) => sum + record.bytes.byteLength,
+                        0,
+                    ),
+                };
+            };
+            // The host stores a closure beyond one retrieval but does not
+            // acknowledge it.
+            await expect(
+                (await createPublicArchive(configuration(3))).publish(
+                    (await submission([1, 2])).root,
+                    source.storage,
+                ),
+            ).rejects.toThrow('unavailable');
+            // Two more roots fill the capacity with seven records, more than
+            // one retrieval carries.
+            const retained = [await submission([3]), await submission([4])];
+            for (const { root } of retained)
+                expect(await archive.publish(root, source.storage)).toEqual([
+                    0,
+                ]);
+            for (const { root, byteLength } of retained)
+                expect(await archive.retrieve(root, store().storage)).toEqual({
+                    recordCount: 2,
+                    byteLength,
+                });
+            await expect(
+                archive.publish((await submission([5])).root, source.storage),
+            ).rejects.toThrow('unavailable');
+        } finally {
+            await host.close();
+        }
+        // A host whose capacity is below its stored records refuses to start.
+        await expect(
+            startPublicArchiveReplica({ ...input, maximumStoredRecords: 6 }),
+        ).rejects.toThrow('exceeds host limits');
+        await expect(
+            startPublicArchiveReplica({ ...input, maximumStoredBytes: 0 }),
+        ).rejects.toThrow('Invalid archive host limits');
+        await rm(directory, { recursive: true });
     });
 });

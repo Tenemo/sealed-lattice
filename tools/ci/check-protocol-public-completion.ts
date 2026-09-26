@@ -11,6 +11,7 @@ import {
 import { freemem } from 'node:os';
 import path from 'node:path';
 
+import { retrieveTranscript } from '#packages/sdk/src/transcript-archive.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
@@ -300,6 +301,7 @@ await runWithLocalRunLog(
             for (const file of [
                 'crates/protocol-research/evaluation-target/src/public-completion-check.rs',
                 'crates/protocol-research/evaluation-target/src/bin/check-target.rs',
+                'packages/sdk/src/transcript-archive.ts',
                 'tools/ci/protocol-public-archive.ts',
                 'tools/ci/participant-public-ceremony.ts',
                 import.meta.filename,
@@ -579,10 +581,45 @@ await runWithLocalRunLog(
                             .subarray(-1952),
                     ),
                 };
+                // The format's largest retrieval; a closure beyond it is
+                // archived in several parts.
                 const limits = {
                     maximumRecords: 65_536,
                     maximumTotalBytes: 4_294_967_291,
                 };
+                const configuration = (
+                    archiveContext: string,
+                    endpoints: readonly string[],
+                ) => ({
+                    context: archiveContext,
+                    faultBound: policy.faultBound,
+                    replicas: endpoints.map((baseUrl, position) => ({
+                        baseUrl,
+                        verificationKey: policy.verificationKeys[position],
+                    })),
+                    ...limits,
+                });
+                const sourceStore = await directoryArchiveStore(
+                    path.join(archiveScratch, 'source'),
+                );
+                const target = await readFile(path.join(output, 'target.bin'));
+                // Encoding contacts no replica, so each replica's capacity is
+                // the encoded closure: every part and the index.
+                const encoded = await encodeArchiveRoutes(
+                    await createPublicArchive(
+                        configuration(
+                            context,
+                            keys.map(
+                                (_key, position) =>
+                                    `http://127.0.0.1:9/encoder-${String(position)}/`,
+                            ),
+                        ),
+                    ),
+                    routes,
+                    target,
+                    sourceStore,
+                    limits,
+                );
                 const replicas: Awaited<
                     ReturnType<typeof startPublicArchiveReplica>
                 >[] = [];
@@ -601,39 +638,28 @@ await runWithLocalRunLog(
                                 privateKey: keys[position],
                                 runtime,
                                 ...limits,
+                                maximumStoredRecords: encoded.records,
+                                maximumStoredBytes: encoded.byteLength,
                             }),
                         );
-                    const configuration = (archiveContext: string) => ({
-                        context: archiveContext,
-                        faultBound: policy.faultBound,
-                        replicas: replicas.map((replica, position) => ({
-                            baseUrl: replica.baseUrl,
-                            verificationKey: policy.verificationKeys[position],
-                        })),
-                        ...limits,
-                    });
+                    const endpoints = replicas.map(
+                        (replica) => replica.baseUrl,
+                    );
                     const publisher = await createPublicArchive(
-                        configuration(context),
+                        configuration(context, endpoints),
                     );
-                    const sourceStore = await directoryArchiveStore(
-                        path.join(archiveScratch, 'source'),
-                    );
-                    const target = await readFile(
-                        path.join(output, 'target.bin'),
-                    );
-                    const encoded = await encodeArchiveRoutes(
-                        publisher,
-                        routes,
-                        target,
-                        sourceStore,
-                    );
-                    assert.ok(
-                        encoded.records <= limits.maximumRecords &&
-                            encoded.byteLength <= limits.maximumTotalBytes,
-                        'The closure exceeds the archive retrieval bounds.',
-                    );
+                    // Every part is retained before the index that lists it.
+                    const partAcknowledgements: (readonly number[])[] = [];
+                    for (const part of encoded.parts) {
+                        const acknowledged = await publisher.publish(
+                            part.root,
+                            sourceStore,
+                        );
+                        assert.ok(acknowledged.length > policy.faultBound);
+                        partAcknowledgements.push(acknowledged);
+                    }
                     const acknowledged = await publisher.publish(
-                        encoded.root,
+                        encoded.index,
                         sourceStore,
                     );
                     assert.ok(acknowledged.length > policy.faultBound);
@@ -646,34 +672,33 @@ await runWithLocalRunLog(
                         context.slice(0, -1) +
                         (context.endsWith('0') ? '1' : '0');
                     await assert.rejects(
-                        (
+                        retrieveTranscript(
                             await createPublicArchive(
-                                configuration(otherContext),
-                            )
-                        ).retrieve(
-                            encoded.root,
+                                configuration(otherContext, endpoints),
+                            ),
+                            encoded.index,
                             await directoryArchiveStore(
                                 path.join(archiveScratch, 'other-context'),
                             ),
                         ),
                     );
                     const reader = await createPublicArchive(
-                        configuration(context),
+                        configuration(context, endpoints),
                     );
                     const retrievedStore = await directoryArchiveStore(
                         path.join(archiveScratch, 'retrieved'),
                     );
-                    const retrieved = await reader.retrieve(
-                        encoded.root,
+                    const retrieved = await retrieveTranscript(
+                        reader,
+                        encoded.index,
                         retrievedStore,
                     );
-                    assert.equal(retrieved.recordCount, encoded.records);
-                    assert.equal(retrieved.byteLength, encoded.byteLength);
+                    assert.deepEqual(retrieved, encoded.parts);
                     const materialize = async (name: string) => {
                         const directoryPath = path.join(archiveScratch, name);
                         const materialized = await materializeArchiveRoutes(
                             reader,
-                            encoded.root,
+                            encoded.index,
                             retrievedStore,
                             directoryPath,
                         );
@@ -682,7 +707,7 @@ await runWithLocalRunLog(
                             routes.map((value) => value.route).sort(),
                         );
                         assert.deepEqual(
-                            Buffer.from(materialized.payload),
+                            Buffer.from(materialized.targetBody),
                             target,
                         );
                         return directoryPath;
@@ -766,10 +791,13 @@ await runWithLocalRunLog(
                         routes: routes.length,
                         records: encoded.records,
                         byteLength: encoded.byteLength,
-                        root: encoded.root,
+                        index: encoded.index,
                         acknowledged,
+                        parts: encoded.parts.map((part, position) => ({
+                            ...part,
+                            acknowledged: partAcknowledgements[position],
+                        })),
                         unavailableReplica,
-                        retrieved,
                         archivedPeakMemory: archived.peakMemory,
                         omittedRoute,
                         omittedExitCode,
@@ -814,7 +842,7 @@ await runWithLocalRunLog(
                                   ? (participantCeremony === undefined
                                         ? ''
                                         : "A browser cohort's relayed records are laid out as the native reader takes them in a scratch directory. ") +
-                                    'The records the owning verifiers depend on are published through the maintained public archive to three local replicas, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader ' +
+                                    'The records the owning verifiers depend on are published through the maintained public archive to three local replicas as consecutive parts under one index, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader ' +
                                     (participantCeremony === undefined
                                         ? 'or departure chronology is exercised.'
                                         : "is exercised; only the source cohort's own departures precede the archive.")
