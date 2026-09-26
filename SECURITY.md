@@ -1,6 +1,6 @@
 # Security policy
 
-`sealed-lattice` is an unaudited post-quantum-targeting research prototype. End-to-end security is unestablished, no complete voting construction is exposed, and no released version is approved for production elections or other security-sensitive use. Use synthetic data only.
+`sealed-lattice` is an unaudited post-quantum-targeting research prototype. End-to-end security is unestablished, the voting construction it implements has no independent review, and no released version is approved for production elections or other security-sensitive use. Use synthetic data only.
 
 ## Report a vulnerability
 
@@ -35,13 +35,13 @@ These are requirements, not claims about the current package.
 
 ## Current implementation boundary
 
-The package implements bounded canonical foundation encodings, context verification, and hashing in Rust/WebAssembly, together with TypeScript poll validation and package integrity checks. It does not implement or expose distributed key generation, ballot encryption, ballot proofs, ballot closing, inventory finality, homomorphic tallying, release shares, or terminal decoding. Any future construction API remains subject to the prohibition on raw decryption, secret export, and bypassing authorized release.
+The package implements bounded canonical foundation encodings, context verification, and hashing in Rust/WebAssembly, TypeScript poll validation, a public archive client, and package integrity checks. It also ships the participant runtime, a WebAssembly module and worker that carry one participant through registration, roster agreement, the distributed setup, the ballot and its proof, closing, the target vote, the release share, and the local result, and that archive and read back the transcript of a verified outcome. The participant API returns only the participant's verified progress and its authorized result; it exposes no raw decryption, participant-secret export, or path around certified release. An implemented step is not an established one: the runtime has run only in development environments, and its security argument has no independent review.
 
 Removed construction formats are not accepted as compatibility inputs or fallback modes. Passing tests for the retained foundation establish only the tested encoding and verification behavior.
 
 ## Open security blockers
 
-The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
+The emitted protocol implements a candidate for each of the first five items, and a conditional composition argument and security ledger stand for the next two; none is closed without independent review. The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
 
 - a malicious, dealerless, fixed-roster BFV/BGV setup that creates threshold secret shares and every evaluation key without participant removal or retry;
 - an asynchronous close rule that completes from the close responses of any `n-f` participants including the organizer and limits a malicious relay or organizer to the bounded omission above;

@@ -2,7 +2,7 @@
 
 `sealed-lattice` is a TypeScript and Rust/WebAssembly research library for browser-first, fixed-roster, private-score polling. It targets end-to-end post-quantum security without a trusted tally service, but that security is not yet established.
 
-Use synthetic data only. The project has no complete voting construction, independent cryptographic audit, supported-phone qualification, or production approval. Do not use it with real ballots, credentials, keys, or secret material. Read the [security policy](SECURITY.md) before experimenting.
+Use synthetic data only. The project implements its candidate voting construction end to end, but the construction has no independent cryptographic review, supported-phone qualification, or production approval, and its end-to-end security is not established. Do not use it with real ballots, credentials, keys, or secret material. Read the [security policy](SECURITY.md) before experimenting.
 
 ## Intended protocol
 
@@ -17,7 +17,7 @@ Use synthetic data only. The project has no complete voting construction, indepe
 
 The [security policy](SECURITY.md#intended-security-model) summarizes the adversary, completion boundary, and derived thresholds. Those thresholds are necessary constraints, not a complete protocol.
 
-The leading research direction combines exact threshold homomorphic encryption, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. Malicious distributed key generation, the closing theorem, exact quantum-secure proofs, concrete parameters, composition, and browser feasibility remain open.
+The candidate construction combines exact threshold homomorphic encryption from a dealerless fixed-roster setup, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. A conditional composed argument covers setup, proofs, closing, and release under stated lattice and signature assumptions, but it has no independent review, so the composition is not established, and every run so far is development evidence rather than qualification.
 
 The application and library must not expose raw ballot, total, or intermediate-value decryption, participant-secret export, or a bypass around certified target-bound result release. Any future result-related interface may return only positively verified protocol capabilities and the authorized terminal result.
 
@@ -32,7 +32,7 @@ The public package exposes construction-neutral foundation operations:
 - content-addressed public-data retention and retrieval with authenticated replica acknowledgements; and
 - reproducible package assembly and public-export checks.
 
-It also exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
+It also exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result, and with a configured archive the archived transcript of the verified outcome. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
 
 The separate [protocol research workspace](crates/protocol-research/README.md) contains the executable native construction and its guarded runner. It is not part of the published SDK. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
 
