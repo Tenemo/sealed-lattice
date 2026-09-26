@@ -6,7 +6,7 @@ import {
 } from '#packages/sdk/src/participant/worker/predecessor.js';
 import { commitParticipantState } from '#packages/sdk/src/participant/worker/state-transaction.js';
 
-const stores = ['head', 'root', 'key', 'stopped', 'data', 'journal'];
+const stores = ['head', 'root', 'key', 'stopped', 'data', 'sealed'];
 const databases: IDBDatabase[] = [];
 const result = <Value>(request: IDBRequest<Value>) =>
     new Promise<Value>((resolve, reject) => {
@@ -77,17 +77,17 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
     const rawKey = crypto.getRandomValues(new Uint8Array(32)),
         additionalData = Uint8Array.of(7, 19),
         plain = Uint8Array.of(2, 3, 5, 7);
-    const journalKey = await crypto.subtle.importKey(
+    const sealedKey = await crypto.subtle.importKey(
         'raw',
         rawKey,
         'AES-GCM',
         false,
         ['encrypt'],
     );
-    const journal = new Uint8Array(
+    const sealed = new Uint8Array(
         await crypto.subtle.encrypt(
             { name: 'AES-GCM', iv: new Uint8Array(12), additionalData },
-            journalKey,
+            sealedKey,
             plain,
         ),
     );
@@ -101,14 +101,14 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
     ] as const)
         initial.objectStore(name).add(value, 0);
     initial.objectStore('data').add(new Blob([data]), [4, 0]);
-    initial.objectStore('journal').add(new Blob([journal]), [0, 0]);
+    initial.objectStore('sealed').add(new Blob([sealed]), [0, 0]);
     await initialized;
     const expected = {
         head,
         manifest,
         rootContext,
         maximumRootBytes: 1024,
-        recordStores: ['data', 'journal'],
+        recordStores: ['data', 'sealed'],
         records: [
             {
                 store: 'data',
@@ -117,9 +117,9 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
                 identity: await recordIdentity(data),
             },
             {
-                store: 'journal',
+                store: 'sealed',
                 key: [0, 0],
-                byteLength: journal.length,
+                byteLength: sealed.length,
                 encryption: { key: rawKey, additionalData },
             },
         ] as ParticipantStoredRecord[],
@@ -133,7 +133,7 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
             validate: (reader) =>
                 validateParticipantPredecessor(reader, expected),
             write: (transaction) => {
-                transaction.objectStore('journal').clear();
+                transaction.objectStore('sealed').clear();
                 transaction
                     .objectStore('head')
                     .put({ ...head, generation: generation + 1 }, 0);
@@ -159,10 +159,10 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
         mutate,
         generation: currentGeneration,
         expected,
-        journal,
+        sealed,
         root,
-        journalKey: rawKey,
-        journalContext: additionalData,
+        sealedKey: rawKey,
+        sealedContext: additionalData,
     };
 };
 
@@ -174,33 +174,31 @@ afterEach(async () => {
 });
 
 describe('required predecessor records', () => {
-    it('checks both the retained ciphertext hash and its encryption binding', async () => {
+    it('refuses a record described by both a hash and a key', async () => {
         const value = await fixture();
         value.expected.records[1] = {
             ...value.expected.records[1],
-            identity: await recordIdentity(value.journal),
-        };
-        await value.commit();
-        expect(await value.generation()).toBe(17);
+            identity: await recordIdentity(value.sealed),
+        } as unknown as ParticipantStoredRecord;
+        await expect(value.commit()).rejects.toThrow(
+            'Invalid predecessor record description.',
+        );
+        expect(await value.generation()).toBe(16);
     });
 
     it.each(['hash', 'key', 'context'])(
-        'independently refuses a wrong %s on a doubly bound record',
+        'refuses a wrong listed %s',
         async (fault) => {
             const value = await fixture();
-            value.expected.records[1] = {
-                ...value.expected.records[1],
-                identity: await recordIdentity(value.journal),
-            };
-            const record = value.expected.records[1];
-            if (fault === 'hash') record.identity![0] ^= 1;
-            if (fault === 'key') record.encryption!.key[0] ^= 1;
-            if (fault === 'context') record.encryption!.additionalData[0] ^= 1;
+            const [data, sealed] = value.expected.records;
+            if (fault === 'hash') data.identity![0] ^= 1;
+            if (fault === 'key') sealed.encryption!.key[0] ^= 1;
+            if (fault === 'context') sealed.encryption!.additionalData[0] ^= 1;
             await expect(value.commit()).rejects.toThrow();
             expect(await value.generation()).toBe(16);
         },
     );
-    it('authenticates old ciphertexts and hashes before retiring the journal', async () => {
+    it('authenticates old ciphertexts and hashes before retiring a sealed record', async () => {
         const value = await fixture();
         await value.commit();
         expect(await value.generation()).toBe(17);
@@ -229,8 +227,8 @@ describe('required predecessor records', () => {
     });
 
     it.each([
-        'missing journal',
-        'changed journal',
+        'missing sealed record',
+        'changed sealed record',
         'changed data',
         'unexpected record',
         'stopped',
@@ -240,12 +238,12 @@ describe('required predecessor records', () => {
         'refuses %s while preserving the preceding generation',
         async (fault) => {
             const value = await fixture();
-            if (fault === 'missing journal')
-                await value.mutate('journal', (store) => store.delete([0, 0]));
-            if (fault === 'changed journal') {
-                value.journal[0] ^= 1;
-                await value.mutate('journal', (store) =>
-                    store.put(new Blob([value.journal]), [0, 0]),
+            if (fault === 'missing sealed record')
+                await value.mutate('sealed', (store) => store.delete([0, 0]));
+            if (fault === 'changed sealed record') {
+                value.sealed[0] ^= 1;
+                await value.mutate('sealed', (store) =>
+                    store.put(new Blob([value.sealed]), [0, 0]),
                 );
             }
             if (fault === 'changed data')
@@ -253,7 +251,7 @@ describe('required predecessor records', () => {
                     store.put(new Blob([Uint8Array.of(101, 107)]), [4, 0]),
                 );
             if (fault === 'unexpected record')
-                await value.mutate('journal', (store) =>
+                await value.mutate('sealed', (store) =>
                     store.add(new Blob([Uint8Array.of(1)]), [0, 1]),
                 );
             if (fault === 'stopped')
@@ -295,7 +293,7 @@ describe('predecessor root nonce', () => {
 });
 
 describe('predecessor record keys', () => {
-    const addSecondJournal = async (
+    const addSecondSealed = async (
         value: Awaited<ReturnType<typeof fixture>>,
         rawKey: Uint8Array,
     ) => {
@@ -306,34 +304,34 @@ describe('predecessor record keys', () => {
             false,
             ['encrypt'],
         );
-        const journal = new Uint8Array(
+        const sealed = new Uint8Array(
             await crypto.subtle.encrypt(
                 {
                     name: 'AES-GCM',
                     iv: new Uint8Array(12),
-                    additionalData: value.journalContext,
+                    additionalData: value.sealedContext,
                 },
                 key,
                 Uint8Array.of(11, 13, 17, 19),
             ),
         );
-        await value.mutate('journal', (store) =>
-            store.add(new Blob([journal]), [0, 1]),
+        await value.mutate('sealed', (store) =>
+            store.add(new Blob([sealed]), [0, 1]),
         );
         value.expected.records.push({
-            store: 'journal',
+            store: 'sealed',
             key: [0, 1],
-            byteLength: journal.length,
+            byteLength: sealed.length,
             encryption: {
                 key: Uint8Array.from(rawKey),
-                additionalData: value.journalContext,
+                additionalData: value.sealedContext,
             },
         });
     };
 
     it('accepts two zero-nonce records under distinct keys', async () => {
         const value = await fixture();
-        await addSecondJournal(
+        await addSecondSealed(
             value,
             crypto.getRandomValues(new Uint8Array(32)),
         );
@@ -343,7 +341,7 @@ describe('predecessor record keys', () => {
 
     it('refuses two zero-nonce records under one key', async () => {
         const value = await fixture();
-        await addSecondJournal(value, value.journalKey);
+        await addSecondSealed(value, value.sealedKey);
         await expect(value.commit()).rejects.toThrow(
             'Invalid predecessor record description.',
         );

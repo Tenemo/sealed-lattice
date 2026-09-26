@@ -584,26 +584,22 @@ const openSigning = (session: ContributionSession, kind: SigningKind) => {
     return openRecord(session, record);
 };
 
-// The stored records a contribution state lists. With a record context each
-// sealed record must also open under its own key.
+// The stored records a contribution state lists. Public and signing records
+// are authenticated by their own keys; checkpoint records, which the module
+// seals, by their ciphertext hashes.
 const contributionInventory = (
     profile: ParticipantProfile,
     state: ContributionState,
-    context?: RecordContext,
+    context: RecordContext,
 ): ParticipantStoredRecord[] => [
     ...[...state.publicRecords, ...state.signingRecords].map((record) => ({
         store: 'contribution',
         key: [record.object, record.offset],
         byteLength: record.length + 16,
-        identity: record.hash,
-        ...(context === undefined
-            ? {}
-            : {
-                  encryption: {
-                      key: record.key,
-                      additionalData: recordAssociatedData(context, record),
-                  },
-              }),
+        encryption: {
+            key: record.key,
+            additionalData: recordAssociatedData(context, record),
+        },
     })),
     ...state.privateRecords.map((record, index) => ({
         store: 'checkpoint',
@@ -632,7 +628,7 @@ const commitContribution = async (
     const profile = context.profile;
     const predecessor =
         root.head.generation >= 4 && session.state !== undefined
-            ? contributionInventory(profile, session.state)
+            ? contributionInventory(profile, session.state, session.records)
             : [];
     const listed = new Set(
         predecessor.map(
@@ -1695,7 +1691,11 @@ export const confirmRoster = async (
 // lists, if any.
 export const contributionRecords = (session: ParticipantSession) =>
     isContributionSession(session)
-        ? contributionInventory(session.context.profile, session.state)
+        ? contributionInventory(
+              session.context.profile,
+              session.state,
+              session.records,
+          )
         : [];
 
 // The signed opening, as retained.

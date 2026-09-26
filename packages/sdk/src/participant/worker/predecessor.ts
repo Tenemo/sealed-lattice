@@ -1,15 +1,23 @@
 import type { ParticipantTransactionReader } from './state-transaction.js';
 
+// A required record is authenticated either by the key the worker sealed it
+// under and its associated data, or by its listed ciphertext hash, as a
+// checkpoint record the module seals and a data record are.
 export type ParticipantStoredRecord = Readonly<{
     store: string;
     key: number | number[];
     byteLength: number;
-    identity?: Uint8Array;
-    encryption?: Readonly<{
-        key: Uint8Array;
-        additionalData: Uint8Array;
-    }>;
-}>;
+}> &
+    (
+        | Readonly<{ identity: Uint8Array; encryption?: undefined }>
+        | Readonly<{
+              identity?: undefined;
+              encryption: Readonly<{
+                  key: Uint8Array;
+                  additionalData: Uint8Array;
+              }>;
+          }>
+    );
 
 // The identities the caller derives for a sealed root and a stored record.
 export type ParticipantIdentities = Readonly<{
@@ -64,8 +72,8 @@ export async function validateParticipantPredecessor(
             !Number.isSafeInteger(record.byteLength) ||
             record.byteLength <= 0 ||
             record.byteLength > 1_572_864 ||
-            (record.identity === undefined &&
-                record.encryption === undefined) ||
+            (record.identity === undefined) ===
+                (record.encryption === undefined) ||
             (record.identity !== undefined && record.identity.length !== 64) ||
             (record.encryption !== undefined &&
                 (record.encryption.key.length !== 32 ||
@@ -137,17 +145,8 @@ export async function validateParticipantPredecessor(
             throw new Error('Required predecessor record is missing.');
         const bytes = new Uint8Array(await blob.arrayBuffer());
         try {
-            if (record.identity !== undefined) {
-                if (
-                    !equal(
-                        await expected.identities.record(bytes),
-                        record.identity,
-                    )
-                )
-                    throw new Error('Predecessor record bytes changed.');
-            }
-            if (record.encryption !== undefined) {
-                const encryption = record.encryption;
+            const { encryption, identity } = record;
+            if (encryption !== undefined) {
                 const recordKey = await crypto.subtle.importKey(
                     'raw',
                     new Uint8Array(encryption.key),
@@ -169,7 +168,11 @@ export async function validateParticipantPredecessor(
                     ),
                 );
                 plaintext.fill(0);
-            }
+            } else if (
+                identity === undefined ||
+                !equal(await expected.identities.record(bytes), identity)
+            )
+                throw new Error('Predecessor record bytes changed.');
         } finally {
             bytes.fill(0);
         }
