@@ -8,7 +8,6 @@ use evaluation_target::{
 };
 use registration_credentials::{
     Credential, contribution_authentication::SignedOpening, release_signing::body_header,
-    roster::RetainedContributionContext,
 };
 use registration_enrollment::{
     Enrollment,
@@ -193,26 +192,13 @@ pub fn run(
         .iter_mut()
         .enumerate()
         .map(|(position, enrollment)| {
-            let retained = RetainedContributionContext::parse(
-                poll.identity(),
-                poll.runtime(),
-                profile.options(),
+            Arc::new(crate::close::owner_of(
+                &enrollment.credential,
+                &poll,
+                &setup,
+                openings.get(position),
                 position,
-                setup.inventory().proposal().proposal().body(),
-            )
-            .unwrap();
-            Arc::new(
-                enrollment
-                    .credential
-                    .retain_ballot_owner(
-                        &poll,
-                        &retained,
-                        setup.inventory().identity(),
-                        openings[position].body(),
-                        openings[position].signature(),
-                    )
-                    .unwrap(),
-            )
+            ))
         })
         .collect();
     let mut collector = CertificateCollector::new(target.clone());

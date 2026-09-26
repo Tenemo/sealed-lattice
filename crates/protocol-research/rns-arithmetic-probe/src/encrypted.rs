@@ -99,11 +99,11 @@ impl Arithmetic {
         let half_modulus = &modulus >> 1usize;
         let degree_factor = degree as u64;
         // A plaintext coefficient is at most half the plaintext modulus and
-        // an aggregate secret's one-norm is at most one support per
-        // participant.
+        // an aggregate secret's one-norm is at most one support per setup
+        // contributor.
         let key_bound = 2u64
             * (degree_factor * u64::from(PLAINTEXT_MODULUS / 2))
-                .max((profile.participants() * FHE_SECRET_SUPPORT) as u64)
+                .max((profile.setup_contributors() * FHE_SECRET_SUPPORT) as u64)
             * &half_modulus;
         let external_bound = 2u64
             * gadget_length as u64
@@ -449,11 +449,11 @@ fn push_words(output: &mut Vec<u64>, value: &BigUint, words: usize) {
     output.resize(output.len() + words - digits.len(), 0);
 }
 
-/// A synthetic aggregate secret of one sparse support per participant.
+/// A synthetic aggregate secret of one sparse support per setup contributor.
 #[cfg(any(test, feature = "numerical-probes"))]
-fn secret(degree: usize, participants: usize, weight: usize, mut seed: u64) -> Vec<i16> {
+fn secret(degree: usize, contributors: usize, weight: usize, mut seed: u64) -> Vec<i16> {
     let mut result = vec![0; degree];
-    for _ in 0..participants {
+    for _ in 0..contributors {
         let mut occupied = vec![false; degree];
         let mut count = 0;
         while count < weight {
@@ -680,9 +680,9 @@ mod tests {
         for profile in profiles() {
             let arithmetic = Arithmetic::new(profile, TEST_DEGREE);
             let weight = TEST_DEGREE / 2;
-            let participants = profile.participants();
-            let secret_values = secret(TEST_DEGREE, participants, weight, 0x1234_5678_9abc_def1);
-            let auxiliary_values = secret(TEST_DEGREE, participants, weight, 0x9876_5432_10ab_cdef);
+            let contributors = profile.setup_contributors();
+            let secret_values = secret(TEST_DEGREE, contributors, weight, 0x1234_5678_9abc_def1);
+            let auxiliary_values = secret(TEST_DEGREE, contributors, weight, 0x9876_5432_10ab_cdef);
             let secret = arithmetic.small(&secret_values);
             let auxiliary = arithmetic.small(&auxiliary_values);
             let rotated_secret = arithmetic.automorphism(&secret);

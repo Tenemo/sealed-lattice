@@ -12,10 +12,22 @@ import {
     unsigned64,
 } from './bytes.js';
 import { closeRecordInventory, decodeCloseState } from './close-state.js';
-import { describe, PublicInputFailure, sessionInput } from './context.js';
+import {
+    describe,
+    isSetupContributor,
+    PublicInputFailure,
+    sessionInput,
+} from './context.js';
 import type { ProfileContext } from './context.js';
-import { contributionRecords, storedOpening } from './contribution.js';
-import type { ContributionSession } from './contribution.js';
+import {
+    contributionRecords,
+    isContributionSession,
+    storedOpening,
+} from './contribution.js';
+import type {
+    ContributionSession,
+    ParticipantSession,
+} from './contribution.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel } from './kernel.js';
 import type { KernelHandlers } from './kernel.js';
@@ -74,7 +86,7 @@ type BallotState = Readonly<{
 }>;
 
 export type BallotSession = {
-    readonly contribution: ContributionSession;
+    readonly participant: ParticipantSession;
     readonly records: RecordContext;
     state: BallotState;
 };
@@ -307,7 +319,7 @@ const openBallotRecord = (
     kind: number,
     index: number,
 ) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const keys =
         kind === journalKind
             ? session.state.journalKeys
@@ -366,10 +378,10 @@ const ballotInventory = (
 // the attempt's phase through generation seventeen, and the signed ballot
 // after it.
 const retainedBallotState = (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
     records: RecordContext,
 ): BallotState | undefined => {
-    const { root, context } = contribution;
+    const { root, context } = participant;
     const bytes = root.manifest.suffixes.ballot;
     if (bytes === undefined) throw new Error('The ballot suffix is missing.');
     if (bytes.length === 0) {
@@ -390,22 +402,22 @@ const retainedBallotState = (
 
 // The ballot records the current root lists.
 export const retainedBallotRecords = (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
     records: RecordContext,
 ): ParticipantStoredRecord[] => {
-    const state = retainedBallotState(contribution, records);
+    const state = retainedBallotState(participant, records);
     return state === undefined
         ? []
-        : ballotInventory(contribution.context.profile, records, state);
+        : ballotInventory(participant.context.profile, records, state);
 };
 
 // The close records the root lists while a ballot is pending; the close log
 // only collects through the ballot phases.
 const collectedCloseRecords = (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
     records: RecordContext,
 ) => {
-    const { root, context } = contribution;
+    const { root, context } = participant;
     const bytes = root.manifest.suffixes.close;
     if (bytes === undefined) throw new Error('The close suffix is missing.');
     return closeRecordInventory(
@@ -428,12 +440,12 @@ const commitBallot = async (
     session: BallotSession,
     transition: BallotTransition,
 ) => {
-    const { contribution } = session;
-    const { context, root } = contribution;
+    const { participant } = session;
+    const { context, root } = participant;
     const encoded = encodeBallotState(transition.generation, transition.state);
     if (encoded.length > context.profile.ballot.maximumStateBytes)
         throw new Error('The ballot state exceeds its bound.');
-    contribution.root = await commitRoot(context, root, {
+    participant.root = await commitRoot(context, root, {
         generation: transition.generation,
         manifest: {
             ...root.manifest,
@@ -441,9 +453,9 @@ const commitBallot = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(contribution),
+            ...contributionRecords(participant),
             ...ballotInventory(context.profile, session.records, session.state),
-            ...collectedCloseRecords(contribution, session.records),
+            ...collectedCloseRecords(participant, session.records),
         ],
         write: (transaction) => {
             const store = transaction.objectStore('ballot');
@@ -472,10 +484,10 @@ const commitBallot = async (
 // Locks a ballot attempt: the scores and the ballot time enter the root
 // before any journal randomness exists.
 export const beginBallot = async (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
     scores: Uint8Array,
 ): Promise<BallotSession> => {
-    const { context, root } = contribution;
+    const { context, root } = participant;
     const { profile } = context;
     if (root.head.generation !== phase.locked - 1)
         throw new Error('No verified setup awaits a ballot.');
@@ -488,9 +500,9 @@ export const beginBallot = async (
         estimate.quota - estimate.usage < profile.ballot.requiredStorageBytes
     )
         throw new StoragePending('The origin lacks room for a ballot.');
-    const records = await recordContext(contribution);
+    const records = await recordContext(participant);
     const session: BallotSession = {
-        contribution,
+        participant,
         records,
         state: {
             scores: scores.slice(),
@@ -503,7 +515,7 @@ export const beginBallot = async (
             signature: new Uint8Array(),
         },
     };
-    contribution.root = await commitRoot(context, root, {
+    participant.root = await commitRoot(context, root, {
         generation: phase.locked,
         manifest: {
             ...root.manifest,
@@ -514,8 +526,8 @@ export const beginBallot = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(contribution),
-            ...collectedCloseRecords(contribution, records),
+            ...contributionRecords(participant),
+            ...collectedCloseRecords(participant, records),
         ],
     });
     return session;
@@ -524,11 +536,11 @@ export const beginBallot = async (
 // Decodes the retained ballot, or undefined when the root retains none.
 // Every listed record must be stored and nothing else.
 export const resumeBallot = async (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
 ): Promise<BallotSession | undefined> => {
-    const { context } = contribution;
-    const records = await recordContext(contribution);
-    const state = retainedBallotState(contribution, records);
+    const { context } = participant;
+    const records = await recordContext(participant);
+    const state = retainedBallotState(participant, records);
     const snapshot = await snapshotParticipant(context.database);
     if (
         snapshot.counts.ballot !==
@@ -537,17 +549,29 @@ export const resumeBallot = async (
             : state.journalKeys.length + state.bodyKeys.length)
     )
         throw new Error('The ballot records changed.');
-    return state === undefined ? undefined : { contribution, records, state };
+    return state === undefined ? undefined : { participant, records, state };
+};
+
+// A setup contributor's signed opening as the module reads it.
+const openingPacket = async (session: ContributionSession) => {
+    const opening = await storedOpening(session);
+    return concatenate(
+        unsigned32(opening.body.length),
+        opening.body,
+        opening.signature,
+    );
 };
 
 // The input that starts the module's ballot or close work from the retained
-// poll, opening and setup reference.
+// poll, a setup contributor's own opening and the setup reference. A
+// participant outside the setup contributors opened nothing and names no
+// opening.
 export const ballotWorkInput = async (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
     inventory: Uint8Array,
 ) => {
-    const { context } = contribution;
-    const { manifest } = contribution.root;
+    const { context } = participant;
+    const { manifest } = participant.root;
     const definition = await readDataKind(
         context,
         manifest,
@@ -563,15 +587,16 @@ export const ballotWorkInput = async (
         manifest,
         dataKind.setupReference,
     );
-    const opening = await storedOpening(contribution);
-    const packet = concatenate(
-        unsigned32(opening.body.length),
-        opening.body,
-        opening.signature,
-    );
+    // A setup contributor's own opening names the inventory; any other
+    // participant's setup reference does.
+    const packet =
+        isSetupContributor(participant.context) &&
+        isContributionSession(participant)
+            ? await openingPacket(participant)
+            : new Uint8Array();
     return concatenate(
         manifest.poll,
-        contribution.context.runtime,
+        participant.context.runtime,
         unsigned32(definition.length),
         definition,
         definitionSignature,
@@ -609,14 +634,14 @@ const ballotCommand = (
 // aggregate. The module checks each key against the retained reference, so
 // an unavailable or refused key leaves the participant pending.
 const startBallotWork = async (session: BallotSession) => {
-    const { contribution } = session;
-    const { context } = contribution;
+    const { participant } = session;
+    const { context } = participant;
     const { kernel } = context;
     ballotCommand(
         context,
         0,
         0,
-        await ballotWorkInput(contribution, session.records.inventory),
+        await ballotWorkInput(participant, session.records.inventory),
     );
     for (let ordinal = 0; ordinal < ballotKeys; ordinal++) {
         const index = kernel.participant_ballot_key_index(ordinal) >>> 0;
@@ -638,8 +663,8 @@ const startBallotWork = async (session: BallotSession) => {
 // Appends the journal's original random bytes one record at a time; the
 // append of the final record enters the ready phase.
 const prepareJournal = async (session: BallotSession) => {
-    const layout = journalLayout(session.contribution.context.profile);
-    while (session.contribution.root.head.generation === phase.locked) {
+    const layout = journalLayout(session.participant.context.profile);
+    while (session.participant.root.head.generation === phase.locked) {
         const index = session.state.journalKeys.length;
         const bytes = new Uint8Array(layout[index].length);
         let added: SealedRecord;
@@ -672,7 +697,7 @@ const prepareJournal = async (session: BallotSession) => {
 // Serves the module's encryption and proof randomness from the journal's
 // two banks in order and clears what it consumed; exhaustion refuses.
 const journalRandomness = async (session: BallotSession) => {
-    const { profile } = session.contribution.context;
+    const { profile } = session.participant.context;
     const { recordBytes, randomBudgets } = profile.ballot;
     const banks: Uint8Array[][] = randomBudgets.map(() => []);
     for (const [index, entry] of journalLayout(profile).entries())
@@ -715,7 +740,7 @@ const journalRandomness = async (session: BallotSession) => {
 
 // Creates the ballot from the locked scores, ballot time and journal.
 const createBallot = async (session: BallotSession) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const randomness = await journalRandomness(session);
     const input = concatenate(
         unsigned64(session.state.ballotTime),
@@ -734,7 +759,7 @@ const createBallot = async (session: BallotSession) => {
 
 // Retains the created body record by record, each append with its root.
 const retainBody = async (session: BallotSession) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const { recordBytes } = context.profile.ballot;
     const count = Math.ceil(session.state.bodyLength / recordBytes);
     while (session.state.bodyKeys.length < count) {
@@ -769,7 +794,7 @@ const retainBody = async (session: BallotSession) => {
 // Imports the complete retained body; the module verifies it against the
 // keys and must reproduce the retained envelope.
 const importBody = async (session: BallotSession) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     ballotCommand(context, 5, 0, session.state.envelope);
     let offset = 0;
     await readBallotBody(session, (bytes) => {
@@ -784,9 +809,9 @@ const importBody = async (session: BallotSession) => {
 // Carries a retained ballot to its signed completion. A replay before the
 // body is complete must reproduce the retained envelope before appending.
 export const completeBallot = async (session: BallotSession) => {
-    const { contribution } = session;
-    const { context } = contribution;
-    const generation = () => contribution.root.head.generation;
+    const { participant } = session;
+    const { context } = participant;
+    const generation = () => participant.root.head.generation;
     if (generation() >= phase.signed) return;
     await startBallotWork(session);
     await prepareJournal(session);
@@ -891,7 +916,7 @@ export const publishBallot = async (
     if (!isSignedBallot(session))
         throw new Error('No signed ballot is retained.');
     const identity = custodyIdentity(
-        session.contribution.context.kernel,
+        session.participant.context.kernel,
         custodyPurpose.envelope,
         session.state.envelope,
     );

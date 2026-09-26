@@ -58,6 +58,7 @@ describe('threshold completion model', () => {
             maximumCorruptParticipantCount: 3,
             inventoryCertificateThreshold: 7,
             resultReleaseThreshold: 4,
+            setupContributorCount: 4,
             minimumTurnout: 5,
             noResultForceableAtFullHonestTurnout: true,
             setupReceiptThreshold: 10,
@@ -78,6 +79,7 @@ describe('threshold completion model', () => {
             maximumCorruptParticipantCount: 0,
             inventoryCertificateThreshold: 3,
             resultReleaseThreshold: 2,
+            setupContributorCount: 2,
             minimumTurnout: 2,
             noResultForceableAtFullHonestTurnout: false,
             mandatoryReleaseParticipantCount: 0,
@@ -85,6 +87,7 @@ describe('threshold completion model', () => {
         expect(compileThresholdCompletionProfile(20)).toMatchObject({
             maximumCorruptParticipantCount: 6,
             resultReleaseThreshold: 7,
+            setupContributorCount: 7,
             minimumTurnout: 8,
             noResultForceableAtFullHonestTurnout: false,
         });
@@ -166,6 +169,38 @@ describe('threshold completion model', () => {
             expect(expected.resultReleaseThreshold).toBeLessThan(
                 expected.participantCount,
             );
+        }
+    });
+
+    it('leaves an honest setup contributor that does not know the key alone', () => {
+        for (const profile of compileSupportedThresholdCompletionProfiles()) {
+            // Only the first setupContributorCount positions contribute, and
+            // the corrupt participants cannot fill them all.
+            expect(profile.setupContributorCount).toBeGreaterThan(
+                profile.maximumCorruptParticipantCount,
+            );
+            expect(profile.setupContributorCount).toBeGreaterThanOrEqual(2);
+            expect(profile.setupContributorCount).toBeLessThanOrEqual(
+                profile.participantCount,
+            );
+        }
+        // Every corrupt set of at most f participants leaves an honest
+        // contributor.
+        for (
+            let participantCount = 3;
+            participantCount <= 12;
+            participantCount += 1
+        ) {
+            const { maximumCorruptParticipantCount, setupContributorCount } =
+                compileThresholdCompletionProfile(participantCount);
+            const contributors = 2 ** setupContributorCount - 1;
+            for (const corruptSet of participantSets(
+                participantCount,
+                (size) => size <= maximumCorruptParticipantCount,
+            ))
+                expect(
+                    memberCount(contributors & ~corruptSet),
+                ).toBeGreaterThanOrEqual(1);
         }
     });
 

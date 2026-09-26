@@ -10,11 +10,15 @@ describe('setup randomness and bounded integer reduction', () => {
     it('charges all contribution and registration errors in the preparation profile', () => {
         const result = compileSetupRandomnessCensus(completionProfile());
         expect(result.samplesPerContribution).toBe(44n * 65536n + 4096n);
-        expect(result.samplesPerPreparation).toBe(10n * (45n * 65536n + 4096n));
+        // Four setup contributors draw contribution errors and all ten
+        // participants draw registration errors.
+        expect(result.samplesPerPreparation).toBe(
+            4n * (44n * 65536n + 4096n) + 10n * 65536n,
+        );
         expect(result.encodedThresholdBytes).toBe(127n * 20n);
         expect(result.quantizationBits).toBeGreaterThan(120);
         expect(result.tailExponent).toBe(200n);
-        expect(result.preparationSamplingBits).toBe(128);
+        expect(result.preparationSamplingBits).toBe(129);
     });
     it('matches direct centered division across signed carries and both correction outcomes', () => {
         const corrections = new Set<bigint>();

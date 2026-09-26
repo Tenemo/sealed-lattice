@@ -360,6 +360,8 @@ export const largestTransformPrimeBelow = (bits: number): TransformPrime => {
 const undecodable = 'The accepted error support exceeds the BFV decoding cell.';
 
 // Returns undefined when some operation of the ranking graph fails to decode.
+// The aggregate keys sum the setup contributors' secrets and errors, and the
+// ranking sums a ballot from every participant.
 export const deriveRankingNoise = (
     participantCount: number,
     optionCount: number,
@@ -368,7 +370,9 @@ export const deriveRankingNoise = (
     try {
         const model = createFixedModulusBfvNoiseModel({
             ...fixedModulusBfvInputs,
-            participantCount: BigInt(participantCount),
+            contributorCount: BigInt(
+                thresholdsFor(participantCount).setupContributorCount,
+            ),
             ciphertextModulus,
         });
         const { comparison, result } = evaluateFixedModulusBfvRanking(
@@ -431,10 +435,10 @@ const shareLiftings = new Map<
 export const deriveSupportedShareLifting = (participantCount: number) => {
     let lifting = shareLiftings.get(participantCount);
     if (lifting === undefined) {
+        const thresholds = thresholdsFor(participantCount);
         lifting = deriveWideShareLiftingLayout({
-            participantCount: BigInt(participantCount),
-            sharingDegree:
-                thresholdsFor(participantCount).resultReleaseThreshold - 1,
+            contributorCount: BigInt(thresholds.setupContributorCount),
+            sharingDegree: thresholds.resultReleaseThreshold - 1,
         });
         shareLiftings.set(participantCount, lifting);
     }
@@ -478,6 +482,7 @@ const computeSupportedProfile = (
             inventoryCertificateThreshold:
                 thresholds.inventoryCertificateThreshold,
             releaseThreshold: thresholds.resultReleaseThreshold,
+            setupContributorCount: thresholds.setupContributorCount,
             minimumTurnout: thresholds.minimumTurnout,
             ciphertext,
             release: release.release,
@@ -610,7 +615,7 @@ export const compileProfileBfvCensus = (profile: SupportedProfile) => {
             model.gadgetLength *
             fixedModulusBfvInputs.polynomialDegree *
             BigInt(Math.ceil(bitLength(profile.ciphertext.modulus) / 8)) *
-            BigInt(profile.participantCount),
+            BigInt(profile.setupContributorCount),
     };
 };
 

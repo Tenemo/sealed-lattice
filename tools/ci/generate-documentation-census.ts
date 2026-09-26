@@ -319,8 +319,9 @@ export const renderDocumentationCensus = (): string => {
     const contributionBodies = supportedProfiles.profiles.map((row) =>
         row.map((profile) => compileContributionBodyCensus(profile)),
     );
-    // A roster's contributions, which every participant verifies and every
-    // archived closure carries, at the option count with the largest bodies.
+    // A roster's setup contributions, which every participant verifies and
+    // every archived closure carries, at the option count with the largest
+    // bodies.
     const contributionCorpus = contributionBodies.map((row, index) => ({
         participants: supportedProfiles.profiles[index][0].participantCount,
         bytes: row.reduce(
@@ -410,7 +411,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](non-forking-state.md#release-threshold-under-the-candidate-availability-model); its responder floor is not an additional mandatory fault budget.',
         '',
-        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, and minimum turnout `m = f + 2` accepted ballots. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
+        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, which is also the number of setup contributors, the first `d` roster positions, and minimum turnout `m = f + 2` accepted ballots. At least one setup contributor is honest because `d > f`, and no single one knows the key because `d >= 2`. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` publication or close certificate has at least `n - 2f` honest locked signers, leaving at most `2f < q` positions able to pass it with the conflicting certificate. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
         '',
         table(
             [
@@ -3736,7 +3737,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof compiler chronology',
         '',
-        'Proofs, programming points and commitments that one poll emits under the lifecycle rules owned by the construction analysis, against the caps the compiler charges. Every honest registration publishes a registration proof before any roster exists, including one no roster takes, so the largest honest credential population bounds them; each participant adds at most one contribution, ballot and release proof, because those purposes occupy one-shot slots. A restored participant replays identical bytes and one that loses unfinished work stops. At that population a corrupt organizer can split the honest registrations into as many rosters of one participant count as their honest members allow: each honest registration confirms at most one, and a roster with at most `f` corrupt members holds `n-f` honest ones. The direct simulator programs one verifier message per simulated proof, and accepted proof roles are the registrations and positions of those rosters. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
+        'Proofs, programming points and commitments that one poll emits under the lifecycle rules owned by the construction analysis, against the caps the compiler charges. Every honest registration publishes a registration proof before any roster exists, including one no roster takes, so the largest honest credential population bounds them; each setup contributor adds at most one contribution proof and each participant at most one ballot and release proof, because those purposes occupy one-shot slots. A restored participant replays identical bytes and one that loses unfinished work stops. At that population a corrupt organizer can split the honest registrations into as many rosters of one participant count as their honest members allow: each honest registration confirms at most one, and a roster with at most `f` corrupt members holds `n-f` honest ones. The direct simulator programs one verifier message per simulated proof, and accepted proof roles are the registrations and proving positions of those rosters. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
         '',
         table(
             [
@@ -4737,7 +4738,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Contribution authentication census',
         '',
-        'Canonical confirmation bodies bind the proposal, position, and commitment. Opening headers bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing, archive replication, and local custody.',
+        'Every participant signs one canonical confirmation body, which binds the proposal, the position, and either the commitment of a setup contributor or, for any other participant, its own registration body. Only setup contributors sign opening headers, which bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing, archive replication, and local custody.',
         '',
         table(
             [
@@ -5388,7 +5389,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'Every participant verifies, and every archived closure carries, all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target, and its bound on one canonical transport stream also caps the bytes one archive retrieval holds, so a larger closure is archived in several parts. A participant count is listed when some option count exceeds the bound.',
+        'Only the first `d` roster positions contribute to the setup. Every participant verifies, and every archived closure carries, all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target, and its bound on one canonical transport stream also caps the bytes one archive retrieval holds, so a larger closure is archived in several parts. A participant count is listed when some option count exceeds the bound.',
         '',
         table(
             ['Property', 'Value'],

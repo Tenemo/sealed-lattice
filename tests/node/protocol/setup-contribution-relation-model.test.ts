@@ -106,19 +106,20 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(
             compileSetupContributionRelationCensus(completionProfile()),
         ).toEqual({
+            // Each 112-bit sharing coefficient fills seven words.
             wordColumns: 24 * 10 + 3 * 7 + 10 * 7 + 2,
-            booleanColumns: 2 * (2 + 10 + 1) + 3 * 2,
+            booleanColumns: 2 * (2 + 10 + 1),
             errorColumns: 24 + 2 * 10 + 1,
             disjointPairs: 13,
             supportRows: 26,
             affineRows: BigInt((24 * 9 + 20 * 2) * 65536 + 4096 + 26),
             lookupEntries: 333 + 45,
-            fullAffineCoefficientByteLength: 365n * 65536n * (3n * 16n),
+            fullAffineCoefficientByteLength: 359n * 65536n * (3n * 16n),
             singlePublicAdjointCoefficientByteLength: 65536n * (3n * 16n),
             largestPublicPolynomialByteLength: 65536n * (1n + 108n),
             maximumPublicQueryCount: 2 * 704,
             publicQueryValueByteLength: 2n * 704n * (3n * 16n),
-            fullAffineQueryValueByteLength: 365n * 2n * 704n * (3n * 16n),
+            fullAffineQueryValueByteLength: 359n * 2n * 704n * (3n * 16n),
             publicQueryTransformVectorByteLength:
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
@@ -131,10 +132,10 @@ describe('complete setup contribution relation in a reduced ring', () => {
                 31n * 65536n * 21n +
                 2n * 4096n * 6n,
             maximumEncodedOperatorByteLength:
-                64n + 2n * 48n + 365n * 1408n * 48n,
+                64n + 2n * 48n + 359n * 1408n * 48n,
             maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),
             syntheticWitnessHeaderByteLength: 4n + 3n * 4n + 64n,
-            syntheticWitnessByteLength: 80n + 365n * 65536n * 2n,
+            syntheticWitnessByteLength: 80n + 359n * 65536n * 2n,
         });
     });
 
@@ -145,7 +146,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
             [...layout.modelToCanonicalColumn].sort(
                 (left, right) => left - right,
             ),
-        ).toEqual(Array.from({ length: 365 }, (_unused, index) => index));
+        ).toEqual(Array.from({ length: 359 }, (_unused, index) => index));
         expect(layout.lookups.slice(0, 333)).toEqual(
             Array.from({ length: 333 }, (_unused, column) => ({
                 column,
@@ -241,7 +242,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         for (const name of [
             'FHE secret/positive',
             'sharing coefficient 1/low/word-0',
-            'sharing coefficient 3/high/bit-17',
+            'sharing coefficient 3/high/word-0',
         ]) {
             const column = model.columns.find(
                 (candidate) => candidate.name === name,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-// Operands shared by every supported profile. The participant and option
+// Operands shared by every supported profile. The contributor and option
 // counts and both moduli are derived per profile by the supported-profile
 // rules.
 export const fixedModulusBfvInputs = {
@@ -15,7 +15,9 @@ export const fixedModulusBfvInputs = {
 } as const;
 
 type NoiseParameters = Readonly<{
-    participantCount: bigint;
+    // The setup contributors, whose secrets and key errors the aggregate
+    // keys sum.
+    contributorCount: bigint;
     polynomialDegree: bigint;
     plaintextSubringDegree: bigint;
     plaintextModulus: bigint;
@@ -52,12 +54,13 @@ export const verifyProthCertificate = (
 };
 
 // Bounds apply to centered ciphertext components and plaintexts in the
-// specified subring. Both aggregate secrets have the stated one-norm bound.
+// specified subring. Both aggregate secrets have the stated one-norm bound:
+// each is the sum of every contributor's secret of the support weight.
 export const createFixedModulusBfvNoiseModel = (
     parameters: NoiseParameters,
 ) => {
     const {
-        participantCount,
+        contributorCount,
         polynomialDegree,
         plaintextSubringDegree,
         plaintextModulus,
@@ -69,7 +72,7 @@ export const createFixedModulusBfvNoiseModel = (
     assert.equal(ciphertextModulus % 2n, 1n);
     assert.equal(plaintextModulus % 2n, 1n);
     assert.equal(polynomialDegree % plaintextSubringDegree, 0n);
-    const secretOneNorm = participantCount * secretSupportWeight;
+    const secretOneNorm = contributorCount * secretSupportWeight;
     const plaintextMaximumNorm = plaintextModulus / 2n;
     const plaintextOneNorm = plaintextSubringDegree * plaintextMaximumNorm;
     const plaintextProductMaximumNorm = plaintextOneNorm * plaintextMaximumNorm;
@@ -88,7 +91,7 @@ export const createFixedModulusBfvNoiseModel = (
     const externalProductError =
         gadgetLength *
         (gadgetBase - 1n) *
-        participantCount *
+        contributorCount *
         polynomialDegree *
         errorBound;
     const relinearizationError =

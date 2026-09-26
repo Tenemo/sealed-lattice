@@ -75,23 +75,16 @@ impl BallotWork {
         let packet_length =
             u32::from_le_bytes(input[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
-        if !(4 + 3309..=4 + 1024 + 3309).contains(&packet_length)
+        // A setup contributor names its own signed opening; any other
+        // participant opened nothing and names none.
+        let contributor = proposal.position() < proposal.profile().setup_contributors();
+        if (contributor && !(4 + 3309..=4 + 1024 + 3309).contains(&packet_length))
+            || (!contributor && packet_length != 0)
             || input.len() < offset + packet_length
         {
             return Err(Error::Shape);
         }
-        let opening_length =
-            u32::from_le_bytes(input[offset..offset + 4].try_into().unwrap()) as usize;
-        if packet_length != 4 + opening_length + 3309 {
-            return Err(Error::Shape);
-        }
-        let owner = credential.retain_ballot_owner(
-            &poll,
-            proposal,
-            inventory,
-            &input[offset + 4..offset + 4 + opening_length],
-            &input[offset + 4 + opening_length..offset + packet_length],
-        )?;
+        let packet = &input[offset..offset + packet_length];
         offset += packet_length;
         let retained = &input[offset..];
         let (reference, tag) = retained.split_at(
@@ -100,7 +93,23 @@ impl BallotWork {
                 .checked_sub(RETAINED_SETUP_TAG_BYTES)
                 .ok_or(Error::Shape)?,
         );
-        credential.check_retained_setup_tag(&poll, reference, tag)?;
+        let owner = if contributor {
+            let opening_length = u32::from_le_bytes(packet[..4].try_into().unwrap()) as usize;
+            if packet_length != 4 + opening_length + 3309 {
+                return Err(Error::Shape);
+            }
+            let owner = credential.retain_ballot_owner(
+                &poll,
+                proposal,
+                inventory,
+                &packet[4..4 + opening_length],
+                &packet[4 + opening_length..],
+            )?;
+            credential.check_retained_setup_tag(&poll, reference, tag)?;
+            owner
+        } else {
+            credential.retain_setup_ballot_owner(&poll, proposal, inventory, reference, tag)?
+        };
         let inputs = RetainedSetupInputs::parse(proposal.profile(), reference, inventory)
             .map_err(|_| Error::Context)?;
         let context = BallotComputationContext::from_retained(poll, &owner, &inputs)

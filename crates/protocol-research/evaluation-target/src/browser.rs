@@ -191,7 +191,7 @@ impl State {
                     return Err(Error::Context);
                 }
                 let (_, setup) = self.context.as_ref().ok_or(Error::Context)?;
-                if self.classifications.len() >= setup.inventory().confirmations().len() {
+                if self.classifications.len() >= setup.profile().participants() {
                     return Err(Error::Incomplete);
                 }
                 self.classifications

@@ -265,6 +265,11 @@ impl Profile {
     pub fn release_threshold(self) -> usize {
         (self.corrupt() + 1).max(2)
     }
+    /// Only the first d roster positions contribute setup key material, so at
+    /// least one contributor is honest and no single one knows the key.
+    pub fn setup_contributors(self) -> usize {
+        self.release_threshold()
+    }
     /// A result needs f + 2 accepted ballots.
     pub fn minimum_turnout(self) -> usize {
         self.corrupt() + 2
@@ -671,11 +676,11 @@ mod tests {
         // limbs, sharing coefficient, share limb and carry bits, release
         // share and quotient bits, and common-matrix sample bits.
         for (participants, options, bits, gadgets, limbs, sharing, limb, carry, share, quotient) in [
-            (3, 2, 576, 4, 6, 109, 96, 32, 112, 144),
-            (10, 10, 864, 6, 9, 114, 96, 32, 120, 144),
-            (13, 2, 704, 5, 8, 115, 96, 32, 127, 192),
-            (16, 2, 768, 6, 8, 116, 95, 33, 127, 192),
-            (20, 20, 992, 7, 11, 118, 95, 33, 127, 192),
+            (3, 2, 576, 4, 6, 108, 96, 32, 112, 144),
+            (10, 10, 864, 6, 9, 112, 96, 32, 120, 144),
+            (13, 2, 704, 5, 8, 114, 96, 32, 120, 144),
+            (16, 2, 736, 6, 8, 115, 95, 33, 120, 144),
+            (20, 20, 960, 7, 10, 116, 95, 33, 127, 192),
         ] {
             let profile = Profile::new(participants, options).unwrap();
             assert_eq!(profile.ciphertext_modulus().bits(), bits);
@@ -698,7 +703,7 @@ mod tests {
         }
         assert_eq!(fixed_common_sample_bits(), 320);
         let completion = Profile::new(10, 10).unwrap();
-        assert_eq!(completion.release_noise_bits(), 168);
+        assert_eq!(completion.release_noise_bits(), 144);
         assert_eq!(completion.comparison_degree(), 181);
         assert_eq!(completion.rank_window(), 16);
         assert_eq!(Profile::new(3, 2).unwrap().rank_window(), 2);
@@ -809,7 +814,7 @@ mod tests {
         let completion = Profile::new(10, 10).unwrap().setup_shape();
         assert_eq!(
             (completion.word_columns, completion.boolean_columns),
-            (333, 32)
+            (333, 26)
         );
         // Twenty-four FHE errors, one per key, then two share errors per
         // recipient and the auxiliary error.
@@ -824,7 +829,7 @@ mod tests {
         assert_eq!(completion.sparse_supports[2], (1, 128));
         assert_eq!(completion.sparse_supports[12], (16, 128));
         // Census ranges of word columns by participant count.
-        for (participants, low, high) in [(3, 142, 270), (16, 360, 480), (20, 394, 514)] {
+        for (participants, low, high) in [(3, 142, 270), (16, 360, 452), (20, 394, 486)] {
             let words: Vec<_> = Profile::option_range()
                 .map(|options| {
                     Profile::new(participants, options)
@@ -836,9 +841,9 @@ mod tests {
             assert_eq!(*words.iter().min().unwrap(), low);
             assert_eq!(*words.iter().max().unwrap(), high);
         }
-        // Thirteen-bit high parts are narrow words for three participants.
+        // Twelve-bit high parts are narrow words for three participants.
         let small = Profile::new(3, 2).unwrap().setup_shape();
-        assert_eq!(small.narrow_words[0], (6, 13));
+        assert_eq!(small.narrow_words[0], (6, 12));
     }
 
     #[test]

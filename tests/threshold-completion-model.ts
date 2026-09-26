@@ -209,6 +209,7 @@ export type ThresholdCompletionProfile = Readonly<{
     maximumCorruptParticipantCount: number;
     inventoryCertificateThreshold: number;
     resultReleaseThreshold: number;
+    setupContributorCount: number;
     minimumTurnout: number;
     noResultForceableAtFullHonestTurnout: boolean;
     setupReceiptThreshold: number;
@@ -249,6 +250,9 @@ export const compileThresholdCompletionProfile = (
         maximumCorruptParticipantCount + 1,
         2,
     );
+    // The first d roster positions contribute the setup's key material, so at
+    // least one contributor is honest and no single one knows the key.
+    const setupContributorCount = resultReleaseThreshold;
     const minimumTurnout = maximumCorruptParticipantCount + 2;
     const setupReceiptThreshold = participantCount;
     const mandatoryReleaseParticipantCount =
@@ -276,6 +280,9 @@ export const compileThresholdCompletionProfile = (
     if (
         resultReleaseThreshold < 2 ||
         resultReleaseThreshold >= participantCount ||
+        setupContributorCount < 2 ||
+        setupContributorCount <= maximumCorruptParticipantCount ||
+        setupContributorCount > participantCount ||
         minimumTurnout - maximumCorruptParticipantCount < 2 ||
         participantCount - maximumCorruptParticipantCount < minimumTurnout ||
         maximumCorruptParticipantCount >= resultReleaseThreshold ||
@@ -366,6 +373,7 @@ export const compileThresholdCompletionProfile = (
         maximumCorruptParticipantCount,
         inventoryCertificateThreshold,
         resultReleaseThreshold,
+        setupContributorCount,
         minimumTurnout,
         noResultForceableAtFullHonestTurnout,
         setupReceiptThreshold,

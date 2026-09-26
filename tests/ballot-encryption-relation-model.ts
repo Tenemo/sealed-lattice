@@ -92,7 +92,7 @@ export const compileBallotEncryptionColumnLayout = (
 export const compileBallotEncryptionRelationCensus = (
     profile: SupportedProfile,
 ) => {
-    const participants = BigInt(profile.participantCount);
+    const contributors = BigInt(profile.setupContributorCount);
     const optionCount = BigInt(profile.optionCount);
     const modulus = profile.ciphertext.modulus;
     const scale = profilePlaintextScale(profile);
@@ -114,7 +114,7 @@ export const compileBallotEncryptionRelationCensus = (
         error +
         carryBound * (radix + 1n);
     const auxiliaryNoiseBound =
-        (2n * participants * auxiliary.support + 1n) * error;
+        (2n * contributors * auxiliary.support + 1n) * error;
     assert.equal(
         auxiliary.modulus,
         auxiliary.plaintextModulus * auxiliary.scale + 1n,
@@ -284,7 +284,7 @@ const rowProduct = (
 
 // Reduced physical rings and sparse supports; the profile's moduli and all
 // distinct packing, range, quotient, carry, and linked-encryption families
-// are retained. Aggregate keys sum every participant's contribution.
+// are retained. Aggregate keys sum every setup contributor's contribution.
 export const createBallotEncryptionRelationModel = (
     profile: SupportedProfile,
     scores: readonly bigint[],
@@ -293,7 +293,7 @@ export const createBallotEncryptionRelationModel = (
     const modulus = profile.ciphertext.modulus;
     const scale = profilePlaintextScale(profile);
     const limbs = ciphertextLimbs(profile);
-    const participants = BigInt(profile.participantCount);
+    const contributors = BigInt(profile.setupContributorCount);
     assert.equal(scores.length, 2);
     assert.equal(auxiliaryScores.length, scores.length);
     const degree = 64,
@@ -326,7 +326,7 @@ export const createBallotEncryptionRelationModel = (
     const sparse = (length: number, aggregate: boolean) =>
         Array.from({ length }, (_unused, index) =>
             index < 4
-                ? (index < 2 ? 1n : -1n) * (aggregate ? participants : 1n)
+                ? (index < 2 ? 1n : -1n) * (aggregate ? contributors : 1n)
                 : 0n,
         );
     const error = (length: number, negative: boolean) =>
@@ -344,7 +344,7 @@ export const createBallotEncryptionRelationModel = (
         );
         const publicKey = convolution(common, secret).map((value) =>
             centered(
-                -value - participants * fixedModulusBfvInputs.errorBound,
+                -value - contributors * fixedModulusBfvInputs.errorBound,
                 ciphertextModulus,
             ),
         );

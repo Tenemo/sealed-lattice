@@ -336,10 +336,13 @@ export const reverifyRoster = async (
 
 // The profile the retained roster names: its participant count from the
 // retained proposal and its option count from the poll the module verified.
-// The retained root, proposal and setup reference must meet its bounds.
+// The retained root, proposal, setup reference and setup inventory must meet
+// its bounds. The participant's position is its registration's in the
+// retained proposal.
 export const retainedProfile = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
+    enrollment: RestoredEnrollment,
 ): Promise<ProfileContext> => {
     const proposal = await readDataKind(
         context,
@@ -352,21 +355,31 @@ export const retainedProfile = async (
         proposalRecordIds(proposal).length,
         context.kernel.own_registration_option_count(),
     );
-    const setupReference = root.manifest.references
-        .filter((reference) => reference.kind === dataKind.setupReference)
-        .reduce((total, reference) => total + reference.length, 0);
+    const retainedLength = (kind: number) =>
+        root.manifest.references
+            .filter((reference) => reference.kind === kind)
+            .reduce((total, reference) => total + reference.length, 0);
+    const setupReference = retainedLength(dataKind.setupReference);
+    const setupInventory = retainedLength(dataKind.setupInventory);
     if (
         profile === undefined ||
         proposal.length !== profile.proposalBytes ||
         root.plaintext.length + 16 >
             rootBound({ ...context, profile }, root.head.generation) ||
         (setupReference !== 0 &&
-            setupReference !== profile.root.setupReferenceBytes)
+            setupReference !== profile.root.setupReferenceBytes) ||
+        (setupInventory !== 0 &&
+            setupInventory !== profile.root.setupInventoryBytes)
     )
         throw new Error(
             'The retained roster does not name a supported profile.',
         );
-    return { ...context, profile };
+    const position = proposalRecordIds(proposal).indexOf(
+        hexadecimal(enrollment.bodyDigest),
+    );
+    if (position < 0)
+        throw new Error('The retained roster omits this participant.');
+    return { ...context, profile, position };
 };
 
 export const parseRecordIds = (value: unknown): string[] => {

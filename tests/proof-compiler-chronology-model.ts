@@ -17,6 +17,14 @@ export const proofPurposes = [
     'release',
 ] as const;
 
+// The roster positions that prove each purpose: only the setup contributors
+// prove a setup.
+export const provingPositions = (
+    purpose: (typeof proofPurposes)[number],
+    participantCount: bigint,
+    setupContributorCount: bigint,
+) => (purpose === 'setup' ? setupContributorCount : participantCount);
+
 // The proofs, programming points and commitments that one poll emits when
 // every roster that reaches an honest opening has this profile, against the
 // caps the proof compiler charges. Every honest registration publishes its
@@ -38,6 +46,7 @@ export const compileProofCompilerChronology = (
     rosterCount = 1n,
 ) => {
     const participants = BigInt(profile.participantCount);
+    const contributors = BigInt(profile.setupContributorCount);
     if (honestRegistrations < participants)
         throw new RangeError('The registrations must cover the roster.');
     if (rosterCount < 1n)
@@ -52,17 +61,22 @@ export const compileProofCompilerChronology = (
         honestRegistrations / honestMembers < rosterCount
             ? honestRegistrations / honestMembers
             : rosterCount;
-    const purposes = BigInt(proofPurposes.length);
-    const rosterParticipants = rosters * participants;
-    const honestProofs =
-        honestRegistrations +
-        (purposes - 1n) *
-            (rosterParticipants < honestRegistrations
-                ? rosterParticipants
-                : honestRegistrations);
+    const rosterProvers = (purpose: (typeof proofPurposes)[number]) =>
+        rosters * provingPositions(purpose, participants, contributors);
+    const honestProofs = proofPurposes.reduce((sum, purpose) => {
+        if (purpose === 'registration') return sum + honestRegistrations;
+        const provers = rosterProvers(purpose);
+        return (
+            sum +
+            (provers < honestRegistrations ? provers : honestRegistrations)
+        );
+    }, 0n);
     // Honest participants accept proofs only for their confirmed roster's
-    // registration records and positions, one role per purpose each.
-    const acceptedRoles = purposes * rosterParticipants;
+    // registration records and proving positions, one role per purpose each.
+    const acceptedRoles = proofPurposes.reduce(
+        (sum, purpose) => sum + rosterProvers(purpose),
+        0n,
+    );
     // The direct simulator programs only the affine-challenge message.
     const programmedMessages = honestProofs;
     // Every leaf and internal node of every tree and every salted message

@@ -114,7 +114,7 @@ fn check_setup(body: &VerifiedBallotBody, setup: &VerifiedSetupAggregate) -> Res
     let inventory = setup.inventory();
     if relation.inventory() != &inventory.identity()
         || relation.poll() != &inventory.proposal().proposal().records()[0].header().poll
-        || relation.position() >= inventory.confirmations().len()
+        || relation.position() >= setup.profile().participants()
     {
         return Err(Error::Context);
     }

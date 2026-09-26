@@ -19,9 +19,15 @@ pub const CONFIRMATION_CONTEXT: &[u8] = b"sealed-lattice/roster-confirmation/v1"
 pub const OPENING_CONTEXT: &[u8] = b"sealed-lattice/setup-opening/v1";
 const MAXIMUM_MESSAGE_BYTES: usize = 1024;
 
+/// Every roster participant confirms the roster once. A setup contributor's
+/// confirmation also commits to its contribution, which it opens once.
 pub(crate) struct ConfirmationLock {
     proposal: [u8; 64],
     position: usize,
+    contribution: Option<ContributionLock>,
+}
+
+struct ContributionLock {
     commitment: [u8; 64],
     salt: Zeroizing<[u8; 64]>,
     opened: bool,
@@ -42,7 +48,7 @@ impl SignedConfirmation {
 pub struct VerifiedConfirmation {
     proposal: [u8; 64],
     position: usize,
-    commitment: [u8; 64],
+    commitment: Option<[u8; 64]>,
     body: Vec<u8>,
     signature: [u8; 3309],
 }
@@ -50,8 +56,10 @@ impl VerifiedConfirmation {
     pub fn position(&self) -> usize {
         self.position
     }
-    pub fn commitment(&self) -> &[u8; 64] {
-        &self.commitment
+    /// A setup contributor's contribution commitment; a confirmation at any
+    /// other position carries none.
+    pub fn commitment(&self) -> Option<&[u8; 64]> {
+        self.commitment.as_ref()
     }
     pub fn body(&self) -> &[u8] {
         &self.body
@@ -89,16 +97,19 @@ fn body(
     .encode()
     .map_err(|_| Error::Shape)
 }
+/// A confirmation names the proposal, the signer's position and, for a setup
+/// contributor, its contribution commitment; any other participant names its
+/// own registration body in its place.
 fn confirmation_message(
     proposal: [u8; 64],
     position: usize,
-    commitment: [u8; 64],
+    value: [u8; 64],
 ) -> Result<Vec<u8>, Error> {
     body(
         "sealed-lattice/roster-confirmation/v1",
         proposal,
         position,
-        CanonicalItem::hash512(commitment),
+        CanonicalItem::hash512(value),
     )
 }
 fn opening_message(inventory: [u8; 64], position: usize, salt: [u8; 64]) -> Result<Vec<u8>, Error> {
@@ -247,6 +258,10 @@ impl Credential {
         if self.confirmation.is_some() {
             return Err(Error::Consumed);
         }
+        // Only a setup contributor commits to a contribution.
+        if position >= proposal.proposal().profile().setup_contributors() {
+            return Err(Error::Context);
+        }
         let record = proposal
             .proposal()
             .records()
@@ -297,21 +312,114 @@ impl Credential {
         computed: ComputedContributionCommitment,
         coins: [u8; 32],
     ) -> Result<SignedConfirmation, Error> {
+        self.sign_locked_confirmation(
+            body,
+            ConfirmationLock {
+                proposal: computed.proposal,
+                position: computed.position,
+                contribution: Some(ContributionLock {
+                    commitment: computed.digest,
+                    salt: computed.salt,
+                    opened: false,
+                }),
+            },
+            coins,
+        )
+    }
+    fn sign_locked_confirmation(
+        &mut self,
+        body: Vec<u8>,
+        lock: ConfirmationLock,
+        coins: [u8; 32],
+    ) -> Result<SignedConfirmation, Error> {
         self.check_unlocked(SigningPurpose::Confirmation)?;
+        if self.confirmation.is_some() {
+            return Err(Error::Consumed);
+        }
         let message = identity("sealed-lattice/roster-confirmation-id/v1", &body)?;
-        self.confirmation = Some(ConfirmationLock {
-            proposal: computed.proposal,
-            position: computed.position,
-            commitment: computed.digest,
-            salt: computed.salt,
-            opened: false,
-        });
+        self.confirmation = Some(lock);
         let coins = Zeroizing::new(coins);
         let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         let signature = key
             .try_sign_with_seed(&coins, &message, CONFIRMATION_CONTEXT)
             .map_err(|_| Error::Crypto)?;
         Ok(SignedConfirmation { body, signature })
+    }
+    /// The roster confirmation of a participant outside the setup
+    /// contributors, which commits to no contribution.
+    fn roster_confirmation(
+        &self,
+        proposal: [u8; 64],
+        profile: supported_profile::Profile,
+        position: usize,
+        owner_body: [u8; 64],
+    ) -> Result<Vec<u8>, Error> {
+        self.check_unlocked(SigningPurpose::Confirmation)?;
+        if self.confirmation.is_some() {
+            return Err(Error::Consumed);
+        }
+        if position < profile.setup_contributors()
+            || position >= profile.participants()
+            || self.completed_body != Some(owner_body)
+        {
+            return Err(Error::Context);
+        }
+        confirmation_message(proposal, position, owner_body)
+    }
+    pub fn roster_confirmation_body(
+        &self,
+        proposal: &OrganizerSignedRoster,
+        position: usize,
+    ) -> Result<Vec<u8>, Error> {
+        let proposal = proposal.proposal();
+        let record = proposal.records().get(position).ok_or(Error::Context)?;
+        if self.signing_public != record.header().signing_public {
+            return Err(Error::Context);
+        }
+        self.roster_confirmation(
+            proposal.identity(),
+            proposal.profile(),
+            position,
+            record.body_digest(),
+        )
+    }
+    pub fn sign_roster_confirmation(
+        &mut self,
+        proposal: &OrganizerSignedRoster,
+        position: usize,
+        coins: [u8; 32],
+    ) -> Result<SignedConfirmation, Error> {
+        let body = self.roster_confirmation_body(proposal, position)?;
+        let lock = ConfirmationLock {
+            proposal: proposal.proposal().identity(),
+            position,
+            contribution: None,
+        };
+        self.sign_locked_confirmation(body, lock, coins)
+    }
+    pub fn retained_roster_confirmation_body(
+        &self,
+        context: &RetainedContributionContext,
+    ) -> Result<Vec<u8>, Error> {
+        self.roster_confirmation(
+            context.proposal,
+            context.profile(),
+            context.position,
+            context.owner_body,
+        )
+    }
+    pub fn sign_retained_roster_confirmation(
+        &mut self,
+        context: &RetainedContributionContext,
+        coins: [u8; 32],
+    ) -> Result<SignedConfirmation, Error> {
+        let body = self.retained_roster_confirmation_body(context)?;
+        let lock = ConfirmationLock {
+            proposal: context.proposal,
+            position: context.position,
+            contribution: None,
+        };
+        self.sign_locked_confirmation(body, lock, coins)
     }
     pub fn restore_confirmation(
         &mut self,
@@ -325,16 +433,18 @@ impl Credential {
         self.check_confirmation_owner(proposal, &computed)?;
         if confirmation.proposal != computed.proposal
             || confirmation.position != computed.position
-            || confirmation.commitment != computed.digest
+            || confirmation.commitment != Some(computed.digest)
         {
             return Err(Error::Context);
         }
         self.confirmation = Some(ConfirmationLock {
             proposal: computed.proposal,
             position: computed.position,
-            commitment: computed.digest,
-            salt: computed.salt,
-            opened: false,
+            contribution: Some(ContributionLock {
+                commitment: computed.digest,
+                salt: computed.salt,
+                opened: false,
+            }),
         });
         Ok(())
     }
@@ -345,12 +455,24 @@ pub fn verify_confirmation(
     bytes: &[u8],
     signature: &[u8],
 ) -> Result<VerifiedConfirmation, Error> {
-    let (position, commitment) = decode(
+    let (position, value) = decode(
         bytes,
         CONFIRMATION_CONTEXT,
         proposal.proposal().identity(),
         CanonicalItemType::Hash512,
     )?;
+    let record = proposal
+        .proposal()
+        .records()
+        .get(position)
+        .ok_or(Error::Context)?;
+    let commitment = if position < proposal.proposal().profile().setup_contributors() {
+        Some(value)
+    } else if value == record.body_digest() {
+        None
+    } else {
+        return Err(Error::Context);
+    };
     let digest = identity("sealed-lattice/roster-confirmation-id/v1", bytes)?;
     let signature = verify_signature(proposal, position, &digest, signature, CONFIRMATION_CONTEXT)?;
     Ok(VerifiedConfirmation {
@@ -369,23 +491,27 @@ pub struct CommitmentInventory {
     identity: [u8; 64],
 }
 impl CommitmentInventory {
+    /// Holds one confirmation from every roster position. Its body lists the
+    /// setup contributors' commitments, which only their confirmations carry.
     pub fn new(
         proposal: Arc<OrganizerSignedRoster>,
         mut confirmations: Vec<VerifiedConfirmation>,
     ) -> Result<Self, Error> {
-        let count = proposal.proposal().records().len();
-        if confirmations.len() != count {
+        let profile = proposal.proposal().profile();
+        if confirmations.len() != profile.participants() {
             return Err(Error::Shape);
         }
         confirmations.sort_by_key(|confirmation| confirmation.position);
-        let mut commitments = Vec::from((count as u32).to_le_bytes());
+        let contributors = profile.setup_contributors();
+        let mut commitments = Vec::from((contributors as u32).to_le_bytes());
         for (position, confirmation) in confirmations.iter().enumerate() {
             if confirmation.position != position
                 || confirmation.proposal != proposal.proposal().identity()
+                || confirmation.commitment.is_some() != (position < contributors)
             {
                 return Err(Error::Context);
             }
-            commitments.extend(confirmation.commitment);
+            commitments.extend(confirmation.commitment.iter().flatten());
         }
         let body = CanonicalTuple::new(
             1,
@@ -453,20 +579,35 @@ impl AuthenticatedOpening {
     }
 }
 impl Credential {
-    pub fn opening_body(&self, inventory: &CommitmentInventory) -> Result<Vec<u8>, Error> {
+    /// Only a setup contributor's confirmation leaves a contribution to open.
+    fn contribution_lock(&self) -> Result<(&ConfirmationLock, &ContributionLock), Error> {
         let lock = self.confirmation.as_ref().ok_or(Error::Consumed)?;
-        if lock.opened {
+        Ok((lock, lock.contribution.as_ref().ok_or(Error::Context)?))
+    }
+    pub fn opening_body(&self, inventory: &CommitmentInventory) -> Result<Vec<u8>, Error> {
+        let (lock, contribution) = self.contribution_lock()?;
+        if contribution.opened {
             return Err(Error::Consumed);
         }
         if inventory.proposal.proposal().identity() != lock.proposal
             || inventory
                 .confirmations
                 .get(lock.position)
-                .is_none_or(|entry| entry.commitment != lock.commitment)
+                .is_none_or(|entry| entry.commitment != Some(contribution.commitment))
         {
             return Err(Error::Context);
         }
-        opening_message(inventory.identity, lock.position, *lock.salt)
+        opening_message(inventory.identity, lock.position, *contribution.salt)
+    }
+    fn mark_opened(&mut self) -> Result<(), Error> {
+        self.confirmation
+            .as_mut()
+            .ok_or(Error::Consumed)?
+            .contribution
+            .as_mut()
+            .ok_or(Error::Context)?
+            .opened = true;
+        Ok(())
     }
     pub fn sign_opening(
         &mut self,
@@ -476,7 +617,7 @@ impl Credential {
         self.check_unlocked(SigningPurpose::Opening)?;
         let body = self.opening_body(inventory)?;
         let message = identity("sealed-lattice/setup-opening-id/v1", &body)?;
-        self.confirmation.as_mut().ok_or(Error::Consumed)?.opened = true;
+        self.mark_opened()?;
         let coins = Zeroizing::new(coins);
         let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         let signature = key
@@ -485,8 +626,7 @@ impl Credential {
         Ok(SignedOpening { body, signature })
     }
     pub fn consume_opening(&mut self) -> Result<(), Error> {
-        self.confirmation.as_mut().ok_or(Error::Consumed)?.opened = true;
-        Ok(())
+        self.mark_opened()
     }
     pub fn restore_opening(
         &mut self,
@@ -495,11 +635,11 @@ impl Credential {
         signature: &[u8],
     ) -> Result<(), Error> {
         let opening = verify_opening(inventory, body, signature)?;
-        let lock = self.confirmation.as_ref().ok_or(Error::Consumed)?;
+        let (lock, contribution) = self.contribution_lock()?;
         if opening.position != lock.position
-            || opening.salt != *lock.salt
+            || opening.salt != *contribution.salt
             || inventory.proposal.proposal().identity() != lock.proposal
-            || inventory.confirmations[lock.position].commitment != lock.commitment
+            || inventory.confirmations[lock.position].commitment != Some(contribution.commitment)
         {
             return Err(Error::Context);
         }
@@ -517,6 +657,9 @@ pub fn verify_opening(
         inventory.identity,
         CanonicalItemType::RawBytes,
     )?;
+    if position >= inventory.proposal.proposal().profile().setup_contributors() {
+        return Err(Error::Context);
+    }
     let digest = identity("sealed-lattice/setup-opening-id/v1", bytes)?;
     verify_signature(
         &inventory.proposal,
@@ -624,8 +767,8 @@ mod tests {
                 .unwrap(),
         );
         let other = verify(
-            credentials[2]
-                .sign_confirmation(&roster, commitment(&roster, 2, 9), [8; 32])
+            credentials[0]
+                .sign_confirmation(&roster, commitment(&roster, 0, 9), [8; 32])
                 .unwrap(),
         );
         // The root shows the proposal and the confirmation used, so the
@@ -651,7 +794,7 @@ mod tests {
         for (computed, confirmation) in [
             (commitment(&roster, 1, 10), &own),
             (commitment(&roster, 1, 9), &other),
-            (commitment(&roster, 2, 9), &other),
+            (commitment(&roster, 0, 9), &other),
         ] {
             assert!(
                 restored
@@ -668,6 +811,158 @@ mod tests {
         ));
         assert!(matches!(
             restored.validate_body_position(&roster, 1),
+            Err(Error::Consumed)
+        ));
+    }
+
+    #[test]
+    fn every_participant_confirms_and_only_setup_contributors_commit_and_open() {
+        let (mut credentials, roster) = signed_roster();
+        // Three participants have two setup contributors, so the last
+        // position commits to no contribution: it neither signs nor has
+        // accepted a confirmation that carries a commitment.
+        assert_eq!(roster.proposal().profile().setup_contributors(), 2);
+        assert!(matches!(
+            credentials[2].validate_confirmation_position(&roster, 2),
+            Err(Error::Context)
+        ));
+        assert!(matches!(
+            credentials[2].sign_confirmation(&roster, commitment(&roster, 2, 9), [8; 32]),
+            Err(Error::Context)
+        ));
+        assert!(matches!(
+            roster.proposal().contribution_role(2),
+            Err(Error::Context)
+        ));
+        let (_, key) = ml_dsa_65::KG::keygen_from_seed(&credentials[2].signing_seed);
+        let forged = |value: [u8; 64]| {
+            let body = confirmation_message(roster.proposal().identity(), 2, value).unwrap();
+            let message = identity("sealed-lattice/roster-confirmation-id/v1", &body).unwrap();
+            let signature = key
+                .try_sign_with_seed(&[8; 32], &message, CONFIRMATION_CONTEXT)
+                .unwrap();
+            (body, signature)
+        };
+        let (body, signature) = forged([9; 64]);
+        assert!(matches!(
+            verify_confirmation(&roster, &body, &signature),
+            Err(Error::Context)
+        ));
+        // Its confirmation names its own registration body instead. No
+        // contributor signs one, nor does anyone at another's position.
+        let (body, signature) = forged([3; 64]);
+        assert_eq!(
+            verify_confirmation(&roster, &body, &signature)
+                .unwrap()
+                .commitment(),
+            None
+        );
+        for (signer, position) in [(0, 0), (1, 2), (2, 1)] {
+            assert!(matches!(
+                credentials[signer].sign_roster_confirmation(&roster, position, [8; 32]),
+                Err(Error::Context)
+            ));
+        }
+        let own = credentials[2]
+            .sign_roster_confirmation(&roster, 2, [8; 32])
+            .unwrap();
+        assert_eq!(own.body(), body);
+        assert!(matches!(
+            credentials[2].sign_roster_confirmation(&roster, 2, [8; 32]),
+            Err(Error::Consumed)
+        ));
+        // The inventory holds every position's confirmation and lists only
+        // the contributors' commitments.
+        let roster = Arc::new(roster);
+        let signed: Vec<_> = (0..2)
+            .map(|position| {
+                credentials[position]
+                    .sign_confirmation(
+                        &roster,
+                        commitment(&roster, position, 9 + position as u8),
+                        [8; 32],
+                    )
+                    .unwrap()
+            })
+            .collect();
+        let verified = |all: bool| {
+            signed
+                .iter()
+                .chain(all.then_some(&own))
+                .map(|signed| {
+                    verify_confirmation(&roster, signed.body(), signed.signature()).unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(matches!(
+            CommitmentInventory::new(roster.clone(), verified(false)),
+            Err(Error::Shape)
+        ));
+        let inventory = CommitmentInventory::new(roster.clone(), verified(true)).unwrap();
+        assert_eq!(inventory.confirmations().len(), 3);
+        let listed: Vec<u8> = [2, 0, 0, 0]
+            .into_iter()
+            .chain([9; 64])
+            .chain([10; 64])
+            .collect();
+        assert!(inventory.body().ends_with(&listed));
+        // An opening is signed and accepted only at a contributor's position
+        // of that inventory.
+        assert!(matches!(
+            credentials[2].sign_opening(&inventory, [8; 32]),
+            Err(Error::Context)
+        ));
+        let opening = credentials[1].sign_opening(&inventory, [8; 32]).unwrap();
+        assert_eq!(
+            verify_opening(&inventory, opening.body(), opening.signature())
+                .unwrap()
+                .position(),
+            1
+        );
+        let body = opening_message(inventory.identity(), 2, [3; 64]).unwrap();
+        let message = identity("sealed-lattice/setup-opening-id/v1", &body).unwrap();
+        let signature = key
+            .try_sign_with_seed(&[8; 32], &message, OPENING_CONTEXT)
+            .unwrap();
+        assert!(matches!(
+            verify_opening(&inventory, &body, &signature),
+            Err(Error::Context)
+        ));
+    }
+
+    #[test]
+    fn a_retained_roster_confirmation_is_signed_once_at_its_own_position() {
+        let (mut credentials, roster) = signed_roster();
+        let header = roster.proposal().records()[0].header();
+        let context = |position| {
+            RetainedContributionContext::parse(
+                header.poll,
+                header.runtime,
+                2,
+                position,
+                roster.proposal().body(),
+            )
+            .unwrap()
+        };
+        // A setup contributor's position and another participant's position
+        // are refused.
+        for (signer, position) in [(0, 0), (2, 0), (1, 2)] {
+            assert!(matches!(
+                credentials[signer].retained_roster_confirmation_body(&context(position)),
+                Err(Error::Context)
+            ));
+        }
+        let body = credentials[2]
+            .retained_roster_confirmation_body(&context(2))
+            .unwrap();
+        let signed = credentials[2]
+            .sign_retained_roster_confirmation(&context(2), [8; 32])
+            .unwrap();
+        assert_eq!(signed.body(), body);
+        let verified = verify_confirmation(&roster, signed.body(), signed.signature()).unwrap();
+        assert_eq!((verified.position(), verified.commitment()), (2, None));
+        assert!(matches!(
+            credentials[2].sign_retained_roster_confirmation(&context(2), [8; 32]),
             Err(Error::Consumed)
         ));
     }

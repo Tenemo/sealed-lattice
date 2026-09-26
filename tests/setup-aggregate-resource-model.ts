@@ -70,7 +70,8 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
         (sum, polynomial) => sum + polynomial.bytes,
         0n,
     );
-    const participantCount = BigInt(body.participantCount);
+    // The verifier folds every setup contributor's body into the cache.
+    const contributorCount = BigInt(body.setupContributorCount);
     return {
         polynomials,
         aggregateBytes,
@@ -89,9 +90,9 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
             0n,
         ),
         maximumTwoGenerationPayloadBytes: 2n * aggregateBytes,
-        contributionReadBytes: participantCount * aggregateBytes,
-        previousCacheReadBytes: (participantCount - 1n) * aggregateBytes,
-        provisionalCacheWriteBytes: participantCount * aggregateBytes,
+        contributionReadBytes: contributorCount * aggregateBytes,
+        previousCacheReadBytes: (contributorCount - 1n) * aggregateBytes,
+        provisionalCacheWriteBytes: contributorCount * aggregateBytes,
         completeReadbackBytes: aggregateBytes,
     };
 };

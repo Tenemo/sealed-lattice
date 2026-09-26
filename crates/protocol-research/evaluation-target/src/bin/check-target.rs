@@ -328,11 +328,15 @@ fn main() -> io::Result<()> {
         )
         .map_err(refusal)?,
     );
-    let contributions: Vec<_> = (0..count)
+    // Every roster participant published a confirmation; only the setup
+    // contributors published a contribution.
+    let profile = proposal.proposal().profile();
+    let directories: Vec<_> = (0..profile.participants())
         .map(|position| ceremony.join(format!("contribution-{position}")))
         .collect();
+    let contributions = &directories[..profile.setup_contributors()];
     let mut confirmations = Vec::new();
-    for directory in &contributions {
+    for directory in &directories {
         for name in ["confirmation.bin", "confirmation-signature.bin"] {
             work.depend(&directory.join(name))?;
         }
@@ -344,7 +348,6 @@ fn main() -> io::Result<()> {
         )?;
         confirmations.push(verify_confirmation(&proposal, &body, &signature).map_err(refusal)?);
     }
-    let profile = proposal.proposal().profile();
     let inventory = Arc::new(CommitmentInventory::new(proposal, confirmations).map_err(refusal)?);
     let mut aggregator = SetupAggregator::new(inventory).map_err(refusal)?;
     let indices = profile.contribution_body_polynomials();
@@ -538,7 +541,7 @@ fn main() -> io::Result<()> {
     let required = close
         .required_bodies(&intent, &named, &responses)
         .map_err(refusal)?;
-    let aggregate = scratch.join(format!("aggregate-{}", count - 1));
+    let aggregate = scratch.join(format!("aggregate-{}", contributions.len() - 1));
     let mut authenticated_bodies = Vec::new();
     let mut classifications: Vec<_> = (0..count).map(|_| None).collect();
     let mut ballots = vec![None; count];

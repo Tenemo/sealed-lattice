@@ -15,26 +15,27 @@ import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 describe('release linked to the original encrypted aggregate share', () => {
     it('places every signed range in complete words and constrains each high word', () => {
         const layout = compileLinkedReleaseColumnLayout(completionProfile());
-        expect(layout.wordColumns).toBe(61);
-        expect(layout.positiveSecretColumn).toBe(61);
-        expect(layout.negativeSecretColumn).toBe(62);
+        expect(layout.wordColumns).toBe(59);
+        expect(layout.positiveSecretColumn).toBe(59);
+        expect(layout.negativeSecretColumn).toBe(60);
         expect(
             layout.columns.find((column) => column.name === 'aggregate-share'),
         ).toMatchObject({ firstColumn: 3, bits: 120, wordCount: 8 });
         expect(
             layout.columns.find((column) => column.name === 'release-noise'),
-        ).toMatchObject({ firstColumn: 16, bits: 168, wordCount: 11 });
+        ).toMatchObject({ firstColumn: 16, bits: 144, wordCount: 9 });
+        // The 144-bit release noise and quotient fill their words; each
+        // 72-bit carry leaves a high byte.
         expect(layout.lookups.slice(layout.wordColumns)).toEqual([
             { column: 2, factor: 512n },
             { column: 10, factor: 256n },
             { column: 12, factor: 256n },
             { column: 15, factor: 4n },
-            { column: 26, factor: 256n },
-            { column: 40, factor: 256n },
-            { column: 45, factor: 256n },
-            { column: 50, factor: 256n },
-            { column: 55, factor: 256n },
-            { column: 60, factor: 256n },
+            { column: 38, factor: 256n },
+            { column: 43, factor: 256n },
+            { column: 48, factor: 256n },
+            { column: 53, factor: 256n },
+            { column: 58, factor: 256n },
         ]);
         for (const { factor } of layout.lookups) {
             const firstOutside = 65536n / factor;
@@ -145,9 +146,9 @@ describe('release linked to the original encrypted aggregate share', () => {
         expect(census.trueDecodingCarryBound).toBeLessThan(1n << 29n);
         expect(census.decodingResidualBound).toBeLessThan(prime);
         expect(census.releaseResidualBound).toBeLessThan(prime);
-        expect(census.wordColumns).toBe(3 + 8 + 2 + 1 + 2 + 11 + 9 + 5 * 5);
-        expect(census.narrowMemberships).toBe(10);
-        expect(census.lookupEntries).toBe(71);
+        expect(census.wordColumns).toBe(3 + 8 + 2 + 1 + 2 + 9 + 9 + 5 * 5);
+        expect(census.narrowMemberships).toBe(9);
+        expect(census.lookupEntries).toBe(59 + 9);
         expect(census.affineRows).toBe(655362n);
     });
 

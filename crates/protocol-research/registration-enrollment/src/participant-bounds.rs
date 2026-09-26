@@ -218,6 +218,7 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         *ballot.end(),
         close_quorum(participants),
         profile.corrupt(),
+        profile.setup_contributors(),
         response,
         packet_bytes(response),
         proposal,
@@ -347,9 +348,9 @@ mod tests {
         assert_eq!(limits.len(), 35);
         for profile in [Profile::new(3, 2).unwrap(), Profile::new(20, 20).unwrap()] {
             let bounds = profile_bounds(profile);
-            let checkpoints = bounds[23] as usize;
-            let polynomials = bounds[24 + checkpoints] as usize;
-            assert_eq!(bounds.len(), 25 + checkpoints + 3 * polynomials);
+            let checkpoints = bounds[24] as usize;
+            let polynomials = bounds[25 + checkpoints] as usize;
+            assert_eq!(bounds.len(), 26 + checkpoints + 3 * polynomials);
             assert_eq!(
                 bounds[..2],
                 [profile.participants() as u64, profile.options() as u64]

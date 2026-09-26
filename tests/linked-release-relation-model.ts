@@ -244,7 +244,7 @@ export const createLinkedReleaseRelationModel = (
     // 1 + (d-1)*sharingRadius at a signed monomial point.
     for (
         let contributor = 0;
-        contributor < profile.participantCount;
+        contributor < profile.setupContributorCount;
         contributor++
     ) {
         const message = zero().map((_value, index) =>

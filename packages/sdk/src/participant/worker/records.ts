@@ -1,5 +1,5 @@
-import { openedInventory } from './contribution.js';
-import type { ContributionSession } from './contribution.js';
+import type { ParticipantSession } from './contribution.js';
+import { retainedSetupInventory } from './setup.js';
 import { readParticipantValue } from './storage.js';
 import type { ParticipantStore } from './storage.js';
 
@@ -18,12 +18,12 @@ export const recordKeyBytes = 32;
 const tagBytes = 16;
 
 export const recordContext = async (
-    contribution: ContributionSession,
+    session: ParticipantSession,
 ): Promise<RecordContext> => ({
-    poll: contribution.root.manifest.poll,
-    runtime: contribution.context.runtime,
-    inventory: (await openedInventory(contribution)).identity,
-    position: contribution.records.position,
+    poll: session.root.manifest.poll,
+    runtime: session.context.runtime,
+    inventory: await retainedSetupInventory(session),
+    position: session.records.position,
 });
 
 const recordCipher = (key: Uint8Array, usage: 'encrypt' | 'decrypt') =>

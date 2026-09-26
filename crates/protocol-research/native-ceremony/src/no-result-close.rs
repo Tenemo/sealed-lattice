@@ -120,7 +120,7 @@ pub fn run(
                 &enrollments[position],
                 &poll,
                 &setup,
-                &openings[position],
+                openings.get(position),
                 position,
             )
         })
@@ -163,7 +163,7 @@ pub fn run(
             &enrollments[position],
             &poll,
             &setup,
-            &openings[position],
+            openings.get(position),
             position,
         );
         replay(

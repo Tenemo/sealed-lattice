@@ -670,6 +670,25 @@ fn contribution_operation(
                 state.contribution.opening_body(credential)?
             };
         }
+        // A participant outside the setup contributors confirms the retained
+        // roster without a contribution.
+        14 => {
+            if length != 0 {
+                return Err(Error::Shape);
+            }
+            let context = state.retained_context.as_ref().ok_or(Error::Context)?;
+            state.contribution_output = credential.retained_roster_confirmation_body(context)?;
+        }
+        15 => {
+            if length != 32 {
+                return Err(Error::Shape);
+            }
+            let context = state.retained_context.as_ref().ok_or(Error::Context)?;
+            let confirmation = credential
+                .sign_retained_roster_confirmation(context, input[..].try_into().unwrap())?;
+            state.contribution_output =
+                emitted_packet(confirmation.body(), confirmation.signature());
+        }
         _ => return Err(Error::Shape),
     }
     Ok(())

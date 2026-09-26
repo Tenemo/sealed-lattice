@@ -151,7 +151,7 @@ impl ContributionSigning {
         let proposal = self.public_proposal()?.clone();
         let confirmation = verify_confirmation(&proposal, body, signature)?;
         let computed = self.computed.as_ref().ok_or(Error::Consumed)?;
-        if confirmation.commitment() != computed.digest()
+        if confirmation.commitment() != Some(computed.digest())
             || proposal.proposal().records()[confirmation.position()]
                 .header()
                 .signing_public
@@ -184,12 +184,13 @@ impl ContributionSigning {
         Ok(())
     }
 
+    /// Every roster participant's confirmation completes the inventory.
     pub fn finish_inventory(&mut self) -> Result<(), Error> {
         if self.inventory.is_some() {
             return Err(Error::Consumed);
         }
         let proposal = self.public_proposal()?.clone();
-        if self.confirmations.len() != proposal.proposal().records().len() {
+        if self.confirmations.len() != proposal.proposal().profile().participants() {
             return Err(Error::Shape);
         }
         self.inventory = Some(CommitmentInventory::new(

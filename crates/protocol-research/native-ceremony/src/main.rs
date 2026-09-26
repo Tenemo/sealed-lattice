@@ -82,7 +82,7 @@ impl BallotInputs<'_> {
     fn cast(
         &self,
         enrollment: &mut Enrollment,
-        opening: &SignedOpening,
+        opening: Option<&SignedOpening>,
         position: usize,
         scores: &[u8],
     ) -> close::Submission {
@@ -95,12 +95,15 @@ impl BallotInputs<'_> {
             self.setup.inventory().proposal().proposal().body(),
         )
         .unwrap();
-        let opening_packet = [
-            (opening.body().len() as u32).to_le_bytes().as_slice(),
-            opening.body(),
-            opening.signature(),
-        ]
-        .concat();
+        // Only a setup contributor names its own opening.
+        let opening_packet = opening.map_or_else(Vec::new, |opening| {
+            [
+                (opening.body().len() as u32).to_le_bytes().as_slice(),
+                opening.body(),
+                opening.signature(),
+            ]
+            .concat()
+        });
         let retained_reference = registration_enrollment::ballot::retained_setup_reference(
             &enrollment.credential,
             self.poll,
@@ -382,10 +385,37 @@ fn main() {
     write(output.join("proposal-signature.bin"), &proposal_signature);
     let roster = Arc::new(verify_roster_proposal(proposal, &proposal_signature).unwrap());
     println!("Verified original enrollment roster");
+    // Every participant confirms the roster once. Only the setup
+    // contributors commit and open; any other position's contribution is
+    // refused before commitment work, and its confirmation names its own
+    // registration body instead.
+    let contributors = profile.setup_contributors();
     let mut confirmations = Vec::new();
+    for (position, enrollment) in enrollments.iter_mut().enumerate().skip(contributors) {
+        assert!(matches!(
+            enrollment
+                .credential
+                .validate_confirmation_position(&roster, position),
+            Err(registration_credentials::Error::Context)
+        ));
+        assert!(roster.proposal().contribution_role(position).is_err());
+        let signed = enrollment
+            .credential
+            .sign_roster_confirmation(&roster, position, *random::<32>())
+            .unwrap();
+        let directory = output.join(format!("contribution-{position}"));
+        fs::create_dir_all(&directory).unwrap();
+        write(directory.join("confirmation.bin"), signed.body());
+        write(
+            directory.join("confirmation-signature.bin"),
+            signed.signature(),
+        );
+        confirmations
+            .push(verify_confirmation(&roster, signed.body(), signed.signature()).unwrap());
+    }
     let mut contribution_directories = Vec::new();
     let mut body_headers = Vec::new();
-    for (position, enrollment) in enrollments.iter_mut().enumerate() {
+    for (position, enrollment) in enrollments.iter_mut().enumerate().take(contributors) {
         let directory = output.join(format!("contribution-{position}"));
         let (commitment, header) =
             contribution::generate(&roster, position, &directory, &random::<64>());
@@ -409,7 +439,7 @@ fn main() {
     write(output.join("inventory.bin"), inventory.body());
     write(output.join("inventory-identity.bin"), &inventory.identity());
     let mut openings = Vec::new();
-    for (position, enrollment) in enrollments.iter_mut().enumerate() {
+    for (position, enrollment) in enrollments.iter_mut().enumerate().take(contributors) {
         let opening = enrollment
             .credential
             .sign_opening(&inventory, *random::<32>())
@@ -627,6 +657,117 @@ fn main() {
             .is_err()
         );
     }
+    // The last position contributes nothing. Its owner comes only from the
+    // setup reference its own credential keyed, never from an opening, and a
+    // contributor's never from its reference alone.
+    let outsider = count - 1;
+    let outsider_proposal = RetainedContributionContext::parse(
+        poll.identity(),
+        poll.runtime(),
+        profile.options(),
+        outsider,
+        inventory.proposal().proposal().body(),
+    )
+    .unwrap();
+    let outsider_reference = registration_enrollment::ballot::retained_setup_reference(
+        &enrollments[outsider].credential,
+        &poll,
+        &setup,
+    )
+    .unwrap();
+    let (outsider_record, outsider_tag) =
+        outsider_reference.split_at(outsider_reference.len() - RETAINED_SETUP_TAG_BYTES);
+    let outsider_owner = enrollments[outsider]
+        .credential
+        .retain_setup_ballot_owner(
+            &poll,
+            &outsider_proposal,
+            inventory.identity(),
+            outsider_record,
+            outsider_tag,
+        )
+        .unwrap();
+    assert_eq!(outsider_owner.position(), outsider);
+    assert_eq!(outsider_owner.inventory(), &inventory.identity());
+    let organizer_tag = &retained_reference[retained_record.len()..];
+    for (record, tag, inventory) in [
+        (retained_record, organizer_tag, inventory.identity()),
+        (outsider_record, outsider_tag, [0; 64]),
+    ] {
+        assert!(
+            enrollments[outsider]
+                .credential
+                .retain_setup_ballot_owner(&poll, &outsider_proposal, inventory, record, tag)
+                .is_err()
+        );
+    }
+    assert!(
+        enrollments[outsider]
+            .credential
+            .retain_ballot_owner(
+                &poll,
+                &outsider_proposal,
+                inventory.identity(),
+                openings[0].body(),
+                openings[0].signature()
+            )
+            .is_err()
+    );
+    assert!(
+        enrollments[0]
+            .credential
+            .retain_setup_ballot_owner(
+                &poll,
+                &retained_proposal,
+                inventory.identity(),
+                retained_record,
+                organizer_tag
+            )
+            .is_err()
+    );
+    // A ballot names an opening exactly when its author contributed.
+    let control_of = |opening: &[u8], reference: &[u8]| {
+        [
+            poll.identity().as_slice(),
+            poll.runtime().as_slice(),
+            (packet.body.len() as u32).to_le_bytes().as_slice(),
+            packet.body.as_slice(),
+            packet.signature.as_slice(),
+            inventory.identity().as_slice(),
+            (opening.len() as u32).to_le_bytes().as_slice(),
+            opening,
+            reference,
+        ]
+        .concat()
+    };
+    for (position, context, control) in [
+        (
+            outsider,
+            &outsider_proposal,
+            control_of(&opening_packet, &outsider_reference),
+        ),
+        (0, &retained_proposal, control_of(&[], &retained_reference)),
+    ] {
+        assert!(
+            registration_enrollment::ballot::BallotWork::new(
+                &enrollments[position].credential,
+                context,
+                &control,
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(
+        registration_enrollment::ballot::BallotWork::new(
+            &enrollments[outsider].credential,
+            &outsider_proposal,
+            &control_of(&[], &outsider_reference),
+        )
+        .unwrap()
+        .into_owner()
+        .position(),
+        outsider
+    );
     let ballot_control = control_with_reference(&retained_reference);
     let mut work = registration_enrollment::ballot::BallotWork::new(
         &enrollments[0].credential,
@@ -1115,7 +1256,7 @@ fn main() {
     for &position in scenario.voters[1..].iter().chain(&scenario.omitted) {
         submissions[position] = Some(ballot_inputs.cast(
             &mut enrollments[position],
-            &openings[position],
+            openings.get(position),
             position,
             &scenario.scores(position),
         ));

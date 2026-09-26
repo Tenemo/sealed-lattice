@@ -216,9 +216,13 @@ impl RosterProposal {
     pub fn organizer_position(&self) -> usize {
         self.organizer_position
     }
+    /// The proof role of a setup contributor's contribution.
     pub fn contribution_role(&self, position: usize) -> Result<Vec<u8>, Error> {
         if position >= self.records.len() {
             return Err(Error::Shape);
+        }
+        if position >= self.profile.setup_contributors() {
+            return Err(Error::Context);
         }
         contribution_role_from_context(self.poll, self.runtime, self.identity, position)
     }

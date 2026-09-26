@@ -104,7 +104,7 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
     let mut engine = Engine::new(profile, &bytes, program)?;
     let secret = engine.arithmetic.small(&super::super::secret(
         DEGREE,
-        participants,
+        profile.setup_contributors(),
         FHE_SECRET_SUPPORT,
         0x1234_5678_9abc_def1,
     ));

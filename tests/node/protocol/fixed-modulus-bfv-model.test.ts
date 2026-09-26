@@ -154,7 +154,7 @@ describe('fixed-modulus BFV noise', () => {
             // Without either changed term, the former zero-noise box gives 247.
             expect(error).toBeGreaterThan(247n);
             const model = createFixedModulusBfvNoiseModel({
-                participantCount: 3n,
+                contributorCount: 3n,
                 polynomialDegree: 8n,
                 plaintextSubringDegree: 4n,
                 plaintextModulus: 17n,
@@ -186,7 +186,8 @@ describe('fixed-modulus BFV noise', () => {
         expect(census.gadgetPolynomialProducts).toBe(996n);
         expect(census.releaseCorrect).toBe(true);
         expect(census.jointStatisticalBoundHolds).toBe(true);
-        expect(census.publicKeyCorpusBytes).toBe(10n * 4n * 6n * 65536n * 108n);
+        // Four setup contributors each publish four gadget vectors.
+        expect(census.publicKeyCorpusBytes).toBe(4n * 4n * 6n * 65536n * 108n);
         expect(() => verifyProthCertificate(9n, 4, 2n)).toThrow(); // 145 is composite.
         expect(() =>
             verifyProthCertificate(65537n * 65319n, 832, 1n),
@@ -208,7 +209,7 @@ describe('fixed-modulus BFV noise', () => {
             const delta = 1n << 112n;
             const gadgetBase = 16n;
             const model = createFixedModulusBfvNoiseModel({
-                participantCount: 3n,
+                contributorCount: 3n,
                 polynomialDegree: BigInt(degree),
                 plaintextSubringDegree: BigInt(degree / 2),
                 plaintextModulus,

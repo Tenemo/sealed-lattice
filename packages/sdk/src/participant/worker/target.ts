@@ -558,7 +558,7 @@ const finalityCommand = (
 
 // The retained target signing state, or undefined before it begins.
 export const resumeTarget = (close: CloseSession): TargetState | undefined => {
-    const { root, context } = close.contribution;
+    const { root, context } = close.participant;
     if (root.head.generation < targetPhase.intent) return undefined;
     const bytes = root.manifest.suffixes.target;
     if (bytes === undefined) throw new Error('No target state is retained.');
@@ -575,12 +575,12 @@ const commitTarget = async (
     generation: number,
     state: TargetState,
 ) => {
-    const { contribution } = close;
-    const { context, root } = contribution;
+    const { participant } = close;
+    const { context, root } = participant;
     const encoded = encodeTargetState(generation, state);
     if (encoded.length > context.profile.target.maximumStateBytes)
         throw new Error('The target state exceeds its bound.');
-    contribution.root = await commitRoot(context, root, {
+    participant.root = await commitRoot(context, root, {
         generation,
         manifest: {
             ...root.manifest,
@@ -588,8 +588,8 @@ const commitTarget = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(contribution),
-            ...retainedBallotRecords(contribution, close.records),
+            ...contributionRecords(participant),
+            ...retainedBallotRecords(participant, close.records),
             ...completedCloseRecords(close),
         ],
     });
@@ -630,8 +630,8 @@ export const evaluateClosedTarget = async (
 // in the target, how many slots were usable and how many usable ballots were
 // valid.
 export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
-    const { contribution } = close;
-    const { context } = contribution;
+    const { participant } = close;
+    const { context } = participant;
     await restoreCompletedClose(close);
     const { body, usableBallots, validBallots } = await evaluateClosedTarget(
         context,
@@ -677,7 +677,7 @@ export const publishTarget = async (
     const state = resumeTarget(close);
     if (
         state === undefined ||
-        close.contribution.root.head.generation < targetPhase.signed
+        close.participant.root.head.generation < targetPhase.signed
     )
         return;
     await publishRecord(

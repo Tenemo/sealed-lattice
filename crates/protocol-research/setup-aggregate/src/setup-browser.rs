@@ -165,7 +165,7 @@ pub extern "C" fn setup_inventory_finish() -> u32 {
         let Some(proposal) = value.proposal.clone() else {
             return 0;
         };
-        if value.confirmations.len() != proposal.proposal().records().len() {
+        if value.confirmations.len() != proposal.proposal().profile().participants() {
             return 0;
         }
         let confirmations = std::mem::take(&mut value.confirmations);

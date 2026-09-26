@@ -42,7 +42,7 @@ impl ReleaseWork {
         key.validate_retained().map_err(|_| Error::Crypto)?;
         let target = self.context.certificate().target();
         let setup = target.inventory().setup();
-        let message = TargetMessage::parse(target.body(), setup.inventory().confirmations().len())?;
+        let message = TargetMessage::parse(target.body(), setup.profile().participants())?;
         credential.begin_release(&self.owner, setup.inventory().proposal(), &message)?;
         let prepared = key
             .prepare_release(

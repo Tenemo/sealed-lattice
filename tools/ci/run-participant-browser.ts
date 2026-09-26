@@ -674,6 +674,7 @@ await runWithLocalRunLog(
                 maximumCorruptParticipantCount,
                 minimumTurnout,
                 releaseThreshold,
+                setupContributorCount,
             } = deriveSupportedProfile(participantCount, optionCount);
             const foreign =
                 foreignPoll === undefined
@@ -1316,32 +1317,40 @@ await runWithLocalRunLog(
                 definitionSignature: hexadecimal(definitionSignature),
                 username: 'Participant again',
             });
+            // Only the first roster positions contribute setup key material,
+            // as each participant reports once its roster is retained. Every
+            // participant confirms the roster.
+            const contributors = positions.slice(0, setupContributorCount);
+            const confirmers = positions.slice(setupContributorCount);
             for (const position of positions) {
                 const status = await run(position, 'status');
                 assert.equal(status.generation, 3);
                 assert.equal(status.poll, organizer.poll);
+                assert.equal(
+                    status.isSetupContributor,
+                    position < setupContributorCount,
+                );
             }
-            // Every participant generates and retains its contribution body
-            // and confirms it. No opening precedes the complete confirmation
-            // inventory. The first honest participant after the organizer
-            // crashes during its generation once checkpoint records are
-            // stored, during its continuation once proof records are stored,
-            // and with its confirmation and opening intents; the next honest
-            // one with its checkpoint retained. Each next visit discards what
-            // an interrupted operation stored and continues from its retained
-            // seed or coins.
-            const setupReplay = positions.find(
-                (position) => position > 0 && honest(position),
-            );
-            const setupCheckpoint = positions.find(
-                (position) =>
-                    setupReplay !== undefined &&
-                    position > setupReplay &&
-                    honest(position),
-            );
+            // A participant outside the setup contributors contributes and
+            // opens nothing, and verifies the setup only behind its own
+            // signed confirmation.
+            if (confirmers.length > 0)
+                for (const operation of ['contribute', 'open', 'verify-setup'])
+                    await expectStatus(confirmers[0], operation, 'refused');
+            // Every setup contributor generates and retains its contribution
+            // body and confirms it. No opening precedes the complete
+            // confirmation inventory. The last honest contributor crashes
+            // during its generation once checkpoint records are stored, with
+            // its checkpoint retained, during its continuation once proof
+            // records are stored, and with its confirmation and opening
+            // intents. Each next visit discards what an interrupted operation
+            // stored and continues from its retained seed, checkpoint or
+            // coins.
+            const setupReplay = [...contributors].reverse().find(honest);
+            assert.notEqual(setupReplay, undefined);
             const bodyRecords = bounds.contribution.publicRecords.length;
             await Promise.all(
-                positions.map(async (position) => {
+                contributors.map(async (position) => {
                     if (position === setupReplay) {
                         await interruptStaged(
                             position,
@@ -1350,6 +1359,7 @@ await runWithLocalRunLog(
                             'checkpoint',
                             1,
                         );
+                        await interrupt(position, 'contribute', {}, 5);
                         await interruptStaged(
                             position,
                             'contribute',
@@ -1358,8 +1368,6 @@ await runWithLocalRunLog(
                             bodyRecords + 1,
                         );
                     }
-                    if (position === setupCheckpoint)
-                        await interrupt(position, 'contribute', {}, 5);
                     assert.equal(
                         (await run(position, 'contribute')).generation,
                         7,
@@ -1367,6 +1375,7 @@ await runWithLocalRunLog(
                 }),
             );
             await expectStatus(0, 'contribute', 'refused');
+            if (setupReplay === 0) await interrupt(0, 'confirm', {}, 8);
             assert.equal((await run(0, 'confirm')).generation, 9);
             assert.deepEqual(await request(0, 'open'), {
                 status: 'pending',
@@ -1374,7 +1383,7 @@ await runWithLocalRunLog(
             });
             assert.equal((await run(0, 'status')).generation, 9);
             await Promise.all(
-                positions.slice(1).map(async (position) => {
+                contributors.slice(1).map(async (position) => {
                     if (position === setupReplay)
                         await interrupt(position, 'confirm', {}, 8);
                     assert.equal(
@@ -1383,8 +1392,31 @@ await runWithLocalRunLog(
                     );
                 }),
             );
+            // The opening waits for every participant's confirmation. The
+            // last honest participant outside the setup contributors crashes
+            // with its confirmation intent, and its next visit signs with
+            // the locked coins.
+            if (confirmers.length > 0) {
+                assert.deepEqual(await request(0, 'open'), {
+                    status: 'pending',
+                    reason: 'A public record is unavailable.',
+                });
+                const confirmationReplay = [...confirmers]
+                    .reverse()
+                    .find(honest);
+                await Promise.all(
+                    confirmers.map(async (position) => {
+                        if (position === confirmationReplay)
+                            await interrupt(position, 'confirm', {}, 8);
+                        assert.equal(
+                            (await run(position, 'confirm')).generation,
+                            9,
+                        );
+                    }),
+                );
+            }
             await Promise.all(
-                positions.map(async (position) => {
+                contributors.map(async (position) => {
                     if (position === setupReplay)
                         await interrupt(position, 'open', {}, 10);
                     assert.equal((await run(position, 'open')).generation, 11);
@@ -1395,9 +1427,10 @@ await runWithLocalRunLog(
             // confirmation, as the late-materialization argument assumes.
             assert.deepEqual(relay.earlyContributionRecords, []);
             // Every participant verifies the complete setup and retains its
-            // reference once, which opens its ballot. In an empty run the
-            // last participant's setup arrives only after the organizer's
-            // close intent, below.
+            // reference once, which opens its ballot: a setup contributor
+            // behind its opening, any other participant behind its signed
+            // confirmation. In an empty run the last participant's setup
+            // arrives only after the organizer's close intent, below.
             // A ballot needs the verified setup.
             await expectStatus(0, 'ballot', 'refused', {
                 scores: ballotScores(0),
@@ -1414,6 +1447,17 @@ await runWithLocalRunLog(
                     }),
             );
             await expectStatus(0, 'verify-setup', 'refused');
+            // With its setup retained, a participant outside the setup
+            // contributors still contributes and opens nothing, and only
+            // delivers its signed confirmation again.
+            const confirmer = confirmers.find(
+                (position) => position !== lateSetup,
+            );
+            if (confirmer !== undefined) {
+                for (const operation of ['contribute', 'open', 'verify-setup'])
+                    await expectStatus(confirmer, operation, 'refused');
+                assert.equal((await run(confirmer, 'confirm')).generation, 12);
+            }
             // The departing participant leaves after its preparation.
             if (departing !== undefined) await depart(departing);
             // Every participant that did not depart signs one ballot, the late
@@ -2683,7 +2727,7 @@ await runWithLocalRunLog(
                           "An honest participant departs with its private state after preparation and before the close, casting nothing. The relay hides another honest voter's on-time ballot from every other participant and serves its close response only after the organizer's proposal, so the proposal omits that ballot and its voter's target reports the omission.",
                       ]),
                 'A registrant that the organizer leaves out of the roster stays pending when shown it.',
-                'An honest browser crashes during its contribution generation and during its continuation once it stored records ahead of its next root, and with its confirmation and opening intents, and another with its retained checkpoint; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
+                'Only the setup contributors contribute, confirm and open; the other participants verify the setup from their accepted rosters. An honest setup contributor crashes during its contribution generation and during its continuation once it stored records ahead of its next root, with its retained checkpoint, and with its confirmation and opening intents; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
                 mode === 'empty'
                     ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."

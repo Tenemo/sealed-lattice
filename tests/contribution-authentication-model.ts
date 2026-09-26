@@ -1,6 +1,7 @@
 import { compileCommitmentEquivocationBound } from '#tests/commitment-equivocation-model.js';
 import { contributionBodyHeaderBytes } from '#tests/contribution-body-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 export const compileContributionAuthenticationCensus = (
     participants: number,
@@ -11,6 +12,11 @@ export const compileContributionAuthenticationCensus = (
         participants > 20
     )
         throw new RangeError('Unsupported participant count.');
+    // Every participant confirms the roster; only the setup contributors'
+    // confirmations carry a commitment, which they open.
+    const contributors = BigInt(
+        compileThresholdCompletionProfile(participants).setupContributorCount,
+    );
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
     const saltBytes =
         compileCommitmentEquivocationBound(participants).saltBitLength / 8n;
@@ -39,9 +45,10 @@ export const compileContributionAuthenticationCensus = (
         64n +
         4n +
         4n +
-        BigInt(participants) * 64n;
+        contributors * 64n;
     return {
         participants,
+        contributors,
         confirmationBodyBytes,
         openingBodyBytes,
         inventoryBodyBytes,
@@ -54,6 +61,6 @@ export const compileContributionAuthenticationCensus = (
         allConfirmationPayloadBytes:
             BigInt(participants) * (confirmationBodyBytes + signatureBytes),
         allOpeningHeaderPayloadBytes:
-            BigInt(participants) * (openingBodyBytes + signatureBytes),
+            contributors * (openingBodyBytes + signatureBytes),
     };
 };

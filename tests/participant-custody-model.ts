@@ -68,12 +68,19 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumCheckpointMetadataBytes > maximumCompletedMetadataBytes
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
-    const maximumRootRecords = enrollment.maximumRecords + 1n;
+    // The setup reference and the confirmation inventory the setup was
+    // verified against join the enrollment records, each in one record.
+    const maximumRootRecords = enrollment.maximumRecords + 2n;
     const ballot = compileParticipantBallotCustody(profile);
     // Marker, inventory identity, one digest per aggregate polynomial, and the
     // credential-keyed SHA3-512 tag that the ballot step checks before parsing.
     const setupReferenceBytes =
         4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
+    // The count and every participant's confirmation packet.
+    const setupInventoryBytes =
+        4n +
+        BigInt(authentication.participants) *
+            authentication.confirmationPacketBytes;
     // The close suffix collects deliveries alongside every ballot phase.
     const close = compileParticipantCloseCustody(profile);
     const maximumWithBallot =
@@ -121,13 +128,13 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         authentication.confirmationBodyBytes +
         authentication.openingBodyBytes +
         2n * authentication.signatureBytes +
-        4n +
-        BigInt(body.participantCount) * authentication.confirmationPacketBytes;
+        setupInventoryBytes;
     const maximumRetainedPayloadBytes =
         enrollment.maximumRetainedPayloadBytes -
         enrollment.maximumRootBytes +
         maximumRootBytes +
         setupReferenceBytes +
+        setupInventoryBytes +
         maximumPublicBodyCiphertextBytes +
         checkpoint.ciphertextBytes +
         maximumSigningPlaintextBytes +
@@ -143,6 +150,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumMetadataBytes,
         maximumRootRecords,
         setupReferenceBytes,
+        setupInventoryBytes,
         maximumRootBytes,
         maximumCloseStateBytes: close.maximumStateBytes,
         maximumTargetSigningStateBytes: targetSigning.maximumStateBytes,
@@ -245,9 +253,7 @@ export const compileParticipantVaultKeyClasses = (
         authentication.confirmationBodyBytes,
         authentication.openingBodyBytes,
         authentication.signatureBytes,
-        4n +
-            BigInt(body.participantCount) *
-                authentication.confirmationPacketBytes,
+        custody.setupInventoryBytes,
     ].reduce((maximum, bytes) => (bytes > maximum ? bytes : maximum), 0n);
     const chunkBytes = 1n << 20n;
     const contributionAssociatedBytes =

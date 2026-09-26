@@ -34,7 +34,7 @@ import type { CloseEvent, CloseState } from './close-state.js';
 import { PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
-import type { ContributionSession } from './contribution.js';
+import type { ParticipantSession } from './contribution.js';
 import { readKernel } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -123,7 +123,7 @@ type Submission = Readonly<{
 }>;
 
 export type CloseSession = {
-    readonly contribution: ContributionSession;
+    readonly participant: ParticipantSession;
     readonly records: RecordContext;
     readonly organizer: boolean;
     readonly ballot: BallotSession | undefined;
@@ -181,7 +181,7 @@ const packet = (body: Uint8Array, signature: Uint8Array) =>
     concatenate(unsigned32(body.length), body, signature);
 
 const generationOf = (session: CloseSession) =>
-    session.contribution.root.head.generation;
+    session.participant.root.head.generation;
 
 const nextSerial = (state: CloseState) =>
     state.events.length === 0
@@ -194,14 +194,14 @@ const recordCount = (state: CloseState) =>
 // Decodes the retained close log and the signed ballot it may reference.
 // Every listed record must be stored and nothing else.
 export const resumeClose = async (
-    contribution: ContributionSession,
+    participant: ParticipantSession,
     organizer: boolean,
 ): Promise<CloseSession> => {
-    const { context, root } = contribution;
+    const { context, root } = participant;
     const bytes = root.manifest.suffixes.close;
     if (root.head.generation < 12 || bytes === undefined)
         throw new Error('No close log is retained.');
-    const records = await recordContext(contribution);
+    const records = await recordContext(participant);
     const state = decodeCloseState(
         context.profile,
         root.head.generation,
@@ -211,9 +211,9 @@ export const resumeClose = async (
     const snapshot = await snapshotParticipant(context.database);
     if (snapshot.counts.close !== recordCount(state))
         throw new Error('The close records changed.');
-    const ballot = await resumeBallot(contribution);
+    const ballot = await resumeBallot(participant);
     return {
-        contribution,
+        participant,
         records,
         organizer,
         ballot:
@@ -234,7 +234,7 @@ const openCloseRecord = (
     event: CloseEvent,
     index: number,
 ) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const length = closeRecordLengths(context.profile, event)[index];
     return openRecord(
         context.database,
@@ -279,8 +279,8 @@ const commitClose = async (
     session: CloseSession,
     transition: CloseTransition,
 ) => {
-    const { contribution } = session;
-    const { context, root } = contribution;
+    const { participant } = session;
+    const { context, root } = participant;
     const { profile } = context;
     const encoded = encodeCloseState(
         transition.generation,
@@ -289,7 +289,7 @@ const commitClose = async (
     );
     if (encoded.length > profile.close.maximumStateBytes)
         throw new Error('The close state exceeds its bound.');
-    contribution.root = await commitRoot(context, root, {
+    participant.root = await commitRoot(context, root, {
         generation: transition.generation,
         manifest: {
             ...root.manifest,
@@ -297,8 +297,8 @@ const commitClose = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(contribution),
-            ...retainedBallotRecords(contribution, session.records),
+            ...contributionRecords(participant),
+            ...retainedBallotRecords(participant, session.records),
             ...closeRecordInventory(profile, session.records, session.state),
         ],
         write: (transaction) => {
@@ -352,7 +352,7 @@ const learnSubmission = (
     serial: number,
     envelope: Uint8Array,
 ) => {
-    const identity = envelopeIdentity(session.contribution.context, envelope);
+    const identity = envelopeIdentity(session.participant.context, envelope);
     if (identity === undefined)
         throw new Error('An accepted envelope has no identity.');
     session.submissions.set(serial, {
@@ -370,7 +370,7 @@ const learnResponse = (
     serial: number,
     record: Uint8Array,
 ) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const { close, registration } = context.profile;
     const length = readUnsigned32(record, 0);
     session.responders.set(
@@ -398,7 +398,7 @@ const ownSubmission = (ballot: BallotSession) =>
 // Replays one retained event. It was accepted on arrival, so a refusal means
 // the retained state changed.
 const replayEvent = async (session: CloseSession, event: CloseEvent) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     switch (event.kind) {
         case closeEventKind.own: {
             const { ballot } = session;
@@ -457,14 +457,14 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
 // verified the complete setup in this instance first. A completed proposal
 // leaves no close work to start.
 const startCloseWork = async (session: CloseSession) => {
-    const { contribution } = session;
-    const { context } = contribution;
+    const { participant } = session;
+    const { context } = participant;
     const generation = generationOf(session);
     closeCommand(
         context,
         0,
         0,
-        await ballotWorkInput(contribution, session.records.inventory),
+        await ballotWorkInput(participant, session.records.inventory),
     );
     if (session.ballot !== undefined)
         closeCommand(context, 11, 0, ownSubmission(session.ballot));
@@ -480,15 +480,15 @@ const startCloseWork = async (session: CloseSession) => {
 // signed response and the organizer's proposal. The owning setup verifier
 // must have verified the complete setup in this instance first.
 export const restoreCompletedClose = async (session: CloseSession) => {
-    const { contribution, state } = session;
-    const { context } = contribution;
+    const { participant, state } = session;
+    const { context } = participant;
     if (!isCloseComplete(session))
         throw new Error('The close is not complete.');
     closeCommand(
         context,
         0,
         0,
-        await ballotWorkInput(contribution, session.records.inventory),
+        await ballotWorkInput(participant, session.records.inventory),
     );
     if (session.ballot !== undefined)
         closeCommand(context, 11, 0, ownSubmission(session.ballot));
@@ -501,7 +501,7 @@ export const restoreCompletedClose = async (session: CloseSession) => {
 // The close records the root lists.
 export const completedCloseRecords = (session: CloseSession) =>
     closeRecordInventory(
-        session.contribution.context.profile,
+        session.participant.context.profile,
         session.records,
         session.state,
     );
@@ -525,7 +525,7 @@ const deliverOwnBallot = async (session: CloseSession) => {
         session.state.events.some((event) => event.kind === closeEventKind.own)
     )
         return;
-    const { context } = session.contribution;
+    const { context } = session.participant;
     // A late own ballot after the lock is refused and never listed.
     if (tryCloseCommand(context, 3, 0, ownSubmission(ballot)) === undefined)
         return;
@@ -616,7 +616,7 @@ const deliverBallot = async (
     author: number,
     expected?: Uint8Array,
 ) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const { profile } = context;
     const submission =
         expected === undefined
@@ -699,7 +699,7 @@ const announceBallot = async (
     relay: PublicRelay,
     author: number,
 ) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const submission = await readAnnouncedSubmission(context, relay, author);
     if (
         submission === undefined ||
@@ -723,7 +723,7 @@ const announceBallot = async (
 // signature exists; an interrupted signing recomputes the same body from the
 // retained close time, which ends the body.
 const signIntent = async (session: CloseSession, closeTime?: bigint) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     let body: Uint8Array;
     if (generationOf(session) === closePhase.intent) {
         const retained = session.state.intentBody;
@@ -756,10 +756,10 @@ const signIntent = async (session: CloseSession, closeTime?: bigint) => {
 // events of submissions timed after the close time, which no response can
 // list, and appends the lock event, so replay applies it where it arrived.
 const lockIntent = async (session: CloseSession, intentPacket: Uint8Array) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     if (tryCloseCommand(context, 2, 0, intentPacket) === undefined)
         throw new PublicInputFailure('The close intent was refused.');
-    const { close } = session.contribution.context.profile;
+    const { close } = session.participant.context.profile;
     const closeTime = readUnsigned64(
         intentPacket,
         4 + close.intentBodyBytes - 8,
@@ -794,7 +794,7 @@ const lockIntent = async (session: CloseSession, intentPacket: Uint8Array) => {
 // envelopes the module does not know. A response the module refuses, or one
 // whose envelopes the relay lacks, waits for a later visit.
 const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const { profile } = context;
     const { close, registration } = profile;
     const taken = new Set(session.responders.values());
@@ -875,7 +875,7 @@ const deliverWantedBodies = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    const wanted = closeCommand(session.contribution.context, 13);
+    const wanted = closeCommand(session.participant.context, 13);
     for (let offset = 0; offset < wanted.length; offset += listedEntryBytes)
         await deliverBallot(
             session,
@@ -891,7 +891,7 @@ const deliverWantedBodies = async (
 // and retains its proposal body and coins with it. Returns whether the
 // organizer's proposal is prepared in this instance.
 const respond = async (session: CloseSession) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     const resumed = generationOf(session) === closePhase.responding;
     const body = tryCloseCommand(context, 6);
     if (body === undefined) {
@@ -941,7 +941,7 @@ const respond = async (session: CloseSession) => {
 // Signs the organizer's retained proposal. A restored organizer takes its
 // own response again and must prepare the same proposal first.
 const propose = async (session: CloseSession, prepared: boolean) => {
-    const { context } = session.contribution;
+    const { context } = session.participant;
     if (!prepared) {
         closeCommand(context, 7, 0, session.state.responsePacket);
         if (!equalBytes(closeCommand(context, 9), session.state.proposalBody))
@@ -971,7 +971,7 @@ const readPublishedIntent = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    const { close, registration } = session.contribution.context.profile;
+    const { close, registration } = session.participant.context.profile;
     try {
         return await readPublic(
             relay,

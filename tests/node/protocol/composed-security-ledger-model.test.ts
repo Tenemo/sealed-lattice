@@ -39,6 +39,11 @@ import {
     proofCompilerCaps,
 } from '#tests/wide-challenge-compiler-model.js';
 
+// Only the first max(f + 1, 2) roster positions contribute setup key
+// material, with f = floor((n - 1) / 3).
+const setupContributors = (participantCount: number) =>
+    Math.max(Math.floor((participantCount - 1) / 3) + 1, 2);
+
 const ledger = compileComposedSecurityLedger();
 const target = 1n << securityTargetBits;
 
@@ -230,8 +235,10 @@ describe('composed security ledger', () => {
             [3, 1, 3],
             [10, 4, 2],
         ] as const) {
-            // A corrupt organizer can complete disjoint rosters, each of whose
-            // honest participants can contribute, receive shares and vote.
+            // A corrupt organizer can complete disjoint rosters. The honest
+            // setup contributors of each can contribute, and all of its
+            // honest participants can receive shares and vote.
+            const contributors = setupContributors(participantCount);
             const rosters = Array.from(
                 { length: rosterCount },
                 (_unused, roster) =>
@@ -262,18 +269,24 @@ describe('composed security ledger', () => {
                         ...(registration < honest.length
                             ? rosters[
                                   Math.floor(registration / participantCount)
-                              ].flatMap((contributor) =>
-                                  replaceCiphertext(
-                                      `share ${contributor} to ${registration}`,
-                                  ),
-                              )
+                              ]
+                                  .slice(0, contributors)
+                                  .flatMap((contributor) =>
+                                      replaceCiphertext(
+                                          `share ${contributor} to ${registration}`,
+                                      ),
+                                  )
                             : []),
                         `registration key ${registration} back`,
                     ]),
                 ],
                 [
                     'Auxiliary Ring-LWE:plain',
-                    honest.map((participant) => `coordinate ${participant}`),
+                    rosters.flatMap((members) =>
+                        members
+                            .slice(0, contributors)
+                            .map((contributor) => `coordinate ${contributor}`),
+                    ),
                 ],
                 [
                     'Auxiliary Ring-LWE:extraction',
@@ -288,7 +301,11 @@ describe('composed security ledger', () => {
                 ],
                 [
                     'Evaluation-key circular security:extraction',
-                    honest.map((participant) => `tuple ${participant}`),
+                    rosters.flatMap((members) =>
+                        members
+                            .slice(0, contributors)
+                            .map((contributor) => `tuple ${contributor}`),
+                    ),
                 ],
                 [
                     'FHE Ring-LWE:extraction',
@@ -318,7 +335,7 @@ describe('composed security ledger', () => {
 
     it('guesses the ciphertext modulus only where a challenge enters the shared FHE common streams', () => {
         // One modulus of each supported length, the largest of its prime
-        // form: 576 and 640 to 992 bits in steps of 32.
+        // form: 576 to 960 bits in steps of 32.
         const lengths = new Set(
             listSupportedProfiles().map(
                 (profile) => profile.ciphertext.modulus.toString(2).length,
@@ -333,16 +350,16 @@ describe('composed security ledger', () => {
                     ? 13n
                     : 1n,
             );
-        // Each of the 3n+1 guessing steps loses twice the complete
-        // programming distance per guess, rounded up to a multiple of
-        // 2^-256.
+        // Each of the 2n+d+1 guessing steps, with n = 8 and d = 3, loses
+        // twice the complete programming distance per guess, rounded up to a
+        // multiple of 2^-256.
         const profile = deriveSupportedProfile(8, 18);
         const matrices = compileCommonMatrixSamplingCensus(profile);
         const initialization = compileCommonMatrixInitializationCensus(profile);
         const exactNumerator =
             2n *
             13n *
-            25n *
+            20n *
             (matrices.distanceUpperNumerator * initialization.biasDenominator +
                 initialization.biasNumerator *
                     matrices.distanceUpperDenominator);
@@ -375,7 +392,7 @@ describe('composed security ledger', () => {
             subtotal << (securityTargetBits + ledgerBudgetBits),
         ).toBeLessThanOrEqual(1n << ledger.statistical.denominatorBits);
         // The sharing translation meets the statistical target for every
-        // supported roster.
+        // supported roster; every setup contributor shares its own secret.
         const secretOneNorm = 2n * fixedModulusBfvInputs.secretSupportWeight;
         for (const participantCount of supportedParticipantCounts) {
             const degree =
@@ -383,7 +400,7 @@ describe('composed security ledger', () => {
                     .resultReleaseThreshold - 1;
             const lifting = deriveSupportedShareLifting(participantCount);
             const numerator =
-                BigInt(participantCount) *
+                BigInt(setupContributors(participantCount)) *
                 ((1n << BigInt(degree)) - 1n) *
                 secretOneNorm;
             expect(lifting.privacyNumerator).toBe(numerator);
@@ -395,7 +412,7 @@ describe('composed security ledger', () => {
 
     it('charges every sparse sampler call its cap-exhaustion bound', () => {
         // A balanced sparse sampler of support s over degree d fails its
-        // draw cap of 2s with probability at most (4(s-1)/d)^s. Every
+        // draw cap of 2s with probability at most (4(s-1)/d)^s. Every setup
         // contributor draws two FHE secrets, one ephemeral per recipient
         // and one auxiliary secret; every registration one recipient secret.
         const bound = (degree: bigint, support: bigint) => ({
@@ -425,13 +442,14 @@ describe('composed security ledger', () => {
             [20, 20],
         ] as const) {
             const participants = BigInt(participantCount);
+            const contributors = BigInt(setupContributors(participantCount));
             const expected = unitsAbove([
-                { calls: 2n * participants, ...bound(65_536n, 1_024n) },
+                { calls: 2n * contributors, ...bound(65_536n, 1_024n) },
                 {
-                    calls: participants * participants,
+                    calls: contributors * participants,
                     ...bound(65_536n, 256n),
                 },
-                { calls: participants, ...bound(4_096n, 256n) },
+                { calls: contributors, ...bound(4_096n, 256n) },
             ]);
             const term = profileStatisticalTerms(
                 deriveSupportedProfile(participantCount, optionCount),
@@ -455,16 +473,16 @@ describe('composed security ledger', () => {
     });
 
     it('charges the seeded contribution randomness its one-way-to-hiding bound', () => {
-        // Two 512-bit seeds per roster participant, and 2^80 oracle calls in
+        // Two 512-bit seeds per setup contributor, and 2^80 oracle calls in
         // any experiment within the target: 2*sqrt((q+1)*4q*m/2^512) is at
         // most 4(q+1)*ceil(sqrt(m))/2^256.
         const calls = 1n << 80n;
         for (const [participantCount, optionCount, root] of [
-            [3, 2, 3n],
-            [10, 10, 5n],
-            [20, 20, 7n],
+            [3, 2, 2n],
+            [10, 10, 3n],
+            [20, 20, 4n],
         ] as const) {
-            const seeds = 2n * BigInt(participantCount);
+            const seeds = 2n * BigInt(setupContributors(participantCount));
             expect(root * root).toBeGreaterThanOrEqual(seeds);
             expect((root - 1n) * (root - 1n)).toBeLessThan(seeds);
             const term = profileStatisticalTerms(
@@ -580,7 +598,9 @@ describe('composed security ledger', () => {
                 );
                 roles[registrations] = Math.max(
                     roles[registrations],
-                    roles[rest] + 4 * participantCount,
+                    roles[rest] +
+                        3 * participantCount +
+                        setupContributors(participantCount),
                 );
             }
         }
@@ -598,7 +618,7 @@ describe('composed security ledger', () => {
         // Nineteen participants with six corrupt maximize roles per honest
         // member, and the bound is attained at their multiples.
         expect(tight).toBeGreaterThanOrEqual(Math.floor(limit / 13));
-        expect(acceptedProofRolesAt(13n * 7n)).toBe(76n * 7n);
+        expect(acceptedProofRolesAt(13n * 7n)).toBe(64n * 7n);
     });
 
     it('caps the honest credential population by its rosters', () => {

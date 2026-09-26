@@ -378,9 +378,8 @@ impl VerifiedEvaluationTarget {
         )
         .map_err(|_| Error::Encoding)?
         .into_bytes();
-        let message =
-            TargetMessage::parse(&body, inventory.setup.inventory().confirmations().len())
-                .map_err(|_| Error::Encoding)?;
+        let message = TargetMessage::parse(&body, inventory.setup.profile().participants())
+            .map_err(|_| Error::Encoding)?;
         if message.identity() != &identity {
             return Err(Error::Encoding);
         }

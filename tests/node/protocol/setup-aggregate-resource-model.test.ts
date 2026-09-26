@@ -47,6 +47,12 @@ describe('setup aggregate cache resources', () => {
                 auxiliaryInputEncryptionParameters.degree,
         );
         expect(value.maximumTwoGenerationPayloadBytes).toBe(2n * expected);
+        // Every recipient's share sums the first max(f + 1, 2) positions'
+        // contributions, with f = floor((n - 1) / 3).
+        const contributorCount = BigInt(
+            Math.max(Math.floor((profile.participantCount - 1) / 3) + 1, 2),
+        );
+        expect(value.contributionReadBytes).toBe(contributorCount * expected);
         expect(value.previousCacheReadBytes + value.completeReadbackBytes).toBe(
             value.contributionReadBytes,
         );

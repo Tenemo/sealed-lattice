@@ -58,7 +58,7 @@ impl State {
                     return Err(Error::Context);
                 }
                 let target = crate::browser::verified_target().ok_or(Error::Incomplete)?;
-                let count = target.inventory().setup().inventory().confirmations().len();
+                let count = target.inventory().setup().profile().participants();
                 let collector = CertificateCollector::new(target);
                 self.word(count);
                 self.word(collector.threshold());

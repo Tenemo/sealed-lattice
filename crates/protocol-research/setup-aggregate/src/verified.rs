@@ -106,9 +106,9 @@ impl SetupAggregator {
     pub fn accepted(&self) -> usize {
         self.accepted
     }
-    /// Every roster position's opening is accepted and none is pending.
+    /// Every setup contributor's opening is accepted and none is pending.
     pub fn complete(&self) -> bool {
-        self.pending.is_none() && self.accepted == self.inventory.confirmations().len()
+        self.pending.is_none() && self.accepted == self.profile.setup_contributors()
     }
     pub fn polynomials(&self) -> &[AggregatePolynomial] {
         &self.previous
@@ -120,7 +120,7 @@ impl SetupAggregator {
         body_header: &[u8],
         proof_header: &[u8],
     ) -> Result<(), Refusal> {
-        if self.accepted >= self.inventory.confirmations().len() {
+        if self.accepted >= self.profile.setup_contributors() {
             return Err(Refusal::Order);
         }
         let verifier = OpenedContributionVerifier::new(

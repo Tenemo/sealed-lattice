@@ -25,11 +25,11 @@ pub fn polynomial_bytes(profile: Profile, index: usize) -> (usize, usize) {
         CHUNK_BYTES / width * width,
     )
 }
-/// The aggregate after the last contribution.
+/// The aggregate after the last setup contributor's contribution.
 pub fn final_keys(output: &Path, profile: Profile) -> PathBuf {
     output.join(format!(
-        "aggregates/after-participant-{}",
-        profile.participants() - 1
+        "aggregates/after-contributor-{}",
+        profile.setup_contributors() - 1
     ))
 }
 /// The setup indices of the FHE and auxiliary encryption keys, in the
@@ -49,7 +49,7 @@ pub fn verify(
     let profile = inventory.proposal().proposal().profile();
     let mut verifier = SetupAggregator::new(inventory).unwrap();
     for (position, directory) in directories.iter().enumerate() {
-        let target = output.join(format!("after-participant-{position}"));
+        let target = output.join(format!("after-contributor-{position}"));
         fs::create_dir(&target).unwrap();
         let mut proof = File::open(directory.join("proof.bin")).unwrap();
         let mut proof_header = [0; PROOF_HEADER_BYTES];
@@ -73,7 +73,7 @@ pub fn verify(
                 Some(
                     File::open(
                         output
-                            .join(format!("after-participant-{}", position - 1))
+                            .join(format!("after-contributor-{}", position - 1))
                             .join(&name),
                     )
                     .unwrap(),

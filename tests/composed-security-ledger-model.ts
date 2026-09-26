@@ -23,6 +23,7 @@ import { compileParticipantReleaseCustody } from '#tests/participant-release-cus
 import {
     compileProofCompilerChronology,
     proofPurposes,
+    provingPositions,
 } from '#tests/proof-compiler-chronology-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
@@ -33,7 +34,10 @@ import {
     listSupportedProfiles,
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
-import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
+import {
+    compileSupportedThresholdCompletionProfiles,
+    compileThresholdCompletionProfile,
+} from '#tests/threshold-completion-model.js';
 import {
     compileProofCompilerCapCensus,
     compileWideChallengeCompilerCensus,
@@ -165,6 +169,7 @@ const largestParticipantCount = Math.max(...supportedParticipantCounts);
 const rosterSizes = compileSupportedThresholdCompletionProfiles().map(
     (profile) => ({
         participantCount: BigInt(profile.participantCount),
+        setupContributorCount: BigInt(profile.setupContributorCount),
         honestMembers: BigInt(
             profile.participantCount - profile.maximumCorruptParticipantCount,
         ),
@@ -183,16 +188,31 @@ export const rosterCountAt = (honestRegistrations: bigint) =>
     honestRegistrations / minimumHonestRosterMembers;
 
 // The proof roles honest participants accept across those rosters: one per
-// purpose and position of each, so at most 4n/(n-f) per honest member.
+// purpose and proving position of each, so at most (3n+d)/(n-f) per honest
+// member.
 export const acceptedProofRolesAt = (honestRegistrations: bigint) =>
-    rosterSizes.reduce((maximum, { participantCount, honestMembers }) => {
-        const roles =
-            (BigInt(proofPurposes.length) *
-                participantCount *
-                honestRegistrations) /
-            honestMembers;
-        return roles > maximum ? roles : maximum;
-    }, 0n);
+    rosterSizes.reduce(
+        (
+            maximum,
+            { participantCount, setupContributorCount, honestMembers },
+        ) => {
+            const roles =
+                (proofPurposes.reduce(
+                    (sum, purpose) =>
+                        sum +
+                        provingPositions(
+                            purpose,
+                            participantCount,
+                            setupContributorCount,
+                        ),
+                    0n,
+                ) *
+                    honestRegistrations) /
+                honestMembers;
+            return roles > maximum ? roles : maximum;
+        },
+        0n,
+    );
 
 type StatisticalTerm = Readonly<{
     name: string;
@@ -273,7 +293,7 @@ export const profileStatisticalTerms = (
             ),
         },
         {
-            // Every roster participant draws each contribution secret once.
+            // Every setup contributor draws each contribution secret once.
             name: 'Contribution sparse-support cap exhaustion',
             numerator: sparseSupportExhaustion(
                 compileSparseSupportSamplingCensus(profile)
@@ -281,24 +301,26 @@ export const profileStatisticalTerms = (
                     .map((row) => ({
                         ...row,
                         calls:
-                            BigInt(profile.participantCount) *
+                            BigInt(profile.setupContributorCount) *
                             row.callsPerOperation,
                     })),
             ),
         },
         {
-            // Every roster participant expands its generation and
+            // Every setup contributor expands its generation and
             // continuation randomness from two uniform seeds through the
-            // ideal SHAKE256, and nothing else reads a seed. Replacing all 2n
+            // ideal SHAKE256, and nothing else reads a seed. Replacing all 2d
             // streams by uniform bytes costs, by the semi-classical
             // one-way-to-hiding lemma over q oracle calls of the complete
-            // experiment and s-bit seeds, 2*sqrt((q+1)*4q*2n/2^s), at most
-            // 4(q+1)*sqrt(2n)/2^(s/2).
+            // experiment and s-bit seeds, 2*sqrt((q+1)*4q*2d/2^s), at most
+            // 4(q+1)*sqrt(2d)/2^(s/2).
             name: 'Contribution seed expansion',
             numerator: dyadic(
                 4n *
                     (caps.adversaryQueries + 1n) *
-                    ceilingSquareRoot(2n * BigInt(profile.participantCount)),
+                    ceilingSquareRoot(
+                        2n * BigInt(profile.setupContributorCount),
+                    ),
                 1n << (4n * contributionSeedBytes),
             ),
         },
@@ -658,7 +680,7 @@ export const reductionRatioAt = (
 
 // The computational groups share the 2^-80 budget with the statistical
 // subtotal, each receiving 2^-(80+budgetBits).
-export const ledgerGroups = [
+const ledgerGroups = [
     'Statistical terms',
     'ML-DSA-65 multi-user existential unforgeability',
     'Identity collisions',
@@ -697,7 +719,8 @@ const guessingSteps = (participantCount: bigint) =>
         .filter((row) => row.guesses > 1n)
         .reduce((sum, row) => sum + row.multiplicity, 0n);
 
-// Every honest participant can contribute, receive shares and vote. A
+// Every honest setup contributor, one of the first d roster positions, can
+// contribute, and every honest participant can receive shares and vote. A
 // ciphertext replacement passes through a uniform value, so it takes two
 // steps, and a key that must end good leaves for uniform and returns. Every
 // honest registration publishes its recipient key before any roster exists,
@@ -709,22 +732,26 @@ export const computationalHybrids = (
     participantCount: bigint,
     honestRegistrations = participantCount,
     rosterCount = 1n,
-) =>
-    [
+) => {
+    const contributorCount = BigInt(
+        compileThresholdCompletionProfile(Number(participantCount))
+            .setupContributorCount,
+    );
+    return [
         {
             assumption: 'Share-encryption Ring-LWE',
             hybrid: 'Honest registration keys out and back around their honest-to-honest sharing ciphertexts',
             reduction: 'plain',
             multiplicity:
                 2n * honestRegistrations +
-                2n * participantCount ** 2n * rosterCount,
+                2n * contributorCount * participantCount * rosterCount,
             guesses: 1n,
         },
         {
             assumption: 'Auxiliary Ring-LWE',
             hybrid: 'Honest auxiliary key coordinates',
             reduction: 'plain',
-            multiplicity: participantCount * rosterCount,
+            multiplicity: contributorCount * rosterCount,
             guesses: 1n,
         },
         {
@@ -738,7 +765,7 @@ export const computationalHybrids = (
             assumption: 'Evaluation-key circular security',
             hybrid: 'Honest evaluation-key tuples',
             reduction: 'extraction',
-            multiplicity: participantCount * rosterCount,
+            multiplicity: contributorCount * rosterCount,
             guesses: fheCommonStreamGuesses(),
         },
         {
@@ -755,6 +782,7 @@ export const computationalHybrids = (
         multiplicity: bigint;
         guesses: bigint;
     }[];
+};
 
 // Smallest lambda with multiplicity*guesses*Tred(T)/2^lambda <=
 // T/2^(80+budgetBits) at T = 2^80, where Tred(T)/T is constant or increasing
@@ -894,7 +922,11 @@ export const compileComposedSecurityLedger = (
         (1n << 512n) * target,
     );
     const assumptions = [
-        ...new Set(computationalHybrids(1n).map((row) => row.assumption)),
+        ...new Set(
+            computationalHybrids(BigInt(largestParticipantCount)).map(
+                (row) => row.assumption,
+            ),
+        ),
     ];
     return {
         securityTargetBits,

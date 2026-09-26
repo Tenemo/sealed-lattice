@@ -77,7 +77,7 @@ const releaseTarget = (session: ReleaseSession) => {
 };
 
 const generationOf = (session: ReleaseSession) =>
-    session.close.contribution.root.head.generation;
+    session.close.participant.root.head.generation;
 
 const words = (bytes: Uint8Array) =>
     Array.from({ length: Math.floor(bytes.length / 4) }, (_unused, index) =>
@@ -93,7 +93,7 @@ const recordCount = (state: ReleaseState | undefined) =>
 export const resumeRelease = async (
     close: CloseSession,
 ): Promise<ReleaseSession> => {
-    const { root, context } = close.contribution;
+    const { root, context } = close.participant;
     const { generation } = root.head;
     const closed = completedClosePhase(close.organizer);
     if (generation !== closed && generation < targetPhase.signed)
@@ -254,7 +254,7 @@ const openReleaseRecord = (
     kind: number,
     index: number,
 ) => {
-    const { context } = session.close.contribution;
+    const { context } = session.close.participant;
     const { state } = session;
     if (state === undefined) throw new Error('No release state is retained.');
     const journal = kind === releaseRecordKind.journal;
@@ -319,13 +319,13 @@ const commitRelease = async (
     transition: ReleaseTransition,
 ) => {
     const { close } = session;
-    const { contribution } = close;
-    const { context, root } = contribution;
+    const { participant } = close;
+    const { context, root } = participant;
     const { profile } = context;
     const encoded = encodeReleaseState(transition.generation, transition.state);
     if (encoded.length > profile.release.maximumStateBytes)
         throw new Error('The release state exceeds its bound.');
-    contribution.root = await commitRoot(context, root, {
+    participant.root = await commitRoot(context, root, {
         generation: transition.generation,
         manifest: {
             ...root.manifest,
@@ -337,8 +337,8 @@ const commitRelease = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(contribution),
-            ...retainedBallotRecords(contribution, close.records),
+            ...contributionRecords(participant),
+            ...retainedBallotRecords(participant, close.records),
             ...completedCloseRecords(close),
             ...(session.state === undefined
                 ? []
@@ -375,7 +375,7 @@ const commitRelease = async (
 // Appends the journal's original random bytes one record at a time; the
 // append of the final record enters the ready phase.
 const appendJournal = async (session: ReleaseSession) => {
-    const { profile } = session.close.contribution.context;
+    const { profile } = session.close.participant.context;
     const lengths = releaseRecordLengths(profile, profile.release.journalBytes);
     while (generationOf(session) < releasePhase.ready) {
         const state: ReleaseState = session.state ?? {
@@ -423,7 +423,7 @@ const appendJournal = async (session: ReleaseSession) => {
 // Loads the complete journal into the module's entropy queue one record at
 // a time, clearing each plaintext.
 const loadJournal = async (session: ReleaseSession) => {
-    const { context } = session.close.contribution;
+    const { context } = session.close.participant;
     const { kernel, profile } = context;
     if (kernel.release_entropy_command(0, profile.release.journalBytes) !== 0)
         throw new Error('The release entropy refused its journal.');
@@ -472,7 +472,7 @@ export const journalRandomness =
 // Generates the release body from the journal and retains its records and
 // envelope before any signature.
 const proveRelease = async (session: ReleaseSession) => {
-    const { context } = session.close.contribution;
+    const { context } = session.close.participant;
     const { profile, kernel, handlers } = context;
     const bounds = profile.release;
     let envelope: Uint8Array;
@@ -532,7 +532,7 @@ const proveRelease = async (session: ReleaseSession) => {
 // Imports the retained unsigned body, which the owning proof verifier checks
 // again under the actual certificate before a signature.
 const restoreReleaseBody = async (session: ReleaseSession) => {
-    const { context } = session.close.contribution;
+    const { context } = session.close.participant;
     const { state } = session;
     if (state === undefined) throw new Error('No release body is retained.');
     releaseCommand(context, 2, state.envelope);
@@ -550,7 +550,7 @@ const restoreReleaseBody = async (session: ReleaseSession) => {
 // Retains the signing coins, signs the exact envelope and retires the
 // journal with the signature.
 const signRelease = async (session: ReleaseSession) => {
-    const { context } = session.close.contribution;
+    const { context } = session.close.participant;
     if (session.state === undefined)
         throw new Error('No release body is retained.');
     if (generationOf(session) === releasePhase.body)
@@ -602,7 +602,7 @@ export const advanceRelease = async (
     relay: PublicRelay,
 ) => {
     const { close } = session;
-    const { context } = close.contribution;
+    const { context } = close.participant;
     await restoreCompletedClose(close);
     if (session.signed !== undefined)
         restoreSignedTarget(context, session.signed);
@@ -641,7 +641,7 @@ export const publishRelease = async (
     const { state } = session;
     if (state === undefined || generationOf(session) < releasePhase.signed)
         return;
-    const { profile } = session.close.contribution.context;
+    const { profile } = session.close.participant.context;
     const position = String(session.close.records.position);
     for (let index = 0; index < state.bodyKeys.length; index++)
         await publishChunk(
@@ -666,7 +666,7 @@ export const computeResult = async (
     close: CloseSession,
     relay: PublicRelay,
 ) => {
-    const { context } = close.contribution;
+    const { context } = close.participant;
     const { profile } = context;
     const bounds = profile.release;
     await restoreCompletedClose(close);

@@ -59,9 +59,9 @@ describe('proof hash work', () => {
             ]),
         ).toEqual([
             ['registration', 144n, 288n, 180n, 2752540n],
-            ['setup', 5904n, 18240n, 7788n, 342737041n],
+            ['setup', 5808n, 18240n, 7740n, 342737041n],
             ['ballot', 576n, 1632n, 776n, 28672136n],
-            ['release', 1072n, 3504n, 1596n, 8782022n],
+            ['release', 1040n, 3360n, 1540n, 8782022n],
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
             282n,

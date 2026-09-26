@@ -9,7 +9,11 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import {
+    isSetupContributor,
+    PublicInputFailure,
+    sessionInput,
+} from './context.js';
 import type { ProfileContext } from './context.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
@@ -42,7 +46,8 @@ import {
     snapshotParticipant,
 } from './storage.js';
 
-// A participant's setup contribution. Generation four locks the generation
+// A setup contributor's contribution; only the first roster positions
+// contribute. Generation four locks the generation
 // intent with the seed of all its randomness before the prover draws any;
 // generation five retains the sealed first-oracle checkpoint and the retained
 // body polynomials; generation six locks the continuation with the seed of
@@ -52,6 +57,11 @@ import {
 // confirmation and, after every confirmation is known, the opening, each with
 // coins locked beforehand. The root's contribution suffix lists every record
 // key and ciphertext hash.
+//
+// Every other participant confirms the roster without a contribution: its
+// confirmation names its own registration body. Generation eight locks the
+// confirmation body with its signing coins and generation nine retains the
+// signature, under the same record names.
 
 type RecordLocation = Readonly<{
     object: number;
@@ -84,12 +94,23 @@ type RecordContext = Readonly<{
     position: number;
 }>;
 
-export type ContributionSession = {
+// What every operation from the accepted roster on shares. A setup
+// contributor's session retains its contribution from generation four, and
+// any other participant's its roster confirmation from generation eight.
+export type ParticipantSession = {
     readonly context: ProfileContext;
     readonly records: RecordContext;
     root: AuthenticatedRoot;
+    state?: ContributionState;
+};
+
+export type ContributionSession = ParticipantSession & {
     state: ContributionState;
 };
+
+export const isContributionSession = (
+    session: ParticipantSession,
+): session is ContributionSession => session.state !== undefined;
 
 export type SignedPacket = Readonly<{
     body: Uint8Array;
@@ -147,6 +168,8 @@ const signingCommand = {
     validatePosition: 11,
     confirmationBody: 12,
     openingBody: 13,
+    rosterConfirmationBody: 14,
+    signRosterConfirmation: 15,
 } as const;
 
 // Signing records follow the proof in this order, one generation after
@@ -168,9 +191,10 @@ const proofObject = (profile: ParticipantProfile) =>
 const signingObject = (profile: ParticipantProfile, kind: SigningKind) =>
     proofObject(profile) + 1 + signingKinds.indexOf(kind);
 
-// The confirmation inventory is the participant count and every packet.
+// The confirmation inventory is the participant count and every
+// participant's packet.
 const inventoryBytes = (profile: ParticipantProfile) =>
-    4 + profile.participantCount * profile.contribution.confirmationPacketBytes;
+    profile.root.setupInventoryBytes;
 
 const signingLength = (profile: ParticipantProfile, kind: SigningKind) =>
     kind === 'confirmationBody'
@@ -210,39 +234,122 @@ const proofLength = (state: ContributionState, profile: ParticipantProfile) =>
         .filter((record) => record.object === proofObject(profile))
         .reduce((total, record) => total + record.length, 0);
 
-const encodeContributionState = (state: ContributionState) =>
+const encodeSigningRecord = (record: SealedRecord) =>
     concatenate(
-        encodeText('PCS2'),
-        unsigned16(state.position),
-        state.salt,
-        unsigned32(state.header.length),
-        unsigned32(state.publicRecords.length),
-        unsigned32(state.privateRecords.length),
-        unsigned32(state.signingRecords.length),
-        state.header,
-        ...state.publicRecords.map((record) =>
-            concatenate(
-                unsigned16(record.object),
-                unsigned32(record.offset),
-                unsigned32(record.length),
-                record.key,
-                record.hash,
-            ),
-        ),
-        ...state.privateRecords.map((record) =>
-            concatenate(record.key, record.hash),
-        ),
-        ...state.signingRecords.map((record) =>
-            concatenate(
-                unsigned16(record.object),
-                unsigned32(record.length),
-                record.key,
-                record.hash,
-            ),
-        ),
-        state.seed,
-        state.coins,
+        unsigned16(record.object),
+        unsigned32(record.length),
+        record.key,
+        record.hash,
     );
+
+// A setup contributor's state lists its whole contribution; any other
+// participant's only its roster confirmation records and coins.
+const encodeContributionState = (
+    state: ContributionState,
+    profile: ParticipantProfile,
+) =>
+    state.position >= profile.setupContributorCount
+        ? concatenate(
+              encodeText('PRC1'),
+              unsigned16(state.position),
+              unsigned32(state.signingRecords.length),
+              ...state.signingRecords.map(encodeSigningRecord),
+              state.coins,
+          )
+        : concatenate(
+              encodeText('PCS2'),
+              unsigned16(state.position),
+              state.salt,
+              unsigned32(state.header.length),
+              unsigned32(state.publicRecords.length),
+              unsigned32(state.privateRecords.length),
+              unsigned32(state.signingRecords.length),
+              state.header,
+              ...state.publicRecords.map((record) =>
+                  concatenate(
+                      unsigned16(record.object),
+                      unsigned32(record.offset),
+                      unsigned32(record.length),
+                      record.key,
+                      record.hash,
+                  ),
+              ),
+              ...state.privateRecords.map((record) =>
+                  concatenate(record.key, record.hash),
+              ),
+              ...state.signingRecords.map(encodeSigningRecord),
+              state.seed,
+              state.coins,
+          );
+
+// Decodes the first signing records in their order from the offset.
+const decodeSigningRecords = (
+    bytes: Uint8Array,
+    offset: number,
+    count: number,
+    profile: ParticipantProfile,
+) =>
+    signingKinds.slice(0, count).map((kind, index) => {
+        const start = offset + index * signingEntryBytes;
+        const record = {
+            object: readUnsigned16(bytes, start),
+            offset: 0,
+            length: readUnsigned32(bytes, start + 2),
+            key: bytes.slice(start + 6, start + 6 + keyBytes),
+            hash: bytes.slice(start + 6 + keyBytes, start + signingEntryBytes),
+        };
+        if (
+            record.object !== signingObject(profile, kind) ||
+            record.length !== signingLength(profile, kind)
+        )
+            throw new Error('Noncanonical contribution signing record.');
+        return record;
+    });
+
+// Decodes the roster confirmation of a participant outside the setup
+// contributors: the locked body with coins at generation eight, and the
+// signed confirmation from generation nine on. Such a participant never
+// holds the contributor-only generations.
+const decodeConfirmationState = (
+    bytes: Uint8Array,
+    generation: number,
+    profile: ParticipantProfile,
+): ContributionState => {
+    const locked = generation === 8;
+    const signingCount = locked ? 1 : 2;
+    const coins = locked ? coinBytes : 0;
+    const prefix = 4 + 2 + 4;
+    if (
+        (generation !== 8 && generation !== 9 && generation < 12) ||
+        bytes.length !== prefix + signingEntryBytes * signingCount + coins ||
+        !equalBytes(bytes.subarray(0, 4), encodeText('PRC1')) ||
+        readUnsigned32(bytes, 6) !== signingCount
+    )
+        throw new Error(
+            'The roster confirmation does not match its generation.',
+        );
+    const position = readUnsigned16(bytes, 4);
+    if (
+        position < profile.setupContributorCount ||
+        position >= profile.participantCount
+    )
+        throw new Error('The roster confirmation names another position.');
+    return {
+        position,
+        salt: new Uint8Array(),
+        header: new Uint8Array(),
+        publicRecords: [],
+        privateRecords: [],
+        signingRecords: decodeSigningRecords(
+            bytes,
+            prefix,
+            signingCount,
+            profile,
+        ),
+        seed: new Uint8Array(),
+        coins: bytes.slice(prefix + signingEntryBytes * signingCount),
+    };
+};
 
 // Decodes the contribution suffix of an authenticated root. The retained
 // body records must be exactly the profile's, the proof records contiguous
@@ -286,7 +393,7 @@ const decodeContributionState = (
                 publicCount > bodyRecords &&
                 publicCount <= bodyRecords + maximumProofRecords;
     if (
-        position >= profile.participantCount ||
+        position >= profile.setupContributorCount ||
         !shaped ||
         signingCount !== shape.signingRecords ||
         bytes.length !==
@@ -349,26 +456,13 @@ const decodeContributionState = (
         });
         offset += privateEntryBytes;
     }
-    const signingRecords: SealedRecord[] = [];
-    for (const kind of signingKinds.slice(0, signingCount)) {
-        const record = {
-            object: readUnsigned16(bytes, offset),
-            offset: 0,
-            length: readUnsigned32(bytes, offset + 2),
-            key: bytes.slice(offset + 6, offset + 6 + keyBytes),
-            hash: bytes.slice(
-                offset + 6 + keyBytes,
-                offset + signingEntryBytes,
-            ),
-        };
-        if (
-            record.object !== signingObject(profile, kind) ||
-            record.length !== signingLength(profile, kind)
-        )
-            throw new Error('Noncanonical contribution signing record.');
-        signingRecords.push(record);
-        offset += signingEntryBytes;
-    }
+    const signingRecords = decodeSigningRecords(
+        bytes,
+        offset,
+        signingCount,
+        profile,
+    );
+    offset += signingEntryBytes * signingCount;
     return {
         position,
         salt: bytes.slice(6, counts),
@@ -405,7 +499,7 @@ type SealedOutput = Readonly<{
 }>;
 
 const sealRecord = async (
-    session: ContributionSession,
+    session: ParticipantSession,
     object: number,
     offset: number,
     bytes: Uint8Array,
@@ -440,7 +534,7 @@ const sealRecord = async (
 };
 
 const openRecord = async (
-    session: ContributionSession,
+    session: ParticipantSession,
     record: SealedRecord,
 ) => {
     const blob = await readParticipantValue(
@@ -531,13 +625,13 @@ type ContributionTransition = Readonly<{
 }>;
 
 const commitContribution = async (
-    session: ContributionSession,
+    session: ParticipantSession,
     transition: ContributionTransition,
 ) => {
     const { context, root } = session;
     const profile = context.profile;
     const predecessor =
-        root.head.generation >= 4
+        root.head.generation >= 4 && session.state !== undefined
             ? contributionInventory(profile, session.state)
             : [];
     const listed = new Set(
@@ -564,7 +658,10 @@ const commitContribution = async (
             ...root.manifest,
             suffixes: {
                 ...root.manifest.suffixes,
-                contribution: encodeContributionState(transition.state),
+                contribution: encodeContributionState(
+                    transition.state,
+                    profile,
+                ),
             },
         },
         predecessorRecords: [
@@ -1266,9 +1363,9 @@ export const contributionDirectory = (position: number) =>
 export const polynomialFile = (expandedIndex: number) =>
     'polynomial-' + String(expandedIndex).padStart(2, '0') + '.bin';
 
-// Reads every roster position's published confirmation into one inventory.
-const readConfirmations = async (
-    session: ContributionSession,
+// Reads every participant's published confirmation into one inventory.
+export const readConfirmations = async (
+    session: ParticipantSession,
     relay: PublicRelay,
 ) => {
     const { profile } = session.context;
@@ -1417,6 +1514,35 @@ export const openContribution = async (
     return { body, signature: await openSigning(session, 'openingSignature') };
 };
 
+// Has the module retain the stored proposal's context at this participant's
+// position and returns the proposal's identity.
+const retainProposal = async (
+    context: ProfileContext,
+    root: AuthenticatedRoot,
+) => {
+    const { kernel } = context;
+    const proposal = await readDataKind(
+        context,
+        root.manifest,
+        dataKind.proposal,
+    );
+    const control = concatenate(
+        root.manifest.poll,
+        context.runtime,
+        unsigned16(context.position),
+        unsigned32(proposal.length),
+        proposal,
+    );
+    sessionInput(context, control);
+    if (kernel.retain_proposal(control.length) !== 0)
+        throw new Error('The retained proposal context was refused.');
+    return readKernel(
+        kernel,
+        kernel.retained_proposal_identity_pointer(),
+        identityBytes,
+    );
+};
+
 // Decodes the retained contribution of a root after its intent. Every listed
 // record must be stored and nothing else, so interrupted one-shot work cannot
 // continue. The records bind to the verified signed proposal when the caller
@@ -1428,7 +1554,7 @@ export const resumeContribution = async (
     root: AuthenticatedRoot,
     verified?: VerifiedProposal,
 ): Promise<ContributionSession> => {
-    const { profile, kernel } = context;
+    const { profile } = context;
     const suffix = root.manifest.suffixes.contribution;
     if (root.head.generation < 4 || suffix === undefined)
         throw new Error('No contribution is retained.');
@@ -1437,6 +1563,8 @@ export const resumeContribution = async (
         root.head.generation,
         profile,
     );
+    if (state.position !== context.position)
+        throw new Error('The retained contribution names another position.');
     const snapshot = await snapshotParticipant(context.database);
     if (
         snapshot.counts.contribution !==
@@ -1445,28 +1573,8 @@ export const resumeContribution = async (
     )
         throw new Error('The contribution records changed.');
     let identity: Uint8Array;
-    if (verified === undefined) {
-        const proposal = await readDataKind(
-            context,
-            root.manifest,
-            dataKind.proposal,
-        );
-        const control = concatenate(
-            root.manifest.poll,
-            context.runtime,
-            unsigned16(state.position),
-            unsigned32(proposal.length),
-            proposal,
-        );
-        sessionInput(context, control);
-        if (kernel.retain_proposal(control.length) !== 0)
-            throw new Error('The retained proposal context was refused.');
-        identity = readKernel(
-            kernel,
-            kernel.retained_proposal_identity_pointer(),
-            identityBytes,
-        );
-    } else {
+    if (verified === undefined) identity = await retainProposal(context, root);
+    else {
         if (verified.position !== state.position)
             throw new Error('The verified proposal moved this participant.');
         identity = verified.identity;
@@ -1484,9 +1592,127 @@ export const resumeContribution = async (
     };
 };
 
-// The stored records the retained contribution lists.
-export const contributionRecords = (session: ContributionSession) =>
-    contributionInventory(session.context.profile, session.state);
+// Resumes a setup contributor from its retained contribution, and any other
+// participant from its accepted roster on, with its roster confirmation once
+// that is locked. Every listed record must be stored and nothing else.
+export const resumeParticipant = async (
+    context: ProfileContext,
+    root: AuthenticatedRoot,
+): Promise<ParticipantSession> => {
+    if (isSetupContributor(context)) return resumeContribution(context, root);
+    const { generation } = root.head;
+    const suffix = root.manifest.suffixes.contribution;
+    if (generation < 3 || (generation === 3) !== (suffix === undefined))
+        throw new Error('No accepted roster is retained.');
+    const state =
+        suffix === undefined
+            ? undefined
+            : decodeConfirmationState(suffix, generation, context.profile);
+    if (state !== undefined && state.position !== context.position)
+        throw new Error('The roster confirmation names another position.');
+    const snapshot = await snapshotParticipant(context.database);
+    if (
+        snapshot.counts.contribution !== (state?.signingRecords.length ?? 0) ||
+        snapshot.counts.checkpoint !== 0
+    )
+        throw new Error('The roster confirmation records changed.');
+    return {
+        context,
+        records: {
+            poll: root.manifest.poll,
+            runtime: context.runtime,
+            proposal: await retainProposal(context, root),
+            position: context.position,
+        },
+        root,
+        ...(state === undefined ? {} : { state }),
+    };
+};
+
+// Signs the roster confirmation of a participant outside the setup
+// contributors once, with coins locked beforehand, and delivers it again
+// from its authenticated records afterwards. The module rebuilds the body
+// from the retained roster, which names this participant's own registration
+// body.
+export const confirmRoster = async (
+    session: ParticipantSession,
+): Promise<SignedPacket> => {
+    const { context } = session;
+    const { profile } = context;
+    if (isSetupContributor(context))
+        throw new Error('A setup contributor confirms its contribution.');
+    const retained = () => {
+        if (!isContributionSession(session))
+            throw new Error('No roster confirmation is retained.');
+        return session;
+    };
+    if (session.root.head.generation === 3) {
+        const output = await sealRecord(
+            session,
+            signingObject(profile, 'confirmationBody'),
+            0,
+            signing(context, signingCommand.rosterConfirmationBody),
+        );
+        await commitContribution(session, {
+            generation: 8,
+            state: {
+                position: context.position,
+                salt: new Uint8Array(),
+                header: new Uint8Array(),
+                publicRecords: [],
+                privateRecords: [],
+                signingRecords: [output.record],
+                seed: new Uint8Array(),
+                coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
+            },
+            signing: [output],
+        });
+    }
+    if (session.root.head.generation === 8) {
+        const locked = retained();
+        const body = await openSigning(locked, 'confirmationBody');
+        if (
+            !equalBytes(
+                signing(context, signingCommand.rosterConfirmationBody),
+                body,
+            )
+        )
+            throw new Error('The locked confirmation changed.');
+        const signed = splitPacket(
+            signing(
+                context,
+                signingCommand.signRosterConfirmation,
+                locked.state.coins,
+            ),
+            profile,
+        );
+        if (!equalBytes(signed.body, body))
+            throw new Error('The signer changed the confirmation.');
+        const output = await sealRecord(
+            locked,
+            signingObject(profile, 'confirmationSignature'),
+            0,
+            signed.signature,
+        );
+        await commitContribution(locked, {
+            generation: 9,
+            state: {
+                ...locked.state,
+                signingRecords: [...locked.state.signingRecords, output.record],
+                coins: new Uint8Array(),
+            },
+            signing: [output],
+        });
+    }
+    return storedConfirmation(retained());
+};
+
+// The stored records the retained contribution or roster confirmation
+// lists, if any.
+export const contributionRecords = (session: ParticipantSession) =>
+    isContributionSession(session)
+        ? contributionInventory(session.context.profile, session.state)
+        : [];
 
 // The signed opening, as retained.
 export const storedOpening = async (
@@ -1513,11 +1739,11 @@ export const openedInventory = async (session: ContributionSession) => {
 };
 
 export const publishConfirmation = async (
-    session: ContributionSession,
+    session: ParticipantSession,
     relay: PublicRelay,
     confirmation: SignedPacket,
 ) => {
-    const directory = contributionDirectory(session.state.position);
+    const directory = contributionDirectory(session.records.position);
     await publishRecord(
         relay,
         directory + 'confirmation.bin',

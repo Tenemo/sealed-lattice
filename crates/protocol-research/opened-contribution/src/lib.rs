@@ -220,7 +220,7 @@ impl OpenedContributionVerifier {
             .finish()
             .map_err(|_| Refusal::Shape)?
             .digest();
-        if &commitment != self.inventory.confirmations()[self.position].commitment() {
+        if self.inventory.confirmations()[self.position].commitment() != Some(&commitment) {
             return Err(Refusal::Commitment);
         }
         if !self.verifier.finish() {

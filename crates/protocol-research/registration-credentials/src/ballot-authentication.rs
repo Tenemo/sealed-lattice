@@ -181,6 +181,22 @@ impl Credential {
         self.ballot_attempted = true;
         Ok(())
     }
+    fn check_owner_context(
+        &self,
+        poll: &VerifiedPoll,
+        context: &RetainedContributionContext,
+    ) -> Result<(), Error> {
+        if context.poll != poll.identity()
+            || context.runtime != poll.runtime()
+            || context.profile().options() != poll.manifest().option_count()
+            || self.completed_body != Some(context.owner_body)
+        {
+            return Err(Error::Context);
+        }
+        Ok(())
+    }
+    /// A setup contributor's owner: its own signed opening names the
+    /// inventory.
     pub fn retain_ballot_owner(
         &self,
         poll: &VerifiedPoll,
@@ -189,11 +205,8 @@ impl Credential {
         opening_body: &[u8],
         opening_signature: &[u8],
     ) -> Result<RetainedBallotOwner, Error> {
-        if context.poll != poll.identity()
-            || context.runtime != poll.runtime()
-            || context.profile().options() != poll.manifest().option_count()
-            || self.completed_body != Some(context.owner_body)
-        {
+        self.check_owner_context(poll, context)?;
+        if context.position >= context.profile().setup_contributors() {
             return Err(Error::Context);
         }
         let (position, _) = crate::contribution_authentication::decode(
@@ -224,6 +237,35 @@ impl Credential {
             runtime: poll.runtime(),
             inventory,
             position,
+            owner_body: context.owner_body,
+            signing_public: self.signing_public,
+        })
+    }
+    /// The owner of a participant outside the setup contributors, which opens
+    /// nothing: the setup reference that this credential keyed when the
+    /// owning setup verifier accepted the setup names the inventory, after
+    /// the reference's four-byte marker.
+    pub fn retain_setup_ballot_owner(
+        &self,
+        poll: &VerifiedPoll,
+        context: &RetainedContributionContext,
+        inventory: [u8; 64],
+        reference: &[u8],
+        tag: &[u8],
+    ) -> Result<RetainedBallotOwner, Error> {
+        self.check_owner_context(poll, context)?;
+        if context.position < context.profile().setup_contributors() {
+            return Err(Error::Context);
+        }
+        self.check_retained_setup_tag(poll, reference, tag)?;
+        if reference.get(4..68) != Some(inventory.as_slice()) {
+            return Err(Error::Context);
+        }
+        Ok(RetainedBallotOwner {
+            poll: poll.identity(),
+            runtime: poll.runtime(),
+            inventory,
+            position: context.position,
             owner_body: context.owner_body,
             signing_public: self.signing_public,
         })

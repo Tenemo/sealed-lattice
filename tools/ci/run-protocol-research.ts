@@ -150,6 +150,7 @@ await runWithLocalRunLog(
             const enrollment = compileRegistrationEnrollmentCensus();
             const ballot = compileBallotBodyCensus(profile);
             const participants = BigInt(contribution.participantCount);
+            const contributors = BigInt(contribution.setupContributorCount);
             const registration = compileRegistrationKeyRelationCensus();
             const authentication = compileContributionAuthenticationCensus(
                 Number(participants),
@@ -168,9 +169,11 @@ await runWithLocalRunLog(
                 198n +
                 degree * coefficientBytes +
                 release.maximumMultiproofBytes;
-            // The native close records every response, the late control
-            // response and an index line of at most 128 bytes per archived
-            // submission.
+            // Only the setup contributors publish a contribution body, and
+            // the native setup verification keeps each contributor's running
+            // aggregate. The native close records every response, the late
+            // control response and an index line of at most 128 bytes per
+            // archived submission.
             const closeRecordBound =
                 close.maximumRosterCloseMetadataBytes +
                 close.maximumResponsePacketBytes +
@@ -178,9 +181,9 @@ await runWithLocalRunLog(
                 4096n;
             const sourceBound =
                 closeRecordBound +
+                contributors * contribution.maximumBodyBytes +
                 participants *
-                    (contribution.maximumBodyBytes +
-                        registration.maximumProofBytes +
+                    (registration.maximumProofBytes +
                         registration.publicKeyBytes +
                         enrollment.maximumHeaderBytes +
                         enrollment.signatureBytes) +
@@ -215,7 +218,7 @@ await runWithLocalRunLog(
                 enrollment.maximumPollDefinitionBytes;
             const diagnosticBound =
                 publicPayloadBound +
-                participants * aggregate.aggregateBytes +
+                contributors * aggregate.aggregateBytes +
                 ballot.maximumProofBytes;
             assert.equal(participants, BigInt(selected.participantCount));
             assert.ok(

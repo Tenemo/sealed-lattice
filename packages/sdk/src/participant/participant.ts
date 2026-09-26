@@ -137,6 +137,8 @@ export type ParticipantSummary = Readonly<{
     bodyDigest: string;
     username: string;
     isOrganizer: boolean;
+    /** Whether the participant contributes setup key material, once its roster is retained. */
+    isSetupContributor: boolean | undefined;
     ballot: 'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
 }>;
 

@@ -11,7 +11,7 @@ use ballot_proof::{
 };
 use registration_credentials::{
     Credential, Error,
-    ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
+    ballot_authentication::{BallotEnvelope, RETAINED_SETUP_TAG_BYTES, RetainedBallotOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage, close_quorum,
         maximum_close_message_bytes,
@@ -83,16 +83,18 @@ pub fn owner(
     enrollment: &Enrollment,
     poll: &VerifiedPoll,
     setup: &VerifiedSetupAggregate,
-    opening: &SignedOpening,
+    opening: Option<&SignedOpening>,
     position: usize,
 ) -> RetainedBallotOwner {
     owner_of(&enrollment.credential, poll, setup, opening, position)
 }
-fn owner_of(
+/// A setup contributor's owner comes from its own opening; any other
+/// participant's from the setup reference its credential keys.
+pub fn owner_of(
     credential: &Credential,
     poll: &VerifiedPoll,
     setup: &VerifiedSetupAggregate,
-    opening: &SignedOpening,
+    opening: Option<&SignedOpening>,
     position: usize,
 ) -> RetainedBallotOwner {
     let retained = RetainedContributionContext::parse(
@@ -103,15 +105,32 @@ fn owner_of(
         setup.inventory().proposal().proposal().body(),
     )
     .unwrap();
-    credential
-        .retain_ballot_owner(
-            poll,
-            &retained,
-            setup.inventory().identity(),
-            opening.body(),
-            opening.signature(),
-        )
-        .unwrap()
+    match opening {
+        Some(opening) => credential
+            .retain_ballot_owner(
+                poll,
+                &retained,
+                setup.inventory().identity(),
+                opening.body(),
+                opening.signature(),
+            )
+            .unwrap(),
+        None => {
+            let reference =
+                registration_enrollment::ballot::retained_setup_reference(credential, poll, setup)
+                    .unwrap();
+            let (reference, tag) = reference.split_at(reference.len() - RETAINED_SETUP_TAG_BYTES);
+            credential
+                .retain_setup_ballot_owner(
+                    poll,
+                    &retained,
+                    setup.inventory().identity(),
+                    reference,
+                    tag,
+                )
+                .unwrap()
+        }
+    }
 }
 /// An input a participant's close state accepted, as its persistent close log
 /// retains it: a held submission, the locked intent, or a response the
@@ -143,7 +162,7 @@ pub fn close_work(
     enrollment: &Enrollment,
     poll: &Arc<VerifiedPoll>,
     setup: &Arc<VerifiedSetupAggregate>,
-    opening: &SignedOpening,
+    opening: Option<&SignedOpening>,
     position: usize,
 ) -> LoggedWork {
     LoggedWork {
@@ -395,7 +414,7 @@ pub struct Equivocator {
     pub forks: [Credential; 3],
     pub restored: Credential,
 }
-/// Every participant's enrollment and setup opening.
+/// Every participant's enrollment and every setup contributor's opening.
 pub struct Participants<'a> {
     pub enrollments: &'a mut [Enrollment],
     pub openings: &'a [SignedOpening],
@@ -443,7 +462,7 @@ pub fn run(
                 &enrollments[position],
                 &poll,
                 &setup,
-                &openings[position],
+                openings.get(position),
                 position,
             )
         })
@@ -465,7 +484,7 @@ pub fn run(
                 forks: [mut first, mut second, mut late_fork],
                 restored,
             } = equivocator;
-            let owner = owner_of(&first, &poll, &setup, &openings[position], position);
+            let owner = owner_of(&first, &poll, &setup, openings.get(position), position);
             let equivocate = |fork: &mut Credential, time: u64| {
                 let envelope = BallotEnvelope::new(
                     profile,
@@ -535,7 +554,7 @@ pub fn run(
         ));
     }
     // Only the organizer closes, and only once.
-    let mut other = close_work(&enrollments[1], &poll, &setup, &openings[1], 1);
+    let mut other = close_work(&enrollments[1], &poll, &setup, openings.get(1), 1);
     let body = other
         .command(
             &mut enrollments[1].credential,
@@ -550,7 +569,7 @@ pub fn run(
     ));
     let (intent_body, intent_signature) = open(&mut works, enrollments, close_time);
     let intent_packet = packet(&intent_body, &intent_signature);
-    let mut repeated = close_work(&enrollments[0], &poll, &setup, &openings[0], 0);
+    let mut repeated = close_work(&enrollments[0], &poll, &setup, openings.first(), 0);
     let later = repeated
         .command(
             &mut enrollments[0].credential,
@@ -583,7 +602,7 @@ pub fn run(
         &enrollments[first_honest],
         &poll,
         &setup,
-        &openings[first_honest],
+        openings.get(first_honest),
         first_honest,
     );
     assert!(
@@ -602,7 +621,7 @@ pub fn run(
             &enrollments[nonvoter],
             &poll,
             &setup,
-            &openings[nonvoter],
+            openings.get(nonvoter),
             nonvoter,
         );
         assert!(matches!(
@@ -683,7 +702,13 @@ pub fn run(
     ));
     // A voter's response must list its own on-time ballot.
     let voter = scenario.omitted.unwrap_or(*scenario.voters.last().unwrap());
-    let mut incomplete = close_work(&enrollments[voter], &poll, &setup, &openings[voter], voter);
+    let mut incomplete = close_work(
+        &enrollments[voter],
+        &poll,
+        &setup,
+        openings.get(voter),
+        voter,
+    );
     incomplete
         .command(&mut enrollments[voter].credential, 2, 0, &intent_packet)
         .unwrap();
@@ -884,7 +909,7 @@ pub fn run(
         works[1].command(&mut enrollments[1].credential, 7, 0, arrivals[0]),
         Err(Error::Context)
     ));
-    let mut probe = close_work(&enrollments[0], &poll, &setup, &openings[0], 0);
+    let mut probe = close_work(&enrollments[0], &poll, &setup, openings.first(), 0);
     if let Some(forged) = &forged {
         for submission in [&forged.a, &forged.late] {
             probe
@@ -966,7 +991,7 @@ pub fn run(
         probe.command(&mut enrollments[0].credential, 7, 0, arrivals[0]),
         Err(Error::Consumed)
     ));
-    let mut lacking = close_work(&enrollments[0], &poll, &setup, &openings[0], 0);
+    let mut lacking = close_work(&enrollments[0], &poll, &setup, openings.first(), 0);
     lacking
         .command(&mut enrollments[0].credential, 2, 0, &intent_packet)
         .unwrap();
@@ -1046,7 +1071,7 @@ pub fn run(
             &enrollments[position],
             &poll,
             &setup,
-            &openings[position],
+            openings.get(position),
             position,
         );
         replay(
@@ -1212,7 +1237,7 @@ pub fn run(
             mut restored,
             ..
         } = equivocation;
-        let restored_owner = owner_of(&restored, &poll, &setup, &openings[position], position);
+        let restored_owner = owner_of(&restored, &poll, &setup, openings.get(position), position);
         let (response_body, response_signature) = split(&responses[position]);
         let response = CloseResponseMessage::parse(response_body, count).unwrap();
         assert!(matches!(
@@ -1268,7 +1293,7 @@ pub fn run(
         late_fork = Some(fork);
     }
     // The restored organizer replays its intent, response and proposal.
-    let organizer_owner = owner_of(&organizer_restored, &poll, &setup, &openings[0], 0);
+    let organizer_owner = owner_of(&organizer_restored, &poll, &setup, openings.first(), 0);
     let proposal_message = barrier.proposal().clone();
     let (own_body, own_signature) = split(&responses[0]);
     let own = CloseResponseMessage::parse(own_body, count).unwrap();

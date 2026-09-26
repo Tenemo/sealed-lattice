@@ -13,7 +13,7 @@ pub fn proof_role(
     position: usize,
 ) -> Result<Vec<u8>, Error> {
     let inventory = setup.inventory();
-    if position >= inventory.confirmations().len()
+    if position >= setup.profile().participants()
         || inventory.proposal().proposal().records()[0].header().poll != poll.identity()
     {
         return Err(Error);

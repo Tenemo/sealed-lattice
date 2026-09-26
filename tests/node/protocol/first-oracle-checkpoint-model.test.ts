@@ -7,8 +7,8 @@ describe('complete first-oracle proof checkpoint', () => {
     it('accounts for every required private field without deterministic caches', () => {
         const model = compileFirstOracleCheckpointCensus(completionProfile());
         expect(model.fields.map((field) => field.plaintextBytes)).toEqual([
-            365n * 65536n * 2n,
-            366n * 1409n * 16n,
+            359n * 65536n * 2n,
+            360n * 1409n * 16n,
             131072n * 48n,
             262144n * 128n,
             262144n * 201n,

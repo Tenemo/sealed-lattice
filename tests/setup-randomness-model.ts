@@ -10,15 +10,19 @@ export const setupGaussianParameters = {
     maximum: 63,
 } as const;
 
+// Every setup contributor draws its contribution's errors, which encrypt a
+// share to every participant, and every participant draws its registration
+// key's errors.
 export const compileSetupRandomnessCensus = (profile: SupportedProfile) => {
     const gadgetLength = profile.gadgetLength;
     const participants = BigInt(profile.participantCount);
+    const contributors = BigInt(profile.setupContributorCount);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
         (4n * gadgetLength + 2n * participants) * degree +
         auxiliaryInputEncryptionParameters.degree;
     const samplesPerPreparation =
-        participants * (samplesPerContribution + degree);
+        contributors * samplesPerContribution + participants * degree;
     const thresholdCount = BigInt(
         setupGaussianParameters.maximum - setupGaussianParameters.minimum,
     );

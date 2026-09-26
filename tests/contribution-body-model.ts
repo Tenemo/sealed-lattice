@@ -145,6 +145,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     };
     return {
         participantCount,
+        setupContributorCount: profile.setupContributorCount,
         polynomials,
         headerBytes,
         polynomialPayloadBytes,
@@ -169,7 +170,9 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         maximumHashInputEnclosingBitExponent: enclosingExponent(
             8n * maximumHashInputBytes,
         ),
+        // Only the setup contributors publish a body; every participant
+        // verifies them all.
         maximumAllContributorBodies:
-            BigInt(participantCount) * maximumBodyBytes,
+            BigInt(profile.setupContributorCount) * maximumBodyBytes,
     };
 };

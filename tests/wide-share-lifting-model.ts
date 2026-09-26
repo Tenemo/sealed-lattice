@@ -16,7 +16,7 @@ const degree = 8,
     maximumLimbBits = 96,
     minimumCarryBits = 32;
 const sharedSecretSupportWeight = fixedModulusBfvInputs.secretSupportWeight;
-// Every supported roster keeps the summed decryption error of all its
+// Every supported roster keeps the summed decryption error of all its setup
 // contributors' shares below this radius; the layout derivation checks it.
 const aggregateDecryptionErrorRadius = 1n << 23n;
 const bitLength = (value: bigint): number => value.toString(2).length;
@@ -33,7 +33,8 @@ export const shareEncryptionParameters = {
 } as const;
 
 export type WideShareLiftingInput = Readonly<{
-    participantCount: bigint;
+    // The setup contributors, whose shares each aggregate share sums.
+    contributorCount: bigint;
     sharingDegree: number;
 }>;
 
@@ -45,10 +46,10 @@ const wideShareLiftingBounds = (
     input: WideShareLiftingInput,
     limbBits: number,
 ) => {
-    const { participantCount, sharingDegree } = input;
+    const { contributorCount, sharingDegree } = input;
     const radix = 1n << BigInt(limbBits);
     const privacyNumerator =
-        participantCount *
+        contributorCount *
         ((1n << BigInt(sharingDegree)) - 1n) *
         2n *
         sharedSecretSupportWeight;
@@ -84,7 +85,7 @@ const wideShareLiftingBounds = (
         sharingCoefficientBits,
         sharingRadius,
         aggregateSharingMaximum:
-            participantCount * (1n + BigInt(sharingDegree) * sharingRadius),
+            contributorCount * (1n + BigInt(sharingDegree) * sharingRadius),
         trueQuotientBound,
         trueCarryBound,
         carryBound,
@@ -102,8 +103,8 @@ const wideShareLiftingBounds = (
 
 // The widest limb, at most maximumLimbBits, whose bounds hold.
 export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
-    const { participantCount, sharingDegree } = input;
-    assert.ok(participantCount > 0n && sharingDegree > 0);
+    const { contributorCount, sharingDegree } = input;
+    assert.ok(contributorCount > 0n && sharingDegree > 0);
     for (let limbBits = maximumLimbBits; limbBits > 0; limbBits--) {
         const bounds = wideShareLiftingBounds(input, limbBits);
         if (!bounds.holds) continue;
@@ -115,7 +116,7 @@ export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
         );
         assert.ok(2n * bounds.aggregateSharingMaximum < proofPrime);
         assert.ok(
-            participantCount *
+            contributorCount *
                 (2n * encryptionSupportWeight + 1n) *
                 errorBound <
                 aggregateDecryptionErrorRadius,

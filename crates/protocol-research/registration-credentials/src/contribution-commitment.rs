@@ -332,7 +332,7 @@ mod tests {
         // encryptions and the auxiliary key, with the setup proof bound.
         let completion = Profile::new(10, 10).unwrap();
         assert_eq!(polynomials(completion).len(), 45);
-        assert_eq!(*proof_lengths(completion).end(), 41_991_008);
+        assert_eq!(*proof_lengths(completion).end(), 41_855_840);
         let longest = Profile::new(20, 20).unwrap();
         assert!(body_header(completion, *proof_lengths(longest).end()).is_err());
     }

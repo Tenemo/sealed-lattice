@@ -58,6 +58,7 @@ export const compileParticipantRuntimeProfile = (
     return {
         participantCount,
         optionCount,
+        setupContributorCount: profile.setupContributorCount,
         proposalBytes: number(
             compileRosterProposalCensus(participantCount).proposalBytes,
         ),
@@ -80,6 +81,7 @@ export const compileParticipantRuntimeProfile = (
             maximumRecords: number(custody.maximumRootRecords),
             maximumRootBytes: number(custody.maximumRootBytes),
             setupReferenceBytes: number(custody.setupReferenceBytes),
+            setupInventoryBytes: number(custody.setupInventoryBytes),
         },
         contribution: {
             expandedPolynomials: number(
@@ -203,6 +205,7 @@ export const compileParticipantRuntimeLimits = (): ParticipantLimits => {
             ),
             maximumRootBytes: largest.root.maximumRootBytes,
             maximumSetupReferenceBytes: largest.root.setupReferenceBytes,
+            maximumSetupInventoryBytes: largest.root.setupInventoryBytes,
         },
     };
 };

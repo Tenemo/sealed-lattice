@@ -31,7 +31,7 @@ impl FinalityWork {
         target: Arc<VerifiedEvaluationTarget>,
     ) -> Result<Self, Error> {
         let inventory = target.inventory();
-        let count = inventory.setup().inventory().confirmations().len();
+        let count = inventory.setup().profile().participants();
         if owner.poll() != &inventory.poll().identity()
             || owner.runtime() != &inventory.poll().runtime()
             || owner.inventory() != &inventory.setup().inventory().identity()

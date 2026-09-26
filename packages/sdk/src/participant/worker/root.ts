@@ -67,6 +67,8 @@ export const dataKind = {
     proposal: 8,
     proposalSignature: 9,
     setupReference: 10,
+    // The setup contributors' confirmations the setup was verified against.
+    setupInventory: 11,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -148,7 +150,8 @@ export const encodeManifest = (
 // Checks the canonical reference inventory: ascending kinds, contiguous
 // chunks of at most one mebibyte, only the last chunk of a kind shorter, and
 // the complete records that the generation requires. The profile's exact
-// proposal and setup reference lengths are checked once it is known.
+// proposal, setup reference and setup inventory lengths are checked once it
+// is known.
 const checkReferences = (
     references: readonly RecordReference[],
     generation: number,
@@ -188,7 +191,8 @@ const checkReferences = (
             dataKind.proposalSignature,
             generation >= 3 ? registration.signatureBytes : 0,
         ) ||
-        generation >= 12 !== lengths[dataKind.setupReference] > 0
+        generation >= 12 !== lengths[dataKind.setupReference] > 0 ||
+        generation >= 12 !== lengths[dataKind.setupInventory] > 0
     )
         throw new Error('Participant records do not match the generation.');
 };

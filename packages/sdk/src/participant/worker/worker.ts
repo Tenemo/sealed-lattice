@@ -23,11 +23,12 @@ import {
     publishClose,
     resumeClose,
 } from './close.js';
-import { PublicInputFailure } from './context.js';
+import { isSetupContributor, PublicInputFailure } from './context.js';
 import type { ParticipantContext, ProfileContext } from './context.js';
 import {
     beginContribution,
     confirmContribution,
+    confirmRoster,
     continueContribution,
     discardInterruptedRecords,
     generateContribution,
@@ -36,6 +37,7 @@ import {
     publishOpening,
     restoreCheckpoint,
     resumeContribution,
+    resumeParticipant,
     storedConfirmation,
 } from './contribution.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
@@ -298,13 +300,21 @@ const ballotState = (root: AuthenticatedRoot) => {
         : 'could not vote';
 };
 
-const summary = (root: AuthenticatedRoot, enrollment: RestoredEnrollment) => ({
+// Whether the participant contributes setup key material is known once its
+// roster is retained.
+const summary = (
+    root: AuthenticatedRoot,
+    enrollment: RestoredEnrollment,
+    profiled: ProfileContext | undefined,
+) => ({
     generation: root.head.generation,
     rootHash: root.head.hash,
     poll: hexadecimal(root.manifest.poll),
     bodyDigest: hexadecimal(enrollment.bodyDigest),
     username: enrollment.username,
     isOrganizer: enrollment.isOrganizer,
+    isSetupContributor:
+        profiled === undefined ? undefined : isSetupContributor(profiled),
     ballot: ballotState(root),
 });
 
@@ -337,7 +347,10 @@ const execute = async (
         const root = await createEnrollment(context, request, started);
         if (root === undefined) return { status: 'refused' };
         const enrollment = await restoreEnrollment(context, root, true);
-        return { status: 'completed', details: summary(root, enrollment) };
+        return {
+            status: 'completed',
+            details: summary(root, enrollment, undefined),
+        };
     }
     // An empty namespace holds no participant, so no authority starts and
     // nothing can stop.
@@ -355,7 +368,7 @@ const execute = async (
     // operation past the roster runs only at such a generation.
     const profiled =
         root.head.generation >= 2
-            ? await retainedProfile(context, root)
+            ? await retainedProfile(context, root, enrollment)
             : undefined;
     const profileContext = (): ProfileContext => {
         if (profiled === undefined)
@@ -406,11 +419,17 @@ const execute = async (
             break;
         }
         case 'contribute': {
-            // Generation and continuation each draw their randomness from a
-            // seed retained before they start, so an interrupted one runs
-            // again from its seed once what it stored is discarded.
+            // Only a setup contributor contributes. Generation and
+            // continuation each draw their randomness from a seed retained
+            // before they start, so an interrupted one runs again from its
+            // seed once what it stored is discarded.
             const { generation } = root.head;
-            if (generation < 3 || generation >= 7) return { status: 'refused' };
+            if (
+                generation < 3 ||
+                generation >= 7 ||
+                !isSetupContributor(profileContext())
+            )
+                return { status: 'refused' };
             if (generation === 4 || generation === 6)
                 await discardInterruptedRecords(profileContext(), root);
             let session;
@@ -443,6 +462,17 @@ const execute = async (
             break;
         }
         case 'confirm': {
+            // Every participant confirms the roster once: a setup
+            // contributor with its contribution, any other participant
+            // with its own registration body.
+            if (!isSetupContributor(profileContext())) {
+                if (root.head.generation < 3) return { status: 'refused' };
+                const session = await resumeParticipant(profileContext(), root);
+                const confirmation = await confirmRoster(session);
+                root = session.root;
+                await publishConfirmation(session, relay, confirmation);
+                break;
+            }
             if (root.head.generation < 7) return { status: 'refused' };
             const session = await resumeContribution(profileContext(), root);
             const confirmation =
@@ -454,7 +484,11 @@ const execute = async (
             break;
         }
         case 'open': {
-            if (root.head.generation < 9) return { status: 'refused' };
+            if (
+                root.head.generation < 9 ||
+                !isSetupContributor(profileContext())
+            )
+                return { status: 'refused' };
             const session = await resumeContribution(
                 profileContext(),
                 root,
@@ -467,8 +501,14 @@ const execute = async (
             break;
         }
         case 'verify-setup': {
-            if (root.head.generation !== 11) return { status: 'refused' };
-            const session = await resumeContribution(profileContext(), root);
+            // A setup contributor verifies the setup behind its opening, and
+            // any other participant behind its signed roster confirmation.
+            if (
+                profiled === undefined ||
+                root.head.generation !== (isSetupContributor(profiled) ? 11 : 9)
+            )
+                return { status: 'refused' };
+            const session = await resumeParticipant(profiled, root);
             root = await retainSetup(
                 session,
                 await verifySetup(session, relay),
@@ -500,15 +540,12 @@ const execute = async (
                 (generation >= 17 && scores !== undefined)
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(
-                profileContext(),
-                root,
-            );
+            const participant = await resumeParticipant(profileContext(), root);
             let session;
             if (scores !== undefined && generation === 12)
-                session = await beginBallot(contribution, scores);
+                session = await beginBallot(participant, scores);
             else {
-                session = await resumeBallot(contribution);
+                session = await resumeBallot(participant);
                 if (
                     session === undefined ||
                     (scores !== undefined &&
@@ -517,7 +554,7 @@ const execute = async (
                     return { status: 'refused' };
             }
             await completeBallot(session);
-            root = contribution.root;
+            root = participant.root;
             await publishBallot(session, relay);
             break;
         }
@@ -537,24 +574,21 @@ const execute = async (
                         (generation !== 12 && generation !== 17)))
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(
-                profileContext(),
-                root,
-            );
+            const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
-                contribution,
+                participant,
                 enrollment.isOrganizer,
             );
             if (!isCloseComplete(session)) {
-                await reverifySetup(contribution, relay);
+                await reverifySetup(participant, relay);
                 await advanceClose(session, relay, request);
             }
-            root = contribution.root;
+            root = participant.root;
             await publishClose(session, relay);
             return {
                 status: 'completed',
                 details: {
-                    ...summary(root, enrollment),
+                    ...summary(root, enrollment, profiled),
                     closeEvents: closeEvents(session),
                 },
             };
@@ -570,24 +604,21 @@ const execute = async (
                     root.manifest.suffixes.target?.length === 0)
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(
-                profileContext(),
-                root,
-            );
+            const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
-                contribution,
+                participant,
                 enrollment.isOrganizer,
             );
             let signed = {};
             if (generation < targetPhase.signed) {
-                await reverifySetup(contribution, relay);
+                await reverifySetup(participant, relay);
                 signed = await signTarget(session, relay);
             }
-            root = contribution.root;
+            root = participant.root;
             await publishTarget(session, relay);
             return {
                 status: 'completed',
-                details: { ...summary(root, enrollment), ...signed },
+                details: { ...summary(root, enrollment, profiled), ...signed },
             };
         }
         case 'release': {
@@ -601,12 +632,9 @@ const execute = async (
                 generation < targetPhase.signed
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(
-                profileContext(),
-                root,
-            );
+            const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeRelease(
-                await resumeClose(contribution, enrollment.isOrganizer),
+                await resumeClose(participant, enrollment.isOrganizer),
             );
             let released = {};
             if (generation < releasePhase.signed) {
@@ -622,7 +650,7 @@ const execute = async (
                                       session.state.journalKeys.length,
                               },
                           };
-                await reverifySetup(contribution, relay);
+                await reverifySetup(participant, relay);
                 const encrypted = await advanceRelease(session, relay);
                 released = {
                     ...resumed,
@@ -630,11 +658,14 @@ const execute = async (
                     encrypted,
                 };
             }
-            root = contribution.root;
+            root = participant.root;
             await publishRelease(session, relay);
             return {
                 status: 'completed',
-                details: { ...summary(root, enrollment), ...released },
+                details: {
+                    ...summary(root, enrollment, profiled),
+                    ...released,
+                },
             };
         }
         case 'result':
@@ -679,22 +710,19 @@ const execute = async (
                     : recorder === undefined
                       ? relay
                       : { ...relay, recorder };
-            const contribution = await resumeContribution(
-                profileContext(),
-                root,
-            );
+            const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
-                contribution,
+                participant,
                 enrollment.isOrganizer,
             );
-            await reverifySetup(contribution, source);
+            await reverifySetup(participant, source);
             const result = await computeResult(session, source);
             const transcript =
                 recorder === undefined ? undefined : await recorder.archive();
             return {
                 status: 'completed',
                 details: {
-                    ...summary(root, enrollment),
+                    ...summary(root, enrollment, profiled),
                     ...result,
                     ...(transcript === undefined
                         ? {}
@@ -714,7 +742,7 @@ const execute = async (
             return {
                 status: 'completed',
                 details: {
-                    ...summary(root, enrollment),
+                    ...summary(root, enrollment, profiled),
                     transcripts: await discoverTranscripts(
                         await openArchive(
                             command.archive,
@@ -727,7 +755,18 @@ const execute = async (
         default:
             return { status: 'refused' };
     }
-    return { status: 'completed', details: summary(root, enrollment) };
+    // A roster retained by this operation names the profile only now.
+    return {
+        status: 'completed',
+        details: summary(
+            root,
+            enrollment,
+            profiled ??
+                (root.head.generation >= 2
+                    ? await retainedProfile(context, root, enrollment)
+                    : undefined),
+        ),
+    };
 };
 
 const run = async (command: WorkerCommand): Promise<WorkerResult> => {

@@ -1,14 +1,22 @@
-import { concatenate, equalBytes, unsigned16, unsigned32 } from './bytes.js';
+import {
+    concatenate,
+    equalBytes,
+    readUnsigned32,
+    unsigned16,
+    unsigned32,
+} from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
-import { PublicInputFailure } from './context.js';
+import { isSetupContributor, PublicInputFailure } from './context.js';
 import type { ProfileContext } from './context.js';
 import {
     contributionDirectory,
     contributionRecords,
+    isContributionSession,
     openedInventory,
     polynomialFile,
+    readConfirmations,
 } from './contribution.js';
-import type { ContributionSession } from './contribution.js';
+import type { ParticipantSession } from './contribution.js';
 import { readKernel, writeSetupInput } from './kernel.js';
 import { readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -30,11 +38,14 @@ import { namespacedName } from './storage.js';
 
 // Verifies the complete setup from public records in the participant's own
 // module: the poll and every registration again, the organizer's proposal
-// signature, the confirmations this participant opened, and every opening
-// with its body and proof. The running public aggregate lives in an
-// origin-local cache between contributions, and the module checks every
-// chunk it reads back. Only the complete verified setup lets the module emit
-// the retained setup reference.
+// signature, every participant's confirmation, and every setup contributor's
+// opening with its body and proof. A contributor verifies the confirmations
+// it opened; any other participant, once its own confirmation is signed,
+// first verifies the published ones, which every contributor's opening must
+// name, and then retains them. The running
+// public aggregate lives in an origin-local cache between contributions, and
+// the module checks every chunk it reads back. Only the complete verified
+// setup lets the module emit the retained setup reference.
 
 const cacheName = 'sealed-lattice-setup';
 const cacheStore = 'aggregate';
@@ -128,7 +139,7 @@ export const readFinalAggregate = async (
                 offset,
                 await readCachedChunk(
                     cache,
-                    [profile.participantCount - 1, expandedIndex, offset],
+                    [profile.setupContributorCount - 1, expandedIndex, offset],
                     Math.min(capacity, polynomial.bytes - offset),
                 ),
             );
@@ -275,15 +286,21 @@ const verifyContribution = async (
         );
 };
 
-// Verifies the complete setup behind this participant's opening and has the
+// The confirmation inventory a verification reads: the participant count
+// and every participant's packet. Retained bytes are authenticated state, so
+// their refusal stops the participant; published ones leave it pending.
+type SetupInventory = Readonly<{ bytes: Uint8Array; retained: boolean }>;
+
+// Verifies the complete setup behind the given confirmations and has the
 // original credential emit its retained setup reference. A first
 // verification starts from an empty aggregate cache; a later one overwrites
 // each chunk in place, so an interrupted verification keeps the final
 // aggregate a pending ballot reads.
 const verifyCompleteSetup = async (
-    session: ContributionSession,
+    session: ParticipantSession,
     relay: PublicRelay,
     clearCache: boolean,
+    inventory: SetupInventory,
 ): Promise<Uint8Array> => {
     const { context } = session;
     const { kernel, profile } = context;
@@ -374,39 +391,42 @@ const verifyCompleteSetup = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained roster.',
         );
-    // The confirmations are the ones this participant's opening signed.
-    const opened = await openedInventory(session);
+    const refuse = (message: string) =>
+        inventory.retained
+            ? new Error(message)
+            : new PublicInputFailure(message);
+    const participants = profile.participantCount;
     const packetBytes = profile.contribution.confirmationPacketBytes;
-    for (let position = 0; position < profile.participantCount; position++) {
-        const confirmation = opened.inventory.subarray(
+    if (
+        inventory.bytes.length !== profile.root.setupInventoryBytes ||
+        readUnsigned32(inventory.bytes, 0) !== participants
+    )
+        throw refuse('The confirmation inventory is incomplete.');
+    for (let position = 0; position < participants; position++) {
+        const confirmation = inventory.bytes.subarray(
             4 + position * packetBytes,
             4 + (position + 1) * packetBytes,
         );
         writeSetupInput(kernel, confirmation);
         if (kernel.setup_confirmation(confirmation.length) !== 0)
-            throw new Error('The setup verifier refused a confirmation.');
+            throw refuse('The setup verifier refused a confirmation.');
     }
     if (kernel.setup_inventory_finish() !== 1)
-        throw new Error('The setup verifier refused the inventory.');
+        throw refuse('The setup verifier refused the inventory.');
     const cache = await openSetupCache(context.namespace);
     try {
         if (clearCache) await writeCache(cache, (store) => store.clear());
-        for (let position = 0; position < profile.participantCount; position++)
+        for (
+            let position = 0;
+            position < profile.setupContributorCount;
+            position++
+        )
             await verifyContribution(context, relay, cache, position);
     } finally {
         cache.close();
     }
     if (kernel.setup_finish() !== 1)
         throw new PublicInputFailure('The complete setup was refused.');
-    if (
-        !equalBytes(
-            readKernel(kernel, kernel.setup_inventory_pointer(), 64),
-            opened.identity,
-        )
-    )
-        throw new Error(
-            'The verified setup differs from the opened inventory.',
-        );
     if (kernel.retain_setup() !== 0)
         throw new Error('The credential refused the verified setup.');
     const reference = readKernel(
@@ -419,45 +439,98 @@ const verifyCompleteSetup = async (
     return reference;
 };
 
-export const verifySetup = (
-    session: ContributionSession,
+export type VerifiedSetup = Readonly<{
+    reference: Uint8Array;
+    inventory: Uint8Array;
+}>;
+
+// A setup reference names the inventory identity after its marker.
+const referenceInventory = (reference: Uint8Array) =>
+    reference.subarray(4, 4 + 64);
+
+// Verifies the setup once: a setup contributor behind its opening, any other
+// participant behind the published confirmations once its own is signed.
+export const verifySetup = async (
+    session: ParticipantSession,
     relay: PublicRelay,
-): Promise<Uint8Array> => {
-    if (session.root.head.generation !== 11)
+): Promise<VerifiedSetup> => {
+    if (!isSetupContributor(session.context)) {
+        if (session.root.head.generation !== 9)
+            throw new Error(
+                'No signed roster confirmation awaits setup verification.',
+            );
+        const inventory = await readConfirmations(session, relay);
+        return {
+            reference: await verifyCompleteSetup(session, relay, true, {
+                bytes: inventory,
+                retained: false,
+            }),
+            inventory,
+        };
+    }
+    if (!isContributionSession(session) || session.root.head.generation !== 11)
         throw new Error('No opened contribution awaits setup verification.');
-    return verifyCompleteSetup(session, relay, true);
+    const opened = await openedInventory(session);
+    const reference = await verifyCompleteSetup(session, relay, true, {
+        bytes: opened.inventory,
+        retained: true,
+    });
+    if (!equalBytes(referenceInventory(reference), opened.identity))
+        throw new Error(
+            'The verified setup differs from the opened inventory.',
+        );
+    return { reference, inventory: opened.inventory };
 };
 
-// Verifies the complete setup again in this instance for work that needs the
-// verified setup itself. It must reproduce the retained setup reference.
+// Verifies the complete setup again in this instance, from the retained
+// confirmation inventory, for work that needs the verified setup itself. It
+// must reproduce the retained setup reference.
 export const reverifySetup = async (
-    session: ContributionSession,
+    session: ParticipantSession,
     relay: PublicRelay,
 ) => {
     if (session.root.head.generation < 12)
         throw new Error('No setup reference is retained.');
-    const reference = await verifyCompleteSetup(session, relay, false);
+    const { context, root } = session;
+    const reference = await verifyCompleteSetup(session, relay, false, {
+        bytes: await readDataKind(
+            context,
+            root.manifest,
+            dataKind.setupInventory,
+        ),
+        retained: true,
+    });
     if (
         !equalBytes(
             reference,
-            await readDataKind(
-                session.context,
-                session.root.manifest,
-                dataKind.setupReference,
-            ),
+            await readDataKind(context, root.manifest, dataKind.setupReference),
         )
     )
         throw new Error('The verified setup differs from the retained one.');
 };
 
-// Retains the setup reference. The ballot suffix starts empty and the close
-// log collects from here on.
+// The identity of the confirmation inventory the retained setup names.
+export const retainedSetupInventory = async (session: ParticipantSession) =>
+    referenceInventory(
+        await readDataKind(
+            session.context,
+            session.root.manifest,
+            dataKind.setupReference,
+        ),
+    ).slice();
+
+// Retains the setup reference and the confirmation inventory it was
+// verified against. The ballot suffix starts empty and the close log
+// collects from here on; the contribution suffix keeps what it lists.
 export const retainSetup = async (
-    session: ContributionSession,
-    reference: Uint8Array,
+    session: ParticipantSession,
+    verified: VerifiedSetup,
 ): Promise<AuthenticatedRoot> => {
     const { context, root } = session;
-    const added = [{ kind: dataKind.setupReference, bytes: reference }];
+    const added = [
+        { kind: dataKind.setupReference, bytes: verified.reference },
+        { kind: dataKind.setupInventory, bytes: verified.inventory },
+    ];
     return commitRoot(context, root, {
         generation: 12,
         manifest: {

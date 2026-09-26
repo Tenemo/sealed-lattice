@@ -66,7 +66,7 @@ describe('wide sharing and release integer lifting', () => {
         expect(widestDecodableShareBits).toBe(127);
         for (const [participantCount, shareBits] of [
             [10, 120],
-            [13, 127],
+            [13, 120],
             [20, 127],
         ]) {
             const profile = deriveSupportedProfile(participantCount, 2);
