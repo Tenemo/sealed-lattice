@@ -19,7 +19,10 @@ import {
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { prefixReplacementBaseQueriesPerAccess } from '#tests/oracle-domain-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
-import { compileProofCompilerChronology } from '#tests/proof-compiler-chronology-model.js';
+import {
+    compileProofCompilerChronology,
+    proofPurposes,
+} from '#tests/proof-compiler-chronology-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
@@ -114,6 +117,44 @@ export const supportedParticipantCounts =
         (profile) => profile.participantCount,
     );
 const largestParticipantCount = Math.max(...supportedParticipantCounts);
+
+// A corrupt organizer working with the relay can show disjoint groups of
+// registrants separate rosters of one poll (frozen II.1). Each honest
+// registration commits to at most one roster, and a roster that reaches an
+// honest opening has at most f corrupt members, so it holds at least n-f of
+// the poll's honest registrations. The poll definition does not fix the roster
+// size, so every supported size can occur in one poll.
+const rosterSizes = compileSupportedThresholdCompletionProfiles().map(
+    (profile) => ({
+        participantCount: BigInt(profile.participantCount),
+        honestMembers: BigInt(
+            profile.participantCount - profile.maximumCorruptParticipantCount,
+        ),
+    }),
+);
+
+export const minimumHonestRosterMembers = rosterSizes.reduce(
+    (minimum, { honestMembers }) =>
+        honestMembers < minimum ? honestMembers : minimum,
+    rosterSizes[0].honestMembers,
+);
+
+// The rosters of a poll with this many honest registrations that can reach an
+// honest opening.
+export const rosterCountAt = (honestRegistrations: bigint) =>
+    honestRegistrations / minimumHonestRosterMembers;
+
+// The proof roles honest participants accept across those rosters: one per
+// purpose and position of each, so at most 4n/(n-f) per honest member.
+export const acceptedProofRolesAt = (honestRegistrations: bigint) =>
+    rosterSizes.reduce((maximum, { participantCount, honestMembers }) => {
+        const roles =
+            (BigInt(proofPurposes.length) *
+                participantCount *
+                honestRegistrations) /
+            honestMembers;
+        return roles > maximum ? roles : maximum;
+    }, 0n);
 
 type StatisticalTerm = Readonly<{
     name: string;
@@ -265,21 +306,15 @@ let credentialIndependentTerms:
     | undefined;
 
 // Terms that do not depend on the honest credential population, each at its
-// largest value over every supported profile. A poll has one profile, so
-// their sum bounds that profile's terms.
+// largest value over every supported profile. Every roster of a poll has one
+// profile, so their sum bounds each roster's terms.
 const statisticalTermsWithoutCredentials = () => {
     if (credentialIndependentTerms !== undefined)
         return credentialIndependentTerms;
-    const evaluated = listSupportedProfiles().map((profile) => {
-        // The terms charge the proof compiler's caps, which the proofs,
-        // programming points and commitments of every profile must meet with
-        // a registration for every honest credential of the population.
-        assert.ok(
-            compileProofCompilerChronology(profile, maximumCredentialPopulation)
-                .withinCaps,
-        );
-        return { profile, terms: profileStatisticalTerms(profile) };
-    });
+    const evaluated = listSupportedProfiles().map((profile) => ({
+        profile,
+        terms: profileStatisticalTerms(profile),
+    }));
     const terms = evaluated[0].terms.map((first, index): StatisticalTerm => {
         let largest = { profile: evaluated[0].profile, term: first };
         let varies = false;
@@ -312,9 +347,14 @@ const statisticalTermsWithoutCredentials = () => {
 // oracle call costs at least one permutation charge, so the cap covers every
 // experiment of at most 2^80 gates, and every term is nondecreasing in the
 // query count. The subtotal therefore bounds Adv(T)/T for 1 <= T <= 2^80.
+// Each roster that reaches an honest opening runs its own hybrids, so the
+// ledger charges the whole subtotal once per such roster, which overcounts
+// the terms that every roster shares.
 const compileStatisticalLedger = (
     potentialCredentialCount = BigInt(largestParticipantCount),
+    rosterCount = 1n,
 ) => {
+    assert.ok(rosterCount >= 1n);
     const fixed = statisticalTermsWithoutCredentials();
     assert.ok(
         fixed.adversaryQueries * keccakReferenceCost.permutationCharge >=
@@ -346,15 +386,21 @@ const compileStatisticalLedger = (
         (sum, term) => sum + term.numerator,
         0n,
     );
+    const chargedNumerator = rosterCount * subtotalNumerator;
     return {
         participantCount: largestParticipantCount,
         potentialCredentialCount,
+        rosterCount,
         adversaryQueries: fixed.adversaryQueries,
         denominatorBits: statisticalDenominatorBits,
         terms,
         subtotalNumerator,
         subtotalExponent: ceilingLog2(
             rational(subtotalNumerator, 1n << statisticalDenominatorBits),
+        ),
+        chargedNumerator,
+        chargedExponent: ceilingLog2(
+            rational(chargedNumerator, 1n << statisticalDenominatorBits),
         ),
     };
 };
@@ -575,11 +621,13 @@ const guessingSteps = (participantCount: bigint) =>
 // steps, and a key that must end good leaves for uniform and returns. Every
 // honest registration publishes its recipient key before any roster exists,
 // so the share-encryption steps take every registration key out and back, not
-// only the recipients'. Each step's reduction succeeds only when its guesses
-// are right.
+// only the recipients'. Every other step belongs to one roster and repeats for
+// each roster that reaches an honest opening, charged here at this roster
+// size. Each step's reduction succeeds only when its guesses are right.
 export const computationalHybrids = (
     participantCount: bigint,
     honestRegistrations = participantCount,
+    rosterCount = 1n,
 ) =>
     [
         {
@@ -587,35 +635,36 @@ export const computationalHybrids = (
             hybrid: 'Honest registration keys out and back around their honest-to-honest sharing ciphertexts',
             reduction: 'plain',
             multiplicity:
-                2n * honestRegistrations + 2n * participantCount ** 2n,
+                2n * honestRegistrations +
+                2n * participantCount ** 2n * rosterCount,
             guesses: 1n,
         },
         {
             assumption: 'Auxiliary Ring-LWE',
             hybrid: 'Honest auxiliary key coordinates',
             reduction: 'plain',
-            multiplicity: participantCount,
+            multiplicity: participantCount * rosterCount,
             guesses: 1n,
         },
         {
             assumption: 'Auxiliary Ring-LWE',
             hybrid: 'Programmed auxiliary key, then its honest ballots with the key out and back',
             reduction: 'extraction',
-            multiplicity: 2n * participantCount + 3n,
+            multiplicity: (2n * participantCount + 3n) * rosterCount,
             guesses: 1n,
         },
         {
             assumption: 'Evaluation-key circular security',
             hybrid: 'Honest evaluation-key tuples',
             reduction: 'extraction',
-            multiplicity: participantCount,
+            multiplicity: participantCount * rosterCount,
             guesses: fheCommonStreamGuesses(),
         },
         {
             assumption: 'FHE Ring-LWE',
             hybrid: 'Honest FHE ballots under the uniform programmed key, then its good key',
             reduction: 'extraction',
-            multiplicity: 2n * participantCount + 1n,
+            multiplicity: (2n * participantCount + 1n) * rosterCount,
             guesses: fheCommonStreamGuesses(),
         },
     ] as const satisfies readonly {
@@ -653,37 +702,96 @@ export const signatureReductionFactor = 2n;
 
 // The largest honest credential population with
 // U*(2T)^2/2^192 <= T/2^(80+budgetBits) at T = 2^80.
-const maximumCredentialPopulation =
+const signatureCredentialPopulation =
     (1n <<
         (signatureCategoryBits - 2n * securityTargetBits - ledgerBudgetBits)) /
     signatureReductionFactor ** 2n;
 
+// Whether the honest registrations of a poll, split into every roster they
+// can complete, stay within the signature group, the proof compiler's caps
+// and the statistical share of the budget.
+const populationWithinClaim = (honestRegistrations: bigint) =>
+    honestRegistrations <= signatureCredentialPopulation &&
+    acceptedProofRolesAt(honestRegistrations) <= proofCompilerCaps.roleBudget &&
+    BigInt(proofPurposes.length) * honestRegistrations <=
+        proofCompilerCaps.honestProofBudget &&
+    compileStatisticalLedger(
+        honestRegistrations,
+        rosterCountAt(honestRegistrations),
+    ).chargedNumerator <<
+        (securityTargetBits + ledgerBudgetBits) <=
+        1n << statisticalDenominatorBits;
+
+// The largest honest credential population of one poll that the claim
+// covers. Every constraint only tightens as the population grows.
+let claimedCredentialPopulation: bigint | undefined;
+const maximumCredentialPopulation = () => {
+    if (claimedCredentialPopulation !== undefined)
+        return claimedCredentialPopulation;
+    let covered = BigInt(largestParticipantCount);
+    assert.ok(populationWithinClaim(covered));
+    let excluded = signatureCredentialPopulation + 1n;
+    while (excluded - covered > 1n) {
+        const middle = (covered + excluded) / 2n;
+        if (populationWithinClaim(middle)) covered = middle;
+        else excluded = middle;
+    }
+    // The terms charge the proof compiler's caps, which the proofs,
+    // programming points and commitments of every profile must meet with a
+    // registration for every honest credential of the population in every
+    // roster it can complete.
+    for (const profile of listSupportedProfiles())
+        assert.ok(
+            compileProofCompilerChronology(
+                profile,
+                covered,
+                rosterCountAt(covered),
+            ).withinCaps,
+        );
+    claimedCredentialPopulation = covered;
+    return covered;
+};
+
 export const compileComposedSecurityLedger = (
     potentialCredentialCount?: bigint,
 ) => {
+    // One potential honest credential per participant is one roster; a
+    // population is split into every roster it can complete.
+    const rosterCount =
+        potentialCredentialCount === undefined
+            ? 1n
+            : rosterCountAt(potentialCredentialCount);
+    const claimedPopulation = maximumCredentialPopulation();
+    if (
+        potentialCredentialCount !== undefined &&
+        (potentialCredentialCount > claimedPopulation ||
+            potentialCredentialCount < BigInt(largestParticipantCount))
+    )
+        throw new RangeError('The population lies outside the claim.');
     const statistical = compileStatisticalLedger(
         potentialCredentialCount ?? BigInt(largestParticipantCount),
+        rosterCount,
     );
     const target = 1n << securityTargetBits;
     const profiles = supportedParticipantCounts.map((participantCount) => {
         const credentials =
             potentialCredentialCount ?? BigInt(participantCount);
-        assert.ok(
-            credentials >= BigInt(participantCount) &&
-                credentials <= maximumCredentialPopulation,
-        );
+        // Every roster is charged at this size, so the largest size bounds
+        // a poll whose rosters differ in size.
         const extracted =
-            compileCommitmentExtractionBound(
-                participantCount,
-            ).extractedCommitmentCount;
+            rosterCount *
+            compileCommitmentExtractionBound(participantCount)
+                .extractedCommitmentCount;
         const work = compileReductionWork(credentials, extracted);
         return {
             participantCount,
             potentialCredentialCount: credentials,
+            rosterCount,
             extractedCommitmentCount: extracted,
             hybrids: computationalHybrids(
                 BigInt(participantCount),
                 credentials,
+                rosterCount,
             ).map((row) => {
                 const ratio = reductionRatioAt(work, row.reduction, target);
                 return {
@@ -713,7 +821,10 @@ export const compileComposedSecurityLedger = (
         budgetBits: ledgerBudgetBits,
         statistical,
         profiles,
-        maximumCredentialPopulation,
+        signatureCredentialPopulation,
+        maximumCredentialPopulation: claimedPopulation,
+        maximumRosterCount: rosterCountAt(claimedPopulation),
+        maximumAcceptedProofRoles: acceptedProofRolesAt(claimedPopulation),
         identityCollisionExponent: ceilingLog2(identityCollisionRatio),
         maximumRequiredBits: assumptions.map((assumption) => ({
             assumption,

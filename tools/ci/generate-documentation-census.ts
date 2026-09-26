@@ -51,6 +51,7 @@ import {
     compileUnitCallCostSensitivity,
     fheCommonStreamGuesses,
     keccakReferenceCost,
+    minimumHonestRosterMembers,
 } from '#tests/composed-security-ledger-model.js';
 import {
     sparseRoutingWork,
@@ -3735,14 +3736,15 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof compiler chronology',
         '',
-        'Proofs, programming points and commitments that one poll emits under the lifecycle rules owned by the construction analysis, against the caps the compiler charges. Every honest registration publishes a registration proof before any roster exists, including one the roster leaves out, so the largest honest credential population bounds them; each participant adds at most one contribution, ballot and release proof, because those purposes occupy one-shot slots. A restored participant replays identical bytes and one that loses unfinished work stops. The direct simulator programs one verifier message per simulated proof, and accepted proof roles are the registrations and positions of the roster. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
+        'Proofs, programming points and commitments that one poll emits under the lifecycle rules owned by the construction analysis, against the caps the compiler charges. Every honest registration publishes a registration proof before any roster exists, including one no roster takes, so the largest honest credential population bounds them; each participant adds at most one contribution, ballot and release proof, because those purposes occupy one-shot slots. A restored participant replays identical bytes and one that loses unfinished work stops. At that population a corrupt organizer can split the honest registrations into as many rosters of one participant count as their honest members allow: each honest registration confirms at most one, and a roster with at most `f` corrupt members holds `n-f` honest ones. The direct simulator programs one verifier message per simulated proof, and accepted proof roles are the registrations and positions of those rosters. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
         '',
         table(
             [
                 'Participants',
                 'Honest proofs, one registration per participant',
-                'Honest proofs at the largest credential population',
-                'Accepted proof roles',
+                'Rosters at the largest credential population',
+                'Honest proofs at that population',
+                'Accepted proof roles at that population',
                 'Programmed verifier messages at that population',
                 'Committed nodes per proof',
                 'Widest non-salt input bits',
@@ -3752,6 +3754,7 @@ export const renderDocumentationCensus = (): string => {
                     compileProofCompilerChronology(
                         profile,
                         securityLedger.maximumCredentialPopulation,
+                        securityLedger.maximumRosterCount,
                     ),
                 );
                 const [first] = chronologies;
@@ -3764,6 +3767,7 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(
                         compileProofCompilerChronology(row[0]).honestProofs,
                     ),
+                    formatCount(first.rosters),
                     formatCount(first.honestProofs),
                     formatCount(first.acceptedRoles),
                     formatCount(first.programmedMessages),
@@ -5410,7 +5414,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. Statistical terms are evaluated at the query cap of the proof compiler and the largest honest credential population of a poll, and each term takes its largest value over every supported profile; a poll has one profile, so the subtotal bounds every poll. The last column names the first profile that attains a term that varies between profiles. Every profile reduces the same FHE common streams modulo its own ciphertext modulus, and the adversary may fix the profile after querying them, so the FHE Ring-LWE and circular-security reductions also guess the ciphertext modulus. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        'Arithmetic of the composed real-ideal argument owned by the construction analysis. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. A corrupt organizer can complete several rosters of one poll, of any supported sizes, for disjoint honest groups; each honest registration confirms at most one roster, and a roster that reaches an honest opening holds at least `n-f` honest registrations, so the honest credential population bounds the number of such rosters. Statistical terms are evaluated at the query cap of the proof compiler and the largest honest credential population of a poll, and each term takes its largest value over every supported profile; every roster has one profile, so the subtotal bounds each roster, and the ledger charges it once for every roster that can reach an honest opening. The last column names the first profile that attains a term that varies between profiles. Every profile reduces the same FHE common streams modulo its own ciphertext modulus, and the adversary may fix the profile after querying them, so the FHE Ring-LWE and circular-security reductions also guess the ciphertext modulus. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
         '',
         table(
             ['Statistical term', 'Bound exponent', 'Largest at'],
@@ -5435,9 +5439,16 @@ export const renderDocumentationCensus = (): string => {
                           ].join(', '),
                 ]),
                 [
-                    'Subtotal',
+                    'Subtotal per roster',
                     signedExponent(
                         populationLedger.statistical.subtotalExponent,
+                    ),
+                    'every profile',
+                ],
+                [
+                    'Charged for every roster',
+                    signedExponent(
+                        populationLedger.statistical.chargedExponent,
                     ),
                     'every profile',
                 ],
@@ -5489,8 +5500,24 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Largest honest credential population of one poll for ML-DSA-65',
+                    'Honest credential population of one poll within the ML-DSA-65 group',
+                    formatCount(securityLedger.signatureCredentialPopulation),
+                ],
+                [
+                    'Least honest registrations of a roster that reaches an honest opening',
+                    formatCount(minimumHonestRosterMembers),
+                ],
+                [
+                    'Largest honest credential population of one poll',
                     formatCount(securityLedger.maximumCredentialPopulation),
+                ],
+                [
+                    'Rosters of that population that can reach an honest opening',
+                    formatCount(securityLedger.maximumRosterCount),
+                ],
+                [
+                    'Proof roles accepted across those rosters',
+                    formatCount(securityLedger.maximumAcceptedProofRoles),
                 ],
                 [
                     'Identity collision exponent, per cost',
@@ -5507,7 +5534,7 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'Required bits by participant count, with one potential honest credential per participant:',
+        'Required bits by participant count, with one roster and one potential honest credential per participant:',
         '',
         table(
             [
@@ -5528,8 +5555,8 @@ export const renderDocumentationCensus = (): string => {
         table(
             [
                 'Assumption',
-                'Required bits, one credential per participant',
-                'Required bits at the largest credential population',
+                'Required bits, one roster and one credential per participant',
+                'Required bits at the largest credential population, every roster at the largest size',
             ],
             securityLedger.maximumRequiredBits.map((row) => [
                 row.assumption,

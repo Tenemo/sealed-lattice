@@ -5,6 +5,7 @@ import {
     compileCommonMatrixSamplingCensus,
 } from '#tests/common-matrix-sampling-model.js';
 import {
+    acceptedProofRolesAt,
     compileComposedSecurityLedger,
     compileReductionWork,
     compileUnitCallCostSensitivity,
@@ -12,10 +13,12 @@ import {
     fheCommonStreamGuesses,
     keccakReferenceCost,
     ledgerBudgetBits,
+    minimumHonestRosterMembers,
     profileStatisticalTerms,
     rational,
     reductionRatioAt,
     requiredAssumptionBits,
+    rosterCountAt,
     securityTargetBits,
     signatureCategoryBits,
     signatureReductionFactor,
@@ -31,7 +34,10 @@ import {
     listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import {
+    compileWideChallengeCompilerCensus,
+    proofCompilerCaps,
+} from '#tests/wide-challenge-compiler-model.js';
 
 const ledger = compileComposedSecurityLedger();
 const target = 1n << securityTargetBits;
@@ -215,19 +221,30 @@ describe('composed security ledger', () => {
     });
 
     it('counts hybrid multiplicities from the honest roles', () => {
-        for (const [participantCount, extraRegistrations] of [
-            ...supportedParticipantCounts.map((count) => [count, 0] as const),
-            [3, 2],
-            [20, 7],
+        for (const [participantCount, extraRegistrations, rosterCount] of [
+            ...supportedParticipantCounts.map(
+                (count) => [count, 0, 1] as const,
+            ),
+            [3, 2, 1],
+            [20, 7, 1],
+            [3, 1, 3],
+            [10, 4, 2],
         ] as const) {
-            const honest = Array.from(
-                { length: participantCount },
-                (_unused, index) => index,
+            // A corrupt organizer can complete disjoint rosters, each of whose
+            // honest participants can contribute, receive shares and vote.
+            const rosters = Array.from(
+                { length: rosterCount },
+                (_unused, roster) =>
+                    Array.from(
+                        { length: participantCount },
+                        (_member, index) => roster * participantCount + index,
+                    ),
             );
-            // Registrations the roster leaves out publish keys too, but no
-            // share is encrypted to them.
+            const honest = rosters.flat();
+            // Registrations no roster takes publish keys too, but no share is
+            // encrypted to them.
             const registrations = Array.from(
-                { length: participantCount + extraRegistrations },
+                { length: honest.length + extraRegistrations },
                 (_unused, index) => index,
             );
             // Each step replaces one assumption instance. A ciphertext moves
@@ -242,8 +259,10 @@ describe('composed security ledger', () => {
                     'Share-encryption Ring-LWE:plain',
                     registrations.flatMap((registration) => [
                         `registration key ${registration} out`,
-                        ...(registration < participantCount
-                            ? honest.flatMap((contributor) =>
+                        ...(registration < honest.length
+                            ? rosters[
+                                  Math.floor(registration / participantCount)
+                              ].flatMap((contributor) =>
                                   replaceCiphertext(
                                       `share ${contributor} to ${registration}`,
                                   ),
@@ -258,14 +277,14 @@ describe('composed security ledger', () => {
                 ],
                 [
                     'Auxiliary Ring-LWE:extraction',
-                    [
-                        'uniform aggregate to good key',
-                        'aggregate out',
-                        ...honest.flatMap((voter) =>
+                    rosters.flatMap((members, roster) => [
+                        `roster ${roster} uniform aggregate to good key`,
+                        `roster ${roster} aggregate out`,
+                        ...members.flatMap((voter) =>
                             replaceCiphertext(`auxiliary ballot ${voter}`),
                         ),
-                        'aggregate back',
-                    ],
+                        `roster ${roster} aggregate back`,
+                    ]),
                 ],
                 [
                     'Evaluation-key circular security:extraction',
@@ -273,17 +292,18 @@ describe('composed security ledger', () => {
                 ],
                 [
                     'FHE Ring-LWE:extraction',
-                    [
-                        ...honest.flatMap((voter) =>
+                    rosters.flatMap((members, roster) => [
+                        ...members.flatMap((voter) =>
                             replaceCiphertext(`FHE ballot ${voter}`),
                         ),
-                        'uniform aggregate to good key',
-                    ],
+                        `roster ${roster} uniform aggregate to good key`,
+                    ]),
                 ],
             ]);
             const rows = computationalHybrids(
                 BigInt(participantCount),
                 BigInt(registrations.length),
+                BigInt(rosterCount),
             );
             expect(rows).toHaveLength(steps.size);
             for (const row of rows) {
@@ -446,25 +466,103 @@ describe('composed security ledger', () => {
         }
     });
 
-    it('caps the honest credential population by the signature term', () => {
+    it('bounds the rosters and proof roles of every split of the honest registrations', () => {
+        // Each roster that reaches an honest opening has at most f corrupt
+        // members and takes n-f honest registrations of its own. The largest
+        // number of rosters and of accepted roles over every multiset of
+        // supported roster sizes whose honest members fit the registrations.
+        const sizes = supportedParticipantCounts.map((participantCount) => ({
+            participantCount,
+            honestMembers:
+                participantCount -
+                compileThresholdCompletionProfile(participantCount)
+                    .maximumCorruptParticipantCount,
+        }));
+        const limit = 120;
+        const rosters = Array.from({ length: limit + 1 }, () => 0);
+        const roles = Array.from({ length: limit + 1 }, () => 0);
+        for (let registrations = 1; registrations <= limit; registrations++) {
+            rosters[registrations] = rosters[registrations - 1];
+            roles[registrations] = roles[registrations - 1];
+            for (const { participantCount, honestMembers } of sizes) {
+                if (honestMembers > registrations) continue;
+                const rest = registrations - honestMembers;
+                rosters[registrations] = Math.max(
+                    rosters[registrations],
+                    rosters[rest] + 1,
+                );
+                roles[registrations] = Math.max(
+                    roles[registrations],
+                    roles[rest] + 4 * participantCount,
+                );
+            }
+        }
+        expect(minimumHonestRosterMembers).toBe(3n);
+        let tight = 0;
+        for (let registrations = 3; registrations <= limit; registrations++) {
+            const count = BigInt(registrations);
+            expect(rosterCountAt(count)).toBe(BigInt(rosters[registrations]));
+            expect(acceptedProofRolesAt(count)).toBeGreaterThanOrEqual(
+                BigInt(roles[registrations]),
+            );
+            if (acceptedProofRolesAt(count) === BigInt(roles[registrations]))
+                tight++;
+        }
+        // Nineteen participants with six corrupt maximize roles per honest
+        // member, and the bound is attained at their multiples.
+        expect(tight).toBeGreaterThanOrEqual(Math.floor(limit / 13));
+        expect(acceptedProofRolesAt(13n * 7n)).toBe(76n * 7n);
+    });
+
+    it('caps the honest credential population by its rosters', () => {
         const population = ledger.maximumCredentialPopulation;
-        const holds = (credentials: bigint) =>
+        expect(ledger.maximumRosterCount).toBe(rosterCountAt(population));
+        expect(ledger.maximumAcceptedProofRoles).toBe(
+            acceptedProofRolesAt(population),
+        );
+        // The signature group bounds a larger population than the rosters do.
+        const signatureHolds = (credentials: bigint) =>
             (credentials * (signatureReductionFactor * target) ** 2n) <<
                 (securityTargetBits + ledgerBudgetBits) <=
             target << signatureCategoryBits;
-        expect(holds(population)).toBe(true);
-        expect(holds(population + 1n)).toBe(false);
-        // The statistical and plain terms stay within budget at that population.
+        expect(signatureHolds(ledger.signatureCredentialPopulation)).toBe(true);
+        expect(signatureHolds(ledger.signatureCredentialPopulation + 1n)).toBe(
+            false,
+        );
+        expect(population).toBeLessThan(ledger.signatureCredentialPopulation);
+        // The per-roster subtotal only grows with the population, so the
+        // population's own subtotal bounds the next one from below.
+        const subtotal =
+            compileComposedSecurityLedger(population).statistical
+                .subtotalNumerator;
+        const charged = (credentials: bigint) =>
+            (rosterCountAt(credentials) * subtotal) <<
+            (securityTargetBits + ledgerBudgetBits);
+        const withinClaim = (credentials: bigint) =>
+            charged(credentials) <= 1n << 256n &&
+            acceptedProofRolesAt(credentials) <= proofCompilerCaps.roleBudget &&
+            4n * credentials <= proofCompilerCaps.honestProofBudget;
+        expect(withinClaim(population)).toBe(true);
+        expect(withinClaim(population + 1n)).toBe(false);
+        // The charged statistical terms and every requirement grow with the
+        // rosters of that population.
         const large = compileComposedSecurityLedger(population);
-        expect(large.statistical.subtotalExponent).toBeLessThanOrEqual(
+        expect(large.statistical.rosterCount).toBe(ledger.maximumRosterCount);
+        expect(large.statistical.chargedNumerator).toBe(
+            ledger.maximumRosterCount * large.statistical.subtotalNumerator,
+        );
+        expect(large.statistical.chargedExponent).toBeLessThanOrEqual(
             -(securityTargetBits + ledgerBudgetBits),
         );
         for (const row of large.maximumRequiredBits)
-            expect(row.requiredBits).toBeGreaterThanOrEqual(
+            expect(row.requiredBits).toBeGreaterThan(
                 ledger.maximumRequiredBits.find(
                     (value) => value.assumption === row.assumption,
                 )!.requiredBits,
             );
+        expect(() => compileComposedSecurityLedger(population + 1n)).toThrow(
+            'The population lies outside the claim.',
+        );
     });
 
     it('makes the reference call charge load-bearing', () => {
@@ -485,6 +583,8 @@ describe('composed security ledger', () => {
     it('refuses populations and counts outside the model', () => {
         expect(() => compileReductionWork(0n, 0n)).toThrow();
         expect(() => compileReductionWork(1n, -1n)).toThrow();
-        expect(() => compileComposedSecurityLedger(19n)).toThrow();
+        expect(() => compileComposedSecurityLedger(19n)).toThrow(
+            'The population lies outside the claim.',
+        );
     });
 });

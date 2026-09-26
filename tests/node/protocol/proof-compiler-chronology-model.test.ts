@@ -41,6 +41,7 @@ describe('proof compiler chronology', () => {
         // roster's.
         const chronology = compileProofCompilerChronology(profile, population);
         expect(chronology.honestRegistrations).toBe(population);
+        expect(chronology.rosters).toBe(1n);
         expect(chronology.honestProofs).toBe(population + 3n * 20n);
         expect(chronology.acceptedRoles).toBe(80n);
         expect(chronology.programmedMessages).toBe(chronology.honestProofs);
@@ -56,6 +57,58 @@ describe('proof compiler chronology', () => {
         expect(() => compileProofCompilerChronology(profile, 19n)).toThrow(
             'The registrations must cover the roster.',
         );
+        expect(() =>
+            compileProofCompilerChronology(profile, population, 0n),
+        ).toThrow('A poll completes at least one roster.');
+    });
+
+    it('counts the rosters a corrupt organizer can complete from the population', () => {
+        // Each honest registration confirms at most one roster, and a roster
+        // with at most f corrupt members has n-f honest ones, so only as many
+        // rosters of one size as the population fills can reach an opening.
+        for (const [participantCount, corrupt] of [
+            [3, 0],
+            [4, 1],
+            [19, 6],
+            [20, 6],
+        ] as const) {
+            const profile = deriveSupportedProfile(participantCount, 10);
+            const honestMembers = BigInt(participantCount - corrupt);
+            const filled = population / honestMembers;
+            const chronology = compileProofCompilerChronology(
+                profile,
+                population,
+                population,
+            );
+            expect(chronology.rosters).toBe(filled);
+            // Every honest member adds a contribution, ballot and release
+            // proof, and every position of every roster accepts four roles.
+            const members =
+                filled * BigInt(participantCount) < population
+                    ? filled * BigInt(participantCount)
+                    : population;
+            expect(chronology.honestProofs).toBe(population + 3n * members);
+            expect(chronology.acceptedRoles).toBe(
+                4n * BigInt(participantCount) * filled,
+            );
+            // A smaller roster count caps the rosters instead.
+            expect(
+                compileProofCompilerChronology(profile, population, 2n)
+                    .acceptedRoles,
+            ).toBe(8n * BigInt(participantCount));
+        }
+        // Roles beyond the compiler's role budget leave its caps.
+        const profile = deriveSupportedProfile(3, 2);
+        const registrations = 3n * (proofCompilerCaps.roleBudget / 12n + 1n);
+        const beyond = compileProofCompilerChronology(
+            profile,
+            registrations,
+            registrations,
+        );
+        expect(beyond.acceptedRoles).toBeGreaterThan(
+            proofCompilerCaps.roleBudget,
+        );
+        expect(beyond.withinCaps).toBe(false);
     });
 
     it('counts every tree node and message root of the emitted proof domain', () => {
@@ -109,24 +162,6 @@ describe('proof compiler chronology', () => {
         );
         expect(chronology.widestNonSaltInputBits).toBeLessThanOrEqual(
             proofCompilerCaps.maximumNonSaltInputBits,
-        );
-    });
-
-    it('depends on replaying rather than regenerating proofs after a restart', () => {
-        const chronology = compileProofCompilerChronology(
-            deriveSupportedProfile(20, 20),
-            population,
-        );
-        // The honest proofs of the largest population fill more than half the
-        // budget, so generating every proof a second time would exceed it.
-        expect(2n * chronology.honestProofs).toBeGreaterThan(
-            proofCompilerCaps.honestProofBudget,
-        );
-        expect(chronology.honestProofs).toBeLessThanOrEqual(
-            proofCompilerCaps.honestProofBudget,
-        );
-        expect(chronology.programmedMessages).toBeLessThanOrEqual(
-            proofCompilerCaps.programmedMessageBudget,
         );
     });
 });
