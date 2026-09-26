@@ -2603,7 +2603,84 @@ await runWithLocalRunLog(
                             ),
                         ),
                     );
-            // A fourth set of views serves the other poll's records of one
+            // With ballots cast, a fourth set of views forges the vote
+            // probe's own ballot, which the certified target counts: its
+            // body altered or withheld, its submission replaced by another
+            // counted author's authentic one, or its signature altered.
+            // Every result visit verifies the close barrier again from the
+            // public records, so none of them withdraws or replaces the
+            // accepted ballot, and its participant stays pending.
+            const countedBallots = onTimeBallots.filter(
+                (position) =>
+                    ![equivocator, omittedVoter, invalidAuthor].includes(
+                        position,
+                    ),
+            );
+            const ballotForgeries: {
+                forgery: string;
+                forgeries: ReadonlyMap<string, ViewedRecord>;
+                reason: string;
+            }[] = [];
+            const replacingAuthor = countedBallots.find(
+                (position) => position !== voteProbe,
+            );
+            if (mode !== 'empty') {
+                assert.ok(
+                    countedBallots.includes(voteProbe) &&
+                        replacingAuthor !== undefined,
+                );
+                const directory = await submissionDirectory(voteProbe);
+                const replacing = await submissionDirectory(replacingAuthor);
+                const ballotName = (file: string) =>
+                    path
+                        .relative(publicDirectory, path.join(directory, file))
+                        .split(path.sep)
+                        .join('/');
+                const alteredBody = await readFile(
+                    path.join(directory, 'body.bin'),
+                );
+                alteredBody[alteredBody.length - 1] ^= 1;
+                const alteredSignature = await readFile(
+                    path.join(directory, 'signature.bin'),
+                );
+                alteredSignature[0] ^= 1;
+                ballotForgeries.push(
+                    {
+                        forgery: 'altered body',
+                        forgeries: new Map<string, ViewedRecord>([
+                            [ballotName('body.bin'), alteredBody],
+                        ]),
+                        reason: 'A usable body was refused.',
+                    },
+                    {
+                        forgery: 'withheld body',
+                        forgeries: new Map<string, ViewedRecord>([
+                            [ballotName('body.bin'), undefined],
+                        ]),
+                        reason: 'A public record is unavailable.',
+                    },
+                    {
+                        forgery: 'replaced submission',
+                        forgeries: new Map<string, ViewedRecord>(
+                            ['envelope.bin', 'signature.bin', 'body.bin'].map(
+                                (file) => [
+                                    ballotName(file),
+                                    { file: path.join(replacing, file) },
+                                ],
+                            ),
+                        ),
+                        reason: 'A listed envelope is unavailable.',
+                    },
+                    {
+                        forgery: 'altered signature',
+                        forgeries: new Map<string, ViewedRecord>([
+                            [ballotName('signature.bin'), alteredSignature],
+                        ]),
+                        reason: 'A listed envelope was refused.',
+                    },
+                );
+            }
+            // A fifth set of views serves the other poll's records of one
             // family at a time. The first of them a result visit reads is
             // refused, so its participant stays pending.
             const foreignProbes: {
@@ -2669,6 +2746,8 @@ await runWithLocalRunLog(
                                 'The release shares are incomplete.',
                             );
                         if (position === voteProbe) {
+                            for (const { forgeries, reason } of ballotForgeries)
+                                await probe(position, forgeries, reason);
                             await probe(
                                 position,
                                 registrationForgeries,
@@ -2684,8 +2763,9 @@ await runWithLocalRunLog(
                 result.identifiers,
                 noResult ? [] : expectedResult,
             );
-            // None of the forged views stopped its participant: with the
-            // relay's own records it combines the same outcome.
+            // None of the forged views stopped its participant or withdrew
+            // its ballot: with the relay's own records it combines the same
+            // outcome.
             const recovered = await run(voteProbe, 'result');
             assert.equal(recovered.encrypted, result.encrypted);
             assert.deepEqual(recovered.identifiers, result.identifiers);
@@ -2797,6 +2877,11 @@ await runWithLocalRunLog(
                     ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."
                     : "Copies of honest participants' state stop for good once they lose their last ballot record with the ballot journal complete, or, before their close response or target vote, their last close record or, holding none, their last data record.",
                 `Relay views that ${noResult ? 'relabel or replay votes' : 'relabel, replay or alter votes and shares'} or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.`,
+                ...(mode === 'empty'
+                    ? []
+                    : [
+                          "Relay views that alter or withhold the body of a participant's own counted ballot, replace its submission with another counted author's authentic one or alter its signature leave that participant's result visit pending, and with the relay's own records it reaches the same outcome from the certified target that counts the ballot.",
+                      ]),
                 ...(foreign === undefined
                     ? []
                     : [
@@ -2849,6 +2934,25 @@ await runWithLocalRunLog(
                                 position: voteProbe,
                                 paths: [...registrationForgeries.keys()],
                             },
+                            ...(mode === 'empty'
+                                ? {}
+                                : {
+                                      ballot: {
+                                          position: voteProbe,
+                                          replacingAuthor,
+                                          probes: ballotForgeries.map(
+                                              ({
+                                                  forgery,
+                                                  forgeries,
+                                                  reason,
+                                              }) => ({
+                                                  forgery,
+                                                  paths: [...forgeries.keys()],
+                                                  reason,
+                                              }),
+                                          ),
+                                      },
+                                  }),
                             ...(noResult
                                 ? {}
                                 : {
