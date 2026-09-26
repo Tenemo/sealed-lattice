@@ -323,90 +323,100 @@ await runWithLocalRunLog(
                 scratchDirectory: string,
                 slug: string,
             ) => {
-                const controller = new AbortController();
-                let active = false,
-                    monitor: Promise<void> | undefined,
-                    peakMemory = 0,
-                    samples = 0;
-                const exitCode = await runCommandsInSeries(
-                    [
+                // The reader's scratch holds only its working values.
+                try {
+                    const controller = new AbortController();
+                    let active = false,
+                        monitor: Promise<void> | undefined,
+                        peakMemory = 0,
+                        samples = 0;
+                    const exitCode = await runCommandsInSeries(
+                        [
+                            {
+                                command: executable,
+                                args: [
+                                    ceremonyDirectory,
+                                    scratchDirectory,
+                                    outputDirectory,
+                                    completionDirectory,
+                                    ...(selected.stage !== 'terminal'
+                                        ? [selected.stage]
+                                        : []),
+                                ],
+                                env: environment,
+                                workingDirectoryPath: workspace,
+                                description:
+                                    'Verify only available completion records',
+                                logFileSlug: slug,
+                            },
+                        ],
                         {
-                            command: executable,
-                            args: [
-                                ceremonyDirectory,
-                                scratchDirectory,
-                                outputDirectory,
-                                completionDirectory,
-                                ...(selected.stage !== 'terminal'
-                                    ? [selected.stage]
-                                    : []),
-                            ],
-                            env: environment,
-                            workingDirectoryPath: workspace,
-                            description:
-                                'Verify only available completion records',
-                            logFileSlug: slug,
-                        },
-                    ],
-                    {
-                        runLog: log,
-                        outputMode: 'inherit',
-                        signal: AbortSignal.any([
-                            controller.signal,
-                            AbortSignal.timeout(verificationTimeout),
-                        ]),
-                        observer: {
-                            onCommandStart({ processIdentifier }) {
-                                assert.ok(processIdentifier);
-                                active = true;
-                                monitor = (async () => {
-                                    while (active) {
-                                        const bytes =
-                                            await readProtocolProcessTree(
-                                                processIdentifier,
-                                            );
-                                        if (bytes !== undefined) {
-                                            samples++;
-                                            peakMemory = Math.max(
-                                                peakMemory,
-                                                bytes,
-                                            );
-                                            log.writeEvent({
-                                                eventType:
-                                                    'threshold-reader-memory',
-                                                details: {
+                            runLog: log,
+                            outputMode: 'inherit',
+                            signal: AbortSignal.any([
+                                controller.signal,
+                                AbortSignal.timeout(verificationTimeout),
+                            ]),
+                            observer: {
+                                onCommandStart({ processIdentifier }) {
+                                    assert.ok(processIdentifier);
+                                    active = true;
+                                    monitor = (async () => {
+                                        while (active) {
+                                            const bytes =
+                                                await readProtocolProcessTree(
+                                                    processIdentifier,
+                                                );
+                                            if (bytes !== undefined) {
+                                                samples++;
+                                                peakMemory = Math.max(
+                                                    peakMemory,
                                                     bytes,
-                                                    limit: 1073741824,
-                                                },
-                                            });
-                                            assert.ok(
-                                                bytes <= 1073741824,
-                                                'Reader process-tree memory guard exceeded.',
-                                            );
+                                                );
+                                                log.writeEvent({
+                                                    eventType:
+                                                        'threshold-reader-memory',
+                                                    details: {
+                                                        bytes,
+                                                        limit: 1073741824,
+                                                    },
+                                                });
+                                                assert.ok(
+                                                    bytes <= 1073741824,
+                                                    'Reader process-tree memory guard exceeded.',
+                                                );
+                                            }
+                                            if (active)
+                                                await new Promise((resolve) =>
+                                                    setTimeout(resolve, 1000),
+                                                );
                                         }
-                                        if (active)
-                                            await new Promise((resolve) =>
-                                                setTimeout(resolve, 1000),
-                                            );
-                                    }
-                                })().catch((error) => controller.abort(error));
-                            },
-                            onCommandExit() {
-                                active = false;
+                                    })().catch((error) =>
+                                        controller.abort(error),
+                                    );
+                                },
+                                onCommandExit() {
+                                    active = false;
+                                },
                             },
                         },
-                    },
-                ).finally(async () => {
-                    active = false;
-                    await monitor;
-                });
-                assert.equal(
-                    controller.signal.aborted,
-                    false,
-                    String(controller.signal.reason),
-                );
-                assert.ok(samples > 0);
-                return { exitCode, peakMemory, samples };
+                    ).finally(async () => {
+                        active = false;
+                        await monitor;
+                    });
+                    assert.equal(
+                        controller.signal.aborted,
+                        false,
+                        String(controller.signal.reason),
+                    );
+                    assert.ok(samples > 0);
+                    return { exitCode, peakMemory, samples };
+                } finally {
+                    await rm(scratchDirectory, {
+                        recursive: true,
+                        force: true,
+                    });
+                }
             };
             const { exitCode, peakMemory, samples } = await verifyRecords(
                 ceremony,
