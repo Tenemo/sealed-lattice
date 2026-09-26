@@ -976,6 +976,46 @@ const propose = async (session: CloseSession, prepared: boolean) => {
     });
 };
 
+// The organizer's published intent, or undefined when the relay lacks it.
+const readPublishedIntent = async (
+    session: CloseSession,
+    relay: PublicRelay,
+) => {
+    const { close, registration } = session.contribution.context.descriptor;
+    try {
+        return await readPublic(
+            relay,
+            closeDirectory + 'intent.bin',
+            4 + close.intentBodyBytes + registration.signatureBytes,
+        );
+    } catch (error) {
+        if (!(error instanceof PublicInputFailure)) throw error;
+        return undefined;
+    }
+};
+
+// A participant other than the organizer whose setup was just verified in
+// this instance, before any ballot attempt, locks the organizer's published
+// intent: it learned that ballot submission closed before it could vote, so
+// it never starts a ballot. Returns whether it locked; without an authentic
+// published intent it can still vote.
+export const lockPublishedIntent = async (
+    session: CloseSession,
+    relay: PublicRelay,
+) => {
+    if (session.organizer || generationOf(session) !== 12) return false;
+    const intent = await readPublishedIntent(session, relay);
+    if (intent === undefined) return false;
+    await startCloseWork(session);
+    try {
+        await lockIntent(session, intent);
+    } catch (error) {
+        if (!(error instanceof PublicInputFailure)) throw error;
+        return false;
+    }
+    return true;
+};
+
 // One visit's close work after the complete setup verified in this instance.
 export const advanceClose = async (
     session: CloseSession,
@@ -1006,17 +1046,7 @@ export const advanceClose = async (
                 await signIntent(session, request.closeTime),
             );
     } else if (unlocked) {
-        const { close, registration } = session.contribution.context.descriptor;
-        let intent: Uint8Array | undefined;
-        try {
-            intent = await readPublic(
-                relay,
-                closeDirectory + 'intent.bin',
-                4 + close.intentBodyBytes + registration.signatureBytes,
-            );
-        } catch (error) {
-            if (!(error instanceof PublicInputFailure)) throw error;
-        }
+        const intent = await readPublishedIntent(session, relay);
         if (intent !== undefined) await lockIntent(session, intent);
     }
     if (session.organizer && generation() === closePhase.locked) {

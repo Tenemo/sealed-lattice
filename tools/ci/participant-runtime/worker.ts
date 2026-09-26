@@ -19,6 +19,7 @@ import {
     advanceClose,
     closeEvents,
     isCloseComplete,
+    lockPublishedIntent,
     parseCloseRequest,
     publishClose,
     resumeClose,
@@ -196,6 +197,20 @@ const publishRecords = async (
     }
 };
 
+// What this participant's ballot is: open once the verified setup is
+// retained, in progress from the attempt lock, signed, or impossible once the
+// participant learned that ballot submission closed without a ballot of its
+// own.
+const ballotState = (root: AuthenticatedRoot) => {
+    const { generation } = root.head;
+    if (generation < 12) return undefined;
+    if (generation === 12) return 'open';
+    if (generation < 17) return 'in progress';
+    return (root.manifest.suffixes.ballot?.length ?? 0) > 0
+        ? 'signed'
+        : 'could not vote';
+};
+
 const summary = (root: AuthenticatedRoot, enrollment: RestoredEnrollment) => ({
     generation: root.head.generation,
     rootHash: root.head.hash,
@@ -203,6 +218,7 @@ const summary = (root: AuthenticatedRoot, enrollment: RestoredEnrollment) => ({
     bodyDigest: hexadecimal(enrollment.bodyDigest),
     username: enrollment.username,
     isOrganizer: enrollment.isOrganizer,
+    ballot: ballotState(root),
 });
 
 const execute = async (
@@ -341,6 +357,15 @@ const execute = async (
                 session,
                 await verifySetup(session, relay),
             );
+            // A participant that finds the organizer's close intent once its
+            // setup is retained learned that ballot submission closed before
+            // it could vote: it locks the intent and starts no ballot.
+            session.root = root;
+            await lockPublishedIntent(
+                await resumeClose(session, enrollment.isOrganizer),
+                relay,
+            );
+            root = session.root;
             break;
         }
         case 'ballot': {
