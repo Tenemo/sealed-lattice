@@ -28,6 +28,8 @@ import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
+import { summarizeCpuTrace } from '#tools/ci/participant-cpu-profile.js';
+import type { CpuProfileSummary } from '#tools/ci/participant-cpu-profile.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
@@ -56,17 +58,25 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // ones: one departs after preparation and casts nothing, and the relay omits
 // the other's on-time ballot. Another poll's passed cohort of the same
 // profile, named by its run directory, supplies the records a relay view
-// serves one participant as this poll's.
+// serves one participant as this poll's. A rosters run has a corrupt
+// organizer complete a second roster of the same poll beside the first,
+// each roster with the organizer as its only corrupt member, and serves each
+// roster's records to a member of the other. A plain run carries one roster
+// of honest participants through each stage once, with no crash, forgery or
+// other roster. With --profile, Chrome records every operation's CPU samples,
+// and their summary lies beside the run.
 const foreignOption = '--foreign-poll=';
+const profileOption = '--profile';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
     .find((value) => value.startsWith(foreignOption))
     ?.slice(foreignOption.length);
+const profiling = allArguments.includes(profileOption);
 const commandArguments = allArguments.filter(
-    (value) => !value.startsWith(foreignOption),
+    (value) => !value.startsWith(foreignOption) && value !== profileOption,
 );
 const mode =
-    (['no-result', 'empty'] as const).find(
+    (['no-result', 'empty', 'rosters', 'plain'] as const).find(
         (value) => value === commandArguments[commandArguments.length - 1],
     ) ?? 'result';
 const noResult = mode !== 'result';
@@ -76,17 +86,30 @@ assert.ok(
     counts.length === 0 ||
         (counts.length === 2 &&
             counts.every((value) => /^[1-9]\d*$/u.test(value))),
-    'Optionally select the participant and option counts, then no-result or empty, and another poll with --foreign-poll=<run directory>.',
+    'Optionally select the participant and option counts, then no-result, empty, rosters or plain, another poll with --foreign-poll=<run directory>, and --profile.',
+);
+assert.ok(
+    (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
+    'Rosters and plain runs serve no other poll.',
 );
 const [participantCount, optionCount] =
     counts.length === 0 ? [3, 2] : counts.map(Number);
 const root = path.resolve('.');
 const basePort = 43_600;
 // A registrant that the organizer leaves out of the roster has the origin
-// after the roster participants'.
+// after the roster participants'. In a rosters run the second roster's
+// registrants take the origins from there on instead.
 const leftOut = participantCount;
+const originCount = mode === 'rosters' ? 2 * participantCount - 1 : leftOut + 1;
+// The copy of the corrupt organizer's private state that proposes the second
+// roster, which reaches that roster's records under its own path of the
+// organizer's origin.
+const secondRosterCopy = 'second-roster';
+const secondRosterPath = '/second-roster/';
 // The host guard for each participant's Chrome process tree.
 const participantMemoryLimit = 3_221_225_472;
+// The functions each operation's CPU profile summary ranks.
+const cpuProfileEntries = 60;
 const operationMilliseconds = 3_600_000;
 
 // The relay's layout: lower-case path segments of letters, digits, dots and
@@ -100,7 +123,8 @@ type ViewedRecord = Buffer | Readonly<{ file: string }> | undefined;
 
 type Relay = Readonly<{
     servers: Server[];
-    // The origin that first published each path; only it may add to it.
+    // The origin that first published each stored file; only it may add
+    // to it.
     owners: Map<string, string>;
     views: Map<string, ViewedRecord>[];
     // Publications the relay refuses to store.
@@ -187,7 +211,7 @@ window.runParticipant = async (operation, parameters) => {
     const archive = response.ok ? await response.json() : undefined;
     return openParticipant({
         namespace: ${JSON.stringify(participantNamespace)},
-        relay: location.origin + '/',
+        relay: new URL('./', location.href).href,
         ...(archive === undefined
             ? {}
             : {
@@ -204,11 +228,31 @@ window.runParticipant = async (operation, parameters) => {
 </script>`;
 
 // A patched client's page checks the patched worker against the digest it
-// names and sends the SDK's commands, claiming the runtime's identity.
-const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
+// names and sends the SDK's commands, claiming the runtime's identity. A
+// halting client stands in for an honest page, so it also names the archive
+// as that page does, with the foundation kernel the SDK pins.
+const clientPage = (
+    runtime: ParticipantRuntime,
+    workerDigest: string,
+    namesArchive: boolean,
+) =>
     `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
-const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
+const runtime = ${JSON.stringify({
+        identity: runtime.identity,
+        worker: workerDigest,
+        ...(namesArchive
+            ? {
+                  kernelSha256: createHash('sha256')
+                      .update(runtime.kernel)
+                      .digest('hex'),
+              }
+            : {}),
+    })};
 window.runParticipant = async (operation, parameters) => {
+    const configuration = runtime.kernelSha256 === undefined
+        ? undefined
+        : await fetch('/archive.json', { cache: 'no-store' });
+    const archive = configuration?.ok ? await configuration.json() : undefined;
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
     const digest = Array.from(
@@ -238,6 +282,19 @@ window.runParticipant = async (operation, parameters) => {
             relay: location.origin + '/',
             module: location.origin + '/sdk/participant.wasm',
             identity: runtime.identity,
+            ...(archive === undefined
+                ? {}
+                : {
+                      archive: {
+                          faultBound: archive.faultBound,
+                          replicas: archive.replicas.map((replica) => ({
+                              baseUrl: new URL(replica.baseUrl).href,
+                              verificationKey: replica.verificationKey,
+                          })),
+                          kernel: location.origin + '/sdk/sealed-lattice-kernel.wasm',
+                          kernelSha256: runtime.kernelSha256,
+                      },
+                  }),
         });
     });
 };
@@ -245,17 +302,20 @@ window.runParticipant = async (operation, parameters) => {
 
 // Every origin serves the SDK's participant API and module and an honest
 // participant's page, except that a corrupt participant's origin serves its
-// client's page and worker and its client's module.
+// client's page and worker and its client's module. With a second roster,
+// its registrants' origins and the second roster's path store and serve its
+// own records.
 const startRelay = async (
     runtime: ParticipantRuntime,
     publicDirectory: string,
     corrupt:
         | Readonly<{ position: number; client: CorruptParticipantClient }>
         | undefined,
+    secondRoster: string | undefined,
 ): Promise<Relay> => {
     const owners = new Map<string, string>();
     const views = Array.from(
-        { length: leftOut + 1 },
+        { length: originCount },
         () => new Map<string, ViewedRecord>(),
     );
     const refused = new Set<string>();
@@ -263,7 +323,7 @@ const startRelay = async (
     const archive: Relay['archive'] = { configuration: undefined };
     const withheld = new Set<number>();
     const delivered = Array.from(
-        { length: leftOut + 1 },
+        { length: originCount },
         () => new Set<string>(),
     );
     const assets = (position: number) => {
@@ -277,7 +337,7 @@ const startRelay = async (
                     bytes: Buffer.from(
                         client === undefined
                             ? participantPage
-                            : clientPage(runtime, client.workerDigest),
+                            : clientPage(runtime, client.workerDigest, false),
                     ),
                 },
             ],
@@ -310,10 +370,22 @@ const startRelay = async (
         view: ReadonlyMap<string, ViewedRecord>,
         servesPublic: boolean,
         delivering: Set<string>,
+        ownRecords: string,
         request: IncomingMessage,
         response: ServerResponse,
     ) => {
-        const url = new URL(request.url ?? '/', origin);
+        const requested = new URL(request.url ?? '/', origin);
+        const second =
+            secondRoster !== undefined &&
+            requested.pathname.startsWith(secondRosterPath);
+        const url = second
+            ? new URL(
+                  requested.pathname.slice(secondRosterPath.length - 1) +
+                      requested.search,
+                  origin,
+              )
+            : requested;
+        const records = (second ? secondRoster : undefined) ?? ownRecords;
         if (request.method === 'GET') {
             const asset = served.get(url.pathname);
             if (asset !== undefined) {
@@ -341,7 +413,7 @@ const startRelay = async (
                 url.pathname.startsWith('/public/') &&
                 publicPath.test(name)
             ) {
-                const file = path.join(publicDirectory, name);
+                const file = path.join(records, name);
                 const viewed = view.get(name);
                 const bytes = !view.has(name)
                     ? await readFile(file).catch(() => undefined)
@@ -361,6 +433,7 @@ const startRelay = async (
         }
         const name = url.pathname.slice('/publish/'.length);
         const offset = Number(url.searchParams.get('offset'));
+        const file = path.join(records, name);
         if (
             request.method !== 'POST' ||
             request.headers.origin !== origin ||
@@ -369,20 +442,19 @@ const startRelay = async (
             refused.has(name) ||
             !Number.isSafeInteger(offset) ||
             offset < 0 ||
-            (owners.get(name) ?? origin) !== origin
+            (owners.get(file) ?? origin) !== origin
         ) {
             response.writeHead(404);
             response.end();
             return;
         }
         const bytes = await readBody(request, 1 << 20);
-        const file = path.join(publicDirectory, name);
         const [directory, record] = name.split('/');
         if (
             /^contribution-\d+$/u.test(directory) &&
             !preOpeningContributionRecords.has(record) &&
             (await stat(
-                path.join(publicDirectory, directory, 'opening-signature.bin'),
+                path.join(records, directory, 'opening-signature.bin'),
             ).catch(() => undefined)) === undefined
         )
             earlyContributionRecords.push(name);
@@ -410,7 +482,7 @@ const startRelay = async (
             }
         } else if (offset === length) {
             await writeFile(file, bytes, { flag: 'a' });
-            owners.set(name, origin);
+            owners.set(file, origin);
         } else {
             response.writeHead(409);
             response.end();
@@ -421,9 +493,13 @@ const startRelay = async (
     };
     const halting = new Map<number, HaltingClient>();
     const servers: Server[] = [];
-    for (let position = 0; position <= leftOut; position++) {
+    for (let position = 0; position < originCount; position++) {
         const origin = `http://127.0.0.1:${String(basePort + position)}`;
         const served = assets(position);
+        const ownRecords =
+            secondRoster !== undefined && position >= participantCount
+                ? secondRoster
+                : publicDirectory;
         const server = createServer((request, response) => {
             const client = halting.get(position);
             handle(
@@ -437,7 +513,7 @@ const startRelay = async (
                               {
                                   type: 'text/html',
                                   bytes: Buffer.from(
-                                      clientPage(runtime, client.digest),
+                                      clientPage(runtime, client.digest, true),
                                   ),
                               },
                           ],
@@ -452,6 +528,7 @@ const startRelay = async (
                 views[position],
                 !withheld.has(position),
                 delivered[position],
+                ownRecords,
                 request,
                 response,
             ).catch(() => {
@@ -580,7 +657,7 @@ const foreignFamilies = [
 // position under this poll's record identifiers, and its other records under
 // their own names.
 const foreignRecordView = async (
-    foreign: ForeignPoll,
+    foreign: Pick<ForeignPoll, 'publicDirectory' | 'recordIds' | 'leftOut'>,
     publicDirectory: string,
     recordIds: readonly string[],
     pattern: RegExp,
@@ -630,6 +707,7 @@ await runWithLocalRunLog(
             String(optionCount),
             ...(mode === 'result' ? [] : [mode]),
             ...(foreignPoll === undefined ? [] : [foreignOption + foreignPoll]),
+            ...(profiling ? [profileOption] : []),
         ],
         lanes: [
             'Participant runtime assembly',
@@ -743,7 +821,18 @@ await runWithLocalRunLog(
                 });
             const publicDirectory = path.join(log.runDirectoryPath, 'public');
             await mkdir(publicDirectory);
-            relay = await startRelay(runtime, publicDirectory, corrupt);
+            const secondRosterDirectory =
+                mode === 'rosters'
+                    ? path.join(log.runDirectoryPath, 'second-roster-public')
+                    : undefined;
+            if (secondRosterDirectory !== undefined)
+                await mkdir(secondRosterDirectory);
+            relay = await startRelay(
+                runtime,
+                publicDirectory,
+                corrupt,
+                secondRosterDirectory,
+            );
             const {
                 views,
                 refused: refusedPublications,
@@ -754,7 +843,7 @@ await runWithLocalRunLog(
                 path.join(root, 'temp/participant-browser-'),
             );
             const profileDirectory = profiles;
-            const peaks = new Array<number>(leftOut + 1).fill(0);
+            const peaks = new Array<number>(originCount).fill(0);
             const copyPeaks = new Map<string, number>();
             // Samples every open browser's process tree against the guard,
             // from one snapshot of the host's processes.
@@ -850,7 +939,10 @@ await runWithLocalRunLog(
                             copy === undefined
                                 ? profile(position)
                                 : copyProfile(copy),
-                            origin(position),
+                            origin(position) +
+                                (copy === secondRosterCopy
+                                    ? secondRosterPath
+                                    : ''),
                         );
                         browserDetails.set(key, details);
                         log.writeEvent({
@@ -866,6 +958,14 @@ await runWithLocalRunLog(
                     action,
                 );
             };
+            // With profiling, each operation's summary of CPU samples, in
+            // the order the operations ended.
+            const cpuProfileDirectory = profiling
+                ? path.join(log.runDirectoryPath, 'cpu-profiles')
+                : undefined;
+            if (cpuProfileDirectory !== undefined)
+                await mkdir(cpuProfileDirectory);
+            let profiledOperations = 0;
             // Runs one operation in a participant's page, or in a copy of its
             // private state.
             const request = async (
@@ -879,9 +979,8 @@ await runWithLocalRunLog(
                     // The deadline ends with its operation so that no timer
                     // outlives the run.
                     const deadline = new AbortController();
-                    let result: WorkerResult;
-                    try {
-                        result = (await Promise.race([
+                    const evaluation = async () =>
+                        (await Promise.race([
                             chrome.evaluate(
                                 `window.runParticipant(${JSON.stringify(operation)}, ${JSON.stringify(parameters)})`,
                             ),
@@ -893,20 +992,57 @@ await runWithLocalRunLog(
                                 );
                             }),
                         ])) as WorkerResult;
+                    let result: WorkerResult;
+                    let cpuProfile: CpuProfileSummary | undefined;
+                    try {
+                        if (cpuProfileDirectory === undefined)
+                            result = await evaluation();
+                        else {
+                            const traced = await chrome.trace(evaluation);
+                            result = traced.result;
+                            cpuProfile = summarizeCpuTrace(
+                                traced.events,
+                                cpuProfileEntries,
+                            );
+                        }
                     } finally {
                         deadline.abort();
                     }
                     if (guardFailure !== undefined) throw guardFailure;
+                    const milliseconds = performance.now() - started;
                     log.writeEvent({
                         eventType: 'participant-operation',
                         details: {
                             position,
                             ...(copy === undefined ? {} : { copy }),
                             operation,
-                            milliseconds: performance.now() - started,
+                            milliseconds,
                             result,
                         },
                     });
+                    if (
+                        cpuProfile !== undefined &&
+                        cpuProfileDirectory !== undefined
+                    )
+                        await writeFile(
+                            path.join(
+                                cpuProfileDirectory,
+                                `${String(++profiledOperations).padStart(4, '0')}-${String(position)}${copy === undefined ? '' : '-' + copy}-${operation}.json`,
+                            ),
+                            JSON.stringify(
+                                {
+                                    position,
+                                    ...(copy === undefined ? {} : { copy }),
+                                    operation,
+                                    status: result.status,
+                                    milliseconds,
+                                    ...cpuProfile,
+                                },
+                                null,
+                                2,
+                            ) + '\n',
+                            { flag: 'wx' },
+                        );
                     return result;
                 });
             const run = async (
@@ -1317,6 +1453,418 @@ await runWithLocalRunLog(
                 await run(position, 'publish');
                 return details;
             };
+            // A roster member acts at its origin, or in a copy of the
+            // organizer's private state.
+            type Member = Readonly<{ origin: number; copy?: string }>;
+            const act = async (
+                member: Member,
+                operation: string,
+                parameters: Record<string, unknown> = {},
+            ) => {
+                const result = await request(
+                    member.origin,
+                    operation,
+                    parameters,
+                    member.copy,
+                );
+                assert.ok(
+                    result.status === 'completed',
+                    `${operation} at origin ${String(member.origin)}${member.copy === undefined ? '' : ' in copy ' + member.copy}: ${JSON.stringify(result)}`,
+                );
+                return result.details;
+            };
+            // A roster's record identifiers: the organizer's registration,
+            // then the joined participants' in order.
+            const rosterRecordIds = (
+                joined: readonly Record<string, unknown>[],
+            ) =>
+                [organizer, ...joined].map((details) =>
+                    String(details.bodyDigest),
+                );
+            // The ordered option identifiers the scores rank first.
+            const rankedIdentifiers = (
+                scores: readonly (readonly number[])[],
+            ) => {
+                const optionTotals = Array.from(
+                    { length: optionCount },
+                    (_unused, option) =>
+                        scores.reduce(
+                            (total, score) => total + score[option],
+                            0,
+                        ),
+                );
+                return Array.from(
+                    { length: optionCount },
+                    (_unused, option) => option,
+                )
+                    .sort(
+                        (left, right) =>
+                            optionTotals[right] - optionTotals[left] ||
+                            left - right,
+                    )
+                    .slice(0, topCount)
+                    .map((option) => `option-${String(option)}`);
+            };
+            // Completes one roster from its proposal to its combined
+            // result, every member acting as soon as its inputs exist.
+            // Every member casts a counted ballot, the organizer closes
+            // at the current time after every ballot, the first quorum of
+            // members vote on the target, and every member releases.
+            const completeRoster = async (
+                members: readonly Member[],
+                recordIds: readonly string[],
+                scores: readonly (readonly number[])[],
+            ) => {
+                const [organizing, ...accepting] = members;
+                assert.equal(
+                    (await act(organizing, 'propose-roster', { recordIds }))
+                        .generation,
+                    3,
+                );
+                await act(organizing, 'publish');
+                for (const details of await Promise.all(
+                    accepting.map((member) =>
+                        act(member, 'accept-roster', { recordIds }),
+                    ),
+                ))
+                    assert.equal(details.generation, 3);
+                const contributing = members.slice(0, setupContributorCount);
+                await Promise.all([
+                    ...contributing.map(async (member) => {
+                        assert.equal(
+                            (await act(member, 'contribute')).generation,
+                            7,
+                        );
+                        assert.equal(
+                            (await act(member, 'confirm')).generation,
+                            9,
+                        );
+                    }),
+                    ...members
+                        .slice(setupContributorCount)
+                        .map(async (member) => {
+                            assert.equal(
+                                (await act(member, 'confirm')).generation,
+                                9,
+                            );
+                        }),
+                ]);
+                await Promise.all(
+                    contributing.map(async (member) => {
+                        assert.equal(
+                            (await act(member, 'open')).generation,
+                            11,
+                        );
+                    }),
+                );
+                await Promise.all(
+                    members.map(async (member) => {
+                        const verified = await act(member, 'verify-setup');
+                        assert.equal(verified.generation, 12);
+                        assert.equal(verified.ballot, 'open');
+                    }),
+                );
+                await Promise.all(
+                    members.map(async (member, position) => {
+                        assert.equal(
+                            (
+                                await act(member, 'ballot', {
+                                    scores: scores[position],
+                                })
+                            ).generation,
+                            17,
+                        );
+                    }),
+                );
+                const authors = members.map((_member, position) => position);
+                await Promise.all(
+                    accepting.map(async (member, index) => {
+                        assert.equal(
+                            (
+                                await act(member, 'close', {
+                                    deliver: authors.filter(
+                                        (author) => author !== index + 1,
+                                    ),
+                                })
+                            ).generation,
+                            17,
+                        );
+                    }),
+                );
+                assert.equal(
+                    (
+                        await act(organizing, 'close', {
+                            deliver: authors.slice(1),
+                            announce: [],
+                            closeTime: Date.now(),
+                        })
+                    ).generation,
+                    19,
+                );
+                await Promise.all(
+                    accepting.map(async (member) => {
+                        assert.equal(
+                            (await act(member, 'close')).generation,
+                            21,
+                        );
+                    }),
+                );
+                assert.equal((await act(organizing, 'close')).generation, 22);
+                await Promise.all(
+                    members
+                        .slice(0, bounds.close.quorum)
+                        .map(async (member) => {
+                            const voted = await act(member, 'target');
+                            assert.equal(voted.generation, 24);
+                            assert.equal(voted.ballotStatus, 'included');
+                            assert.equal(voted.usableBallots, participantCount);
+                            assert.equal(voted.validBallots, participantCount);
+                        }),
+                );
+                for (const details of await Promise.all(
+                    members.map((member) => act(member, 'release')),
+                )) {
+                    assert.equal(details.generation, 29);
+                    assert.equal(details.encrypted, true);
+                }
+                const combined = await act(
+                    members[members.length - 1],
+                    'result',
+                );
+                assert.equal(combined.encrypted, true);
+                assert.deepEqual(
+                    combined.identifiers,
+                    rankedIdentifiers(scores),
+                );
+                return combined.identifiers as readonly string[];
+            };
+            if (mode === 'plain') {
+                // Every other participant joins, and the roster completes
+                // each stage once.
+                const joined = await Promise.all(
+                    positions
+                        .slice(1)
+                        .map((position) =>
+                            join(position, `Participant ${String(position)}`),
+                        ),
+                );
+                const plainRecordIds = rosterRecordIds(joined);
+                const identifiers = await completeRoster(
+                    positions.map((position) => ({ origin: position })),
+                    plainRecordIds,
+                    positions.map(ballotScores),
+                );
+                await writeFile(
+                    path.join(log.runDirectoryPath, 'result.json'),
+                    JSON.stringify(
+                        {
+                            participantCount,
+                            optionCount,
+                            mode,
+                            poll: organizer.poll,
+                            recordIds: plainRecordIds,
+                            runtimeIdentity: runtime.identity.runtime,
+                            peakProcessTreeBytes: peaks,
+                            identifiers,
+                            topCount,
+                            profiled: profiling,
+                            scope: [
+                                'Browser registration, roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result of one roster of honest participants, each stage once with no crash, forgery or other roster, in the maintained participant runtime in external Chrome.',
+                                ...(profiling
+                                    ? [
+                                          'Chrome recorded the CPU samples of every operation, which slows it.',
+                                      ]
+                                    : []),
+                            ].join(' '),
+                        },
+                        null,
+                        2,
+                    ) + '\n',
+                    { flag: 'wx' },
+                );
+                process.stdout.write(log.runDirectoryPath + '\n');
+                return;
+            }
+            if (mode === 'rosters') {
+                // The organizer is corrupt: its private state is copied
+                // before it proposes a roster, and the copy proposes a second
+                // roster of the same poll to other registrants. The relay
+                // serves each roster only its own records and shows the
+                // second roster the poll and the organizer's registration.
+                // The organizer is each roster's only corrupt member.
+                assert.ok(
+                    maximumCorruptParticipantCount >= 1 &&
+                        secondRosterDirectory !== undefined,
+                    'Two rosters need a profile that tolerates the corrupt organizer.',
+                );
+                await copyState(0, secondRosterCopy);
+                for (const name of [
+                    'poll-definition.bin',
+                    'poll-signature.bin',
+                    'registration/' + String(organizer.bodyDigest),
+                ])
+                    await cp(
+                        path.join(publicDirectory, name),
+                        path.join(secondRosterDirectory, name),
+                        { recursive: true, errorOnExist: true, force: false },
+                    );
+                const firstMembers: readonly Member[] = positions.map(
+                    (position) => ({ origin: position }),
+                );
+                const secondMembers: readonly Member[] = positions.map(
+                    (position) =>
+                        position === 0
+                            ? { origin: 0, copy: secondRosterCopy }
+                            : { origin: participantCount - 1 + position },
+                );
+                const registrations = await Promise.all(
+                    [...firstMembers.slice(1), ...secondMembers.slice(1)].map(
+                        (member) =>
+                            join(
+                                member.origin,
+                                `Participant ${String(member.origin)}`,
+                            ),
+                    ),
+                );
+                const firstRecordIds = rosterRecordIds(
+                    registrations.slice(0, participantCount - 1),
+                );
+                const secondRecordIds = rosterRecordIds(
+                    registrations.slice(participantCount - 1),
+                );
+                const [firstIdentifiers, secondIdentifiers] = await Promise.all(
+                    [
+                        completeRoster(
+                            firstMembers,
+                            firstRecordIds,
+                            positions.map(ballotScores),
+                        ),
+                        completeRoster(
+                            secondMembers,
+                            secondRecordIds,
+                            positions.map((position) =>
+                                ballotScores(participantCount + position),
+                            ),
+                        ),
+                    ],
+                );
+                // A relay view serves the second member of each roster the
+                // other roster's records of one family at a time under its
+                // own roster's names, the registrations by roster position.
+                // The first record of each family its result visit reads is
+                // refused, and it stays pending; the other roster's valid
+                // registrations of the same poll are refused only as a
+                // roster. With the relay's own records it then reaches its
+                // roster's outcome.
+                const crossRosterProbes: {
+                    origin: number;
+                    family: string;
+                    served: number;
+                    hidden: number;
+                    reason: string;
+                }[] = [];
+                for (const [member, records, recordIds, other, identifiers] of [
+                    [
+                        firstMembers[1],
+                        publicDirectory,
+                        firstRecordIds,
+                        {
+                            publicDirectory: secondRosterDirectory,
+                            recordIds: secondRecordIds,
+                            leftOut: undefined,
+                        },
+                        firstIdentifiers,
+                    ],
+                    [
+                        secondMembers[1],
+                        secondRosterDirectory,
+                        secondRecordIds,
+                        {
+                            publicDirectory,
+                            recordIds: firstRecordIds,
+                            leftOut: undefined,
+                        },
+                        secondIdentifiers,
+                    ],
+                ] as const) {
+                    for (const { family, pattern, reason } of foreignFamilies) {
+                        const { view, served } = await foreignRecordView(
+                            other,
+                            records,
+                            recordIds,
+                            pattern,
+                        );
+                        assert.ok(
+                            served > 0,
+                            `The other roster has no ${family}.`,
+                        );
+                        const expected =
+                            family === 'registrations'
+                                ? 'The published registrations are not the retained roster.'
+                                : reason;
+                        for (const [name, bytes] of view)
+                            views[member.origin].set(name, bytes);
+                        try {
+                            assert.deepEqual(
+                                await request(member.origin, 'result'),
+                                { status: 'pending', reason: expected },
+                            );
+                        } finally {
+                            views[member.origin].clear();
+                        }
+                        crossRosterProbes.push({
+                            origin: member.origin,
+                            family,
+                            served,
+                            hidden: view.size - served,
+                            reason: expected,
+                        });
+                    }
+                    assert.deepEqual(
+                        (await act(member, 'result')).identifiers,
+                        identifiers,
+                    );
+                }
+                const rostersScope = [
+                    "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
+                    `Relay views that serve one roster's ${prose(foreignFamilies.map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome.`,
+                ].join(' ');
+                await writeFile(
+                    path.join(log.runDirectoryPath, 'result.json'),
+                    JSON.stringify(
+                        {
+                            participantCount,
+                            optionCount,
+                            mode,
+                            poll: organizer.poll,
+                            recordIds: firstRecordIds,
+                            runtimeIdentity: runtime.identity.runtime,
+                            peakProcessTreeBytes: peaks,
+                            copyPeakProcessTreeBytes:
+                                Object.fromEntries(copyPeaks),
+                            secondRoster: {
+                                copy: secondRosterCopy,
+                                origins: secondMembers.map(
+                                    (member) => member.origin,
+                                ),
+                                recordIds: secondRecordIds,
+                            },
+                            results: {
+                                first: firstIdentifiers,
+                                second: secondIdentifiers,
+                            },
+                            crossRosterProbes,
+                            topCount,
+                            scope: rostersScope,
+                        },
+                        null,
+                        2,
+                    ) + '\n',
+                    { flag: 'wx' },
+                );
+                process.stdout.write(log.runDirectoryPath + '\n');
+                return;
+            }
             // One more registrant joins beside the participants, and the
             // organizer leaves it out of the roster.
             const [joined, leftOutRegistration] = await Promise.all([

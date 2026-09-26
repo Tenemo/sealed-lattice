@@ -5,9 +5,10 @@ import path from 'node:path';
 import { killProcessTree } from '#tools/ci/run-command.js';
 
 // Drives an installed release Chrome over its DevTools socket with Runtime
-// and Page control only. Network inspection would retain payloads and change
-// the storage workload, so it is never enabled. Each participant has its own
-// disk-backed profile under the task workspace.
+// and Page control, and records CPU samples only when a trace is requested.
+// Network inspection would retain payloads and change the storage workload,
+// so it is never enabled. Each participant has its own disk-backed profile
+// under the task workspace.
 type DevToolsMessage = {
     id?: number;
     method?: string;
@@ -22,6 +23,11 @@ export type ChromeParticipant = Readonly<{
     version: string;
     launchArguments: readonly string[];
     evaluate(expression: string): Promise<unknown>;
+    // Runs the action while the browser records the V8 CPU samples of its
+    // page and worker threads, and returns the recorded trace events.
+    trace<Result>(
+        action: () => Promise<Result>,
+    ): Promise<Readonly<{ result: Result; events: readonly unknown[] }>>;
     close(): Promise<void>;
     // Ends the browser's process tree at once, as a crash would, without
     // the shutdown work a close lets it finish.
@@ -73,6 +79,8 @@ export const launchChromeParticipant = async (
     let sequence = 0;
     let onLoad: (() => void) | undefined;
     let pageSession = '';
+    // The trace being recorded: its events so far, and what ends it.
+    let tracing: { events: unknown[]; complete: () => void } | undefined;
     const send = (
         method: string,
         params: Record<string, unknown> = {},
@@ -174,6 +182,12 @@ export const launchChromeParticipant = async (
                 message.sessionId === pageSession
             )
                 onLoad?.();
+            else if (message.method === 'Tracing.dataCollected')
+                tracing?.events.push(
+                    ...((message.params?.value as unknown[] | undefined) ?? []),
+                );
+            else if (message.method === 'Tracing.tracingComplete')
+                tracing?.complete();
         };
         connected.onclose = () => {
             for (const request of pending.values())
@@ -224,6 +238,36 @@ export const launchChromeParticipant = async (
             launchArguments,
             close,
             crash,
+            trace: async (action) => {
+                if (tracing !== undefined)
+                    throw new Error('Chrome is already recording a trace.');
+                const events: unknown[] = [];
+                const completed = new Promise<void>((resolve) => {
+                    tracing = { events, complete: resolve };
+                });
+                try {
+                    await send('Tracing.start', {
+                        transferMode: 'ReportEvents',
+                        traceConfig: {
+                            recordMode: 'recordContinuously',
+                            includedCategories: [
+                                'disabled-by-default-v8.cpu_profiler',
+                            ],
+                            excludedCategories: ['*'],
+                        },
+                    });
+                    let result: Awaited<ReturnType<typeof action>>;
+                    try {
+                        result = await action();
+                    } finally {
+                        await send('Tracing.end');
+                        await completed;
+                    }
+                    return { result, events };
+                } finally {
+                    tracing = undefined;
+                }
+            },
             evaluate: async (expression) => {
                 const result = await send(
                     'Runtime.evaluate',

@@ -97,6 +97,22 @@ pnpm run research:participant -- 3 2 empty
 
 The organizer closes at the current time, every response lists nothing, a participant that locked the intent is refused a ballot, and the participants certify a no-result target whose releases create nothing. Its browsers crash only at the close and target boundaries.
 
+A rosters run has a corrupt organizer complete two rosters of one poll:
+
+```text
+pnpm run research:participant -- 4 2 rosters
+```
+
+The organizer's private state is copied after its registration, before it proposes a roster, and the copy proposes a second roster of the same poll to other registrants. The copy acts under its own path of the organizer's origin, and the relay serves each roster only its own records, showing the second roster the poll definition and the organizer's registration. The profile must tolerate a corrupt participant, so the organizer is each roster's only corrupt member. Both rosters then complete roster agreement, setup, ballots, the close, target votes, releases and their results in parallel. A relay view then serves a member of each roster the other roster's registrations, contributions, close records, target votes or release shares, one family at a time, under its own roster's names: each view leaves it pending, the other roster's valid registrations of the same poll refused only as a roster, and with the relay's own records it reaches its roster's outcome.
+
+A plain run carries one roster of honest participants through each stage once, with no crash, forgery, archive or other roster:
+
+```text
+pnpm run research:participant -- 3 2 plain
+```
+
+With `--profile`, Chrome records the CPU samples of every participant operation, and the run directory keeps a summary for each operation of the functions that spent the most time at the top of a sampled stack and anywhere on it.
+
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
 All sources, parameters, toolchain selection and third-party code needed by the native generation case are tracked. That case uses `temp/` only for run-owned scratch. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.
