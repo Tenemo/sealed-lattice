@@ -22,16 +22,23 @@ type VerifyCanonicalManifest = (canonicalBytes: Uint8Array) => Promise<
       }>
     | Readonly<{ readonly isValid: false; readonly refusalReason: string }>
 >;
+type OpenParticipant = (options: {
+    readonly namespace: string;
+    readonly relay: string;
+}) => { readonly run: unknown };
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const createCanonicalManifest =
     publicApiRuntimeRecord.createCanonicalManifest as CreateCanonicalManifest;
 const verifyCanonicalManifest =
     publicApiRuntimeRecord.verifyCanonicalManifest as VerifyCanonicalManifest;
+const openParticipant =
+    publicApiRuntimeRecord.openParticipant as OpenParticipant;
 const expectedPublicRuntimeExportNames = [
     'createCanonicalActionDefinition',
     'createCanonicalBoardPolicy',
     'createCanonicalManifest',
     'createPublicArchive',
+    'openParticipant',
     'validatePollSpec',
     'verifyCanonicalActionContext',
     'verifyCanonicalActionDefinition',
@@ -113,6 +120,42 @@ describe('election foundation public package API in Node', () => {
             isValid: true,
             value: { manifestHash: manifest.manifestHash },
         });
+    });
+
+    it('opens a participant only for a well-formed namespace and relay', () => {
+        const relay = 'https://relay.example/polls/';
+        for (const namespace of [
+            '',
+            'Poll',
+            '-poll',
+            'poll-',
+            'poll/one',
+            'poll one',
+            'a'.repeat(65),
+        ])
+            expect(() => openParticipant({ namespace, relay })).toThrow(
+                TypeError,
+            );
+        for (const malformed of [
+            'relay.example/polls/',
+            '/polls/',
+            'ftp://relay.example/polls/',
+            'https://relay.example/polls/?poll=1',
+            'https://relay.example/polls/#poll',
+        ])
+            expect(() =>
+                openParticipant({ namespace: 'poll', relay: malformed }),
+            ).toThrow(TypeError);
+        for (const namespace of ['a', '0-poll-9', 'a'.repeat(64)])
+            expect(typeof openParticipant({ namespace, relay }).run).toBe(
+                'function',
+            );
+        expect(
+            typeof openParticipant({
+                namespace: 'poll',
+                relay: 'http://127.0.0.1:8080/polls',
+            }).run,
+        ).toBe('function');
     });
 
     it('emits declarations for the foundation verification result', () => {

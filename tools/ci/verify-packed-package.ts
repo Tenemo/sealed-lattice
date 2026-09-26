@@ -14,7 +14,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { checkParticipantModule } from './build-participant-module.js';
+import {
+    checkParticipantModule,
+    participantRuntimeIdentity,
+} from './build-participant-module.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
@@ -228,10 +231,8 @@ const requireFoundationOnlyKernel = async (
 
 // The published participant module exports exactly what the worker calls,
 // the worker is one self-contained module, and the source manifest names no
-// machine path.
-const requireParticipantRuntime = async (
-    packageDirectoryPath: string,
-): Promise<void> => {
+// machine path. Returns the runtime identity of the published files.
+const requireParticipantRuntime = async (packageDirectoryPath: string) => {
     const dist = path.join(packageDirectoryPath, 'dist');
     const [module, worker, manifest] = await Promise.all([
         readFile(path.join(dist, 'participant.wasm')),
@@ -288,7 +289,55 @@ const requireParticipantRuntime = async (
         throw new Error(
             'The published participant source manifest is malformed.',
         );
+    return participantRuntimeIdentity(
+        Buffer.from(manifest),
+        module,
+        Buffer.from(worker),
+    );
 };
+
+// Runs the installed participant API against a stand-in worker, which checks
+// that the API starts the published worker's exact source and passes it the
+// runtime identity of the published files, the published module's URL, the
+// namespace and the normalized relay, then refuses the request.
+const participantConsumer = [
+    "import { resolveObjectURL } from 'node:buffer';",
+    "import { readFile } from 'node:fs/promises';",
+    '',
+    'const expected = JSON.parse(process.argv[2]);',
+    "const entry = import.meta.resolve('sealed-lattice');",
+    "const worker = await readFile(new URL('./participant-worker.js', entry), 'utf8');",
+    'let started = 0;',
+    'globalThis.Worker = class {',
+    '    constructor(url, options) {',
+    '        started++;',
+    '        this.source = resolveObjectURL(url).text();',
+    "        if (options?.type !== 'module') throw new Error('The participant worker is not a module.');",
+    '    }',
+    '    postMessage(command) {',
+    '        void this.source.then((source) => {',
+    "            if (source !== worker) throw new Error('The participant API started another worker.');",
+    '            const received = JSON.stringify(command);',
+    '            const wanted = JSON.stringify({',
+    "                operation: 'status',",
+    '                parameters: {},',
+    "                namespace: 'smoke-poll',",
+    "                relay: 'https://relay.example/polls/',",
+    "                module: new URL('./participant.wasm', entry).href,",
+    '                identity: expected,',
+    '            });',
+    "            if (received !== wanted) throw new Error('The participant API sent another command: ' + received);",
+    "            this.onmessage({ data: { status: 'refused' } });",
+    '        });',
+    '    }',
+    '    terminate() {}',
+    '};',
+    "const { openParticipant } = await import('sealed-lattice');",
+    "const participant = openParticipant({ namespace: 'smoke-poll', relay: 'https://relay.example/polls' });",
+    "const result = await participant.run({ operation: 'status' });",
+    "if (result.status !== 'refused' || started !== 1) throw new Error('The participant API did not return the worker result.');",
+    '',
+].join('\n');
 
 const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
     await mkdir(consumerDirectoryPath);
@@ -315,6 +364,11 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
                 "if (!verification.isValid) throw new Error('Packed WASM verification refused.');",
                 '',
             ].join('\n'),
+            'utf8',
+        ),
+        writeFile(
+            path.join(consumerDirectoryPath, 'participant.mjs'),
+            participantConsumer,
             'utf8',
         ),
         writeFile(
@@ -362,7 +416,8 @@ const verifyPackedPackage = async (
         await stagePublicPackage(packageDirectory);
         await requireSelfContainedBundle(packageDirectory);
         await requireFoundationOnlyKernel(packageDirectory);
-        await requireParticipantRuntime(packageDirectory);
+        const participantIdentity =
+            await requireParticipantRuntime(packageDirectory);
         await runPackageManager(
             runLog,
             resolvePackageManagerRunner(),
@@ -444,6 +499,12 @@ const verifyPackedPackage = async (
             args: ['smoke.mjs'],
             command: process.execPath,
             description: 'Execute the packed WebAssembly API',
+            workingDirectoryPath: consumerDirectory,
+        });
+        await runCommand(runLog, {
+            args: ['participant.mjs', JSON.stringify(participantIdentity)],
+            command: process.execPath,
+            description: 'Start the packed participant worker',
             workingDirectoryPath: consumerDirectory,
         });
         await runCommand(runLog, {

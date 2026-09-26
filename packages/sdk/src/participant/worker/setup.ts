@@ -26,6 +26,7 @@ import {
     registrationFile,
     registrationPath,
 } from './roster.js';
+import { namespacedName } from './storage.js';
 
 // Verifies the complete setup from public records in the participant's own
 // module: the poll and every registration again, the organizer's proposal
@@ -57,8 +58,8 @@ const cacheCompletion = (transaction: IDBTransaction) =>
 
 // The aggregate cache holds only public bytes; a cache failure leaves the
 // participant pending, like any other public input.
-const openSetupCache = async () => {
-    const opened = indexedDB.open(cacheName, 1);
+const openSetupCache = async (namespace: string) => {
+    const opened = indexedDB.open(namespacedName(cacheName, namespace), 1);
     opened.onupgradeneeded = () => opened.result.createObjectStore(cacheStore);
     try {
         return await cacheRequest(opened);
@@ -120,7 +121,7 @@ export const readFinalAggregate = async (
         throw new Error('No body polynomial has this index.');
     const width = polynomial.bytes / polynomial.coefficients;
     const capacity = Math.floor(kernel.setup_chunk_capacity() / width) * width;
-    const cache = await openSetupCache();
+    const cache = await openSetupCache(context.namespace);
     try {
         for (let offset = 0; offset < polynomial.bytes; offset += capacity)
             consume(
@@ -387,7 +388,7 @@ const verifyCompleteSetup = async (
     }
     if (kernel.setup_inventory_finish() !== 1)
         throw new Error('The setup verifier refused the inventory.');
-    const cache = await openSetupCache();
+    const cache = await openSetupCache(context.namespace);
     try {
         if (clearCache) await writeCache(cache, (store) => store.clear());
         for (let position = 0; position < profile.participantCount; position++)

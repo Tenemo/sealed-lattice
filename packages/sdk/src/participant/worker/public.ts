@@ -8,8 +8,9 @@ const transferChunkBytes = 1 << 20;
 const networkMilliseconds = 60_000;
 
 export type PublicRelay = Readonly<{
-    // The origin of the host that serves this participant's application.
-    origin: string;
+    // The relay's base URL, ending with a slash: it serves each record at
+    // public/<name> and accepts publications at publish/<name>.
+    base: string;
 }>;
 
 const withDeadline = async <Value>(
@@ -91,10 +92,10 @@ export const streamPublic = (
     name: string,
     maximum: number,
     accept: (bytes: Uint8Array) => void | Promise<void>,
-) => streamBounded(relay.origin + '/public/' + name, maximum, accept);
+) => streamBounded(relay.base + 'public/' + name, maximum, accept);
 
 export const readPublic = (relay: PublicRelay, name: string, maximum: number) =>
-    readBounded(relay.origin + '/public/' + name, maximum);
+    readBounded(relay.base + 'public/' + name, maximum);
 
 // Publishes bytes of one record at an offset. The relay keeps the first
 // bytes at each offset and accepts only an identical retransmission.
@@ -111,7 +112,7 @@ export const publishChunk = async (
     try {
         response = await withDeadline(controller, () =>
             fetch(
-                relay.origin + '/publish/' + name + '?offset=' + String(offset),
+                relay.base + 'publish/' + name + '?offset=' + String(offset),
                 {
                     method: 'POST',
                     body: new Blob([new Uint8Array(bytes)]),

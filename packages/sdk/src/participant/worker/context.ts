@@ -3,10 +3,11 @@ import { writeInput, writeOwnRegistrationInput } from './kernel.js';
 import type { KernelHandlers, ParticipantKernel } from './kernel.js';
 
 // What one worker invocation shares across the participant's phases: the
-// origin database, the single module instance with its current handlers,
-// the recomputed runtime identity, the module's shared bounds and, once the
-// retained roster names the poll's profile, that profile's bounds.
+// namespace and its database, the single module instance with its current
+// handlers, the recomputed runtime identity, the module's shared bounds and,
+// once the retained roster names the poll's profile, that profile's bounds.
 export type ParticipantContext = Readonly<{
+    namespace: string;
     database: IDBDatabase;
     kernel: ParticipantKernel;
     handlers: KernelHandlers;

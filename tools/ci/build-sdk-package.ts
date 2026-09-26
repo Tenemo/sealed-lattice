@@ -13,6 +13,7 @@ import { build } from 'tsdown';
 
 import {
     buildParticipantModule,
+    participantRuntimeIdentity,
     participantSourceManifest,
 } from './build-participant-module.js';
 import { buildWasmKernel } from './build-wasm-kernel.js';
@@ -83,7 +84,22 @@ export const buildSdkPackage = async (): Promise<void> => {
     });
     const kernelBytes = await readFile(kernelStagingPath);
     const participant = await buildParticipantModule();
-    const sourceManifest = await participantSourceManifest(participant);
+    const sourceManifest = Buffer.from(
+        await participantSourceManifest(participant),
+    );
+    const worker = await buildParticipantWorker();
+    // The SDK carries the worker's source and passes this identity to it,
+    // and the worker recomputes the identity from the module it fetches.
+    const participantRuntime = {
+        identity: participantRuntimeIdentity(
+            sourceManifest,
+            participant.module,
+            worker,
+        ),
+        worker: worker.toString('utf8'),
+    };
+    if (!Buffer.from(participantRuntime.worker, 'utf8').equals(worker))
+        throw new Error('The participant worker is not canonical UTF-8.');
     const runner = resolvePackageManagerRunner();
     const output = runPackageManagerAndCaptureOutput(
         runner,
@@ -103,11 +119,12 @@ export const buildSdkPackage = async (): Promise<void> => {
             environment: {
                 ...process.env,
                 SEALED_LATTICE_KERNEL_SHA256_HEX: kernelHash,
+                SEALED_LATTICE_PARTICIPANT_RUNTIME:
+                    JSON.stringify(participantRuntime),
             },
         },
     );
     if (output.length > 0) process.stdout.write(output);
-    const worker = await buildParticipantWorker();
 
     await mkdir(sdkOutputDirectoryPath, { recursive: true });
     await copyFile(kernelStagingPath, kernelOutputPath);
@@ -117,7 +134,7 @@ export const buildSdkPackage = async (): Promise<void> => {
     for (const [name, bytes] of [
         ['participant.wasm', participant.module],
         ['participant-worker.js', worker],
-        ['participant-source-manifest.json', Buffer.from(sourceManifest)],
+        ['participant-source-manifest.json', sourceManifest],
     ] as const)
         await writeFile(path.join(sdkOutputDirectoryPath, name), bytes);
     console.log(

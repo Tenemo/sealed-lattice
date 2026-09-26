@@ -40,6 +40,7 @@ import {
 } from './contribution.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
+import { participantRuntimeLabel } from './identity.js';
 import { instantiateParticipantKernel } from './kernel.js';
 import { publishRecord, readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -69,17 +70,25 @@ import {
 } from './roster.js';
 import { retainSetup, reverifySetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
-import { openParticipantDatabase } from './storage.js';
+import {
+    isEmptyParticipant,
+    namespacedName,
+    openParticipantDatabase,
+    participantNamespacePattern,
+} from './storage.js';
 import { targetPhase } from './target-state.js';
 import { publishTarget, signTarget } from './target.js';
 
-// The application page supplies the exact identities of the code it
-// verified; the worker fetches the module itself and recomputes the runtime
+// The application's SDK supplies the namespace of the participant's local
+// state, the relay's base URL, the module's URL and the identities its build
+// recorded; the worker fetches the module itself and recomputes the runtime
 // identity that every retained root binds. Every bound comes from the module
 // and the retained state, never from the page.
 type WorkerCommand = Readonly<{
     operation: string;
-    origin: string;
+    namespace: string;
+    relay: string;
+    module: string;
     identity: Readonly<{
         runtime: string;
         source: string;
@@ -100,7 +109,6 @@ export type WorkerResult = Readonly<
       }
 >;
 
-const runtimeLabel = 'participant-runtime/8';
 const maximumModuleBytes = 8_388_608;
 
 // The pinned delivery digest that gates executing the module, and the runtime
@@ -111,20 +119,42 @@ const deliveryDigest = async (bytes: Uint8Array) =>
         await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
     );
 
-const fetchModule = async (origin: string, expected: string) => {
-    const module = await readBounded(
-        origin + '/participant.wasm',
-        maximumModuleBytes,
-    );
+const fetchModule = async (url: string, expected: string) => {
+    const module = await readBounded(url, maximumModuleBytes);
     if (hexadecimal(await deliveryDigest(module)) !== expected)
         throw new PublicInputFailure('The participant module changed.');
     return module;
 };
 
+// An absolute HTTP or HTTPS URL in its canonical form.
+const httpUrl = (value: unknown) => {
+    if (typeof value !== 'string' || !URL.canParse(value)) return undefined;
+    const url = new URL(value);
+    return (url.protocol === 'https:' || url.protocol === 'http:') &&
+        url.href === value
+        ? url
+        : undefined;
+};
+
+// The relay's base URL ends with a slash and has no query or fragment, so
+// every record name extends its path.
+const isWellFormed = (command: WorkerCommand) => {
+    const relay = httpUrl(command.relay);
+    return (
+        typeof command.namespace === 'string' &&
+        participantNamespacePattern.test(command.namespace) &&
+        relay !== undefined &&
+        relay.pathname.endsWith('/') &&
+        relay.search === '' &&
+        relay.hash === '' &&
+        httpUrl(command.module) !== undefined
+    );
+};
+
 const runtimeIdentity = async (command: WorkerCommand, module: Uint8Array) =>
     deliveryDigest(
         concatenate(
-            encodeText(runtimeLabel),
+            encodeText(participantRuntimeLabel),
             fromHexadecimal(command.identity.source),
             await deliveryDigest(module),
             fromHexadecimal(command.identity.worker),
@@ -247,6 +277,10 @@ const execute = async (
         const enrollment = await restoreEnrollment(context, root, true);
         return { status: 'completed', details: summary(root, enrollment) };
     }
+    // An empty namespace holds no participant, so no authority starts and
+    // nothing can stop.
+    if (await isEmptyParticipant(context.database))
+        return { status: 'refused' };
     started();
     let root = await authenticateRoot(context);
     const enrollment = await restoreEnrollment(context, root, false);
@@ -577,31 +611,33 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
         !isSecureContext ||
         typeof navigator.locks !== 'object' ||
         typeof crypto.subtle !== 'object' ||
-        typeof indexedDB !== 'object'
+        typeof indexedDB !== 'object' ||
+        !isWellFormed(command)
     )
         return { status: 'refused' };
-    const relay: PublicRelay = { origin: command.origin };
+    const relay: PublicRelay = { base: command.relay };
     let database: IDBDatabase | undefined;
     let authorityStarted = false;
     try {
         const moduleBytes = await fetchModule(
-            command.origin,
+            command.module,
             command.identity.module,
         );
         const runtime = await runtimeIdentity(command, moduleBytes);
         if (hexadecimal(runtime) !== command.identity.runtime)
             return { status: 'refused' };
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
-        database = await openParticipantDatabase();
+        database = await openParticipantDatabase(command.namespace);
         const opened = database;
         return await navigator.locks.request(
-            'sealed-lattice-participant',
+            namespacedName('sealed-lattice-participant', command.namespace),
             async (): Promise<WorkerResult> => {
                 try {
                     const { kernel, handlers } =
                         await instantiateParticipantKernel(module);
                     return await execute(
                         {
+                            namespace: command.namespace,
                             database: opened,
                             kernel,
                             handlers,

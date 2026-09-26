@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import binaryen from 'binaryen';
 
+import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/identity.js';
+
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const workspace = path.join(repositoryRoot, 'crates', 'protocol-research');
 // The participant module's linear memory never exceeds the absolute bound.
@@ -238,4 +240,29 @@ export const participantSourceManifest = async (
             files,
         }) + '\n'
     );
+};
+
+// The runtime identity the worker recomputes from the packaged files, beside
+// the digests it combines.
+export const participantRuntimeIdentity = (
+    sourceManifest: Uint8Array,
+    module: Uint8Array,
+    worker: Uint8Array,
+) => {
+    const [source, moduleDigest, workerDigest] = [
+        sourceManifest,
+        module,
+        worker,
+    ].map((bytes) => createHash('sha512').update(bytes).digest());
+    return {
+        runtime: createHash('sha512')
+            .update(participantRuntimeLabel)
+            .update(source)
+            .update(moduleDigest)
+            .update(workerDigest)
+            .digest('hex'),
+        source: source.toString('hex'),
+        module: moduleDigest.toString('hex'),
+        worker: workerDigest.toString('hex'),
+    };
 };

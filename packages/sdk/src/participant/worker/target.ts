@@ -24,6 +24,7 @@ import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { readFinalAggregate } from './setup.js';
+import { namespacedName } from './storage.js';
 import {
     decodeTargetState,
     encodeTargetState,
@@ -364,8 +365,11 @@ const completion = (transaction: IDBTransaction) =>
             reject(new PublicInputFailure('The evaluation storage failed.'));
     });
 
-const openEvaluationStorage = async () => {
-    const opened = indexedDB.open(evaluationDatabase, 1);
+const openEvaluationStorage = async (namespace: string) => {
+    const opened = indexedDB.open(
+        namespacedName(evaluationDatabase, namespace),
+        1,
+    );
     opened.onupgradeneeded = () =>
         opened.result.createObjectStore(evaluationStore);
     return request(opened);
@@ -425,7 +429,7 @@ const evaluate = async (
                 };
             },
         );
-    const storage = await openEvaluationStorage();
+    const storage = await openEvaluationStorage(context.namespace);
     try {
         await writeEvaluationStorage(storage, (store) => store.clear());
         const deliverStored = (operation: number, node: number) => {

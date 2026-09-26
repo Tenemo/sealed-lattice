@@ -18,6 +18,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+import { participantDatabaseName } from '#packages/sdk/src/participant/worker/storage.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
@@ -154,9 +155,22 @@ const readBody = async (request: IncomingMessage, maximum: number) => {
     return Buffer.concat(parts);
 };
 
-// The page checks the delivered worker against the digest it names, which
-// is the runtime's own worker except on a corrupt client's page.
-const page = (runtime: ParticipantRuntime, workerDigest: string) =>
+// Each participant keeps its state under this namespace of its own origin.
+const participantNamespace = 'research-cohort';
+const participantDatabase = participantDatabaseName(participantNamespace);
+
+// An honest participant's page runs every operation through the SDK's
+// participant API, which carries the packaged worker; the relay serves it
+// beside the packaged module.
+const participantPage = `<!doctype html><meta charset="utf-8"><title>Participant</title><script type="module">
+import { openParticipant } from '/sdk/index.js';
+const participant = openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay: location.origin + '/' });
+window.runParticipant = (operation, parameters) => participant.run({ operation, parameters });
+</script>`;
+
+// A patched client's page checks the patched worker against the digest it
+// names and sends the SDK's commands, claiming the runtime's identity.
+const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
     `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
 const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
@@ -184,17 +198,19 @@ window.runParticipant = async (operation, parameters) => {
         };
         worker.postMessage({
             operation,
-            origin: location.origin,
-            identity: runtime.identity,
             parameters,
+            namespace: ${JSON.stringify(participantNamespace)},
+            relay: location.origin + '/',
+            module: location.origin + '/sdk/participant.wasm',
+            identity: runtime.identity,
         });
     });
 };
 </script>`;
 
-// Every origin serves the runtime's page, worker and module, except that a
-// corrupt participant's origin serves its client's page and worker and its
-// client's module beside the honest one.
+// Every origin serves the SDK's participant API and module and an honest
+// participant's page, except that a corrupt participant's origin serves its
+// client's page and worker and its client's module.
 const startRelay = async (
     runtime: ParticipantRuntime,
     publicDirectory: string,
@@ -218,32 +234,29 @@ const startRelay = async (
                 {
                     type: 'text/html',
                     bytes: Buffer.from(
-                        page(
-                            runtime,
-                            client?.workerDigest ?? runtime.identity.worker,
-                        ),
+                        client === undefined
+                            ? participantPage
+                            : clientPage(runtime, client.workerDigest),
                     ),
                 },
             ],
+            ['/sdk/index.js', { type: 'text/javascript', bytes: runtime.sdk }],
             [
-                '/worker.js',
-                {
-                    type: 'text/javascript',
-                    bytes: client?.worker ?? runtime.worker,
-                },
-            ],
-            [
-                '/participant.wasm',
+                '/sdk/participant.wasm',
                 { type: 'application/wasm', bytes: runtime.module },
             ],
             ...(client === undefined
                 ? []
-                : [
+                : ([
+                      [
+                          '/worker.js',
+                          { type: 'text/javascript', bytes: client.worker },
+                      ],
                       [
                           '/' + client.path,
                           { type: 'application/wasm', bytes: client.module },
-                      ] as const,
-                  ]),
+                      ],
+                  ] as const)),
         ]);
     };
     const handle = async (
@@ -361,7 +374,7 @@ const startRelay = async (
                               {
                                   type: 'text/html',
                                   bytes: Buffer.from(
-                                      page(runtime, client.digest),
+                                      clientPage(runtime, client.digest),
                                   ),
                               },
                           ],
@@ -788,7 +801,7 @@ await runWithLocalRunLog(
                     await (
                         await participant(position)
                     ).evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open('sealed-lattice-participant');
+    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
         const database = opening.result;
@@ -805,7 +818,7 @@ await runWithLocalRunLog(
                     await (
                         await participant(position)
                     ).evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open('sealed-lattice-participant');
+    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
         const database = opening.result;
@@ -886,7 +899,7 @@ await runWithLocalRunLog(
                 try {
                     const generation = Number(
                         await chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open('sealed-lattice-participant');
+    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
         const database = opening.result;
@@ -898,7 +911,7 @@ await runWithLocalRunLog(
                     );
                     const record: unknown =
                         await chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open('sealed-lattice-participant');
+    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
         const database = opening.result;
@@ -1099,6 +1112,9 @@ await runWithLocalRunLog(
             });
             assert.equal(organizer.isOrganizer, true);
             await run(0, 'publish');
+            // An operation on an empty namespace is refused and leaves it
+            // empty, so that participant still joins below.
+            await expectStatus(1, 'status', 'refused');
             const definition = await readFile(
                 path.join(publicDirectory, 'poll-definition.bin'),
             );
@@ -2299,7 +2315,7 @@ await runWithLocalRunLog(
             const flipDataRecord = async () =>
                 (await participant(stoppedPosition))
                     .evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open('sealed-lattice-participant');
+    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
         const database = opening.result;

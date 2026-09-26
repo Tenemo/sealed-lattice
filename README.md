@@ -23,7 +23,7 @@ The application and library must not expose raw ballot, total, or intermediate-v
 
 ## Current implementation boundary
 
-The public package exposes construction-neutral foundation operations only:
+The public package exposes construction-neutral foundation operations:
 
 - poll validation;
 - canonical poll, action, and board-policy encoding;
@@ -32,7 +32,7 @@ The public package exposes construction-neutral foundation operations only:
 - content-addressed public-data retention and retrieval with authenticated replica acknowledgements; and
 - reproducible package assembly and public-export checks.
 
-The package also ships the participant WebAssembly module, its bundled worker and their source manifest, which no public API exposes yet. It does not expose ballot encryption, distributed setup, tally evaluation, finality signing, decryption shares, or result reconstruction. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
+It also exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
 
 The separate [protocol research workspace](crates/protocol-research/README.md) contains the executable native construction and its guarded runner. It is not part of the published SDK. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
 
@@ -84,6 +84,16 @@ console.log(manifest.manifestHash, manifest.canonicalBytes);
 `discover` yields bounded pages of untrusted root hints as replicas reply. Each replica has its own cursor over immutable content identities, so a large listing remains retrievable and one replica cannot move another's cursor. This traversal order makes no statement about publication time. A returned hint, an empty reply, a record purpose, or a storage acknowledgement never establishes ballot order, acceptance, closing, or a result. The protocol's owning verifier must check that every semantic predecessor is present. Future availability depends on the configured replica fault and retention assumptions; different URLs or keys do not establish independent physical fault domains.
 
 The repository's `tools/archive/public-archive-replica.ts` provides a local storage host exercised by the archive tests. It binds only loopback, verifies records before writing, flushes and reads staged files before replacement, and signs a retention acknowledgement only after checking the complete closure and retaining its discovery entry. Deployment, independent fault domains, power-loss durability, and long-term retention have not been qualified.
+
+### Participant
+
+`openParticipant({ namespace, relay })` opens the participant whose local state the namespace names on the page's origin; a namespace has 1 to 64 lower-case letters, digits and inner hyphens, and one namespace holds one participant of one poll. `run({ operation, parameters })` performs one operation in a fresh worker and returns `completed` with the participant's retained progress, `refused` when the operation is not available and nothing changed, `pending` when it waits for public input or storage, or `stopped` when missing or inconsistent local state ended the participant for good. An operation on an empty namespace other than `create` is refused and leaves it empty.
+
+The operations follow the lifecycle: `create` registers a poll's organizer from its canonical manifest or joins a poll from its signed definition, `publish` delivers the registration and the organizer's poll and roster records again, `propose-roster` and `accept-roster` agree on the roster, `contribute`, `confirm` and `open` prepare the setup, `verify-setup` verifies it, `ballot` casts or delivers the ballot, `close` collects ballots and closes, `target` signs the target vote, `release` releases the share, `result` combines the published shares, and `status` reports progress. Byte parameters are lower-case hexadecimal.
+
+The relay is an untrusted HTTP service at the given base URL. It serves a stored record at `public/<name>` and accepts a publication at `publish/<name>?offset=<offset>` of at most one mebibyte, appending it at the record's end or accepting an identical retransmission of stored bytes, and refusing any other chunk. Record names are lower-case path segments of letters, digits, dots and hyphens. Every participant verifies what it reads, so the relay cannot create a vote, a ballot or a result, but completion needs it to keep records retrievable after their authors leave.
+
+The worker runs from a `blob:` URL, compiles the packaged `participant.wasm` after checking its digest, and keeps its state in the IndexedDB databases `sealed-lattice-participant/<namespace>`, `sealed-lattice-setup/<namespace>` and `sealed-lattice-public-evaluation/<namespace>` under a Web Lock. It needs a secure context, Web Locks, WebCrypto and IndexedDB; a content security policy must allow `worker-src blob:`, WebAssembly compilation and fetching the module and the relay.
 
 ## Development
 

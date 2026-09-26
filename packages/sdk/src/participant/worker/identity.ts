@@ -1,6 +1,10 @@
 import type { ParticipantKernel } from './kernel.js';
 import type { ParticipantIdentities } from './predecessor.js';
 
+// The label of the runtime identity: the SHA-512 digest of this label and the
+// SHA-512 digests of the source manifest, the module and the worker.
+export const participantRuntimeLabel = 'participant-runtime/8';
+
 // The purposes whose identities the participant module derives, each under
 // its own domain. The target and envelope purposes yield the certified
 // target's and a ballot envelope's own identities.

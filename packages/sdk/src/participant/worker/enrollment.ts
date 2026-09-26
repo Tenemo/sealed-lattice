@@ -31,9 +31,9 @@ import {
 import type { AuthenticatedRoot, RecordReference } from './root.js';
 import { commitParticipantState } from './state-transaction.js';
 import {
+    isEmptyParticipant,
     participantRecordStores,
     participantStores,
-    snapshotParticipant,
 } from './storage.js';
 
 export type EnrollmentRequest = Readonly<
@@ -95,9 +95,7 @@ export const createEnrollment = async (
     onIntent: () => void,
 ): Promise<AuthenticatedRoot | undefined> => {
     const { database, limits, kernel, handlers, runtime } = context;
-    const empty = await snapshotParticipant(database);
-    if (participantStores.some((store) => empty.counts[store] !== 0))
-        return undefined;
+    if (!(await isEmptyParticipant(database))) return undefined;
     const name = encodeUsername(request.username);
     if (
         name === undefined ||

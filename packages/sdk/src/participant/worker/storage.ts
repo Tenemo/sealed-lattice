@@ -27,6 +27,17 @@ export const participantRecordStores = [
 
 export type ParticipantHead = Readonly<{ generation: number; hash: string }>;
 
+// One origin holds each participant under its own namespace, which names every
+// database and lock of that participant.
+export const participantNamespacePattern =
+    /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
+
+export const namespacedName = (name: string, namespace: string) =>
+    name + '/' + namespace;
+
+export const participantDatabaseName = (namespace: string) =>
+    namespacedName('sealed-lattice-participant', namespace);
+
 const requestResult = <Value>(request: IDBRequest<Value>) =>
     new Promise<Value>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
@@ -43,8 +54,10 @@ const transactionCompletion = (transaction: IDBTransaction) =>
             );
     });
 
-export const openParticipantDatabase = async (): Promise<IDBDatabase> => {
-    const request = indexedDB.open('sealed-lattice-participant', 1);
+export const openParticipantDatabase = async (
+    namespace: string,
+): Promise<IDBDatabase> => {
+    const request = indexedDB.open(participantDatabaseName(namespace), 1);
     request.onupgradeneeded = () => {
         for (const store of participantStores)
             request.result.createObjectStore(store);
@@ -136,6 +149,12 @@ export const snapshotParticipant = async (database: IDBDatabase) => {
             participantStores.map((store, index) => [store, counts[index]]),
         ) as Record<ParticipantStore, number>,
     };
+};
+
+// Whether the namespace holds nothing: no participant and no stop marker.
+export const isEmptyParticipant = async (database: IDBDatabase) => {
+    const { counts } = await snapshotParticipant(database);
+    return participantStores.every((store) => counts[store] === 0);
 };
 
 export const isParticipantHead = (value: unknown): value is ParticipantHead =>

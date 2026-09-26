@@ -3,13 +3,18 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { buildParticipantModule } from '#tools/ci/build-participant-module.js';
+import {
+    buildParticipantModule,
+    participantRuntimeIdentity,
+} from '#tools/ci/build-participant-module.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 
 const root = path.resolve('.');
 const packageOutput = path.join(root, 'packages/sdk/dist');
 
 export type ParticipantRuntime = Readonly<{
+    // The SDK entry that serves the participant API to the page.
+    sdk: Buffer;
     module: Buffer;
     worker: Buffer;
     identity: Readonly<{
@@ -36,10 +41,11 @@ export type CorruptParticipantClient = Readonly<{
     workerDigest: string;
 }>;
 
-// Takes the participant module, worker and source manifest the SDK build
-// packaged, copies every listed source into the run directory after checking
-// its digest, and computes the runtime identity the worker recomputes. When
-// requested, it also builds the invalid-ballot client from the same sources.
+// Takes the SDK entry, participant module, worker and source manifest the SDK
+// build packaged, copies every listed source into the run directory after
+// checking its digest, and computes the runtime identity the worker
+// recomputes. When requested, it also builds the invalid-ballot client from
+// the same sources.
 export const assembleParticipantRuntime = async (
     runLog: ActiveLocalRunLog,
     invalidBallot: boolean,
@@ -49,8 +55,9 @@ export const assembleParticipantRuntime = async (
         invalidBallotClient: CorruptParticipantClient | undefined;
     }>
 > => {
-    const [module, worker, sourceManifest] = await Promise.all(
+    const [sdk, module, worker, sourceManifest] = await Promise.all(
         [
+            'index.js',
             'participant.wasm',
             'participant-worker.js',
             'participant-source-manifest.json',
@@ -78,17 +85,7 @@ export const assembleParticipantRuntime = async (
         sourceManifest,
         { flag: 'wx' },
     );
-    const identity = {
-        source: sha512(sourceManifest),
-        module: sha512(module),
-        worker: sha512(worker),
-    };
-    const runtime = createHash('sha512')
-        .update('participant-runtime/8')
-        .update(Buffer.from(identity.source, 'hex'))
-        .update(Buffer.from(identity.module, 'hex'))
-        .update(Buffer.from(identity.worker, 'hex'))
-        .digest('hex');
+    const identity = participantRuntimeIdentity(sourceManifest, module, worker);
     const invalidBallotModule = invalidBallot
         ? (await buildParticipantModule('invalid-ballot')).module
         : undefined;
@@ -131,6 +128,7 @@ export const assembleParticipantRuntime = async (
                   return client;
               })();
     for (const [name, bytes] of [
+        ['index.js', sdk],
         ['participant.wasm', module],
         ['worker.js', worker],
         ...(invalidBallotClient === undefined
@@ -144,11 +142,7 @@ export const assembleParticipantRuntime = async (
             flag: 'wx',
         });
     return {
-        runtime: {
-            module,
-            worker,
-            identity: { runtime, ...identity },
-        },
+        runtime: { sdk, module, worker, identity },
         invalidBallotClient,
     };
 };
