@@ -596,10 +596,13 @@ const restoreSignedTarget = (context: ProfileContext, signed: TargetState) => {
 
 // Advances this participant's release to its signature. The owning setup
 // verifier must have verified the complete setup in this instance first.
-// Returns whether the certified target carries a result to release.
+// Once the target is certified, and before any release randomness, the
+// visit may archive the certified target closure it read. Returns whether
+// the certified target carries a result to release.
 export const advanceRelease = async (
     session: ReleaseSession,
     relay: PublicRelay,
+    archiveClosure?: () => Promise<void>,
 ) => {
     const { close } = session;
     const { context } = close.participant;
@@ -614,7 +617,9 @@ export const advanceRelease = async (
         throw new PublicInputFailure(
             'The public close records name another target.',
         );
-    if (!(await certifyTarget(context, relay))) return false;
+    const encrypted = await certifyTarget(context, relay);
+    await archiveClosure?.();
+    if (!encrypted) return false;
     // A release that follows the completed close takes the certified target.
     session.target ??= {
         body: evaluated.body,

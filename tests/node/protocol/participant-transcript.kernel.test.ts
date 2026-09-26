@@ -129,7 +129,7 @@ describe('participant transcript through the real scalar kernel and local replic
             read('close/intent.bin', Buffer.from('other')),
         ).rejects.toThrow(PublicInputFailure);
         const encoded = await recorder.archive();
-        expect(encoded.parts).toHaveLength(1);
+        expect(encoded.parts).toBe(1);
         // Four files, four chunks, one part and the index.
         expect(encoded.records).toBe(10);
         // Another replica is gone; the remaining one serves every record.
@@ -137,8 +137,8 @@ describe('participant transcript through the real scalar kernel and local replic
         const reader = await openArchive(configuration(), poll);
         expect(
             (await discoverTranscripts(reader)).map((index) => index.identity),
-        ).toContain(encoded.index.identity);
-        const source = await openTranscriptSource(reader, encoded.index);
+        ).toContain(encoded.transcript.identity);
+        const source = await openTranscriptSource(reader, encoded.transcript);
         for (const [name, bytes] of records) {
             const pieces: Uint8Array[] = [];
             expect(
@@ -165,7 +165,7 @@ describe('participant transcript through the real scalar kernel and local replic
         await expect(
             openTranscriptSource(
                 await openArchive(configuration(), '08'.repeat(64)),
-                encoded.index,
+                encoded.transcript,
             ),
         ).rejects.toThrow(PublicInputFailure);
         // One replica is not more than the fault bound, so no new transcript

@@ -43,9 +43,11 @@ export type ParticipantOptions = Readonly<{
      */
     relay: string;
     /**
-     * The archive replicas that retain the poll's transcript once a
-     * participant archives its verified result, with the fault bound `b`
-     * the application trusts: at least `2b + 1` and at most 32 replicas.
+     * The archive replicas that retain the poll's certified target closure,
+     * which a participant archives before it releases its share, and its
+     * transcript once a participant archives its verified result, with the
+     * fault bound `b` the application trusts: at least `2b + 1` and at most
+     * 32 replicas.
      */
     archive?: ParticipantArchive;
 }>;
@@ -114,13 +116,12 @@ export type ParticipantRequest = Readonly<
               | 'open'
               | 'verify-setup'
               | 'target'
-              | 'release'
               | 'archive'
               | 'transcripts';
           parameters?: PollBinding;
       }
     | {
-          operation: 'result';
+          operation: 'release' | 'result';
           parameters?: PollBinding &
               Readonly<{
                   /** An archived transcript's index to read instead of the relay. */

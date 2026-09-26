@@ -106,6 +106,15 @@ export const openArchive = (configuration: WorkerArchive, poll: string) =>
         };
     });
 
+// What archiving reports: the transcript's index, how many parts it lists,
+// and its record count and bytes.
+export type ArchivedTranscript = Readonly<{
+    transcript: ArchiveReference;
+    parts: number;
+    records: number;
+    byteLength: number;
+}>;
+
 /**
  * Records every public record a visit reads to its end under its name and
  * sends each record of the transcript to the replicas as it is produced. A
@@ -179,7 +188,7 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
         // may take as long to check a closure as this visit took to read and
         // verify the whole transcript.
         archive: () =>
-            publicly(async () => {
+            publicly(async (): Promise<ArchivedTranscript> => {
                 const encoded = await encodeTranscriptIndex(
                     opened.archive,
                     [...files.values()],
@@ -199,7 +208,12 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
                         root,
                         AbortSignal.timeout(deadline),
                     );
-                return encoded;
+                return {
+                    transcript: encoded.index,
+                    parts: encoded.parts.length,
+                    records: encoded.records,
+                    byteLength: encoded.byteLength,
+                };
             }),
     };
 };

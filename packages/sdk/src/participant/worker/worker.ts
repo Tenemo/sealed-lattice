@@ -86,7 +86,7 @@ import {
     openArchive,
     openTranscriptSource,
 } from './transcript.js';
-import type { WorkerArchive } from './transcript.js';
+import type { ArchivedTranscript, WorkerArchive } from './transcript.js';
 
 // The application's SDK supplies the namespace of the participant's local
 // state, the relay's base URL, the module's URL, the identities its build
@@ -625,13 +625,48 @@ const execute = async (
             // Release follows this participant's signed target, or its
             // completed close when it signed no target and a certificate
             // already exists; a pending target signature cannot be
-            // bypassed. A signed release is only delivered again.
+            // bypassed. With an archive, the visit that certifies the target
+            // before any release randomness first archives the certified
+            // target closure it read, as one transcript that more replicas
+            // than the fault bound acknowledge; a visit may instead read an
+            // archived closure the request names. A signed release is only
+            // delivered again.
             const generation = root.head.generation;
             if (
-                generation !== completedClosePhase(enrollment.isOrganizer) &&
-                generation < targetPhase.signed
+                (generation !== completedClosePhase(enrollment.isOrganizer) &&
+                    generation < targetPhase.signed) ||
+                (parameters.transcript !== undefined &&
+                    (command.archive === undefined ||
+                        generation >= releasePhase.signed))
             )
                 return { status: 'refused' };
+            const archiving =
+                parameters.transcript === undefined &&
+                generation < releasePhase.journal;
+            const archive =
+                command.archive === undefined ||
+                (!archiving && parameters.transcript === undefined)
+                    ? undefined
+                    : await openArchive(
+                          command.archive,
+                          hexadecimal(root.manifest.poll),
+                      );
+            const recorder =
+                archive === undefined || !archiving
+                    ? undefined
+                    : createTranscriptRecorder(archive);
+            const source: PublicRelay =
+                archive !== undefined && parameters.transcript !== undefined
+                    ? {
+                          ...relay,
+                          transcript: await openTranscriptSource(
+                              archive,
+                              transcriptReference(parameters.transcript),
+                          ),
+                      }
+                    : recorder === undefined
+                      ? relay
+                      : { ...relay, recorder };
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeRelease(
                 await resumeClose(participant, enrollment.isOrganizer),
@@ -650,12 +685,22 @@ const execute = async (
                                       session.state.journalKeys.length,
                               },
                           };
-                await reverifySetup(participant, relay);
-                const encrypted = await advanceRelease(session, relay);
+                await reverifySetup(participant, source);
+                let closure: ArchivedTranscript | undefined;
+                const encrypted = await advanceRelease(
+                    session,
+                    source,
+                    recorder === undefined
+                        ? undefined
+                        : async () => {
+                              closure = await recorder.archive();
+                          },
+                );
                 released = {
                     ...resumed,
                     predecessor: session.state?.predecessor,
                     encrypted,
+                    ...(closure === undefined ? {} : { closure }),
                 };
             }
             root = participant.root;
@@ -724,14 +769,7 @@ const execute = async (
                 details: {
                     ...summary(root, enrollment, profiled),
                     ...result,
-                    ...(transcript === undefined
-                        ? {}
-                        : {
-                              transcript: transcript.index,
-                              parts: transcript.parts.length,
-                              records: transcript.records,
-                              byteLength: transcript.byteLength,
-                          }),
+                    ...transcript,
                 },
             };
         }
