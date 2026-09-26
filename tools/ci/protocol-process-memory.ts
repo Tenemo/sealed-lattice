@@ -32,10 +32,11 @@ export const sumProtocolProcessTree = (
     }, 0);
 };
 
-export const readProtocolProcessTree = async (
-    identifier: number,
-): Promise<number | undefined> => {
-    assert.ok(Number.isSafeInteger(identifier) && identifier > 0);
+// Reads every process's parent and private bytes in one snapshot, from which
+// several process trees can be summed.
+export const readProtocolProcesses = async (): Promise<
+    readonly ProcessMemory[]
+> => {
     const execute = promisify(execFile);
     if (process.platform === 'win32') {
         const result = await execute(
@@ -53,20 +54,17 @@ export const readProtocolProcessTree = async (
             PrivatePageCount: number | string;
         }[];
         assert.ok(Array.isArray(rows));
-        return sumProtocolProcessTree(
-            identifier,
-            rows.map((row) => ({
-                identifier: row.ProcessId,
-                parent: row.ParentProcessId,
-                bytes: Number(row.PrivatePageCount),
-            })),
-        );
+        return rows.map((row) => ({
+            identifier: row.ProcessId,
+            parent: row.ParentProcessId,
+            bytes: Number(row.PrivatePageCount),
+        }));
     }
     const result = await execute('ps', ['-axo', 'pid=,ppid=,rss='], {
         timeout: 10_000,
         maxBuffer: 2 ** 22,
     });
-    const rows = result.stdout
+    return result.stdout
         .trim()
         .split(/\r?\n/u)
         .map((line) => {
@@ -78,5 +76,11 @@ export const readProtocolProcessTree = async (
                 bytes: values[2] * 1024,
             };
         });
-    return sumProtocolProcessTree(identifier, rows);
+};
+
+export const readProtocolProcessTree = async (
+    identifier: number,
+): Promise<number | undefined> => {
+    assert.ok(Number.isSafeInteger(identifier) && identifier > 0);
+    return sumProtocolProcessTree(identifier, await readProtocolProcesses());
 };

@@ -13,7 +13,7 @@ import {
 } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
-import { freemem } from 'node:os';
+import { availableParallelism, freemem } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -27,6 +27,7 @@ import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bou
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
@@ -34,13 +35,20 @@ import type {
 } from '#tools/ci/participant-runtime-assembly.js';
 import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
-import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import {
+    readProtocolProcesses,
+    sumProtocolProcessTree,
+} from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 
 // Runs a browser cohort of the selected profile through the maintained
 // participant runtime: each participant is its own origin with its own
 // external Chrome profile, and a local relay only stores and serves the
-// public records the participants publish. A no-result run closes with one
+// public records the participants publish. Participants never need to be
+// online together, so none waits for another's browser: every participant
+// whose inputs exist acts at once, in as many browsers as the host has room
+// for, and a browser stays open between its participant's operations until
+// another needs its room. A no-result run closes with one
 // valid on-time ballot fewer than the minimum turnout, and with a corrupt
 // participant's authentic invalid ballot on time when the profile tolerates
 // one. An empty run closes with no ballot at all. A result run of a profile
@@ -80,10 +88,6 @@ const leftOut = participantCount;
 // The host guard for each participant's Chrome process tree.
 const participantMemoryLimit = 3_221_225_472;
 const operationMilliseconds = 3_600_000;
-// A late ballot starts this much later, so that the organizer's close time
-// makes exactly the late ballots late. It exceeds the variation in the time
-// from a ballot request to its attempt lock across concurrent browsers.
-const lateBallotMilliseconds = 5_000;
 
 // The relay's layout: lower-case path segments of letters, digits, dots and
 // hyphens, with no traversal.
@@ -638,14 +642,27 @@ await runWithLocalRunLog(
             log.runDirectoryPath,
             root,
         );
-        const chromes: (ChromeParticipant | undefined)[] = [];
-        // Copies of a participant's private state, each its own Chrome
-        // process at that participant's origin: the equivocator's, and an
-        // honest participant's whose records are then lost.
-        const copies = new Map<
+        // Each browser runs a participant or a copy of a participant's
+        // private state, at that participant's origin.
+        const browserDetails = new Map<
             string,
-            Readonly<{ position: number; chrome: ChromeParticipant }>
+            Readonly<{ position: number; copy?: string }>
         >();
+        const browsers = createBrowserPool<ChromeParticipant>({
+            processors: availableParallelism(),
+            guardBytes: participantMemoryLimit,
+            freeMemory: freemem,
+            onEndedForRoom: (key) => {
+                log.writeEvent({
+                    eventType: 'participant-browser-ended-for-room',
+                    details: browserDetails.get(key),
+                });
+            },
+        });
+        // Copies of a participant's private state by name, each with its own
+        // Chrome profile at that participant's origin: the equivocator's, and
+        // an honest participant's whose records are then lost.
+        const copies = new Map<string, number>();
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
@@ -681,21 +698,6 @@ await runWithLocalRunLog(
                 mode === 'no-result' && maximumCorruptParticipantCount > 0
                     ? maximumCorruptParticipantCount
                     : undefined;
-            // The host holds twice the guard of every browser that can run at
-            // once: the participants and the registrant left out during
-            // registration, whose browser ends at the roster, and later the
-            // participants and the equivocator's copies. A copy that loses
-            // state replaces its participant's browser.
-            assert.ok(
-                freemem() >=
-                    2 *
-                        Math.max(
-                            leftOut + 1,
-                            participantCount + copyNames.length,
-                        ) *
-                        participantMemoryLimit,
-                'Insufficient host memory for the browser cohort.',
-            );
             // The bounds the worker derives, as the independent models give
             // them, for the expected sizes of the cohort's records.
             const bounds = compileParticipantRuntimeProfile(
@@ -736,41 +738,46 @@ await runWithLocalRunLog(
             const profileDirectory = profiles;
             const peaks = new Array<number>(leftOut + 1).fill(0);
             const copyPeaks = new Map<string, number>();
-            // Samples one Chrome process tree against the guard.
-            const sample = async (
-                chrome: ChromeParticipant,
-                details: Readonly<{ position: number; copy?: string }>,
-            ) => {
-                const bytes = await readProtocolProcessTree(
-                    chrome.processIdentifier,
-                );
-                if (bytes === undefined) return 0;
-                log.writeEvent({
-                    eventType: 'participant-process-memory',
-                    details: { ...details, bytes },
-                });
-                if (bytes > participantMemoryLimit)
-                    guardFailure ??= new Error(
-                        'Participant process-tree memory guard exceeded.',
-                    );
-                return bytes;
-            };
+            // Samples every open browser's process tree against the guard,
+            // from one snapshot of the host's processes.
             monitor = (async () => {
                 while (sampling) {
-                    for (const [position, chrome] of chromes.entries())
-                        if (chrome !== undefined)
-                            peaks[position] = Math.max(
-                                peaks[position],
-                                await sample(chrome, { position }),
-                            );
-                    for (const [copy, { position, chrome }] of copies)
-                        copyPeaks.set(
-                            copy,
-                            Math.max(
-                                copyPeaks.get(copy) ?? 0,
-                                await sample(chrome, { position, copy }),
-                            ),
+                    const processes = await readProtocolProcesses();
+                    for (const {
+                        key,
+                        browser,
+                        sampled,
+                    } of browsers.launched()) {
+                        const details = browserDetails.get(key);
+                        const bytes = sumProtocolProcessTree(
+                            browser.processIdentifier,
+                            processes,
                         );
+                        if (details === undefined || bytes === undefined)
+                            continue;
+                        sampled(bytes);
+                        log.writeEvent({
+                            eventType: 'participant-process-memory',
+                            details: { ...details, bytes },
+                        });
+                        if (bytes > participantMemoryLimit)
+                            guardFailure ??= new Error(
+                                'Participant process-tree memory guard exceeded.',
+                            );
+                        if (details.copy === undefined)
+                            peaks[details.position] = Math.max(
+                                peaks[details.position],
+                                bytes,
+                            );
+                        else
+                            copyPeaks.set(
+                                details.copy,
+                                Math.max(
+                                    copyPeaks.get(details.copy) ?? 0,
+                                    bytes,
+                                ),
+                            );
+                    }
                     await delay(2000);
                 }
             })();
@@ -778,11 +785,15 @@ await runWithLocalRunLog(
                 `http://127.0.0.1:${String(basePort + position)}`;
             const profile = (position: number) =>
                 path.join(profileDirectory, `participant-${String(position)}`);
+            const copyProfile = (copy: string) =>
+                path.join(profileDirectory, `copy-${copy}`);
+            const participantBrowser = (position: number) =>
+                `participant-${String(position)}`;
+            const copyBrowser = (copy: string) => `copy-${copy}`;
             // A departed participant's browser and private state are gone.
             const departed = new Set<number>();
             const depart = async (position: number) => {
-                await chromes[position]?.close();
-                chromes[position] = undefined;
+                await browsers.close(participantBrowser(position));
                 departed.add(position);
                 await rm(profile(position), {
                     recursive: true,
@@ -790,24 +801,52 @@ await runWithLocalRunLog(
                     retryDelay: 500,
                 });
             };
-            const participant = async (position: number) => {
-                assert.ok(!departed.has(position), 'The participant departed.');
-                const existing = chromes[position];
-                if (existing !== undefined) return existing;
-                const chrome = await launchChromeParticipant(
-                    profile(position),
-                    origin(position),
+            // Runs an action in a participant's browser, or in the browser of
+            // a copy of its private state, opening the browser when it is not
+            // open.
+            const inBrowser = async <Result>(
+                position: number,
+                copy: string | undefined,
+                action: (chrome: ChromeParticipant) => Promise<Result>,
+            ) => {
+                assert.ok(
+                    copy !== undefined || !departed.has(position),
+                    'The participant departed.',
                 );
-                chromes[position] = chrome;
-                log.writeEvent({
-                    eventType: 'participant-browser',
-                    details: {
-                        position,
-                        version: chrome.version,
-                        launchArguments: chrome.launchArguments,
+                assert.ok(
+                    copy === undefined || copies.get(copy) === position,
+                    'The copy does not exist.',
+                );
+                const key =
+                    copy === undefined
+                        ? participantBrowser(position)
+                        : copyBrowser(copy);
+                const details = {
+                    position,
+                    ...(copy === undefined ? {} : { copy }),
+                };
+                return browsers.use(
+                    key,
+                    async () => {
+                        const chrome = await launchChromeParticipant(
+                            copy === undefined
+                                ? profile(position)
+                                : copyProfile(copy),
+                            origin(position),
+                        );
+                        browserDetails.set(key, details);
+                        log.writeEvent({
+                            eventType: 'participant-browser',
+                            details: {
+                                ...details,
+                                version: chrome.version,
+                                launchArguments: chrome.launchArguments,
+                            },
+                        });
+                        return chrome;
                     },
-                });
-                return chrome;
+                    action,
+                );
             };
             // Runs one operation in a participant's page, or in a copy of its
             // private state.
@@ -816,44 +855,42 @@ await runWithLocalRunLog(
                 operation: string,
                 parameters: Record<string, unknown> = {},
                 copy?: string,
-            ) => {
-                const chrome =
-                    copy === undefined
-                        ? await participant(position)
-                        : copies.get(copy)?.chrome;
-                assert.ok(chrome !== undefined, 'The copy is not running.');
-                const started = performance.now();
-                // The deadline ends with its operation so that no timer
-                // outlives the run.
-                const deadline = new AbortController();
-                let result: WorkerResult;
-                try {
-                    result = (await Promise.race([
-                        chrome.evaluate(
-                            `window.runParticipant(${JSON.stringify(operation)}, ${JSON.stringify(parameters)})`,
-                        ),
-                        delay(operationMilliseconds, undefined, {
-                            signal: deadline.signal,
-                        }).then(() => {
-                            throw new Error('Participant operation deadline.');
-                        }),
-                    ])) as WorkerResult;
-                } finally {
-                    deadline.abort();
-                }
-                if (guardFailure !== undefined) throw guardFailure;
-                log.writeEvent({
-                    eventType: 'participant-operation',
-                    details: {
-                        position,
-                        ...(copy === undefined ? {} : { copy }),
-                        operation,
-                        milliseconds: performance.now() - started,
-                        result,
-                    },
+            ) =>
+                inBrowser(position, copy, async (chrome) => {
+                    const started = performance.now();
+                    // The deadline ends with its operation so that no timer
+                    // outlives the run.
+                    const deadline = new AbortController();
+                    let result: WorkerResult;
+                    try {
+                        result = (await Promise.race([
+                            chrome.evaluate(
+                                `window.runParticipant(${JSON.stringify(operation)}, ${JSON.stringify(parameters)})`,
+                            ),
+                            delay(operationMilliseconds, undefined, {
+                                signal: deadline.signal,
+                            }).then(() => {
+                                throw new Error(
+                                    'Participant operation deadline.',
+                                );
+                            }),
+                        ])) as WorkerResult;
+                    } finally {
+                        deadline.abort();
+                    }
+                    if (guardFailure !== undefined) throw guardFailure;
+                    log.writeEvent({
+                        eventType: 'participant-operation',
+                        details: {
+                            position,
+                            ...(copy === undefined ? {} : { copy }),
+                            operation,
+                            milliseconds: performance.now() - started,
+                            result,
+                        },
+                    });
+                    return result;
                 });
-                return result;
-            };
             const run = async (
                 position: number,
                 operation: string,
@@ -905,11 +942,10 @@ await runWithLocalRunLog(
             const departing: number | undefined = outsiders[1];
             // Reads the generation of a participant's committed head from its
             // own page, reading nothing else.
-            const headGeneration = async (position: number) =>
+            const headGeneration = async (position: number, copy?: string) =>
                 Number(
-                    await (
-                        await participant(position)
-                    ).evaluate(`new Promise((resolve, reject) => {
+                    await inBrowser(position, copy, (chrome) =>
+                        chrome.evaluate(`new Promise((resolve, reject) => {
     const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
@@ -919,14 +955,14 @@ await runWithLocalRunLog(
         reading.onerror = () => { database.close(); reject(reading.error); };
     };
 })`),
+                    ),
                 );
             // Counts a participant's records in one store from its own page,
             // reading none of them.
             const storedRecords = async (position: number, store: string) =>
                 Number(
-                    await (
-                        await participant(position)
-                    ).evaluate(`new Promise((resolve, reject) => {
+                    await inBrowser(position, undefined, (chrome) =>
+                        chrome.evaluate(`new Promise((resolve, reject) => {
     const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
@@ -936,22 +972,21 @@ await runWithLocalRunLog(
         counting.onerror = () => { database.close(); reject(counting.error); };
     };
 })`),
+                    ),
                 );
-            const copyProfile = (copy: string) =>
-                path.join(profileDirectory, `copy-${copy}`);
             // Ends a participant's browser as a crash would. Its committed
             // state is what the next launch finds, while Chrome's own
             // shutdown can outlast its deadline when other browsers write.
             const endBrowser = async (position: number) => {
-                await chromes[position]?.crash();
-                chromes[position] = undefined;
+                await browsers.crash(participantBrowser(position));
             };
             // Copies a participant's private state into its own Chrome
-            // process at the participant's origin. The participant's browser
-            // ends first, so the copy holds exactly the committed state its
-            // next launch would find; crash reporting state is not
-            // participant state, and its handler can outlive the browser.
-            const copyParticipant = async (position: number, copy: string) => {
+            // profile at the participant's origin, whose browser opens when
+            // the copy acts. The participant's browser ends first, so the
+            // copy holds exactly the committed state its next launch would
+            // find; crash reporting state is not participant state, and its
+            // handler can outlive the browser.
+            const copyState = async (position: number, copy: string) => {
                 await endBrowser(position);
                 await cp(profile(position), copyProfile(copy), {
                     recursive: true,
@@ -960,24 +995,10 @@ await runWithLocalRunLog(
                     filter: (source) =>
                         path.relative(profile(position), source) !== 'Crashpad',
                 });
-                const chrome = await launchChromeParticipant(
-                    copyProfile(copy),
-                    origin(position),
-                );
-                copies.set(copy, { position, chrome });
-                log.writeEvent({
-                    eventType: 'participant-browser',
-                    details: {
-                        position,
-                        copy,
-                        version: chrome.version,
-                        launchArguments: chrome.launchArguments,
-                    },
-                });
-                return chrome;
+                copies.set(copy, position);
             };
             const removeCopy = async (copy: string) => {
-                await copies.get(copy)?.chrome.crash();
+                await browsers.crash(copyBrowser(copy));
                 copies.delete(copy);
                 await rm(copyProfile(copy), {
                     recursive: true,
@@ -1004,22 +1025,14 @@ await runWithLocalRunLog(
             ) => {
                 assert.ok(honest(position), 'Only honest state is lost.');
                 const copy = `lost-${store}-${String(position)}`;
-                const chrome = await copyParticipant(position, copy);
+                await copyState(position, copy);
                 try {
-                    const generation = Number(
-                        await chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const reading = database.transaction('head').objectStore('head').get(0);
-        reading.onsuccess = () => { database.close(); resolve(reading.result?.generation ?? 0); };
-        reading.onerror = () => { database.close(); reject(reading.error); };
-    };
-})`),
-                    );
-                    const record: unknown =
-                        await chrome.evaluate(`new Promise((resolve, reject) => {
+                    const generation = await headGeneration(position, copy);
+                    const record: unknown = await inBrowser(
+                        position,
+                        copy,
+                        (chrome) =>
+                            chrome.evaluate(`new Promise((resolve, reject) => {
     const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
@@ -1037,7 +1050,8 @@ await runWithLocalRunLog(
         deleting.oncomplete = () => { database.close(); resolve(key); };
         deleting.onabort = () => fail(deleting.error);
     };
-})`);
+})`),
+                    );
                     const result = await request(position, operation, {}, copy);
                     assert.ok(
                         result.status === 'stopped' &&
@@ -1069,7 +1083,7 @@ await runWithLocalRunLog(
                     await removeCopy(copy);
                 }
             };
-            // Loads a halting client in the participant's browser, whose
+            // Loads a halting client in the participant's next browser, whose
             // participant stops for good once it durably enters the
             // generation.
             const armHalt = async (position: number, generation: number) => {
@@ -1079,7 +1093,6 @@ await runWithLocalRunLog(
                     position,
                     haltingClient(runtime.worker, generation),
                 );
-                await participant(position);
             };
             // Runs an operation in a halting client. The browser crashes once
             // its participant enters the generation, with no shutdown work
@@ -1119,8 +1132,7 @@ await runWithLocalRunLog(
                         if ((await headGeneration(position)) === generation)
                             break;
                     }
-                    await chromes[position]?.crash();
-                    chromes[position] = undefined;
+                    await endBrowser(position);
                     await assert.rejects(halted);
                 } finally {
                     halting.delete(position);
@@ -1163,8 +1175,7 @@ await runWithLocalRunLog(
                     )
                         break;
                 }
-                await chromes[position]?.crash();
-                chromes[position] = undefined;
+                await endBrowser(position);
                 await assert.rejects(interrupted);
                 assert.equal(
                     await headGeneration(position),
@@ -1406,7 +1417,7 @@ await runWithLocalRunLog(
             // The departing participant leaves after its preparation.
             if (departing !== undefined) await depart(departing);
             // Every participant that did not depart signs one ballot, the late
-            // ones starting later. A result closes with every ballot but the
+            // ones after the others. A result closes with every ballot but the
             // last on time, or with every ballot when a position equivocates.
             // A no-result target has one valid on-time ballot fewer than the
             // minimum turnout, from the honest positions just before the last,
@@ -1460,8 +1471,8 @@ await runWithLocalRunLog(
             const lateBallots = ballotAuthors.filter(
                 (position) => !onTimeBallots.includes(position),
             );
-            // Before its ballot the equivocator copies its private state,
-            // and each copy runs as its own Chrome process at the same origin.
+            // Before its ballot the equivocator's private state is copied
+            // twice, and each copy acts in its own browser at the same origin.
             // The relay refuses the pointer to the equivocator's ballot until
             // every ballot is signed, so that the pointer it stores names the
             // original ballot.
@@ -1469,9 +1480,7 @@ await runWithLocalRunLog(
                 'ballot-' + String(author) + '/submission.bin';
             if (equivocator !== undefined) {
                 for (const copy of copyNames)
-                    await copyParticipant(equivocator, copy);
-                // The original browser runs again before any ballot starts.
-                await participant(equivocator);
+                    await copyState(equivocator, copy);
                 refusedPublications.add(pointerName(equivocator));
             }
             const refusedDelivery = {
@@ -1481,9 +1490,7 @@ await runWithLocalRunLog(
             // The first honest authors halt between them at every ballot
             // generation: after the attempt lock, with the journal complete,
             // with the body partly retained, with the signature intent, and
-            // with the signed ballot before its delivery. Each first halt is
-            // loaded before any ballot starts, so that its attempt locks with
-            // the others.
+            // with the signed ballot before its delivery.
             const ballotHalts = new Map(
                 ballotAuthors
                     .filter(honest)
@@ -1496,65 +1503,64 @@ await runWithLocalRunLog(
                             ] as const,
                     ),
             );
-            for (const [position, halts] of ballotHalts)
-                await armHalt(position, halts[0]);
+            const signBallot = async (position: number) => {
+                const scores = ballotScores(position);
+                if (position === equivocator) {
+                    assert.deepEqual(
+                        await request(position, 'ballot', { scores }),
+                        refusedDelivery,
+                    );
+                    return;
+                }
+                // A signed ballot is only delivered again. A copy of the state
+                // with the complete journal loses a journal record and stops.
+                const halts = ballotHalts.get(position) ?? [];
+                for (const generation of halts) {
+                    await interrupt(position, 'ballot', { scores }, generation);
+                    if (generation === 14)
+                        await loseState(position, 'ballot', 'ballot');
+                }
+                assert.equal(
+                    (
+                        await run(
+                            position,
+                            'ballot',
+                            halts.includes(17) ? {} : { scores },
+                        )
+                    ).generation,
+                    17,
+                );
+            };
+            // Each copy of the equivocator's state signs other scores.
+            const signCopy = async (copy: string) => {
+                assert.ok(equivocator !== undefined);
+                assert.deepEqual(
+                    await request(
+                        equivocator,
+                        'ballot',
+                        {
+                            scores: ballotScores(
+                                participantCount + copyNames.indexOf(copy),
+                            ),
+                        },
+                        copy,
+                    ),
+                    refusedDelivery,
+                );
+            };
+            // The on-time ballots and the conflicting copy's are signed
+            // together, and the late ones, the late copy's among them, only
+            // once every on-time ballot is signed, so that each late ballot is
+            // timed after every on-time one.
+            const copyBallots = (copy: string) =>
+                equivocator === undefined ? [] : [signCopy(copy)];
             await Promise.all([
-                ...ballotAuthors.map(async (position) => {
-                    if (lateBallots.includes(position))
-                        await delay(lateBallotMilliseconds);
-                    const scores = ballotScores(position);
-                    if (position === equivocator)
-                        assert.deepEqual(
-                            await request(position, 'ballot', { scores }),
-                            refusedDelivery,
-                        );
-                    else {
-                        // A signed ballot is only delivered again. A copy of
-                        // the state with the complete journal loses a
-                        // journal record and stops.
-                        const halts = ballotHalts.get(position) ?? [];
-                        for (const generation of halts) {
-                            await interrupt(
-                                position,
-                                'ballot',
-                                { scores },
-                                generation,
-                            );
-                            if (generation === 14)
-                                await loseState(position, 'ballot', 'ballot');
-                        }
-                        assert.equal(
-                            (
-                                await run(
-                                    position,
-                                    'ballot',
-                                    halts.includes(17) ? {} : { scores },
-                                )
-                            ).generation,
-                            17,
-                        );
-                    }
-                }),
-                // Each copy signs other scores, the late one starting later.
-                ...(equivocator === undefined
-                    ? []
-                    : copyNames.map(async (copy, index) => {
-                          if (copy === 'late')
-                              await delay(lateBallotMilliseconds);
-                          assert.deepEqual(
-                              await request(
-                                  equivocator,
-                                  'ballot',
-                                  {
-                                      scores: ballotScores(
-                                          participantCount + index,
-                                      ),
-                                  },
-                                  copy,
-                              ),
-                              refusedDelivery,
-                          );
-                      })),
+                ...onTimeBallots.map(signBallot),
+                ...copyBallots('conflicting'),
+            ]);
+            await Promise.all([
+                ...lateBallots.map(signBallot),
+                ...copyBallots('late'),
             ]);
             if (equivocator !== undefined) {
                 // The original ballot is only delivered again, now with its
@@ -2171,8 +2177,9 @@ await runWithLocalRunLog(
                         )
                             break;
                     }
-                    await chromes[interruptedPosition]?.close();
-                    chromes[interruptedPosition] = undefined;
+                    await browsers.close(
+                        participantBrowser(interruptedPosition),
+                    );
                     await assert.rejects(interrupted);
                     const details = await run(interruptedPosition, 'release');
                     assert.equal(details.generation, 29);
@@ -2628,8 +2635,8 @@ await runWithLocalRunLog(
             // page, and a second flip restores it.
             const stoppedPosition = probes[0];
             const flipDataRecord = async () =>
-                (await participant(stoppedPosition))
-                    .evaluate(`new Promise((resolve, reject) => {
+                inBrowser(stoppedPosition, undefined, (chrome) =>
+                    chrome.evaluate(`new Promise((resolve, reject) => {
     const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
@@ -2650,7 +2657,8 @@ await runWithLocalRunLog(
             }, fail);
         };
     };
-})`);
+})`),
+                );
             const alteredRecord = await flipDataRecord();
             assert.deepEqual(await request(stoppedPosition, 'status'), {
                 status: 'stopped',
@@ -2781,11 +2789,7 @@ await runWithLocalRunLog(
         } finally {
             sampling = false;
             await monitor;
-            for (const chrome of [
-                ...chromes,
-                ...[...copies.values()].map((value) => value.chrome),
-            ])
-                await chrome?.close().catch(() => undefined);
+            await browsers.closeAll();
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));
             if (profiles !== undefined)
