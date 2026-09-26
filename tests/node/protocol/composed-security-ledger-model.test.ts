@@ -454,6 +454,31 @@ describe('composed security ledger', () => {
         );
     });
 
+    it('charges the seeded contribution randomness its one-way-to-hiding bound', () => {
+        // Two 512-bit seeds per roster participant, and 2^80 oracle calls in
+        // any experiment within the target: 2*sqrt((q+1)*4q*m/2^512) is at
+        // most 4(q+1)*ceil(sqrt(m))/2^256.
+        const calls = 1n << 80n;
+        for (const [participantCount, optionCount, root] of [
+            [3, 2, 3n],
+            [10, 10, 5n],
+            [20, 20, 7n],
+        ] as const) {
+            const seeds = 2n * BigInt(participantCount);
+            expect(root * root).toBeGreaterThanOrEqual(seeds);
+            expect((root - 1n) * (root - 1n)).toBeLessThan(seeds);
+            const term = profileStatisticalTerms(
+                deriveSupportedProfile(participantCount, optionCount),
+            ).find((value) => value.name === 'Contribution seed expansion')!;
+            expect(term.numerator).toBe(4n * (calls + 1n) * root);
+            // Squared and scaled by 2^512, the exact bound 16(q+1)qm is at
+            // most the charged term squared.
+            expect(16n * (calls + 1n) * calls * seeds).toBeLessThanOrEqual(
+                term.numerator * term.numerator,
+            );
+        }
+    });
+
     it('charges proof soundness at every hop that relies on it', () => {
         for (const participantCount of [3, 10, 20]) {
             const honest = Array.from(

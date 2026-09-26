@@ -14,7 +14,11 @@ import { PublicInputFailure, sessionInput } from './context.js';
 import type { ParticipantContext } from './context.js';
 import type { ParticipantDescriptor } from './descriptor.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
-import { readKernel, writeProofInput } from './kernel.js';
+import {
+    readKernel,
+    writeContributionSeed,
+    writeProofInput,
+} from './kernel.js';
 import { publishChunk, publishRecord, readPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
@@ -34,17 +38,21 @@ import {
 import type { VerifiedProposal } from './roster.js';
 import {
     addParticipantRecords,
+    discardStagedRecords,
     readParticipantValue,
     snapshotParticipant,
 } from './storage.js';
 
-// A participant's setup contribution. Generation four locks a one-shot intent
-// before the prover draws randomness; generation five retains the sealed
-// first-oracle checkpoint and the retained body polynomials; generation six
-// locks the one-shot continuation; generation seven retains the complete
-// body. Generations eight to eleven sign the confirmation and, after every
-// confirmation is known, the opening, each with coins locked beforehand. The
-// root's contribution suffix lists every record key and ciphertext hash.
+// A participant's setup contribution. Generation four locks the generation
+// intent with the seed of all its randomness before the prover draws any;
+// generation five retains the sealed first-oracle checkpoint and the retained
+// body polynomials; generation six locks the continuation with the seed of
+// its randomness; generation seven retains the complete body. An interrupted
+// generation or continuation draws the same bytes from its seed again, so it
+// reproduces the same outputs. Generations eight to eleven sign the
+// confirmation and, after every confirmation is known, the opening, each with
+// coins locked beforehand. The root's contribution suffix lists every record
+// key and ciphertext hash.
 
 type RecordLocation = Readonly<{
     object: number;
@@ -64,6 +72,8 @@ type ContributionState = Readonly<{
     publicRecords: readonly SealedRecord[];
     privateRecords: readonly CheckpointRecord[];
     signingRecords: readonly SealedRecord[];
+    // The randomness seed of a generation or continuation intent.
+    seed: Uint8Array;
     coins: Uint8Array;
 }>;
 
@@ -92,6 +102,7 @@ const privateEntryBytes = 32 + 64;
 const signingEntryBytes = 2 + 4 + 32 + 64;
 const keyBytes = 32;
 const coinBytes = 32;
+const seedBytes = 64;
 const identityBytes = 64;
 
 // Prover phases: generation below one hundred, then one hundred plus the
@@ -173,8 +184,8 @@ const signingLength = (descriptor: ParticipantDescriptor, kind: SigningKind) =>
             ? inventoryBytes(descriptor)
             : descriptor.registration.signatureBytes;
 
-// The records and coins each generation retains; later generations keep the
-// opened state.
+// The records, seed and coins each generation retains; later generations
+// keep the opened state.
 const retainedShape = (generation: number) => {
     const stage = Math.min(generation, 11);
     return {
@@ -189,6 +200,7 @@ const retainedShape = (generation: number) => {
                     : stage === 10
                       ? 4
                       : 5,
+        seedBytes: stage === 4 || stage === 6 ? seedBytes : 0,
         coinBytes: stage === 8 || stage === 10 ? coinBytes : 0,
     };
 };
@@ -206,7 +218,7 @@ const proofLength = (
 
 const encodeContributionState = (state: ContributionState) =>
     concatenate(
-        encodeText('PCS1'),
+        encodeText('PCS2'),
         unsigned16(state.position),
         state.salt,
         unsigned32(state.header.length),
@@ -234,6 +246,7 @@ const encodeContributionState = (state: ContributionState) =>
                 record.hash,
             ),
         ),
+        state.seed,
         state.coins,
     );
 
@@ -252,7 +265,7 @@ const decodeContributionState = (
         generation < 4 ||
         bytes.length < prefix ||
         bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('PCS1'))
+        !equalBytes(bytes.subarray(0, 4), encodeText('PCS2'))
     )
         throw new Error('Invalid contribution state.');
     const position = readUnsigned16(bytes, 4);
@@ -288,6 +301,7 @@ const decodeContributionState = (
                 publicEntryBytes * publicCount +
                 privateEntryBytes * privateCount +
                 signingEntryBytes * signingCount +
+                shape.seedBytes +
                 shape.coinBytes
     )
         throw new Error(
@@ -368,7 +382,8 @@ const decodeContributionState = (
         publicRecords,
         privateRecords,
         signingRecords,
-        coins: bytes.slice(offset),
+        seed: bytes.slice(offset, offset + shape.seedBytes),
+        coins: bytes.slice(offset + shape.seedBytes),
     };
 };
 
@@ -643,8 +658,9 @@ const splitPacket = (
 };
 
 // Runs prover commands with the randomness of one generation or
-// continuation. Only generation emits statement output; its retained body
-// output is sealed and stored as it arrives.
+// continuation, which the module expands from its retained seed. Only
+// generation emits statement output; its retained body output is sealed and
+// stored as it arrives.
 const proverRun = (session: ContributionSession, statement: boolean) => {
     const { context } = session;
     const { kernel, handlers, descriptor } = context;
@@ -658,10 +674,28 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
     let current = 0;
     let emitted = 0;
     let randomBytes = 0;
+    if (session.state.seed.length !== seedBytes)
+        throw new Error('No contribution randomness seed is retained.');
+    writeContributionSeed(kernel, session.state.seed);
+    if (kernel.contribution_random_command(0, seedBytes) !== 0)
+        throw new Error('The contribution randomness refused its seed.');
     handlers.random = (source, target) => {
         if (source !== 'witness' && source !== 'proof')
             throw new Error('Unexpected contribution randomness request.');
-        crypto.getRandomValues(target);
+        if (
+            kernel.contribution_random_command(
+                source === 'witness' ? 1 : 2,
+                target.length,
+            ) !== 0
+        )
+            throw new Error('The contribution randomness refused a request.');
+        const output = new Uint8Array(
+            kernel.memory.buffer,
+            kernel.contribution_random_output_pointer() >>> 0,
+            target.length,
+        );
+        target.set(output);
+        output.fill(0);
         randomBytes += target.length;
     };
     handlers.contribution = (object, offset, bytes) => {
@@ -746,15 +780,40 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         close: () => {
             handlers.random = undefined;
             handlers.contribution = undefined;
+            kernel.contribution_random_command(3, 0);
             for (const record of pending) record.bytes.fill(0);
             pending.length = 0;
         },
     };
 };
 
-// Locks the one-shot contribution intent for the verified signed proposal
-// after the credential accepts its position and the origin has room for the
-// retained contribution.
+// Discards what an interrupted generation or continuation stored before its
+// root committed: at generation four every contribution and checkpoint
+// record, and at generation six every proof record. Their keys existed only
+// in the interrupted operation, which runs again from its retained seed.
+export const discardInterruptedRecords = (
+    context: ParticipantContext,
+    root: AuthenticatedRoot,
+) => {
+    const proof = proofObject(context.descriptor);
+    if (root.head.generation === 4)
+        return discardStagedRecords(context.database, [
+            { store: 'contribution' },
+            { store: 'checkpoint' },
+        ]);
+    if (root.head.generation === 6)
+        return discardStagedRecords(context.database, [
+            {
+                store: 'contribution',
+                keys: IDBKeyRange.bound([proof], [proof + 1], false, true),
+            },
+        ]);
+    throw new Error('No interrupted contribution work is retained.');
+};
+
+// Locks the contribution intent with a fresh randomness seed for the
+// verified signed proposal after the credential accepts its position and the
+// origin has room for the retained contribution.
 export const beginContribution = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
@@ -793,6 +852,7 @@ export const beginContribution = async (
             publicRecords: [],
             privateRecords: [],
             signingRecords: [],
+            seed: crypto.getRandomValues(new Uint8Array(seedBytes)),
             coins: new Uint8Array(),
         },
     };
@@ -800,8 +860,11 @@ export const beginContribution = async (
     return session;
 };
 
-// Generates the contribution, advances the proof to the last first-oracle
-// column, and retains the sealed checkpoint with the body polynomials.
+// Generates the contribution from the intent's seed, advances the proof to
+// the last first-oracle column, and retains the sealed checkpoint with the
+// body polynomials. The checkpoint retires the seed. An interrupted
+// generation runs again from the same seed once its stored records are
+// discarded.
 export const generateContribution = async (session: ContributionSession) => {
     const { context } = session;
     const { kernel, descriptor } = context;
@@ -874,6 +937,7 @@ export const generateContribution = async (session: ContributionSession) => {
             header,
             publicRecords: run.stored,
             privateRecords,
+            seed: new Uint8Array(),
         },
         staged: true,
     });
@@ -888,7 +952,8 @@ export const restoreCheckpoint = async (
 ) => {
     const { context, state } = session;
     const { kernel, descriptor } = context;
-    if (session.root.head.generation !== 5)
+    const { generation } = session.root.head;
+    if (generation !== 5 && generation !== 6)
         throw new Error('No contribution checkpoint is retained.');
     if (
         checkpoint(
@@ -951,15 +1016,26 @@ export const restoreCheckpoint = async (
         throw new Error('The contribution did not resume exactly.');
 };
 
-// Locks the one-shot continuation, completes the proof over the retained
-// body, and retains the complete body.
+// Locks the continuation with a fresh randomness seed, completes the proof
+// over the retained body, and retains the complete body, which retires the
+// seed. An interrupted continuation runs again from the same seed once its
+// stored proof records are discarded.
 export const continueContribution = async (session: ContributionSession) => {
-    const { context, state } = session;
+    const { context } = session;
     const { descriptor } = context;
     const bounds = descriptor.contribution;
-    if (session.root.head.generation !== 5)
+    const { generation } = session.root.head;
+    if (generation !== 5 && generation !== 6)
         throw new Error('No contribution checkpoint is retained.');
-    await commitContribution(session, { generation: 6, state });
+    if (generation === 5)
+        await commitContribution(session, {
+            generation: 6,
+            state: {
+                ...session.state,
+                seed: crypto.getRandomValues(new Uint8Array(seedBytes)),
+            },
+        });
+    const { state } = session;
     const run = proverRun(session, false);
     const proof: SealedRecord[] = [];
     const buffer = new Uint8Array(chunkBytes);
@@ -1041,6 +1117,7 @@ export const continueContribution = async (session: ContributionSession) => {
             header: new Uint8Array(),
             publicRecords: [...state.publicRecords, ...proof],
             privateRecords: [],
+            seed: new Uint8Array(),
         },
         staged: true,
         clearCheckpoint: true,

@@ -91,6 +91,27 @@ export const addParticipantRecords = async (
     await done;
 };
 
+// Deletes staged records that no root references, in one strict
+// transaction: a whole store, or the keys of a range in it.
+export const discardStagedRecords = async (
+    database: IDBDatabase,
+    ranges: readonly Readonly<{
+        store: ParticipantStore;
+        keys?: IDBKeyRange;
+    }>[],
+): Promise<void> => {
+    const transaction = database.transaction(
+        ranges.map((range) => range.store),
+        'readwrite',
+        { durability: 'strict' },
+    );
+    const done = transactionCompletion(transaction);
+    for (const { store, keys } of ranges)
+        if (keys === undefined) transaction.objectStore(store).clear();
+        else transaction.objectStore(store).delete(keys);
+    await done;
+};
+
 // One consistent read of the root authority and every store's cardinality.
 export const snapshotParticipant = async (database: IDBDatabase) => {
     const transaction = database.transaction(

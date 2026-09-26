@@ -19,7 +19,8 @@ registration-proof = { path = "../registration-proof", default-features = false 
 contribution-prover = { path = "../contribution-prover", default-features = false }
 setup-witness = { path = "../setup-witness", features = ["custody"] }
 num-bigint = "=0.5.1"
-sha3 = "=0.10.9"
+# The contribution randomness streams hold secret sponge states.
+sha3 = { version = "=0.10.9", features = ["zeroize"] }
 zeroize = "=1.8.2"
 ballot-proof = { path = "../ballot-proof", default-features = false }
 ballot-encryption = { path = "../ballot-encryption", default-features = false }

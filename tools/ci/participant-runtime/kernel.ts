@@ -89,6 +89,10 @@ const kernelFunctions = [
     'contribution_checkpoint_records',
     'contribution_checkpoint_command',
     'contribution_checkpoint_key',
+    // The contribution randomness expanded from its retained seed.
+    'contribution_random_input_pointer',
+    'contribution_random_output_pointer',
+    'contribution_random_command',
     'setup_input_pointer',
     'setup_input_capacity',
     'setup_chunk_capacity',
@@ -257,6 +261,20 @@ export const writeSetupInput = (
         capacity - offset,
     );
 };
+
+// The contribution randomness reads one seed from its own buffer.
+const contributionSeedBytes = 64;
+
+export const writeContributionSeed = (
+    kernel: ParticipantKernel,
+    seed: Uint8Array,
+) =>
+    writeKernel(
+        kernel,
+        kernel.contribution_random_input_pointer(),
+        seed,
+        contributionSeedBytes,
+    );
 
 export const writeProofInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
     writeKernel(

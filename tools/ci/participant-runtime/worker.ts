@@ -30,6 +30,7 @@ import {
     beginContribution,
     confirmContribution,
     continueContribution,
+    discardInterruptedRecords,
     generateContribution,
     openContribution,
     publishConfirmation,
@@ -304,19 +305,25 @@ const execute = async (
             break;
         }
         case 'contribute': {
-            // Generation and continuation each draw their randomness once;
-            // an interrupted intent cannot resume.
-            if (root.head.generation < 3 || root.head.generation >= 7)
-                return { status: 'refused' };
-            if (root.head.generation === 4 || root.head.generation === 6)
-                throw new Error('Interrupted contribution work cannot resume.');
+            // Generation and continuation each draw their randomness from a
+            // seed retained before they start, so an interrupted one runs
+            // again from its seed once what it stored is discarded.
+            const { generation } = root.head;
+            if (generation < 3 || generation >= 7) return { status: 'refused' };
+            if (generation === 4 || generation === 6)
+                await discardInterruptedRecords(context, root);
             let session;
-            if (root.head.generation === 3) {
-                session = await beginContribution(
+            if (generation === 3 || generation === 4) {
+                const proposal = await reverifyRoster(
                     context,
+                    relay,
                     root,
-                    await reverifyRoster(context, relay, root, enrollment),
+                    enrollment,
                 );
+                session =
+                    generation === 3
+                        ? await beginContribution(context, root, proposal)
+                        : await resumeContribution(context, root, proposal);
                 await generateContribution(session);
             } else {
                 session = await resumeContribution(context, root);

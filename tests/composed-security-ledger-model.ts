@@ -18,6 +18,7 @@ import {
 } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { prefixReplacementBaseQueriesPerAccess } from '#tests/oracle-domain-model.js';
+import { contributionSeedBytes } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import {
     compileProofCompilerChronology,
@@ -106,6 +107,15 @@ const dyadic = (numerator: bigint, denominator: bigint): bigint => {
         (numerator * (1n << statisticalDenominatorBits) + denominator - 1n) /
         denominator
     );
+};
+
+// Smallest integer r with value <= r^2, for the small counts the ledger takes
+// square roots of.
+const ceilingSquareRoot = (value: bigint) => {
+    assert.ok(value >= 0n && value <= 1n << 20n);
+    let root = 0n;
+    while (root * root < value) root += 1n;
+    return root;
 };
 
 const power = (bits: bigint) =>
@@ -274,6 +284,22 @@ export const profileStatisticalTerms = (
                             BigInt(profile.participantCount) *
                             row.callsPerOperation,
                     })),
+            ),
+        },
+        {
+            // Every roster participant expands its generation and
+            // continuation randomness from two uniform seeds through the
+            // ideal SHAKE256, and nothing else reads a seed. Replacing all 2n
+            // streams by uniform bytes costs, by the semi-classical
+            // one-way-to-hiding lemma over q oracle calls of the complete
+            // experiment and s-bit seeds, 2*sqrt((q+1)*4q*2n/2^s), at most
+            // 4(q+1)*sqrt(2n)/2^(s/2).
+            name: 'Contribution seed expansion',
+            numerator: dyadic(
+                4n *
+                    (caps.adversaryQueries + 1n) *
+                    ceilingSquareRoot(2n * BigInt(profile.participantCount)),
+                1n << (4n * contributionSeedBytes),
             ),
         },
         {

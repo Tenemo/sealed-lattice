@@ -10,6 +10,10 @@ import { compileSetupContributionRelationCensus } from '#tests/setup-contributio
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
+// A contribution's generation and continuation each expand their private
+// randomness from one 512-bit seed retained with their intent.
+export const contributionSeedBytes = 64n;
+
 export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
     const checkpoint = compileFirstOracleCheckpointCensus(profile);
@@ -48,11 +52,14 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const maximumProofRecords =
         (body.maximumProofBytes + chunkBytes - 1n) / chunkBytes;
     const metadataPrefixBytes = 4n + 2n + body.saltBytes + 4n * 4n;
+    // The continuation intent keeps the checkpoint and the seed of the
+    // continuation's randomness.
     const maximumCheckpointMetadataBytes =
         metadataPrefixBytes +
         checkpoint.maximumHeaderBytes +
         106n * BigInt(publicRecords.length) +
-        96n * checkpoint.recordCount;
+        96n * checkpoint.recordCount +
+        contributionSeedBytes;
     const maximumCompletedMetadataBytes =
         metadataPrefixBytes +
         106n * (BigInt(publicRecords.length) + maximumProofRecords) +

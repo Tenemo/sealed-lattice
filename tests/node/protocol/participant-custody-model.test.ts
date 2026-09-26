@@ -58,6 +58,27 @@ describe('shared participant custody', () => {
         expect(value.maximumRetainedPayloadBytes).toBeLessThan(2_147_483_648n);
     });
 
+    it('bounds the continuation intent with its checkpoint and its randomness seed', () => {
+        const value = compileParticipantCustodyCensus(completionProfile());
+        const checkpoint =
+            compileFirstOracleCheckpointCensus(completionProfile());
+        const body = compileContributionBodyCensus(completionProfile());
+        // The marker, position, salt and four counts, the checkpoint header,
+        // each body record's object, offset, length, key and hash, each
+        // checkpoint record's key and hash, and the 512-bit seed.
+        const expected =
+            4n +
+            2n +
+            body.saltBytes +
+            16n +
+            checkpoint.maximumHeaderBytes +
+            (2n + 4n + 4n + 32n + 64n) * BigInt(value.publicRecords.length) +
+            (32n + 64n) * checkpoint.recordCount +
+            512n / 8n;
+        expect(value.maximumCheckpointMetadataBytes).toBe(expected);
+        expect(value.maximumMetadataBytes).toBeGreaterThanOrEqual(expected);
+    });
+
     it('counts repeated reads as work without inventing new AES inputs', () => {
         const first = { nonce: 0n, plaintextBytes: 17n, associatedBytes: 1n };
         const second = { nonce: 1n, plaintextBytes: 1n, associatedBytes: 0n };
