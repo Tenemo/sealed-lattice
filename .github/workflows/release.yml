@@ -44,6 +44,7 @@ jobs:
                   persist-credentials: false
                   ref: ${{ github.sha }}
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: ./.github/actions/participant-toolchain
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   toolchain: 1.90.0
@@ -174,6 +175,7 @@ jobs:
                   persist-credentials: false
                   ref: ${{ needs.verify.outputs.tag }}
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: ./.github/actions/participant-toolchain
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   toolchain: 1.90.0

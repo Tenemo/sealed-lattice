@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-
-import binaryen from 'binaryen';
-import { build } from 'tsdown';
 
 import type { ParticipantDescriptor } from '#packages/sdk/src/participant/worker/descriptor.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
@@ -29,15 +25,11 @@ import {
     deriveSupportedProfile,
 } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
+import { buildParticipantModule } from '#tools/ci/build-participant-module.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
-import { runCommandAndCaptureOutput } from '#tools/ci/run-command.js';
 
-// The participant module's linear memory never exceeds the absolute bound.
-const maximumMemoryBytes = 671_088_640;
-const rustflagSeparator = '\x1f';
 const root = path.resolve('.');
-const workspace = path.join(root, 'crates/protocol-research');
-const runtimeSources = path.join(root, 'packages/sdk/src/participant/worker');
+const packageOutput = path.join(root, 'packages/sdk/dist');
 
 const number = (value: bigint) => {
     const converted = Number(value);
@@ -193,16 +185,6 @@ export const deriveParticipantDescriptor = (
     };
 };
 
-// The imports the participant module may declare, by module and name.
-const allowedImports = [
-    'ballot.fill_random',
-    'contribution.public_chunk',
-    'enrollment.fill_random',
-    'enrollment.staged_chunk',
-    'setup_witness.fill_random',
-    'word_proof.fill_random',
-];
-
 export type ParticipantRuntime = Readonly<{
     module: Buffer;
     worker: Buffer;
@@ -218,38 +200,6 @@ export type ParticipantRuntime = Readonly<{
 const sha512 = (bytes: Uint8Array | string) =>
     createHash('sha512').update(bytes).digest('hex');
 
-// Snapshots one source tree into the run directory and lists each file's
-// digest, so the runtime identity binds the exact sources.
-const snapshotSources = async (
-    runLog: ActiveLocalRunLog,
-    directory: string,
-    files: { file: string; sha512: string; bytes: number }[],
-): Promise<void> => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-        if (entry.name === 'target' || entry.name === '.git') continue;
-        const file = path.join(directory, entry.name);
-        if (entry.isDirectory()) {
-            await snapshotSources(runLog, file, files);
-            continue;
-        }
-        assert.ok(entry.isFile(), 'Runtime sources must be ordinary files.');
-        const relative = path.relative(root, file).split(path.sep).join('/');
-        const bytes = await readFile(file);
-        const destination = path.join(
-            runLog.runDirectoryPath,
-            'sources',
-            relative,
-        );
-        await mkdir(path.dirname(destination), { recursive: true });
-        await writeFile(destination, bytes, { flag: 'wx' });
-        files.push({
-            file: relative,
-            sha512: sha512(bytes),
-            bytes: bytes.length,
-        });
-    }
-};
-
 // A corrupt participant's client claims the honest runtime: its worker
 // fetches and hashes the honest module as the honest worker does, then
 // compiles the module at the client's own path, which signs authentic invalid
@@ -263,10 +213,10 @@ export type CorruptParticipantClient = Readonly<{
     workerDigest: string;
 }>;
 
-// Builds the scalar participant module and the bundled worker from tracked
-// sources, checks the module's scalar code, imports and memory, and computes
-// the runtime identity the worker recomputes. When requested, it also builds
-// the invalid-ballot client from the same sources.
+// Takes the participant module, worker and source manifest the SDK build
+// packaged, copies every listed source into the run directory after checking
+// its digest, and computes the runtime identity the worker recomputes. When
+// requested, it also builds the invalid-ballot client from the same sources.
 export const assembleParticipantRuntime = async (
     runLog: ActiveLocalRunLog,
     descriptor: ParticipantDescriptor,
@@ -277,164 +227,37 @@ export const assembleParticipantRuntime = async (
         invalidBallotClient: CorruptParticipantClient | undefined;
     }>
 > => {
-    const execute = async (
-        command: string,
-        args: string[],
-        name: string,
-        environment: NodeJS.ProcessEnv = process.env,
-    ) => {
-        const result = await runCommandAndCaptureOutput(
-            {
-                command,
-                args,
-                env: environment,
-                workingDirectoryPath: workspace,
-                description: name,
-                logFileSlug: name,
-            },
-            { runLog, signal: AbortSignal.timeout(1_800_000) },
-        );
-        assert.equal(result.exitCode, 0, name);
-        assert.equal(result.terminationSignal, null, name);
-        return result.stdout;
-    };
-    const compiler = await execute('rustc', ['+1.95.0', '-Vv'], 'compiler');
-    assert.match(
-        compiler,
-        /commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860/u,
+    const [module, worker, sourceManifest] = await Promise.all(
+        [
+            'participant.wasm',
+            'participant-worker.js',
+            'participant-source-manifest.json',
+        ].map((name) => readFile(path.join(packageOutput, name))),
     );
-    const cargoHome = path.resolve(
-        process.env.CARGO_HOME ?? path.join(os.homedir(), '.cargo'),
-    );
-    const flags = [
-        '--remap-path-prefix',
-        `${root}=/workspace`,
-        '--remap-path-prefix',
-        `${cargoHome}=/cargo`,
-        '-C',
-        'target-feature=-simd128',
-        '-C',
-        `link-arg=--max-memory=${String(maximumMemoryBytes)}`,
-    ];
-    const { RUSTFLAGS: _ignored, ...inherited } = process.env;
-    // Each module has its own target directory, so neither build can read
-    // the other's output.
-    const buildModule = async (feature: string | undefined) => {
-        const prefix = feature === undefined ? '' : feature + '-';
-        const targetDirectory = path.join(
-            root,
-            'temp/participant-runtime-' + prefix + 'target',
-        );
-        await execute(
-            'cargo',
-            [
-                '+1.95.0',
-                'build',
-                '--offline',
-                '--locked',
-                '--release',
-                '-p',
-                'registration-enrollment',
-                ...(feature === undefined ? [] : ['--features', feature]),
-                '--lib',
-                '--target',
-                'wasm32-unknown-unknown',
-            ],
-            prefix + 'participant-module',
-            {
-                ...inherited,
-                CARGO_ENCODED_RUSTFLAGS: flags.join(rustflagSeparator),
-                CARGO_INCREMENTAL: '0',
-                CARGO_TARGET_DIR: targetDirectory,
-            },
-        );
-        const module = await readFile(
-            path.join(
-                targetDirectory,
-                'wasm32-unknown-unknown/release/registration_enrollment.wasm',
-            ),
-        );
-        const inspected = binaryen.readBinary(module);
-        try {
-            assert.equal(
-                /\b(?:v128|i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\./u.test(
-                    inspected.emitText(),
-                ),
-                false,
-                'The participant module contains vector instructions.',
-            );
-            const memory = inspected.getMemoryInfo();
-            assert.ok(
-                !memory.shared &&
-                    !memory.is64 &&
-                    memory.max === maximumMemoryBytes / 65_536,
-                'The participant module memory is not the bounded scalar memory.',
-            );
-        } finally {
-            inspected.dispose();
+    const listed = (
+        JSON.parse(sourceManifest.toString('utf8')) as {
+            files: { file: string; sha512: string; bytes: number }[];
         }
-        const compiled = await WebAssembly.compile(module);
-        const imports = WebAssembly.Module.imports(compiled);
-        assert.ok(
-            imports.every(
-                (value) =>
-                    value.kind === 'function' &&
-                    allowedImports.includes(value.module + '.' + value.name),
-            ),
-            'The participant module declares an unexpected import.',
-        );
-        return module;
-    };
-    const module = await buildModule(undefined);
-    const invalidBallotModule = invalidBallot
-        ? await buildModule('invalid-ballot')
-        : undefined;
-    const bundle = path.join(root, 'temp/participant-runtime-bundle');
-    await rm(bundle, { recursive: true, force: true });
-    await build({
-        config: false,
-        clean: true,
-        cwd: root,
-        dts: false,
-        entry: { worker: path.join(runtimeSources, 'worker.ts') },
-        failOnWarn: true,
-        format: 'esm',
-        logLevel: 'warn',
-        minify: false,
-        outDir: bundle,
-        outputOptions: { codeSplitting: false },
-        platform: 'browser',
-        report: false,
-        sourcemap: false,
-        target: 'es2022',
-        treeshake: true,
-        tsconfig: path.join(root, 'packages/sdk/tsconfig.json'),
-    });
-    const outputs = (await readdir(bundle)).filter((name) =>
-        /\.m?js$/u.test(name),
-    );
-    assert.equal(outputs.length, 1, 'The worker bundle is not one file.');
-    const worker = await readFile(path.join(bundle, outputs[0]));
-    const files: { file: string; sha512: string; bytes: number }[] = [];
-    await snapshotSources(runLog, workspace, files);
-    await snapshotSources(runLog, runtimeSources, files);
-    for (const file of ['tools/ci/participant-runtime-assembly.ts']) {
+    ).files;
+    for (const { file, sha512: digest } of listed) {
         const bytes = await readFile(path.join(root, file));
+        assert.equal(
+            sha512(bytes),
+            digest,
+            'The packaged participant runtime was built from other sources: ' +
+                file,
+        );
         const destination = path.join(runLog.runDirectoryPath, 'sources', file);
         await mkdir(path.dirname(destination), { recursive: true });
         await writeFile(destination, bytes, { flag: 'wx' });
-        files.push({ file, sha512: sha512(bytes), bytes: bytes.length });
     }
-    files.sort((left, right) => (left.file < right.file ? -1 : 1));
-    const sourceManifest = JSON.stringify({ compiler, flags, files });
     await writeFile(
         path.join(runLog.runDirectoryPath, 'source-manifest.json'),
-        sourceManifest + '\n',
+        sourceManifest,
         { flag: 'wx' },
     );
-    const source = sha512(sourceManifest);
     const identity = {
-        source,
+        source: sha512(sourceManifest),
         module: sha512(module),
         worker: sha512(worker),
     };
@@ -447,6 +270,9 @@ export const assembleParticipantRuntime = async (
             createHash('sha512').update(JSON.stringify(descriptor)).digest(),
         )
         .digest('hex');
+    const invalidBallotModule = invalidBallot
+        ? (await buildParticipantModule('invalid-ballot')).module
+        : undefined;
     const invalidBallotClient =
         invalidBallotModule === undefined
             ? undefined

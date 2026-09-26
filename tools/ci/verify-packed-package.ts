@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { checkParticipantModule } from './build-participant-module.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
@@ -25,6 +26,8 @@ import {
     type CommandInvocation,
 } from './run-command.js';
 
+import { kernelFunctions } from '#packages/sdk/src/participant/worker/kernel.js';
+
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const expectedPackageFiles = [
     'LICENSE',
@@ -32,6 +35,9 @@ const expectedPackageFiles = [
     'dist/index.d.ts',
     'dist/index.js',
     'dist/index.js.map',
+    'dist/participant-source-manifest.json',
+    'dist/participant-worker.js',
+    'dist/participant.wasm',
     'dist/sealed-lattice-kernel.wasm',
     'package.json',
 ] as const;
@@ -220,6 +226,70 @@ const requireFoundationOnlyKernel = async (
     }
 };
 
+// The published participant module exports exactly what the worker calls,
+// the worker is one self-contained module, and the source manifest names no
+// machine path.
+const requireParticipantRuntime = async (
+    packageDirectoryPath: string,
+): Promise<void> => {
+    const dist = path.join(packageDirectoryPath, 'dist');
+    const [module, worker, manifest] = await Promise.all([
+        readFile(path.join(dist, 'participant.wasm')),
+        readFile(path.join(dist, 'participant-worker.js'), 'utf8'),
+        readFile(path.join(dist, 'participant-source-manifest.json'), 'utf8'),
+    ]);
+    await checkParticipantModule(module);
+    const exportNames = WebAssembly.Module.exports(
+        new WebAssembly.Module(module),
+    )
+        .map((entry) => entry.name)
+        .sort();
+    const expectedExportNames = [
+        ...kernelFunctions,
+        '__data_end',
+        '__heap_base',
+        'memory',
+    ].sort();
+    if (JSON.stringify(exportNames) !== JSON.stringify(expectedExportNames))
+        throw new Error(
+            `Published participant module exports differ from the worker's inventory: ${exportNames.join(', ')}.`,
+        );
+    if (
+        /^\s*import\s*(?:[\w$*{]|["'])|\bimport\s*\(/mu.test(worker) ||
+        worker.includes('@sealed-lattice/')
+    )
+        throw new Error('The published participant worker imports a module.');
+    const parsed = JSON.parse(manifest) as unknown;
+    const record = requireRecord(parsed, 'Participant source manifest');
+    const files = record.files;
+    if (
+        typeof record.compiler !== 'string' ||
+        !Array.isArray(record.flags) ||
+        !record.flags.every((value) => typeof value === 'string') ||
+        !Array.isArray(files) ||
+        files.length === 0 ||
+        !files.every((value, index) => {
+            const entry = requireRecord(value, 'Participant source');
+            return (
+                typeof entry.file === 'string' &&
+                typeof entry.sha512 === 'string' &&
+                /^[0-9a-f]{128}$/u.test(entry.sha512) &&
+                Number.isSafeInteger(entry.bytes) &&
+                (index === 0 ||
+                    String(
+                        requireRecord(files[index - 1], 'Participant source')
+                            .file,
+                    ) < entry.file)
+            );
+        }) ||
+        /[A-Za-z]:[\\/]|\/(?:home|Users)\//u.test(manifest) ||
+        manifest !== JSON.stringify(parsed) + '\n'
+    )
+        throw new Error(
+            'The published participant source manifest is malformed.',
+        );
+};
+
 const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
     await mkdir(consumerDirectoryPath);
     await Promise.all([
@@ -292,6 +362,7 @@ const verifyPackedPackage = async (
         await stagePublicPackage(packageDirectory);
         await requireSelfContainedBundle(packageDirectory);
         await requireFoundationOnlyKernel(packageDirectory);
+        await requireParticipantRuntime(packageDirectory);
         await runPackageManager(
             runLog,
             resolvePackageManagerRunner(),

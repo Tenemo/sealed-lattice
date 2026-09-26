@@ -32,7 +32,7 @@ The public package exposes construction-neutral foundation operations only:
 - content-addressed public-data retention and retrieval with authenticated replica acknowledgements; and
 - reproducible package assembly and public-export checks.
 
-It does not expose ballot encryption, distributed setup, tally evaluation, finality signing, decryption shares, or result reconstruction. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
+The package also ships the participant WebAssembly module, its bundled worker and their source manifest, which no public API exposes yet. It does not expose ballot encryption, distributed setup, tally evaluation, finality signing, decryption shares, or result reconstruction. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
 
 The separate [protocol research workspace](crates/protocol-research/README.md) contains the executable native construction and its guarded runner. It is not part of the published SDK. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
 
@@ -87,10 +87,11 @@ The repository's `tools/archive/public-archive-replica.ts` provides a local stor
 
 ## Development
 
-The repository uses Node.js 24.14.1 and pnpm 11.25.0.
+The repository uses Node.js 24.14.1, pnpm 11.25.0, Rust 1.90.0 for the foundation kernel, and Rust 1.95.0 with the `wasm32-unknown-unknown` target for the participant module. The participant module builds offline, so fetch its locked dependencies once before the first build.
 
 ```bash
 pnpm install --frozen-lockfile
+cargo +1.95.0 fetch --locked --manifest-path crates/protocol-research/Cargo.toml
 pnpm run check
 ```
 

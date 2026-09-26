@@ -12,6 +12,9 @@ const generatedArtifactRelativePaths = [
     'packages/sdk/dist/index.d.ts',
     'packages/sdk/dist/index.js',
     'packages/sdk/dist/index.js.map',
+    'packages/sdk/dist/participant-source-manifest.json',
+    'packages/sdk/dist/participant-worker.js',
+    'packages/sdk/dist/participant.wasm',
     'packages/sdk/dist/sealed-lattice-kernel.wasm',
 ] as const;
 

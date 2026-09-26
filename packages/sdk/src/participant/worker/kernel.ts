@@ -1,7 +1,7 @@
 // The participant scalar module's exports that the worker calls. A command
 // returns zero on success unless its comment says otherwise; the owning Rust
 // state machine decides acceptance.
-const kernelFunctions = [
+export const kernelFunctions = [
     'input_pointer',
     'input_capacity',
     'poll_identity_pointer',
