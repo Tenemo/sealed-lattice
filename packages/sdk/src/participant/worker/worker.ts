@@ -370,6 +370,8 @@ const execute = async (
         root.head.generation >= 2
             ? await retainedProfile(context, root, enrollment)
             : undefined;
+    // What an operation reports beside the participant's summary.
+    let reported: Readonly<Record<string, unknown>> = {};
     const profileContext = (): ProfileContext => {
         if (profiled === undefined)
             throw new Error('The participant profile is not known.');
@@ -556,6 +558,10 @@ const execute = async (
             await completeBallot(session);
             root = participant.root;
             await publishBallot(session, relay);
+            // A ballot created in this visit reports the proof randomness
+            // the module drew.
+            if (session.proofRandomBytes !== undefined)
+                reported = { proofRandomBytes: session.proofRandomBytes };
             break;
         }
         case 'close': {
@@ -600,7 +606,7 @@ const execute = async (
             const generation = root.head.generation;
             if (
                 generation < completedClosePhase(enrollment.isOrganizer) ||
-                (generation >= releasePhase.journal &&
+                (generation >= releasePhase.locked &&
                     root.manifest.suffixes.target?.length === 0)
             )
                 return { status: 'refused' };
@@ -642,7 +648,7 @@ const execute = async (
                 return { status: 'refused' };
             const archiving =
                 parameters.transcript === undefined &&
-                generation < releasePhase.journal;
+                generation < releasePhase.locked;
             const archive =
                 command.archive === undefined ||
                 (!archiving && parameters.transcript === undefined)
@@ -674,17 +680,11 @@ const execute = async (
             let released = {};
             if (generation < releasePhase.signed) {
                 // A release continued from an earlier visit reports the
-                // generation and journal records it resumed from.
+                // generation it resumed from.
                 const resumed =
                     session.state === undefined
                         ? {}
-                        : {
-                              resumedFrom: {
-                                  generation,
-                                  journalRecords:
-                                      session.state.journalKeys.length,
-                              },
-                          };
+                        : { resumedFrom: { generation } };
                 await reverifySetup(participant, source);
                 let closure: ArchivedTranscript | undefined;
                 const encrypted = await advanceRelease(
@@ -696,11 +696,17 @@ const execute = async (
                               closure = await recorder.archive();
                           },
                 );
+                // A release generated in this visit reports the proof
+                // randomness the module drew.
+                const { proofRandomBytes } = session;
                 released = {
                     ...resumed,
                     predecessor: session.state?.predecessor,
                     encrypted,
                     ...(closure === undefined ? {} : { closure }),
+                    ...(proofRandomBytes === undefined
+                        ? {}
+                        : { proofRandomBytes }),
                 };
             }
             root = participant.root;
@@ -796,14 +802,17 @@ const execute = async (
     // A roster retained by this operation names the profile only now.
     return {
         status: 'completed',
-        details: summary(
-            root,
-            enrollment,
-            profiled ??
-                (root.head.generation >= 2
-                    ? await retainedProfile(context, root, enrollment)
-                    : undefined),
-        ),
+        details: {
+            ...summary(
+                root,
+                enrollment,
+                profiled ??
+                    (root.head.generation >= 2
+                        ? await retainedProfile(context, root, enrollment)
+                        : undefined),
+            ),
+            ...reported,
+        },
     };
 };
 

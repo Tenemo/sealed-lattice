@@ -47,11 +47,6 @@ impl Random {
         value - (BigInt::from(1) << (bits - 1))
     }
 }
-/// The whole reads of a release's partial-decryption noise, which it draws
-/// before its proof, one uniform word of whole bytes per coefficient.
-pub fn noise_random_bytes(profile: Profile) -> usize {
-    (SYSTEMATIC * profile.release_noise_bits().div_ceil(8)).next_multiple_of(RANDOM_READ_BYTES)
-}
 fn center(value: BigInt, modulus: &BigInt) -> BigInt {
     let value = (value % modulus + modulus) % modulus;
     if value > modulus >> 1usize {

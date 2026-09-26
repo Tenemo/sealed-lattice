@@ -6,7 +6,6 @@ import {
     encodeReleaseState,
     releasePhase,
     releaseRecordInventory,
-    releaseRecordKind,
     releaseRecordLengths,
 } from '#packages/sdk/src/participant/worker/release-state.js';
 import type { ReleaseState } from '#packages/sdk/src/participant/worker/release-state.js';
@@ -37,15 +36,7 @@ const stateAt = (
 ): ReleaseState => ({
     predecessor,
     target: filled(targetLength, 5),
-    journalKeys:
-        phase === releasePhase.signed
-            ? []
-            : keys(
-                  phase === releasePhase.journal
-                      ? bounds.journalRecords - 1
-                      : bounds.journalRecords,
-                  1,
-              ),
+    seed: phase === releasePhase.ready ? filled(64, 6) : new Uint8Array(),
     bodyLength: phase >= releasePhase.body ? bodyLength : 0,
     bodyKeys:
         phase >= releasePhase.body ? keys(bodyRecords(bodyLength), 200) : [],
@@ -154,26 +145,25 @@ describe('participant release state', () => {
                 bodyKeys: keys(bodyRecords(bounds.maximumBodyBytes) - 1, 9),
             }),
         );
-        // A journal is complete from the ready phase until the signature.
+        // Only the ready phase retains the seed, and it retains all of it.
+        for (const phase of phases)
+            refused(
+                phase,
+                encodeReleaseState(phase, {
+                    ...stateAt(phase, 7, bounds.minimumBodyBytes),
+                    seed:
+                        phase === releasePhase.ready
+                            ? filled(63, 6)
+                            : filled(64, 6),
+                }),
+            );
+        // Every phase names a target.
         refused(
-            releasePhase.ready,
-            encodeReleaseState(releasePhase.ready, {
-                ...stateAt(releasePhase.ready, 7, 0),
-                journalKeys: keys(bounds.journalRecords - 1, 1),
-            }),
-        );
-        refused(
-            releasePhase.journal,
-            encodeReleaseState(releasePhase.journal, {
-                ...stateAt(releasePhase.journal, 7, 0),
-                journalKeys: [],
-            }),
-        );
-        refused(
-            releasePhase.journal,
-            encodeReleaseState(releasePhase.journal, {
-                ...stateAt(releasePhase.journal, 0, 0),
-            }),
+            releasePhase.locked,
+            encodeReleaseState(
+                releasePhase.locked,
+                stateAt(releasePhase.locked, 0, 0),
+            ),
         );
     });
 
@@ -187,26 +177,14 @@ describe('participant release state', () => {
         const digest = filled(64, 8);
         const state = stateAt(releasePhase.intent, 7, bounds.maximumBodyBytes);
         const records = releaseRecordInventory(profile, context, digest, state);
-        expect(records.map((record) => record.key)).toEqual([
-            ...state.journalKeys.map((_key, index) => [
-                releaseRecordKind.journal,
-                index,
-            ]),
-            ...state.bodyKeys.map((_key, index) => [
-                releaseRecordKind.body,
-                index,
-            ]),
-        ]);
-        const lengths = [
-            ...releaseRecordLengths(profile, bounds.journalBytes),
-            ...releaseRecordLengths(profile, bounds.maximumBodyBytes),
-        ];
+        expect(records.map((record) => record.key)).toEqual(
+            state.bodyKeys.map((_key, index) => index),
+        );
+        const lengths = releaseRecordLengths(profile, bounds.maximumBodyBytes);
         expect(records.map((record) => record.byteLength)).toEqual(
             lengths.map((length) => length + 16),
         );
-        expect(
-            lengths.slice(0, bounds.journalRecords).reduce((a, b) => a + b),
-        ).toBe(bounds.journalBytes);
+        expect(lengths.reduce((a, b) => a + b)).toBe(bounds.maximumBodyBytes);
         const bindings = new Set(
             records.map((record) =>
                 Buffer.from(record.encryption!.additionalData).toString('hex'),

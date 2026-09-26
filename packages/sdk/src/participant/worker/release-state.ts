@@ -9,6 +9,7 @@ import {
     unsigned32,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
+import { operationSeedBytes } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
@@ -16,26 +17,22 @@ import { targetPhase } from './target-state.js';
 
 // The release suffix follows the signed target, or the completed close when
 // the participant signed no target and a certificate already exists; the
-// target field then stays empty. Generation 25 appends the
-// journal of original random bytes one encrypted record per transition, and
-// the append of its final record enters generation 26. Generation 27 retains
-// the generated body's records and its envelope, 28 also the signing coins
-// before the signature exists, and 29 the signature, retiring the journal.
+// target field then stays empty. Generation 25 locks the certified target,
+// and generation 26 adds the seed of all the release's randomness before
+// any private generation. Generation 27 retains the generated body's records
+// and its envelope, retiring the seed; 28 also the signing coins before the
+// signature exists, and 29 the signature.
 
 export const releasePhase = {
-    journal: 25,
+    locked: 25,
     ready: 26,
     body: 27,
     intent: 28,
     signed: 29,
 } as const;
 
-// The release store holds journal records under kind zero and body records
-// under kind one, each at [kind, index].
-export const releaseRecordKind = { journal: 0, body: 1 } as const;
-
-const marker = encodeText('RST1');
-const prefixBytes = marker.length + 1 + 2 + 2 + 4 + 2;
+const marker = encodeText('RST2');
+const prefixBytes = marker.length + 1 + 2 + 4 + 2;
 const coinBytes = 32;
 
 export type ReleaseState = Readonly<{
@@ -43,7 +40,8 @@ export type ReleaseState = Readonly<{
     predecessor: number;
     // The certified target body.
     target: Uint8Array;
-    journalKeys: readonly Uint8Array[];
+    // The randomness seed, retained only until the body is.
+    seed: Uint8Array;
     bodyLength: number;
     bodyKeys: readonly Uint8Array[];
     envelope: Uint8Array;
@@ -60,11 +58,10 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
         marker,
         Uint8Array.of(state.predecessor),
         unsigned16(state.target.length),
-        unsigned16(state.journalKeys.length),
         unsigned32(state.bodyLength),
         unsigned16(state.bodyKeys.length),
         state.target,
-        ...state.journalKeys,
+        state.seed,
         ...state.bodyKeys,
         ...(phase >= releasePhase.body ? [state.envelope] : []),
         ...(phase === releasePhase.intent ? [state.coins] : []),
@@ -72,8 +69,8 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
     );
 };
 
-// The byte length of each record of one kind: whole records of the record
-// size and a final partial one.
+// The byte length of each body record: whole records of the record size and
+// a final partial one.
 export const releaseRecordLengths = (
     profile: ParticipantProfile,
     totalBytes: number,
@@ -95,7 +92,7 @@ export const decodeReleaseState = (
     const bounds = profile.release;
     const phase = phaseOf(generation);
     if (
-        generation < releasePhase.journal ||
+        generation < releasePhase.locked ||
         bytes.length < prefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
@@ -104,19 +101,13 @@ export const decodeReleaseState = (
     )
         throw new Error('The release state is malformed.');
     const targetLength = readUnsigned16(bytes, marker.length + 1);
-    const journalCount = readUnsigned16(bytes, marker.length + 3);
-    const bodyLength = readUnsigned32(bytes, marker.length + 5);
-    const bodyCount = readUnsigned16(bytes, marker.length + 9);
-    const journalExpected =
-        phase === releasePhase.journal
-            ? journalCount >= 1 && journalCount < bounds.journalRecords
-            : journalCount ===
-              (phase === releasePhase.signed ? 0 : bounds.journalRecords);
+    const bodyLength = readUnsigned32(bytes, marker.length + 3);
+    const bodyCount = readUnsigned16(bytes, marker.length + 7);
+    const seedLength = phase === releasePhase.ready ? operationSeedBytes : 0;
     const withBody = phase >= releasePhase.body;
     if (
         targetLength === 0 ||
         targetLength > profile.target.maximumBodyBytes ||
-        !journalExpected ||
         (withBody
             ? bodyLength < bounds.minimumBodyBytes ||
               bodyLength > bounds.maximumBodyBytes ||
@@ -130,24 +121,23 @@ export const decodeReleaseState = (
         (phase === releasePhase.signed
             ? profile.registration.signatureBytes
             : 0);
-    const keysStart = prefixBytes + targetLength;
-    const tailStart = keysStart + recordKeyBytes * (journalCount + bodyCount);
+    const seedStart = prefixBytes + targetLength;
+    const keysStart = seedStart + seedLength;
+    const tailStart = keysStart + recordKeyBytes * bodyCount;
     if (bytes.length !== tailStart + tail)
         throw new Error('The release state has another length.');
-    const keys = (start: number, count: number) =>
-        Array.from({ length: count }, (_unused, index) =>
-            bytes.slice(
-                start + recordKeyBytes * index,
-                start + recordKeyBytes * (index + 1),
-            ),
-        );
     const envelopeEnd = tailStart + (withBody ? bounds.envelopeBytes : 0);
     return {
         predecessor: bytes[marker.length],
-        target: bytes.slice(prefixBytes, keysStart),
-        journalKeys: keys(keysStart, journalCount),
+        target: bytes.slice(prefixBytes, seedStart),
+        seed: bytes.slice(seedStart, keysStart),
         bodyLength,
-        bodyKeys: keys(keysStart + recordKeyBytes * journalCount, bodyCount),
+        bodyKeys: Array.from({ length: bodyCount }, (_unused, index) =>
+            bytes.slice(
+                keysStart + recordKeyBytes * index,
+                keysStart + recordKeyBytes * (index + 1),
+            ),
+        ),
         envelope: bytes.slice(tailStart, envelopeEnd),
         coins:
             phase === releasePhase.intent
@@ -160,23 +150,22 @@ export const decodeReleaseState = (
     };
 };
 
-// The associated data of one release record binds the participant's record
-// context, the certified target's digest and the record's coordinates.
+// The associated data of one body record, stored under its index, binds the
+// participant's record context, the certified target's digest and the
+// record's index and length.
 export const releaseRecordAssociatedData = (
     context: RecordContext,
     targetDigest: Uint8Array,
-    kind: number,
     index: number,
     length: number,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-release-record/v1'),
+        encodeText('sealed-lattice/participant-release-record/v2'),
         context.poll,
         context.runtime,
         context.inventory,
         unsigned16(context.position),
         targetDigest,
-        Uint8Array.of(kind),
         unsigned16(index),
         unsigned32(length),
     );
@@ -189,36 +178,19 @@ export const releaseRecordInventory = (
     targetDigest: Uint8Array,
     state: ReleaseState,
 ): ParticipantStoredRecord[] => {
-    const kinds = [
-        {
-            kind: releaseRecordKind.journal,
-            keys: state.journalKeys,
-            lengths: releaseRecordLengths(
-                profile,
-                profile.release.journalBytes,
+    const lengths = releaseRecordLengths(profile, state.bodyLength);
+    return state.bodyKeys.map((key, index) => ({
+        store: 'release',
+        key: index,
+        byteLength: sealedLength(lengths[index]),
+        encryption: {
+            key,
+            additionalData: releaseRecordAssociatedData(
+                context,
+                targetDigest,
+                index,
+                lengths[index],
             ),
         },
-        {
-            kind: releaseRecordKind.body,
-            keys: state.bodyKeys,
-            lengths: releaseRecordLengths(profile, state.bodyLength),
-        },
-    ];
-    return kinds.flatMap(({ kind, keys, lengths }) =>
-        keys.map((key, index) => ({
-            store: 'release',
-            key: [kind, index],
-            byteLength: sealedLength(lengths[index]),
-            encryption: {
-                key,
-                additionalData: releaseRecordAssociatedData(
-                    context,
-                    targetDigest,
-                    kind,
-                    index,
-                    lengths[index],
-                ),
-            },
-        })),
-    );
+    }));
 };

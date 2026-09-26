@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { compileCurrentSignatureSamplingBounds } from '#tests/authentication-work-model.js';
-import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommitmentEquivocationBound } from '#tests/commitment-equivocation-model.js';
 import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import {
@@ -17,9 +17,11 @@ import {
     compileContributionBodyCensus,
 } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    operationSeedBytes,
+    operationSeedCount,
+} from '#tests/operation-seed-model.js';
 import { prefixReplacementBaseQueriesPerAccess } from '#tests/oracle-domain-model.js';
-import { contributionSeedBytes } from '#tests/participant-custody-model.js';
-import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import {
     compileProofCompilerChronology,
     proofPurposes,
@@ -29,7 +31,10 @@ import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-mo
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
 import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
-import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
+import {
+    boundSparseSupportSampling,
+    compileSparseSupportSamplingCensus,
+} from '#tests/sparse-sampling-bound-model.js';
 import {
     listSupportedProfiles,
     type SupportedProfile,
@@ -239,7 +244,6 @@ export const profileStatisticalTerms = (
     const matrixInitialization =
         compileCommonMatrixInitializationCensus(profile);
     const sharing = profile.shareLifting;
-    const releaseJournal = compileParticipantReleaseCustody(profile);
     const sampling = compileSetupRandomnessCensus(profile);
     return [
         {
@@ -307,21 +311,41 @@ export const profileStatisticalTerms = (
             ),
         },
         {
+            // Every participant draws its ballot's FHE and auxiliary
+            // ephemerals once each; the ballot's samplers read its seeded
+            // stream without a limit, and the cap is proof-only.
+            name: 'Ballot sparse-support cap exhaustion',
+            numerator: sparseSupportExhaustion(
+                [
+                    boundSparseSupportSampling(
+                        fixedModulusBfvInputs.polynomialDegree,
+                        fixedModulusBfvInputs.secretSupportWeight,
+                    ),
+                    boundSparseSupportSampling(
+                        auxiliaryInputEncryptionParameters.degree,
+                        auxiliaryInputEncryptionParameters.support,
+                    ),
+                ].map((row) => ({
+                    ...row,
+                    calls: BigInt(profile.participantCount),
+                })),
+            ),
+        },
+        {
             // Every setup contributor expands its generation and
-            // continuation randomness from two uniform seeds through the
-            // ideal SHAKE256, and nothing else reads a seed. Replacing all 2d
-            // streams by uniform bytes costs, by the semi-classical
-            // one-way-to-hiding lemma over q oracle calls of the complete
-            // experiment and s-bit seeds, 2*sqrt((q+1)*4q*2d/2^s), at most
-            // 4(q+1)*sqrt(2d)/2^(s/2).
-            name: 'Contribution seed expansion',
+            // continuation randomness, and every participant its ballot and
+            // release randomness, from its own uniform seed through the
+            // ideal SHAKE256, and nothing else reads a seed. Replacing the
+            // streams of all k = 2d + 2n seeds by uniform bytes costs, by
+            // the semi-classical one-way-to-hiding lemma over q oracle calls
+            // of the complete experiment and s-bit seeds,
+            // 2*sqrt((q+1)*4q*k/2^s), at most 4(q+1)*sqrt(k)/2^(s/2).
+            name: 'Operation seed expansion',
             numerator: dyadic(
                 4n *
                     (caps.adversaryQueries + 1n) *
-                    ceilingSquareRoot(
-                        2n * BigInt(profile.setupContributorCount),
-                    ),
-                1n << (4n * contributionSeedBytes),
+                    ceilingSquareRoot(operationSeedCount(profile)),
+                1n << (4n * operationSeedBytes),
             ),
         },
         {
@@ -359,19 +383,6 @@ export const profileStatisticalTerms = (
         {
             name: 'Proof reprogramming',
             numerator: power(BigInt(caps.reprogrammingBits)),
-        },
-        {
-            name: 'Ballot journal exhaustion',
-            numerator: power(
-                compileBallotRandomnessBudget(profile).exhaustionBits,
-            ),
-        },
-        {
-            name: 'Release journal exhaustion',
-            numerator: dyadic(
-                releaseJournal.exhaustionBound.numerator,
-                1n << releaseJournal.exhaustionBound.denominatorBits,
-            ),
         },
         ...compileProofRandomnessBudgets(profile).map((value) => ({
             name: `${value.role.charAt(0).toUpperCase()}${value.role.slice(1)} simulator field sampling`,

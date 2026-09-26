@@ -28,7 +28,8 @@ impl ReleaseWork {
         Ok(Self { context, owner })
     }
     /// Consumes this volatile operation. The worker must retain the exact
-    /// target and entropy journal first; restart replays that same operation.
+    /// target and the release seed first; restart replays that same
+    /// operation from the seed.
     pub fn prove(
         self,
         key: &RegistrationKey,

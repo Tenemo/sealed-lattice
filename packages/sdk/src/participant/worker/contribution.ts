@@ -17,8 +17,9 @@ import {
 import type { ProfileContext } from './context.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
+    operationSeedBytes,
     readKernel,
-    writeContributionSeed,
+    seededRandomness,
     writeProofInput,
 } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
@@ -122,7 +123,6 @@ const privateEntryBytes = 32 + 64;
 const signingEntryBytes = 2 + 4 + 32 + 64;
 const keyBytes = 32;
 const coinBytes = 32;
-const seedBytes = 64;
 const identityBytes = 64;
 
 // Prover phases: generation below one hundred, then one hundred plus the
@@ -221,7 +221,7 @@ const retainedShape = (generation: number) => {
                     : stage === 10
                       ? 4
                       : 5,
-        seedBytes: stage === 4 || stage === 6 ? seedBytes : 0,
+        seedBytes: stage === 4 || stage === 6 ? operationSeedBytes : 0,
         coinBytes: stage === 8 || stage === 10 ? coinBytes : 0,
     };
 };
@@ -764,31 +764,13 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
     const stored: SealedRecord[] = [];
     let current = 0;
     let emitted = 0;
-    let randomBytes = 0;
-    if (session.state.seed.length !== seedBytes)
-        throw new Error('No contribution randomness seed is retained.');
-    writeContributionSeed(kernel, session.state.seed);
-    if (kernel.contribution_random_command(0, seedBytes) !== 0)
-        throw new Error('The contribution randomness refused its seed.');
-    handlers.random = (source, target) => {
-        if (source !== 'witness' && source !== 'proof')
-            throw new Error('Unexpected contribution randomness request.');
-        if (
-            kernel.contribution_random_command(
-                source === 'witness' ? 1 : 2,
-                target.length,
-            ) !== 0
-        )
-            throw new Error('The contribution randomness refused a request.');
-        const output = new Uint8Array(
-            kernel.memory.buffer,
-            kernel.contribution_random_output_pointer() >>> 0,
-            target.length,
-        );
-        target.set(output);
-        output.fill(0);
-        randomBytes += target.length;
-    };
+    const randomness = seededRandomness(
+        kernel,
+        'contribution',
+        session.state.seed,
+        'witness',
+    );
+    handlers.random = randomness.random;
     handlers.contribution = (object, offset, bytes) => {
         if (
             !statement ||
@@ -867,11 +849,11 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         phase: () => kernel.contribution_proof_phase(),
         objects: () => lengths.size,
         emitted: () => emitted,
-        randomBytes: () => randomBytes,
+        randomBytes: randomness.drawn,
         close: () => {
             handlers.random = undefined;
             handlers.contribution = undefined;
-            kernel.contribution_random_command(3, 0);
+            randomness.discard();
             for (const record of pending) record.bytes.fill(0);
             pending.length = 0;
         },
@@ -943,7 +925,7 @@ export const beginContribution = async (
             publicRecords: [],
             privateRecords: [],
             signingRecords: [],
-            seed: crypto.getRandomValues(new Uint8Array(seedBytes)),
+            seed: crypto.getRandomValues(new Uint8Array(operationSeedBytes)),
             coins: new Uint8Array(),
         },
     };
@@ -1123,7 +1105,9 @@ export const continueContribution = async (session: ContributionSession) => {
             generation: 6,
             state: {
                 ...session.state,
-                seed: crypto.getRandomValues(new Uint8Array(seedBytes)),
+                seed: crypto.getRandomValues(
+                    new Uint8Array(operationSeedBytes),
+                ),
             },
         });
     const { state } = session;

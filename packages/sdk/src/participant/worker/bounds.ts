@@ -1,10 +1,10 @@
-import { readKernel } from './kernel.js';
+import { operationSeedBytes, readKernel } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
 
 // Every bound the worker enforces. The participant module reports the sizes
-// of the objects it encodes, verifies or draws randomness for; the worker
-// adds the layouts of the state it retains itself. The page supplies none of
-// them, and the profile comes from authenticated retained state.
+// of the objects it encodes or verifies; the worker adds the layouts of the
+// state it retains itself. The page supplies none of them, and the profile
+// comes from authenticated retained state.
 
 type Range = Readonly<{ minimum: number; maximum: number }>;
 
@@ -105,9 +105,6 @@ export type ParticipantProfile = Readonly<{
         minimumScore: number;
         maximumScore: number;
         recordBytes: number;
-        // The encryption and proof randomness banks, in journal order.
-        randomBudgets: readonly number[];
-        journalRecords: number;
         maximumStateBytes: number;
         headerBytes: number;
         minimumBodyBytes: number;
@@ -137,9 +134,6 @@ export type ParticipantProfile = Readonly<{
     }>;
     release: Readonly<{
         recordBytes: number;
-        // The journal of original random bytes the release proof draws.
-        journalBytes: number;
-        journalRecords: number;
         bodyHeaderBytes: number;
         minimumBodyBytes: number;
         maximumBodyBytes: number;
@@ -233,7 +227,7 @@ const readModuleLimits = (kernel: ParticipantKernel) => {
 };
 type ModuleLimits = ReturnType<typeof readModuleLimits>;
 
-// One profile's sizes and randomness budgets, as the module reports them.
+// One profile's sizes, as the module reports them.
 const readModuleProfile = (
     kernel: ParticipantKernel,
     participants: number,
@@ -252,7 +246,6 @@ const readModuleProfile = (
         minimumProofBytes: take(),
         maximumProofBytes: take(),
         maximumCheckpointHeaderBytes: take(),
-        ballotRandomBudgets: [take(), take()],
         minimumBallotBodyBytes: take(),
         maximumBallotBodyBytes: take(),
         quorum: take(),
@@ -262,7 +255,6 @@ const readModuleProfile = (
         maximumResponsePacketBytes: take(),
         proposalBodyBytes: take(),
         proposalPacketBytes: take(),
-        releaseJournalBytes: take(),
         minimumReleaseBodyBytes: take(),
         maximumReleaseBodyBytes: take(),
         storedCoefficientBytes: take(),
@@ -342,7 +334,6 @@ const publicEntryBytes = 2 + 4 + 4 + keyBytes + identityBytes;
 const privateEntryBytes = keyBytes + identityBytes;
 const signingEntryBytes = 2 + 4 + keyBytes + identityBytes;
 const signingRecords = 5;
-const contributionSeedBytes = 64;
 
 const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     const { contribution } = module;
@@ -372,7 +363,7 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
                 profile.maximumCheckpointHeaderBytes +
                 publicEntryBytes * publicRecords.length +
                 privateEntryBytes * profile.checkpointLengths.length +
-                contributionSeedBytes,
+                operationSeedBytes,
             completedStateBytes,
         ),
         completedStateBytes,
@@ -401,11 +392,11 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     };
 };
 
-// The ballot suffix: its marker, score count, key counts and body length,
-// the scores, the attempt's ballot time until the envelope carries it, a
-// key per journal and body record, the envelope, the signing coins and the
-// signature.
-const ballotPrefixBytes = 4 + 1 + 2 + 4 + 2;
+// The ballot suffix: its marker, score count, body length and key count,
+// the scores, the attempt's ballot time until the envelope carries it, the
+// randomness seed until the body is retained, a key per body record, the
+// envelope, the signing coins and the signature.
+const ballotPrefixBytes = 4 + 1 + 4 + 2;
 const ballotTimeBytes = 8;
 
 const ballotBounds = (
@@ -414,43 +405,27 @@ const ballotBounds = (
     profile: ModuleProfile,
 ) => {
     const { ballot } = module;
-    const journalRecords = profile.ballotRandomBudgets.reduce(
-        (total, budget) => total + Math.ceil(budget / ballot.recordBytes),
-        0,
-    );
     const bodyRecords = Math.ceil(
         profile.maximumBallotBodyBytes / ballot.recordBytes,
     );
     const attempt =
         ballotPrefixBytes + limits.options.maximum + ballotTimeBytes;
+    const retainedBody = keyBytes * bodyRecords + ballot.envelopeBytes;
     const signedStateBytes =
-        ballotPrefixBytes +
-        keyBytes * bodyRecords +
-        ballot.envelopeBytes +
-        module.registration.signatureBytes;
+        ballotPrefixBytes + retainedBody + module.registration.signatureBytes;
     return {
         ...ballot,
-        randomBudgets: profile.ballotRandomBudgets,
-        journalRecords,
         bodyRecords,
         maximumStateBytes: maximum(
-            attempt + keyBytes * journalRecords,
-            attempt +
-                keyBytes * (journalRecords + bodyRecords) +
-                ballot.envelopeBytes +
-                coinBytes,
+            attempt + operationSeedBytes,
+            attempt + retainedBody + coinBytes,
             signedStateBytes,
         ),
         signedStateBytes,
         minimumBodyBytes: profile.minimumBallotBodyBytes,
         maximumBodyBytes: profile.maximumBallotBodyBytes,
-        journalAndBodyBytes:
-            profile.ballotRandomBudgets.reduce(
-                (total, budget) => total + budget,
-                0,
-            ) +
-            profile.maximumBallotBodyBytes +
-            tagBytes * (journalRecords + bodyRecords),
+        sealedBodyBytes:
+            profile.maximumBallotBodyBytes + tagBytes * bodyRecords,
     };
 };
 
@@ -532,34 +507,24 @@ const targetBounds = (module: ModuleLimits) => {
     };
 };
 
-// The release suffix: its marker, phase, counts and body length, the target
-// body, a key per journal and body record, the envelope, the signing coins
-// and the signature.
+// The release suffix: its marker, predecessor, target length, body length
+// and key count, the target body, the randomness seed until the body exists,
+// a key per body record, the envelope, the signing coins and the signature.
 const releaseBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     const { release } = module;
-    const journalRecords = Math.ceil(
-        profile.releaseJournalBytes / release.recordBytes,
-    );
     const bodyRecords = Math.ceil(
         profile.maximumReleaseBodyBytes / release.recordBytes,
     );
-    const attempt = 4 + 1 + 2 + 2 + 4 + 2 + module.target.maximumBodyBytes;
+    const attempt = 4 + 1 + 2 + 4 + 2 + module.target.maximumBodyBytes;
+    const retainedBody = keyBytes * bodyRecords + release.envelopeBytes;
     return {
         ...release,
-        journalBytes: profile.releaseJournalBytes,
-        journalRecords,
         minimumBodyBytes: profile.minimumReleaseBodyBytes,
         maximumBodyBytes: profile.maximumReleaseBodyBytes,
         maximumStateBytes: maximum(
-            attempt + keyBytes * journalRecords,
-            attempt +
-                keyBytes * (journalRecords + bodyRecords) +
-                release.envelopeBytes +
-                coinBytes,
-            attempt +
-                keyBytes * bodyRecords +
-                release.envelopeBytes +
-                module.registration.signatureBytes,
+            attempt + operationSeedBytes,
+            attempt + retainedBody + coinBytes,
+            attempt + retainedBody + module.registration.signatureBytes,
         ),
     };
 };
@@ -587,7 +552,7 @@ const profileBounds = (
         signingBytes,
         ...contribution
     } = contributionBounds(module, profile);
-    const { bodyRecords, signedStateBytes, journalAndBodyBytes, ...ballot } =
+    const { bodyRecords, signedStateBytes, sealedBodyBytes, ...ballot } =
         ballotBounds(module, limits, profile);
     const { collectingBytes, ...close } = closeBounds(
         module,
@@ -649,9 +614,7 @@ const profileBounds = (
         ballot: {
             ...ballot,
             requiredStorageBytes:
-                journalAndBodyBytes +
-                ballot.maximumStateBytes +
-                maximumRootBytes,
+                sealedBodyBytes + ballot.maximumStateBytes + maximumRootBytes,
         },
         close,
         target,

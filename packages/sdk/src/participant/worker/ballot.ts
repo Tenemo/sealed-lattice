@@ -1,13 +1,21 @@
+import {
+    ballotCoinBytes,
+    ballotEnvelopeMatches,
+    ballotPhase,
+    ballotRecordAssociatedData,
+    ballotRecordInventory,
+    ballotRecordLength,
+    decodeBallotState,
+    encodeBallotState,
+    validBallotScores,
+} from './ballot-state.js';
+import type { BallotState } from './ballot-state.js';
 import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
-    encodeText,
     equalBytes,
     hexadecimal,
-    readUnsigned16,
-    readUnsigned32,
     readUnsigned64,
-    unsigned16,
     unsigned32,
     unsigned64,
 } from './bytes.js';
@@ -29,18 +37,11 @@ import type {
     ParticipantSession,
 } from './contribution.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
-import { readKernel } from './kernel.js';
-import type { KernelHandlers } from './kernel.js';
+import { operationSeedBytes, readKernel, seededRandomness } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { publishChunk, publishRecord } from './public.js';
 import type { PublicRelay } from './public.js';
-import {
-    openRecord,
-    recordContext,
-    recordKeyBytes,
-    sealedLength,
-    sealRecord,
-} from './records.js';
+import { openRecord, recordContext, sealRecord } from './records.js';
 import type { RecordContext } from './records.js';
 import {
     commitRoot,
@@ -52,52 +53,20 @@ import {
 import { readFinalAggregate } from './setup.js';
 import { snapshotParticipant } from './storage.js';
 
-// A participant's ballot beneath its authenticated root. Generation 13 locks
-// the attempt's scores and ballot time and appends the randomness journal
-// one record at a time; the append of its final record enters generation 14.
-// Generation 15 retains the envelope and a growing prefix of body records;
-// generation 16 the complete body and the signing coins; generation 17 the
-// signature, retiring the journal and the scores. Every append commits its
-// record with a root sealed under a fresh key, so a repeated generation is
-// not nonce reuse. An interruption replays the same journal and must
-// reproduce the retained envelope. A signed ballot stays retained unchanged
-// through the later generations, and a participant without a ballot keeps
-// an empty suffix.
+// Creates, retains, signs and delivers a participant's ballot through the
+// phases the ballot state records.
 
-const phase = { locked: 13, ready: 14, body: 15, signing: 16, signed: 17 };
-const marker = encodeText('BST1');
-const envelopeMarker = encodeText('LBE2');
-const coinBytes = 32;
-const journalKind = 0;
-const bodyKind = 1;
 // The FHE and auxiliary encryption keys the ballot encrypts under.
 const ballotKeys = 2;
-const randomRequestBytes = 65_536;
-
-type BallotState = Readonly<{
-    scores: Uint8Array;
-    ballotTime: bigint;
-    journalKeys: readonly Uint8Array[];
-    bodyLength: number;
-    bodyKeys: readonly Uint8Array[];
-    envelope: Uint8Array;
-    coins: Uint8Array;
-    signature: Uint8Array;
-}>;
 
 export type BallotSession = {
     readonly participant: ParticipantSession;
     readonly records: RecordContext;
     state: BallotState;
+    // The proof-stream bytes the module drew, when this visit created the
+    // ballot.
+    proofRandomBytes?: number;
 };
-
-const validScores = (profile: ParticipantProfile, scores: Uint8Array) =>
-    scores.length === profile.optionCount &&
-    scores.every(
-        (score) =>
-            score >= profile.ballot.minimumScore &&
-            score <= profile.ballot.maximumScore,
-    );
 
 // The ordered scores a request supplies, or undefined when they are not one
 // valid score per option.
@@ -113,188 +82,12 @@ export const parseBallotScores = (
     const scores = Uint8Array.from(value as number[]);
     return value.length === scores.length &&
         scores.every((score, index) => score === value[index]) &&
-        validScores(profile, scores)
+        validBallotScores(profile, scores)
         ? scores
         : undefined;
 };
 
-// Each journal record's bank and plaintext length: the encryption bank's
-// records, then the proof bank's.
-const journalLayout = (profile: ParticipantProfile) => {
-    const { recordBytes, randomBudgets, journalRecords } = profile.ballot;
-    const layout = randomBudgets.flatMap((total, bank) =>
-        Array.from(
-            { length: Math.ceil(total / recordBytes) },
-            (_unused, index) => ({
-                bank,
-                length: Math.min(recordBytes, total - index * recordBytes),
-            }),
-        ),
-    );
-    if (layout.length !== journalRecords)
-        throw new Error('The ballot journal differs from its profile.');
-    return layout;
-};
-
-const recordLength = (
-    profile: ParticipantProfile,
-    state: BallotState,
-    kind: number,
-    index: number,
-) =>
-    kind === journalKind
-        ? journalLayout(profile)[index].length
-        : Math.min(
-              profile.ballot.recordBytes,
-              state.bodyLength - index * profile.ballot.recordBytes,
-          );
-
-const encodeBallotState = (generation: number, state: BallotState) =>
-    concatenate(
-        marker,
-        Uint8Array.of(state.scores.length),
-        state.scores,
-        generation < phase.signed
-            ? unsigned64(state.ballotTime)
-            : new Uint8Array(),
-        unsigned16(state.journalKeys.length),
-        ...state.journalKeys,
-        unsigned32(state.bodyLength),
-        unsigned16(state.bodyKeys.length),
-        ...state.bodyKeys,
-        state.envelope,
-        state.coins,
-        state.signature,
-    );
-
-// The envelope's context fields at their offsets: the poll, the setup
-// inventory, the author's position, the ballot time and the body length.
-const envelopeMatches = (
-    envelope: Uint8Array,
-    context: RecordContext,
-    bodyLength: number,
-    ballotTime?: bigint,
-) =>
-    equalBytes(envelope.subarray(0, 4), envelopeMarker) &&
-    equalBytes(envelope.subarray(4, 68), context.poll) &&
-    equalBytes(envelope.subarray(68, 132), context.inventory) &&
-    readUnsigned16(envelope, 132) === context.position &&
-    (ballotTime === undefined ||
-        readUnsigned64(envelope, 134) === ballotTime) &&
-    readUnsigned64(envelope, 142) === BigInt(bodyLength);
-
-// Decodes the ballot suffix under the phase its root generation supplies;
-// each phase has exactly one shape.
-const decodeBallotState = (
-    profile: ParticipantProfile,
-    context: RecordContext,
-    generation: number,
-    bytes: Uint8Array,
-): BallotState => {
-    const bounds = profile.ballot;
-    if (
-        generation < phase.locked ||
-        generation > phase.signed ||
-        bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker)
-    )
-        throw new Error('The ballot state is malformed.');
-    let offset = marker.length;
-    const take = (length: number) => {
-        if (length > bytes.length - offset)
-            throw new Error('The ballot state is truncated.');
-        const value = bytes.slice(offset, offset + length);
-        offset += length;
-        return value;
-    };
-    const scores = take(take(1)[0]);
-    if (
-        generation === phase.signed
-            ? scores.length !== 0
-            : !validScores(profile, scores)
-    )
-        throw new Error('The locked scores changed.');
-    const ballotTime =
-        generation === phase.signed ? 0n : readUnsigned64(take(8), 0);
-    const journalCount = readUnsigned16(take(2), 0);
-    if (
-        generation === phase.locked
-            ? journalCount >= bounds.journalRecords
-            : journalCount !==
-              (generation === phase.signed ? 0 : bounds.journalRecords)
-    )
-        throw new Error('The ballot journal is inconsistent.');
-    const journalKeys = Array.from({ length: journalCount }, () =>
-        take(recordKeyBytes),
-    );
-    const bodyLength = readUnsigned32(take(4), 0);
-    const bodyCount = readUnsigned16(take(2), 0);
-    const bodyRecords = Math.ceil(bodyLength / bounds.recordBytes);
-    if (
-        generation < phase.body
-            ? bodyLength !== 0 || bodyCount !== 0
-            : bodyLength < bounds.minimumBodyBytes ||
-              bodyLength > bounds.maximumBodyBytes ||
-              bodyCount > bodyRecords ||
-              (generation > phase.body && bodyCount !== bodyRecords)
-    )
-        throw new Error('The retained ballot body is inconsistent.');
-    const bodyKeys = Array.from({ length: bodyCount }, () =>
-        take(recordKeyBytes),
-    );
-    const envelope =
-        generation >= phase.body
-            ? take(bounds.envelopeBytes)
-            : new Uint8Array();
-    const coins =
-        generation === phase.signing ? take(coinBytes) : new Uint8Array();
-    const signature =
-        generation === phase.signed
-            ? take(profile.registration.signatureBytes)
-            : new Uint8Array();
-    if (offset !== bytes.length)
-        throw new Error('The ballot state has extra bytes.');
-    if (
-        generation >= phase.body &&
-        !envelopeMatches(
-            envelope,
-            context,
-            bodyLength,
-            generation === phase.signed ? undefined : ballotTime,
-        )
-    )
-        throw new Error('The retained envelope changed its context.');
-    return {
-        scores,
-        ballotTime,
-        journalKeys,
-        bodyLength,
-        bodyKeys,
-        envelope,
-        coins,
-        signature,
-    };
-};
-
-const recordAssociatedData = (
-    context: RecordContext,
-    kind: number,
-    index: number,
-    length: number,
-) =>
-    concatenate(
-        encodeText('sealed-lattice/participant-ballot-record/v1'),
-        context.poll,
-        context.runtime,
-        context.inventory,
-        unsigned16(context.position),
-        Uint8Array.of(kind),
-        unsigned16(index),
-        unsigned32(length),
-    );
-
 type SealedRecord = Readonly<{
-    kind: number;
     index: number;
     key: Uint8Array;
     ciphertext: Uint8Array;
@@ -302,38 +95,27 @@ type SealedRecord = Readonly<{
 
 const sealBallotRecord = async (
     context: RecordContext,
-    kind: number,
     index: number,
     bytes: Uint8Array,
 ): Promise<SealedRecord> => ({
-    kind,
     index,
     ...(await sealRecord(
-        recordAssociatedData(context, kind, index, bytes.length),
+        ballotRecordAssociatedData(context, index, bytes.length),
         bytes,
     )),
 });
 
-const openBallotRecord = (
-    session: BallotSession,
-    kind: number,
-    index: number,
-) => {
+const openBallotRecord = (session: BallotSession, index: number) => {
     const { context } = session.participant;
-    const keys =
-        kind === journalKind
-            ? session.state.journalKeys
-            : session.state.bodyKeys;
-    const length = recordLength(context.profile, session.state, kind, index);
+    const length = ballotRecordLength(context.profile, session.state, index);
     return openRecord(
         context.database,
         'ballot',
-        [kind, index],
+        index,
         {
-            key: keys[index],
-            additionalData: recordAssociatedData(
+            key: session.state.bodyKeys[index],
+            additionalData: ballotRecordAssociatedData(
                 session.records,
-                kind,
                 index,
                 length,
             ),
@@ -341,38 +123,6 @@ const openBallotRecord = (
         length,
     );
 };
-
-// The ballot records a state lists; the predecessor check opens each under
-// its own key.
-const ballotInventory = (
-    profile: ParticipantProfile,
-    records: RecordContext,
-    state: BallotState,
-): ParticipantStoredRecord[] =>
-    (
-        [
-            [journalKind, state.journalKeys],
-            [bodyKind, state.bodyKeys],
-        ] as const
-    ).flatMap(([kind, keys]) =>
-        keys.map((key, index) => {
-            const length = recordLength(profile, state, kind, index);
-            return {
-                store: 'ballot',
-                key: [kind, index],
-                byteLength: sealedLength(length),
-                encryption: {
-                    key,
-                    additionalData: recordAssociatedData(
-                        records,
-                        kind,
-                        index,
-                        length,
-                    ),
-                },
-            };
-        }),
-    );
 
 // The ballot a root retains: none at generation twelve or without a ballot,
 // the attempt's phase through generation seventeen, and the signed ballot
@@ -386,8 +136,8 @@ const retainedBallotState = (
     if (bytes === undefined) throw new Error('The ballot suffix is missing.');
     if (bytes.length === 0) {
         if (
-            root.head.generation >= phase.locked &&
-            root.head.generation <= phase.signed
+            root.head.generation >= ballotPhase.locked &&
+            root.head.generation <= ballotPhase.signed
         )
             throw new Error('A ballot phase retains no ballot.');
         return undefined;
@@ -395,7 +145,7 @@ const retainedBallotState = (
     return decodeBallotState(
         context.profile,
         records,
-        Math.min(root.head.generation, phase.signed),
+        Math.min(root.head.generation, ballotPhase.signed),
         bytes,
     );
 };
@@ -408,7 +158,7 @@ export const retainedBallotRecords = (
     const state = retainedBallotState(participant, records);
     return state === undefined
         ? []
-        : ballotInventory(participant.context.profile, records, state);
+        : ballotRecordInventory(participant.context.profile, records, state);
 };
 
 // The close records the root lists while a ballot is pending; the close log
@@ -430,10 +180,8 @@ const collectedCloseRecords = (
 type BallotTransition = Readonly<{
     generation: number;
     state: BallotState;
-    // A record written with the root.
-    added?: SealedRecord;
-    // Completion removes the journal with the root that stops listing it.
-    retireJournal?: boolean;
+    // The records written with the root.
+    added?: readonly SealedRecord[];
 }>;
 
 const commitBallot = async (
@@ -454,44 +202,38 @@ const commitBallot = async (
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
             ...contributionRecords(participant),
-            ...ballotInventory(context.profile, session.records, session.state),
+            ...ballotRecordInventory(
+                context.profile,
+                session.records,
+                session.state,
+            ),
             ...collectedCloseRecords(participant, session.records),
         ],
         write: (transaction) => {
             const store = transaction.objectStore('ballot');
-            if (transition.added !== undefined)
+            for (const record of transition.added ?? [])
                 store.add(
-                    new Blob([new Uint8Array(transition.added.ciphertext)]),
-                    [transition.added.kind, transition.added.index],
-                );
-            if (transition.retireJournal === true)
-                store.delete(
-                    IDBKeyRange.bound([journalKind], [bodyKind], false, true),
+                    new Blob([new Uint8Array(record.ciphertext)]),
+                    record.index,
                 );
         },
     });
     session.state = transition.state;
-    if (transition.added !== undefined)
-        (
-            await openBallotRecord(
-                session,
-                transition.added.kind,
-                transition.added.index,
-            )
-        ).fill(0);
+    for (const record of transition.added ?? [])
+        (await openBallotRecord(session, record.index)).fill(0);
 };
 
 // Locks a ballot attempt: the scores and the ballot time enter the root
-// before any journal randomness exists.
+// before any ballot randomness exists.
 export const beginBallot = async (
     participant: ParticipantSession,
     scores: Uint8Array,
 ): Promise<BallotSession> => {
     const { context, root } = participant;
     const { profile } = context;
-    if (root.head.generation !== phase.locked - 1)
+    if (root.head.generation !== ballotPhase.locked - 1)
         throw new Error('No verified setup awaits a ballot.');
-    if (!validScores(profile, scores))
+    if (!validBallotScores(profile, scores))
         throw new Error('The scores are invalid.');
     const estimate = await navigator.storage.estimate();
     if (
@@ -507,7 +249,7 @@ export const beginBallot = async (
         state: {
             scores: scores.slice(),
             ballotTime: BigInt(Date.now()),
-            journalKeys: [],
+            seed: new Uint8Array(),
             bodyLength: 0,
             bodyKeys: [],
             envelope: new Uint8Array(),
@@ -516,12 +258,12 @@ export const beginBallot = async (
         },
     };
     participant.root = await commitRoot(context, root, {
-        generation: phase.locked,
+        generation: ballotPhase.locked,
         manifest: {
             ...root.manifest,
             suffixes: {
                 ...root.manifest.suffixes,
-                ballot: encodeBallotState(phase.locked, session.state),
+                ballot: encodeBallotState(ballotPhase.locked, session.state),
             },
         },
         predecessorRecords: [
@@ -542,12 +284,7 @@ export const resumeBallot = async (
     const records = await recordContext(participant);
     const state = retainedBallotState(participant, records);
     const snapshot = await snapshotParticipant(context.database);
-    if (
-        snapshot.counts.ballot !==
-        (state === undefined
-            ? 0
-            : state.journalKeys.length + state.bodyKeys.length)
-    )
+    if (snapshot.counts.ballot !== (state?.bodyKeys.length ?? 0))
         throw new Error('The ballot records changed.');
     return state === undefined ? undefined : { participant, records, state };
 };
@@ -660,88 +397,17 @@ const startBallotWork = async (session: BallotSession) => {
     }
 };
 
-// Appends the journal's original random bytes one record at a time; the
-// append of the final record enters the ready phase.
-const prepareJournal = async (session: BallotSession) => {
-    const layout = journalLayout(session.participant.context.profile);
-    while (session.participant.root.head.generation === phase.locked) {
-        const index = session.state.journalKeys.length;
-        const bytes = new Uint8Array(layout[index].length);
-        let added: SealedRecord;
-        try {
-            for (let offset = 0; offset < bytes.length;)
-                offset += crypto.getRandomValues(
-                    bytes.subarray(offset, offset + randomRequestBytes),
-                ).length;
-            added = await sealBallotRecord(
-                session.records,
-                journalKind,
-                index,
-                bytes,
-            );
-        } finally {
-            bytes.fill(0);
-        }
-        const journalKeys = [...session.state.journalKeys, added.key];
-        await commitBallot(session, {
-            generation:
-                journalKeys.length === layout.length
-                    ? phase.ready
-                    : phase.locked,
-            state: { ...session.state, journalKeys },
-            added,
-        });
-    }
-};
-
-// Serves the module's encryption and proof randomness from the journal's
-// two banks in order and clears what it consumed; exhaustion refuses.
-const journalRandomness = async (session: BallotSession) => {
-    const { profile } = session.participant.context;
-    const { recordBytes, randomBudgets } = profile.ballot;
-    const banks: Uint8Array[][] = randomBudgets.map(() => []);
-    for (const [index, entry] of journalLayout(profile).entries())
-        banks[entry.bank].push(
-            await openBallotRecord(session, journalKind, index),
-        );
-    const used = banks.map(() => 0);
-    const serve = (bank: number, target: Uint8Array) => {
-        if (target.length > randomBudgets[bank] - used[bank])
-            throw new Error(
-                'The ballot journal is exhausted in its ' +
-                    (bank === 0 ? 'encryption' : 'proof') +
-                    ' bank.',
-            );
-        for (let filled = 0; filled < target.length;) {
-            const record = banks[bank][Math.floor(used[bank] / recordBytes)];
-            const inside = used[bank] % recordBytes;
-            const count = Math.min(
-                target.length - filled,
-                record.length - inside,
-            );
-            target.set(record.subarray(inside, inside + count), filled);
-            record.fill(0, inside, inside + count);
-            filled += count;
-            used[bank] += count;
-        }
-    };
-    const random: NonNullable<KernelHandlers['random']> = (source, target) => {
-        if (source === 'ballot') serve(0, target);
-        else if (source === 'proof') serve(1, target);
-        else throw new Error('The ballot requested other randomness.');
-    };
-    return {
-        random,
-        clear: () => {
-            for (const bank of banks) for (const record of bank) record.fill(0);
-        },
-    };
-};
-
-// Creates the ballot from the locked scores, ballot time and journal.
-const createBallot = async (session: BallotSession) => {
+// Creates the ballot from the locked scores and ballot time. Its encryption
+// and proof randomness come only from the retained seed, so a replay draws
+// the same bytes.
+const createBallot = (session: BallotSession) => {
     const { context } = session.participant;
-    const randomness = await journalRandomness(session);
+    const randomness = seededRandomness(
+        context.kernel,
+        'ballot',
+        session.state.seed,
+        'ballot',
+    );
     const input = concatenate(
         unsigned64(session.state.ballotTime),
         session.state.scores,
@@ -749,46 +415,57 @@ const createBallot = async (session: BallotSession) => {
     context.handlers.random = randomness.random;
     try {
         ballotCommand(context, 4, 0, input);
+        session.proofRandomBytes = randomness.proofDrawn();
     } finally {
         context.handlers.random = undefined;
-        randomness.clear();
+        randomness.discard();
         input.fill(0);
     }
     return ballotCommand(context, 10);
 };
 
-// Retains the created body record by record, each append with its root.
-const retainBody = async (session: BallotSession) => {
+// Creates the ballot from the seed and retains its envelope and complete body
+// with one root, retiring the seed.
+const retainBallot = async (session: BallotSession) => {
     const { context } = session.participant;
-    const { recordBytes } = context.profile.ballot;
-    const count = Math.ceil(session.state.bodyLength / recordBytes);
-    while (session.state.bodyKeys.length < count) {
-        const index = session.state.bodyKeys.length;
-        const offset = index * recordBytes;
-        const length = Math.min(recordBytes, session.state.bodyLength - offset);
+    const { envelopeBytes, recordBytes } = context.profile.ballot;
+    const envelope = createBallot(session);
+    const bodyLength = Number(readUnsigned64(envelope, 142));
+    if (
+        envelope.length !== envelopeBytes ||
+        !ballotEnvelopeMatches(
+            envelope,
+            session.records,
+            bodyLength,
+            session.state.ballotTime,
+        )
+    )
+        throw new Error('The created envelope has another context.');
+    const added: SealedRecord[] = [];
+    for (let offset = 0; offset < bodyLength; offset += recordBytes) {
+        const length = Math.min(recordBytes, bodyLength - offset);
         const bytes = ballotCommand(context, 11, offset, unsigned32(length));
-        let added: SealedRecord;
         try {
             if (bytes.length !== length)
                 throw new Error('A ballot body record is incomplete.');
-            added = await sealBallotRecord(
-                session.records,
-                bodyKind,
-                index,
-                bytes,
+            added.push(
+                await sealBallotRecord(session.records, added.length, bytes),
             );
         } finally {
             bytes.fill(0);
         }
-        await commitBallot(session, {
-            generation: phase.body,
-            state: {
-                ...session.state,
-                bodyKeys: [...session.state.bodyKeys, added.key],
-            },
-            added,
-        });
     }
+    await commitBallot(session, {
+        generation: ballotPhase.body,
+        state: {
+            ...session.state,
+            seed: new Uint8Array(),
+            bodyLength,
+            bodyKeys: added.map((record) => record.key),
+            envelope,
+        },
+        added,
+    });
 };
 
 // Imports the complete retained body; the module verifies it against the
@@ -806,50 +483,31 @@ const importBody = async (session: BallotSession) => {
         throw new Error('The verified ballot changed its envelope.');
 };
 
-// Carries a retained ballot to its signed completion. A replay before the
-// body is complete must reproduce the retained envelope before appending.
+// Carries a retained ballot to its signed completion.
 export const completeBallot = async (session: BallotSession) => {
     const { participant } = session;
     const { context } = participant;
     const generation = () => participant.root.head.generation;
-    if (generation() >= phase.signed) return;
+    if (generation() >= ballotPhase.signed) return;
     await startBallotWork(session);
-    await prepareJournal(session);
-    const bodyRecords = Math.ceil(
-        session.state.bodyLength / context.profile.ballot.recordBytes,
-    );
-    if (
-        generation() === phase.ready ||
-        (generation() === phase.body &&
-            session.state.bodyKeys.length < bodyRecords)
-    ) {
-        const envelope = await createBallot(session);
-        if (generation() === phase.ready) {
-            const bodyLength = Number(readUnsigned64(envelope, 142));
-            if (
-                envelope.length !== context.profile.ballot.envelopeBytes ||
-                !envelopeMatches(
-                    envelope,
-                    session.records,
-                    bodyLength,
-                    session.state.ballotTime,
-                )
-            )
-                throw new Error('The created envelope has another context.');
-            await commitBallot(session, {
-                generation: phase.body,
-                state: { ...session.state, bodyLength, envelope },
-            });
-        } else if (!equalBytes(envelope, session.state.envelope))
-            throw new Error('The replayed ballot differs from its envelope.');
-        await retainBody(session);
-    } else await importBody(session);
-    if (generation() === phase.body)
+    if (generation() === ballotPhase.locked)
         await commitBallot(session, {
-            generation: phase.signing,
+            generation: ballotPhase.ready,
             state: {
                 ...session.state,
-                coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
+                seed: crypto.getRandomValues(
+                    new Uint8Array(operationSeedBytes),
+                ),
+            },
+        });
+    if (generation() === ballotPhase.ready) await retainBallot(session);
+    else await importBody(session);
+    if (generation() === ballotPhase.body)
+        await commitBallot(session, {
+            generation: ballotPhase.signing,
+            state: {
+                ...session.state,
+                coins: crypto.getRandomValues(new Uint8Array(ballotCoinBytes)),
             },
         });
     const control = concatenate(session.state.envelope, session.state.coins);
@@ -862,16 +520,14 @@ export const completeBallot = async (session: BallotSession) => {
     if (signature.length !== context.profile.registration.signatureBytes)
         throw new Error('The ballot signature is incomplete.');
     await commitBallot(session, {
-        generation: phase.signed,
+        generation: ballotPhase.signed,
         state: {
             ...session.state,
             scores: new Uint8Array(),
             ballotTime: 0n,
-            journalKeys: [],
             coins: new Uint8Array(),
             signature,
         },
-        retireJournal: true,
     });
 };
 
@@ -891,7 +547,7 @@ export const readBallotBody = async (
 ) => {
     let offset = 0;
     for (let index = 0; index < session.state.bodyKeys.length; index++) {
-        const bytes = await openBallotRecord(session, bodyKind, index);
+        const bytes = await openBallotRecord(session, index);
         try {
             await consume(bytes);
             offset += bytes.length;

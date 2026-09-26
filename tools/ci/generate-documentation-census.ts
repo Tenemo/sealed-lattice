@@ -17,7 +17,6 @@ import {
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
-import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
 import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
 import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
@@ -110,6 +109,11 @@ import {
     multiKeyTargetViews,
     randomizerInputCoupling,
 } from '#tests/multi-key-target-model.js';
+import {
+    compileOperationProofDraws,
+    operationSeedBytes,
+    operationSeedCount,
+} from '#tests/operation-seed-model.js';
 import {
     oracleDomainWork,
     programmedOracleDomainWork,
@@ -263,7 +267,6 @@ export const renderDocumentationCensus = (): string => {
     const fullWordProof = compileFullWordProofLayout(completion);
     const ballotWordProof = compileBallotWordProofLayout(completion);
     const ballotBody = compileBallotBodyCensus(completion);
-    const ballotRandomness = compileBallotRandomnessBudget(completion);
     const browserWordProver = compileBrowserWordProverResources(completion);
     const contributionGeneration =
         compileContributionGenerationResources(completion);
@@ -3080,81 +3083,33 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        '## Ballot randomness budget',
+        '## Operation randomness seeds',
         '',
-        'Finite independent random-byte budgets for the replay experiment. These bounds cover exhaustion of the existing samplers, not journal custody, deterministic replay, or complete protocol security.',
+        "All the randomness that the participant module's samplers and provers draw for a contribution generation or continuation, a ballot or a release is SHAKE256 output over its stream's domain and one seed that the participant's root retains before the operation draws any byte. A repeated operation reads its retained seed again, so it draws the same bytes; no finite budget is exhausted. The count bounds the seeds of one roster: two for each setup contributor and two for each participant. An honest ballot's and release's proof streams serve exactly the listed bytes when no candidate word is rejected; a release's include its noise, drawn in whole reads.",
         '',
         table(
             ['Property', 'Value'],
             [
-                ['Sampler read bytes', formatCount(ballotRandomness.readBytes)],
+                ['Seed bytes', formatCount(operationSeedBytes)],
                 [
-                    'Additional proof reads',
-                    formatCount(ballotRandomness.extraProofReads),
+                    'Seeds per roster at the completion profile',
+                    formatCount(operationSeedCount(completion)),
                 ],
                 [
-                    'Proof random-byte budget',
-                    formatCount(ballotRandomness.maximumProofBytes),
-                ],
-                [
-                    'Encryption random-byte budget',
-                    formatCount(ballotRandomness.maximumEncryptionBytes),
-                ],
-                [
-                    'Total private random bytes',
-                    formatCount(ballotRandomness.totalRandomBytes),
-                ],
-                [
-                    'Exhaustion allocation bits',
-                    formatCount(ballotRandomness.exhaustionAllocationBits),
-                ],
-                [
-                    'All-ballot exhaustion bound bits',
-                    formatCount(ballotRandomness.exhaustionBits),
-                ],
-            ],
-        ),
-        '',
-        table(
-            ['Journal storage operand', 'Value'],
-            [
-                [
-                    'Maximum plaintext record bytes',
-                    formatCount(ballotRandomness.recordBytes),
-                ],
-                [
-                    'Encrypted records',
-                    formatCount(ballotRandomness.recordCount),
-                ],
-                [
-                    'Encrypted journal payload bytes',
-                    formatCount(ballotRandomness.encryptedJournalBytes),
-                ],
-                [
-                    'Maximum encrypted root bytes',
-                    formatCount(ballotRandomness.maximumRootCiphertextBytes),
-                ],
-                [
-                    'Root keys in uninterrupted preparation',
-                    formatCount(ballotRandomness.uninterruptedRootKeyCreations),
-                ],
-                [
-                    'Record keys in uninterrupted preparation',
+                    'Seeds per roster at the largest profile',
                     formatCount(
-                        ballotRandomness.uninterruptedRecordKeyCreations,
+                        operationSeedCount(
+                            listSupportedProfiles().slice(-1)[0],
+                        ),
                     ),
                 ],
                 [
-                    'Maximum distinct AES inputs per record key',
-                    formatCount(
-                        ballotRandomness.maximumDistinctGcmBlocksPerRecordKey,
-                    ),
+                    'Ballot proof-stream bytes at the completion profile',
+                    formatCount(compileOperationProofDraws(completion).ballot),
                 ],
                 [
-                    'Maximum distinct AES inputs per root key',
-                    formatCount(
-                        ballotRandomness.maximumDistinctGcmBlocksPerRootKey,
-                    ),
+                    'Release proof-stream bytes at the completion profile',
+                    formatCount(compileOperationProofDraws(completion).release),
                 ],
             ],
         ),
@@ -3178,12 +3133,6 @@ export const renderDocumentationCensus = (): string => {
                     'Maximum encrypted body bytes',
                     formatCount(
                         participantBallotCustody.maximumEncryptedBodyBytes,
-                    ),
-                ],
-                [
-                    'Maximum retained journal and body bytes',
-                    formatCount(
-                        participantBallotCustody.maximumJournalAndBodyBytes,
                     ),
                 ],
                 ...participantBallotCustody.phaseBytes.map((value) => [
@@ -3270,7 +3219,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Participant release custody',
         '',
-        'Bounds for one original-key release under the retained certified target. Repeated execution replays the same finite journal. The volatile entropy payload shares the existing scalar memory ceiling and excludes allocator metadata, capacity rounding and the rest of the prover. The live decrypted-record bound excludes garbage awaiting collection and browser cryptographic internals. These bounds exclude the earlier participant state and do not establish the complete security reduction or measured browser costs.',
+        'Private release suffix and payload bounds for one original-key release under the retained certified target, excluding the earlier participant state. Repeated execution draws the same bytes from the retained seed. The encoded suffix supplies no verification or signing authority by itself.',
         '',
         table(
             ['Property', 'Value'],
@@ -3280,65 +3229,21 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(participantReleaseCustody.proofRoleBytes),
                 ],
                 [
-                    'Independent noise bytes',
-                    formatCount(participantReleaseCustody.noiseBytes),
-                ],
-                [
-                    'Wasm entropy input bytes',
-                    formatCount(
-                        participantReleaseCustody.wasmEntropyInputBytes,
-                    ),
-                ],
-                [
-                    'Wasm entropy output bytes',
-                    formatCount(
-                        participantReleaseCustody.wasmEntropyOutputBytes,
-                    ),
-                ],
-                [
-                    'Maximum Wasm entropy payload bytes',
-                    formatCount(
-                        participantReleaseCustody.maximumWasmEntropyPayloadBytes,
-                    ),
-                ],
-                [
-                    'Maximum live decrypted journal record bytes',
-                    formatCount(
-                        participantReleaseCustody.maximumLiveDecryptedJournalRecordBytes,
-                    ),
-                ],
-                [
-                    'Maximum proof randomness bytes',
-                    formatCount(
-                        participantReleaseCustody.maximumProofRandomBytes,
-                    ),
-                ],
-                [
-                    'Additional proof random reads',
-                    formatCount(participantReleaseCustody.extraProofReads),
-                ],
-                [
-                    'Journal exhaustion allocation bits',
-                    formatCount(
-                        participantReleaseCustody.exhaustionAllocationBits,
-                    ),
-                ],
-                [
-                    'Total journal bytes',
-                    formatCount(participantReleaseCustody.totalRandomBytes),
-                ],
-                [
-                    'Journal records',
-                    formatCount(participantReleaseCustody.journalRecords),
+                    'Maximum release state bytes',
+                    formatCount(participantReleaseCustody.maximumStateBytes),
                 ],
                 [
                     'Maximum body bytes',
                     formatCount(participantReleaseCustody.maximumBodyBytes),
                 ],
                 [
-                    'Maximum encrypted journal and body bytes',
+                    'Maximum body records',
+                    formatCount(participantReleaseCustody.maximumBodyRecords),
+                ],
+                [
+                    'Maximum encrypted body bytes',
                     formatCount(
-                        participantReleaseCustody.maximumJournalAndBodyBytes,
+                        participantReleaseCustody.maximumEncryptedBodyBytes,
                     ),
                 ],
                 ...participantReleaseCustody.phaseBytes.map((value) => [

@@ -143,9 +143,7 @@ describe('shared participant custody', () => {
             'Contribution body record',
             'Contribution checkpoint record',
             'Contribution signing record',
-            'Ballot journal record',
             'Ballot body record',
-            'Release journal record',
             'Release body record',
         ]);
         expect(
@@ -171,20 +169,19 @@ describe('shared participant custody', () => {
     it('includes target-bound release records without turning corpus maxima into lifetime limits', () => {
         const classes = compileParticipantVaultKeyClasses(completionProfile());
         const release = compileParticipantReleaseCustody(completionProfile());
+        // The poll, runtime and setup inventory, the position, the certified
+        // target digest, and the record's index and length.
         const associatedBytes = Buffer.concat([
-            Buffer.from('sealed-lattice/participant-release-record/v1'),
+            Buffer.from('sealed-lattice/participant-release-record/v2'),
             Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.alloc(2),
-            Buffer.alloc(4),
-            Buffer.alloc(2048),
-            Buffer.alloc(1),
+            Buffer.alloc(64),
             Buffer.alloc(2),
             Buffer.alloc(4),
         ]);
         for (const [name, maximumRecords] of [
-            ['Release journal record', release.journalRecords],
             ['Release body record', release.maximumBodyRecords],
         ] as const) {
             const value = classes.find((entry) => entry.name === name);

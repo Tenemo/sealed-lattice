@@ -1,7 +1,7 @@
-import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
@@ -9,10 +9,6 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
-
-// A contribution's generation and continuation each expand their private
-// randomness from one 512-bit seed retained with their intent.
-export const contributionSeedBytes = 64n;
 
 export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
@@ -59,7 +55,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         checkpoint.maximumHeaderBytes +
         106n * BigInt(publicRecords.length) +
         96n * checkpoint.recordCount +
-        contributionSeedBytes;
+        operationSeedBytes;
     const maximumCompletedMetadataBytes =
         metadataPrefixBytes +
         106n * (BigInt(publicRecords.length) + maximumProofRecords) +
@@ -244,7 +240,6 @@ export const compileParticipantVaultKeyClasses = (
     const body = compileContributionBodyCensus(profile);
     const checkpoint = compileFirstOracleCheckpointCensus(profile);
     const ballot = compileParticipantBallotCustody(profile);
-    const randomness = compileBallotRandomnessBudget(profile);
     const release = compileParticipantReleaseCustody(profile);
     const authentication = compileContributionAuthenticationCensus(
         body.participantCount,
@@ -264,24 +259,23 @@ export const compileParticipantVaultKeyClasses = (
         2n +
         4n +
         4n;
+    // The poll, runtime and setup inventory, the position, a release's
+    // certified target digest, and the record's index and length.
     const ballotAssociatedBytes =
         BigInt(
-            Buffer.byteLength('sealed-lattice/participant-ballot-record/v1'),
+            Buffer.byteLength('sealed-lattice/participant-ballot-record/v2'),
         ) +
         3n * 64n +
         2n +
-        1n +
         2n +
         4n;
     const releaseAssociatedBytes =
         BigInt(
-            Buffer.byteLength('sealed-lattice/participant-release-record/v1'),
+            Buffer.byteLength('sealed-lattice/participant-release-record/v2'),
         ) +
         3n * 64n +
         2n +
-        4n +
-        compileTargetSigningStateCensus().maximumBodyBytes +
-        1n +
+        64n +
         2n +
         4n;
     const invocation = (
@@ -362,24 +356,10 @@ export const compileParticipantVaultKeyClasses = (
             ],
         },
         {
-            name: 'Ballot journal record',
-            maximumPerCompletedCorpus: randomness.recordCount,
-            encryptions: [
-                invocation(randomness.recordBytes, ballotAssociatedBytes),
-            ],
-        },
-        {
             name: 'Ballot body record',
             maximumPerCompletedCorpus: ballot.maximumBodyRecords,
             encryptions: [
-                invocation(randomness.recordBytes, ballotAssociatedBytes),
-            ],
-        },
-        {
-            name: 'Release journal record',
-            maximumPerCompletedCorpus: release.journalRecords,
-            encryptions: [
-                invocation(release.recordBytes, releaseAssociatedBytes),
+                invocation(ballot.recordBytes, ballotAssociatedBytes),
             ],
         },
         {

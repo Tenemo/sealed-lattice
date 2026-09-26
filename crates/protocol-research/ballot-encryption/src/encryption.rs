@@ -200,23 +200,6 @@ fn component(
 pub fn fhe_key_polynomial(profile: Profile) -> usize {
     profile.fhe_polynomial(0, 1)
 }
-/// A ballot encrypts its packed scores under the FHE key and its literal
-/// scores under the auxiliary key: each encryption's degree and sparse
-/// secret support, in that order.
-pub fn ballot_encryptions(profile: Profile) -> [(usize, usize); 2] {
-    [
-        (profile.family_degree(Family::Fhe), FHE_SECRET_SUPPORT),
-        (
-            profile.family_degree(Family::Auxiliary),
-            AUXILIARY_SECRET_SUPPORT,
-        ),
-    ]
-}
-/// The whole reads of one encryption whose sparse secret takes at most
-/// twice its support in draws, then its two error vectors.
-pub fn encryption_random_bytes(degree: usize, support: usize) -> usize {
-    (DRAW_BYTES * 2 * support + 2 * degree * SAMPLE_BYTES).next_multiple_of(READ_BYTES)
-}
 impl EncryptionWitness {
     /// Encrypts a message under the profile's FHE or auxiliary key with
     /// fresh randomness.
@@ -369,6 +352,21 @@ mod tests {
         }
         result
     }
+    #[test]
+    fn sparse_secret_draws_are_uniform_positions() {
+        // A four-byte draw reduced modulo the degree is a uniform position
+        // only when the degree divides 2^32.
+        let profile = Profile::new(3, 2).unwrap();
+        for (family, support) in [
+            (Family::Fhe, FHE_SECRET_SUPPORT),
+            (Family::Auxiliary, AUXILIARY_SECRET_SUPPORT),
+        ] {
+            let degree = profile.family_degree(family);
+            assert!((1u64 << (8 * DRAW_BYTES)).is_multiple_of(degree as u64));
+            assert!(0 < support && support < degree);
+        }
+    }
+
     #[test]
     fn both_encryption_moduli_match_independent_integer_convolution_and_decoding() {
         let degree = 32;

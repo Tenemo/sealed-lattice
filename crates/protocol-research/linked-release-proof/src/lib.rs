@@ -16,9 +16,6 @@ pub mod parameters;
 pub mod proof;
 #[path = "../../word-proof/src/random.rs"]
 mod random;
-#[cfg(any(target_arch = "wasm32", test))]
-#[path = "release-entropy.rs"]
-pub mod release_entropy;
 pub mod statement;
 use field::base as arithmetic;
 #[path = "../../word-verifier/src/engine.rs"]
@@ -31,9 +28,7 @@ pub mod tree;
 mod witness;
 use statement::{StatementOutput, StatementStream};
 use supported_profile::{Profile, relation::release_relation};
-pub use witness::{
-    PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound, noise_random_bytes,
-};
+pub use witness::{PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound};
 
 impl engine::Statement for StatementStream {
     fn push(&mut self, bytes: &[u8]) -> bool {

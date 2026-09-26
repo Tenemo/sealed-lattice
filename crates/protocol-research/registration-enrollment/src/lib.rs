@@ -11,15 +11,15 @@ use zeroize::Zeroizing;
 pub mod ballot;
 #[path = "close-work.rs"]
 pub mod close_work;
-#[cfg(any(target_arch = "wasm32", test))]
-#[path = "contribution-random.rs"]
-mod contribution_random;
 #[path = "contribution-signing.rs"]
 pub mod contribution_signing;
 #[path = "custody-identity.rs"]
 pub mod custody_identity;
 #[path = "finality-work.rs"]
 pub mod finality_work;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "operation-random.rs"]
+mod operation_random;
 #[path = "participant-bounds.rs"]
 pub mod participant_bounds;
 #[path = "release-work.rs"]

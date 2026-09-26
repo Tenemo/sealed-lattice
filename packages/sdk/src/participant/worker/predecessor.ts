@@ -18,7 +18,7 @@ export type ParticipantIdentities = Readonly<{
 }>;
 
 // The expected manifest is the immutable authenticated predecessor, never the
-// next manifest after journals/checkpoints have been removed. This check
+// next manifest after retired records have been removed. This check
 // runs inside commitParticipantState's protected readwrite transaction.
 export async function validateParticipantPredecessor(
     reader: ParticipantTransactionReader,

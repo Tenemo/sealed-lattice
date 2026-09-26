@@ -5,7 +5,6 @@ import type {
     ParticipantProfile,
 } from '#packages/sdk/src/participant/worker/bounds.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
-import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
@@ -50,7 +49,6 @@ export const compileParticipantRuntimeProfile = (
         compileContributionAuthenticationCensus(participantCount);
     const ballotBody = compileBallotBodyCensus(profile);
     const ballotCustody = compileParticipantBallotCustody(profile);
-    const randomness = compileBallotRandomnessBudget(profile);
     const closeWire = compileCloseWireCensus(profile);
     const closeCustody = compileParticipantCloseCustody(profile);
     const targetState = compileTargetSigningStateCensus();
@@ -119,12 +117,7 @@ export const compileParticipantRuntimeProfile = (
         ballot: {
             minimumScore: ballotScoreRange.minimum,
             maximumScore: ballotScoreRange.maximum,
-            recordBytes: number(randomness.recordBytes),
-            randomBudgets: [
-                number(randomness.maximumEncryptionBytes),
-                number(randomness.maximumProofBytes),
-            ],
-            journalRecords: number(randomness.recordCount),
+            recordBytes: number(ballotCustody.recordBytes),
             maximumStateBytes: number(ballotCustody.maximumStateBytes),
             headerBytes: number(ballotBody.headerBytes),
             minimumBodyBytes: number(
@@ -135,7 +128,7 @@ export const compileParticipantRuntimeProfile = (
             maximumBodyBytes: number(ballotBody.maximumBodyBytes),
             envelopeBytes: number(ballotBody.envelopeBytes),
             requiredStorageBytes: number(
-                ballotCustody.maximumJournalAndBodyBytes +
+                ballotCustody.maximumEncryptedBodyBytes +
                     ballotCustody.maximumStateBytes +
                     custody.maximumRootBytes,
             ),
@@ -167,8 +160,6 @@ export const compileParticipantRuntimeProfile = (
         },
         release: {
             recordBytes: number(releaseCustody.recordBytes),
-            journalBytes: number(releaseCustody.totalRandomBytes),
-            journalRecords: number(releaseCustody.journalRecords),
             bodyHeaderBytes: number(releaseCustody.bodyHeaderBytes),
             minimumBodyBytes: number(releaseCustody.minimumBodyBytes),
             maximumBodyBytes: number(releaseCustody.maximumBodyBytes),

@@ -1,7 +1,7 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
@@ -17,116 +17,39 @@ const releaseContextBytes = 4n + 3n * 64n + 2n;
 // Context, body length and body identity; the same for every profile.
 export const participantReleaseEnvelopeBytes = releaseContextBytes + 8n + 64n;
 
-// A finite journal of independent bytes for one original-key release. The
-// proof budget bounds rejection-sampling exhaustion; it is not a PRG claim.
+// One original-key release under the retained certified target. Its seed is
+// retained from the phase after the target lock until the body is.
 export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
-    const parameters = {
-        participantCount: BigInt(profile.participantCount),
-        polynomialDegree: fixedModulusBfvInputs.polynomialDegree,
-        releaseModulus: profile.release.modulus,
-        releaseNoiseBits: profile.releaseNoiseBits,
-    };
     const proof = compileLinkedReleaseWordProofLayout(profile);
-    const field = compileSmallLimbProofFieldCensus();
     const { signatureBytes } = compileRegistrationEnrollmentCensus();
-    const readBytes = 65_536n;
     const recordBytes = 1n << 20n;
-    const exhaustionAllocationBits = 128n;
-    const rejected = (1n << field.modulusBitLength) - field.modulus;
-    const failure = (extraReads: bigint) => {
-        const rejections = extraReads + 1n;
-        const candidates =
-            (proof.minimumRequestedRandomBytes + extraReads * readBytes) /
-            field.packedFieldElementByteLength;
-        let subsets = 1n;
-        for (let index = 1n; index <= rejections; index++)
-            subsets = (subsets * (candidates - index + 1n)) / index;
-        return {
-            numerator:
-                parameters.participantCount * subsets * rejected ** rejections,
-            denominatorBits: field.modulusBitLength * rejections,
-        };
-    };
-    let extraProofReads = 0n;
-    while (
-        failure(extraProofReads).numerator << exhaustionAllocationBits >
-        1n << failure(extraProofReads).denominatorBits
-    )
-        extraProofReads++;
-    const exhaustionBound = failure(extraProofReads);
-    if (parameters.releaseNoiseBits % 8 !== 0)
-        throw new Error('Release noise requires an exact byte width.');
-    const noiseBytes =
-        parameters.polynomialDegree * BigInt(parameters.releaseNoiseBits / 8);
-    const roundedNoiseBytes =
-        ((noiseBytes + readBytes - 1n) / readBytes) * readBytes;
-    const maximumProofRandomBytes =
-        proof.minimumRequestedRandomBytes + extraProofReads * readBytes;
-    const totalRandomBytes = roundedNoiseBytes + maximumProofRandomBytes;
-    const journalRecords = (totalRandomBytes + recordBytes - 1n) / recordBytes;
-    const contextBytes = releaseContextBytes;
-    const bodyHeaderBytes = 4n + 8n + contextBytes;
+    const keyBytes = 32n;
+    const coinBytes = 32n;
+    const bodyHeaderBytes = 4n + 8n + releaseContextBytes;
     const coefficientBytes =
-        1n + (BigInt(parameters.releaseModulus.toString(2).length) + 7n) / 8n;
-    const partialBytes = parameters.polynomialDegree * coefficientBytes;
+        1n + (BigInt(profile.release.modulus.toString(2).length) + 7n) / 8n;
+    const partialBytes =
+        fixedModulusBfvInputs.polynomialDegree * coefficientBytes;
     const minimumBodyBytes = bodyHeaderBytes + partialBytes + proof.headerBytes;
     const maximumBodyBytes =
         bodyHeaderBytes + partialBytes + proof.maximumMultiproofBytes;
     const envelopeBytes = participantReleaseEnvelopeBytes;
     const maximumBodyRecords =
         (maximumBodyBytes + recordBytes - 1n) / recordBytes;
-    const prefixBytes = 4n + 1n + 2n + 2n + 4n + 2n;
-    const targetBytes = compileTargetSigningStateCensus().maximumBodyBytes;
+    const prefixBytes = 4n + 1n + 2n + 4n + 2n;
+    const attempt =
+        prefixBytes + compileTargetSigningStateCensus().maximumBodyBytes;
+    const retainedBody = keyBytes * maximumBodyRecords + envelopeBytes;
     const phaseBytes = [
-        {
-            phase: 25,
-            bytes: prefixBytes + targetBytes + 32n * (journalRecords - 1n),
-        },
-        { phase: 26, bytes: prefixBytes + targetBytes + 32n * journalRecords },
-        {
-            phase: 27,
-            bytes:
-                prefixBytes +
-                targetBytes +
-                32n * (journalRecords + maximumBodyRecords) +
-                envelopeBytes,
-        },
-        {
-            phase: 28,
-            bytes:
-                prefixBytes +
-                targetBytes +
-                32n * (journalRecords + maximumBodyRecords) +
-                envelopeBytes +
-                32n,
-        },
-        {
-            phase: 29,
-            bytes:
-                prefixBytes +
-                targetBytes +
-                32n * maximumBodyRecords +
-                envelopeBytes +
-                signatureBytes,
-        },
+        { phase: 25, bytes: attempt },
+        { phase: 26, bytes: attempt + operationSeedBytes },
+        { phase: 27, bytes: attempt + retainedBody },
+        { phase: 28, bytes: attempt + retainedBody + coinBytes },
+        { phase: 29, bytes: attempt + retainedBody + signatureBytes },
     ];
     return {
         proofRoleBytes: participantReleaseProofRoleBytes,
-        readBytes,
         recordBytes,
-        exhaustionAllocationBits,
-        exhaustionBound,
-        extraProofReads,
-        noiseBytes,
-        roundedNoiseBytes,
-        maximumProofRandomBytes,
-        totalRandomBytes,
-        journalRecords,
-        wasmEntropyInputBytes: recordBytes,
-        wasmEntropyOutputBytes: readBytes,
-        maximumWasmEntropyPayloadBytes:
-            totalRandomBytes + recordBytes + readBytes,
-        maximumLiveDecryptedJournalRecordBytes: recordBytes,
         bodyHeaderBytes,
         partialBytes,
         minimumBodyBytes,
@@ -140,11 +63,6 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
             (maximum, value) => (value.bytes > maximum ? value.bytes : maximum),
             0n,
         ),
-        encryptedJournalBytes: totalRandomBytes + 16n * journalRecords,
         maximumEncryptedBodyBytes: maximumBodyBytes + 16n * maximumBodyRecords,
-        maximumJournalAndBodyBytes:
-            totalRandomBytes +
-            maximumBodyBytes +
-            16n * (journalRecords + maximumBodyRecords),
     };
 };

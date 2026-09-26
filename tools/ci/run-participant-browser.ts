@@ -23,6 +23,7 @@ import { participantDatabaseName } from '#packages/sdk/src/participant/worker/st
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
+import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
@@ -795,6 +796,12 @@ await runWithLocalRunLog(
                 participantCount,
                 optionCount,
             );
+            // The proof randomness an honest ballot and release draw from
+            // their seeds when no candidate is rejected, as the independent
+            // models derive it.
+            const proofDraws = compileOperationProofDraws(
+                deriveSupportedProfile(participantCount, optionCount),
+            );
             const { runtime, invalidBallotClient } =
                 await assembleParticipantRuntime(
                     log,
@@ -1010,6 +1017,19 @@ await runWithLocalRunLog(
                     }
                     if (guardFailure !== undefined) throw guardFailure;
                     const milliseconds = performance.now() - started;
+                    // A ballot or release generated in this visit drew the
+                    // modelled proof randomness.
+                    if (
+                        result.status === 'completed' &&
+                        result.details.proofRandomBytes !== undefined
+                    )
+                        assert.equal(
+                            BigInt(result.details.proofRandomBytes as number),
+                            operation === 'ballot'
+                                ? proofDraws.ballot
+                                : proofDraws.release,
+                            `${operation} at position ${String(position)} drew other proof randomness.`,
+                        );
                     log.writeEvent({
                         eventType: 'participant-operation',
                         details: {
@@ -2186,9 +2206,9 @@ await runWithLocalRunLog(
                 reason: 'Public delivery was refused.',
             };
             // The first honest authors halt between them at every ballot
-            // generation: after the attempt lock, with the journal complete,
-            // with the body partly retained, with the signature intent, and
-            // with the signed ballot before its delivery.
+            // generation: after the attempt lock, with the seed retained,
+            // with the body retained, with the signature intent, and with the
+            // signed ballot before its delivery.
             const ballotHalts = new Map(
                 ballotAuthors
                     .filter(honest)
@@ -2211,11 +2231,11 @@ await runWithLocalRunLog(
                     return;
                 }
                 // A signed ballot is only delivered again. A copy of the state
-                // with the complete journal loses a journal record and stops.
+                // with the retained body loses a body record and stops.
                 const halts = ballotHalts.get(position) ?? [];
                 for (const generation of halts) {
                     await interrupt(position, 'ballot', { scores }, generation);
-                    if (generation === 14)
+                    if (generation === 15)
                         await loseState(position, 'ballot', 'ballot');
                 }
                 assert.equal(
@@ -2919,10 +2939,7 @@ await runWithLocalRunLog(
             let interruption:
                 | Readonly<{
                       position: number;
-                      resumedFrom: Readonly<{
-                          generation: number;
-                          journalRecords: number;
-                      }>;
+                      resumedFrom: Readonly<{ generation: number }>;
                   }>
                 | undefined;
             // The participant that released from an archived closure, and
@@ -2955,17 +2972,15 @@ await runWithLocalRunLog(
             } else {
                 // Every remaining participant certifies the target from the
                 // published votes, archives the certified target closure it
-                // read, appends its journal of original random bytes, and
+                // read, retains the seed of its release randomness, and
                 // generates and signs its release share. The first remaining
-                // voter's browser closes once a third of its journal is
-                // committed, and its next visit continues from the retained
-                // records.
-                const { journalRecords } = releaseBounds;
+                // voter's browser closes while it generates its share from the
+                // retained seed, and its next visit generates it again from
+                // that seed.
                 const interruptedPosition = remaining.find((position) =>
                     voters.includes(position),
                 );
                 assert.ok(interruptedPosition !== undefined);
-                const interruptionRecords = Math.ceil(journalRecords / 3);
                 const interruptRelease = async () => {
                     const interrupted = request(interruptedPosition, 'release');
                     for (;;) {
@@ -2981,12 +2996,7 @@ await runWithLocalRunLog(
                             'waiting',
                             'The release ended before its interruption.',
                         );
-                        if (
-                            (await storedRecords(
-                                interruptedPosition,
-                                'release',
-                            )) >= interruptionRecords
-                        )
+                        if ((await headGeneration(interruptedPosition)) === 26)
                             break;
                     }
                     await browsers.close(
@@ -2996,7 +3006,7 @@ await runWithLocalRunLog(
                     const details = await run(interruptedPosition, 'release');
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
-                    // Its first visit archived the closure before the journal.
+                    // Its first visit archived the closure before the seed.
                     assert.equal(details.closure, undefined);
                     assert.equal(
                         details.predecessor,
@@ -3004,13 +3014,8 @@ await runWithLocalRunLog(
                     );
                     const resumedFrom = details.resumedFrom as {
                         generation: number;
-                        journalRecords: number;
                     };
-                    assert.equal(resumedFrom.generation, 25);
-                    assert.ok(
-                        resumedFrom.journalRecords >= interruptionRecords &&
-                            resumedFrom.journalRecords < journalRecords,
-                    );
+                    assert.equal(resumedFrom.generation, 26);
                     return resumedFrom;
                 };
                 const [resumedFrom] = await Promise.all([
@@ -3041,9 +3046,9 @@ await runWithLocalRunLog(
                 // The combining participant, which the relay then serves no
                 // public record, finds the archived closures among the
                 // archive's hints and releases from the replicas alone. It
-                // halts at every generation after its journal, the last with
-                // its signed release before delivery, which its next visit
-                // only delivers.
+                // halts at every generation after its target lock, the last
+                // with its signed release before delivery, which its next
+                // visit only delivers.
                 let hint: Readonly<{ identity: string; byteLength: number }>;
                 relay.withheld.add(combiningPosition);
                 try {
@@ -3516,7 +3521,7 @@ await runWithLocalRunLog(
                     ? "Browser registration, roster agreement, setup contribution and setup verification with no ballot cast, a participant whose setup is retained only after the organizer's close intent and so can no longer vote, close responses that list nothing under the organizer's proposal, a participant refused a ballot after its intent lock, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
                     : noResult
                       ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
-                      : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, one of them the all-minimum ballot, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts.",
+                      : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, one of them the all-minimum ballot, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them generated again from its retained seed after its browser closed while generating it, and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts.",
                 ...(departing === undefined || omittedVoter === undefined
                     ? []
                     : [
@@ -3528,7 +3533,7 @@ await runWithLocalRunLog(
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
                 mode === 'empty'
                     ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."
-                    : "Copies of honest participants' state stop for good once they lose their last ballot record with the ballot journal complete, or, before their close response or target vote, their last close record or, holding none, their last data record.",
+                    : "Copies of honest participants' state stop for good once they lose their last ballot record with the ballot body retained, or, before their close response or target vote, their last close record or, holding none, their last data record.",
                 `Relay views that ${noResult ? 'relabel or replay votes' : 'relabel, replay or alter votes and shares'} or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.`,
                 ...(mode === 'empty'
                     ? []

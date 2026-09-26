@@ -40,8 +40,9 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
     let profile = setup.profile();
     let roster = setup.inventory().proposal();
     match operation {
-        // The worker commits the target and complete original entropy journal
-        // before this call. Only the public verifier can supply the context.
+        // The worker commits the target and the release seed before this
+        // call and installs the seed's undrawn randomness. Only the public
+        // verifier can supply the context.
         0 => {
             if session.release.is_some() {
                 return Err(Error::Consumed);
@@ -51,9 +52,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if input != context.certificate().target().body() {
                 return Err(Error::Context);
             }
-            if !linked_release_proof::release_entropy::ready(
-                crate::participant_bounds::release_random_bytes(profile),
-            ) {
+            if !crate::operation_random::ready(crate::operation_random::Purpose::Release) {
                 return Err(Error::Context);
             }
             let work = crate::release_work::ReleaseWork::new(owner, context)?;

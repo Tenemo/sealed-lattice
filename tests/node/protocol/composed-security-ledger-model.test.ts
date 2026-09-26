@@ -414,7 +414,9 @@ describe('composed security ledger', () => {
         // A balanced sparse sampler of support s over degree d fails its
         // draw cap of 2s with probability at most (4(s-1)/d)^s. Every setup
         // contributor draws two FHE secrets, one ephemeral per recipient
-        // and one auxiliary secret; every registration one recipient secret.
+        // and one auxiliary secret; every participant one FHE and one
+        // auxiliary ballot ephemeral; every registration one recipient
+        // secret.
         const bound = (degree: bigint, support: bigint) => ({
             numerator: (4n * (support - 1n)) ** support,
             denominator: degree ** support,
@@ -459,6 +461,19 @@ describe('composed security ledger', () => {
             )!;
             expect(term.numerator).toBe(expected);
             expect(term.numerator).toBeGreaterThan(0n);
+            const ballot = profileStatisticalTerms(
+                deriveSupportedProfile(participantCount, optionCount),
+            ).find(
+                (value) =>
+                    value.name === 'Ballot sparse-support cap exhaustion',
+            )!;
+            expect(ballot.numerator).toBe(
+                unitsAbove([
+                    { calls: participants, ...bound(65_536n, 1_024n) },
+                    { calls: participants, ...bound(4_096n, 256n) },
+                ]),
+            );
+            expect(ballot.numerator).toBeGreaterThan(0n);
         }
         const population = ledger.maximumCredentialPopulation;
         const registration = compileComposedSecurityLedger(
@@ -472,22 +487,24 @@ describe('composed security ledger', () => {
         );
     });
 
-    it('charges the seeded contribution randomness its one-way-to-hiding bound', () => {
-        // Two 512-bit seeds per setup contributor, and 2^80 oracle calls in
-        // any experiment within the target: 2*sqrt((q+1)*4q*m/2^512) is at
-        // most 4(q+1)*ceil(sqrt(m))/2^256.
+    it('charges the seeded operation randomness its one-way-to-hiding bound', () => {
+        // Two 512-bit seeds per setup contributor and two per participant,
+        // and 2^80 oracle calls in any experiment within the target:
+        // 2*sqrt((q+1)*4q*m/2^512) is at most 4(q+1)*ceil(sqrt(m))/2^256.
         const calls = 1n << 80n;
         for (const [participantCount, optionCount, root] of [
-            [3, 2, 2n],
-            [10, 10, 3n],
-            [20, 20, 4n],
+            [3, 2, 4n],
+            [10, 10, 6n],
+            [20, 20, 8n],
         ] as const) {
-            const seeds = 2n * BigInt(setupContributors(participantCount));
+            const seeds =
+                2n * BigInt(setupContributors(participantCount)) +
+                2n * BigInt(participantCount);
             expect(root * root).toBeGreaterThanOrEqual(seeds);
             expect((root - 1n) * (root - 1n)).toBeLessThan(seeds);
             const term = profileStatisticalTerms(
                 deriveSupportedProfile(participantCount, optionCount),
-            ).find((value) => value.name === 'Contribution seed expansion')!;
+            ).find((value) => value.name === 'Operation seed expansion')!;
             expect(term.numerator).toBe(4n * (calls + 1n) * root);
             // Squared and scaled by 2^512, the exact bound 16(q+1)qm is at
             // most the charged term squared.

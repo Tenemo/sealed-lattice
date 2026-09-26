@@ -13,8 +13,12 @@ import { PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
-import { readKernel, writeChunkInput } from './kernel.js';
-import type { KernelHandlers, ParticipantKernel } from './kernel.js';
+import {
+    operationSeedBytes,
+    readKernel,
+    seededRandomness,
+    writeChunkInput,
+} from './kernel.js';
 import {
     publishChunk,
     publishRecord,
@@ -29,7 +33,6 @@ import {
     releasePhase,
     releaseRecordAssociatedData,
     releaseRecordInventory,
-    releaseRecordKind,
     releaseRecordLengths,
 } from './release-state.js';
 import type { ReleaseState } from './release-state.js';
@@ -51,13 +54,12 @@ import {
 // any signed target, evaluates the target again from the public close records
 // and certifies it from the published votes; only the certificate verifier
 // creates the release context. The
-// journal of original random bytes enters the root before any private
-// generation, and the module proves the release from that journal alone, so
-// an interrupted generation replays the same bytes. The body and envelope
+// seed of all release randomness enters the root before any private
+// generation, and the module proves the release from that seed alone, so an
+// interrupted generation draws the same bytes again. The body and envelope
 // are retained before the signing coins, and the coins before the signature.
 
 const coinBytes = 32;
-const randomRequestBytes = 65_536;
 
 export type ReleaseSession = {
     readonly close: CloseSession;
@@ -68,6 +70,9 @@ export type ReleaseSession = {
     // evaluation of a release that follows the completed close.
     target: Readonly<{ body: Uint8Array; digest: Uint8Array }> | undefined;
     state: ReleaseState | undefined;
+    // The proof-stream bytes the module drew, when this visit generated the
+    // release.
+    proofRandomBytes?: number;
 };
 
 const releaseTarget = (session: ReleaseSession) => {
@@ -84,9 +89,6 @@ const words = (bytes: Uint8Array) =>
         readUnsigned32(bytes, 4 * index),
     );
 
-const recordCount = (state: ReleaseState | undefined) =>
-    state === undefined ? 0 : state.journalKeys.length + state.bodyKeys.length;
-
 // Decodes the retained release state beneath its predecessor. A release that
 // follows the completed close keeps an empty target field. Every listed
 // release record must be stored and nothing else.
@@ -100,7 +102,7 @@ export const resumeRelease = async (
         throw new Error('No completed close or signed target is retained.');
     const bytes = root.manifest.suffixes.release;
     const state =
-        generation < releasePhase.journal
+        generation < releasePhase.locked
             ? undefined
             : bytes === undefined
               ? undefined
@@ -110,7 +112,7 @@ export const resumeRelease = async (
                     close.organizer,
                     bytes,
                 );
-    if (generation >= releasePhase.journal && state === undefined)
+    if (generation >= releasePhase.locked && state === undefined)
         throw new Error('No release state is retained.');
     const followsClose = generation === closed || state?.predecessor === closed;
     if (
@@ -129,7 +131,7 @@ export const resumeRelease = async (
     )
         throw new Error('The release names another target.');
     const snapshot = await snapshotParticipant(context.database);
-    if (snapshot.counts.release !== recordCount(state))
+    if (snapshot.counts.release !== (state?.bodyKeys.length ?? 0))
         throw new Error('The release records changed.');
     const body = signed?.body ?? state?.target;
     return {
@@ -249,29 +251,22 @@ const establishReleaseContext = async (
     completionCommand(context, 5);
 };
 
-const openReleaseRecord = (
-    session: ReleaseSession,
-    kind: number,
-    index: number,
-) => {
+const openReleaseRecord = (session: ReleaseSession, index: number) => {
     const { context } = session.close.participant;
     const { state } = session;
     if (state === undefined) throw new Error('No release state is retained.');
-    const journal = kind === releaseRecordKind.journal;
-    const length = releaseRecordLengths(
-        context.profile,
-        journal ? context.profile.release.journalBytes : state.bodyLength,
-    )[index];
+    const length = releaseRecordLengths(context.profile, state.bodyLength)[
+        index
+    ];
     return openRecord(
         context.database,
         'release',
-        [kind, index],
+        index,
         {
-            key: (journal ? state.journalKeys : state.bodyKeys)[index],
+            key: state.bodyKeys[index],
             additionalData: releaseRecordAssociatedData(
                 session.close.records,
                 releaseTarget(session).digest,
-                kind,
                 index,
                 length,
             ),
@@ -281,7 +276,6 @@ const openReleaseRecord = (
 };
 
 type AddedRecord = Readonly<{
-    kind: number;
     index: number;
     key: Uint8Array;
     ciphertext: Uint8Array;
@@ -289,17 +283,14 @@ type AddedRecord = Readonly<{
 
 const sealReleaseRecord = async (
     session: ReleaseSession,
-    kind: number,
     index: number,
     bytes: Uint8Array,
 ): Promise<AddedRecord> => ({
-    kind,
     index,
     ...(await sealRecord(
         releaseRecordAssociatedData(
             session.close.records,
             releaseTarget(session).digest,
-            kind,
             index,
             bytes.length,
         ),
@@ -311,7 +302,6 @@ type ReleaseTransition = Readonly<{
     generation: number;
     state: ReleaseState;
     added?: readonly AddedRecord[];
-    retireJournal?: boolean;
 }>;
 
 const commitRelease = async (
@@ -351,139 +341,71 @@ const commitRelease = async (
         ],
         write: (transaction) => {
             const store = transaction.objectStore('release');
-            if (transition.retireJournal === true)
-                store.delete(
-                    IDBKeyRange.bound(
-                        [releaseRecordKind.journal],
-                        [releaseRecordKind.body],
-                        false,
-                        true,
-                    ),
-                );
             for (const record of transition.added ?? [])
-                store.add(new Blob([new Uint8Array(record.ciphertext)]), [
-                    record.kind,
+                store.add(
+                    new Blob([new Uint8Array(record.ciphertext)]),
                     record.index,
-                ]);
+                );
         },
     });
     session.state = transition.state;
     for (const record of transition.added ?? [])
-        (await openReleaseRecord(session, record.kind, record.index)).fill(0);
+        (await openReleaseRecord(session, record.index)).fill(0);
 };
 
-// Appends the journal's original random bytes one record at a time; the
-// append of the final record enters the ready phase.
-const appendJournal = async (session: ReleaseSession) => {
-    const { profile } = session.close.participant.context;
-    const lengths = releaseRecordLengths(profile, profile.release.journalBytes);
-    while (generationOf(session) < releasePhase.ready) {
-        const state: ReleaseState = session.state ?? {
-            predecessor:
-                session.signed === undefined
-                    ? completedClosePhase(session.close.organizer)
-                    : targetPhase.signed,
-            target: releaseTarget(session).body,
-            journalKeys: [],
-            bodyLength: 0,
-            bodyKeys: [],
-            envelope: new Uint8Array(),
-            coins: new Uint8Array(),
-            signature: new Uint8Array(),
-        };
-        const index = state.journalKeys.length;
-        const bytes = new Uint8Array(lengths[index]);
-        let added: AddedRecord;
-        try {
-            for (let offset = 0; offset < bytes.length;)
-                offset += crypto.getRandomValues(
-                    bytes.subarray(offset, offset + randomRequestBytes),
-                ).length;
-            added = await sealReleaseRecord(
-                session,
-                releaseRecordKind.journal,
-                index,
-                bytes,
-            );
-        } finally {
-            bytes.fill(0);
-        }
-        const journalKeys = [...state.journalKeys, added.key];
+// Locks the certified target the release follows, then the seed of all its
+// randomness.
+const lockRelease = async (session: ReleaseSession) => {
+    if (generationOf(session) < releasePhase.locked)
         await commitRelease(session, {
-            generation:
-                journalKeys.length === lengths.length
-                    ? releasePhase.ready
-                    : releasePhase.journal,
-            state: { ...state, journalKeys },
-            added: [added],
+            generation: releasePhase.locked,
+            state: {
+                predecessor:
+                    session.signed === undefined
+                        ? completedClosePhase(session.close.organizer)
+                        : targetPhase.signed,
+                target: releaseTarget(session).body,
+                seed: new Uint8Array(),
+                bodyLength: 0,
+                bodyKeys: [],
+                envelope: new Uint8Array(),
+                coins: new Uint8Array(),
+                signature: new Uint8Array(),
+            },
+        });
+    if (generationOf(session) === releasePhase.locked) {
+        const { state } = session;
+        if (state === undefined)
+            throw new Error('No locked release is retained.');
+        await commitRelease(session, {
+            generation: releasePhase.ready,
+            state: {
+                ...state,
+                seed: crypto.getRandomValues(
+                    new Uint8Array(operationSeedBytes),
+                ),
+            },
         });
     }
 };
 
-// Loads the complete journal into the module's entropy queue one record at
-// a time, clearing each plaintext.
-const loadJournal = async (session: ReleaseSession) => {
-    const { context } = session.close.participant;
-    const { kernel, profile } = context;
-    if (kernel.release_entropy_command(0, profile.release.journalBytes) !== 0)
-        throw new Error('The release entropy refused its journal.');
-    const lengths = releaseRecordLengths(profile, profile.release.journalBytes);
-    for (let index = 0; index < lengths.length; index++) {
-        const bytes = await openReleaseRecord(
-            session,
-            releaseRecordKind.journal,
-            index,
-        );
-        try {
-            writeChunkInput(
-                kernel,
-                kernel.release_entropy_input_pointer(),
-                bytes,
-            );
-            if (kernel.release_entropy_command(1, bytes.length) !== 0)
-                throw new Error('The release entropy refused a record.');
-        } finally {
-            bytes.fill(0);
-        }
-    }
-};
-
-// Answers the release prover's proof randomness from the loaded journal in
-// its original order. The queue refuses an over-budget read or exhaustion,
-// and no other randomness is drawn; each copied output is cleared.
-export const journalRandomness =
-    (kernel: ParticipantKernel): NonNullable<KernelHandlers['random']> =>
-    (source, target) => {
-        if (source !== 'proof')
-            throw new Error('Unexpected participant randomness request.');
-        if (kernel.release_entropy_command(2, target.length) !== 0)
-            throw new Error(
-                'The release journal refused a randomness request.',
-            );
-        const output = new Uint8Array(
-            kernel.memory.buffer,
-            kernel.release_entropy_output_pointer() >>> 0,
-            target.length,
-        );
-        target.set(output);
-        output.fill(0);
-    };
-
-// Generates the release body from the journal and retains its records and
-// envelope before any signature.
+// Generates the release body from the seed alone and retains its records and
+// envelope before any signature, retiring the seed.
 const proveRelease = async (session: ReleaseSession) => {
     const { context } = session.close.participant;
     const { profile, kernel, handlers } = context;
     const bounds = profile.release;
+    const { state } = session;
+    if (state === undefined) throw new Error('No release seed is retained.');
+    const randomness = seededRandomness(kernel, 'release', state.seed);
     let envelope: Uint8Array;
     try {
-        await loadJournal(session);
-        handlers.random = journalRandomness(kernel);
+        handlers.random = randomness.random;
         envelope = releaseCommand(context, 0, releaseTarget(session).body);
+        session.proofRandomBytes = randomness.proofDrawn();
     } finally {
         handlers.random = undefined;
-        // Clears any journal bytes the prover left unread.
-        kernel.release_entropy_command(3, 0);
+        randomness.discard();
     }
     // The envelope ends with the body length and the body identity.
     const bodyLength = Number(
@@ -503,7 +425,6 @@ const proveRelease = async (session: ReleaseSession) => {
         added.push(
             await sealReleaseRecord(
                 session,
-                releaseRecordKind.body,
                 index,
                 releaseCommand(
                     context,
@@ -515,12 +436,11 @@ const proveRelease = async (session: ReleaseSession) => {
                 ),
             ),
         );
-    const state = session.state;
-    if (state === undefined) throw new Error('No release journal is retained.');
     await commitRelease(session, {
         generation: releasePhase.body,
         state: {
             ...state,
+            seed: new Uint8Array(),
             bodyLength,
             bodyKeys: added.map((record) => record.key),
             envelope,
@@ -537,18 +457,13 @@ const restoreReleaseBody = async (session: ReleaseSession) => {
     if (state === undefined) throw new Error('No release body is retained.');
     releaseCommand(context, 2, state.envelope);
     for (let index = 0; index < state.bodyKeys.length; index++) {
-        const bytes = await openReleaseRecord(
-            session,
-            releaseRecordKind.body,
-            index,
-        );
+        const bytes = await openReleaseRecord(session, index);
         releaseCommand(context, 3, bytes);
     }
     releaseCommand(context, 4);
 };
 
-// Retains the signing coins, signs the exact envelope and retires the
-// journal with the signature.
+// Retains the signing coins and signs the exact envelope.
 const signRelease = async (session: ReleaseSession) => {
     const { context } = session.close.participant;
     if (session.state === undefined)
@@ -571,11 +486,9 @@ const signRelease = async (session: ReleaseSession) => {
         generation: releasePhase.signed,
         state: {
             ...state,
-            journalKeys: [],
             coins: new Uint8Array(),
             signature: packet.slice(state.envelope.length),
         },
-        retireJournal: true,
     });
 };
 
@@ -630,7 +543,7 @@ export const advanceRelease = async (
         ),
     };
     await establishReleaseContext(context, close.records.position);
-    await appendJournal(session);
+    await lockRelease(session);
     if (generationOf(session) === releasePhase.ready)
         await proveRelease(session);
     else await restoreReleaseBody(session);
@@ -653,7 +566,7 @@ export const publishRelease = async (
             relay,
             completionDirectory + 'release-' + position + '.bin',
             index * profile.release.recordBytes,
-            await openReleaseRecord(session, releaseRecordKind.body, index),
+            await openReleaseRecord(session, index),
         );
     await publishRecord(
         relay,

@@ -1,64 +1,33 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
-import { compileBallotRandomnessBudget } from '#tests/ballot-randomness-budget-model.js';
+import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const compileParticipantBallotCustody = (profile: SupportedProfile) => {
     const body = compileBallotBodyCensus(profile);
-    const randomness = compileBallotRandomnessBudget(profile);
+    const recordBytes = 1n << 20n;
     const maximumScores = 20n;
     // The attempt lock fixes the ballot time until the envelope carries it.
     const ballotTimeBytes = 8n;
     const keyBytes = 32n;
-    const prefixBytes = 4n + 1n + 2n + 4n + 2n;
+    const coinBytes = 32n;
+    const prefixBytes = 4n + 1n + 4n + 2n;
     const maximumBodyRecords =
-        (body.maximumBodyBytes + randomness.recordBytes - 1n) /
-        randomness.recordBytes;
+        (body.maximumBodyBytes + recordBytes - 1n) / recordBytes;
+    const attempt = prefixBytes + maximumScores + ballotTimeBytes;
+    const retainedBody = keyBytes * maximumBodyRecords + body.envelopeBytes;
+    // The seed is retained from the phase after the lock until the body is.
     const phaseBytes = [
-        {
-            phase: 13,
-            bytes:
-                prefixBytes +
-                maximumScores +
-                ballotTimeBytes +
-                keyBytes * (randomness.recordCount - 1n),
-        },
-        {
-            phase: 14,
-            bytes:
-                prefixBytes +
-                maximumScores +
-                ballotTimeBytes +
-                keyBytes * randomness.recordCount,
-        },
-        {
-            phase: 15,
-            bytes:
-                prefixBytes +
-                maximumScores +
-                ballotTimeBytes +
-                keyBytes * (randomness.recordCount + maximumBodyRecords) +
-                body.envelopeBytes,
-        },
-        {
-            phase: 16,
-            bytes:
-                prefixBytes +
-                maximumScores +
-                ballotTimeBytes +
-                keyBytes * (randomness.recordCount + maximumBodyRecords) +
-                body.envelopeBytes +
-                32n,
-        },
+        { phase: 13, bytes: attempt },
+        { phase: 14, bytes: attempt + operationSeedBytes },
+        { phase: 15, bytes: attempt + retainedBody },
+        { phase: 16, bytes: attempt + retainedBody + coinBytes },
         {
             phase: 17,
-            bytes:
-                prefixBytes +
-                keyBytes * maximumBodyRecords +
-                body.envelopeBytes +
-                body.signatureBytes,
+            bytes: prefixBytes + retainedBody + body.signatureBytes,
         },
     ];
     return {
+        recordBytes,
         prefixBytes,
         maximumBodyRecords,
         maximumEncryptedBodyBytes:
@@ -68,9 +37,5 @@ export const compileParticipantBallotCustody = (profile: SupportedProfile) => {
             0n,
         ),
         phaseBytes,
-        maximumJournalAndBodyBytes:
-            randomness.encryptedJournalBytes +
-            body.maximumBodyBytes +
-            16n * maximumBodyRecords,
     };
 };

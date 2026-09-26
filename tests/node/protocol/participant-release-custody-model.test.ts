@@ -3,61 +3,33 @@ import { describe, expect, it } from 'vitest';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
-describe('finite original-key release randomness', () => {
-    it('covers the actual noise, tree-salt and buffered field-mask schedule', () => {
-        const budget = compileParticipantReleaseCustody(completionProfile());
-        // Independent expansion of the current Rust release parameters and
-        // FirstOracle, SecondOracle and Tree allocation schedules: 144-bit
-        // release noise, and one mask more than the 61 release columns and
-        // the 68 lookups.
-        const readBytes = 65_536n;
-        const roundedFields = (count: bigint) =>
-            ((count * 16n + readBytes - 1n) / readBytes) * readBytes;
-        const minimumProof =
-            (4n * 262_144n - 4n) * 128n +
-            20n * 128n +
-            62n * roundedFields(1409n) +
-            roundedFields(3n * 131_072n) +
-            69n * roundedFields(3n * 1409n) +
-            roundedFields(3n * 66_945n);
-        expect(budget.noiseBytes).toBe(65_536n * 18n);
-        expect(budget.roundedNoiseBytes).toBe(budget.noiseBytes);
-        expect(budget.extraProofReads).toBe(3n);
-        expect(budget.maximumProofRandomBytes).toBe(
-            minimumProof + 3n * readBytes,
+describe('participant release custody layout', () => {
+    it('retains the seed only between the target lock and the body', () => {
+        const value = compileParticipantReleaseCustody(completionProfile());
+        // The marker, predecessor, target length, body length and key count;
+        // the 2,048-byte largest target; the 512-bit seed; 32-byte keys; the
+        // envelope of the release context, body length and body identity; 32
+        // coin bytes and the 3,309-byte signature.
+        const attempt = 13n + 2048n;
+        const envelope = 4n + 3n * 64n + 2n + 8n + 64n;
+        const records = value.maximumBodyRecords;
+        expect(value.prefixBytes).toBe(13n);
+        expect(value.envelopeBytes).toBe(envelope);
+        expect(records).toBe(
+            (value.maximumBodyBytes + (1n << 20n) - 1n) / (1n << 20n),
         );
-        expect(budget.totalRandomBytes).toBe(
-            65_536n * 18n + minimumProof + 3n * readBytes,
+        expect(value.phaseBytes).toEqual([
+            { phase: 25, bytes: attempt },
+            { phase: 26, bytes: attempt + 64n },
+            { phase: 27, bytes: attempt + 32n * records + envelope },
+            { phase: 28, bytes: attempt + 32n * records + envelope + 32n },
+            { phase: 29, bytes: attempt + 32n * records + envelope + 3309n },
+        ]);
+        expect(value.maximumStateBytes).toBe(
+            attempt + 32n * records + envelope + 3309n,
         );
-    });
-
-    it('bounds every participant and rejects one fewer reserve block at the chosen allocation', () => {
-        const budget = compileParticipantReleaseCustody(completionProfile());
-        // Rejection words for p = (2^64 - 133) * 2^64 + 1.
-        const rejectedWords = 133n * (1n << 64n) - 1n;
-        const upper = (extraReads: bigint) => {
-            const minimumProof = 156_895_232n;
-            const candidates = (minimumProof + extraReads * 65_536n) / 16n;
-            const failures = extraReads + 1n;
-            let falling = 1n;
-            let factorial = 1n;
-            for (let index = 0n; index < failures; index++) {
-                falling *= candidates - index;
-                factorial *= index + 1n;
-            }
-            return {
-                numerator:
-                    (10n * falling * rejectedWords ** failures) / factorial,
-                denominatorBits: 128n * failures,
-            };
-        };
-        expect(budget.exhaustionBound).toEqual(upper(3n));
-        expect(budget.exhaustionBound.numerator << 128n).toBeLessThanOrEqual(
-            1n << budget.exhaustionBound.denominatorBits,
-        );
-        const insufficient = upper(2n);
-        expect(insufficient.numerator << 128n).toBeGreaterThan(
-            1n << insufficient.denominatorBits,
+        expect(value.maximumEncryptedBodyBytes).toBe(
+            value.maximumBodyBytes + 16n * records,
         );
     });
 });

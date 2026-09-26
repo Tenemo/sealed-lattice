@@ -48,10 +48,6 @@ export const kernelFunctions = [
     'participant_close_command',
     'participant_finality_command',
     'participant_release_command',
-    // The release journal's entropy queue.
-    'release_entropy_input_pointer',
-    'release_entropy_output_pointer',
-    'release_entropy_command',
     // The target certificate, release contexts and release shares.
     'completion_input_pointer',
     'completion_output_pointer',
@@ -96,10 +92,11 @@ export const kernelFunctions = [
     'contribution_checkpoint_records',
     'contribution_checkpoint_command',
     'contribution_checkpoint_key',
-    // The contribution randomness expanded from its retained seed.
-    'contribution_random_input_pointer',
-    'contribution_random_output_pointer',
-    'contribution_random_command',
+    // The randomness of a contribution generation or continuation, a ballot
+    // or a release, expanded from the seed its root retains.
+    'operation_random_input_pointer',
+    'operation_random_output_pointer',
+    'operation_random_command',
     'setup_input_pointer',
     'setup_input_capacity',
     'setup_chunk_capacity',
@@ -269,19 +266,76 @@ export const writeSetupInput = (
     );
 };
 
-// The contribution randomness reads one seed from its own buffer.
-const contributionSeedBytes = 64;
+// Every private randomness of a contribution generation or continuation, a
+// ballot or a release comes from one seed its root retains before the
+// operation draws any byte. The module expands the seed into the operation's
+// first stream and its proof stream; a release has only the proof stream.
+export const operationSeedBytes = 64;
+const operationPurpose = { contribution: 0, ballot: 4, release: 5 } as const;
+const operationStream = { first: 1, proof: 2 } as const;
+const discardOperationSeed = 3;
 
-export const writeContributionSeed = (
+// Installs an operation's retained seed and returns the handler that answers
+// the module's requests: the first source from the first stream and proofs
+// from the proof stream. Any other request refuses, and each copied output
+// is cleared. The seed must be discarded once the operation stops drawing.
+export const seededRandomness = (
     kernel: ParticipantKernel,
+    purpose: keyof typeof operationPurpose,
     seed: Uint8Array,
-) =>
+    first?: RandomSource,
+) => {
+    if (seed.length !== operationSeedBytes)
+        throw new Error('No ' + purpose + ' randomness seed is retained.');
     writeKernel(
         kernel,
-        kernel.contribution_random_input_pointer(),
+        kernel.operation_random_input_pointer(),
         seed,
-        contributionSeedBytes,
+        operationSeedBytes,
     );
+    if (
+        kernel.operation_random_command(
+            operationPurpose[purpose],
+            operationSeedBytes,
+        ) !== 0
+    )
+        throw new Error('The ' + purpose + ' randomness refused its seed.');
+    let drawn = 0;
+    let proofDrawn = 0;
+    const random: NonNullable<KernelHandlers['random']> = (source, target) => {
+        const stream =
+            source === 'proof'
+                ? operationStream.proof
+                : source === first
+                  ? operationStream.first
+                  : undefined;
+        if (
+            stream === undefined ||
+            kernel.operation_random_command(stream, target.length) !== 0
+        )
+            throw new Error(
+                'The ' + purpose + ' randomness refused a request.',
+            );
+        const output = new Uint8Array(
+            kernel.memory.buffer,
+            kernel.operation_random_output_pointer() >>> 0,
+            target.length,
+        );
+        target.set(output);
+        output.fill(0);
+        drawn += target.length;
+        if (stream === operationStream.proof) proofDrawn += target.length;
+    };
+    return {
+        random,
+        drawn: () => drawn,
+        // The bytes the proof stream served.
+        proofDrawn: () => proofDrawn,
+        discard: () => {
+            kernel.operation_random_command(discardOperationSeed, 0);
+        },
+    };
+};
 
 export const writeProofInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
     writeKernel(

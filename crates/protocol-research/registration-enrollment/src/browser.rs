@@ -915,6 +915,13 @@ pub extern "C" fn participant_ballot_command(
         let Some(ballot) = ballot.as_mut() else {
             return 1;
         };
+        // A ballot is created only from the undrawn randomness of the seed
+        // its root retains.
+        if operation == 4
+            && !crate::operation_random::ready(crate::operation_random::Purpose::Ballot)
+        {
+            return 1;
+        }
         match ballot.command(&mut enrollment.credential, operation, argument, &input) {
             Ok(bytes) => {
                 *contribution_output = bytes;
