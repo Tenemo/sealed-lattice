@@ -115,6 +115,8 @@ type Relay = Readonly<{
     archive: { configuration: string | undefined };
     // Positions the relay serves no public record.
     withheld: Set<number>;
+    // The public records the relay delivered to each position, by name.
+    delivered: Set<string>[];
 }>;
 
 // Records a participant may publish from its contribution before its signed
@@ -260,6 +262,10 @@ const startRelay = async (
     const earlyContributionRecords: string[] = [];
     const archive: Relay['archive'] = { configuration: undefined };
     const withheld = new Set<number>();
+    const delivered = Array.from(
+        { length: leftOut + 1 },
+        () => new Set<string>(),
+    );
     const assets = (position: number) => {
         const client =
             corrupt?.position === position ? corrupt.client : undefined;
@@ -303,6 +309,7 @@ const startRelay = async (
         served: ReadonlyMap<string, Readonly<{ type: string; bytes: Buffer }>>,
         view: ReadonlyMap<string, ViewedRecord>,
         servesPublic: boolean,
+        delivering: Set<string>,
         request: IncomingMessage,
         response: ServerResponse,
     ) => {
@@ -347,6 +354,7 @@ const startRelay = async (
                         'Cache-Control': 'no-store',
                     });
                     response.end(bytes);
+                    delivering.add(name);
                     return;
                 }
             }
@@ -443,6 +451,7 @@ const startRelay = async (
                       ]),
                 views[position],
                 !withheld.has(position),
+                delivered[position],
                 request,
                 response,
             ).catch(() => {
@@ -465,6 +474,7 @@ const startRelay = async (
         halting,
         archive,
         withheld,
+        delivered,
     };
 };
 
@@ -734,7 +744,12 @@ await runWithLocalRunLog(
             const publicDirectory = path.join(log.runDirectoryPath, 'public');
             await mkdir(publicDirectory);
             relay = await startRelay(runtime, publicDirectory, corrupt);
-            const { views, refused: refusedPublications, halting } = relay;
+            const {
+                views,
+                refused: refusedPublications,
+                halting,
+                delivered: deliveredRecords,
+            } = relay;
             profiles = await mkdtemp(
                 path.join(root, 'temp/participant-browser-'),
             );
@@ -1108,6 +1123,9 @@ await runWithLocalRunLog(
                 // The records an interrupted operation had stored ahead of
                 // its next root.
                 staged?: Readonly<{ store: string; records: number }>;
+                // The public record the relay had delivered to the
+                // interrupted operation.
+                delivered?: string;
             }[] = [];
             const interrupt = async (
                 position: number,
@@ -1147,16 +1165,17 @@ await runWithLocalRunLog(
                 });
             };
             // Crashes a participant's browser while its operation, in the
-            // generation it durably entered, has stored at least the given
-            // records in one store ahead of its next root. The next visit
-            // discards them and runs the operation again from its retained
-            // seed.
-            const interruptStaged = async (
+            // generation it durably entered, has reached a point ahead of its
+            // next root, and records that point. The next visit discards what
+            // the operation stored and runs it again from its retained state.
+            const interruptWhen = async (
                 position: number,
                 operation: string,
                 generation: number,
-                store: string,
-                records: number,
+                reached: () => Promise<boolean>,
+                point: () => Promise<
+                    Pick<(typeof interruptions)[number], 'staged' | 'delivered'>
+                >,
             ) => {
                 const interrupted = request(position, operation);
                 for (;;) {
@@ -1174,7 +1193,7 @@ await runWithLocalRunLog(
                     );
                     if (
                         (await headGeneration(position)) === generation &&
-                        (await storedRecords(position, store)) >= records
+                        (await reached())
                     )
                         break;
                 }
@@ -1185,15 +1204,56 @@ await runWithLocalRunLog(
                     generation,
                     'The interrupted operation committed its next root first.',
                 );
-                const staged = {
-                    store,
-                    records: await storedRecords(position, store),
+                const details = {
+                    position,
+                    operation,
+                    generation,
+                    ...(await point()),
                 };
-                interruptions.push({ position, operation, generation, staged });
+                interruptions.push(details);
                 log.writeEvent({
                     eventType: 'participant-interruption',
-                    details: { position, operation, generation, staged },
+                    details,
                 });
+            };
+            // Interrupts an operation once it stored at least the given
+            // records in one store.
+            const interruptStaged = (
+                position: number,
+                operation: string,
+                generation: number,
+                store: string,
+                records: number,
+            ) =>
+                interruptWhen(
+                    position,
+                    operation,
+                    generation,
+                    async () =>
+                        (await storedRecords(position, store)) >= records,
+                    async () => ({
+                        staged: {
+                            store,
+                            records: await storedRecords(position, store),
+                        },
+                    }),
+                );
+            // Interrupts an operation once the relay delivered it the named
+            // public record.
+            const interruptDelivered = (
+                position: number,
+                operation: string,
+                generation: number,
+                name: string,
+            ) => {
+                deliveredRecords[position].clear();
+                return interruptWhen(
+                    position,
+                    operation,
+                    generation,
+                    () => Promise.resolve(deliveredRecords[position].has(name)),
+                    () => Promise.resolve({ delivered: name }),
+                );
             };
             // Each participant scores every option differently, across the
             // supported score range, and the result lists one option fewer
@@ -1272,13 +1332,32 @@ await runWithLocalRunLog(
             const recordIds = [organizer, ...joined].map((value) =>
                 String(value.bodyDigest),
             );
+            // The organizer crashes with its proposal intent, and its next
+            // visit verifies the records again and signs the locked proposal
+            // with the retained coins. The last honest participant crashes
+            // right after it retains the accepted roster, and its next visit
+            // continues from that roster.
+            await interrupt(0, 'propose-roster', { recordIds }, 2);
             const proposed = await run(0, 'propose-roster', { recordIds });
             assert.equal(proposed.generation, 3);
             await run(0, 'publish');
+            const rosterReplay = [...positions]
+                .reverse()
+                .find((position) => position > 0 && honest(position));
+            assert.ok(rosterReplay !== undefined);
             const accepted = await Promise.all(
-                joined.map((_details, index) =>
-                    run(index + 1, 'accept-roster', { recordIds }),
-                ),
+                joined.map(async (_details, index) => {
+                    const position = index + 1;
+                    if (position !== rosterReplay)
+                        return run(position, 'accept-roster', { recordIds });
+                    await interrupt(
+                        position,
+                        'accept-roster',
+                        { recordIds },
+                        3,
+                    );
+                    return run(position, 'status');
+                }),
             );
             for (const details of accepted) assert.equal(details.generation, 3);
             // The registrant left out stays pending when shown the roster
@@ -1439,10 +1518,35 @@ await runWithLocalRunLog(
             });
             const lateSetup =
                 mode === 'empty' ? participantCount - 1 : undefined;
+            // The first honest participant outside the setup contributors,
+            // or the last honest contributor when every position contributes,
+            // crashes while it verifies the setup, once the relay delivered it
+            // the last contributor's opening, and again right after it
+            // retains the verified setup. Its next visits verify the setup
+            // again from the public records and then continue from the
+            // retained setup.
+            const verificationReplay = [
+                ...confirmers,
+                ...[...contributors].reverse(),
+            ].find((position) => honest(position) && position !== lateSetup);
+            assert.ok(verificationReplay !== undefined);
             await Promise.all(
                 positions
                     .filter((position) => position !== lateSetup)
                     .map(async (position) => {
+                        if (position === verificationReplay) {
+                            await interruptDelivered(
+                                position,
+                                'verify-setup',
+                                position < setupContributorCount ? 11 : 9,
+                                `contribution-${String(setupContributorCount - 1)}/opening.bin`,
+                            );
+                            await interrupt(position, 'verify-setup', {}, 12);
+                            const status = await run(position, 'status');
+                            assert.equal(status.generation, 12);
+                            assert.equal(status.ballot, 'open');
+                            return;
+                        }
                         const verified = await run(position, 'verify-setup');
                         assert.equal(verified.generation, 12);
                         assert.equal(verified.ballot, 'open');
@@ -2871,6 +2975,7 @@ await runWithLocalRunLog(
                           "An honest participant departs with its private state after preparation and before the close, casting nothing. The relay hides another honest voter's on-time ballot from every other participant and serves its close response only after the organizer's proposal, so the proposal omits that ballot and its voter's target reports the omission.",
                       ]),
                 'A registrant that the organizer leaves out of the roster stays pending when shown it.',
+                'The organizer crashes with its roster proposal intent and the last honest participant right after it retains the accepted roster, and an honest participant crashes while it verifies the setup and right after it retains the verified setup; each next visit continues from its retained state, verifying the setup again from the public records after the first of those crashes.',
                 'Every participant confirms the roster, and only the setup contributors contribute and open; a contributor opens only once every participant confirmed. An honest setup contributor crashes during its contribution generation and during its continuation once it stored records ahead of its next root, with its retained checkpoint, and with its confirmation and opening intents, and an honest participant outside the setup contributors with its confirmation intent; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
                 mode === 'empty'
