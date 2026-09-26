@@ -43,9 +43,12 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // public records the participants publish. A no-result run closes with one
 // valid on-time ballot fewer than the minimum turnout, and with a corrupt
 // participant's authentic invalid ballot on time when the profile tolerates
-// one. An empty run closes with no ballot at all. Another poll's passed
-// cohort of the same profile, named by its run directory, supplies the
-// records a relay view serves one participant as this poll's.
+// one. An empty run closes with no ballot at all. A result run of a profile
+// that tolerates two corrupt participants also closes without two honest
+// ones: one departs after preparation and casts nothing, and the relay omits
+// the other's on-time ballot. Another poll's passed cohort of the same
+// profile, named by its run directory, supplies the records a relay view
+// serves one participant as this poll's.
 const foreignOption = '--foreign-poll=';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
@@ -769,6 +772,16 @@ await runWithLocalRunLog(
                 path.join(profileDirectory, `participant-${String(position)}`);
             // A departed participant's browser and private state are gone.
             const departed = new Set<number>();
+            const depart = async (position: number) => {
+                await chromes[position]?.close();
+                chromes[position] = undefined;
+                departed.add(position);
+                await rm(profile(position), {
+                    recursive: true,
+                    maxRetries: 10,
+                    retryDelay: 500,
+                });
+            };
             const participant = async (position: number) => {
                 assert.ok(!departed.has(position), 'The participant departed.');
                 const existing = chromes[position];
@@ -862,6 +875,26 @@ await runWithLocalRunLog(
                 { length: participantCount },
                 (_unused, position) => position,
             );
+            // In a result run of a profile that tolerates two corrupt
+            // participants, the organizer's proposal can leave out two honest
+            // ones, the last two before the last position. The departing one
+            // leaves with its private state after preparation, casting
+            // nothing. The relay hides the other's on-time ballot from every
+            // other participant and delays its close response until the
+            // proposal exists, so the proposal omits that ballot.
+            const outsiders =
+                mode === 'result' && maximumCorruptParticipantCount >= 2
+                    ? positions
+                          .filter(
+                              (position) =>
+                                  position > 0 &&
+                                  position < participantCount - 1 &&
+                                  honest(position),
+                          )
+                          .slice(-2)
+                    : [];
+            const omittedVoter: number | undefined = outsiders[0];
+            const departing: number | undefined = outsiders[1];
             // Reads the generation of a participant's committed head from its
             // own page, reading nothing else.
             const headGeneration = async (position: number) =>
@@ -1362,16 +1395,21 @@ await runWithLocalRunLog(
                     }),
             );
             await expectStatus(0, 'verify-setup', 'refused');
-            // Every participant signs one ballot, the late ones starting later.
-            // A result closes with every ballot but the last on time, or with
-            // every ballot when a position equivocates. A no-result target has
-            // one valid on-time ballot fewer than the minimum turnout, from the
-            // honest positions just before the last, and the invalid author's
-            // ballot on time, which would meet the turnout if it counted. An
-            // empty close has no ballot at all. A signed ballot refuses other
-            // scores and is only delivered again.
+            // The departing participant leaves after its preparation.
+            if (departing !== undefined) await depart(departing);
+            // Every participant that did not depart signs one ballot, the late
+            // ones starting later. A result closes with every ballot but the
+            // last on time, or with every ballot when a position equivocates.
+            // A no-result target has one valid on-time ballot fewer than the
+            // minimum turnout, from the honest positions just before the last,
+            // and the invalid author's ballot on time, which would meet the
+            // turnout if it counted. An empty close has no ballot at all. A
+            // signed ballot refuses other scores and is only delivered again.
             const lastPosition = participantCount - 1;
-            const ballotAuthors = mode === 'empty' ? [] : positions;
+            const ballotAuthors =
+                mode === 'empty'
+                    ? []
+                    : positions.filter((position) => !departed.has(position));
             const onTimeCount =
                 mode === 'empty'
                     ? 0
@@ -1380,12 +1418,15 @@ await runWithLocalRunLog(
                         1 +
                         (invalidAuthor === undefined ? 0 : 1)
                       : equivocator === undefined
-                        ? participantCount - 1
-                        : participantCount;
+                        ? ballotAuthors.length - 1
+                        : ballotAuthors.length;
             // The equivocator's slot is conflicting, so no ballot of it counts,
-            // and the invalid author's slot is usable but its ballot invalid.
+            // the omitted ballot is in no slot, and the invalid author's slot
+            // is usable but its ballot invalid.
             const usableCount =
-                onTimeCount - (equivocator === undefined ? 0 : 1);
+                onTimeCount -
+                (equivocator === undefined ? 0 : 1) -
+                (omittedVoter === undefined ? 0 : 1);
             const validCount =
                 usableCount - (invalidAuthor === undefined ? 0 : 1);
             assert.ok(
@@ -1406,7 +1447,7 @@ await runWithLocalRunLog(
                               )
                               .slice(1 - minimumTurnout),
                       ].sort((left, right) => left - right)
-                    : positions.slice(0, onTimeCount);
+                    : ballotAuthors.slice(0, onTimeCount);
             assert.equal(onTimeBallots.length, onTimeCount);
             const lateBallots = ballotAuthors.filter(
                 (position) => !onTimeBallots.includes(position),
@@ -1632,9 +1673,36 @@ await runWithLocalRunLog(
             // participant's completed ballot or verified setup leaves.
             const cast = (authors: readonly number[]) =>
                 authors.filter((author) => ballotAuthors.includes(author));
+            // The relay shows the omitted ballot to its author alone.
+            const shown = (position: number, authors: readonly number[]) =>
+                authors.filter(
+                    (author) =>
+                        author !== omittedVoter || position === omittedVoter,
+                );
             const beforeClose = mode === 'empty' ? 12 : 17;
             const submissions = (kind: string, authors: readonly number[]) =>
                 authors.map((position) => ({ kind, position }));
+            // The relay serves every other participant none of the omitted
+            // ballot's records until the target votes are published.
+            const omission: string[] = [];
+            if (omittedVoter !== undefined) {
+                const directory = await submissionDirectory(omittedVoter);
+                omission.push(
+                    pointerName(omittedVoter),
+                    ...(await readdir(directory)).map((file) =>
+                        path
+                            .relative(
+                                publicDirectory,
+                                path.join(directory, file),
+                            )
+                            .split(path.sep)
+                            .join('/'),
+                    ),
+                );
+                for (const position of others(omittedVoter))
+                    for (const name of omission)
+                        views[position].set(name, undefined);
+            }
             // The relay's pointer to the equivocator's ballot names its late
             // copy's ballot to the last participant, and its conflicting
             // copy's to the organizer's first collection.
@@ -1651,22 +1719,29 @@ await runWithLocalRunLog(
             await Promise.all(
                 positions
                     .slice(1)
-                    .filter((position) => position !== lateSetup)
+                    .filter(
+                        (position) =>
+                            position !== lateSetup && !departed.has(position),
+                    )
                     .map(async (position) => {
+                        const delivered = shown(
+                            position,
+                            cast(others(position)),
+                        );
                         const details = await run(position, 'close', {
-                            deliver: cast(others(position)),
+                            deliver: delivered,
                         });
                         assert.equal(details.generation, beforeClose);
                         assert.deepEqual(details.closeEvents, [
                             ...submissions('own', cast([position])),
-                            ...submissions('held', cast(others(position))),
+                            ...submissions('held', delivered),
                         ]);
                     }),
             );
-            views[lastPosition].clear();
             const equivocatorHeld =
                 equivocation === undefined ? [] : [equivocation.position];
             if (equivocation !== undefined) {
+                views[lastPosition].delete(pointerName(equivocation.position));
                 views[0].set(
                     pointerName(equivocation.position),
                     pointerTo(equivocation.conflicting.identity),
@@ -1674,7 +1749,7 @@ await runWithLocalRunLog(
                 const collected = await run(0, 'close', {
                     deliver: equivocatorHeld,
                 });
-                views[0].clear();
+                views[0].delete(pointerName(equivocation.position));
                 assert.equal(collected.generation, 17);
                 assert.deepEqual(collected.closeEvents, [
                     ...submissions('own', [0]),
@@ -1685,12 +1760,15 @@ await runWithLocalRunLog(
             // body, opens the close and locks its own intent. It then holds
             // both of the equivocator's on-time envelopes. With no ballot it
             // learns nothing.
-            const announced = others(0).find(
-                (position) => onTime(position) && position !== equivocator,
+            const announced = shown(0, others(0)).find(
+                (position) =>
+                    onTime(position) &&
+                    position !== equivocator &&
+                    honest(position),
             );
             assert.equal(announced === undefined, mode === 'empty');
             const announcedList = announced === undefined ? [] : [announced];
-            const organizerDeliveries = cast(others(0)).filter(
+            const organizerDeliveries = shown(0, cast(others(0))).filter(
                 (position) => position !== announced,
             );
             await expectStatus(1, 'close', 'refused', { closeTime });
@@ -1740,22 +1818,25 @@ await runWithLocalRunLog(
             // The last participant's lock retires the late ballot it held
             // from the equivocator.
             const heldOnTime = (position: number) =>
-                others(position).filter(
+                shown(position, others(position)).filter(
                     (author) =>
                         onTime(author) &&
                         !(author === equivocator && position === lastPosition),
                 );
+            // The omitted voter responds only after the proposal exists.
+            const responders = positions
+                .slice(1)
+                .filter((position) => !outsiders.includes(position));
             // The first two other honest responders halt after locking the
             // intent and with their response intent.
             const responseHalts = new Map(
-                positions
-                    .slice(1)
+                responders
                     .filter(honest)
                     .slice(0, 2)
                     .map((position, index) => [position, [19, 20][index]]),
             );
             await Promise.all(
-                positions.slice(1).map(async (position) => {
+                responders.map(async (position) => {
                     const halt = responseHalts.get(position);
                     if (halt !== undefined)
                         await interrupt(position, 'close', {}, halt);
@@ -1796,13 +1877,24 @@ await runWithLocalRunLog(
                 [
                     ...organizerCollected,
                     { kind: 'lock' },
-                    ...submissions('response', others(0)),
+                    ...submissions('response', responders),
                     ...submissions('held', announcedList),
                 ].map(({ kind }) => ({ kind })),
             );
             // Completed close work is only delivered again.
             assert.equal((await run(1, 'close')).generation, 21);
             assert.equal((await run(0, 'close')).generation, 22);
+            // The omitted voter then locks the intent and responds, listing
+            // its own ballot, which no response in the proposal lists.
+            if (omittedVoter !== undefined) {
+                const details = await run(omittedVoter, 'close');
+                assert.equal(details.generation, 21);
+                assert.deepEqual(details.closeEvents, [
+                    ...submissions('own', [omittedVoter].filter(onTime)),
+                    ...submissions('held', heldOnTime(omittedVoter)),
+                    { kind: 'lock' },
+                ]);
+            }
             const closeBounds = bounds.close;
             const signatureBytes = bounds.registration.signatureBytes;
             const closeDirectory = path.join(publicDirectory, 'close');
@@ -1817,7 +1909,9 @@ await runWithLocalRunLog(
                 intent.readBigUInt64LE(4 + closeBounds.intentBodyBytes - 8),
                 BigInt(closeTime),
             );
-            for (const position of positions) {
+            for (const position of positions.filter(
+                (responder) => !departed.has(responder),
+            )) {
                 const response = await readFile(
                     path.join(
                         closeDirectory,
@@ -1832,8 +1926,9 @@ await runWithLocalRunLog(
                 assert.equal(response.length, 4 + length + signatureBytes);
                 // The listing holds exactly the on-time ballots its responder
                 // holds: the organizer lists both of the equivocator's
-                // on-time envelopes, which makes its slot conflicting, and
-                // the last participant, which held only the late one, none.
+                // on-time envelopes, which makes its slot conflicting, the
+                // last participant, which held only the late one, none, and
+                // only the omitted voter its own ballot.
                 const listed = [];
                 for (
                     let offset = 4 + closeBounds.minimumResponseBodyBytes;
@@ -1843,9 +1938,8 @@ await runWithLocalRunLog(
                     listed.push(response.readUInt16LE(offset));
                 assert.deepEqual(
                     listed,
-                    positions
-                        .filter(onTime)
-                        .flatMap((author) =>
+                    shown(position, positions.filter(onTime)).flatMap(
+                        (author) =>
                             author !== equivocator
                                 ? [author]
                                 : position === 0
@@ -1853,7 +1947,7 @@ await runWithLocalRunLog(
                                   : position === lastPosition
                                     ? []
                                     : [author],
-                        ),
+                    ),
                 );
             }
             // The proposal names the organizer's response and the first other
@@ -1874,22 +1968,31 @@ await runWithLocalRunLog(
                             (closeBounds.quorum - index) * 66,
                     ),
                 );
-            assert.deepEqual(named, positions.slice(0, closeBounds.quorum));
+            assert.deepEqual(
+                named,
+                [0, ...responders].slice(0, closeBounds.quorum),
+            );
             // The profile's inventory certificate threshold is also the close
-            // quorum. The participants after the organizer beyond it sign no
-            // target vote; they release later from their completed close.
+            // quorum. The last corrupt positions beyond it among the
+            // participants that did not depart sign no target vote; they
+            // release later from their completed close.
             const nonVoters = positions.slice(
-                1,
-                1 + participantCount - closeBounds.quorum,
+                1 +
+                    maximumCorruptParticipantCount -
+                    (participantCount - departed.size - closeBounds.quorum),
+                1 + maximumCorruptParticipantCount,
             );
             const voters = positions.filter(
-                (position) => !nonVoters.includes(position),
+                (position) =>
+                    !nonVoters.includes(position) && !departed.has(position),
             );
+            assert.equal(voters.length, closeBounds.quorum);
             // Every voter verifies the barrier, classifies each usable
             // ballot, evaluates the target and signs its vote. Every on-time
-            // ballot but the equivocator's is usable, every usable ballot but
-            // the invalid author's is valid, a late one is reported late, and
-            // a participant without a ballot has none cast.
+            // ballot but the equivocator's and the omitted one is usable,
+            // every usable ballot but the invalid author's is valid, the
+            // omitted voter's ballot is reported omitted, a late one late,
+            // and a participant without a ballot has none cast.
             // The equivocator and the invalid author are non-voters.
             assert.ok(
                 [equivocator, invalidAuthor].every(
@@ -1926,11 +2029,13 @@ await runWithLocalRunLog(
                     }
                     assert.equal(
                         details.ballotStatus,
-                        onTime(position)
-                            ? 'included'
-                            : ballotAuthors.includes(position)
-                              ? 'late'
-                              : 'not cast',
+                        position === omittedVoter
+                            ? 'omitted'
+                            : onTime(position)
+                              ? 'included'
+                              : ballotAuthors.includes(position)
+                                ? 'late'
+                                : 'not cast',
                     );
                     assert.equal(details.usableBallots, usableCount);
                     assert.equal(details.validBallots, validCount);
@@ -1953,8 +2058,11 @@ await runWithLocalRunLog(
                     target.length <= targetBounds.maximumBodyBytes,
             );
             // Every vote names its signer and one target identity, and no
-            // non-voter published one.
-            for (const position of nonVoters)
+            // other participant published one.
+            const silent = positions.filter(
+                (position) => !voters.includes(position),
+            );
+            for (const position of silent)
                 await assert.rejects(
                     stat(
                         path.join(
@@ -1977,18 +2085,13 @@ await runWithLocalRunLog(
                 targetIdentities.add(vote.subarray(2, 66).toString('hex'));
             }
             assert.equal(targetIdentities.size, 1);
-            // Every vote is published, so the certificate exists. The
-            // organizer then departs before any release exists: its browser
-            // closes and its private state is deleted.
-            const organizerPosition = 0;
-            await chromes[organizerPosition]?.close();
-            chromes[organizerPosition] = undefined;
-            departed.add(organizerPosition);
-            await rm(profile(organizerPosition), {
-                recursive: true,
-                maxRetries: 10,
-                retryDelay: 500,
-            });
+            // Every vote is published, so the certificate exists, and the
+            // relay serves the omitted ballot again. The organizer then
+            // departs before any release exists: its browser closes and its
+            // private state is deleted.
+            for (const view of views)
+                for (const name of omission) view.delete(name);
+            await depart(0);
             const remaining = positions.filter(
                 (position) => !departed.has(position),
             );
@@ -2160,17 +2263,19 @@ await runWithLocalRunLog(
             // into the requested prefix of the ranking of the on-time ballots'
             // score totals, ties to the lower option, or finds that the
             // certified target carries no result. The equivocator's ballots
-            // are not counted. The departed organizer's share is absent, so the
-            // first share it tries is unavailable, and the lowest remaining
-            // shares include a non-voter's when one exists and the interrupted
-            // voter's.
+            // and the omitted ballot are not counted. The departed organizer's
+            // share is absent, so the first share it tries is unavailable, and
+            // the lowest remaining shares include a non-voter's when one
+            // exists and the interrupted voter's.
             const totals = Array.from(
                 { length: optionCount },
                 (_unused, option) =>
                     positions
                         .filter(
                             (position) =>
-                                onTime(position) && position !== equivocator,
+                                onTime(position) &&
+                                position !== equivocator &&
+                                position !== omittedVoter,
                         )
                         .reduce(
                             (total, position) =>
@@ -2193,7 +2298,7 @@ await runWithLocalRunLog(
             // complete the work only if a forgery counted, so its participant
             // stays pending. One view hides the second voter's vote behind the
             // last voter's vote relabeled with that position, and replays the
-            // last voter's vote in every non-voter's slot. Another replays the
+            // last voter's vote in every slot without a vote. Another replays the
             // combining participant's share in every departed slot, alters
             // the first remaining participant's body, and relabels that share
             // for each other remaining slot but the last release threshold
@@ -2216,7 +2321,7 @@ await runWithLocalRunLog(
             relabeledVote.writeUInt16LE(hiddenVoter, 0);
             const voteForgeries = new Map([
                 [publicName('target-vote-', hiddenVoter), relabeledVote],
-                ...nonVoters.map(
+                ...silent.map(
                     (position) =>
                         [
                             publicName('target-vote-', position),
@@ -2556,6 +2661,11 @@ await runWithLocalRunLog(
                     : noResult
                       ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
                       : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, one of them the all-minimum ballot, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts.",
+                ...(departing === undefined || omittedVoter === undefined
+                    ? []
+                    : [
+                          "An honest participant departs with its private state after preparation and before the close, casting nothing. The relay hides another honest voter's on-time ballot from every other participant and serves its close response only after the organizer's proposal, so the proposal omits that ballot and its voter's target reports the omission.",
+                      ]),
                 'A registrant that the organizer leaves out of the roster stays pending when shown it.',
                 'An honest browser crashes during its contribution generation and during its continuation once it stored records ahead of its next root, and with its confirmation and opening intents, and another with its retained checkpoint; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
@@ -2590,6 +2700,8 @@ await runWithLocalRunLog(
                         lateBallots,
                         minimumBallot: minimumBallotAuthor,
                         couldNotVote: lateSetup,
+                        departedBeforeClose: departing,
+                        omittedBallot: omittedVoter,
                         nonVoters,
                         departed: [...departed],
                         interrupted: interruption,
