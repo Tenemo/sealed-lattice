@@ -67,6 +67,9 @@ const [participantCount, optionCount] =
     counts.length === 0 ? [3, 2] : counts.map(Number);
 const root = path.resolve('.');
 const basePort = 43_600;
+// A registrant that the organizer leaves out of the roster has the origin
+// after the roster participants'.
+const leftOut = participantCount;
 // The host guard for each participant's Chrome process tree.
 const participantMemoryLimit = 3_221_225_472;
 const operationMilliseconds = 3_600_000;
@@ -201,7 +204,7 @@ const startRelay = async (
 ): Promise<Relay> => {
     const owners = new Map<string, string>();
     const views = Array.from(
-        { length: participantCount },
+        { length: leftOut + 1 },
         () => new Map<string, ViewedRecord>(),
     );
     const refused = new Set<string>();
@@ -342,7 +345,7 @@ const startRelay = async (
     };
     const halting = new Map<number, HaltingClient>();
     const servers: Server[] = [];
-    for (let position = 0; position < participantCount; position++) {
+    for (let position = 0; position <= leftOut; position++) {
         const origin = `http://127.0.0.1:${String(basePort + position)}`;
         const served = assets(position);
         const server = createServer((request, response) => {
@@ -597,7 +600,7 @@ await runWithLocalRunLog(
             assert.ok(
                 freemem() >=
                     2 *
-                        (participantCount + copyNames.length) *
+                        (leftOut + 1 + copyNames.length) *
                         participantMemoryLimit,
                 'Insufficient host memory for the browser cohort.',
             );
@@ -639,7 +642,7 @@ await runWithLocalRunLog(
                 path.join(root, 'temp/participant-browser-'),
             );
             const profileDirectory = profiles;
-            const peaks = new Array<number>(participantCount).fill(0);
+            const peaks = new Array<number>(leftOut + 1).fill(0);
             const copyPeaks = new Map<string, number>();
             // Samples one Chrome process tree against the guard.
             const sample = async (
@@ -1102,26 +1105,31 @@ await runWithLocalRunLog(
             const definitionSignature = await readFile(
                 path.join(publicDirectory, 'poll-signature.bin'),
             );
-            const joined = await Promise.all(
-                Array.from(
-                    { length: participantCount - 1 },
-                    async (_unused, index) => {
-                        const position = index + 1;
-                        const details = await run(position, 'create', {
-                            role: 'join',
-                            poll: organizer.poll,
-                            definition: hexadecimal(definition),
-                            definitionSignature:
-                                hexadecimal(definitionSignature),
-                            username: `Participant ${String(position)}`,
-                        });
-                        assert.equal(details.isOrganizer, false);
-                        assert.equal(details.poll, organizer.poll);
-                        await run(position, 'publish');
-                        return details;
-                    },
+            const join = async (position: number, username: string) => {
+                const details = await run(position, 'create', {
+                    role: 'join',
+                    poll: organizer.poll,
+                    definition: hexadecimal(definition),
+                    definitionSignature: hexadecimal(definitionSignature),
+                    username,
+                });
+                assert.equal(details.isOrganizer, false);
+                assert.equal(details.poll, organizer.poll);
+                await run(position, 'publish');
+                return details;
+            };
+            // One more registrant joins beside the participants, and the
+            // organizer leaves it out of the roster.
+            const [joined, leftOutRegistration] = await Promise.all([
+                Promise.all(
+                    Array.from(
+                        { length: participantCount - 1 },
+                        (_unused, index) =>
+                            join(index + 1, `Participant ${String(index + 1)}`),
+                    ),
                 ),
-            );
+                join(leftOut, 'Registrant left out'),
+            ]);
             const recordIds = [organizer, ...joined].map((value) =>
                 String(value.bodyDigest),
             );
@@ -1134,6 +1142,22 @@ await runWithLocalRunLog(
                 ),
             );
             for (const details of accepted) assert.equal(details.generation, 3);
+            // The registrant left out stays pending when shown the roster
+            // and keeps its registration; its browser then ends.
+            assert.deepEqual(
+                await request(leftOut, 'accept-roster', { recordIds }),
+                {
+                    status: 'pending',
+                    reason: 'The proposal omits this participant.',
+                },
+            );
+            const leftOutStatus = await run(leftOut, 'status');
+            assert.equal(leftOutStatus.generation, 1);
+            assert.equal(
+                leftOutStatus.bodyDigest,
+                leftOutRegistration.bodyDigest,
+            );
+            await endBrowser(leftOut);
             // A second proposal, acceptance or enrollment is refused, and
             // every participant restores its retained state.
             await expectStatus(0, 'propose-roster', 'refused', { recordIds });
@@ -2314,6 +2338,7 @@ await runWithLocalRunLog(
                     : noResult
                       ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
                       : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, one of them the all-minimum ballot, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts.",
+                'A registrant that the organizer leaves out of the roster stays pending when shown it.',
                 'An honest browser crashes during its contribution generation and during its continuation once it stored records ahead of its next root, and with its confirmation and opening intents, and another with its retained checkpoint; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
                 mode === 'empty'
@@ -2336,7 +2361,11 @@ await runWithLocalRunLog(
                         recordIds,
                         runtimeIdentity: runtime.identity.runtime,
                         corruptClient,
-                        peakProcessTreeBytes: peaks,
+                        peakProcessTreeBytes: peaks.slice(0, leftOut),
+                        leftOut: {
+                            bodyDigest: leftOutRegistration.bodyDigest,
+                            peakProcessTreeBytes: peaks[leftOut],
+                        },
                         copyPeakProcessTreeBytes: Object.fromEntries(copyPeaks),
                         closeTime,
                         lateBallots,
