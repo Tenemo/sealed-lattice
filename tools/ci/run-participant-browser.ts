@@ -41,10 +41,17 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // public records the participants publish. A no-result run closes with one
 // valid on-time ballot fewer than the minimum turnout, and with a corrupt
 // participant's authentic invalid ballot on time when the profile tolerates
-// one. An empty run closes with no ballot at all.
-const commandArguments = process.argv
-    .slice(2)
-    .filter((value) => value !== '--');
+// one. An empty run closes with no ballot at all. Another poll's passed
+// cohort of the same profile, named by its run directory, supplies the
+// records a relay view serves one participant as this poll's.
+const foreignOption = '--foreign-poll=';
+const allArguments = process.argv.slice(2).filter((value) => value !== '--');
+const foreignPoll = allArguments
+    .find((value) => value.startsWith(foreignOption))
+    ?.slice(foreignOption.length);
+const commandArguments = allArguments.filter(
+    (value) => !value.startsWith(foreignOption),
+);
 const mode =
     (['no-result', 'empty'] as const).find(
         (value) => value === commandArguments[commandArguments.length - 1],
@@ -56,7 +63,7 @@ assert.ok(
     counts.length === 0 ||
         (counts.length === 2 &&
             counts.every((value) => /^[1-9]\d*$/u.test(value))),
-    'Optionally select the participant and option counts, then no-result or empty.',
+    'Optionally select the participant and option counts, then no-result or empty, and another poll with --foreign-poll=<run directory>.',
 );
 const [participantCount, optionCount] =
     counts.length === 0 ? [3, 2] : counts.map(Number);
@@ -74,13 +81,16 @@ const lateBallotMilliseconds = 5_000;
 // hyphens, with no traversal.
 const publicPath = /^(?:[a-z0-9][a-z0-9.-]*\/)*[a-z0-9][a-z0-9.-]*$/u;
 
+// What a relay view serves a participant instead of a stored record: other
+// bytes, the record another relay stored in the named file, or nothing when
+// the value is undefined.
+type ViewedRecord = Buffer | Readonly<{ file: string }> | undefined;
+
 type Relay = Readonly<{
     servers: Server[];
     // The origin that first published each path; only it may add to it.
     owners: Map<string, string>;
-    // What the relay serves each participant instead of a stored record:
-    // other bytes, or nothing when the value is undefined.
-    views: Map<string, Buffer | undefined>[];
+    views: Map<string, ViewedRecord>[];
     // Publications the relay refuses to store.
     refused: Set<string>;
     // Contribution records other than the confirmation and the opening that
@@ -195,7 +205,7 @@ const startRelay = async (
     const owners = new Map<string, string>();
     const views = Array.from(
         { length: participantCount },
-        () => new Map<string, Buffer | undefined>(),
+        () => new Map<string, ViewedRecord>(),
     );
     const refused = new Set<string>();
     const earlyContributionRecords: string[] = [];
@@ -239,7 +249,7 @@ const startRelay = async (
     const handle = async (
         origin: string,
         served: ReadonlyMap<string, Readonly<{ type: string; bytes: Buffer }>>,
-        view: Map<string, Buffer | undefined>,
+        view: ReadonlyMap<string, ViewedRecord>,
         request: IncomingMessage,
         response: ServerResponse,
     ) => {
@@ -257,9 +267,12 @@ const startRelay = async (
             const name = url.pathname.slice('/public/'.length);
             if (url.pathname.startsWith('/public/') && publicPath.test(name)) {
                 const file = path.join(publicDirectory, name);
-                const bytes = view.has(name)
-                    ? view.get(name)
-                    : await readFile(file).catch(() => undefined);
+                const viewed = view.get(name);
+                const bytes = !view.has(name)
+                    ? await readFile(file).catch(() => undefined)
+                    : viewed === undefined || Buffer.isBuffer(viewed)
+                      ? viewed
+                      : await readFile(viewed.file);
                 if (bytes !== undefined) {
                     response.writeHead(200, {
                         'Content-Type': 'application/octet-stream',
@@ -384,12 +397,141 @@ const startRelay = async (
     };
 };
 
+type ForeignPoll = Readonly<{
+    // The passed cohort's run directory, relative to the repository.
+    run: string;
+    poll: string;
+    recordIds: readonly string[];
+    publicDirectory: string;
+}>;
+
+const identifierPattern = /^[0-9a-f]{128}$/u;
+
+// Reads another passed cohort of this profile: its result names its poll and
+// its roster's registrations, and its relay's records lie beside it.
+const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
+    const directory = path.resolve(run);
+    const result = JSON.parse(
+        await readFile(path.join(directory, 'result.json'), 'utf8'),
+    ) as Readonly<Record<string, unknown>>;
+    assert.ok(
+        result.participantCount === participantCount &&
+            result.optionCount === optionCount,
+        'The foreign poll has another profile.',
+    );
+    const { poll } = result;
+    const recordIds: readonly unknown[] = Array.isArray(result.recordIds)
+        ? (result.recordIds as unknown[])
+        : [];
+    assert.ok(
+        typeof poll === 'string' &&
+            identifierPattern.test(poll) &&
+            recordIds.length === participantCount &&
+            recordIds.every(
+                (id) => typeof id === 'string' && identifierPattern.test(id),
+            ),
+        'The foreign poll names a malformed poll or roster.',
+    );
+    const publicDirectory = path.join(directory, 'public');
+    assert.ok(
+        (await stat(publicDirectory)).isDirectory(),
+        'The foreign poll has no public records.',
+    );
+    return {
+        run: path.relative(root, directory).split(path.sep).join('/'),
+        poll,
+        recordIds: recordIds.map(String),
+        publicDirectory,
+    };
+};
+
+// The names of the records a relay stored.
+const publicRecordNames = async (directory: string) =>
+    (await readdir(directory, { recursive: true }))
+        .map((name) => name.split(path.sep).join('/'))
+        .filter((name) => publicPath.test(name) && name.endsWith('.bin'));
+
+// The record families a relay view replaces with another poll's, each with
+// the refusal of the first of them a result visit reads.
+const foreignFamilies = [
+    {
+        family: 'registrations',
+        pattern: /^registration\//u,
+        reason: 'A registration header was refused.',
+    },
+    {
+        family: 'contributions',
+        pattern: /^contribution-\d+\//u,
+        reason: 'An opening was refused.',
+    },
+    {
+        family: 'close records',
+        pattern: /^close\//u,
+        reason: 'The close intent was refused.',
+    },
+    {
+        family: 'target votes',
+        pattern: /^completion\/target-vote-\d+\.bin$/u,
+        reason: 'The target votes are incomplete.',
+    },
+    {
+        family: 'release shares',
+        pattern: /^completion\/release-(?:envelope-)?\d+\.bin$/u,
+        reason: 'The release shares are incomplete.',
+    },
+] as const;
+
+// Serves another poll's records of one family under this poll's names, and
+// nothing where the other poll has none: its registrations by roster
+// position under this poll's record identifiers, and its other records under
+// their own names.
+const foreignRecordView = async (
+    foreign: ForeignPoll,
+    publicDirectory: string,
+    recordIds: readonly string[],
+    pattern: RegExp,
+) => {
+    const view = new Map<string, ViewedRecord>();
+    for (const name of await publicRecordNames(publicDirectory))
+        if (pattern.test(name)) view.set(name, undefined);
+    let served = 0;
+    for (const name of await publicRecordNames(foreign.publicDirectory)) {
+        if (!pattern.test(name)) continue;
+        const registration = /^registration\/([0-9a-f]{128})\/(.+)$/u.exec(
+            name,
+        );
+        const position =
+            registration === null
+                ? undefined
+                : foreign.recordIds.indexOf(registration[1]);
+        assert.ok(
+            position === undefined || position >= 0,
+            'A foreign registration is not in its roster.',
+        );
+        view.set(
+            registration === null || position === undefined
+                ? name
+                : `registration/${recordIds[position]}/${registration[2]}`,
+            { file: path.join(foreign.publicDirectory, name) },
+        );
+        served++;
+    }
+    return { view, served };
+};
+
+// Lists words as prose.
+const prose = (words: readonly string[]) =>
+    words.length < 2
+        ? words.join('')
+        : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`;
+
 await runWithLocalRunLog(
     {
         commandLineArguments: [
             String(participantCount),
             String(optionCount),
             ...(mode === 'result' ? [] : [mode]),
+            ...(foreignPoll === undefined ? [] : [foreignOption + foreignPoll]),
         ],
         lanes: [
             'Participant runtime assembly',
@@ -402,7 +544,8 @@ await runWithLocalRunLog(
             'Browser release shares',
             'Browser result',
             'Browser relay forgeries',
-            'Browser altered storage',
+            'Browser records of another poll',
+            'Browser altered and lost storage',
         ],
         scriptName: 'research:participant',
     },
@@ -412,9 +555,13 @@ await runWithLocalRunLog(
             root,
         );
         const chromes: (ChromeParticipant | undefined)[] = [];
-        // The equivocator's copies of its private state, each its own Chrome
-        // process at the equivocator's origin.
-        const copies = new Map<string, ChromeParticipant>();
+        // Copies of a participant's private state, each its own Chrome
+        // process at that participant's origin: the equivocator's, and an
+        // honest participant's whose records are then lost.
+        const copies = new Map<
+            string,
+            Readonly<{ position: number; chrome: ChromeParticipant }>
+        >();
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
@@ -427,6 +574,10 @@ await runWithLocalRunLog(
                 minimumTurnout,
                 releaseThreshold,
             } = deriveSupportedProfile(participantCount, optionCount);
+            const foreign =
+                foreignPoll === undefined
+                    ? undefined
+                    : await loadForeignPoll(foreignPoll);
             // In a result run the last corrupt position equivocates, as in
             // the native result ceremony: two copies of its private state
             // sign two more ballots.
@@ -519,15 +670,12 @@ await runWithLocalRunLog(
                                 peaks[position],
                                 await sample(chrome, { position }),
                             );
-                    for (const [copy, chrome] of copies)
+                    for (const [copy, { position, chrome }] of copies)
                         copyPeaks.set(
                             copy,
                             Math.max(
                                 copyPeaks.get(copy) ?? 0,
-                                await sample(chrome, {
-                                    position: equivocator ?? 0,
-                                    copy,
-                                }),
+                                await sample(chrome, { position, copy }),
                             ),
                         );
                     await delay(2000);
@@ -569,7 +717,7 @@ await runWithLocalRunLog(
                 const chrome =
                     copy === undefined
                         ? await participant(position)
-                        : copies.get(copy);
+                        : copies.get(copy)?.chrome;
                 assert.ok(chrome !== undefined, 'The copy is not running.');
                 const started = performance.now();
                 // The deadline ends with its operation so that no timer
@@ -649,13 +797,161 @@ await runWithLocalRunLog(
     };
 })`),
                 );
+            // Counts a participant's records in one store from its own page,
+            // reading none of them.
+            const storedRecords = async (position: number, store: string) =>
+                Number(
+                    await (
+                        await participant(position)
+                    ).evaluate(`new Promise((resolve, reject) => {
+    const opening = indexedDB.open('sealed-lattice-participant');
+    opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+        const database = opening.result;
+        const counting = database.transaction(${JSON.stringify(store)}).objectStore(${JSON.stringify(store)}).count();
+        counting.onsuccess = () => { database.close(); resolve(counting.result); };
+        counting.onerror = () => { database.close(); reject(counting.error); };
+    };
+})`),
+                );
+            const copyProfile = (copy: string) =>
+                path.join(profileDirectory, `copy-${copy}`);
+            // Ends a participant's browser as a crash would. Its committed
+            // state is what the next launch finds, while Chrome's own
+            // shutdown can outlast its deadline when other browsers write.
+            const endBrowser = async (position: number) => {
+                await chromes[position]?.crash();
+                chromes[position] = undefined;
+            };
+            // Copies a participant's private state into its own Chrome
+            // process at the participant's origin. The participant's browser
+            // ends first, so the copy holds exactly the committed state its
+            // next launch would find; crash reporting state is not
+            // participant state, and its handler can outlive the browser.
+            const copyParticipant = async (position: number, copy: string) => {
+                await endBrowser(position);
+                await cp(profile(position), copyProfile(copy), {
+                    recursive: true,
+                    errorOnExist: true,
+                    force: false,
+                    filter: (source) =>
+                        path.relative(profile(position), source) !== 'Crashpad',
+                });
+                const chrome = await launchChromeParticipant(
+                    copyProfile(copy),
+                    origin(position),
+                );
+                copies.set(copy, { position, chrome });
+                log.writeEvent({
+                    eventType: 'participant-browser',
+                    details: {
+                        position,
+                        copy,
+                        version: chrome.version,
+                        launchArguments: chrome.launchArguments,
+                    },
+                });
+                return chrome;
+            };
+            const removeCopy = async (copy: string) => {
+                await copies.get(copy)?.chrome.crash();
+                copies.delete(copy);
+                await rm(copyProfile(copy), {
+                    recursive: true,
+                    maxRetries: 10,
+                    retryDelay: 500,
+                });
+            };
+            // Loses the last record of one store in a copy of an honest
+            // participant's state and runs the operation there: the copy
+            // stops with its stop persisted and stays stopped, and the copy
+            // is deleted. The participant itself continues unaffected.
+            const stateLosses: {
+                position: number;
+                store: string;
+                record: unknown;
+                operation: string;
+                generation: number;
+                reason: string;
+            }[] = [];
+            const loseState = async (
+                position: number,
+                store: string,
+                operation: string,
+            ) => {
+                assert.ok(honest(position), 'Only honest state is lost.');
+                const copy = `lost-${store}-${String(position)}`;
+                const chrome = await copyParticipant(position, copy);
+                try {
+                    const generation = Number(
+                        await chrome.evaluate(`new Promise((resolve, reject) => {
+    const opening = indexedDB.open('sealed-lattice-participant');
+    opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+        const database = opening.result;
+        const reading = database.transaction('head').objectStore('head').get(0);
+        reading.onsuccess = () => { database.close(); resolve(reading.result?.generation ?? 0); };
+        reading.onerror = () => { database.close(); reject(reading.error); };
+    };
+})`),
+                    );
+                    const record: unknown =
+                        await chrome.evaluate(`new Promise((resolve, reject) => {
+    const opening = indexedDB.open('sealed-lattice-participant');
+    opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+        const database = opening.result;
+        const fail = (error) => { database.close(); reject(error); };
+        const deleting = database.transaction(${JSON.stringify(store)}, 'readwrite');
+        const reading = deleting.objectStore(${JSON.stringify(store)}).openCursor(null, 'prev');
+        let key;
+        reading.onerror = () => fail(reading.error);
+        reading.onsuccess = () => {
+            if (reading.result === null) return fail(new Error('No record to lose.'));
+            key = reading.result.key;
+            reading.result.delete();
+        };
+        deleting.oncomplete = () => { database.close(); resolve(key); };
+        deleting.onabort = () => fail(deleting.error);
+    };
+})`);
+                    const result = await request(position, operation, {}, copy);
+                    assert.ok(
+                        result.status === 'stopped' &&
+                            result.stopPersistence === 'confirmed',
+                        `${operation} after losing a ${store} record at position ${String(position)}: ${JSON.stringify(result)}`,
+                    );
+                    assert.deepEqual(
+                        await request(position, 'status', {}, copy),
+                        {
+                            status: 'stopped',
+                            reason: 'Missing or inconsistent participant authority.',
+                            stopPersistence: 'confirmed',
+                        },
+                    );
+                    const loss = {
+                        position,
+                        store,
+                        record,
+                        operation,
+                        generation,
+                        reason: result.reason,
+                    };
+                    stateLosses.push(loss);
+                    log.writeEvent({
+                        eventType: 'participant-state-loss',
+                        details: loss,
+                    });
+                } finally {
+                    await removeCopy(copy);
+                }
+            };
             // Loads a halting client in the participant's browser, whose
             // participant stops for good once it durably enters the
             // generation.
             const armHalt = async (position: number, generation: number) => {
                 assert.ok(honest(position), 'Only an honest client halts.');
-                await chromes[position]?.close();
-                chromes[position] = undefined;
+                await endBrowser(position);
                 halting.set(
                     position,
                     haltingClient(runtime.worker, generation),
@@ -670,6 +966,9 @@ await runWithLocalRunLog(
                 position: number;
                 operation: string;
                 generation: number;
+                // The records an interrupted operation had stored ahead of
+                // its next root.
+                staged?: Readonly<{ store: string; records: number }>;
             }[] = [];
             const interrupt = async (
                 position: number,
@@ -709,26 +1008,77 @@ await runWithLocalRunLog(
                     details: { position, operation, generation },
                 });
             };
+            // Crashes a participant's browser while its operation, in the
+            // generation it durably entered, has stored at least the given
+            // records in one store ahead of its next root. The next visit
+            // discards them and runs the operation again from its retained
+            // seed.
+            const interruptStaged = async (
+                position: number,
+                operation: string,
+                generation: number,
+                store: string,
+                records: number,
+            ) => {
+                const interrupted = request(position, operation);
+                for (;;) {
+                    const outcome = await Promise.race([
+                        interrupted.then(
+                            () => 'settled',
+                            () => 'settled',
+                        ),
+                        delay(250, 'waiting'),
+                    ]);
+                    assert.equal(
+                        outcome,
+                        'waiting',
+                        `${operation} at position ${String(position)} ended before its interruption in generation ${String(generation)}.`,
+                    );
+                    if (
+                        (await headGeneration(position)) === generation &&
+                        (await storedRecords(position, store)) >= records
+                    )
+                        break;
+                }
+                await chromes[position]?.crash();
+                chromes[position] = undefined;
+                await assert.rejects(interrupted);
+                assert.equal(
+                    await headGeneration(position),
+                    generation,
+                    'The interrupted operation committed its next root first.',
+                );
+                const staged = {
+                    store,
+                    records: await storedRecords(position, store),
+                };
+                interruptions.push({ position, operation, generation, staged });
+                log.writeEvent({
+                    eventType: 'participant-interruption',
+                    details: { position, operation, generation, staged },
+                });
+            };
             // Each participant scores every option differently, across the
             // descriptor's score range, and the result lists one option fewer
-            // than the complete ranking.
+            // than the complete ranking. In a result run the first honest
+            // participant after the organizer casts the all-minimum ballot,
+            // an ordinary valid ballot that counts like any other.
             const { minimumScore, maximumScore } = runtime.descriptor.ballot;
             const topCount = Math.max(1, optionCount - 1);
+            const minimumBallotAuthor =
+                mode === 'result'
+                    ? positions.find(
+                          (position) => position > 0 && honest(position),
+                      )
+                    : undefined;
             const ballotScores = (position: number) =>
-                Array.from(
-                    { length: optionCount },
-                    (_unused, option) =>
-                        minimumScore +
-                        ((position * (optionCount + 1) + option) %
-                            (maximumScore - minimumScore + 1)),
+                Array.from({ length: optionCount }, (_unused, option) =>
+                    position === minimumBallotAuthor
+                        ? minimumScore
+                        : minimumScore +
+                          ((position * (optionCount + 1) + option) %
+                              (maximumScore - minimumScore + 1)),
                 );
-            const everyone = async (operation: string, generation: number) => {
-                const results = await Promise.all(
-                    positions.map((position) => run(position, operation)),
-                );
-                for (const details of results)
-                    assert.equal(details.generation, generation);
-            };
             const { createCanonicalManifest } =
                 await import('#packages/sdk/dist/index.js');
             const manifest = await createCanonicalManifest({
@@ -815,8 +1165,50 @@ await runWithLocalRunLog(
             }
             // Every participant generates and retains its contribution body
             // and confirms it. No opening precedes the complete confirmation
-            // inventory.
-            await everyone('contribute', 7);
+            // inventory. The first honest participant after the organizer
+            // crashes during its generation once checkpoint records are
+            // stored, during its continuation once proof records are stored,
+            // and with its confirmation and opening intents; the next honest
+            // one with its checkpoint retained. Each next visit discards what
+            // an interrupted operation stored and continues from its retained
+            // seed or coins.
+            const setupReplay = positions.find(
+                (position) => position > 0 && honest(position),
+            );
+            const setupCheckpoint = positions.find(
+                (position) =>
+                    setupReplay !== undefined &&
+                    position > setupReplay &&
+                    honest(position),
+            );
+            const bodyRecords =
+                runtime.descriptor.contribution.publicRecords.length;
+            await Promise.all(
+                positions.map(async (position) => {
+                    if (position === setupReplay) {
+                        await interruptStaged(
+                            position,
+                            'contribute',
+                            4,
+                            'checkpoint',
+                            1,
+                        );
+                        await interruptStaged(
+                            position,
+                            'contribute',
+                            6,
+                            'contribution',
+                            bodyRecords + 1,
+                        );
+                    }
+                    if (position === setupCheckpoint)
+                        await interrupt(position, 'contribute', {}, 5);
+                    assert.equal(
+                        (await run(position, 'contribute')).generation,
+                        7,
+                    );
+                }),
+            );
             await expectStatus(0, 'contribute', 'refused');
             assert.equal((await run(0, 'confirm')).generation, 9);
             assert.deepEqual(await request(0, 'open'), {
@@ -826,24 +1218,44 @@ await runWithLocalRunLog(
             assert.equal((await run(0, 'status')).generation, 9);
             await Promise.all(
                 positions.slice(1).map(async (position) => {
+                    if (position === setupReplay)
+                        await interrupt(position, 'confirm', {}, 8);
                     assert.equal(
                         (await run(position, 'confirm')).generation,
                         9,
                     );
                 }),
             );
-            await everyone('open', 11);
+            await Promise.all(
+                positions.map(async (position) => {
+                    if (position === setupReplay)
+                        await interrupt(position, 'open', {}, 10);
+                    assert.equal((await run(position, 'open')).generation, 11);
+                }),
+            );
             // Before its signed opening a participant publishes nothing
             // derived from its contribution body but the committed
             // confirmation, as the late-materialization argument assumes.
             assert.deepEqual(relay.earlyContributionRecords, []);
             // Every participant verifies the complete setup and retains its
-            // reference once.
+            // reference once, which opens its ballot. In an empty run the
+            // last participant's setup arrives only after the organizer's
+            // close intent, below.
             // A ballot needs the verified setup.
             await expectStatus(0, 'ballot', 'refused', {
                 scores: ballotScores(0),
             });
-            await everyone('verify-setup', 12);
+            const lateSetup =
+                mode === 'empty' ? participantCount - 1 : undefined;
+            await Promise.all(
+                positions
+                    .filter((position) => position !== lateSetup)
+                    .map(async (position) => {
+                        const verified = await run(position, 'verify-setup');
+                        assert.equal(verified.generation, 12);
+                        assert.equal(verified.ballot, 'open');
+                    }),
+            );
             await expectStatus(0, 'verify-setup', 'refused');
             // Every participant signs one ballot, the late ones starting later.
             // A result closes with every ballot but the last on time, or with
@@ -901,37 +1313,9 @@ await runWithLocalRunLog(
             // original ballot.
             const pointerName = (author: number) =>
                 'ballot-' + String(author) + '/submission.bin';
-            const copyProfile = (copy: string) =>
-                profile(equivocator ?? 0) + '-' + copy;
             if (equivocator !== undefined) {
-                await chromes[equivocator]?.close();
-                chromes[equivocator] = undefined;
-                for (const copy of copyNames) {
-                    // Crash reporting state is not participant state, and its
-                    // handler can outlive the browser.
-                    await cp(profile(equivocator), copyProfile(copy), {
-                        recursive: true,
-                        errorOnExist: true,
-                        force: false,
-                        filter: (source) =>
-                            path.relative(profile(equivocator), source) !==
-                            'Crashpad',
-                    });
-                    const chrome = await launchChromeParticipant(
-                        copyProfile(copy),
-                        origin(equivocator),
-                    );
-                    copies.set(copy, chrome);
-                    log.writeEvent({
-                        eventType: 'participant-browser',
-                        details: {
-                            position: equivocator,
-                            copy,
-                            version: chrome.version,
-                            launchArguments: chrome.launchArguments,
-                        },
-                    });
-                }
+                for (const copy of copyNames)
+                    await copyParticipant(equivocator, copy);
                 // The original browser runs again before any ballot starts.
                 await participant(equivocator);
                 refusedPublications.add(pointerName(equivocator));
@@ -971,15 +1355,20 @@ await runWithLocalRunLog(
                             refusedDelivery,
                         );
                     else {
-                        // A signed ballot is only delivered again.
+                        // A signed ballot is only delivered again. A copy of
+                        // the state with the complete journal loses a
+                        // journal record and stops.
                         const halts = ballotHalts.get(position) ?? [];
-                        for (const generation of halts)
+                        for (const generation of halts) {
                             await interrupt(
                                 position,
                                 'ballot',
                                 { scores },
                                 generation,
                             );
+                            if (generation === 14)
+                                await loseState(position, 'ballot', 'ballot');
+                        }
                         assert.equal(
                             (
                                 await run(
@@ -1018,15 +1407,7 @@ await runWithLocalRunLog(
                 // pointer, and the copies' private state is deleted.
                 refusedPublications.delete(pointerName(equivocator));
                 assert.equal((await run(equivocator, 'ballot')).generation, 17);
-                for (const [copy, chrome] of copies) {
-                    await chrome.close();
-                    copies.delete(copy);
-                    await rm(copyProfile(copy), {
-                        recursive: true,
-                        maxRetries: 10,
-                        retryDelay: 500,
-                    });
-                }
+                for (const copy of copyNames) await removeCopy(copy);
             }
             if (ballotAuthors.includes(0)) {
                 await expectStatus(0, 'ballot', 'refused', {
@@ -1159,20 +1540,23 @@ await runWithLocalRunLog(
                     pointerName(equivocation.position),
                     pointerTo(equivocation.late.identity),
                 );
-            // Every other participant collects the published ballots, its own
-            // first, before any intent exists; with no ballot it collects
-            // nothing and commits nothing.
+            // Every other participant with its verified setup collects the
+            // published ballots, its own first, before any intent exists;
+            // with no ballot it collects nothing and commits nothing.
             await Promise.all(
-                positions.slice(1).map(async (position) => {
-                    const details = await run(position, 'close', {
-                        deliver: cast(others(position)),
-                    });
-                    assert.equal(details.generation, beforeClose);
-                    assert.deepEqual(details.closeEvents, [
-                        ...submissions('own', cast([position])),
-                        ...submissions('held', cast(others(position))),
-                    ]);
-                }),
+                positions
+                    .slice(1)
+                    .filter((position) => position !== lateSetup)
+                    .map(async (position) => {
+                        const details = await run(position, 'close', {
+                            deliver: cast(others(position)),
+                        });
+                        assert.equal(details.generation, beforeClose);
+                        assert.deepEqual(details.closeEvents, [
+                            ...submissions('own', cast([position])),
+                            ...submissions('held', cast(others(position))),
+                        ]);
+                    }),
             );
             views[lastPosition].clear();
             const equivocatorHeld =
@@ -1230,6 +1614,23 @@ await runWithLocalRunLog(
                 { kind: 'lock' },
             ]);
             await expectStatus(0, 'close', 'refused', { closeTime });
+            // The last participant's setup arrives only after the organizer's
+            // close intent: once the setup is retained, the participant
+            // learns that ballot submission closed, locks the intent and can
+            // no longer vote.
+            if (lateSetup !== undefined) {
+                const verified = await run(lateSetup, 'verify-setup');
+                assert.equal(verified.generation, 19);
+                assert.equal(verified.ballot, 'could not vote');
+                await expectStatus(lateSetup, 'ballot', 'refused', {
+                    scores: ballotScores(lateSetup),
+                });
+            }
+            // A copy of honest state loses its last close record, or its last
+            // data record when it holds no close record, as when every ballot
+            // it held was late or none was cast, and stops.
+            const closeStore = async (position: number) =>
+                (await storedRecords(position, 'close')) > 0 ? 'close' : 'data';
             // Every other participant locks the intent and responds at once.
             // The last participant's lock retires the late ballot it held
             // from the equivocator.
@@ -1253,6 +1654,12 @@ await runWithLocalRunLog(
                     const halt = responseHalts.get(position);
                     if (halt !== undefined)
                         await interrupt(position, 'close', {}, halt);
+                    if (halt === 19)
+                        await loseState(
+                            position,
+                            await closeStore(position),
+                            'close',
+                        );
                     const details = await run(position, 'close');
                     assert.equal(details.generation, 21);
                     assert.deepEqual(details.closeEvents, [
@@ -1401,6 +1808,12 @@ await runWithLocalRunLog(
                     const halt = targetHalts.get(position);
                     if (halt !== undefined)
                         await interrupt(position, 'target', {}, halt);
+                    if (halt === 23)
+                        await loseState(
+                            position,
+                            await closeStore(position),
+                            'target',
+                        );
                     const details = await run(position, 'target');
                     assert.equal(details.generation, 24);
                     if (halt === 24) {
@@ -1475,23 +1888,6 @@ await runWithLocalRunLog(
             const remaining = positions.filter(
                 (position) => !departed.has(position),
             );
-            // Counts a participant's retained release records from its own
-            // page, reading none of them.
-            const storedReleaseRecords = async (position: number) =>
-                Number(
-                    await (
-                        await participant(position)
-                    ).evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open('sealed-lattice-participant');
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const counting = database.transaction('release').objectStore('release').count();
-        counting.onsuccess = () => { database.close(); resolve(counting.result); };
-        counting.onerror = () => { database.close(); reject(counting.error); };
-    };
-})`),
-                );
             const combiningPosition = remaining[remaining.length - 1];
             const releaseBounds = runtime.descriptor.release;
             const completionFile = (name: string, position: number) =>
@@ -1553,8 +1949,10 @@ await runWithLocalRunLog(
                             'The release ended before its interruption.',
                         );
                         if (
-                            (await storedReleaseRecords(interruptedPosition)) >=
-                            interruptionRecords
+                            (await storedRecords(
+                                interruptedPosition,
+                                'release',
+                            )) >= interruptionRecords
                         )
                             break;
                     }
@@ -1585,10 +1983,12 @@ await runWithLocalRunLog(
                         .filter((position) => position !== interruptedPosition)
                         .map(async (position) => {
                             // The combining participant halts at every
-                            // generation after its journal.
+                            // generation after its journal, the last with
+                            // its signed release before delivery, which its
+                            // next visit only delivers.
                             const halts =
                                 position === combiningPosition
-                                    ? [26, 27, 28]
+                                    ? [26, 27, 28, 29]
                                     : [];
                             for (const generation of halts)
                                 await interrupt(
@@ -1599,16 +1999,12 @@ await runWithLocalRunLog(
                                 );
                             const details = await run(position, 'release');
                             assert.equal(details.generation, 29);
+                            assert.equal(details.resumedFrom, undefined);
+                            if (halts.length > 0) {
+                                assert.equal(details.encrypted, undefined);
+                                return;
+                            }
                             assert.equal(details.encrypted, true);
-                            assert.equal(
-                                (
-                                    details.resumedFrom as
-                                        { generation: number } | undefined
-                                )?.generation,
-                                halts.length === 0
-                                    ? undefined
-                                    : halts[halts.length - 1],
-                            );
                             assert.equal(
                                 details.predecessor,
                                 predecessor(position),
@@ -1789,9 +2185,42 @@ await runWithLocalRunLog(
                             ),
                         ),
                     );
+            // A fourth set of views serves the other poll's records of one
+            // family at a time. The first of them a result visit reads is
+            // refused, so its participant stays pending.
+            const foreignProbes: {
+                family: string;
+                served: number;
+                hidden: number;
+                reason: string;
+            }[] = [];
+            const probeForeignPoll = async (position: number) => {
+                if (foreign === undefined) return;
+                assert.notEqual(foreign.poll, organizer.poll);
+                for (const { family, pattern, reason } of foreignFamilies) {
+                    // Only an encrypted target's result reads release shares,
+                    // and only a result run of the other poll released any.
+                    if (family === 'release shares' && noResult) continue;
+                    const { view, served } = await foreignRecordView(
+                        foreign,
+                        publicDirectory,
+                        recordIds,
+                        pattern,
+                    );
+                    if (family === 'release shares' && served === 0) continue;
+                    assert.ok(served > 0, `The foreign poll has no ${family}.`);
+                    await probe(position, view, reason);
+                    foreignProbes.push({
+                        family,
+                        served,
+                        hidden: view.size - served,
+                        reason,
+                    });
+                }
+            };
             const probe = async (
                 position: number,
-                forgeries: ReadonlyMap<string, Buffer>,
+                forgeries: ReadonlyMap<string, ViewedRecord>,
                 reason: string,
             ) => {
                 for (const [name, bytes] of forgeries)
@@ -1821,12 +2250,14 @@ await runWithLocalRunLog(
                                 shareForgeries,
                                 'The release shares are incomplete.',
                             );
-                        if (position === voteProbe)
+                        if (position === voteProbe) {
                             await probe(
                                 position,
                                 registrationForgeries,
                                 'The published registrations are not the retained roster.',
                             );
+                            await probeForeignPoll(position);
+                        }
                     },
                 ),
             ]);
@@ -1881,6 +2312,24 @@ await runWithLocalRunLog(
                 reason: 'Missing or inconsistent participant authority.',
                 stopPersistence: 'confirmed',
             });
+            const scope = [
+                mode === 'empty'
+                    ? "Browser registration, roster agreement, setup contribution and setup verification with no ballot cast, a participant whose setup is retained only after the organizer's close intent and so can no longer vote, close responses that list nothing under the organizer's proposal, a participant refused a ballot after its intent lock, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
+                    : noResult
+                      ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
+                      : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, one of them the all-minimum ballot, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts.",
+                'An honest browser crashes during its contribution generation and during its continuation once it stored records ahead of its next root, and with its confirmation and opening intents, and another with its retained checkpoint; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
+                `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
+                mode === 'empty'
+                    ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."
+                    : "Copies of honest participants' state stop for good once they lose their last ballot record with the ballot journal complete, or, before their close response or target vote, their last close record or, holding none, their last data record.",
+                `Relay views that ${noResult ? 'relabel or replay votes' : 'relabel, replay or alter votes and shares'} or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.`,
+                ...(foreign === undefined
+                    ? []
+                    : [
+                          `Relay views that serve another poll's ${prose(foreignProbes.map(({ family }) => family))} under this poll's names leave a participant pending.`,
+                      ]),
+            ].join(' ');
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -1895,10 +2344,13 @@ await runWithLocalRunLog(
                         copyPeakProcessTreeBytes: Object.fromEntries(copyPeaks),
                         closeTime,
                         lateBallots,
+                        minimumBallot: minimumBallotAuthor,
+                        couldNotVote: lateSetup,
                         nonVoters,
                         departed: [...departed],
                         interrupted: interruption,
                         interruptions,
+                        stateLosses,
                         equivocation:
                             equivocation === undefined
                                 ? undefined
@@ -1930,16 +2382,20 @@ await runWithLocalRunLog(
                             position: stoppedPosition,
                             record: alteredRecord,
                         },
+                        foreignPoll:
+                            foreign === undefined
+                                ? undefined
+                                : {
+                                      run: foreign.run,
+                                      poll: foreign.poll,
+                                      position: voteProbe,
+                                      probes: foreignProbes,
+                                  },
                         topCount,
                         result: noResult
                             ? { kind: 'no-result' }
                             : { kind: 'result', identifiers: expectedResult },
-                        scope:
-                            mode === 'empty'
-                                ? "Browser registration, roster agreement, setup contribution and setup verification with no ballot cast, close responses that list nothing under the organizer's proposal, a participant refused a ballot after its intent lock, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. Honest browsers crash right after their participants durably enter each close and target generation, and each next visit continues from the retained state. Relay views that relabel or replay votes or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good."
-                                : noResult
-                                  ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome. Honest browsers crash right after their participants durably enter each ballot, close and target generation, and each next visit continues from the retained state. Relay views that relabel or replay votes or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good."
-                                  : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them continued after its browser closed mid-journal and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts. Honest browsers crash right after their participants durably enter each ballot, close, target and release generation, and each next visit continues from the retained state. Relay views that relabel, replay or alter votes and shares or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.",
+                        scope,
                     },
                     null,
                     2,
@@ -1950,7 +2406,10 @@ await runWithLocalRunLog(
         } finally {
             sampling = false;
             await monitor;
-            for (const chrome of [...chromes, ...copies.values()])
+            for (const chrome of [
+                ...chromes,
+                ...[...copies.values()].map((value) => value.chrome),
+            ])
                 await chrome?.close().catch(() => undefined);
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));
