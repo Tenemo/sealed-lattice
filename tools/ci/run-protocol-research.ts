@@ -139,12 +139,6 @@ await runWithLocalRunLog(
                 compiler,
                 /commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860/u,
             );
-            const protoc = await execute(
-                process.env.PROTOC ?? 'protoc',
-                ['--version'],
-                'protobuf-compiler',
-            );
-            assert.equal(protoc.trim(), 'libprotoc 36.1');
             // The research crates implement every supported profile; the
             // native ceremony runs the selected one.
             const profile = deriveSupportedProfile(
@@ -292,7 +286,7 @@ await runWithLocalRunLog(
             );
             await writeFile(
                 path.join(log.runDirectoryPath, 'source-manifest.json'),
-                JSON.stringify({ compiler, protoc, sources }, null, 2) + '\n',
+                JSON.stringify({ compiler, sources }, null, 2) + '\n',
                 { flag: 'wx' },
             );
             await writeFile(

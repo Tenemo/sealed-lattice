@@ -303,12 +303,6 @@ export const assembleParticipantRuntime = async (
         compiler,
         /commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860/u,
     );
-    const protoc = await execute(
-        process.env.PROTOC ?? 'protoc',
-        ['--version'],
-        'protobuf-compiler',
-    );
-    assert.equal(protoc.trim(), 'libprotoc 36.1');
     const cargoHome = path.resolve(
         process.env.CARGO_HOME ?? path.join(os.homedir(), '.cargo'),
     );
@@ -432,7 +426,7 @@ export const assembleParticipantRuntime = async (
         files.push({ file, sha512: sha512(bytes), bytes: bytes.length });
     }
     files.sort((left, right) => (left.file < right.file ? -1 : 1));
-    const sourceManifest = JSON.stringify({ compiler, protoc, flags, files });
+    const sourceManifest = JSON.stringify({ compiler, flags, files });
     await writeFile(
         path.join(runLog.runDirectoryPath, 'source-manifest.json'),
         sourceManifest + '\n',

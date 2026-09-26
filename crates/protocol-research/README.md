@@ -16,7 +16,7 @@ pnpm run research:profiles -- --output crates/protocol-research/supported-profil
 
 ## Build and run
 
-Prerequisites are Node.js satisfying the repository's engine requirement, the pinned pnpm version, Rust 1.95.0 with rustfmt, Clippy and the `wasm32-unknown-unknown` target, and Protocol Buffers compiler 36.1. Install protoc from the official Protocol Buffers release and put it on `PATH`, or set `PROTOC` to that executable. The runner checks both compiler versions and records the native executable digest; it does not search an ignored checkout. Cargo's lockfile pins registry dependency versions and checksums. Before an offline run, populate the Cargo cache with:
+Prerequisites are Node.js satisfying the repository's engine requirement, the pinned pnpm version, and Rust 1.95.0 with rustfmt, Clippy and the `wasm32-unknown-unknown` target. The runner checks the compiler version and records the native executable digest. Cargo's lockfile pins registry dependency versions and checksums. Before an offline run, populate the Cargo cache with:
 
 ```text
 cargo +1.95.0 fetch --locked --manifest-path crates/protocol-research/Cargo.toml
@@ -109,6 +109,6 @@ The worker authenticates release-journal records before staging them in the scal
 
 ## Third-party sources
 
-`vendor/fhe-rs` contains the used arithmetic, utility and trait crates from `tlepoint/fhe.rs` at `e248cd288c754e5cca9a54d4b7df505058a539ed`, plus the previously verified scalar execution and dependency-pin changes. The imported local revision is `877151d0f2484aef379c2253fb5bb0d380eb528a`. Only its tests enable rand's operating-system generator: the browser modules build for `wasm32-unknown-unknown`, where that generator has no backend, and receive randomness from their host. The `check` case builds the browser participant module for that target. Its MIT license is retained. The existing Protobuf schema and build remain unchanged.
+`vendor/fhe-rs` contains the used arithmetic, utility and trait crates from `tlepoint/fhe.rs` at `e248cd288c754e5cca9a54d4b7df505058a539ed`, plus the previously verified scalar execution and dependency-pin changes. The imported local revision is `877151d0f2484aef379c2253fb5bb0d380eb528a`. Only its tests enable rand's operating-system generator: the browser modules build for `wasm32-unknown-unknown`, where that generator has no backend, and receive randomness from their host. The `check` case builds the browser participant module for that target. Its MIT license is retained. Its Protobuf schema is unchanged, and the Rust code that prost-build 0.14.4 generated from it with protoc 36.1 is committed in place of the build script, so no build needs a Protocol Buffers compiler.
 
 `vendor/keccak` contains RustCrypto keccak 0.2.2 with the existing scalar backend delegation to keccak 0.1.6. Its MIT and Apache-2.0 licenses are retained. Unused registry test/benchmark manifest entries are removed because those sources were not part of the imported dependency. This is a pinned local dependency, not a claim of an unmodified upstream release.

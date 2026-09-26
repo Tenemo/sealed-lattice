@@ -236,7 +236,6 @@ await runWithLocalRunLog(
                 environment = {
                     ...process.env,
                     RUSTFLAGS: '',
-                    PROTOC: process.env.PROTOC,
                 };
             const execute = async (
                 command: string,
