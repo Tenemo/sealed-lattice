@@ -54,6 +54,7 @@ export const compileSparseSupportSamplingCensus = (
     return [
         {
             role: 'Registration recipient secret',
+            scope: 'registration',
             callsPerOperation: 1n,
             ...boundSparseSupportSampling(
                 registration.degree,
@@ -62,6 +63,7 @@ export const compileSparseSupportSamplingCensus = (
         },
         {
             role: 'Contribution FHE secrets',
+            scope: 'contribution',
             callsPerOperation: 2n,
             ...boundSparseSupportSampling(
                 fixedModulusBfvInputs.polynomialDegree,
@@ -70,6 +72,7 @@ export const compileSparseSupportSamplingCensus = (
         },
         {
             role: 'Contribution recipient ephemerals',
+            scope: 'contribution',
             callsPerOperation: BigInt(profile.participantCount),
             ...boundSparseSupportSampling(
                 fixedModulusBfvInputs.polynomialDegree,
@@ -78,6 +81,7 @@ export const compileSparseSupportSamplingCensus = (
         },
         {
             role: 'Contribution auxiliary secret',
+            scope: 'contribution',
             callsPerOperation: 1n,
             ...boundSparseSupportSampling(
                 auxiliaryInputEncryptionParameters.degree,

@@ -393,6 +393,67 @@ describe('composed security ledger', () => {
         }
     });
 
+    it('charges every sparse sampler call its cap-exhaustion bound', () => {
+        // A balanced sparse sampler of support s over degree d fails its
+        // draw cap of 2s with probability at most (4(s-1)/d)^s. Every
+        // contributor draws two FHE secrets, one ephemeral per recipient
+        // and one auxiliary secret; every registration one recipient secret.
+        const bound = (degree: bigint, support: bigint) => ({
+            numerator: (4n * (support - 1n)) ** support,
+            denominator: degree ** support,
+        });
+        const unitsAbove = (
+            rows: readonly Readonly<{
+                calls: bigint;
+                numerator: bigint;
+                denominator: bigint;
+            }>[],
+        ) => {
+            // The smallest multiple of 2^-256 at or above the exact sum.
+            let numerator = 0n;
+            let denominator = 1n;
+            for (const row of rows) {
+                numerator =
+                    numerator * row.denominator +
+                    row.calls * row.numerator * denominator;
+                denominator *= row.denominator;
+            }
+            return ((numerator << 256n) + denominator - 1n) / denominator;
+        };
+        for (const [participantCount, optionCount] of [
+            [3, 2],
+            [20, 20],
+        ] as const) {
+            const participants = BigInt(participantCount);
+            const expected = unitsAbove([
+                { calls: 2n * participants, ...bound(65_536n, 1_024n) },
+                {
+                    calls: participants * participants,
+                    ...bound(65_536n, 256n),
+                },
+                { calls: participants, ...bound(4_096n, 256n) },
+            ]);
+            const term = profileStatisticalTerms(
+                deriveSupportedProfile(participantCount, optionCount),
+            ).find(
+                (value) =>
+                    value.name === 'Contribution sparse-support cap exhaustion',
+            )!;
+            expect(term.numerator).toBe(expected);
+            expect(term.numerator).toBeGreaterThan(0n);
+        }
+        const population = ledger.maximumCredentialPopulation;
+        const registration = compileComposedSecurityLedger(
+            population,
+        ).statistical.terms.find(
+            (value) =>
+                value.name === 'Registration sparse-support cap exhaustion',
+        )!;
+        expect(registration.numerator).toBe(
+            unitsAbove([{ calls: population, ...bound(65_536n, 256n) }]),
+        );
+    });
+
     it('charges proof soundness at every hop that relies on it', () => {
         for (const participantCount of [3, 10, 20]) {
             const honest = Array.from(
@@ -434,6 +495,7 @@ describe('composed security ledger', () => {
         const rosterTerms = new Set([
             'Honest-body equivocation',
             'Honest signing credential collision',
+            'Registration sparse-support cap exhaustion',
         ]);
         const charged = ledger.statistical.terms.filter(
             (term) => !rosterTerms.has(term.name),

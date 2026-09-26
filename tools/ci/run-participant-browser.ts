@@ -83,10 +83,22 @@ type Relay = Readonly<{
     views: Map<string, Buffer | undefined>[];
     // Publications the relay refuses to store.
     refused: Set<string>;
+    // Contribution records other than the confirmation and the opening that
+    // arrived before their author's signed opening.
+    earlyContributionRecords: string[];
     // The halting client a participant's origin serves instead of the
     // runtime's page and worker while one is set.
     halting: Map<number, HaltingClient>;
 }>;
+
+// Records a participant may publish from its contribution before its signed
+// opening: the committed confirmation and the opening itself.
+const preOpeningContributionRecords = new Set([
+    'confirmation.bin',
+    'confirmation-signature.bin',
+    'opening.bin',
+    'opening-signature.bin',
+]);
 
 type HaltingClient = Readonly<{
     generation: number;
@@ -186,6 +198,7 @@ const startRelay = async (
         () => new Map<string, Buffer | undefined>(),
     );
     const refused = new Set<string>();
+    const earlyContributionRecords: string[] = [];
     const assets = (position: number) => {
         const client =
             corrupt?.position === position ? corrupt.client : undefined;
@@ -275,6 +288,15 @@ const startRelay = async (
         }
         const bytes = await readBody(request, 1 << 20);
         const file = path.join(publicDirectory, name);
+        const [directory, record] = name.split('/');
+        if (
+            /^contribution-\d+$/u.test(directory) &&
+            !preOpeningContributionRecords.has(record) &&
+            (await stat(
+                path.join(publicDirectory, directory, 'opening-signature.bin'),
+            ).catch(() => undefined)) === undefined
+        )
+            earlyContributionRecords.push(name);
         await mkdir(path.dirname(file), { recursive: true });
         const existing = await stat(file).catch(() => undefined);
         const length = existing?.size ?? 0;
@@ -352,7 +374,14 @@ const startRelay = async (
         });
         servers.push(server);
     }
-    return { servers, owners, views, refused, halting };
+    return {
+        servers,
+        owners,
+        views,
+        refused,
+        earlyContributionRecords,
+        halting,
+    };
 };
 
 await runWithLocalRunLog(
@@ -804,6 +833,10 @@ await runWithLocalRunLog(
                 }),
             );
             await everyone('open', 11);
+            // Before its signed opening a participant publishes nothing
+            // derived from its contribution body but the committed
+            // confirmation, as the late-materialization argument assumes.
+            assert.deepEqual(relay.earlyContributionRecords, []);
             // Every participant verifies the complete setup and retains its
             // reference once.
             // A ballot needs the verified setup.

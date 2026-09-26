@@ -27,6 +27,7 @@ import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-mo
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
 import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
+import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
 import {
     listSupportedProfiles,
     type SupportedProfile,
@@ -111,6 +112,33 @@ const power = (bits: bigint) =>
     bits >= statisticalDenominatorBits
         ? 1n
         : 1n << (statisticalDenominatorBits - bits);
+
+// Exceeding the proof-only draw cap of a balanced sparse sampler on its
+// original tape is an error event of the sampler step, whose power-of-two
+// per-call bound every call pays. The sum is exact before rounding.
+const sparseSupportExhaustion = (
+    rows: readonly Readonly<{
+        calls: bigint;
+        numerator: bigint;
+        denominator: bigint;
+    }>[],
+) => {
+    const denominator = rows.reduce(
+        (largest, row) =>
+            row.denominator > largest ? row.denominator : largest,
+        1n,
+    );
+    return dyadic(
+        rows.reduce((sum, row) => {
+            assert.equal(denominator % row.denominator, 0n);
+            return (
+                sum +
+                row.calls * row.numerator * (denominator / row.denominator)
+            );
+        }, 0n),
+        denominator,
+    );
+};
 
 export const supportedParticipantCounts =
     compileSupportedThresholdCompletionProfiles().map(
@@ -232,6 +260,20 @@ export const profileStatisticalTerms = (
             numerator: dyadic(
                 sampling.preparationVariationNumerator,
                 sampling.preparationVariationDenominator,
+            ),
+        },
+        {
+            // Every roster participant draws each contribution secret once.
+            name: 'Contribution sparse-support cap exhaustion',
+            numerator: sparseSupportExhaustion(
+                compileSparseSupportSamplingCensus(profile)
+                    .filter((row) => row.scope === 'contribution')
+                    .map((row) => ({
+                        ...row,
+                        calls:
+                            BigInt(profile.participantCount) *
+                            row.callsPerOperation,
+                    })),
             ),
         },
         {
@@ -380,6 +422,19 @@ const compileStatisticalLedger = (
                 equivocation.credentialCollisionDenominator,
             ),
             largestAt: largestRoster,
+        },
+        {
+            // Every potential honest credential draws its recipient secret
+            // once; that sampler is the same for every profile.
+            name: 'Registration sparse-support cap exhaustion',
+            numerator: sparseSupportExhaustion(
+                compileSparseSupportSamplingCensus(listSupportedProfiles()[0])
+                    .filter((row) => row.scope === 'registration')
+                    .map((row) => ({
+                        ...row,
+                        calls: potentialCredentialCount * row.callsPerOperation,
+                    })),
+            ),
         },
     ];
     const subtotalNumerator = terms.reduce(
