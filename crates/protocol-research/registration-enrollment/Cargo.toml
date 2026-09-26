@@ -18,6 +18,7 @@ registration-credentials = { path = "../registration-credentials", default-featu
 registration-proof = { path = "../registration-proof", default-features = false }
 contribution-prover = { path = "../contribution-prover", default-features = false }
 setup-witness = { path = "../setup-witness", features = ["custody"] }
+supported-profile = { path = "../supported-profile" }
 num-bigint = "=0.5.1"
 # The contribution randomness streams hold secret sponge states.
 sha3 = { version = "=0.10.9", features = ["zeroize"] }

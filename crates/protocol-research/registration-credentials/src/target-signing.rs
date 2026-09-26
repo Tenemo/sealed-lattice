@@ -16,7 +16,9 @@ use zeroize::Zeroizing;
 pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v1";
 pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-id/v1";
 pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification/v1";
-pub const TARGET_VOTE_BYTES: usize = 2 + 64 + 3309;
+pub const TARGET_VOTE_BYTES: usize = 2 + 64 + crate::SIGNATURE_BYTES;
+/// Every evaluation target body is at most this long.
+pub const MAXIMUM_TARGET_BODY_BYTES: usize = 2048;
 
 /// A result needs at least `f+2` accepted ballots, where `f = floor((n-1)/3)`
 /// bounds the compromised participants, so every result combines at least two
@@ -42,9 +44,9 @@ impl TargetMessage {
         }
         // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.
         let limits = CanonicalDecodeLimits {
-            maximum_tuple_byte_length: 2048,
+            maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
             maximum_item_count: 9,
-            maximum_item_byte_length: 2048,
+            maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
         };

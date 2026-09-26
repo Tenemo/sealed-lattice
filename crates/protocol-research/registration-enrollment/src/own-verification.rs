@@ -120,6 +120,11 @@ pub extern "C" fn own_registration_input_capacity() -> usize {
 pub extern "C" fn own_registration_command(operation: u32, length: usize) -> u32 {
     STATE.with(|state| u32::from(state.borrow_mut().command(operation, length).is_err()))
 }
+/// The verified poll's option count, or zero before verification.
+#[unsafe(no_mangle)]
+pub extern "C" fn own_registration_option_count() -> usize {
+    verified_option_count().unwrap_or(0)
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn own_registration_username_pointer() -> usize {
     STATE.with(|state| {

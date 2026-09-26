@@ -541,6 +541,18 @@ const supportedOptionCountRange = () =>
         (_unused, index) => supportedOptionCounts.minimum + index,
     );
 
+// The supported participant and option counts, each a contiguous range.
+export const supportedProfileRanges = () => {
+    const participants = supportedParticipantCounts();
+    return {
+        participants: {
+            minimum: Math.min(...participants),
+            maximum: Math.max(...participants),
+        },
+        options: supportedOptionCounts,
+    };
+};
+
 // Every supported profile, by participant count and then option count.
 export const listSupportedProfiles = (): readonly SupportedProfile[] =>
     supportedParticipantCounts().flatMap((participantCount) =>

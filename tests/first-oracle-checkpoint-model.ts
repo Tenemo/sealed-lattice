@@ -51,8 +51,12 @@ export const compileFirstOracleCheckpointCensus = (
                 count + (polynomial.bytes + (1n << 20n) - 1n) / (1n << 20n),
             0n,
         );
+    // Magic, participant and option counts, column, role length, the
+    // longest role, the expected and context digests, the statement header,
+    // and the count and recipient key hashes.
     const maximumHeaderBytes =
         4n +
+        2n +
         4n +
         2n +
         1024n +

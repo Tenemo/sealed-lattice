@@ -10,6 +10,8 @@ const registrationEnrollmentInputs = {
     maximumUsernameIngressBytes: 512n,
     maximumHeaderInputBytes: 4096n,
     maximumPollDefinitionBytes: 1_048_576n,
+    // A retained roster proposal is at most this long.
+    maximumProposalBytes: 2048n,
 } as const;
 
 export const compileRegistrationEnrollmentCensus = () => {
@@ -112,7 +114,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             maximumRootBytes +
             inputs.maximumPollDefinitionBytes +
             inputs.signatureBytes +
-            2048n +
+            inputs.maximumProposalBytes +
             inputs.signatureBytes,
         initialRootDistinctBlockInputs:
             1n +

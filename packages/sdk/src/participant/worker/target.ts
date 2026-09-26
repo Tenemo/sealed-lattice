@@ -17,7 +17,7 @@ import {
 } from './close.js';
 import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ParticipantContext } from './context.js';
+import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import { moduleChunkBytes, readKernel, writeChunkInput } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
@@ -62,7 +62,7 @@ const words = (bytes: Uint8Array) => {
 type UsableSlot = Readonly<{ submission: Uint8Array; identity: Uint8Array }>;
 
 const streamBody = (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
@@ -71,12 +71,12 @@ const streamBody = (
     streamPublic(
         relay,
         submissionDirectory(author, identity) + 'body.bin',
-        context.descriptor.ballot.maximumBodyBytes,
+        context.profile.ballot.maximumBodyBytes,
         accept,
     );
 
 const barrierCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
@@ -86,7 +86,7 @@ const barrierCommand = (
 };
 
 const requireBarrier = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     input: Uint8Array,
     reason: string,
@@ -99,11 +99,11 @@ const requireBarrier = (
 // intent, the proposal's named responses with every envelope they list, and
 // the body of each usable slot. Returns each usable slot by its author.
 const verifyCloseBarrier = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
 ) => {
-    const { descriptor, kernel } = context;
-    const { close, registration } = descriptor;
+    const { profile, kernel } = context;
+    const { close, registration } = profile;
     const { signatureBytes } = registration;
     if (!barrierCommand(context, 1))
         throw new Error('The close verifier has no verified setup.');
@@ -159,7 +159,7 @@ const verifyCloseBarrier = async (
             if (listed.has(hexadecimal(identity))) continue;
             const author = readUnsigned16(response, offset);
             const submission = await readPublishedSubmission(
-                descriptor,
+                profile,
                 relay,
                 author,
                 identity,
@@ -219,7 +219,7 @@ const verifyCloseBarrier = async (
     return usable;
 };
 
-const classifierInput = (context: ParticipantContext, bytes: Uint8Array) => {
+const classifierInput = (context: ProfileContext, bytes: Uint8Array) => {
     const { kernel } = context;
     writeChunkInput(kernel, kernel.ballot_body_input_pointer(), bytes);
     return bytes.length;
@@ -229,7 +229,7 @@ const classifierInput = (context: ParticipantContext, bytes: Uint8Array) => {
 // body header, and delivers the encryption keys from the verified aggregate
 // while the body relation needs them.
 const beginClassification = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     submission: Uint8Array,
     header: Uint8Array,
 ) => {
@@ -267,13 +267,13 @@ const beginClassification = async (
 // Classifies one usable ballot as valid or invalid. The body must be the one
 // the barrier authenticated, or the classifier refuses it.
 const classifyBallot = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
     author: number,
     { submission, identity }: UsableSlot,
 ) => {
-    const { kernel, descriptor } = context;
-    const { headerBytes } = descriptor.ballot;
+    const { kernel, profile } = context;
+    const { headerBytes } = profile.ballot;
     let header: Uint8Array = new Uint8Array();
     await streamBody(context, relay, author, identity, async (bytes) => {
         let rest = bytes;
@@ -302,7 +302,7 @@ const classifyBallot = async (
 };
 
 const tryEvaluationCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -322,7 +322,7 @@ const tryEvaluationCommand = (
 };
 
 const evaluationCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -338,7 +338,7 @@ const evaluationCommand = (
 // Delivers one incoming evaluation input in chunks and finishes it. A refusal
 // means the bytes are not the ones the engine expects.
 const deliverEvaluationInput = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     produce: (accept: (bytes: Uint8Array) => void) => Promise<unknown>,
     reason: string,
 ) => {
@@ -403,12 +403,12 @@ const readStoredChunk = async (
 // spilled value is read back through the engine before it leaves memory. A
 // ballot input is the body of the barrier's usable slot of its author.
 const evaluate = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
     usable: ReadonlyMap<number, UsableSlot>,
 ) => {
-    const { kernel, descriptor } = context;
-    const { polynomialDegree, storedCoefficientBytes } = descriptor.evaluation;
+    const { kernel, profile } = context;
+    const { polynomialDegree, storedCoefficientBytes } = profile.evaluation;
     const coefficients = 2 * polynomialDegree;
     const chunkCoefficients = Math.floor(
         moduleChunkBytes / storedCoefficientBytes,
@@ -535,7 +535,7 @@ const evaluate = async (
 };
 
 const finalityCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
@@ -559,7 +559,7 @@ export const resumeTarget = (close: CloseSession): TargetState | undefined => {
     const bytes = root.manifest.suffixes.target;
     if (bytes === undefined) throw new Error('No target state is retained.');
     return decodeTargetState(
-        context.descriptor,
+        context.profile,
         root.head.generation,
         close.organizer,
         bytes,
@@ -574,7 +574,7 @@ const commitTarget = async (
     const { contribution } = close;
     const { context, root } = contribution;
     const encoded = encodeTargetState(generation, state);
-    if (encoded.length > context.descriptor.target.maximumStateBytes)
+    if (encoded.length > context.profile.target.maximumStateBytes)
         throw new Error('The target state exceeds its bound.');
     contribution.root = await commitRoot(context, root, {
         generation,
@@ -597,17 +597,13 @@ const commitTarget = async (
 // restored first, after the owning setup verifier verified the complete setup
 // in this instance.
 export const evaluateClosedTarget = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
 ) => {
     const usable = await verifyCloseBarrier(context, relay);
     evaluationCommand(context, 0);
     let validBallots = 0;
-    for (
-        let author = 0;
-        author < context.descriptor.participantCount;
-        author++
-    ) {
+    for (let author = 0; author < context.profile.participantCount; author++) {
         const slot = usable.get(author);
         if (
             slot !== undefined &&

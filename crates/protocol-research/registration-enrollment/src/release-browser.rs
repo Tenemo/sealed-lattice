@@ -6,7 +6,7 @@ use registration_credentials::{
         RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseBodyHasher, ReleaseEnvelope,
         body_header,
     },
-    target_signing::TargetMessage,
+    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TargetMessage},
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -51,7 +51,9 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if input != context.certificate().target().body() {
                 return Err(Error::Context);
             }
-            if !linked_release_proof::release_entropy::ready() {
+            if !linked_release_proof::release_entropy::ready(
+                crate::participant_bounds::release_random_bytes(profile),
+            ) {
                 return Err(Error::Context);
             }
             let work = crate::release_work::ReleaseWork::new(owner, context)?;
@@ -212,7 +214,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             }
             let length = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             if length == 0
-                || length > 2048
+                || length > MAXIMUM_TARGET_BODY_BYTES
                 || input.len() != 4 + length + RELEASE_ENVELOPE_BYTES + 3309
             {
                 return Err(Error::Shape);

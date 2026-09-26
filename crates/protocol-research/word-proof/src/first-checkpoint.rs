@@ -16,6 +16,9 @@ use zeroize::Zeroizing;
 
 pub const RECORD_BYTES: usize = 16_384;
 const MAGIC: &[u8; 4] = b"FPC3";
+const MAXIMUM_ROLE_BYTES: usize = 1024;
+/// Each record is sealed with an AES-GCM tag of this many bytes.
+const TAG_BYTES: usize = 16;
 
 // The checkpoint names its profile, whose statement header it carries, and
 // either no recipient key hashes or one for each participant.
@@ -60,7 +63,7 @@ impl Header {
         let start = 12 + role_length;
         let input_start = start + 128 + statement.len();
         if role_length == 0
-            || role_length > 1024
+            || role_length > MAXIMUM_ROLE_BYTES
             || column > setup_relation(profile).columns() + 1
             || bytes.len() < input_start + 2
         {
@@ -111,6 +114,25 @@ pub fn record_count(relation: &Relation) -> usize {
         .map(|(units, width)| units.div_ceil(RECORD_BYTES / width))
         .sum()
 }
+/// The longest header of a profile's checkpoint: its magic, profile, column
+/// and role length, the longest role, the expected and context digests, the
+/// statement header, and a recipient key hash for each participant.
+pub fn maximum_header_bytes(profile: Profile) -> usize {
+    12 + MAXIMUM_ROLE_BYTES
+        + 2 * 64
+        + profile.setup_statement_header().len()
+        + 2
+        + profile.participants() * 64
+}
+/// Each sealed record's length, in record order.
+pub fn record_lengths(relation: &Relation) -> Vec<usize> {
+    (0..record_count(relation))
+        .map(|record| {
+            let (_, _, count, width) = record_layout(relation, record).unwrap();
+            count * width + TAG_BYTES
+        })
+        .collect()
+}
 fn record_layout(relation: &Relation, mut record: usize) -> Option<(usize, usize, usize, usize)> {
     for (field, (units, width)) in fields(relation).into_iter().enumerate() {
         let per_record = RECORD_BYTES / width;
@@ -132,7 +154,10 @@ pub struct Export {
 impl Export {
     pub fn begin_with_inputs(prover: &Prover, input_hashes: &[[u8; 64]]) -> Result<Self, Error> {
         let profile = prover.profile;
-        if ![0, profile.participants()].contains(&input_hashes.len()) {
+        // A header the import would refuse is never exported.
+        if ![0, profile.participants()].contains(&input_hashes.len())
+            || !(1..=MAXIMUM_ROLE_BYTES).contains(&prover.role.len())
+        {
             return Err(Error::Operation);
         }
         let Phase::FirstColumn(column) = prover.phase else {
@@ -183,7 +208,7 @@ impl Export {
         }
         let witness = prover.witness.as_ref().ok_or(())?;
         let first = prover.first.as_ref().ok_or(())?;
-        let mut bytes = Zeroizing::new(Vec::with_capacity(count * width + 16));
+        let mut bytes = Zeroizing::new(Vec::with_capacity(count * width + TAG_BYTES));
         for index in start..start + count {
             match field {
                 0 => bytes
@@ -265,7 +290,7 @@ impl Import {
     }
     fn open_record(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Error> {
         let (field, _, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
-        if bytes.len() != count * width + 16 {
+        if bytes.len() != count * width + TAG_BYTES {
             return Err(Error::Operation);
         }
         let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| ())?;

@@ -1,3 +1,4 @@
+import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -6,7 +7,6 @@ import {
     unsigned16,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
-import type { ParticipantDescriptor } from './descriptor.js';
 
 // The target signing suffix follows the completed close: the participant's
 // signed response, and for the organizer its signed proposal. Generation 23
@@ -36,12 +36,12 @@ export const encodeTargetState = (generation: number, state: TargetState) =>
     );
 
 export const decodeTargetState = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     generation: number,
     organizer: boolean,
     bytes: Uint8Array,
 ): TargetState => {
-    const { maximumBodyBytes, votePacketBytes } = descriptor.target;
+    const { maximumBodyBytes, votePacketBytes } = profile.target;
     const signed = generation >= targetPhase.signed;
     if (
         generation < targetPhase.intent ||

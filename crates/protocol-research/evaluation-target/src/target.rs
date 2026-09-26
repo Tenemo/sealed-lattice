@@ -10,7 +10,9 @@ use registration_credentials::{
     foundation::{CanonicalItem, CanonicalTuple, hash_foundation_tuple_512},
     identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
-    target_signing::{TARGET_IDENTITY_DOMAIN, TargetMessage, minimum_turnout},
+    target_signing::{
+        MAXIMUM_TARGET_BODY_BYTES, TARGET_IDENTITY_DOMAIN, TargetMessage, minimum_turnout,
+    },
 };
 use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE, Engine};
 use setup_aggregate::verified::VerifiedSetupAggregate;
@@ -367,7 +369,7 @@ impl VerifiedEvaluationTarget {
         let body = CanonicalTuple::new(1, 1, fields)
             .encode()
             .map_err(|_| Error::Encoding)?;
-        if body.len() > 2048 {
+        if body.len() > MAXIMUM_TARGET_BODY_BYTES {
             return Err(Error::Encoding);
         }
         let identity = hash_foundation_tuple_512(

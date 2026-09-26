@@ -21,6 +21,10 @@ pub const SUM_DEGREE: usize = 2 * SYSTEMATIC + MASKS - 2;
 pub const FOLDS: usize = (DOMAIN / 2).ilog2() as usize;
 const DIGEST_BYTES: usize = 64;
 const SALT_BYTES: usize = 128;
+/// The prover draws uniform field elements as candidate words of this many
+/// bytes, read in blocks of this many bytes.
+pub const RANDOM_WORD_BYTES: usize = 16;
+pub const RANDOM_READ_BYTES: usize = 65_536;
 const EXTENSION_BYTES: usize = 48;
 /// The proof header: its magic, the statement and context digests, three
 /// oracle roots, the mask sum, a salt per round, the fold roots and the
@@ -147,6 +151,25 @@ impl Relation {
         degrees.extend([WITNESS_DEGREE - 1, SYSTEMATIC - 2]);
         assert_eq!(degrees.len(), self.oracles());
         degrees
+    }
+    /// The random bytes a proof requests when no candidate word is rejected:
+    /// a salt for every leaf of the three oracle trees and of each fold tree
+    /// and for every transcript round, and whole reads for the first
+    /// oracle's column masks and degree mask and the second oracle's lookup
+    /// masks and sum mask.
+    pub fn minimum_random_bytes(&self) -> usize {
+        let reads = |words: usize| (words * RANDOM_WORD_BYTES).next_multiple_of(RANDOM_READ_BYTES);
+        let mut leaves = 3 * DOMAIN;
+        let mut length = DOMAIN / 2;
+        while length > 2 {
+            leaves += length;
+            length /= 2;
+        }
+        (leaves + FOLDS + 3) * SALT_BYTES
+            + (self.columns() + 1) * reads(MASKS)
+            + reads(3 * (MAX_DEGREE + 1))
+            + (self.lookups() + 1) * reads(3 * MASKS)
+            + reads(3 * (WITNESS_DEGREE + 1))
     }
     /// Bytes of the largest canonical proof: the header, then each stage's
     /// multiproof with every query's opening and at most one sibling per

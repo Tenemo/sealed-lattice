@@ -89,6 +89,38 @@ fn body(
     .encode()
     .map_err(|_| Error::Shape)
 }
+fn confirmation_message(
+    proposal: [u8; 64],
+    position: usize,
+    commitment: [u8; 64],
+) -> Result<Vec<u8>, Error> {
+    body(
+        "sealed-lattice/roster-confirmation/v1",
+        proposal,
+        position,
+        CanonicalItem::hash512(commitment),
+    )
+}
+fn opening_message(inventory: [u8; 64], position: usize, salt: [u8; 64]) -> Result<Vec<u8>, Error> {
+    body(
+        "sealed-lattice/setup-opening/v1",
+        inventory,
+        position,
+        CanonicalItem::fixed_bytes(salt).map_err(|_| Error::Shape)?,
+    )
+}
+/// Every confirmation body has this exact encoded length.
+pub fn confirmation_body_bytes() -> usize {
+    confirmation_message([0; 64], 0, [0; 64])
+        .expect("A confirmation body encodes.")
+        .len()
+}
+/// Every opening body has this exact encoded length.
+pub fn opening_body_bytes() -> usize {
+    opening_message([0; 64], 0, [0; 64])
+        .expect("An opening body encodes.")
+        .len()
+}
 pub(crate) fn decode(
     bytes: &[u8],
     purpose: &[u8],
@@ -248,12 +280,7 @@ impl Credential {
     fn computed_confirmation_body(
         computed: &ComputedContributionCommitment,
     ) -> Result<Vec<u8>, Error> {
-        body(
-            "sealed-lattice/roster-confirmation/v1",
-            computed.proposal,
-            computed.position,
-            CanonicalItem::hash512(computed.digest),
-        )
+        confirmation_message(computed.proposal, computed.position, computed.digest)
     }
     pub fn sign_confirmation(
         &mut self,
@@ -439,12 +466,7 @@ impl Credential {
         {
             return Err(Error::Context);
         }
-        body(
-            "sealed-lattice/setup-opening/v1",
-            inventory.identity,
-            lock.position,
-            CanonicalItem::fixed_bytes(*lock.salt).map_err(|_| Error::Shape)?,
-        )
+        opening_message(inventory.identity, lock.position, *lock.salt)
     }
     pub fn sign_opening(
         &mut self,

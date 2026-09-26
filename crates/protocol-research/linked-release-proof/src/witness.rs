@@ -20,8 +20,8 @@ struct Random {
 impl Random {
     fn new() -> Self {
         Self {
-            bytes: Zeroizing::new(vec![0; 65536]),
-            offset: 65536,
+            bytes: Zeroizing::new(vec![0; RANDOM_READ_BYTES]),
+            offset: RANDOM_READ_BYTES,
         }
     }
     fn fill(&mut self, output: &mut [u8]) {
@@ -46,6 +46,11 @@ impl Random {
         let value = BigInt::from_bytes_le(Sign::Plus, &bytes) & ((BigInt::from(1) << bits) - 1u32);
         value - (BigInt::from(1) << (bits - 1))
     }
+}
+/// The whole reads of a release's partial-decryption noise, which it draws
+/// before its proof, one uniform word of whole bytes per coefficient.
+pub fn noise_random_bytes(profile: Profile) -> usize {
+    (SYSTEMATIC * profile.release_noise_bits().div_ceil(8)).next_multiple_of(RANDOM_READ_BYTES)
 }
 fn center(value: BigInt, modulus: &BigInt) -> BigInt {
     let value = (value % modulus + modulus) % modulus;

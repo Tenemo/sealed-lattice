@@ -1,5 +1,7 @@
 use crate::{Enrollment, contribution_signing::ContributionSigning};
-use registration_credentials::foundation::{RegistrationHeader, normalize_username};
+use registration_credentials::foundation::{
+    MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader, normalize_username,
+};
 use registration_credentials::{
     roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
@@ -79,7 +81,7 @@ fn creator_context(
             .ok()?,
     ) as usize;
     let name_start = 74 + manifest_length;
-    if name_length > 512 || input.len() < name_start + name_length {
+    if name_length > MAXIMUM_USERNAME_INGRESS_BYTES || input.len() < name_start + name_length {
         return None;
     }
     normalize_username(&input[name_start..name_start + name_length]).ok()?;
@@ -107,7 +109,7 @@ fn join_context(
     let name_start = 132 + length + 3309 + 4;
     let name_length =
         u32::from_le_bytes(input[name_start - 4..name_start].try_into().ok()?) as usize;
-    if name_length > 512 || input.len() < name_start + name_length {
+    if name_length > MAXIMUM_USERNAME_INGRESS_BYTES || input.len() < name_start + name_length {
         return None;
     }
     normalize_username(&input[name_start..name_start + name_length]).ok()?;
@@ -793,7 +795,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         }
         let input = &state.input[..length];
         let body_length = u32::from_le_bytes(input[130..134].try_into().unwrap()) as usize;
-        if body_length > 2048
+        if body_length > registration_credentials::roster::MAXIMUM_PROPOSAL_BYTES
             || length != 134 + body_length
             || input[..64] != verified.header().poll
             || input[64..128] != verified.header().runtime

@@ -1,3 +1,5 @@
+import { participantDataKindMaximums } from './bounds.js';
+import type { ParticipantLimits } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -8,7 +10,6 @@ import {
 } from './bytes.js';
 import { describe } from './context.js';
 import type { ParticipantContext } from './context.js';
-import type { ParticipantDescriptor } from './descriptor.js';
 import {
     custodyIdentities,
     custodyIdentity,
@@ -86,22 +87,24 @@ export type ParticipantManifest = Readonly<{
 const presentSuffixes = (generation: number) =>
     suffixOrder.filter((name) => generation >= suffixStarts[name]);
 
-// The fixed per-kind maximum; the setup reference length is the profile's.
-export const dataKindMaximums = (descriptor: ParticipantDescriptor) => {
-    const registration = descriptor.registration;
-    return [
-        registration.publicKeyBytes,
-        registration.maximumProofBytes,
-        registration.maximumHeaderBytes,
-        registration.signatureBytes,
-        registration.recipientCapsuleBytes,
-        registration.signingCapsuleBytes,
-        registration.maximumPollDefinitionBytes,
-        registration.signatureBytes,
-        registration.maximumProposalBytes,
-        registration.signatureBytes,
-        descriptor.root.setupReferenceBytes,
-    ];
+// Roots before the contribution's intent retain only enrollment records,
+// the proposal and its signature. A later root is bounded by the profile its
+// retained roster names; before that profile is known, by the largest root
+// of any supported profile.
+const enrollmentRoot = (generation: number) =>
+    generation < suffixStarts.contribution;
+
+const provisionalRootBound = (limits: ParticipantLimits, generation: number) =>
+    enrollmentRoot(generation)
+        ? limits.root.maximumEnrollmentRootBytes
+        : limits.root.maximumRootBytes;
+
+export const rootBound = (context: ParticipantContext, generation: number) => {
+    if (enrollmentRoot(generation))
+        return context.limits.root.maximumEnrollmentRootBytes;
+    if (context.profile === undefined)
+        throw new Error('The participant profile is not known.');
+    return context.profile.root.maximumRootBytes;
 };
 
 const encodeReference = (reference: RecordReference) => {
@@ -144,13 +147,14 @@ export const encodeManifest = (
 
 // Checks the canonical reference inventory: ascending kinds, contiguous
 // chunks of at most one mebibyte, only the last chunk of a kind shorter, and
-// the complete records that the generation requires.
+// the complete records that the generation requires. The profile's exact
+// proposal and setup reference lengths are checked once it is known.
 const checkReferences = (
     references: readonly RecordReference[],
     generation: number,
-    maximums: readonly number[],
-    descriptor: ParticipantDescriptor,
+    limits: ParticipantLimits,
 ) => {
+    const maximums = participantDataKindMaximums(limits);
     const lengths = maximums.map(() => 0);
     let previous: RecordReference | undefined;
     for (const reference of references) {
@@ -168,7 +172,7 @@ const checkReferences = (
         lengths[reference.kind] += reference.length;
         previous = reference;
     }
-    const registration = descriptor.registration;
+    const registration = limits.registration;
     const exact = (kind: number, length: number) => lengths[kind] === length;
     if (
         !exact(dataKind.publicKey, registration.publicKeyBytes) ||
@@ -184,10 +188,7 @@ const checkReferences = (
             dataKind.proposalSignature,
             generation >= 3 ? registration.signatureBytes : 0,
         ) ||
-        !exact(
-            dataKind.setupReference,
-            generation >= 12 ? maximums[dataKind.setupReference] : 0,
-        )
+        generation >= 12 !== lengths[dataKind.setupReference] > 0
     )
         throw new Error('Participant records do not match the generation.');
 };
@@ -195,7 +196,7 @@ const checkReferences = (
 const decodeManifest = (
     bytes: Uint8Array,
     generation: number,
-    descriptor: ParticipantDescriptor,
+    limits: ParticipantLimits,
 ): ParticipantManifest => {
     if (
         !Number.isSafeInteger(generation) ||
@@ -207,7 +208,7 @@ const decodeManifest = (
         throw new Error('Invalid participant root manifest.');
     const count = readUnsigned32(bytes, 132);
     if (
-        count > descriptor.root.maximumRecords ||
+        count > limits.root.maximumRecords ||
         bytes.length < prefixBytes + referenceBytes * count
     )
         throw new Error('Invalid participant record inventory.');
@@ -226,12 +227,7 @@ const decodeManifest = (
             hash: bytes.slice(start + 9, start + referenceBytes),
         });
     }
-    checkReferences(
-        references,
-        generation,
-        dataKindMaximums(descriptor),
-        descriptor,
-    );
+    checkReferences(references, generation, limits);
     let offset = prefixBytes + referenceBytes * count;
     let proposalCoins: Uint8Array | undefined;
     if (generation === 2) {
@@ -334,7 +330,7 @@ export type AuthenticatedRoot = Readonly<{
 export const authenticateRoot = async (
     context: ParticipantContext,
 ): Promise<AuthenticatedRoot> => {
-    const { database, kernel, runtime, descriptor } = context;
+    const { database, kernel, runtime, limits } = context;
     const snapshot = await snapshotParticipant(database);
     if (
         snapshot.counts.key !== 1 ||
@@ -343,10 +339,11 @@ export const authenticateRoot = async (
         snapshot.counts.stopped !== 0 ||
         !isRootKey(snapshot.key) ||
         !(snapshot.root instanceof Uint8Array) ||
-        snapshot.root.length > descriptor.root.maximumRootBytes ||
         !isParticipantHead(snapshot.head) ||
         snapshot.head.generation < 1 ||
         snapshot.head.generation > lastGeneration ||
+        snapshot.root.length >
+            provisionalRootBound(limits, snapshot.head.generation) ||
         snapshot.head.hash !==
             hexadecimal(
                 custodyIdentity(kernel, custodyPurpose.root, snapshot.root),
@@ -362,7 +359,7 @@ export const authenticateRoot = async (
     const manifest = decodeManifest(
         plaintext,
         snapshot.head.generation,
-        descriptor,
+        limits,
     );
     if (manifest.references.length !== snapshot.counts.data)
         throw new Error('Participant data inventory changed.');
@@ -463,13 +460,13 @@ export const commitRoot = async (
     predecessor: AuthenticatedRoot,
     transition: RootTransition,
 ): Promise<AuthenticatedRoot> => {
-    const { database, kernel, runtime, descriptor } = context;
+    const { database, kernel, runtime } = context;
     const associatedData = rootAssociatedData(runtime);
     const plaintext = encodeManifest(
         transition.manifest,
         transition.generation,
     );
-    if (plaintext.length + 16 > descriptor.root.maximumRootBytes)
+    if (plaintext.length + 16 > rootBound(context, transition.generation))
         throw new Error('The participant root exceeds its bound.');
     const key = await createRootKey();
     const sealed = await sealRoot(
@@ -499,7 +496,7 @@ export const commitRoot = async (
             head: predecessor.head,
             manifest: predecessor.plaintext,
             rootContext: associatedData,
-            maximumRootBytes: descriptor.root.maximumRootBytes,
+            maximumRootBytes: rootBound(context, predecessor.head.generation),
             recordStores: participantRecordStores,
             records: transition.predecessorRecords,
             identities: custodyIdentities(kernel),

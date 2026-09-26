@@ -2,6 +2,11 @@
 // returns zero on success unless its comment says otherwise; the owning Rust
 // state machine decides acceptance.
 export const kernelFunctions = [
+    // The shared bounds and one profile's, each written as 64-bit words; a
+    // command returns the word count, zero for an unsupported profile.
+    'participant_bounds_pointer',
+    'participant_limits',
+    'participant_profile_bounds',
     'input_pointer',
     'input_capacity',
     'poll_identity_pointer',
@@ -18,6 +23,8 @@ export const kernelFunctions = [
     'own_registration_body_digest_pointer',
     'own_registration_username_pointer',
     'own_registration_username_length',
+    // The verified poll's option count, or zero before verification.
+    'own_registration_option_count',
     'roster_begin',
     'roster_record_begin',
     'roster_record_key',

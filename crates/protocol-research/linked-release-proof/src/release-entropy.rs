@@ -4,7 +4,7 @@ use zeroize::{Zeroize, Zeroizing};
 const RECORD_BYTES: usize = crate::CHUNK_LIMIT;
 const REQUEST_BYTES: usize = 65_536;
 // The queue shares the participant's existing absolute linear-memory ceiling.
-// Its actual finite budget comes from the authenticated worker descriptor.
+// A release proves only from a journal of exactly its profile's budget.
 const MAXIMUM_BYTES: usize = 671_088_640;
 
 struct Journal {
@@ -28,10 +28,10 @@ impl State {
             journal: None,
         }
     }
-    fn ready(&self) -> bool {
-        self.journal
-            .as_ref()
-            .is_some_and(|journal| journal.loaded == journal.total && journal.consumed == 0)
+    fn ready(&self, total: usize) -> bool {
+        self.journal.as_ref().is_some_and(|journal| {
+            journal.total == total && journal.loaded == total && journal.consumed == 0
+        })
     }
     fn command(&mut self, operation: u32, length: usize) -> Result<(), ()> {
         self.output.as_mut_slice().zeroize();
@@ -111,8 +111,9 @@ mod browser {
 
     thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
 
-    pub fn ready() -> bool {
-        STATE.with(|state| state.borrow().ready())
+    /// Whether the complete, unconsumed journal holds exactly `total` bytes.
+    pub fn ready(total: usize) -> bool {
+        STATE.with(|state| state.borrow().ready(total))
     }
 
     #[unsafe(no_mangle)]
@@ -147,7 +148,8 @@ mod tests {
             state.command(1, record.len()).unwrap();
             assert!(state.input.iter().all(|value| *value == 0));
         }
-        assert!(state.ready());
+        assert!(state.ready(expected.len()));
+        assert!(!state.ready(expected.len() - 1));
         let mut consumed = 0;
         for requested in [1, 17, REQUEST_BYTES - 1, REQUEST_BYTES]
             .into_iter()
@@ -168,7 +170,7 @@ mod tests {
                 journal.records.len(),
                 usize::from(consumed < RECORD_BYTES) + usize::from(consumed < expected.len())
             );
-            assert!(!state.ready());
+            assert!(!state.ready(expected.len()));
         }
         assert_eq!(consumed, expected.len());
         assert!(state.command(2, 1).is_err());
@@ -193,14 +195,15 @@ mod tests {
         assert!(state.command(1, RECORD_BYTES + 1).is_err());
         state.input.fill(7);
         state.command(1, RECORD_BYTES).unwrap();
-        assert!(!state.ready());
+        assert!(!state.ready(RECORD_BYTES + 1));
         assert!(state.command(2, 1).is_err());
         state.input[0] = 9;
         state.command(1, 1).unwrap();
-        assert!(state.ready());
+        assert!(state.ready(RECORD_BYTES + 1));
+        assert!(!state.ready(RECORD_BYTES + 2));
         for length in [0, REQUEST_BYTES + 1, usize::MAX] {
             assert!(state.command(2, length).is_err());
-            assert!(state.ready());
+            assert!(state.ready(RECORD_BYTES + 1));
         }
         state.command(2, REQUEST_BYTES).unwrap();
         assert!(state.output.iter().all(|value| *value == 7));

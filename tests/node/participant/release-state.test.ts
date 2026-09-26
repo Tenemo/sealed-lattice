@@ -12,11 +12,11 @@ import {
 import type { ReleaseState } from '#packages/sdk/src/participant/worker/release-state.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-import { deriveParticipantDescriptor } from '#tools/ci/participant-runtime-assembly.js';
 
-const descriptor = deriveParticipantDescriptor(3, 2);
-const bounds = descriptor.release;
+const profile = compileParticipantRuntimeProfile(3, 2);
+const bounds = profile.release;
 const custody = compileParticipantReleaseCustody(deriveSupportedProfile(3, 2));
 
 const filled = (length: number, value: number) =>
@@ -56,7 +56,7 @@ const stateAt = (
     coins: phase === releasePhase.intent ? filled(32, 3) : new Uint8Array(),
     signature:
         phase === releasePhase.signed
-            ? filled(descriptor.registration.signatureBytes, 4)
+            ? filled(profile.registration.signatureBytes, 4)
             : new Uint8Array(),
 });
 
@@ -82,7 +82,7 @@ describe('participant release state', () => {
                         );
                         expect(
                             decodeReleaseState(
-                                descriptor,
+                                profile,
                                 phase,
                                 organizer,
                                 encodeReleaseState(phase, state),
@@ -98,7 +98,7 @@ describe('participant release state', () => {
                     phase,
                     stateAt(
                         phase,
-                        descriptor.target.maximumBodyBytes,
+                        profile.target.maximumBodyBytes,
                         bounds.maximumBodyBytes,
                     ),
                 ).length,
@@ -115,7 +115,7 @@ describe('participant release state', () => {
             organizer = false,
         ) =>
             expect(() =>
-                decodeReleaseState(descriptor, generation, organizer, bytes),
+                decodeReleaseState(profile, generation, organizer, bytes),
             ).toThrow();
         const body = encodeReleaseState(
             releasePhase.body,
@@ -186,12 +186,7 @@ describe('participant release state', () => {
         };
         const digest = filled(64, 8);
         const state = stateAt(releasePhase.intent, 7, bounds.maximumBodyBytes);
-        const records = releaseRecordInventory(
-            descriptor,
-            context,
-            digest,
-            state,
-        );
+        const records = releaseRecordInventory(profile, context, digest, state);
         expect(records.map((record) => record.key)).toEqual([
             ...state.journalKeys.map((_key, index) => [
                 releaseRecordKind.journal,
@@ -203,8 +198,8 @@ describe('participant release state', () => {
             ]),
         ]);
         const lengths = [
-            ...releaseRecordLengths(descriptor, bounds.journalBytes),
-            ...releaseRecordLengths(descriptor, bounds.maximumBodyBytes),
+            ...releaseRecordLengths(profile, bounds.journalBytes),
+            ...releaseRecordLengths(profile, bounds.maximumBodyBytes),
         ];
         expect(records.map((record) => record.byteLength)).toEqual(
             lengths.map((length) => length + 16),
@@ -219,7 +214,7 @@ describe('participant release state', () => {
         );
         expect(bindings.size).toBe(records.length);
         const otherTarget = releaseRecordInventory(
-            descriptor,
+            profile,
             context,
             filled(64, 9),
             state,

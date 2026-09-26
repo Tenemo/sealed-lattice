@@ -10,7 +10,7 @@ import { completedClosePhase } from './close-state.js';
 import { completedCloseRecords, restoreCompletedClose } from './close.js';
 import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ParticipantContext } from './context.js';
+import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel, writeChunkInput } from './kernel.js';
@@ -105,7 +105,7 @@ export const resumeRelease = async (
             : bytes === undefined
               ? undefined
               : decodeReleaseState(
-                    context.descriptor,
+                    context.profile,
                     generation,
                     close.organizer,
                     bytes,
@@ -151,7 +151,7 @@ export const resumeRelease = async (
 };
 
 const releaseCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
@@ -169,7 +169,7 @@ const releaseCommand = (
 };
 
 const tryCompletionCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -186,7 +186,7 @@ const tryCompletionCommand = (
 };
 
 const completionCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -202,10 +202,7 @@ const completionCommand = (
 // Certifies the evaluated target from the published target votes, stopping
 // at the certificate threshold. A missing or refused vote is skipped; too few
 // leave the participant pending. Returns whether the target is encrypted.
-const certifyTarget = async (
-    context: ParticipantContext,
-    relay: PublicRelay,
-) => {
+const certifyTarget = async (context: ProfileContext, relay: PublicRelay) => {
     const [count, threshold] = words(completionCommand(context, 0));
     let accepted = 0;
     for (
@@ -221,7 +218,7 @@ const certifyTarget = async (
                     'target-vote-' +
                     String(position) +
                     '.bin',
-                context.descriptor.target.votePacketBytes,
+                context.profile.target.votePacketBytes,
             );
         } catch (error) {
             if (error instanceof PublicInputFailure) continue;
@@ -239,7 +236,7 @@ const certifyTarget = async (
 // Creates the certified release context of one position from its two share
 // polynomials of the verified aggregate.
 const establishReleaseContext = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     position: number,
 ) => {
     const stream = (index: number) =>
@@ -262,8 +259,8 @@ const openReleaseRecord = (
     if (state === undefined) throw new Error('No release state is retained.');
     const journal = kind === releaseRecordKind.journal;
     const length = releaseRecordLengths(
-        context.descriptor,
-        journal ? context.descriptor.release.journalBytes : state.bodyLength,
+        context.profile,
+        journal ? context.profile.release.journalBytes : state.bodyLength,
     )[index];
     return openRecord(
         context.database,
@@ -324,9 +321,9 @@ const commitRelease = async (
     const { close } = session;
     const { contribution } = close;
     const { context, root } = contribution;
-    const { descriptor } = context;
+    const { profile } = context;
     const encoded = encodeReleaseState(transition.generation, transition.state);
-    if (encoded.length > descriptor.release.maximumStateBytes)
+    if (encoded.length > profile.release.maximumStateBytes)
         throw new Error('The release state exceeds its bound.');
     contribution.root = await commitRoot(context, root, {
         generation: transition.generation,
@@ -346,7 +343,7 @@ const commitRelease = async (
             ...(session.state === undefined
                 ? []
                 : releaseRecordInventory(
-                      descriptor,
+                      profile,
                       close.records,
                       releaseTarget(session).digest,
                       session.state,
@@ -378,11 +375,8 @@ const commitRelease = async (
 // Appends the journal's original random bytes one record at a time; the
 // append of the final record enters the ready phase.
 const appendJournal = async (session: ReleaseSession) => {
-    const { descriptor } = session.close.contribution.context;
-    const lengths = releaseRecordLengths(
-        descriptor,
-        descriptor.release.journalBytes,
-    );
+    const { profile } = session.close.contribution.context;
+    const lengths = releaseRecordLengths(profile, profile.release.journalBytes);
     while (generationOf(session) < releasePhase.ready) {
         const state: ReleaseState = session.state ?? {
             predecessor:
@@ -430,15 +424,10 @@ const appendJournal = async (session: ReleaseSession) => {
 // a time, clearing each plaintext.
 const loadJournal = async (session: ReleaseSession) => {
     const { context } = session.close.contribution;
-    const { kernel, descriptor } = context;
-    if (
-        kernel.release_entropy_command(0, descriptor.release.journalBytes) !== 0
-    )
+    const { kernel, profile } = context;
+    if (kernel.release_entropy_command(0, profile.release.journalBytes) !== 0)
         throw new Error('The release entropy refused its journal.');
-    const lengths = releaseRecordLengths(
-        descriptor,
-        descriptor.release.journalBytes,
-    );
+    const lengths = releaseRecordLengths(profile, profile.release.journalBytes);
     for (let index = 0; index < lengths.length; index++) {
         const bytes = await openReleaseRecord(
             session,
@@ -484,8 +473,8 @@ export const journalRandomness =
 // envelope before any signature.
 const proveRelease = async (session: ReleaseSession) => {
     const { context } = session.close.contribution;
-    const { descriptor, kernel, handlers } = context;
-    const bounds = descriptor.release;
+    const { profile, kernel, handlers } = context;
+    const bounds = profile.release;
     let envelope: Uint8Array;
     try {
         await loadJournal(session);
@@ -508,7 +497,7 @@ const proveRelease = async (session: ReleaseSession) => {
         throw new Error('The release envelope is malformed.');
     const added: AddedRecord[] = [];
     for (const [index, length] of releaseRecordLengths(
-        descriptor,
+        profile,
         bodyLength,
     ).entries())
         added.push(
@@ -592,10 +581,7 @@ const signRelease = async (session: ReleaseSession) => {
 
 // Restores the signed target the credential retains, so a release can only
 // follow that target.
-const restoreSignedTarget = (
-    context: ParticipantContext,
-    signed: TargetState,
-) => {
+const restoreSignedTarget = (context: ProfileContext, signed: TargetState) => {
     const { kernel } = context;
     const { body, vote } = signed;
     sessionInput(context, concatenate(unsigned32(body.length), body, vote));
@@ -655,13 +641,13 @@ export const publishRelease = async (
     const { state } = session;
     if (state === undefined || generationOf(session) < releasePhase.signed)
         return;
-    const { descriptor } = session.close.contribution.context;
+    const { profile } = session.close.contribution.context;
     const position = String(session.close.records.position);
     for (let index = 0; index < state.bodyKeys.length; index++)
         await publishChunk(
             relay,
             completionDirectory + 'release-' + position + '.bin',
-            index * descriptor.release.recordBytes,
+            index * profile.release.recordBytes,
             await openReleaseRecord(session, releaseRecordKind.body, index),
         );
     await publishRecord(
@@ -681,15 +667,15 @@ export const computeResult = async (
     relay: PublicRelay,
 ) => {
     const { context } = close.contribution;
-    const { descriptor } = context;
-    const bounds = descriptor.release;
+    const { profile } = context;
+    const bounds = profile.release;
     await restoreCompletedClose(close);
     await evaluateClosedTarget(context, relay);
     const encrypted = await certifyTarget(context, relay);
     let result = encrypted ? undefined : tryCompletionCommand(context, 10);
     for (
         let position = 0;
-        result === undefined && position < descriptor.participantCount;
+        result === undefined && position < profile.participantCount;
         position++
     ) {
         let packet: Uint8Array;
@@ -700,7 +686,7 @@ export const computeResult = async (
                     'release-envelope-' +
                     String(position) +
                     '.bin',
-                bounds.envelopeBytes + descriptor.registration.signatureBytes,
+                bounds.envelopeBytes + profile.registration.signatureBytes,
             );
         } catch (error) {
             if (error instanceof PublicInputFailure) continue;

@@ -5,6 +5,7 @@ import {
     publishBallot,
     resumeBallot,
 } from './ballot.js';
+import { readParticipantLimits } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -23,7 +24,7 @@ import {
     resumeClose,
 } from './close.js';
 import { PublicInputFailure } from './context.js';
-import type { ParticipantContext } from './context.js';
+import type { ParticipantContext, ProfileContext } from './context.js';
 import {
     beginContribution,
     confirmContribution,
@@ -37,8 +38,6 @@ import {
     resumeContribution,
     storedConfirmation,
 } from './contribution.js';
-import { parseParticipantDescriptor } from './descriptor.js';
-import type { ParticipantDescriptor } from './descriptor.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { instantiateParticipantKernel } from './kernel.js';
@@ -64,6 +63,7 @@ import {
     proposeRoster,
     registrationFile,
     registrationPath,
+    retainedProfile,
     reverifyRoster,
     signRoster,
 } from './roster.js';
@@ -73,13 +73,13 @@ import { openParticipantDatabase } from './storage.js';
 import { targetPhase } from './target-state.js';
 import { publishTarget, signTarget } from './target.js';
 
-// The application page supplies the descriptor and the exact identities of
-// the code it verified; the worker fetches the module itself and recomputes
-// the runtime identity that every retained root binds.
+// The application page supplies the exact identities of the code it
+// verified; the worker fetches the module itself and recomputes the runtime
+// identity that every retained root binds. Every bound comes from the module
+// and the retained state, never from the page.
 type WorkerCommand = Readonly<{
     operation: string;
     origin: string;
-    descriptor: unknown;
     identity: Readonly<{
         runtime: string;
         source: string;
@@ -100,7 +100,7 @@ export type WorkerResult = Readonly<
       }
 >;
 
-const runtimeLabel = 'participant-runtime/7';
+const runtimeLabel = 'participant-runtime/8';
 const maximumModuleBytes = 8_388_608;
 
 // The pinned delivery digest that gates executing the module, and the runtime
@@ -121,18 +121,13 @@ const fetchModule = async (origin: string, expected: string) => {
     return module;
 };
 
-const runtimeIdentity = async (
-    command: WorkerCommand,
-    descriptor: ParticipantDescriptor,
-    module: Uint8Array,
-) =>
+const runtimeIdentity = async (command: WorkerCommand, module: Uint8Array) =>
     deliveryDigest(
         concatenate(
             encodeText(runtimeLabel),
             fromHexadecimal(command.identity.source),
             await deliveryDigest(module),
             fromHexadecimal(command.identity.worker),
-            await deliveryDigest(encodeText(JSON.stringify(descriptor))),
         ),
     );
 
@@ -260,6 +255,17 @@ const execute = async (
         parameters.poll !== hexadecimal(root.manifest.poll)
     )
         return { status: 'refused' };
+    // The retained roster names the profile from generation two on; every
+    // operation past the roster runs only at such a generation.
+    const profiled =
+        root.head.generation >= 2
+            ? await retainedProfile(context, root)
+            : undefined;
+    const profileContext = (): ProfileContext => {
+        if (profiled === undefined)
+            throw new Error('The participant profile is not known.');
+        return profiled;
+    };
     switch (command.operation) {
         case 'status':
             break;
@@ -310,7 +316,7 @@ const execute = async (
             const { generation } = root.head;
             if (generation < 3 || generation >= 7) return { status: 'refused' };
             if (generation === 4 || generation === 6)
-                await discardInterruptedRecords(context, root);
+                await discardInterruptedRecords(profileContext(), root);
             let session;
             if (generation === 3 || generation === 4) {
                 const proposal = await reverifyRoster(
@@ -321,11 +327,19 @@ const execute = async (
                 );
                 session =
                     generation === 3
-                        ? await beginContribution(context, root, proposal)
-                        : await resumeContribution(context, root, proposal);
+                        ? await beginContribution(
+                              profileContext(),
+                              root,
+                              proposal,
+                          )
+                        : await resumeContribution(
+                              profileContext(),
+                              root,
+                              proposal,
+                          );
                 await generateContribution(session);
             } else {
-                session = await resumeContribution(context, root);
+                session = await resumeContribution(profileContext(), root);
                 await restoreCheckpoint(session, relay);
             }
             await continueContribution(session);
@@ -334,7 +348,7 @@ const execute = async (
         }
         case 'confirm': {
             if (root.head.generation < 7) return { status: 'refused' };
-            const session = await resumeContribution(context, root);
+            const session = await resumeContribution(profileContext(), root);
             const confirmation =
                 root.head.generation >= 9
                     ? await storedConfirmation(session)
@@ -346,7 +360,7 @@ const execute = async (
         case 'open': {
             if (root.head.generation < 9) return { status: 'refused' };
             const session = await resumeContribution(
-                context,
+                profileContext(),
                 root,
                 await reverifyRoster(context, relay, root, enrollment),
             );
@@ -358,7 +372,7 @@ const execute = async (
         }
         case 'verify-setup': {
             if (root.head.generation !== 11) return { status: 'refused' };
-            const session = await resumeContribution(context, root);
+            const session = await resumeContribution(profileContext(), root);
             root = await retainSetup(
                 session,
                 await verifySetup(session, relay),
@@ -380,9 +394,9 @@ const execute = async (
             // signed ballot is only delivered again, also after an intent.
             const generation = root.head.generation;
             const scores =
-                parameters.scores === undefined
+                parameters.scores === undefined || profiled === undefined
                     ? undefined
-                    : parseBallotScores(context.descriptor, parameters.scores);
+                    : parseBallotScores(profiled.profile, parameters.scores);
             if (
                 generation < 12 ||
                 (parameters.scores !== undefined && scores === undefined) ||
@@ -390,7 +404,10 @@ const execute = async (
                 (generation >= 17 && scores !== undefined)
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(context, root);
+            const contribution = await resumeContribution(
+                profileContext(),
+                root,
+            );
             let session;
             if (scores !== undefined && generation === 12)
                 session = await beginBallot(contribution, scores);
@@ -411,7 +428,10 @@ const execute = async (
         case 'close': {
             // Only the organizer opens the close, and only before an intent
             // and with no ballot attempt pending.
-            const request = parseCloseRequest(context.descriptor, parameters);
+            const request =
+                profiled === undefined
+                    ? undefined
+                    : parseCloseRequest(profiled.profile, parameters);
             const generation = root.head.generation;
             if (
                 request === undefined ||
@@ -421,7 +441,10 @@ const execute = async (
                         (generation !== 12 && generation !== 17)))
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(context, root);
+            const contribution = await resumeContribution(
+                profileContext(),
+                root,
+            );
             const session = await resumeClose(
                 contribution,
                 enrollment.isOrganizer,
@@ -451,7 +474,10 @@ const execute = async (
                     root.manifest.suffixes.target?.length === 0)
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(context, root);
+            const contribution = await resumeContribution(
+                profileContext(),
+                root,
+            );
             const session = await resumeClose(
                 contribution,
                 enrollment.isOrganizer,
@@ -479,7 +505,10 @@ const execute = async (
                 generation < targetPhase.signed
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(context, root);
+            const contribution = await resumeContribution(
+                profileContext(),
+                root,
+            );
             const session = await resumeRelease(
                 await resumeClose(contribution, enrollment.isOrganizer),
             );
@@ -520,7 +549,10 @@ const execute = async (
                 completedClosePhase(enrollment.isOrganizer)
             )
                 return { status: 'refused' };
-            const contribution = await resumeContribution(context, root);
+            const contribution = await resumeContribution(
+                profileContext(),
+                root,
+            );
             const session = await resumeClose(
                 contribution,
                 enrollment.isOrganizer,
@@ -548,7 +580,6 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
         typeof indexedDB !== 'object'
     )
         return { status: 'refused' };
-    const descriptor = parseParticipantDescriptor(command.descriptor);
     const relay: PublicRelay = { origin: command.origin };
     let database: IDBDatabase | undefined;
     let authorityStarted = false;
@@ -557,7 +588,7 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
             command.origin,
             command.identity.module,
         );
-        const runtime = await runtimeIdentity(command, descriptor, moduleBytes);
+        const runtime = await runtimeIdentity(command, moduleBytes);
         if (hexadecimal(runtime) !== command.identity.runtime)
             return { status: 'refused' };
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
@@ -574,8 +605,8 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
                             database: opened,
                             kernel,
                             handlers,
-                            descriptor,
                             runtime,
+                            limits: readParticipantLimits(kernel),
                         },
                         relay,
                         command,

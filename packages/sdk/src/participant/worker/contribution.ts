@@ -1,3 +1,4 @@
+import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -9,8 +10,7 @@ import {
     unsigned32,
 } from './bytes.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ParticipantContext } from './context.js';
-import type { ParticipantDescriptor } from './descriptor.js';
+import type { ProfileContext } from './context.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     readKernel,
@@ -85,7 +85,7 @@ type RecordContext = Readonly<{
 }>;
 
 export type ContributionSession = {
-    readonly context: ParticipantContext;
+    readonly context: ProfileContext;
     readonly records: RecordContext;
     root: AuthenticatedRoot;
     state: ContributionState;
@@ -162,26 +162,24 @@ type SigningKind = (typeof signingKinds)[number];
 
 // Setup polynomial i is object i + 1, as the prover emits it; the proof and
 // the signing records follow the last setup polynomial.
-const proofObject = (descriptor: ParticipantDescriptor) =>
-    descriptor.contribution.expandedPolynomials + 1;
+const proofObject = (profile: ParticipantProfile) =>
+    profile.contribution.expandedPolynomials + 1;
 
-const signingObject = (descriptor: ParticipantDescriptor, kind: SigningKind) =>
-    proofObject(descriptor) + 1 + signingKinds.indexOf(kind);
+const signingObject = (profile: ParticipantProfile, kind: SigningKind) =>
+    proofObject(profile) + 1 + signingKinds.indexOf(kind);
 
 // The confirmation inventory is the participant count and every packet.
-const inventoryBytes = (descriptor: ParticipantDescriptor) =>
-    4 +
-    descriptor.participantCount *
-        descriptor.contribution.confirmationPacketBytes;
+const inventoryBytes = (profile: ParticipantProfile) =>
+    4 + profile.participantCount * profile.contribution.confirmationPacketBytes;
 
-const signingLength = (descriptor: ParticipantDescriptor, kind: SigningKind) =>
+const signingLength = (profile: ParticipantProfile, kind: SigningKind) =>
     kind === 'confirmationBody'
-        ? descriptor.contribution.confirmationBodyBytes
+        ? profile.contribution.confirmationBodyBytes
         : kind === 'openingBody'
-          ? descriptor.contribution.openingBodyBytes
+          ? profile.contribution.openingBodyBytes
           : kind === 'inventory'
-            ? inventoryBytes(descriptor)
-            : descriptor.registration.signatureBytes;
+            ? inventoryBytes(profile)
+            : profile.registration.signatureBytes;
 
 // The records, seed and coins each generation retains; later generations
 // keep the opened state.
@@ -204,15 +202,12 @@ const retainedShape = (generation: number) => {
     };
 };
 
-const prefixBytes = (descriptor: ParticipantDescriptor) =>
-    4 + 2 + descriptor.contribution.saltBytes + 4 * 4;
+const prefixBytes = (profile: ParticipantProfile) =>
+    4 + 2 + profile.contribution.saltBytes + 4 * 4;
 
-const proofLength = (
-    state: ContributionState,
-    descriptor: ParticipantDescriptor,
-) =>
+const proofLength = (state: ContributionState, profile: ParticipantProfile) =>
     state.publicRecords
-        .filter((record) => record.object === proofObject(descriptor))
+        .filter((record) => record.object === proofObject(profile))
         .reduce((total, record) => total + record.length, 0);
 
 const encodeContributionState = (state: ContributionState) =>
@@ -256,10 +251,10 @@ const encodeContributionState = (state: ContributionState) =>
 const decodeContributionState = (
     bytes: Uint8Array,
     generation: number,
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
 ): ContributionState => {
-    const bounds = descriptor.contribution;
-    const prefix = prefixBytes(descriptor);
+    const bounds = profile.contribution;
+    const prefix = prefixBytes(profile);
     if (
         generation < 4 ||
         bytes.length < prefix ||
@@ -291,7 +286,7 @@ const decodeContributionState = (
                 publicCount > bodyRecords &&
                 publicCount <= bodyRecords + maximumProofRecords;
     if (
-        position >= descriptor.participantCount ||
+        position >= profile.participantCount ||
         !shaped ||
         signingCount !== shape.signingRecords ||
         bytes.length !==
@@ -329,7 +324,7 @@ const decodeContributionState = (
                 record.length === expected.length;
         } else {
             canonical =
-                record.object === proofObject(descriptor) &&
+                record.object === proofObject(profile) &&
                 record.offset === proofBytes &&
                 record.length >= 1 &&
                 record.length <= chunkBytes &&
@@ -367,8 +362,8 @@ const decodeContributionState = (
             ),
         };
         if (
-            record.object !== signingObject(descriptor, kind) ||
-            record.length !== signingLength(descriptor, kind)
+            record.object !== signingObject(profile, kind) ||
+            record.length !== signingLength(profile, kind)
         )
             throw new Error('Noncanonical contribution signing record.');
         signingRecords.push(record);
@@ -486,7 +481,7 @@ const openRecord = async (
 };
 
 const openSigning = (session: ContributionSession, kind: SigningKind) => {
-    const object = signingObject(session.context.descriptor, kind);
+    const object = signingObject(session.context.profile, kind);
     const record = session.state.signingRecords.find(
         (value) => value.object === object,
     );
@@ -498,7 +493,7 @@ const openSigning = (session: ContributionSession, kind: SigningKind) => {
 // The stored records a contribution state lists. With a record context each
 // sealed record must also open under its own key.
 const contributionInventory = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     state: ContributionState,
     context?: RecordContext,
 ): ParticipantStoredRecord[] => [
@@ -519,7 +514,7 @@ const contributionInventory = (
     ...state.privateRecords.map((record, index) => ({
         store: 'checkpoint',
         key: index,
-        byteLength: descriptor.contribution.checkpointLengths[index],
+        byteLength: profile.contribution.checkpointLengths[index],
         identity: record.hash,
     })),
 ];
@@ -540,10 +535,10 @@ const commitContribution = async (
     transition: ContributionTransition,
 ) => {
     const { context, root } = session;
-    const descriptor = context.descriptor;
+    const profile = context.profile;
     const predecessor =
         root.head.generation >= 4
-            ? contributionInventory(descriptor, session.state)
+            ? contributionInventory(profile, session.state)
             : [];
     const listed = new Set(
         predecessor.map(
@@ -553,7 +548,7 @@ const commitContribution = async (
     const staged =
         transition.staged === true
             ? contributionInventory(
-                  descriptor,
+                  profile,
                   transition.state,
                   session.records,
               ).filter(
@@ -594,7 +589,7 @@ const commitContribution = async (
         (await openRecord(session, output.record)).fill(0);
 };
 
-const proverOutput = (context: ParticipantContext) =>
+const proverOutput = (context: ProfileContext) =>
     readKernel(
         context.kernel,
         context.kernel.contribution_proof_output_pointer(),
@@ -602,7 +597,7 @@ const proverOutput = (context: ParticipantContext) =>
     );
 
 const checkpoint = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     position = 0,
     bytes: Uint8Array = new Uint8Array(),
@@ -616,7 +611,7 @@ const checkpoint = (
 };
 
 const signing = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     bytes: Uint8Array = new Uint8Array(),
     argument = 0,
@@ -642,9 +637,9 @@ const packet = (body: Uint8Array, signature: Uint8Array) =>
 
 const splitPacket = (
     bytes: Uint8Array,
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
 ): SignedPacket => {
-    const signatureBytes = descriptor.registration.signatureBytes;
+    const signatureBytes = profile.registration.signatureBytes;
     if (
         bytes.length < 4 ||
         bytes.length !== 4 + readUnsigned32(bytes, 0) + signatureBytes
@@ -662,8 +657,8 @@ const splitPacket = (
 // stored as it arrives.
 const proverRun = (session: ContributionSession, statement: boolean) => {
     const { context } = session;
-    const { kernel, handlers, descriptor } = context;
-    const bounds = descriptor.contribution;
+    const { kernel, handlers, profile } = context;
+    const bounds = profile.contribution;
     const bodyObjects = new Set(
         bounds.publicRecords.map((record) => record.object),
     );
@@ -791,10 +786,10 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
 // record, and at generation six every proof record. Their keys existed only
 // in the interrupted operation, which runs again from its retained seed.
 export const discardInterruptedRecords = (
-    context: ParticipantContext,
+    context: ProfileContext,
     root: AuthenticatedRoot,
 ) => {
-    const proof = proofObject(context.descriptor);
+    const proof = proofObject(context.profile);
     if (root.head.generation === 4)
         return discardStagedRecords(context.database, [
             { store: 'contribution' },
@@ -814,7 +809,7 @@ export const discardInterruptedRecords = (
 // verified signed proposal after the credential accepts its position and the
 // origin has room for the retained contribution.
 export const beginContribution = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     root: AuthenticatedRoot,
     proposal: VerifiedProposal,
 ): Promise<ContributionSession> => {
@@ -830,7 +825,7 @@ export const beginContribution = async (
         estimate.quota === undefined ||
         estimate.usage === undefined ||
         estimate.quota - estimate.usage <
-            context.descriptor.contribution.requiredStorageBytes
+            context.profile.contribution.requiredStorageBytes
     )
         throw new StoragePending('The origin lacks room for a contribution.');
     const session: ContributionSession = {
@@ -845,7 +840,7 @@ export const beginContribution = async (
         state: {
             position: proposal.position,
             salt: crypto.getRandomValues(
-                new Uint8Array(context.descriptor.contribution.saltBytes),
+                new Uint8Array(context.profile.contribution.saltBytes),
             ),
             header: new Uint8Array(),
             publicRecords: [],
@@ -866,8 +861,8 @@ export const beginContribution = async (
 // discarded.
 export const generateContribution = async (session: ContributionSession) => {
     const { context } = session;
-    const { kernel, descriptor } = context;
-    const bounds = descriptor.contribution;
+    const { kernel, profile } = context;
+    const bounds = profile.contribution;
     if (session.root.head.generation !== 4)
         throw new Error('No contribution intent is locked.');
     const run = proverRun(session, true);
@@ -950,7 +945,7 @@ export const restoreCheckpoint = async (
     relay: PublicRelay,
 ) => {
     const { context, state } = session;
-    const { kernel, descriptor } = context;
+    const { kernel, profile } = context;
     const { generation } = session.root.head;
     if (generation !== 5 && generation !== 6)
         throw new Error('No contribution checkpoint is retained.');
@@ -974,7 +969,7 @@ export const restoreCheckpoint = async (
             'checkpoint',
             index,
         );
-        const length = descriptor.contribution.checkpointLengths[index];
+        const length = profile.contribution.checkpointLengths[index];
         if (!(blob instanceof Blob) || blob.size !== length)
             throw new Error('A checkpoint record is missing.');
         const sealed = new Uint8Array(await blob.arrayBuffer());
@@ -1000,7 +995,7 @@ export const restoreCheckpoint = async (
         const key = await readPublic(
             relay,
             registrationPath(id, registrationFile.publicKey),
-            descriptor.registration.publicKeyBytes,
+            profile.registration.publicKeyBytes,
         );
         writeProofInput(kernel, key);
         if (kernel.contribution_checkpoint_key(position, key.length) !== 0)
@@ -1021,8 +1016,8 @@ export const restoreCheckpoint = async (
 // stored proof records are discarded.
 export const continueContribution = async (session: ContributionSession) => {
     const { context } = session;
-    const { descriptor } = context;
-    const bounds = descriptor.contribution;
+    const { profile } = context;
+    const bounds = profile.contribution;
     const { generation } = session.root.head;
     if (generation !== 5 && generation !== 6)
         throw new Error('No contribution checkpoint is retained.');
@@ -1043,7 +1038,7 @@ export const continueContribution = async (session: ContributionSession) => {
     const sealProof = async () => {
         const output = await sealRecord(
             session,
-            proofObject(descriptor),
+            proofObject(profile),
             proofBytes,
             buffer.subarray(0, used),
         );
@@ -1135,18 +1130,18 @@ const bodyHeader = (proofBytes: number) => {
 // Recomputes the commitment to the retained body in the module's signer.
 const bodyCommitment = async (session: ContributionSession) => {
     const { context, state } = session;
-    const { descriptor } = context;
+    const { profile } = context;
     const control = concatenate(
         unsigned16(state.position),
         state.salt,
-        bodyHeader(proofLength(state, descriptor)),
+        bodyHeader(proofLength(state, profile)),
     );
     try {
         signing(context, signingCommand.beginBody, control);
     } finally {
         control.fill(0);
     }
-    for (const polynomial of descriptor.contribution.polynomials)
+    for (const polynomial of profile.contribution.polynomials)
         for (const record of state.publicRecords.filter(
             (value) => value.object === polynomial.expandedIndex + 1,
         )) {
@@ -1165,7 +1160,7 @@ const bodyCommitment = async (session: ContributionSession) => {
             }
         }
     for (const record of state.publicRecords.filter(
-        (value) => value.object === proofObject(descriptor),
+        (value) => value.object === proofObject(profile),
     )) {
         const bytes = await openRecord(session, record);
         try {
@@ -1196,14 +1191,14 @@ export const confirmContribution = async (
     session: ContributionSession,
 ): Promise<SignedPacket> => {
     const { context } = session;
-    const { descriptor } = context;
+    const { profile } = context;
     if (session.root.head.generation < 7)
         throw new Error('No contribution body is retained.');
     const commitment = await bodyCommitment(session);
     if (session.root.head.generation === 7) {
         const output = await sealRecord(
             session,
-            signingObject(descriptor, 'confirmationBody'),
+            signingObject(profile, 'confirmationBody'),
             0,
             signing(context, signingCommand.confirmationBody),
         );
@@ -1231,7 +1226,7 @@ export const confirmContribution = async (
         try {
             signed = splitPacket(
                 signing(context, signingCommand.signConfirmation, control),
-                descriptor,
+                profile,
             );
         } finally {
             control.fill(0);
@@ -1240,7 +1235,7 @@ export const confirmContribution = async (
             throw new Error('The signer changed the confirmation.');
         const output = await sealRecord(
             session,
-            signingObject(descriptor, 'confirmationSignature'),
+            signingObject(profile, 'confirmationSignature'),
             0,
             signed.signature,
         );
@@ -1276,46 +1271,45 @@ const readConfirmations = async (
     session: ContributionSession,
     relay: PublicRelay,
 ) => {
-    const { descriptor } = session.context;
+    const { profile } = session.context;
     const packets: Uint8Array[] = [];
-    for (let position = 0; position < descriptor.participantCount; position++) {
+    for (let position = 0; position < profile.participantCount; position++) {
         const directory = contributionDirectory(position);
         const confirmation = packet(
             await readPublic(
                 relay,
                 directory + 'confirmation.bin',
-                descriptor.contribution.confirmationBodyBytes,
+                profile.contribution.confirmationBodyBytes,
             ),
             await readPublic(
                 relay,
                 directory + 'confirmation-signature.bin',
-                descriptor.registration.signatureBytes,
+                profile.registration.signatureBytes,
             ),
         );
         if (
-            confirmation.length !==
-            descriptor.contribution.confirmationPacketBytes
+            confirmation.length !== profile.contribution.confirmationPacketBytes
         )
             throw new PublicInputFailure('A confirmation is incomplete.');
         packets.push(confirmation);
     }
-    return concatenate(unsigned32(descriptor.participantCount), ...packets);
+    return concatenate(unsigned32(profile.participantCount), ...packets);
 };
 
 // Every confirmation must pass the module's verifier before the inventory
 // identity exists.
 const loadInventory = (session: ContributionSession, inventory: Uint8Array) => {
     const { context } = session;
-    const { descriptor } = context;
-    const packetBytes = descriptor.contribution.confirmationPacketBytes;
+    const { profile } = context;
+    const packetBytes = profile.contribution.confirmationPacketBytes;
     if (
-        inventory.length !== inventoryBytes(descriptor) ||
-        readUnsigned32(inventory, 0) !== descriptor.participantCount
+        inventory.length !== inventoryBytes(profile) ||
+        readUnsigned32(inventory, 0) !== profile.participantCount
     )
         throw new PublicInputFailure(
             'The confirmation inventory is incomplete.',
         );
-    for (let position = 0; position < descriptor.participantCount; position++) {
+    for (let position = 0; position < profile.participantCount; position++) {
         const confirmation = inventory.subarray(
             4 + position * packetBytes,
             4 + (position + 1) * packetBytes,
@@ -1344,7 +1338,7 @@ export const openContribution = async (
     relay: PublicRelay,
 ): Promise<SignedPacket> => {
     const { context } = session;
-    const { descriptor } = context;
+    const { profile } = context;
     if (session.root.head.generation < 9)
         throw new Error('No signed confirmation is retained.');
     const inventory =
@@ -1356,13 +1350,13 @@ export const openContribution = async (
         const outputs = [
             await sealRecord(
                 session,
-                signingObject(descriptor, 'inventory'),
+                signingObject(profile, 'inventory'),
                 0,
                 inventory,
             ),
             await sealRecord(
                 session,
-                signingObject(descriptor, 'openingBody'),
+                signingObject(profile, 'openingBody'),
                 0,
                 signing(context, signingCommand.openingBody),
             ),
@@ -1389,7 +1383,7 @@ export const openContribution = async (
         try {
             signed = splitPacket(
                 signing(context, signingCommand.signOpening, control),
-                descriptor,
+                profile,
             );
         } finally {
             control.fill(0);
@@ -1398,7 +1392,7 @@ export const openContribution = async (
             throw new Error('The signer changed the opening.');
         const output = await sealRecord(
             session,
-            signingObject(descriptor, 'openingSignature'),
+            signingObject(profile, 'openingSignature'),
             0,
             signed.signature,
         );
@@ -1430,18 +1424,18 @@ export const openContribution = async (
 // confirmation need it. Otherwise the module retains the stored proposal's
 // context, which suffices for the checkpoint and the confirmation signature.
 export const resumeContribution = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     root: AuthenticatedRoot,
     verified?: VerifiedProposal,
 ): Promise<ContributionSession> => {
-    const { descriptor, kernel } = context;
+    const { profile, kernel } = context;
     const suffix = root.manifest.suffixes.contribution;
     if (root.head.generation < 4 || suffix === undefined)
         throw new Error('No contribution is retained.');
     const state = decodeContributionState(
         suffix,
         root.head.generation,
-        descriptor,
+        profile,
     );
     const snapshot = await snapshotParticipant(context.database);
     if (
@@ -1492,7 +1486,7 @@ export const resumeContribution = async (
 
 // The stored records the retained contribution lists.
 export const contributionRecords = (session: ContributionSession) =>
-    contributionInventory(session.context.descriptor, session.state);
+    contributionInventory(session.context.profile, session.state);
 
 // The signed opening, as retained.
 export const storedOpening = async (
@@ -1543,7 +1537,7 @@ export const publishOpening = async (
     relay: PublicRelay,
     opening: SignedPacket,
 ) => {
-    const { descriptor } = session.context;
+    const { profile } = session.context;
     const directory = contributionDirectory(session.state.position);
     await publishRecord(relay, directory + 'opening.bin', opening.body);
     await publishRecord(
@@ -1554,7 +1548,7 @@ export const publishOpening = async (
     await publishRecord(
         relay,
         directory + 'body-header.bin',
-        bodyHeader(proofLength(session.state, descriptor)),
+        bodyHeader(proofLength(session.state, profile)),
     );
     for (const record of session.state.publicRecords) {
         const bytes = await openRecord(session, record);
@@ -1562,7 +1556,7 @@ export const publishOpening = async (
             await publishChunk(
                 relay,
                 directory +
-                    (record.object === proofObject(descriptor)
+                    (record.object === proofObject(profile)
                         ? 'proof.bin'
                         : polynomialFile(record.object - 1)),
                 record.offset,

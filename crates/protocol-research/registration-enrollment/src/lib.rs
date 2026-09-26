@@ -20,6 +20,8 @@ pub mod contribution_signing;
 pub mod custody_identity;
 #[path = "finality-work.rs"]
 pub mod finality_work;
+#[path = "participant-bounds.rs"]
+pub mod participant_bounds;
 #[path = "release-work.rs"]
 pub mod release_work;
 

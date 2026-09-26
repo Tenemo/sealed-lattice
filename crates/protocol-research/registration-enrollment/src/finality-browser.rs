@@ -1,5 +1,8 @@
 use super::{INPUT_BYTES, SESSION, Session};
-use registration_credentials::{Error, target_signing::TARGET_VOTE_BYTES};
+use registration_credentials::{
+    Error,
+    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_VOTE_BYTES},
+};
 use zeroize::{Zeroize, Zeroizing};
 
 fn field<'a>(bytes: &mut &'a [u8], maximum: usize) -> Result<&'a [u8], Error> {
@@ -38,7 +41,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             Ok(output)
         }
         1 => {
-            if !(33..=2048 + 32).contains(&input.len()) {
+            if !(33..=MAXIMUM_TARGET_BODY_BYTES + 32).contains(&input.len()) {
                 return Err(Error::Shape);
             }
             let body_length = input.len() - 32;
@@ -56,7 +59,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 return Err(Error::Consumed);
             }
             let mut remaining = input;
-            let body = field(&mut remaining, 2048)?;
+            let body = field(&mut remaining, MAXIMUM_TARGET_BODY_BYTES)?;
             if remaining.len() != TARGET_VOTE_BYTES {
                 return Err(Error::Shape);
             }

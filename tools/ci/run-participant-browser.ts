@@ -20,12 +20,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
+import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import {
-    assembleParticipantRuntime,
-    deriveParticipantDescriptor,
-} from '#tools/ci/participant-runtime-assembly.js';
+import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
     ParticipantRuntime,
@@ -157,7 +155,7 @@ const readBody = async (request: IncomingMessage, maximum: number) => {
 // is the runtime's own worker except on a corrupt client's page.
 const page = (runtime: ParticipantRuntime, workerDigest: string) =>
     `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
-const runtime = ${JSON.stringify({ descriptor: runtime.descriptor, identity: runtime.identity, worker: workerDigest })};
+const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -184,7 +182,6 @@ window.runParticipant = async (operation, parameters) => {
         worker.postMessage({
             operation,
             origin: location.origin,
-            descriptor: runtime.descriptor,
             identity: runtime.identity,
             parameters,
         });
@@ -604,14 +601,15 @@ await runWithLocalRunLog(
                         participantMemoryLimit,
                 'Insufficient host memory for the browser cohort.',
             );
-            const descriptor = deriveParticipantDescriptor(
+            // The bounds the worker derives, as the independent models give
+            // them, for the expected sizes of the cohort's records.
+            const bounds = compileParticipantRuntimeProfile(
                 participantCount,
                 optionCount,
             );
             const { runtime, invalidBallotClient } =
                 await assembleParticipantRuntime(
                     log,
-                    descriptor,
                     invalidAuthor !== undefined,
                 );
             const corrupt =
@@ -1059,11 +1057,11 @@ await runWithLocalRunLog(
                 });
             };
             // Each participant scores every option differently, across the
-            // descriptor's score range, and the result lists one option fewer
+            // supported score range, and the result lists one option fewer
             // than the complete ranking. In a result run the first honest
             // participant after the organizer casts the all-minimum ballot,
             // an ordinary valid ballot that counts like any other.
-            const { minimumScore, maximumScore } = runtime.descriptor.ballot;
+            const { minimumScore, maximumScore } = bounds.ballot;
             const topCount = Math.max(1, optionCount - 1);
             const minimumBallotAuthor =
                 mode === 'result'
@@ -1181,8 +1179,7 @@ await runWithLocalRunLog(
                     position > setupReplay &&
                     honest(position),
             );
-            const bodyRecords =
-                runtime.descriptor.contribution.publicRecords.length;
+            const bodyRecords = bounds.contribution.publicRecords.length;
             await Promise.all(
                 positions.map(async (position) => {
                     if (position === setupReplay) {
@@ -1415,7 +1412,7 @@ await runWithLocalRunLog(
                 });
                 assert.equal((await run(0, 'ballot')).generation, 17);
             }
-            const ballotBounds = runtime.descriptor.ballot;
+            const ballotBounds = bounds.ballot;
             // An author's pointer names the directory of its submission.
             const submissionDirectory = async (author: number) =>
                 path.join(
@@ -1441,7 +1438,7 @@ await runWithLocalRunLog(
                 );
                 assert.equal(
                     (await stat(path.join(directory, 'signature.bin'))).size,
-                    runtime.descriptor.registration.signatureBytes,
+                    bounds.registration.signatureBytes,
                 );
             }
             // The organizer's close time is the latest on-time ballot time, so
@@ -1698,9 +1695,8 @@ await runWithLocalRunLog(
             // Completed close work is only delivered again.
             assert.equal((await run(1, 'close')).generation, 21);
             assert.equal((await run(0, 'close')).generation, 22);
-            const closeBounds = runtime.descriptor.close;
-            const signatureBytes =
-                runtime.descriptor.registration.signatureBytes;
+            const closeBounds = bounds.close;
+            const signatureBytes = bounds.registration.signatureBytes;
             const closeDirectory = path.join(publicDirectory, 'close');
             const intent = await readFile(
                 path.join(closeDirectory, 'intent.bin'),
@@ -1836,7 +1832,7 @@ await runWithLocalRunLog(
             const repeated = await run(voters[voters.length - 1], 'target');
             assert.equal(repeated.generation, 24);
             assert.equal(repeated.ballotStatus, undefined);
-            const targetBounds = runtime.descriptor.target;
+            const targetBounds = bounds.target;
             const completionDirectory = path.join(
                 publicDirectory,
                 'completion',
@@ -1889,7 +1885,7 @@ await runWithLocalRunLog(
                 (position) => !departed.has(position),
             );
             const combiningPosition = remaining[remaining.length - 1];
-            const releaseBounds = runtime.descriptor.release;
+            const releaseBounds = bounds.release;
             const completionFile = (name: string, position: number) =>
                 path.join(
                     completionDirectory,

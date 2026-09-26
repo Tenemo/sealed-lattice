@@ -1,3 +1,4 @@
+import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -7,7 +8,6 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import type { ParticipantDescriptor } from './descriptor.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
@@ -142,11 +142,11 @@ export const encodeCloseState = (
 
 // The plaintext length of each record of an event, in record order.
 export const closeRecordLengths = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     event: CloseEvent,
 ) => {
-    const { submissionBytes } = descriptor.close;
-    const { recordBytes } = descriptor.ballot;
+    const { submissionBytes } = profile.close;
+    const { recordBytes } = profile.ballot;
     if (event.kind === closeEventKind.held)
         return [
             submissionBytes,
@@ -159,8 +159,8 @@ export const closeRecordLengths = (
     return [];
 };
 
-const validEvent = (descriptor: ParticipantDescriptor, event: CloseEvent) => {
-    const { close, ballot, registration } = descriptor;
+const validEvent = (profile: ParticipantProfile, event: CloseEvent) => {
+    const { close, ballot, registration } = profile;
     const count = event.keys.length;
     switch (event.kind) {
         case closeEventKind.own:
@@ -210,12 +210,12 @@ const packetLength = (
 // the lock, and only the organizer's phases may carry its intent signing and
 // proposal.
 export const decodeCloseState = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     generation: number,
     organizer: boolean,
     bytes: Uint8Array,
 ): CloseState => {
-    const { close, registration } = descriptor;
+    const { close, registration } = profile;
     const phase = phaseOf(generation, organizer);
     if (
         generation < 12 ||
@@ -255,7 +255,7 @@ export const decodeCloseState = (
             keys: Array.from({ length: count }, () => take(recordKeyBytes)),
         };
         if (
-            !validEvent(descriptor, event) ||
+            !validEvent(profile, event) ||
             (events.length > 0 && serial <= events[events.length - 1].serial) ||
             (kind === closeEventKind.lock && locked) ||
             (kind === closeEventKind.response && (!organizer || !locked))
@@ -349,12 +349,12 @@ export const closeRecordAssociatedData = (
 // The close records a log lists, each at [serial, index]; the predecessor
 // check opens each under its own key.
 export const closeRecordInventory = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     context: RecordContext,
     state: CloseState,
 ): ParticipantStoredRecord[] =>
     state.events.flatMap((event) =>
-        closeRecordLengths(descriptor, event).map((length, index) => ({
+        closeRecordLengths(profile, event).map((length, index) => ({
             store: 'close',
             key: [event.serial, index],
             byteLength: sealedLength(length),

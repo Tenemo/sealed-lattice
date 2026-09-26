@@ -1,5 +1,5 @@
 pub use supported_profile::DEGREE;
-use supported_profile::{MAXIMUM_SCORE, PLAINTEXT_MODULUS as MODULUS, Profile};
+use supported_profile::{MAXIMUM_SCORE, MINIMUM_SCORE, PLAINTEXT_MODULUS as MODULUS, Profile};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -147,7 +147,7 @@ pub fn check_scores(scores: &[u8]) -> Result<(), Refusal> {
     }
     if scores
         .iter()
-        .any(|score| !(1..=MAXIMUM_SCORE).contains(&usize::from(*score)))
+        .any(|score| !(MINIMUM_SCORE..=MAXIMUM_SCORE).contains(&usize::from(*score)))
     {
         return Err(Refusal::Scores);
     }

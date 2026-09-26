@@ -10,11 +10,16 @@ use supported_profile::{
 };
 use zeroize::Zeroizing;
 
+/// A contribution commitment's secret salt.
+pub const SALT_BYTES: usize = 64;
+/// A contribution body opens with its magic and its proof's length.
+pub const BODY_HEADER_BYTES: usize = 4 + 8;
+
 pub struct ComputedContributionCommitment {
     pub(crate) proposal: [u8; 64],
     pub(crate) position: usize,
     pub(crate) digest: [u8; 64],
-    pub(crate) salt: Zeroizing<[u8; 64]>,
+    pub(crate) salt: Zeroizing<[u8; SALT_BYTES]>,
 }
 impl ComputedContributionCommitment {
     pub fn digest(&self) -> &[u8; 64] {
@@ -26,11 +31,14 @@ pub fn proof_lengths(profile: Profile) -> RangeInclusive<usize> {
     PROOF_HEADER_BYTES..=setup_relation(profile).maximum_proof_bytes()
 }
 
-pub fn body_header(profile: Profile, proof_length: usize) -> Result<[u8; 12], Error> {
+pub fn body_header(
+    profile: Profile,
+    proof_length: usize,
+) -> Result<[u8; BODY_HEADER_BYTES], Error> {
     if !proof_lengths(profile).contains(&proof_length) {
         return Err(Error::Shape);
     }
-    let mut header = [0; 12];
+    let mut header = [0; BODY_HEADER_BYTES];
     header[..4].copy_from_slice(b"SCB1");
     header[4..].copy_from_slice(&(proof_length as u64).to_le_bytes());
     Ok(header)
@@ -56,13 +64,13 @@ pub struct ContributionCommitmentHasher {
     proof_length: usize,
     proposal: [u8; 64],
     position: usize,
-    salt: Zeroizing<[u8; 64]>,
+    salt: Zeroizing<[u8; SALT_BYTES]>,
 }
 impl ContributionCommitmentHasher {
     pub fn new(
         proposal: &RosterProposal,
         position: usize,
-        salt: &[u8; 64],
+        salt: &[u8; SALT_BYTES],
         header: &[u8],
     ) -> Result<Self, Error> {
         let role = proposal.contribution_role(position)?;
@@ -80,7 +88,7 @@ impl ContributionCommitmentHasher {
     pub fn from_retained(
         credential: &Credential,
         context: &RetainedContributionContext,
-        salt: &[u8; 64],
+        salt: &[u8; SALT_BYTES],
         header: &[u8],
     ) -> Result<Self, Error> {
         credential.validate_retained_confirmation(context)?;
@@ -100,7 +108,7 @@ impl ContributionCommitmentHasher {
         position: usize,
         signing_public: &[u8; 1952],
         role: &[u8],
-        salt: &[u8; 64],
+        salt: &[u8; SALT_BYTES],
         header: &[u8],
     ) -> Result<Self, Error> {
         if header.len() != 12 || &header[..4] != b"SCB1" {
@@ -195,7 +203,7 @@ impl ContributionCommitmentHasher {
                 proposal: self.proposal,
                 position: self.position,
                 digest: hash.into_bytes(),
-                salt: Zeroizing::new(std::mem::replace(&mut *self.salt, [0; 64])),
+                salt: Zeroizing::new(std::mem::replace(&mut *self.salt, [0; SALT_BYTES])),
             })
             .map_err(|_| Error::Shape)
     }

@@ -150,6 +150,10 @@ impl RegistrationKey {
 #[cfg(feature = "custody")]
 #[path = "registration-custody.rs"]
 mod custody;
+/// A sealed registration key: its magic, its secret's support positions and
+/// the AES-GCM tag.
+#[cfg(feature = "custody")]
+pub use custody::SEALED_BYTES as SEALED_KEY_BYTES;
 
 #[cfg(test)]
 mod tests {

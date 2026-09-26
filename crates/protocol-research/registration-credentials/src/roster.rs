@@ -11,6 +11,10 @@ use crate::{
 use std::sync::Arc;
 use supported_profile::Profile;
 
+/// A retained proposal is at most this long; the largest supported roster's
+/// proposal fits.
+pub const MAXIMUM_PROPOSAL_BYTES: usize = 2048;
+
 /// Parsed context for private continuation after the current local root is authenticated.
 /// This is not a verified public proposal and cannot initialize contribution generation.
 #[derive(Clone)]
@@ -34,9 +38,9 @@ impl RetainedContributionContext {
         bytes: &[u8],
     ) -> Result<Self, Error> {
         let limits = CanonicalDecodeLimits {
-            maximum_tuple_byte_length: 2048,
+            maximum_tuple_byte_length: MAXIMUM_PROPOSAL_BYTES,
             maximum_item_count: 4,
-            maximum_item_byte_length: 2048,
+            maximum_item_byte_length: MAXIMUM_PROPOSAL_BYTES,
             maximum_nesting_depth: 1,
             maximum_cumulative_work_byte_length: 8192,
             maximum_cumulative_allocation_byte_length: 8192,
@@ -99,6 +103,32 @@ impl RetainedContributionContext {
     }
 }
 
+/// A proposal names its poll and runtime and lists the registration count
+/// and each registration's body digest.
+fn encode_proposal(poll: [u8; 64], runtime: [u8; 64], bodies: Vec<u8>) -> Result<Vec<u8>, Error> {
+    CanonicalTuple::new(
+        1,
+        1,
+        vec![
+            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1")
+                .map_err(|_| Error::Shape)?,
+            CanonicalItem::hash512(poll),
+            CanonicalItem::hash512(runtime),
+            CanonicalItem::variable_bytes(bodies).map_err(|_| Error::Shape)?,
+        ],
+    )
+    .encode()
+    .map_err(|_| Error::Shape)
+}
+/// A proposal of this many registrations has this exact encoded length.
+pub fn proposal_bytes(participants: usize) -> usize {
+    let mut bodies = Vec::from((participants as u32).to_le_bytes());
+    bodies.resize(4 + 64 * participants, 0);
+    encode_proposal([0; 64], [0; 64], bodies)
+        .expect("A proposal of a supported size encodes.")
+        .len()
+}
+
 pub struct RosterProposal {
     poll: [u8; 64],
     runtime: [u8; 64],
@@ -147,19 +177,7 @@ impl RosterProposal {
             .map_err(|_| Error::Shape)?
             .encode()
             .map_err(|_| Error::Shape)?;
-        let body = CanonicalTuple::new(
-            1,
-            1,
-            vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1")
-                    .map_err(|_| Error::Shape)?,
-                CanonicalItem::hash512(poll.identity()),
-                CanonicalItem::hash512(poll.runtime()),
-                CanonicalItem::variable_bytes(bodies).map_err(|_| Error::Shape)?,
-            ],
-        )
-        .encode()
-        .map_err(|_| Error::Shape)?;
+        let body = encode_proposal(poll.identity(), poll.runtime(), bodies)?;
         let identity = hash_foundation_tuple_512(
             "sealed-lattice/roster-proposal-id/v1",
             &[CanonicalItem::variable_bytes(&body).map_err(|_| Error::Shape)?],

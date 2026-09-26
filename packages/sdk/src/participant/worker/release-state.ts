@@ -1,3 +1,4 @@
+import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -8,7 +9,6 @@ import {
     unsigned32,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
-import type { ParticipantDescriptor } from './descriptor.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
@@ -75,10 +75,10 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
 // The byte length of each record of one kind: whole records of the record
 // size and a final partial one.
 export const releaseRecordLengths = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     totalBytes: number,
 ) => {
-    const { recordBytes } = descriptor.release;
+    const { recordBytes } = profile.release;
     return Array.from(
         { length: Math.ceil(totalBytes / recordBytes) },
         (_unused, index) =>
@@ -87,12 +87,12 @@ export const releaseRecordLengths = (
 };
 
 export const decodeReleaseState = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     generation: number,
     organizer: boolean,
     bytes: Uint8Array,
 ): ReleaseState => {
-    const bounds = descriptor.release;
+    const bounds = profile.release;
     const phase = phaseOf(generation);
     if (
         generation < releasePhase.journal ||
@@ -115,7 +115,7 @@ export const decodeReleaseState = (
     const withBody = phase >= releasePhase.body;
     if (
         targetLength === 0 ||
-        targetLength > descriptor.target.maximumBodyBytes ||
+        targetLength > profile.target.maximumBodyBytes ||
         !journalExpected ||
         (withBody
             ? bodyLength < bounds.minimumBodyBytes ||
@@ -128,7 +128,7 @@ export const decodeReleaseState = (
         (withBody ? bounds.envelopeBytes : 0) +
         (phase === releasePhase.intent ? coinBytes : 0) +
         (phase === releasePhase.signed
-            ? descriptor.registration.signatureBytes
+            ? profile.registration.signatureBytes
             : 0);
     const keysStart = prefixBytes + targetLength;
     const tailStart = keysStart + recordKeyBytes * (journalCount + bodyCount);
@@ -184,7 +184,7 @@ export const releaseRecordAssociatedData = (
 // The release records a state lists; the predecessor check opens each under
 // its own key.
 export const releaseRecordInventory = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     context: RecordContext,
     targetDigest: Uint8Array,
     state: ReleaseState,
@@ -194,14 +194,14 @@ export const releaseRecordInventory = (
             kind: releaseRecordKind.journal,
             keys: state.journalKeys,
             lengths: releaseRecordLengths(
-                descriptor,
-                descriptor.release.journalBytes,
+                profile,
+                profile.release.journalBytes,
             ),
         },
         {
             kind: releaseRecordKind.body,
             keys: state.bodyKeys,
-            lengths: releaseRecordLengths(descriptor, state.bodyLength),
+            lengths: releaseRecordLengths(profile, state.bodyLength),
         },
     ];
     return kinds.flatMap(({ kind, keys, lengths }) =>

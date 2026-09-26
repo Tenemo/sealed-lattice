@@ -1,7 +1,7 @@
 import { concatenate, equalBytes, unsigned16, unsigned32 } from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
 import { PublicInputFailure } from './context.js';
-import type { ParticipantContext } from './context.js';
+import type { ProfileContext } from './context.js';
 import {
     contributionDirectory,
     contributionRecords,
@@ -108,12 +108,12 @@ const readCachedChunk = async (
 // in the whole-coefficient chunks setup verification wrote. The consumer
 // checks the bytes against the retained setup reference.
 export const readFinalAggregate = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     expandedIndex: number,
     consume: (offset: number, bytes: Uint8Array) => void,
 ) => {
-    const { kernel, descriptor } = context;
-    const polynomial = descriptor.contribution.polynomials.find(
+    const { kernel, profile } = context;
+    const polynomial = profile.contribution.polynomials.find(
         (value) => value.expandedIndex === expandedIndex,
     );
     if (polynomial === undefined)
@@ -127,7 +127,7 @@ export const readFinalAggregate = async (
                 offset,
                 await readCachedChunk(
                     cache,
-                    [descriptor.participantCount - 1, expandedIndex, offset],
+                    [profile.participantCount - 1, expandedIndex, offset],
                     Math.min(capacity, polynomial.bytes - offset),
                 ),
             );
@@ -139,13 +139,13 @@ export const readFinalAggregate = async (
 // Verifies one opening, streams its body polynomials in whole-coefficient
 // chunks against the running aggregate, and then its proof.
 const verifyContribution = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
     cache: IDBDatabase,
     position: number,
 ) => {
-    const { kernel, descriptor } = context;
-    const bounds = descriptor.contribution;
+    const { kernel, profile } = context;
+    const bounds = profile.contribution;
     const directory = contributionDirectory(position);
     const opening = await readPublic(
         relay,
@@ -155,7 +155,7 @@ const verifyContribution = async (
     const openingSignature = await readPublic(
         relay,
         directory + 'opening-signature.bin',
-        descriptor.registration.signatureBytes,
+        profile.registration.signatureBytes,
     );
     const header = await readPublic(
         relay,
@@ -285,7 +285,7 @@ const verifyCompleteSetup = async (
     clearCache: boolean,
 ): Promise<Uint8Array> => {
     const { context } = session;
-    const { kernel, descriptor } = context;
+    const { kernel, profile } = context;
     const { manifest } = session.root;
     const definition = await readDataKind(
         context,
@@ -311,7 +311,7 @@ const verifyCompleteSetup = async (
     writeSetupInput(kernel, begin);
     if (kernel.setup_roster_begin(begin.length) !== 0)
         throw new Error('The setup verifier refused the retained poll.');
-    const registration = descriptor.registration;
+    const registration = profile.registration;
     for (const [position, id] of recordIds.entries()) {
         const header = await readPublic(
             relay,
@@ -375,8 +375,8 @@ const verifyCompleteSetup = async (
         );
     // The confirmations are the ones this participant's opening signed.
     const opened = await openedInventory(session);
-    const packetBytes = descriptor.contribution.confirmationPacketBytes;
-    for (let position = 0; position < descriptor.participantCount; position++) {
+    const packetBytes = profile.contribution.confirmationPacketBytes;
+    for (let position = 0; position < profile.participantCount; position++) {
         const confirmation = opened.inventory.subarray(
             4 + position * packetBytes,
             4 + (position + 1) * packetBytes,
@@ -390,11 +390,7 @@ const verifyCompleteSetup = async (
     const cache = await openSetupCache();
     try {
         if (clearCache) await writeCache(cache, (store) => store.clear());
-        for (
-            let position = 0;
-            position < descriptor.participantCount;
-            position++
-        )
+        for (let position = 0; position < profile.participantCount; position++)
             await verifyContribution(context, relay, cache, position);
     } finally {
         cache.close();
@@ -417,7 +413,7 @@ const verifyCompleteSetup = async (
         kernel.contribution_output_pointer(),
         kernel.contribution_output_length(),
     );
-    if (reference.length !== descriptor.root.setupReferenceBytes)
+    if (reference.length !== profile.root.setupReferenceBytes)
         throw new Error('The setup reference has another length.');
     return reference;
 };

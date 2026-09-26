@@ -1,3 +1,5 @@
+import { readParticipantProfile } from './bounds.js';
+import type { ParticipantLimits } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -8,7 +10,7 @@ import {
     unsigned32,
 } from './bytes.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ParticipantContext } from './context.js';
+import type { ParticipantContext, ProfileContext } from './context.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { readKernel } from './kernel.js';
 import { readPublic, streamPublic } from './public.js';
@@ -19,6 +21,7 @@ import {
     dataRecordInventory,
     readDataKind,
     referenceData,
+    rootBound,
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 
@@ -55,8 +58,11 @@ export const proposalRecordIds = (body: Uint8Array): string[] => {
     );
 };
 
-const validRecordIds = (ids: readonly string[], participantCount: number) =>
-    ids.length === participantCount &&
+// The module decides whether it supports a roster of this size; a request
+// outside every supported size is refused before it reaches the module.
+const validRecordIds = (ids: readonly string[], limits: ParticipantLimits) =>
+    ids.length >= limits.participants.minimum &&
+    ids.length <= limits.participants.maximum &&
     new Set(ids).size === ids.length &&
     ids.every((id) => /^[0-9a-f]{128}$/u.test(id));
 
@@ -77,9 +83,9 @@ const verifyProposalInputs = async (
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
 ): Promise<VerifiedProposal> => {
-    const { kernel, descriptor, runtime } = context;
-    const registration = descriptor.registration;
-    if (!validRecordIds(recordIds, descriptor.participantCount))
+    const { kernel, limits, runtime } = context;
+    const registration = limits.registration;
+    if (!validRecordIds(recordIds, limits))
         throw new PublicInputFailure('The proposed records are invalid.');
     const begin = concatenate(
         root.manifest.poll,
@@ -215,7 +221,7 @@ export const signRoster = async (
     const coins = root.manifest.proposalCoins;
     if (root.head.generation !== 2 || coins === undefined)
         throw new Error('No locked roster proposal exists.');
-    const { kernel, descriptor } = context;
+    const { kernel, limits } = context;
     const signing = concatenate(proposal.identity, coins);
     let signed: number;
     try {
@@ -229,7 +235,7 @@ export const signRoster = async (
     const signature = readKernel(
         kernel,
         kernel.roster_signature_pointer(),
-        descriptor.registration.signatureBytes,
+        limits.registration.signatureBytes,
     );
     if (!verifySignature(context, signature))
         throw new Error('The proposal signature did not verify.');
@@ -270,7 +276,7 @@ export const acceptRoster = async (
     const signature = await readPublic(
         relay,
         'proposal-signature.bin',
-        context.descriptor.registration.signatureBytes,
+        context.limits.registration.signatureBytes,
     );
     if (!verifySignature(context, signature))
         throw new PublicInputFailure(
@@ -326,6 +332,41 @@ export const reverifyRoster = async (
             throw new Error('The retained proposal signature failed.');
     }
     return proposal;
+};
+
+// The profile the retained roster names: its participant count from the
+// retained proposal and its option count from the poll the module verified.
+// The retained root, proposal and setup reference must meet its bounds.
+export const retainedProfile = async (
+    context: ParticipantContext,
+    root: AuthenticatedRoot,
+): Promise<ProfileContext> => {
+    const proposal = await readDataKind(
+        context,
+        root.manifest,
+        dataKind.proposal,
+    );
+    const profile = readParticipantProfile(
+        context.kernel,
+        context.limits,
+        proposalRecordIds(proposal).length,
+        context.kernel.own_registration_option_count(),
+    );
+    const setupReference = root.manifest.references
+        .filter((reference) => reference.kind === dataKind.setupReference)
+        .reduce((total, reference) => total + reference.length, 0);
+    if (
+        profile === undefined ||
+        proposal.length !== profile.proposalBytes ||
+        root.plaintext.length + 16 >
+            rootBound({ ...context, profile }, root.head.generation) ||
+        (setupReference !== 0 &&
+            setupReference !== profile.root.setupReferenceBytes)
+    )
+        throw new Error(
+            'The retained roster does not name a supported profile.',
+        );
+    return { ...context, profile };
 };
 
 export const parseRecordIds = (value: unknown): string[] => {

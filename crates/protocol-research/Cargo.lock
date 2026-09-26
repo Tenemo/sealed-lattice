@@ -825,6 +825,7 @@ dependencies = [
  "setup-aggregate",
  "setup-witness",
  "sha3 0.10.9",
+ "supported-profile",
  "zeroize",
 ]
 

@@ -4,7 +4,7 @@ use aes_gcm::{
     aead::{AeadInPlace, KeyInit},
 };
 
-const PLAIN_BYTES: usize = 4 + 2 * 256;
+const PLAIN_BYTES: usize = 4 + 2 * RECIPIENT_SECRET_SUPPORT;
 pub const SEALED_BYTES: usize = PLAIN_BYTES + 16;
 
 impl RegistrationKey {

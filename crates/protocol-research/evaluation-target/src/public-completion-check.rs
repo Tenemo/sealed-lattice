@@ -6,8 +6,9 @@ use evaluation_target::{
     target::VerifiedEvaluationTarget,
     terminal::{ReleaseCollector, verify_no_result},
 };
-use registration_credentials::release_signing::{
-    RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES,
+use registration_credentials::{
+    release_signing::{RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES},
+    target_signing::MAXIMUM_TARGET_BODY_BYTES,
 };
 use setup_aggregate::{CHUNK_BYTES, VerifiedAggregatePolynomial};
 use std::{fs::File, io, path::Path, sync::Arc};
@@ -52,7 +53,12 @@ pub fn verify(
     work: &mut Work,
     stage: Stage,
 ) -> io::Result<String> {
-    if bounded(directory.join("target.bin"), 2048, work)? != target.body() {
+    if bounded(
+        directory.join("target.bin"),
+        MAXIMUM_TARGET_BODY_BYTES,
+        work,
+    )? != target.body()
+    {
         return Err(refusal("published target differs from recomputation"));
     }
     work.depend(&directory.join("target.bin"))?;

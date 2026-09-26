@@ -1,17 +1,22 @@
-import type { ParticipantDescriptor } from './descriptor.js';
+import type { ParticipantLimits, ParticipantProfile } from './bounds.js';
 import { writeInput, writeOwnRegistrationInput } from './kernel.js';
 import type { KernelHandlers, ParticipantKernel } from './kernel.js';
 
 // What one worker invocation shares across the participant's phases: the
 // origin database, the single module instance with its current handlers,
-// the verified descriptor and the recomputed runtime identity.
+// the recomputed runtime identity, the module's shared bounds and, once the
+// retained roster names the poll's profile, that profile's bounds.
 export type ParticipantContext = Readonly<{
     database: IDBDatabase;
     kernel: ParticipantKernel;
     handlers: KernelHandlers;
-    descriptor: ParticipantDescriptor;
     runtime: Uint8Array;
+    limits: ParticipantLimits;
+    profile?: ParticipantProfile;
 }>;
+
+export type ProfileContext = ParticipantContext &
+    Readonly<{ profile: ParticipantProfile }>;
 
 export const sessionInput = (context: ParticipantContext, bytes: Uint8Array) =>
     writeInput(context.kernel, bytes);

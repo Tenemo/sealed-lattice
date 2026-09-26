@@ -22,6 +22,13 @@ pub enum Refusal {
     Arithmetic,
 }
 
+/// Each encryption reads its own randomness in blocks of this many bytes:
+/// a word for each sparse-secret draw, then one sample for each error
+/// coefficient.
+const READ_BYTES: usize = 65_536;
+const DRAW_BYTES: usize = 4;
+const SAMPLE_BYTES: usize = 20;
+
 struct Random {
     bytes: Zeroizing<Vec<u8>>,
     cursor: usize,
@@ -29,8 +36,8 @@ struct Random {
 impl Random {
     fn new() -> Self {
         Self {
-            bytes: Zeroizing::new(vec![0; 65536]),
-            cursor: 65536,
+            bytes: Zeroizing::new(vec![0; READ_BYTES]),
+            cursor: READ_BYTES,
         }
     }
     fn read<const N: usize>(&mut self) -> Result<Zeroizing<[u8; N]>, Refusal> {
@@ -66,7 +73,7 @@ impl Random {
         let mut values = Zeroizing::new(vec![0; degree]);
         let mut selected = 0;
         while selected < support {
-            let position = u32::from_le_bytes(*self.read::<4>()?) as usize % degree;
+            let position = u32::from_le_bytes(*self.read::<DRAW_BYTES>()?) as usize % degree;
             if values[position] == 0 {
                 values[position] = if selected < support / 2 { 1 } else { -1 };
                 selected += 1;
@@ -76,7 +83,7 @@ impl Random {
     }
     fn errors(&mut self, degree: usize) -> Result<Zeroizing<Vec<i8>>, Refusal> {
         (0..degree)
-            .map(|_| Ok(gaussian::sample(&*self.read::<20>()?) as i8))
+            .map(|_| Ok(gaussian::sample(&*self.read::<SAMPLE_BYTES>()?) as i8))
             .collect::<Result<Vec<_>, _>>()
             .map(Zeroizing::new)
     }
@@ -192,6 +199,23 @@ fn component(
 /// and under the auxiliary key.
 pub fn fhe_key_polynomial(profile: Profile) -> usize {
     profile.fhe_polynomial(0, 1)
+}
+/// A ballot encrypts its packed scores under the FHE key and its literal
+/// scores under the auxiliary key: each encryption's degree and sparse
+/// secret support, in that order.
+pub fn ballot_encryptions(profile: Profile) -> [(usize, usize); 2] {
+    [
+        (profile.family_degree(Family::Fhe), FHE_SECRET_SUPPORT),
+        (
+            profile.family_degree(Family::Auxiliary),
+            AUXILIARY_SECRET_SUPPORT,
+        ),
+    ]
+}
+/// The whole reads of one encryption whose sparse secret takes at most
+/// twice its support in draws, then its two error vectors.
+pub fn encryption_random_bytes(degree: usize, support: usize) -> usize {
+    (DRAW_BYTES * 2 * support + 2 * degree * SAMPLE_BYTES).next_multiple_of(READ_BYTES)
 }
 impl EncryptionWitness {
     /// Encrypts a message under the profile's FHE or auxiliary key with

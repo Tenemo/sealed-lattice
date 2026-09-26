@@ -9,7 +9,7 @@ pub mod contribution_authentication;
 #[path = "contribution-commitment.rs"]
 pub mod contribution_commitment;
 mod custody;
-pub use custody::SigningPurpose;
+pub use custody::{SEALED_SIGNING_SEED_BYTES, SigningPurpose};
 pub mod foundation;
 pub mod identity;
 pub mod poll;
@@ -40,6 +40,8 @@ use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
 use zeroize::Zeroizing;
 
 pub const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
+/// Every participant signature is one ML-DSA-65 signature.
+pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
 
 #[derive(Debug)]
 pub enum Error {

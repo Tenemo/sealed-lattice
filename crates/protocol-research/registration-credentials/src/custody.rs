@@ -6,7 +6,8 @@ use aes_gcm::{
 use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
 use zeroize::Zeroizing;
 
-const SEALED_BYTES: usize = 4 + 32 + 16;
+/// The sealed signing seed: its magic, the seed and the AES-GCM tag.
+pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + 16;
 
 /// Signing purposes that a restored credential withholds until the
 /// authenticated participant root unlocks those its records show unused.
@@ -45,7 +46,7 @@ impl Credential {
         if !self.check_retained() {
             return Err(Error::Crypto);
         }
-        let mut bytes = Zeroizing::new(Vec::with_capacity(SEALED_BYTES));
+        let mut bytes = Zeroizing::new(Vec::with_capacity(SEALED_SIGNING_SEED_BYTES));
         bytes.extend(b"RCS1");
         bytes.extend(*self.signing_seed);
         Aes256Gcm::new(key.into())
@@ -60,7 +61,7 @@ impl Credential {
         key: &[u8; 32],
         sealed: &[u8],
     ) -> Result<Self, Error> {
-        if sealed.len() != SEALED_BYTES {
+        if sealed.len() != SEALED_SIGNING_SEED_BYTES {
             return Err(Error::Shape);
         }
         ml_kem_768::EncapsKey::try_from_bytes(mailbox_public).map_err(|_| Error::Shape)?;
@@ -147,7 +148,7 @@ mod tests {
         let for_repeat = make();
         original.sign_registration(digest, [10; 32]).unwrap();
         let sealed = original.seal_complete(&data_key).unwrap();
-        assert_eq!(sealed.len(), SEALED_BYTES);
+        assert_eq!(sealed.len(), SEALED_SIGNING_SEED_BYTES);
         assert!(original.seal_complete(&data_key).is_err());
         let mut restored = Credential::open_complete(
             *original.signing_public(),

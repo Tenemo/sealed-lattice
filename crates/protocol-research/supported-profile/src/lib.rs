@@ -23,7 +23,8 @@ pub const AUXILIARY_DEGREE: usize = 4_096;
 pub const FHE_LIMB_BITS: usize = 96;
 /// Gadget coordinates are digits of this many bits.
 const GADGET_BASE_BITS: usize = 144;
-/// Every score is between one and this value.
+/// Every score is between these values.
+pub const MINIMUM_SCORE: usize = 1;
 pub const MAXIMUM_SCORE: usize = 10;
 /// FHE plaintexts are integers modulo this prime, which divides every
 /// ciphertext modulus less one.

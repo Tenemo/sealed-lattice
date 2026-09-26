@@ -51,19 +51,28 @@ pub fn close_quorum(participants: usize) -> usize {
 /// canonical tuple layout: an eight-byte header and, per item, a two-byte type
 /// and four-byte length, with a four-byte length inside variable values.
 pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -> usize {
-    let prefix = 8 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64);
     match purpose {
-        ClosePurpose::Intent => prefix + 6 + 8,
+        ClosePurpose::Intent => close_prefix_bytes(purpose) + 6 + 8,
         ClosePurpose::Response => {
-            prefix
-                + (6 + 64)
-                + (6 + 2)
-                + (6 + 4 + MAXIMUM_LISTED_ENVELOPES_PER_SLOT * participants * LISTED_ENTRY_BYTES)
+            close_response_bytes(MAXIMUM_LISTED_ENVELOPES_PER_SLOT * participants)
         }
         ClosePurpose::Proposal => {
-            prefix + (6 + 64) + (6 + 4 + close_quorum(participants) * LISTED_ENTRY_BYTES)
+            close_prefix_bytes(purpose)
+                + (6 + 64)
+                + (6 + 4 + close_quorum(participants) * LISTED_ENTRY_BYTES)
         }
     }
+}
+/// The purpose, poll identity and inventory identity open every close message.
+fn close_prefix_bytes(purpose: ClosePurpose) -> usize {
+    8 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64)
+}
+/// The exact encoded length of a response listing this many entries.
+pub fn close_response_bytes(entries: usize) -> usize {
+    close_prefix_bytes(ClosePurpose::Response)
+        + (6 + 64)
+        + (6 + 2)
+        + (6 + 4 + entries * LISTED_ENTRY_BYTES)
 }
 
 /// The signed message identity: the foundation hash of the complete body as

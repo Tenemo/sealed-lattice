@@ -12,10 +12,10 @@ import type {
     CloseEvent,
     CloseState,
 } from '#packages/sdk/src/participant/worker/close-state.js';
-import { deriveParticipantDescriptor } from '#tools/ci/participant-runtime-assembly.js';
+import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
-const descriptor = deriveParticipantDescriptor(3, 2);
-const { close, ballot, registration } = descriptor;
+const profile = compileParticipantRuntimeProfile(3, 2);
+const { close, ballot, registration } = profile;
 const signatureBytes = registration.signatureBytes;
 
 const filled = (length: number, value: number) =>
@@ -128,7 +128,7 @@ const phases: readonly (readonly [number, boolean, CloseState])[] = [
 ];
 
 const decode = (generation: number, organizer: boolean, bytes: Uint8Array) =>
-    decodeCloseState(descriptor, generation, organizer, bytes);
+    decodeCloseState(profile, generation, organizer, bytes);
 
 describe('participant close state', () => {
     it('decodes every phase it encodes', () => {
@@ -283,7 +283,7 @@ describe('participant close state', () => {
     });
 
     it('lists every record at its serial with its own binding', () => {
-        const lengths = closeRecordLengths(descriptor, held);
+        const lengths = closeRecordLengths(profile, held);
         expect(lengths[0]).toBe(close.submissionBytes);
         expect(lengths.slice(1).reduce((total, value) => total + value)).toBe(
             ballot.minimumBodyBytes,
@@ -298,7 +298,7 @@ describe('participant close state', () => {
             position: 1,
         };
         const records = closeRecordInventory(
-            descriptor,
+            profile,
             context,
             state({ events: [...collected, lock, response] }),
         );

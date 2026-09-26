@@ -1,3 +1,4 @@
+import { participantDataKindMaximums } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -21,7 +22,6 @@ import {
     chunkBytes,
     createRootKey,
     dataKind,
-    dataKindMaximums,
     encodeManifest,
     readDataKind,
     readDataRecord,
@@ -94,14 +94,14 @@ export const createEnrollment = async (
     request: EnrollmentRequest,
     onIntent: () => void,
 ): Promise<AuthenticatedRoot | undefined> => {
-    const { database, descriptor, kernel, handlers, runtime } = context;
+    const { database, limits, kernel, handlers, runtime } = context;
     const empty = await snapshotParticipant(database);
     if (participantStores.some((store) => empty.counts[store] !== 0))
         return undefined;
     const name = encodeUsername(request.username);
     if (
         name === undefined ||
-        name.length > descriptor.registration.maximumUsernameIngressBytes
+        name.length > limits.registration.maximumUsernameIngressBytes
     )
         return undefined;
     let input: Uint8Array;
@@ -127,7 +127,7 @@ export const createEnrollment = async (
         if (
             request.poll.length !== 64 ||
             request.definitionSignature.length !==
-                descriptor.registration.signatureBytes
+                limits.registration.signatureBytes
         )
             return undefined;
         input = concatenate(
@@ -149,8 +149,8 @@ export const createEnrollment = async (
         estimate.usage === undefined ||
         estimate.quota - estimate.usage <
             2 *
-                (descriptor.registration.publicKeyBytes +
-                    descriptor.registration.maximumProofBytes)
+                (limits.registration.publicKeyBytes +
+                    limits.registration.maximumProofBytes)
     )
         return undefined;
     const associatedData = rootAssociatedData(runtime);
@@ -184,7 +184,7 @@ export const createEnrollment = async (
     const dataKeys = crypto.getRandomValues(new Uint8Array(64));
     if (equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(32)))
         throw new Error('Repeated enrollment data keys.');
-    const maximums = dataKindMaximums(descriptor);
+    const maximums = participantDataKindMaximums(limits);
     const lengths = maximums.map(() => 0);
     const records: StagedRecord[] = [];
     handlers.staged = (kind, offset, bytes) => {
@@ -240,7 +240,7 @@ export const createEnrollment = async (
         lengths[dataKind.pollDefinition] = request.definition.length;
         lengths[dataKind.pollSignature] = request.definitionSignature.length;
     }
-    const registration = descriptor.registration;
+    const registration = limits.registration;
     if (
         lengths[dataKind.publicKey] !== registration.publicKeyBytes ||
         lengths[dataKind.proof] === 0 ||
@@ -279,7 +279,7 @@ export const createEnrollment = async (
         1,
     );
     dataKeys.fill(0);
-    if (plaintext.length + 16 > descriptor.root.maximumRootBytes)
+    if (plaintext.length + 16 > limits.root.maximumEnrollmentRootBytes)
         throw new Error('The enrollment root exceeds its bound.');
     // The initial key seals the intent and the completed root under their
     // distinct generation nonces.
@@ -298,7 +298,7 @@ export const createEnrollment = async (
                 head: intentHead,
                 manifest: intentPlaintext,
                 rootContext: associatedData,
-                maximumRootBytes: descriptor.root.maximumRootBytes,
+                maximumRootBytes: limits.root.maximumEnrollmentRootBytes,
                 recordStores: participantRecordStores,
                 records: [],
                 identities: custodyIdentities(kernel),

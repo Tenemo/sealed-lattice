@@ -34,8 +34,10 @@ pub(crate) use schemas::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, Ro
 pub use text::StabilizedDisplayText;
 
 pub const MAXIMUM_USERNAME_BYTES: usize = 128;
+/// A username arrives as at most this many bytes before normalization.
+pub const MAXIMUM_USERNAME_INGRESS_BYTES: usize = 512;
 pub fn normalize_username(bytes: &[u8]) -> Result<StabilizedDisplayText, crate::Error> {
-    if bytes.is_empty() || bytes.len() > 512 {
+    if bytes.is_empty() || bytes.len() > MAXIMUM_USERNAME_INGRESS_BYTES {
         return Err(crate::Error::Shape);
     }
     let value = StabilizedDisplayText::from_ingress_utf8(bytes).map_err(|_| crate::Error::Shape)?;
@@ -55,6 +57,23 @@ pub struct RegistrationHeader {
     pub proof_length: usize,
 }
 impl RegistrationHeader {
+    /// The encoded length of a header with the longest username.
+    pub fn maximum_bytes() -> usize {
+        let username = StabilizedDisplayText::from_ingress_utf8(&[b'a'; MAXIMUM_USERNAME_BYTES])
+            .expect("A run of one ASCII letter is a stable username.");
+        Self {
+            username,
+            poll: [0; 64],
+            runtime: [0; 64],
+            signing_public: [0; 1952],
+            mailbox_public: [0; 1184],
+            recipient_key_hash: [0; 64],
+            proof_length: 0,
+        }
+        .encode()
+        .expect("The longest username encodes.")
+        .len()
+    }
     pub fn encode(&self) -> Result<Vec<u8>, crate::Error> {
         if self.username.as_str().is_empty()
             || self.username.as_str().len() > MAXIMUM_USERNAME_BYTES

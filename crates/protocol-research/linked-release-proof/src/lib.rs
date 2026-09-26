@@ -31,7 +31,9 @@ pub mod tree;
 mod witness;
 use statement::{StatementOutput, StatementStream};
 use supported_profile::{Profile, relation::release_relation};
-pub use witness::{PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound};
+pub use witness::{
+    PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound, noise_random_bytes,
+};
 
 impl engine::Statement for StatementStream {
     fn push(&mut self, bytes: &[u8]) -> bool {

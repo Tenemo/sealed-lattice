@@ -8,6 +8,7 @@ import {
     submissionPointer,
 } from './ballot.js';
 import type { BallotSession } from './ballot.js';
+import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -31,10 +32,9 @@ import {
 } from './close-state.js';
 import type { CloseEvent, CloseState } from './close-state.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ParticipantContext } from './context.js';
+import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ContributionSession } from './contribution.js';
-import type { ParticipantDescriptor } from './descriptor.js';
 import { readKernel } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -73,7 +73,7 @@ export type CloseRequest = Readonly<{
 
 // Distinct roster positions, or undefined when the value lists anything else.
 const parsePositions = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     value: unknown,
 ): number[] | undefined => {
     if (value === undefined) return [];
@@ -84,7 +84,7 @@ const parsePositions = (
             typeof position === 'number' &&
             Number.isSafeInteger(position) &&
             position >= 0 &&
-            position < descriptor.participantCount,
+            position < profile.participantCount,
     ) && new Set(positions).size === positions.length
         ? (positions as number[])
         : undefined;
@@ -93,11 +93,11 @@ const parsePositions = (
 // The deliveries and close time a request supplies, or undefined when any
 // is malformed.
 export const parseCloseRequest = (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     parameters: Readonly<Record<string, unknown>>,
 ): CloseRequest | undefined => {
-    const deliver = parsePositions(descriptor, parameters.deliver);
-    const announce = parsePositions(descriptor, parameters.announce);
+    const deliver = parsePositions(profile, parameters.deliver);
+    const announce = parsePositions(profile, parameters.announce);
     const { closeTime } = parameters;
     if (
         deliver === undefined ||
@@ -144,7 +144,7 @@ type AddedRecord = Readonly<{
 }>;
 
 const tryCloseCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -164,7 +164,7 @@ const tryCloseCommand = (
 };
 
 const closeCommand = (
-    context: ParticipantContext,
+    context: ProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -203,7 +203,7 @@ export const resumeClose = async (
         throw new Error('No close log is retained.');
     const records = await recordContext(contribution);
     const state = decodeCloseState(
-        context.descriptor,
+        context.profile,
         root.head.generation,
         organizer,
         bytes,
@@ -235,7 +235,7 @@ const openCloseRecord = (
     index: number,
 ) => {
     const { context } = session.contribution;
-    const length = closeRecordLengths(context.descriptor, event)[index];
+    const length = closeRecordLengths(context.profile, event)[index];
     return openRecord(
         context.database,
         'close',
@@ -281,13 +281,13 @@ const commitClose = async (
 ) => {
     const { contribution } = session;
     const { context, root } = contribution;
-    const { descriptor } = context;
+    const { profile } = context;
     const encoded = encodeCloseState(
         transition.generation,
         session.organizer,
         transition.state,
     );
-    if (encoded.length > descriptor.close.maximumStateBytes)
+    if (encoded.length > profile.close.maximumStateBytes)
         throw new Error('The close state exceeds its bound.');
     contribution.root = await commitRoot(context, root, {
         generation: transition.generation,
@@ -299,7 +299,7 @@ const commitClose = async (
             ...dataRecordInventory(root.manifest),
             ...contributionRecords(contribution),
             ...retainedBallotRecords(contribution, session.records),
-            ...closeRecordInventory(descriptor, session.records, session.state),
+            ...closeRecordInventory(profile, session.records, session.state),
         ],
         write: (transaction) => {
             const store = transaction.objectStore('close');
@@ -328,18 +328,18 @@ const commitClose = async (
 // The submission identity the module reports for an envelope, which
 // listings and wanted bodies name; undefined for bytes that are not one.
 export const envelopeIdentity = (
-    context: ParticipantContext,
+    context: ProfileContext,
     submission: Uint8Array,
 ) =>
     tryCloseCommand(
         context,
         14,
         0,
-        submission.subarray(0, context.descriptor.ballot.envelopeBytes),
+        submission.subarray(0, context.profile.ballot.envelopeBytes),
     );
 
 const namesEnvelope = (
-    context: ParticipantContext,
+    context: ProfileContext,
     submission: Uint8Array,
     identity: Uint8Array,
 ) => {
@@ -371,7 +371,7 @@ const learnResponse = (
     record: Uint8Array,
 ) => {
     const { context } = session.contribution;
-    const { close, registration } = context.descriptor;
+    const { close, registration } = context.profile;
     const length = readUnsigned32(record, 0);
     session.responders.set(
         serial,
@@ -501,7 +501,7 @@ export const restoreCompletedClose = async (session: CloseSession) => {
 // The close records the root lists.
 export const completedCloseRecords = (session: CloseSession) =>
     closeRecordInventory(
-        session.contribution.context.descriptor,
+        session.contribution.context.profile,
         session.records,
         session.state,
     );
@@ -547,7 +547,7 @@ const deliverOwnBallot = async (session: CloseSession) => {
 // identity, or undefined when the relay lacks them. The caller checks that
 // the envelope has that identity.
 export const readPublishedSubmission = async (
-    descriptor: ParticipantDescriptor,
+    profile: ParticipantProfile,
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
@@ -558,15 +558,15 @@ export const readPublishedSubmission = async (
             await readPublic(
                 relay,
                 directory + 'envelope.bin',
-                descriptor.ballot.envelopeBytes,
+                profile.ballot.envelopeBytes,
             ),
             await readPublic(
                 relay,
                 directory + 'signature.bin',
-                descriptor.registration.signatureBytes,
+                profile.registration.signatureBytes,
             ),
         );
-        return submission.length === descriptor.close.submissionBytes
+        return submission.length === profile.close.submissionBytes
             ? submission
             : undefined;
     } catch (error) {
@@ -579,7 +579,7 @@ export const readPublishedSubmission = async (
 // it or serves one that is not that author's envelope with that identity. The
 // pointer only proposes an identity; the module authenticates what it names.
 const readAnnouncedSubmission = async (
-    context: ParticipantContext,
+    context: ProfileContext,
     relay: PublicRelay,
     author: number,
 ) => {
@@ -593,7 +593,7 @@ const readAnnouncedSubmission = async (
     const submission =
         identity.length === 64
             ? await readPublishedSubmission(
-                  context.descriptor,
+                  context.profile,
                   relay,
                   author,
                   identity,
@@ -617,16 +617,11 @@ const deliverBallot = async (
     expected?: Uint8Array,
 ) => {
     const { context } = session.contribution;
-    const { descriptor } = context;
+    const { profile } = context;
     const submission =
         expected === undefined
             ? await readAnnouncedSubmission(context, relay, author)
-            : await readPublishedSubmission(
-                  descriptor,
-                  relay,
-                  author,
-                  expected,
-              );
+            : await readPublishedSubmission(profile, relay, author, expected);
     const identity =
         submission === undefined
             ? undefined
@@ -639,8 +634,7 @@ const deliverBallot = async (
     )
         return;
     const length = Number(readUnsigned64(submission, envelopeLengthOffset));
-    const { recordBytes, minimumBodyBytes, maximumBodyBytes } =
-        descriptor.ballot;
+    const { recordBytes, minimumBodyBytes, maximumBodyBytes } = profile.ballot;
     const event = {
         kind: closeEventKind.held,
         serial: nextSerial(session.state),
@@ -765,7 +759,7 @@ const lockIntent = async (session: CloseSession, intentPacket: Uint8Array) => {
     const { context } = session.contribution;
     if (tryCloseCommand(context, 2, 0, intentPacket) === undefined)
         throw new PublicInputFailure('The close intent was refused.');
-    const { close } = session.contribution.context.descriptor;
+    const { close } = session.contribution.context.profile;
     const closeTime = readUnsigned64(
         intentPacket,
         4 + close.intentBodyBytes - 8,
@@ -801,14 +795,10 @@ const lockIntent = async (session: CloseSession, intentPacket: Uint8Array) => {
 // whose envelopes the relay lacks, waits for a later visit.
 const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
     const { context } = session.contribution;
-    const { descriptor } = context;
-    const { close, registration } = descriptor;
+    const { profile } = context;
+    const { close, registration } = profile;
     const taken = new Set(session.responders.values());
-    for (
-        let responder = 0;
-        responder < descriptor.participantCount;
-        responder++
-    ) {
+    for (let responder = 0; responder < profile.participantCount; responder++) {
         if (responder === session.records.position || taken.has(responder))
             continue;
         let response: Uint8Array;
@@ -849,7 +839,7 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
             )
                 continue;
             const submission = await readPublishedSubmission(
-                descriptor,
+                profile,
                 relay,
                 readUnsigned16(response, offset),
                 identity,
@@ -981,7 +971,7 @@ const readPublishedIntent = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    const { close, registration } = session.contribution.context.descriptor;
+    const { close, registration } = session.contribution.context.profile;
     try {
         return await readPublic(
             relay,

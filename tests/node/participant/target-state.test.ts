@@ -6,10 +6,10 @@ import {
     encodeTargetState,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/target-state.js';
+import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
-import { deriveParticipantDescriptor } from '#tools/ci/participant-runtime-assembly.js';
 
-const descriptor = deriveParticipantDescriptor(3, 2);
+const profile = compileParticipantRuntimeProfile(3, 2);
 const census = compileTargetSigningStateCensus();
 
 const filled = (length: number, value: number) =>
@@ -19,13 +19,13 @@ const state = (organizer: boolean, bodyLength: number) => ({
     predecessor: completedClosePhase(organizer),
     body: filled(bodyLength, 7),
     coins: filled(32, 9),
-    vote: filled(descriptor.target.votePacketBytes, 11),
+    vote: filled(profile.target.votePacketBytes, 11),
 });
 
 describe('participant target signing state', () => {
     it('round-trips both phases for both roles at the body bounds', () => {
         for (const organizer of [false, true])
-            for (const bodyLength of [1, descriptor.target.maximumBodyBytes]) {
+            for (const bodyLength of [1, profile.target.maximumBodyBytes]) {
                 const value = state(organizer, bodyLength);
                 const intent = encodeTargetState(targetPhase.intent, value);
                 expect(intent.length).toBe(
@@ -33,7 +33,7 @@ describe('participant target signing state', () => {
                 );
                 expect(
                     decodeTargetState(
-                        descriptor,
+                        profile,
                         targetPhase.intent,
                         organizer,
                         intent,
@@ -47,7 +47,7 @@ describe('participant target signing state', () => {
                 );
                 expect(
                     decodeTargetState(
-                        descriptor,
+                        profile,
                         targetPhase.signed,
                         organizer,
                         signed,
@@ -56,7 +56,7 @@ describe('participant target signing state', () => {
                 // Later generations keep the completed vote unchanged.
                 expect(
                     decodeTargetState(
-                        descriptor,
+                        profile,
                         targetPhase.signed + 5,
                         organizer,
                         signed,
@@ -68,10 +68,10 @@ describe('participant target signing state', () => {
     it('bounds the complete state by the census', () => {
         const largest = encodeTargetState(
             targetPhase.signed,
-            state(true, descriptor.target.maximumBodyBytes),
+            state(true, profile.target.maximumBodyBytes),
         );
-        expect(largest.length).toBe(descriptor.target.maximumStateBytes);
-        expect(BigInt(descriptor.target.maximumStateBytes)).toBe(
+        expect(largest.length).toBe(profile.target.maximumStateBytes);
+        expect(BigInt(profile.target.maximumStateBytes)).toBe(
             census.maximumStateBytes,
         );
     });
@@ -86,7 +86,7 @@ describe('participant target signing state', () => {
             bytes: Uint8Array,
         ) =>
             expect(() =>
-                decodeTargetState(descriptor, generation, organizer, bytes),
+                decodeTargetState(profile, generation, organizer, bytes),
             ).toThrow();
         // Each phase carries its own tail.
         refused(targetPhase.signed, false, intent);
@@ -103,7 +103,7 @@ describe('participant target signing state', () => {
         refused(targetPhase.intent, false, empty);
         const oversized = encodeTargetState(
             targetPhase.intent,
-            state(false, descriptor.target.maximumBodyBytes + 1),
+            state(false, profile.target.maximumBodyBytes + 1),
         );
         refused(targetPhase.intent, false, oversized);
     });
