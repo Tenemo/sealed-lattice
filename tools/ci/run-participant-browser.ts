@@ -648,7 +648,9 @@ const publicRecordNames = async (directory: string) =>
         .filter((name) => publicPath.test(name) && name.endsWith('.bin'));
 
 // The record families a relay view replaces with another poll's, each with
-// the refusal of the first of them a result visit reads.
+// the refusal of the first of them a result visit reads. A result visit
+// restores the verified setup and the evaluated target, so it reads no
+// contribution or close record.
 const foreignFamilies = [
     {
         family: 'registrations',
@@ -658,12 +660,12 @@ const foreignFamilies = [
     {
         family: 'contributions',
         pattern: /^contribution-\d+\//u,
-        reason: 'An opening was refused.',
+        reason: undefined,
     },
     {
         family: 'close records',
         pattern: /^close\//u,
-        reason: 'The close intent was refused.',
+        reason: undefined,
     },
     {
         family: 'target votes',
@@ -1805,14 +1807,15 @@ await runWithLocalRunLog(
                 // The first record of each family its result visit reads is
                 // refused, and it stays pending; the other roster's valid
                 // registrations of the same poll are refused only as a
-                // roster. With the relay's own records it then reaches its
-                // roster's outcome.
+                // roster. The families its result visit does not read leave
+                // it its roster's outcome, which it also reaches with the
+                // relay's own records.
                 const crossRosterProbes: {
                     origin: number;
                     family: string;
                     served: number;
                     hidden: number;
-                    reason: string;
+                    reason?: string;
                 }[] = [];
                 for (const [member, records, recordIds, other, identifiers] of [
                     [
@@ -1852,10 +1855,16 @@ await runWithLocalRunLog(
                         for (const [name, bytes] of view)
                             views[member.origin].set(name, bytes);
                         try {
-                            assert.deepEqual(
-                                await request(member.origin, 'result'),
-                                { status: 'pending', reason },
-                            );
+                            if (reason === undefined)
+                                assert.deepEqual(
+                                    (await act(member, 'result')).identifiers,
+                                    identifiers,
+                                );
+                            else
+                                assert.deepEqual(
+                                    await request(member.origin, 'result'),
+                                    { status: 'pending', reason },
+                                );
                         } finally {
                             views[member.origin].clear();
                         }
@@ -1874,7 +1883,7 @@ await runWithLocalRunLog(
                 }
                 const rostersScope = [
                     "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
-                    `Relay views that serve one roster's ${prose(foreignFamilies.map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome.`,
+                    `Relay views that serve one roster's ${prose(foreignFamilies.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome; its ${prose(foreignFamilies.filter(({ reason }) => reason === undefined).map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that member its roster's outcome.`,
                 ].join(' ');
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),
@@ -3371,12 +3380,18 @@ await runWithLocalRunLog(
             }
             // A fifth set of views serves the other poll's records of one
             // family at a time. The first of them a result visit reads is
-            // refused, so its participant stays pending.
+            // refused, so its participant stays pending; a family it does not
+            // read leaves it the outcome of the relay's own records.
             const foreignProbes: {
                 family: string;
                 served: number;
                 hidden: number;
-                reason: string;
+                reason?: string;
+            }[] = [];
+            const unreadOutcomes: {
+                family: string;
+                encrypted: unknown;
+                identifiers: unknown;
             }[] = [];
             const probeForeignPoll = async (position: number) => {
                 if (foreign === undefined) return;
@@ -3393,7 +3408,13 @@ await runWithLocalRunLog(
                     );
                     if (family === 'release shares' && served === 0) continue;
                     assert.ok(served > 0, `The foreign poll has no ${family}.`);
-                    await probe(position, view, reason);
+                    if (reason === undefined) {
+                        const { encrypted, identifiers } = await probeUnread(
+                            position,
+                            view,
+                        );
+                        unreadOutcomes.push({ family, encrypted, identifiers });
+                    } else await probe(position, view, reason);
                     foreignProbes.push({
                         family,
                         served,
@@ -3414,6 +3435,19 @@ await runWithLocalRunLog(
                         status: 'pending',
                         reason,
                     });
+                } finally {
+                    views[position].clear();
+                }
+            };
+            // A result visit that reads none of the served records completes.
+            const probeUnread = async (
+                position: number,
+                forgeries: ReadonlyMap<string, ViewedRecord>,
+            ) => {
+                for (const [name, bytes] of forgeries)
+                    views[position].set(name, bytes);
+                try {
+                    return await run(position, 'result');
                 } finally {
                     views[position].clear();
                 }
@@ -3452,6 +3486,10 @@ await runWithLocalRunLog(
                 result.identifiers,
                 noResult ? [] : expectedResult,
             );
+            for (const { family, encrypted, identifiers } of unreadOutcomes) {
+                assert.equal(encrypted, result.encrypted, family);
+                assert.deepEqual(identifiers, result.identifiers, family);
+            }
             // None of the forged views stopped its participant or withdrew
             // its ballot: with the relay's own records it combines the same
             // outcome.
@@ -3575,7 +3613,7 @@ await runWithLocalRunLog(
                 ...(foreign === undefined
                     ? []
                     : [
-                          `Relay views that serve another poll's ${prose(foreignProbes.map(({ family }) => family))} under this poll's names leave a participant pending.`,
+                          `Relay views that serve another poll's ${prose(foreignProbes.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
                       ]),
                 `Three local archive replicas and a fourth that never answers run with fault bound one from the release phase on. Each remaining participant's first release visit archives the certified target closure it read before any release randomness${noResult ? '' : ', and the last remaining participant, served no public record by the relay, finds a closure among the archive hints and releases from the replicas alone'}. The last remaining participant then archives the transcript of its verified outcome; after one of the three replicas stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Local replicas on one host are not independent fault domains.`,
             ].join(' ');
