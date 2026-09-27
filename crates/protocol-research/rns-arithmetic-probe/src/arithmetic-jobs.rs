@@ -393,6 +393,14 @@ impl Arithmetic {
         );
         keys.count += 1;
     }
+    /// The most memory one keyed job of the groups holds: its input, the
+    /// value's transformed digits, the sum and the output.
+    pub(super) fn keyed_job_bytes(&self, groups: usize) -> usize {
+        HEADER_BYTES
+            + 16
+            + 8 * self.polynomial_words()
+            + 8 * self.degree * (self.gadget_length + 1 + groups)
+    }
     /// The sums of the value's gadget digits times each gadget coordinate's
     /// key, for each of the groups of kept keys from the first group, lifted.
     pub(super) fn keyed<const GROUPS: usize>(

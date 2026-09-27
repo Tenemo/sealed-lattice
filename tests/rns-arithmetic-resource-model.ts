@@ -56,6 +56,8 @@ const primeCount = (bound: bigint): bigint => {
 
 // Pinned fhe.rs NttOperator owns four N-element u64 tables. Context::new
 // constructs every shorter modulus context recursively, without sharing them.
+// A flat plan keeps only the forward twiddles and their Shoup companions,
+// from which its backward transform reads the negated twiddles.
 export const compileRnsArithmeticResourceCensus = (
     profile: SupportedProfile,
 ) => {
@@ -65,6 +67,7 @@ export const compileRnsArithmeticResourceCensus = (
     const basePrimes = 15n;
     const multiplicationPrimes = basePrimes + (bits + 60n + 61n) / 62n;
     const tableBytesPerPrime = 4n * degree * 8n;
+    const flatTableBytesPerPrime = 2n * degree * 8n;
     const recursiveTableBytes =
         (tableBytesPerPrime *
             multiplicationPrimes *
@@ -84,7 +87,7 @@ export const compileRnsArithmeticResourceCensus = (
             (fixedModulusBfvInputs.gadgetBase - 1n) *
             half,
     );
-    const flatTableBytes = tableBytesPerPrime * exactProductPrimes;
+    const flatTableBytes = flatTableBytesPerPrime * exactProductPrimes;
     const coefficientWords = (bits + 63n) / 64n;
     const canonicalPolynomialBytes = coefficientWords * 8n * degree;
     const cachedMultiplicationKeyBytes =
@@ -97,6 +100,7 @@ export const compileRnsArithmeticResourceCensus = (
         recursiveTableBytes,
         exactProductPrimes,
         externalProductPrimes,
+        flatTableBytesPerPrime,
         flatTableBytes,
         coefficientWords,
         canonicalPolynomialBytes,

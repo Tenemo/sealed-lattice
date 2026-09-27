@@ -56,7 +56,8 @@ describe('exact RNS arithmetic resource floor', () => {
             640n * 1024n * 1024n,
         );
         expect(census.exactProductPrimes).toBe(31n);
-        expect(census.flatTableBytes).toBe(65011712n);
+        expect(census.flatTableBytesPerPrime).toBe(2n * 65536n * 8n);
+        expect(census.flatTableBytes).toBe(31n * 2n * 65536n * 8n);
     });
 
     it('charges fixed public coefficients and transformed multiplication keys separately', () => {

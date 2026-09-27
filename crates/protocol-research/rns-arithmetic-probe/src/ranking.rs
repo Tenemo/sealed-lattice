@@ -23,8 +23,10 @@ pub use requested_output::probe as requested_output_probe;
 const MEMORY_BYTES: usize = 671_088_640;
 const RUNTIME_RESERVE_BYTES: usize = 67_108_864;
 const TRANSFER_RESERVE_BYTES: usize = 2_097_152;
-/// Each transform owns four tables of a word per coefficient.
-const TRANSFORM_TABLES: usize = 4;
+/// Each transform owns two tables of a word per coefficient: the forward
+/// twiddles and their Shoup companions, from which the backward transform
+/// reads its own.
+const TRANSFORM_TABLES: usize = 2;
 /// Keys a multiplication uses for each gadget coordinate, more than a
 /// rotation's two.
 const MULTIPLICATION_KEYS: usize = 4;
@@ -115,6 +117,64 @@ pub fn helper_memory_bytes(helpers: usize) -> usize {
         })
         .max()
         .unwrap()
+}
+
+/// The keys a cache holds.
+fn key_total(arithmetic: &Arithmetic, cache: Option<Cache>) -> usize {
+    match cache {
+        Some(Cache::Multiplication) => MULTIPLICATION_KEYS * arithmetic.gadget_length,
+        Some(Cache::Rotation) => 2 * arithmetic.gadget_length,
+        None => 0,
+    }
+}
+/// Bytes of one resident working value.
+fn value_bytes(arithmetic: &Arithmetic) -> usize {
+    2 * arithmetic.polynomial_words() * 8
+}
+/// An instruction's scratch: a multiplication holds at most three
+/// transformed tensor sources, one product and three tensors, one of them
+/// being lifted; a rotation holds its shifted component, that component's
+/// shared copy and both key groups' residues.
+fn scratch_bytes(arithmetic: &Arithmetic, operation: u32) -> usize {
+    let residue_bytes = DEGREE * 8;
+    let polynomial_bytes = arithmetic.polynomial_words() * 8;
+    match operation {
+        2 => 4 * arithmetic.tensor_primes() * residue_bytes + 3 * polynomial_bytes,
+        6 => 2 * arithmetic.external_primes * residue_bytes + 2 * polynomial_bytes,
+        _ => 0,
+    }
+}
+/// The resident values an instruction of the operation allows with the
+/// cache's keys when the helpers run the primes' jobs. The tables and kept
+/// keys count wherever those jobs run, and so does each helper's keyed job.
+/// Helpers keep the memory they reserved for a multiplication's keys while
+/// another cache's keys replace them.
+fn capacity(
+    arithmetic: &Arithmetic,
+    operation: u32,
+    cache: Option<Cache>,
+    helpers: usize,
+) -> Result<usize, Refusal> {
+    let residue_bytes = DEGREE * 8;
+    let table_bytes = arithmetic.tensor_primes() * TRANSFORM_TABLES * residue_bytes;
+    let kept = if helpers > 0 {
+        Some(Cache::Multiplication)
+    } else {
+        cache
+    };
+    let key_bytes = key_total(arithmetic, kept) * arithmetic.external_primes * residue_bytes;
+    let helper_job_bytes = helpers * arithmetic.keyed_job_bytes(MULTIPLICATION_KEYS / 2);
+    let available = MEMORY_BYTES
+        .checked_sub(
+            RUNTIME_RESERVE_BYTES
+                + TRANSFER_RESERVE_BYTES
+                + table_bytes
+                + key_bytes
+                + helper_job_bytes
+                + scratch_bytes(arithmetic, operation),
+        )
+        .ok_or(Refusal::Allocation)?;
+    Ok(available / value_bytes(arithmetic))
 }
 
 /// The most values a program holds at once when each stays from its
@@ -392,67 +452,56 @@ impl Engine {
 
     /// The keys a cache holds.
     fn key_total(&self, cache: Option<Cache>) -> usize {
-        match cache {
-            Some(Cache::Multiplication) => MULTIPLICATION_KEYS * self.arithmetic.gadget_length,
-            Some(Cache::Rotation) => 2 * self.arithmetic.gadget_length,
-            None => 0,
-        }
+        key_total(&self.arithmetic, cache)
     }
     /// Bytes of one resident working value.
     fn value_bytes(&self) -> usize {
-        2 * self.arithmetic.polynomial_words() * 8
+        value_bytes(&self.arithmetic)
     }
-    /// An instruction's scratch: a multiplication holds its four
-    /// transformed tensor sources and one product; a rotation holds its
-    /// shifted component, that component's shared copy and both key groups'
-    /// residues.
     fn scratch_bytes(&self, operation: u32) -> usize {
-        let residue_bytes = DEGREE * 8;
-        let polynomial_bytes = self.arithmetic.polynomial_words() * 8;
-        match operation {
-            2 => 5 * self.arithmetic.tensor_primes() * residue_bytes + 2 * polynomial_bytes,
-            6 => 2 * self.arithmetic.external_primes * residue_bytes + 2 * polynomial_bytes,
-            _ => 0,
-        }
+        scratch_bytes(&self.arithmetic, operation)
     }
-    /// The resident values an instruction of the operation allows with the
-    /// cache's keys. The tables and kept keys count wherever the primes'
-    /// jobs run.
     fn capacity(&self, operation: u32, cache: Option<Cache>) -> Result<usize, Refusal> {
-        let residue_bytes = DEGREE * 8;
-        let table_bytes = self.arithmetic.tensor_primes() * TRANSFORM_TABLES * residue_bytes;
-        let key_bytes = self.key_total(cache) * self.arithmetic.external_primes * residue_bytes;
-        let available = MEMORY_BYTES
-            .checked_sub(
-                RUNTIME_RESERVE_BYTES
-                    + TRANSFER_RESERVE_BYTES
-                    + table_bytes
-                    + key_bytes
-                    + self.scratch_bytes(operation),
-            )
-            .ok_or(Refusal::Allocation)?;
-        Ok(available / self.value_bytes())
+        capacity(&self.arithmetic, operation, cache, parallel_work::helpers())
     }
-    /// The linear memory the evaluation's instance plans to hold. Without
-    /// helpers it holds the tables and kept keys too and plans the whole
-    /// bound. With them it holds at most the reserves and, at the kind of
+    /// The linear memory the evaluation's instance plans to add for it.
+    /// Without helpers it holds the tables and kept keys too and plans the
+    /// whole bound but the reserves. With them it plans, at the kind of
     /// instruction that needs the most, that instruction's scratch and the
     /// resident values its capacity allows, never more than the program
     /// holds at once.
     pub fn planned_memory_bytes(&self) -> usize {
         if parallel_work::helpers() == 0 {
-            return MEMORY_BYTES;
+            return MEMORY_BYTES - RUNTIME_RESERVE_BYTES - TRANSFER_RESERVE_BYTES;
         }
         let held = |operation: u32, cache: Option<Cache>| {
             self.capacity(operation, cache).map_or(0, |capacity| {
                 self.scratch_bytes(operation) + capacity.min(self.peak_values) * self.value_bytes()
             })
         };
-        RUNTIME_RESERVE_BYTES
-            + TRANSFER_RESERVE_BYTES
-            + held(2, Some(Cache::Multiplication))
-                .max(held(6, Some(Cache::Rotation)))
-                .max(held(1, None))
+        held(2, Some(Cache::Multiplication))
+            .max(held(6, Some(Cache::Rotation)))
+            .max(held(1, None))
+    }
+
+    /// The memory one of the helpers reserves for the evaluation: the
+    /// transform tables of the tensor primes it holds, a multiplication's
+    /// kept keys modulo the external-product primes it holds, and one keyed
+    /// job of a multiplication's key groups.
+    fn helper_reserved_bytes(&self, helper: usize, helpers: usize) -> usize {
+        let residue_bytes = DEGREE * 8;
+        let held = |count: usize| (helper..count).step_by(helpers).count();
+        held(self.arithmetic.tensor_primes()) * TRANSFORM_TABLES * residue_bytes
+            + held(self.arithmetic.external_primes)
+                * self.key_total(Some(Cache::Multiplication))
+                * residue_bytes
+            + self.arithmetic.keyed_job_bytes(MULTIPLICATION_KEYS / 2)
+    }
+    /// Has each helper reserve at once the memory it will hold for the
+    /// evaluation.
+    pub fn reserve_helpers(&self) {
+        let helpers = parallel_work::helpers();
+        parallel_work::reserve_helpers(|helper| self.helper_reserved_bytes(helper, helpers));
     }
 
     /// Whether a cached key is a public common polynomial, and its setup
@@ -774,8 +823,9 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::{prime_count_bounds, primes},
-        DEGREE, Instruction, Profile, Refusal, evictions, helper_memory_bytes, peak_values,
+        super::{prime_count_bounds, primes, shared},
+        Cache, DEGREE, Instruction, Profile, Refusal, capacity, evictions, helper_memory_bytes,
+        peak_values,
     };
     use std::collections::BTreeSet;
 
@@ -877,6 +927,25 @@ mod tests {
         assert!(bounds.iter().all(|bytes| bytes.is_multiple_of(65_536)));
         assert!(bounds.windows(2).all(|pair| pair[1] <= pair[0]));
         assert!(bounds[7] < bounds[0]);
+    }
+
+    // With up to eight helpers, each representative profile keeps room for
+    // an instruction's two inputs and its output at every kind of
+    // instruction.
+    #[test]
+    fn every_profile_keeps_room_for_an_instruction_with_eight_helpers() {
+        for (participants, options) in [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)] {
+            let arithmetic = shared(Profile::new(participants, options).unwrap(), DEGREE);
+            for helpers in 0..=8 {
+                for (operation, cache) in [
+                    (1, None),
+                    (2, Some(Cache::Multiplication)),
+                    (6, Some(Cache::Rotation)),
+                ] {
+                    assert!(capacity(&arithmetic, operation, cache, helpers).unwrap() >= 3);
+                }
+            }
+        }
     }
 
     #[test]

@@ -12,6 +12,13 @@ use rand_chacha::ChaCha8Rng;
 use std::iter::successors;
 
 /// Number-Theoretic Transform operator.
+///
+/// The backward transform's twiddles are not stored: with `psi` the
+/// primitive `2 * size`-th root, forward twiddle `i` is `psi^rev(i)` and
+/// backward twiddle `k` is `psi^-(rev(k) + 1)`, which equals
+/// `-psi^rev(size - 1 - k)` because `psi^size = -1`. The Shoup companion of
+/// `p - w` is the complement of `w`'s, since `w * 2^64 / p` is never an
+/// integer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NttOperator {
     p: Modulus,
@@ -19,8 +26,6 @@ pub struct NttOperator {
     size: usize,
     omegas: Box<[u64]>,
     omegas_shoup: Box<[u64]>,
-    zetas_inv: Box<[u64]>,
-    zetas_inv_shoup: Box<[u64]>,
     size_inv: u64,
     size_inv_shoup: u64,
 }
@@ -39,24 +44,16 @@ impl NttOperator {
             let size_inv = p.inv(size as u64)?;
 
             let omega = Self::primitive_root(size, p);
-            let omega_inv = p.inv(omega)?;
 
             let powers = successors(Some(1u64), |n| Some(p.mul(*n, omega)))
                 .take(size)
                 .collect_vec();
-            let powers_inv = successors(Some(omega_inv), |n| Some(p.mul(*n, omega_inv)))
-                .take(size)
+
+            let omegas = (0..size)
+                .map(|i| powers[i.reverse_bits() >> (size.leading_zeros() + 1)])
                 .collect_vec();
 
-            let (omegas, zetas_inv): (Vec<u64>, Vec<u64>) = (0..size)
-                .map(|i| {
-                    let j = i.reverse_bits() >> (size.leading_zeros() + 1);
-                    (powers[j], powers_inv[j])
-                })
-                .unzip();
-
             let omegas_shoup = p.shoup_vec(&omegas);
-            let zetas_inv_shoup = p.shoup_vec(&zetas_inv);
 
             Some(Self {
                 p: p.clone(),
@@ -64,8 +61,6 @@ impl NttOperator {
                 size,
                 omegas: omegas.into_boxed_slice(),
                 omegas_shoup: omegas_shoup.into_boxed_slice(),
-                zetas_inv: zetas_inv.into_boxed_slice(),
-                zetas_inv_shoup: zetas_inv_shoup.into_boxed_slice(),
                 size_inv,
                 size_inv_shoup: p.shoup(size_inv),
             })
@@ -111,8 +106,8 @@ impl NttOperator {
 
         while l < self.size {
             for chunk in a.chunks_exact_mut(2 * l) {
-                let zeta_inv = self.zetas_inv[k];
-                let zeta_inv_shoup = self.zetas_inv_shoup[k];
+                let zeta_inv = self.p.p - self.omegas[self.size - 1 - k];
+                let zeta_inv_shoup = !self.omegas_shoup[self.size - 1 - k];
                 k += 1;
 
                 let (left, right) = chunk.split_at_mut(l);
@@ -203,8 +198,9 @@ impl NttOperator {
         while m > 0 {
             for i in 0..m {
                 let s = 2 * i * l;
-                let zeta_inv = unsafe { *self.zetas_inv.get_unchecked(k) };
-                let zeta_inv_shoup = unsafe { *self.zetas_inv_shoup.get_unchecked(k) };
+                let zeta_inv = self.p.p - unsafe { *self.omegas.get_unchecked(self.size - 1 - k) };
+                let zeta_inv_shoup =
+                    !unsafe { *self.omegas_shoup.get_unchecked(self.size - 1 - k) };
                 k += 1;
                 match l {
                     1 => {

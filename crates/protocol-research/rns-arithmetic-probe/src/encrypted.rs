@@ -314,27 +314,36 @@ impl Arithmetic {
             .collect()
     }
     /// The four tensor products of two ciphertexts' components: component
-    /// k / 2 of the first times component k % 2 of the second. A square's
-    /// two cross products are one product modulo every prime, so its two
-    /// sources and that product are computed once.
+    /// k / 2 of the first times component k % 2 of the second. Each source
+    /// is transformed when its first product needs it and dropped after its
+    /// last, so at most three are held. A square's two cross products are
+    /// one product modulo every prime, so its two sources and that product
+    /// are computed once.
     fn tensors(&self, first: &[Polynomial; 2], second: &[Polynomial; 2]) -> [Polynomial; 4] {
         let count = self.tensor_primes();
-        let square = std::ptr::eq(first, second);
-        let second: &[Polynomial] = if square { &[] } else { second };
-        let sources: Vec<Transformed> = first
-            .iter()
-            .chain(second)
-            .map(|polynomial| self.transformed(polynomial, count))
-            .collect();
-        let tensor = |left: usize, right: usize| {
-            let products = self.products(&sources[left], &sources[right]);
+        let tensor = |left: &Transformed, right: &Transformed| {
+            let products = self.products(left, right);
             self.lifted(&products, jobs::Lifted::Tensor)
         };
-        if square {
-            let cross = tensor(0, 1);
-            return [tensor(0, 0), cross.clone(), cross, tensor(1, 1)];
+        let first_constant = self.transformed(&first[0], count);
+        if std::ptr::eq(first, second) {
+            let first_linear = self.transformed(&first[1], count);
+            let constant = tensor(&first_constant, &first_constant);
+            let cross = tensor(&first_constant, &first_linear);
+            drop(first_constant);
+            let quadratic = tensor(&first_linear, &first_linear);
+            return [constant, cross.clone(), cross, quadratic];
         }
-        std::array::from_fn(|index| tensor(index / 2, 2 + index % 2))
+        let second_constant = self.transformed(&second[0], count);
+        let constant = tensor(&first_constant, &second_constant);
+        let second_linear = self.transformed(&second[1], count);
+        let first_cross = tensor(&first_constant, &second_linear);
+        drop(first_constant);
+        let first_linear = self.transformed(&first[1], count);
+        let quadratic = tensor(&first_linear, &second_linear);
+        drop(second_linear);
+        let second_cross = tensor(&first_linear, &second_constant);
+        [constant, first_cross, second_cross, quadratic]
     }
     /// Each gadget digit of the canonical coefficients' residues modulo the
     /// prime, untransformed, from the coefficients' little-endian words.

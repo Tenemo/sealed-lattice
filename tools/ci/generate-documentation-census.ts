@@ -3450,7 +3450,7 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(rnsArithmetic.multiplicationPrimes),
                 ],
                 [
-                    'Transform-table bytes per prime',
+                    'Pinned library transform-table bytes per prime',
                     formatCount(rnsArithmetic.tableBytesPerPrime),
                 ],
                 [
@@ -3460,6 +3460,10 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Auxiliary primes for exact integer products',
                     formatCount(rnsArithmetic.exactProductPrimes),
+                ],
+                [
+                    'Flat transform-plan table bytes per prime',
+                    formatCount(rnsArithmetic.flatTableBytesPerPrime),
                 ],
                 [
                     'Flat transform-table bytes',

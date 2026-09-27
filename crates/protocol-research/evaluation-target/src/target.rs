@@ -153,10 +153,12 @@ impl ClassifiedClosedInventory {
                     .map_err(|_| Error::Arithmetic)
             })
             .transpose()?;
-        // The instance grows once to what the evaluation plans to hold.
-        #[cfg(target_arch = "wasm32")]
+        // The instance grows once to what the evaluation plans to hold, and
+        // each helper reserves what it will hold.
         if let Some(engine) = &engine {
+            #[cfg(target_arch = "wasm32")]
             crate::scalar_allocator::plan_linear_memory(engine.planned_memory_bytes());
+            engine.reserve_helpers();
         }
         Ok(EvaluationSession {
             inventory: self,

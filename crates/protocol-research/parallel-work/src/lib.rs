@@ -38,8 +38,34 @@ pub fn session() -> u64 {
     SESSIONS.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Reserves memory for the helper's later jobs: it allocates the bytes its
+/// input names at once and frees them, so its memory grows once to hold
+/// what those jobs keep rather than in steps as they keep it.
+pub static RESERVE: Job = Job {
+    kind: 0x0401,
+    run: reserve,
+};
+fn reserve(input: &[u8]) -> Vec<u8> {
+    let bytes = u64::from_le_bytes(input.try_into().expect("Reserved length"));
+    let block: Vec<u8> = Vec::with_capacity(bytes as usize);
+    std::hint::black_box(&block);
+    Vec::new()
+}
+/// Has each helper reserve the bytes the function gives for its index.
+pub fn reserve_helpers(bytes: impl Fn(usize) -> usize) {
+    let tickets: Vec<Ticket> = (0..helpers())
+        .map(|helper| {
+            let length = (bytes(helper) as u64).to_le_bytes();
+            submit(&RESERVE, Some(helper), &[Part::Bytes(&length)], 0)
+        })
+        .collect();
+    for ticket in tickets {
+        assert!(ticket.wait().is_empty());
+    }
+}
+
 /// The jobs this crate defines.
-pub static JOBS: [&Job; 1] = [&stream::STREAM];
+pub static JOBS: [&Job; 2] = [&stream::STREAM, &RESERVE];
 
 /// The job of a kind among the listed ones.
 pub fn find(jobs: &[&'static Job], kind: u32) -> Option<&'static Job> {
