@@ -149,6 +149,7 @@ version = "0.0.0"
 dependencies = [
  "num-bigint",
  "num-traits",
+ "parallel-work",
  "registration-credentials",
  "setup-witness",
  "sha3 0.10.9",
@@ -591,6 +592,7 @@ dependencies = [
 name = "parallel-work"
 version = "0.0.0"
 dependencies = [
+ "sha3 0.10.9",
  "zeroize",
 ]
 
@@ -808,6 +810,7 @@ dependencies = [
  "fips204",
  "getrandom 0.3.3",
  "linked-release-proof",
+ "parallel-work",
  "registration-proof",
  "registration-verifier",
  "sha3 0.10.9",
@@ -860,6 +863,7 @@ dependencies = [
 name = "registration-verifier"
 version = "0.0.0"
 dependencies = [
+ "parallel-work",
  "proof-lookup-table",
  "registration-proof",
  "setup-stream-kernel",
@@ -1234,6 +1238,7 @@ dependencies = [
 name = "word-verifier"
 version = "0.0.0"
 dependencies = [
+ "parallel-work",
  "proof-lookup-table",
  "setup-stream-kernel",
  "sha3 0.10.9",

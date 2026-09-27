@@ -2,8 +2,7 @@ use super::{
     CHUNK_LIMIT, Element, Error, MODULUS, ONE, PolynomialStream, ZERO, arithmetic, fingerprint_in,
     jobs, minus, plus, power, query, times,
 };
-use parallel_work::{Pipeline, Ticket};
-use sha3::{Digest, Sha3_512};
+use parallel_work::{HashStream, Pipeline, Sponge, Ticket};
 use std::collections::VecDeque;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT, DEGREE, FHE_LIMB_BITS, FHE_SECRET_SUPPORT, Family,
@@ -706,7 +705,8 @@ pub struct SetupStatementStream {
     alpha: Element,
     indices: Vec<u32>,
     expected_digest: [u8; 64],
-    hasher: Sha3_512,
+    // The statement's digest, which a helper computes when there are helpers.
+    hasher: HashStream,
     header: Vec<u8>,
     consumed: usize,
     polynomial: usize,
@@ -740,7 +740,7 @@ impl SetupStatementStream {
             alpha,
             indices: indices.to_vec(),
             expected_digest,
-            hasher: Sha3_512::new(),
+            hasher: HashStream::new(Sponge::Sha3_512),
             header: Vec::new(),
             consumed: 0,
             polynomial: 0,
@@ -822,7 +822,7 @@ impl SetupStatementStream {
         {
             return Err(Error::Incomplete);
         }
-        let digest: [u8; 64] = self.hasher.finalize().into();
+        let digest = self.hasher.finish();
         if digest != self.expected_digest {
             return Err(Error::Binding);
         }
@@ -842,6 +842,7 @@ mod tests {
     use super::*;
     use num_bigint::{BigInt, BigUint, Sign};
     use num_traits::ToPrimitive;
+    use sha3::{Digest, Sha3_512};
 
     // Every size of the profile over sixteen-coefficient rings.
     fn reduced(profile: Profile) -> Layout {

@@ -1,6 +1,7 @@
 use crate::{
     Credential, Error,
-    foundation::{CanonicalItem, hash::StreamingFoundationTupleHash512},
+    foundation::CanonicalItem,
+    identity::IdentityHasher,
     roster::{RetainedContributionContext, RosterProposal},
 };
 use std::ops::RangeInclusive;
@@ -56,7 +57,7 @@ fn polynomials(profile: Profile) -> Vec<(usize, usize)> {
 /// Hashes a framed body. It does not verify the contribution relation,
 /// authorize a confirmation, or consume a participant's local signing lock.
 pub struct ContributionCommitmentHasher {
-    hash: Option<StreamingFoundationTupleHash512>,
+    hash: Option<IdentityHasher>,
     polynomials: Vec<(usize, usize)>,
     ordinal: usize,
     polynomial_offset: usize,
@@ -125,13 +126,12 @@ impl ContributionCommitmentHasher {
             CanonicalItem::fixed_bytes(*salt).map_err(|_| Error::Shape)?,
             CanonicalItem::variable_bytes(role).map_err(|_| Error::Shape)?,
         ];
-        let mut hash = StreamingFoundationTupleHash512::new_variable_bytes(
+        let mut hash = IdentityHasher::new(
             "sealed-lattice/setup-commitment/v1",
             &prefix,
             header.len() + polynomials.iter().map(|(_, bytes)| bytes).sum::<usize>() + proof_length,
-        )
-        .map_err(|_| Error::Shape)?;
-        hash.absorb(header).map_err(|_| Error::Shape)?;
+        )?;
+        hash.absorb(header)?;
         Ok(Self {
             hash: Some(hash),
             polynomials,
@@ -198,11 +198,11 @@ impl ContributionCommitmentHasher {
         self.hash
             .take()
             .ok_or(Error::Consumed)?
-            .finalize()
-            .map(|hash| ComputedContributionCommitment {
+            .finish()
+            .map(|digest| ComputedContributionCommitment {
                 proposal: self.proposal,
                 position: self.position,
-                digest: hash.into_bytes(),
+                digest,
                 salt: Zeroizing::new(std::mem::replace(&mut *self.salt, [0; SALT_BYTES])),
             })
             .map_err(|_| Error::Shape)

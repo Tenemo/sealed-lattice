@@ -7,10 +7,12 @@
 //! equals the one this instance computes alone.
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod stream;
 use std::{
     collections::VecDeque,
     sync::atomic::{AtomicU64, Ordering},
 };
+pub use stream::{HashStream, Sponge};
 use zeroize::Zeroizing;
 
 /// The most bytes one job's input or output holds, the bound on one buffer
@@ -33,6 +35,9 @@ static SESSIONS: AtomicU64 = AtomicU64::new(1);
 pub fn session() -> u64 {
     SESSIONS.fetch_add(1, Ordering::Relaxed)
 }
+
+/// The jobs this crate defines.
+pub static JOBS: [&Job; 1] = [&stream::STREAM];
 
 /// The job of a kind among the listed ones.
 pub fn find(jobs: &[&'static Job], kind: u32) -> Option<&'static Job> {

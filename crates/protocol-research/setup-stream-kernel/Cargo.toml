@@ -12,9 +12,9 @@ crate-type = ["rlib"]
 
 [dependencies]
 parallel-work = { path = "../parallel-work" }
-sha3 = "=0.10.9"
 supported-profile = { path = "../supported-profile" }
 
 [dev-dependencies]
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
+sha3 = "=0.10.9"

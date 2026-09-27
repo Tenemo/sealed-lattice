@@ -6,6 +6,7 @@ publish = false
 autobins = false
 
 [dependencies]
+sha3 = "=0.10.9"
 zeroize = "=1.8.2"
 
 [lib]

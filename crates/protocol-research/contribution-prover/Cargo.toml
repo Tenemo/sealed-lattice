@@ -10,6 +10,7 @@ autobins = false
 crate-type = ["rlib"]
 
 [dependencies]
+parallel-work = { path = "../parallel-work" }
 registration-credentials = { path = "../registration-credentials", default-features = false }
 setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }

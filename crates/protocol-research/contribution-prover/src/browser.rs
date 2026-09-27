@@ -1,5 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::{Signed, Zero};
+use parallel_work::{HashStream, Sponge};
 use registration_credentials::{
     registration::{KEY_BYTES, VerifiedRegistration},
     roster::{RosterProposal, contribution_role_from_context},
@@ -13,7 +14,7 @@ use std::{cell::RefCell, sync::Arc};
 use supported_profile::{DEGREE, Profile, relation::setup_relation, share_modulus};
 use word_proof::{
     bridge::{Prover, first_checkpoint},
-    transcript::context_hasher,
+    transcript::context_stream,
 };
 use zeroize::Zeroize;
 
@@ -22,8 +23,10 @@ const CHUNK: usize = 1 << 20;
 const INPUT_BYTES: usize = 1_572_864;
 struct PublicOutput {
     profile: Profile,
-    hash: Sha3_512,
-    context: Sha3_512,
+    // The statement's digest and context, which helpers hash when there are
+    // helpers.
+    hash: HashStream,
+    context: HashStream,
     next: usize,
     total: usize,
     offset: usize,
@@ -33,8 +36,8 @@ impl PublicOutput {
     fn new(profile: Profile, role: &[u8]) -> Self {
         let mut output = Self {
             profile,
-            hash: Sha3_512::new(),
-            context: context_hasher(&setup_relation(profile), role),
+            hash: HashStream::new(Sponge::Sha3_512),
+            context: context_stream(&setup_relation(profile), role),
             next: 0,
             total: 0,
             offset: 0,
@@ -200,8 +203,8 @@ impl Work {
                 Prover::from_generated(
                     profile,
                     &self.role,
-                    public.hash.finalize().into(),
-                    public.context.finalize().into(),
+                    public.hash.finish(),
+                    public.context.finish(),
                     profile.setup_statement_header(),
                     columns,
                 )

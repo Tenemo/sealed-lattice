@@ -7,6 +7,7 @@ use ballot_encryption::{
     packing::PackingMatrix,
 };
 use num_bigint::{BigInt, Sign};
+use parallel_work::{HashStream, Sponge};
 use setup_stream_kernel::PolynomialStream;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
 use sha3::{Digest, Sha3_512};
@@ -454,7 +455,8 @@ pub struct StatementStream {
     alpha: Element,
     queries: Vec<u32>,
     statement_bytes: usize,
-    hash: Sha3_512,
+    // The statement's digest, which a helper computes when there are helpers.
+    hash: HashStream,
     header: Vec<u8>,
     builder: Option<Builder>,
     parser: Option<PolynomialStream>,
@@ -484,7 +486,7 @@ impl StatementStream {
             alpha,
             queries: queries.to_vec(),
             statement_bytes: ballot_relation(profile).statement_bytes(),
-            hash: Sha3_512::new(),
+            hash: HashStream::new(Sponge::Sha3_512),
             header: Vec::new(),
             builder: None,
             parser: None,
@@ -554,7 +556,7 @@ impl StatementStream {
             || self.consumed != self.statement_bytes
             || self.polynomial != POLYNOMIALS
             || self.parser.is_some()
-            || <[u8; 64]>::from(self.hash.finalize()) != self.expected
+            || self.hash.finish() != self.expected
         {
             return Err(Error::Binding);
         }

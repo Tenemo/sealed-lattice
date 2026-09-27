@@ -24,6 +24,7 @@ pub extern "C" fn parallel_input(length: usize) -> usize {
 pub extern "C" fn parallel_run(kind: u32) -> u32 {
     helper::run(
         &[
+            &parallel_work::JOBS,
             &registration_proof::jobs::JOBS,
             &setup_stream_kernel::JOBS,
             &rns_arithmetic_probe::JOBS,

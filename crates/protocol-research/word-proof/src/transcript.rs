@@ -2,6 +2,7 @@ use crate::{
     field::{Element, MODULUS, ZERO},
     parameters::*,
 };
+use parallel_work::{HashStream, Sponge};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -50,8 +51,21 @@ pub fn parameters(relation: &Relation) -> Vec<u8> {
 /// appends.
 pub fn context_hasher(relation: &Relation, role: &[u8]) -> Sha3_512 {
     let mut state = Sha3_512::new();
-    part(&mut state, b"bounded-proof/statement");
+    context_prefix(relation, role, |bytes| Digest::update(&mut state, bytes));
+    state
+}
+/// The same context as a stream, which a helper hashes when there are
+/// helpers.
+pub fn context_stream(relation: &Relation, role: &[u8]) -> HashStream {
+    let mut stream = HashStream::new(Sponge::Sha3_512);
+    context_prefix(relation, role, |bytes| stream.update(bytes));
+    stream
+}
+// The context's bytes before the statement: each part after its length,
+// then the statement's length.
+fn context_prefix(relation: &Relation, role: &[u8], mut absorb: impl FnMut(&[u8])) {
     for value in [
+        b"bounded-proof/statement".as_slice(),
         role,
         relation.tag,
         &2u128.to_le_bytes(),
@@ -60,13 +74,10 @@ pub fn context_hasher(relation: &Relation, role: &[u8]) -> Sha3_512 {
         &parameters(relation),
         &(MODULUS - 1).to_le_bytes(),
     ] {
-        part(&mut state, value);
+        absorb(&(value.len() as u32).to_le_bytes());
+        absorb(value);
     }
-    Digest::update(
-        &mut state,
-        (relation.statement_bytes() as u32).to_le_bytes(),
-    );
-    state
+    absorb(&(relation.statement_bytes() as u32).to_le_bytes());
 }
 pub struct Transcript {
     pub role: Vec<u8>,

@@ -3,6 +3,7 @@ use crate::arithmetic::{
     subtract as subtract_base,
 };
 use crate::statement::StatementOutput;
+use parallel_work::{HashStream, Sponge};
 use sha3::{
     Digest, Sha3_512, Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -129,6 +130,10 @@ fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
 fn part(hash: &mut Sha3_512, bytes: &[u8]) {
     Digest::update(hash, (bytes.len() as u32).to_le_bytes());
     Digest::update(hash, bytes);
+}
+fn stream_part(stream: &mut HashStream, bytes: &[u8]) {
+    stream.update(&(bytes.len() as u32).to_le_bytes());
+    stream.update(bytes);
 }
 fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     let mut hash = Shake256::default();
@@ -447,7 +452,8 @@ pub struct Verifier<S> {
     header: Header,
     challenges: Challenges,
     statement: Option<S>,
-    context_hash: Sha3_512,
+    // The statement's context, which a helper hashes when there are helpers.
+    context_hash: Option<HashStream>,
     operator: Option<StatementOutput>,
     statement_done: bool,
     indices: Vec<usize>,
@@ -486,8 +492,8 @@ impl<S: Statement> Verifier<S> {
         let indices = requested(&challenges.queries, D);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
         let statement = open_statement(challenges.alpha, &selected).ok_or(Refusal::Context)?;
-        let mut context_hash = Sha3_512::new();
-        part(&mut context_hash, b"bounded-proof/statement");
+        let mut context_hash = HashStream::new(Sponge::Sha3_512);
+        stream_part(&mut context_hash, b"bounded-proof/statement");
         for value in [
             role,
             relation.tag,
@@ -497,19 +503,16 @@ impl<S: Statement> Verifier<S> {
             &context_parameters(&relation),
             &(MODULUS - 1).to_le_bytes(),
         ] {
-            part(&mut context_hash, value);
+            stream_part(&mut context_hash, value);
         }
-        Digest::update(
-            &mut context_hash,
-            (relation.statement_bytes as u32).to_le_bytes(),
-        );
+        context_hash.update(&(relation.statement_bytes as u32).to_le_bytes());
         Ok(Self {
             shape,
             role: role.to_vec(),
             header,
             challenges,
             statement: Some(statement),
-            context_hash,
+            context_hash: Some(context_hash),
             operator: None,
             statement_done: false,
             indices,
@@ -534,7 +537,10 @@ impl<S: Statement> Verifier<S> {
             self.failed = true;
             return Err(Refusal::Length);
         }
-        Digest::update(&mut self.context_hash, bytes);
+        self.context_hash
+            .as_mut()
+            .ok_or(Refusal::Stage)?
+            .update(bytes);
         if !self.statement.as_mut().ok_or(Refusal::Stage)?.push(bytes) {
             self.failed = true;
             return Err(Refusal::Encoding);
@@ -545,7 +551,7 @@ impl<S: Statement> Verifier<S> {
         if self.failed || self.statement_done {
             return Err(Refusal::Stage);
         }
-        let computed: [u8; 64] = self.context_hash.clone().finalize().into();
+        let computed = self.context_hash.take().ok_or(Refusal::Stage)?.finish();
         if computed != self.header.context {
             self.failed = true;
             return Err(Refusal::Context);
