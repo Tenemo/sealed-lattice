@@ -297,7 +297,7 @@ export const sealRoot = async (
         ),
     );
 
-const openRoot = async (
+export const openRoot = async (
     key: CryptoKey,
     generation: number,
     associatedData: Uint8Array,

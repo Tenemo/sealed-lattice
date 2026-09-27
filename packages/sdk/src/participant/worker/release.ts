@@ -12,6 +12,7 @@ import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
+import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
@@ -551,7 +552,8 @@ export const advanceRelease = async (
     return true;
 };
 
-// Delivers the signed release body and its envelope packet.
+// Delivers the signed release body and then its envelope packet, inspecting
+// the retained authority around every transfer.
 export const publishRelease = async (
     session: ReleaseSession,
     relay: PublicRelay,
@@ -559,19 +561,30 @@ export const publishRelease = async (
     const { state } = session;
     if (state === undefined || generationOf(session) < releasePhase.signed)
         return;
-    const { profile } = session.close.participant.context;
+    const { context, root } = session.close.participant;
     const position = String(session.close.records.position);
-    for (let index = 0; index < state.bodyKeys.length; index++)
-        await publishChunk(
-            relay,
-            completionDirectory + 'release-' + position + '.bin',
-            index * profile.release.recordBytes,
-            await openReleaseRecord(session, index),
+    const delivery = await openDelivery(context, root, {
+        release: state.bodyKeys.length,
+    });
+    for (let index = 0; index < state.bodyKeys.length; index++) {
+        const bytes = await openReleaseRecord(session, index);
+        await delivery.transfer(
+            () =>
+                publishChunk(
+                    relay,
+                    completionDirectory + 'release-' + position + '.bin',
+                    index * context.profile.release.recordBytes,
+                    bytes,
+                ),
+            bytes,
         );
-    await publishRecord(
-        relay,
-        completionDirectory + 'release-envelope-' + position + '.bin',
-        concatenate(state.envelope, state.signature),
+    }
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            completionDirectory + 'release-envelope-' + position + '.bin',
+            concatenate(state.envelope, state.signature),
+        ),
     );
 };
 

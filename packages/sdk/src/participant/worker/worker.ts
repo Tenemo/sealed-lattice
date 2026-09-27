@@ -40,6 +40,7 @@ import {
     resumeParticipant,
     storedConfirmation,
 } from './contribution.js';
+import { openDelivery } from './delivery.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { participantRuntimeLabel } from './identity.js';
@@ -247,48 +248,36 @@ const transcriptReference = (value: unknown) => {
 };
 
 // Publishes every public record the current root holds: the registration
-// record, and the organizer's poll, proposal and proposal signature.
+// record, and the organizer's poll, proposal and proposal signature. The
+// retained authority is inspected around every transfer.
 const publishRecords = async (
     context: ParticipantContext,
     relay: PublicRelay,
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
 ) => {
-    const read = (kind: number) => readDataKind(context, root.manifest, kind);
     const id = hexadecimal(enrollment.bodyDigest);
-    for (const [kind, file] of [
-        [dataKind.publicKey, registrationFile.publicKey],
-        [dataKind.proof, registrationFile.proof],
-        [dataKind.header, registrationFile.header],
-        [dataKind.signature, registrationFile.signature],
-    ] as const)
-        await publishRecord(
-            relay,
-            registrationPath(id, file),
-            await read(kind),
+    const files: [number, string][] = [
+        [dataKind.publicKey, registrationPath(id, registrationFile.publicKey)],
+        [dataKind.proof, registrationPath(id, registrationFile.proof)],
+        [dataKind.header, registrationPath(id, registrationFile.header)],
+        [dataKind.signature, registrationPath(id, registrationFile.signature)],
+    ];
+    if (enrollment.isOrganizer) {
+        files.push(
+            [dataKind.pollDefinition, 'poll-definition.bin'],
+            [dataKind.pollSignature, 'poll-signature.bin'],
         );
-    if (!enrollment.isOrganizer) return;
-    await publishRecord(
-        relay,
-        'poll-definition.bin',
-        await read(dataKind.pollDefinition),
-    );
-    await publishRecord(
-        relay,
-        'poll-signature.bin',
-        await read(dataKind.pollSignature),
-    );
-    if (root.head.generation >= 3) {
-        await publishRecord(
-            relay,
-            'proposal.bin',
-            await read(dataKind.proposal),
-        );
-        await publishRecord(
-            relay,
-            'proposal-signature.bin',
-            await read(dataKind.proposalSignature),
-        );
+        if (root.head.generation >= 3)
+            files.push(
+                [dataKind.proposal, 'proposal.bin'],
+                [dataKind.proposalSignature, 'proposal-signature.bin'],
+            );
+    }
+    const delivery = await openDelivery(context, root);
+    for (const [kind, name] of files) {
+        const record = await readDataKind(context, root.manifest, kind);
+        await delivery.transfer(() => publishRecord(relay, name, record));
     }
 };
 

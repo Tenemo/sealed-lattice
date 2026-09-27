@@ -15,6 +15,7 @@ import {
     sessionInput,
 } from './context.js';
 import type { ProfileContext } from './context.js';
+import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
@@ -1772,26 +1773,30 @@ export const openedInventory = async (session: ContributionSession) => {
     return { inventory, identity: fields[1].slice() };
 };
 
+// Publishes the signed confirmation, inspecting the retained authority around
+// every transfer.
 export const publishConfirmation = async (
     session: ParticipantSession,
     relay: PublicRelay,
     confirmation: SignedPacket,
 ) => {
     const directory = contributionDirectory(session.records.position);
-    await publishRecord(
-        relay,
-        directory + 'confirmation.bin',
-        confirmation.body,
+    const delivery = await openDelivery(session.context, session.root);
+    await delivery.transfer(() =>
+        publishRecord(relay, directory + 'confirmation.bin', confirmation.body),
     );
-    await publishRecord(
-        relay,
-        directory + 'confirmation-signature.bin',
-        confirmation.signature,
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            directory + 'confirmation-signature.bin',
+            confirmation.signature,
+        ),
     );
 };
 
 // Publishes the opening and then the body it opens, under the names the
-// native records use.
+// native records use, inspecting the retained authority around every
+// transfer.
 export const publishOpening = async (
     session: ContributionSession,
     relay: PublicRelay,
@@ -1799,31 +1804,38 @@ export const publishOpening = async (
 ) => {
     const { profile } = session.context;
     const directory = contributionDirectory(session.state.position);
-    await publishRecord(relay, directory + 'opening.bin', opening.body);
-    await publishRecord(
-        relay,
-        directory + 'opening-signature.bin',
-        opening.signature,
+    const delivery = await openDelivery(session.context, session.root);
+    await delivery.transfer(() =>
+        publishRecord(relay, directory + 'opening.bin', opening.body),
     );
-    await publishRecord(
-        relay,
-        directory + 'body-header.bin',
-        bodyHeader(proofLength(session.state, profile)),
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            directory + 'opening-signature.bin',
+            opening.signature,
+        ),
+    );
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            directory + 'body-header.bin',
+            bodyHeader(proofLength(session.state, profile)),
+        ),
     );
     for (const record of session.state.publicRecords) {
         const bytes = await openRecord(session, record);
-        try {
-            await publishChunk(
-                relay,
-                directory +
-                    (record.object === proofObject(profile)
-                        ? 'proof.bin'
-                        : polynomialFile(record.object - 1)),
-                record.offset,
-                bytes,
-            );
-        } finally {
-            bytes.fill(0);
-        }
+        await delivery.transfer(
+            () =>
+                publishChunk(
+                    relay,
+                    directory +
+                        (record.object === proofObject(profile)
+                            ? 'proof.bin'
+                            : polynomialFile(record.object - 1)),
+                    record.offset,
+                    bytes,
+                ),
+            bytes,
+        );
     }
 };

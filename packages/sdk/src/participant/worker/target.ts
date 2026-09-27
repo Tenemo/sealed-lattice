@@ -19,6 +19,7 @@ import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
+import { openDelivery } from './delivery.js';
 import { moduleChunkBytes, readKernel, writeChunkInput } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -669,29 +670,33 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     return { ballotStatus: ballotStatuses[code], usableBallots, validBallots };
 };
 
-// Delivers the signed target vote, and the organizer the target body.
+// Delivers the signed target vote, and the organizer the target body,
+// inspecting the retained authority around every transfer.
 export const publishTarget = async (
     close: CloseSession,
     relay: PublicRelay,
 ) => {
     const state = resumeTarget(close);
-    if (
-        state === undefined ||
-        close.participant.root.head.generation < targetPhase.signed
-    )
+    const { context, root } = close.participant;
+    if (state === undefined || root.head.generation < targetPhase.signed)
         return;
-    await publishRecord(
-        relay,
-        completionDirectory +
-            'target-vote-' +
-            String(close.records.position) +
-            '.bin',
-        state.vote,
+    const delivery = await openDelivery(context, root);
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            completionDirectory +
+                'target-vote-' +
+                String(close.records.position) +
+                '.bin',
+            state.vote,
+        ),
     );
     if (close.organizer)
-        await publishRecord(
-            relay,
-            completionDirectory + 'target.bin',
-            state.body,
+        await delivery.transfer(() =>
+            publishRecord(
+                relay,
+                completionDirectory + 'target.bin',
+                state.body,
+            ),
         );
 };

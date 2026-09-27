@@ -36,6 +36,7 @@ import type {
     ContributionSession,
     ParticipantSession,
 } from './contribution.js';
+import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import { operationSeedBytes, readKernel, seededRandomness } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
@@ -565,33 +566,45 @@ export const isSignedBallot = (session: BallotSession) =>
 
 // Delivers the signed ballot from its authenticated records, then the
 // pointer that names it, so a pointer never names an incomplete submission.
+// The retained authority is inspected around every transfer.
 export const publishBallot = async (
     session: BallotSession,
     relay: PublicRelay,
 ) => {
     if (!isSignedBallot(session))
         throw new Error('No signed ballot is retained.');
+    const { context, root } = session.participant;
     const identity = custodyIdentity(
-        session.participant.context.kernel,
+        context.kernel,
         custodyPurpose.envelope,
         session.state.envelope,
     );
     const { position } = session.records;
     const directory = submissionDirectory(position, identity);
-    await publishRecord(
-        relay,
-        directory + 'envelope.bin',
-        session.state.envelope,
+    const delivery = await openDelivery(context, root);
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            directory + 'envelope.bin',
+            session.state.envelope,
+        ),
     );
-    await publishRecord(
-        relay,
-        directory + 'signature.bin',
-        session.state.signature,
+    await delivery.transfer(() =>
+        publishRecord(
+            relay,
+            directory + 'signature.bin',
+            session.state.signature,
+        ),
     );
     let offset = 0;
     await readBallotBody(session, async (bytes) => {
-        await publishChunk(relay, directory + 'body.bin', offset, bytes);
+        await delivery.transfer(
+            () => publishChunk(relay, directory + 'body.bin', offset, bytes),
+            bytes,
+        );
         offset += bytes.length;
     });
-    await publishRecord(relay, submissionPointer(position), identity);
+    await delivery.transfer(() =>
+        publishRecord(relay, submissionPointer(position), identity),
+    );
 };

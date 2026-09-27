@@ -35,6 +35,7 @@ import { PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
+import { openDelivery } from './delivery.js';
 import { readKernel } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -1053,33 +1054,30 @@ export const advanceClose = async (
         await propose(session, prepared);
 };
 
-// Retransmits the retained signed close messages.
+// Retransmits the retained signed close messages, inspecting the retained
+// authority around every transfer.
 export const publishClose = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
     const generation = generationOf(session);
     const { state } = session;
+    const messages: [string, Uint8Array][] = [];
     if (session.organizer && generation >= closePhase.locked)
-        await publishRecord(
-            relay,
-            closeDirectory + 'intent.bin',
-            state.intentPacket,
-        );
+        messages.push(['intent.bin', state.intentPacket]);
     if (generation >= closePhase.responded)
-        await publishRecord(
-            relay,
-            closeDirectory +
-                'response-' +
-                String(session.records.position) +
-                '.bin',
+        messages.push([
+            'response-' + String(session.records.position) + '.bin',
             state.responsePacket,
-        );
+        ]);
     if (generation === closePhase.proposed)
-        await publishRecord(
-            relay,
-            closeDirectory + 'proposal.bin',
-            state.proposalPacket,
+        messages.push(['proposal.bin', state.proposalPacket]);
+    if (messages.length === 0) return;
+    const { context, root } = session.participant;
+    const delivery = await openDelivery(context, root);
+    for (const [name, message] of messages)
+        await delivery.transfer(() =>
+            publishRecord(relay, closeDirectory + name, message),
         );
 };
 
