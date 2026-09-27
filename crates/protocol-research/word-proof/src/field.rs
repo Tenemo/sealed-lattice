@@ -65,6 +65,10 @@ pub fn encode(value: Element) -> [u8; 48] {
     }
     bytes
 }
+/// The element of 48 encoded bytes, which the encoder produced.
+pub fn decode(bytes: &[u8]) -> Element {
+    std::array::from_fn(|i| u128::from_le_bytes(bytes[16 * i..16 * (i + 1)].try_into().unwrap()))
+}
 
 pub struct Transform {
     pub length: usize,
@@ -175,6 +179,13 @@ fn selected_forward<T: Copy>(
 }
 
 impl Transform {
+    /// The transform of a length, built once and kept.
+    pub fn cached(length: usize) -> &'static Self {
+        static TRANSFORMS: [std::sync::OnceLock<Transform>; 21] =
+            [const { std::sync::OnceLock::new() }; 21];
+        assert!(length.is_power_of_two());
+        TRANSFORMS[length.ilog2() as usize].get_or_init(|| Self::new(length))
+    }
     pub fn new(length: usize) -> Self {
         let root = root(length);
         Self {

@@ -28,6 +28,9 @@ ballot-encryption = { path = "../ballot-encryption", default-features = false }
 setup-aggregate = { path = "../setup-aggregate", default-features = false, features = ["bridge"] }
 evaluation-target = { path = "../evaluation-target", features = ["browser"] }
 linked-release-proof = { path = "../linked-release-proof", default-features = false }
+parallel-work = { path = "../parallel-work" }
+rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
+setup-stream-kernel = { path = "../setup-stream-kernel" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "=0.3.3"

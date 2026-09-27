@@ -1,6 +1,7 @@
 // Summarizes the V8 CPU samples a Chrome trace recorded across its page and
 // worker threads: the time each function spent at the top of a sampled stack
-// and anywhere on it, counting a recursive function once per sample.
+// and anywhere on it, counting a recursive function once per sample, and the
+// same times within each sampled thread.
 type CallFrame = Readonly<{ functionName?: string; url?: string }>;
 type ProfileNode = Readonly<{
     id: number;
@@ -22,11 +23,25 @@ type ProfileChunk = Readonly<{
     }>;
 }>;
 
+type RankedFunctions = readonly Readonly<{
+    name: string;
+    milliseconds: number;
+}>[];
+
 export type CpuProfileSummary = Readonly<{
     sampledMilliseconds: number;
-    self: readonly Readonly<{ name: string; milliseconds: number }>[];
-    inclusive: readonly Readonly<{ name: string; milliseconds: number }>[];
+    self: RankedFunctions;
+    inclusive: RankedFunctions;
+    // Each thread's samples, the busiest first.
+    threads: readonly Readonly<{
+        sampledMilliseconds: number;
+        self: RankedFunctions;
+        inclusive: RankedFunctions;
+    }>[];
 }>;
+
+// The functions listed for each thread.
+const threadEntries = 40;
 
 // Samples that name no work.
 const idleFrames = new Set(['(root)', '(idle)', '(program)']);
@@ -74,8 +89,19 @@ export const summarizeCpuTrace = (
     }
     const self = new Map<string, number>();
     const inclusive = new Map<string, number>();
+    const threads: {
+        sampled: number;
+        self: Map<string, number>;
+        inclusive: Map<string, number>;
+    }[] = [];
     let sampled = 0;
-    for (const { nodes, samples, deltas } of profiles.values())
+    for (const { nodes, samples, deltas } of profiles.values()) {
+        const thread = {
+            sampled: 0,
+            self: new Map<string, number>(),
+            inclusive: new Map<string, number>(),
+        };
+        threads.push(thread);
         for (let index = 0; index < samples.length; index++) {
             // A sample lasts until the next one.
             const microseconds = Math.max(0, deltas[index + 1] ?? 0);
@@ -83,8 +109,13 @@ export const summarizeCpuTrace = (
             if (leaf === undefined || idleFrames.has(frameName(leaf.callFrame)))
                 continue;
             sampled += microseconds;
+            thread.sampled += microseconds;
             const leafName = frameName(leaf.callFrame);
             self.set(leafName, (self.get(leafName) ?? 0) + microseconds);
+            thread.self.set(
+                leafName,
+                (thread.self.get(leafName) ?? 0) + microseconds,
+            );
             const onStack = new Set<string>();
             for (
                 let node: ProfileNode | undefined = leaf;
@@ -98,11 +129,24 @@ export const summarizeCpuTrace = (
                 if (idleFrames.has(name) || onStack.has(name)) continue;
                 onStack.add(name);
                 inclusive.set(name, (inclusive.get(name) ?? 0) + microseconds);
+                thread.inclusive.set(
+                    name,
+                    (thread.inclusive.get(name) ?? 0) + microseconds,
+                );
             }
         }
+    }
     return {
         sampledMilliseconds: Math.round(sampled) / 1000,
         self: ranked(self, limit),
         inclusive: ranked(inclusive, limit),
+        threads: threads
+            .filter((thread) => thread.sampled > 0)
+            .sort((left, right) => right.sampled - left.sampled)
+            .map((thread) => ({
+                sampledMilliseconds: Math.round(thread.sampled) / 1000,
+                self: ranked(thread.self, threadEntries),
+                inclusive: ranked(thread.inclusive, threadEntries),
+            })),
     };
 };

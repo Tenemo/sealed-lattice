@@ -44,6 +44,12 @@ import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { participantRuntimeLabel } from './identity.js';
 import { instantiateParticipantKernel } from './kernel.js';
+import {
+    helperRole,
+    listenAsHelper,
+    startParallelHelpers,
+} from './parallel.js';
+import type { ParallelHelpers } from './parallel.js';
 import { publishRecord, readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
 import { releasePhase } from './release-state.js';
@@ -816,7 +822,10 @@ const execute = async (
     };
 };
 
-const run = async (command: WorkerCommand): Promise<WorkerResult> => {
+const run = async (
+    command: WorkerCommand,
+    helperPorts: readonly MessagePort[],
+): Promise<WorkerResult> => {
     if (
         !isSecureContext ||
         typeof navigator.locks !== 'object' ||
@@ -827,6 +836,7 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
         return { status: 'refused' };
     const relay: PublicRelay = { base: command.relay };
     let database: IDBDatabase | undefined;
+    let helpers: ParallelHelpers | undefined;
     let authorityStarted = false;
     try {
         const moduleBytes = await fetchModule(
@@ -837,14 +847,17 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
         if (hexadecimal(runtime) !== command.identity.runtime)
             return { status: 'refused' };
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
+        const started = startParallelHelpers(module, helperPorts);
         database = await openParticipantDatabase(command.namespace);
+        helpers = await started;
         const opened = database;
+        const parallel = helpers;
         return await navigator.locks.request(
             namespacedName('sealed-lattice-participant', command.namespace),
             async (): Promise<WorkerResult> => {
                 try {
                     const { kernel, handlers } =
-                        await instantiateParticipantKernel(module);
+                        await instantiateParticipantKernel(module, parallel);
                     return await execute(
                         {
                             namespace: command.namespace,
@@ -889,12 +902,19 @@ const run = async (command: WorkerCommand): Promise<WorkerResult> => {
             reason: error instanceof Error ? error.message : String(error),
         };
     } finally {
+        helpers?.stop();
         database?.close();
     }
 };
 
-self.onmessage = (event: MessageEvent<WorkerCommand>) => {
-    void run(event.data).then(
+self.onmessage = (event: MessageEvent<WorkerCommand | typeof helperRole>) => {
+    if (event.data === helperRole) {
+        self.onmessage = null;
+        listenAsHelper(event.ports[0]);
+        self.postMessage(true);
+        return;
+    }
+    void run(event.data, event.ports).then(
         (result) => self.postMessage(result),
         (error: unknown) =>
             self.postMessage({

@@ -4,7 +4,6 @@ use crate::{
     transcript::{Transcript, challenge},
     tree::Tree,
 };
-use stateful_sha3::Digest;
 use zeroize::{Zeroize, Zeroizing};
 
 pub struct Layer {
@@ -77,13 +76,11 @@ impl Fri {
                 }
                 Transform::new(length).extension(&mut values, false);
                 let mut tree = Tree::new(role, 3 + round, length, 48);
-                let prefix = tree.leaf_hash_prefix();
-                for (index, value) in values.iter().enumerate() {
-                    let mut hasher = tree.leaf_hasher(index, &prefix);
-                    hasher.update(field::encode(*value));
-                    tree.leaf(index, hasher);
+                let mut rows = Zeroizing::new(Vec::with_capacity(48 * length));
+                for value in values.iter() {
+                    rows.extend(field::encode(*value));
                 }
-                tree.finish();
+                tree.hash_rows(&rows);
                 transcript.respond(&[&tree.root()]);
                 layers.push(Layer {
                     tree,

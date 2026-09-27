@@ -3,12 +3,20 @@ use num_bigint::BigUint;
 #[cfg(any(test, feature = "numerical-probes"))]
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
+use std::{
+    cell::{OnceCell, RefCell},
+    rc::Rc,
+};
 use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
 
+#[path = "arithmetic-jobs.rs"]
+mod jobs;
 #[path = "ranking.rs"]
 pub mod ranking;
 #[path = "word-arithmetic.rs"]
 mod word_arithmetic;
+
+pub use jobs::JOBS;
 
 #[cfg(any(test, feature = "numerical-probes"))]
 use word_arithmetic::words_of;
@@ -68,6 +76,7 @@ fn digit_words(coefficient: &[u64], start: usize, bits: usize, output: &mut [u64
 }
 
 struct Arithmetic {
+    profile: Profile,
     degree: usize,
     words: usize,
     gadget_length: usize,
@@ -84,7 +93,9 @@ struct Arithmetic {
     /// Each prime's residue of the negated ciphertext modulus, which a
     /// centered negative coefficient adds.
     negated_modulus: Vec<u64>,
-    transforms: Vec<NttOperator>,
+    /// Each prime's transform, built when first used, so an instance that
+    /// runs only some primes' jobs holds only their tables.
+    transforms: Vec<OnceCell<NttOperator>>,
     key_primes: usize,
     external_primes: usize,
     key_lift: Lift,
@@ -134,10 +145,7 @@ impl Arithmetic {
             .iter()
             .map(|prime| Modulus::new(*prime).unwrap())
             .collect();
-        let transforms = reductions
-            .iter()
-            .map(|prime| NttOperator::new(prime, degree).unwrap())
-            .collect();
+        let transforms = reductions.iter().map(|_| OnceCell::new()).collect();
         let word_powers = reductions
             .iter()
             .map(|prime| {
@@ -161,6 +169,7 @@ impl Arithmetic {
             )
         };
         Self {
+            profile,
             degree,
             words,
             gadget_length,
@@ -187,6 +196,20 @@ impl Arithmetic {
     }
     fn tensor_primes(&self) -> usize {
         self.tensor_lift.count
+    }
+    fn transform(&self, prime: usize) -> &NttOperator {
+        self.transforms[prime]
+            .get_or_init(|| NttOperator::new(&self.reductions[prime], self.degree).unwrap())
+    }
+    /// The lift of a plaintext or secret product, of an external product or
+    /// of a ciphertext tensor.
+    fn lift(&self, lifted: usize) -> &Lift {
+        match lifted {
+            0 => &self.key_lift,
+            1 => &self.external_lift,
+            2 => &self.tensor_lift,
+            _ => panic!("Lift"),
+        }
     }
     fn polynomial_words(&self) -> usize {
         self.degree * self.words
@@ -266,53 +289,8 @@ impl Arithmetic {
         }
         output
     }
-    fn finish(&self, mut products: Vec<Vec<u64>>, lift: &Lift) -> Polynomial {
-        assert_eq!(products.len(), lift.count);
-        for (index, values) in products.iter_mut().enumerate() {
-            self.transforms[index].backward(values);
-        }
-        let mut output = self.zero();
-        for (position, coefficient) in output.chunks_exact_mut(self.words).enumerate() {
-            lift.coefficient(
-                &products,
-                position,
-                &self.reductions,
-                &self.wide,
-                coefficient,
-            );
-        }
-        output
-    }
-    fn multiply(&self, left: &[u64], right: &[u64], tensor: bool) -> Polynomial {
-        let count = if tensor {
-            self.tensor_primes()
-        } else {
-            self.key_primes
-        };
-        let mut products = self.transformed(left, count);
-        for (index, product) in products.iter_mut().enumerate() {
-            let mut second = self.projections(right, index..index + 1).remove(0);
-            self.transforms[index].forward(&mut second);
-            for (first, second) in product.iter_mut().zip(second) {
-                *first = self.reductions[index].mul(*first, second);
-            }
-        }
-        self.finish(
-            products,
-            if tensor {
-                &self.tensor_lift
-            } else {
-                &self.key_lift
-            },
-        )
-    }
-    fn transformed(&self, value: &[u64], count: usize) -> Transformed {
-        let mut projected = self.projections(value, 0..count);
-        for (values, transform) in projected.iter_mut().zip(&self.transforms) {
-            transform.forward(values);
-        }
-        projected
-    }
+    /// The four tensor products of two ciphertexts' components: component
+    /// k / 2 of the first times component k % 2 of the second.
     fn tensors(&self, first: &[Polynomial; 2], second: &[Polynomial; 2]) -> [Polynomial; 4] {
         let count = self.tensor_primes();
         let sources: Vec<Transformed> = first
@@ -321,67 +299,28 @@ impl Arithmetic {
             .map(|polynomial| self.transformed(polynomial, count))
             .collect();
         std::array::from_fn(|index| {
-            let left = index / 2;
-            let right = 2 + index % 2;
-            let products = (0..count)
-                .map(|prime| {
-                    sources[left][prime]
-                        .iter()
-                        .zip(&sources[right][prime])
-                        .map(|(left, right)| self.reductions[prime].mul(*left, *right))
-                        .collect()
-                })
-                .collect();
-            self.finish(products, &self.tensor_lift)
+            let products = self.products(&sources[index / 2], &sources[2 + index % 2]);
+            self.lifted(&products, jobs::Lifted::Tensor)
         })
     }
-    /// Each gadget digit of the canonical coefficients, transformed modulo
-    /// every external-product prime. A digit's words are read once for every
-    /// prime.
-    fn digit_transforms(&self, value: &[u64]) -> Vec<Transformed> {
+    /// Each gadget digit of the canonical coefficients' residues modulo the
+    /// prime, untransformed.
+    fn prime_digits(&self, value: &[u64], prime: usize) -> Vec<Vec<u64>> {
         let bits = Profile::gadget_base_bits();
         let parts = bits.div_ceil(64);
-        let mut output: Vec<Transformed> = (0..self.gadget_length)
-            .map(|_| {
-                (0..self.external_primes)
-                    .map(|_| Vec::with_capacity(self.degree))
-                    .collect()
-            })
+        let mut output: Vec<Vec<u64>> = (0..self.gadget_length)
+            .map(|_| Vec::with_capacity(self.degree))
             .collect();
         let mut words = [0u64; MAXIMUM_WORDS];
         let words = &mut words[..parts];
+        let (reduction, powers) = (&self.reductions[prime], &self.word_powers[prime]);
         for coefficient in self.coefficients(value) {
-            for (digit, transformed) in output.iter_mut().enumerate() {
+            for (digit, residues) in output.iter_mut().enumerate() {
                 digit_words(coefficient, bits * digit, bits, words);
-                for ((residues, prime), powers) in transformed
-                    .iter_mut()
-                    .zip(&self.reductions)
-                    .zip(&self.word_powers)
-                {
-                    residues.push(words_residue(prime, powers, words, 0));
-                }
-            }
-        }
-        for transformed in &mut output {
-            for (digits, transform) in transformed.iter_mut().zip(&self.transforms) {
-                transform.forward(digits);
+                residues.push(words_residue(reduction, powers, words, 0));
             }
         }
         output
-    }
-    fn external(&self, digits: &[Transformed], keys: &[Transformed]) -> Polynomial {
-        assert_eq!(keys.len(), self.gadget_length);
-        assert_eq!(digits.len(), self.gadget_length);
-        let mut products = vec![vec![0u64; self.degree]; self.external_primes];
-        for (digit, key) in digits.iter().zip(keys) {
-            for (prime, product) in products.iter_mut().enumerate() {
-                for ((sum, digit), key) in product.iter_mut().zip(&digit[prime]).zip(&key[prime]) {
-                    *sum =
-                        self.reductions[prime].add(*sum, self.reductions[prime].mul(*digit, *key));
-                }
-            }
-        }
-        self.finish(products, &self.external_lift)
     }
     /// The product of two ciphertexts, relinearized with each gadget
     /// coordinate's encryption key, first relinearization key, second
@@ -482,6 +421,25 @@ impl Arithmetic {
             })
             .collect()
     }
+}
+thread_local! {
+    static SHARED: RefCell<Option<Rc<Arithmetic>>> = const { RefCell::new(None) };
+}
+/// The profile's arithmetic at the degree, which this instance's engine and
+/// jobs share, so that its transform tables exist once.
+fn shared(profile: Profile, degree: usize) -> Rc<Arithmetic> {
+    SHARED.with(|shared| {
+        let mut shared = shared.borrow_mut();
+        if let Some(arithmetic) = shared
+            .as_ref()
+            .filter(|arithmetic| arithmetic.profile == profile && arithmetic.degree == degree)
+        {
+            return arithmetic.clone();
+        }
+        let arithmetic = Rc::new(Arithmetic::new(profile, degree));
+        *shared = Some(arithmetic.clone());
+        arithmetic
+    })
 }
 /// A synthetic aggregate secret of one sparse support per setup contributor.
 #[cfg(any(test, feature = "numerical-probes"))]

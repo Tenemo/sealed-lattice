@@ -6,6 +6,8 @@ mod convolution;
 pub mod field;
 #[path = "../../word-proof/src/fri.rs"]
 pub mod fri;
+#[path = "../../word-proof/src/jobs.rs"]
+pub mod jobs;
 #[path = "../../registration-proof/src/linear.rs"]
 pub mod linear;
 #[path = "../../word-proof/src/linear-oracle.rs"]
@@ -16,7 +18,11 @@ pub mod parameters;
 pub mod proof;
 #[path = "../../word-proof/src/random.rs"]
 mod random;
+#[path = "../../word-proof/src/rows.rs"]
+pub mod rows;
 pub mod statement;
+#[path = "../../word-proof/src/sums.rs"]
+pub mod sums;
 use field::base as arithmetic;
 #[path = "../../word-verifier/src/engine.rs"]
 mod engine;

@@ -22,6 +22,13 @@ const allowedImports = [
     'contribution.public_chunk',
     'enrollment.fill_random',
     'enrollment.staged_chunk',
+    'parallel.discard',
+    'parallel.helpers',
+    'parallel.release',
+    'parallel.share',
+    'parallel.submit',
+    'parallel.take',
+    'parallel.wait',
     'setup_witness.fill_random',
     'word_proof.fill_random',
 ];

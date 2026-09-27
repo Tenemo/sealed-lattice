@@ -121,20 +121,30 @@ pub fn evaluate(values: Vec<Element>, indices: &[u32]) -> Result<Vec<Element>, E
     evaluate_in(values, indices, SYSTEMATIC_SIZE)
 }
 
+/// The refusals of an evaluation of that many values at the indices.
+pub(crate) fn check_in(
+    degree: usize,
+    indices: &[u32],
+    systematic_size: usize,
+) -> Result<(), Error> {
+    if !systematic_size.is_power_of_two() || !(2..=SYSTEMATIC_SIZE).contains(&systematic_size) {
+        return Err(Error::Parameters);
+    }
+    validate_indices_in(indices, 4 * systematic_size)?;
+    if !degree.is_power_of_two() || degree < 2 || degree > systematic_size {
+        return Err(Error::Parameters);
+    }
+    Ok(())
+}
+
 pub(crate) fn evaluate_in(
     mut values: Vec<Element>,
     indices: &[u32],
     systematic_size: usize,
 ) -> Result<Vec<Element>, Error> {
-    if !systematic_size.is_power_of_two() || !(2..=SYSTEMATIC_SIZE).contains(&systematic_size) {
-        return Err(Error::Parameters);
-    }
+    check_in(values.len(), indices, systematic_size)?;
     let domain_size = 4 * systematic_size;
-    validate_indices_in(indices, domain_size)?;
     let degree = values.len();
-    if !degree.is_power_of_two() || degree < 2 || degree > systematic_size {
-        return Err(Error::Parameters);
-    }
     // The coefficients times the degree; each coset's twist powers carry the
     // inverse degree instead.
     Transform::new(degree, true).apply(&mut values);

@@ -3,6 +3,7 @@ use crate::{
     field::{self, Element, MODULUS},
     oracles::{FirstOracle, Witness},
     parameters::*,
+    rows::RowShards,
     transcript::Transcript,
     tree::Tree,
 };
@@ -150,9 +151,14 @@ pub struct Export {
     relation: Relation,
     header: Header,
     next: usize,
+    // Every row's hash state, in row order.
+    states: Zeroizing<Vec<[u8; 201]>>,
 }
 impl Export {
-    pub fn begin_with_inputs(prover: &Prover, input_hashes: &[[u8; 64]]) -> Result<Self, Error> {
+    pub fn begin_with_inputs(
+        prover: &mut Prover,
+        input_hashes: &[[u8; 64]],
+    ) -> Result<Self, Error> {
         let profile = prover.profile;
         // A header the import would refuse is never exported.
         if ![0, profile.participants()].contains(&input_hashes.len())
@@ -163,15 +169,15 @@ impl Export {
         let Phase::FirstColumn(column) = prover.phase else {
             return Err(Error::Operation);
         };
-        let first = prover.first.as_ref().ok_or(())?;
+        let first = prover.first.as_mut().ok_or(())?;
         let transcript = prover.transcript.as_ref().ok_or(())?;
-        if first.hashers.len() != DOMAIN
-            || first.degree_mask.len() != MAX_DEGREE + 1
+        if first.degree_mask.len() != MAX_DEGREE + 1
             || transcript.round != 1
             || !transcript.salts.is_empty()
         {
             return Err(Error::Operation);
         }
+        let states = first.rows.as_mut().ok_or(())?.export();
         Ok(Self {
             relation: prover.relation.clone(),
             header: Header {
@@ -184,6 +190,7 @@ impl Export {
                 input_hashes: input_hashes.to_vec(),
             },
             next: 0,
+            states,
         })
     }
     pub fn header(&self) -> Vec<u8> {
@@ -216,11 +223,7 @@ impl Export {
                 1 => bytes.extend(first.masks[index / MASKS][index % MASKS].to_le_bytes()),
                 2 => bytes.extend(field::encode(first.degree_mask[index])),
                 3 => bytes.extend(first.tree.salts[index]),
-                4 => {
-                    let encoded =
-                        Zeroizing::new(<[u8; 201]>::from(first.hashers[index].serialize()));
-                    bytes.extend(encoded.as_slice());
-                }
+                4 => bytes.extend(self.states[index]),
                 _ => unreachable!(),
             }
         }
@@ -385,7 +388,8 @@ impl Import {
                 salts: std::mem::take(&mut *self.salts),
                 nodes: vec![[0; 64]; 2 * DOMAIN],
             },
-            hashers: self.hashers,
+            rows: Some(RowShards::import(&self.hashers)),
+            prefetched: Default::default(),
         });
         prover.phase = Phase::FirstColumn(self.header.column);
         Ok(prover)

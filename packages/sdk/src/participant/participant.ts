@@ -6,6 +6,7 @@ import {
 } from '../foundation-kernel.js';
 
 import { hexadecimal } from './worker/bytes.js';
+import { affordedHelpers, helperRole } from './worker/parallel.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
 
@@ -165,17 +166,58 @@ export type Participant = Readonly<{
     run: (request: ParticipantRequest) => Promise<ParticipantResult>;
 }>;
 
-const runWorker = (
+// Starts the helpers this context affords from the worker source and waits
+// until each listens on its port, whose other ends the operation's worker
+// takes. A helper that fails to load leaves the worker without helpers.
+const openHelpers = async (url: string) => {
+    const count = affordedHelpers();
+    if (count === 0) return { workers: [], ports: [] };
+    const workers: Worker[] = [];
+    const ports: MessagePort[] = [];
+    const listening = await Promise.all(
+        Array.from(
+            { length: count },
+            () =>
+                new Promise<boolean>((resolve) => {
+                    const worker = new Worker(url, { type: 'module' });
+                    const channel = new MessageChannel();
+                    workers.push(worker);
+                    ports.push(channel.port2);
+                    worker.onmessage = () => {
+                        resolve(true);
+                    };
+                    worker.onerror = () => {
+                        resolve(false);
+                    };
+                    worker.postMessage(helperRole, [channel.port1]);
+                }),
+        ),
+    );
+    if (!listening.every(Boolean)) {
+        for (const worker of workers) worker.terminate();
+        for (const port of ports) port.close();
+        return { workers: [], ports: [] };
+    }
+    for (const worker of workers) {
+        worker.onmessage = null;
+        worker.onerror = null;
+    }
+    return { workers, ports };
+};
+
+const runWorker = async (
     source: string,
     command: Readonly<Record<string, unknown>>,
-) =>
-    new Promise<ParticipantResult>((resolve) => {
-        const url = URL.createObjectURL(
-            new Blob([source], { type: 'text/javascript' }),
-        );
+) => {
+    const url = URL.createObjectURL(
+        new Blob([source], { type: 'text/javascript' }),
+    );
+    const helpers = await openHelpers(url);
+    return new Promise<ParticipantResult>((resolve) => {
         const worker = new Worker(url, { type: 'module' });
         const finish = (result: ParticipantResult) => {
             worker.terminate();
+            for (const helper of helpers.workers) helper.terminate();
             URL.revokeObjectURL(url);
             resolve(result);
         };
@@ -188,8 +230,9 @@ const runWorker = (
                 reason: event.message || 'The participant worker failed.',
             });
         };
-        worker.postMessage(command);
+        worker.postMessage(command, helpers.ports);
     });
+};
 
 // A base URL is absolute HTTP or HTTPS without credentials, a query or a
 // fragment, and its path ends with a slash so that every name extends it.

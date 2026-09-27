@@ -30,6 +30,9 @@ mod browser;
 #[cfg(target_arch = "wasm32")]
 #[path = "own-verification.rs"]
 mod own_verification;
+#[cfg(target_arch = "wasm32")]
+#[path = "parallel-browser.rs"]
+mod parallel_browser;
 
 pub struct Enrollment {
     pub key: RegistrationKey,

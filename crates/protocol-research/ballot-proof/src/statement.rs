@@ -559,13 +559,9 @@ impl StatementStream {
             return Err(Error::Binding);
         }
         let operator = self.builder.ok_or(Error::Shape)?.finish()?;
-        let mut coefficients = Vec::with_capacity(operator.coefficients.len() * self.queries.len());
-        for column in operator.coefficients {
-            coefficients.extend(
-                setup_stream_kernel::evaluate_public_values(column, &self.queries)
-                    .map_err(|_| Error::Arithmetic)?,
-            );
-        }
+        let coefficients =
+            setup_stream_kernel::evaluate_public_columns(operator.coefficients, &self.queries)
+                .map_err(|_| Error::Arithmetic)?;
         Ok(StatementOutput {
             statement_digest: self.expected,
             target: operator.target,

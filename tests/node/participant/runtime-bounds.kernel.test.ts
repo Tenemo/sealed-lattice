@@ -7,6 +7,7 @@ import {
     readParticipantProfile,
 } from '#packages/sdk/src/participant/worker/bounds.js';
 import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
 import {
     compileParticipantRuntimeLimits,
     compileParticipantRuntimeProfile,
@@ -23,6 +24,7 @@ const { kernel } = await instantiateParticipantKernel(
             ),
         ),
     ),
+    noParallelHelpers,
 );
 const limits = readParticipantLimits(kernel);
 const counts = (range: Readonly<{ minimum: number; maximum: number }>) =>

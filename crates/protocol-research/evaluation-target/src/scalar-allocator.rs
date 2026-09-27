@@ -5,6 +5,7 @@ use core::{
     arch::wasm32,
     cell::UnsafeCell,
     ptr,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 #[cfg(target_feature = "atomics")]
@@ -12,6 +13,23 @@ compile_error!("The evaluation allocator requires an unshared scalar Wasm instan
 
 pub const MAXIMUM_LINEAR_MEMORY_BYTES: usize = 671_088_640;
 const PAGE_BYTES: usize = 65_536;
+// The instance's memory bound, which a helper instance lowers before its
+// first allocation acquires the region.
+static LINEAR_MEMORY_BYTES: AtomicUsize = AtomicUsize::new(MAXIMUM_LINEAR_MEMORY_BYTES);
+static ACQUIRED: AtomicBool = AtomicBool::new(false);
+
+/// Lowers the instance's memory bound to whole pages before its first
+/// allocation. Returns whether the bound applies.
+pub fn limit_linear_memory(bytes: usize) -> bool {
+    if ACQUIRED.load(Ordering::Relaxed)
+        || bytes > MAXIMUM_LINEAR_MEMORY_BYTES
+        || !bytes.is_multiple_of(PAGE_BYTES)
+    {
+        return false;
+    }
+    LINEAR_MEMORY_BYTES.store(bytes, Ordering::Relaxed);
+    true
+}
 struct SystemRegion;
 
 // SAFETY: A successful call returns only newly grown, zero-filled Wasm pages.
@@ -19,8 +37,9 @@ struct SystemRegion;
 // The returned region is page aligned, non-overlapping and below the fixed cap.
 unsafe impl dlmalloc::Allocator for SystemRegion {
     fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
+        ACQUIRED.store(true, Ordering::Relaxed);
         let previous_pages = wasm32::memory_size(0);
-        let maximum_pages = MAXIMUM_LINEAR_MEMORY_BYTES / PAGE_BYTES;
+        let maximum_pages = LINEAR_MEMORY_BYTES.load(Ordering::Relaxed) / PAGE_BYTES;
         if previous_pages >= maximum_pages {
             return (ptr::null_mut(), 0, 0);
         }

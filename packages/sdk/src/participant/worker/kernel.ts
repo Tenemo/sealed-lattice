@@ -1,3 +1,5 @@
+import type { ParallelHelpers } from './parallel.js';
+
 // The participant scalar module's exports that the worker calls. A command
 // returns zero on success unless its comment says otherwise; the owning Rust
 // state machine decides acceptance.
@@ -154,6 +156,7 @@ export type LoadedKernel = Readonly<{
 
 export const instantiateParticipantKernel = async (
     module: WebAssembly.Module,
+    helpers: ParallelHelpers,
 ): Promise<LoadedKernel> => {
     const handlers: KernelHandlers = {};
     const instantiated: { memory?: WebAssembly.Memory } = {};
@@ -174,6 +177,11 @@ export const instantiateParticipantKernel = async (
             return 0;
         };
     const instance = await WebAssembly.instantiate(module, {
+        parallel: helpers.imports(() => {
+            if (instantiated.memory === undefined)
+                throw new Error('The participant module is not ready.');
+            return instantiated.memory;
+        }),
         enrollment: {
             fill_random: random('enrollment'),
             staged_chunk: (

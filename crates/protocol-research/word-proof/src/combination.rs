@@ -1,11 +1,43 @@
+//! The combined oracle's values on two cosets, as sums of term groups that
+//! independent jobs add: each group of committed columns that zero
+//! products join, with its lookups, the lookup multiplicities and table,
+//! and each remaining extension oracle.
 use crate::{
     field::{self, Element, MODULUS, Transform, ZERO, base},
     linear::LinearOracle,
     oracles::{self, FirstOracle, SecondOracle, Witness},
     parameters::*,
+    sums::{self, Sums},
     transcript::challenge,
 };
+use parallel_work::{Job, Part, share, submit};
+use std::collections::BTreeSet;
 use zeroize::Zeroizing;
+
+/// Adds the terms of committed columns that only their own zero products
+/// join, with their lookups', on both cosets.
+pub static COLUMNS: Job = Job {
+    kind: 0x0130,
+    run: add_columns,
+};
+/// Adds the multiplicity, table reciprocal and table residual terms.
+pub static COUNTS: Job = Job {
+    kind: 0x0131,
+    run: add_counts,
+};
+/// Adds an extension oracle's weighted values, or the degree mask's values.
+pub static EXTENSION: Job = Job {
+    kind: 0x0132,
+    run: add_extension_oracle,
+};
+
+// Every honest combined oracle has degree below twice the systematic size.
+// Interpolate on that many points; the verifier still checks the full domain.
+const COSETS: [usize; 2] = [0, 2];
+// The degree mask's values join the sums without a weight.
+const UNWEIGHTED: usize = u32::MAX as usize;
+const WORD_BYTES: usize = 16;
+const ELEMENT_BYTES: usize = 48;
 
 struct Weights {
     coefficients: Vec<Element>,
@@ -13,17 +45,26 @@ struct Weights {
     classes: Vec<usize>,
 }
 impl Weights {
-    fn new(relation: &Relation, message: &[u8], coset: u128) -> Self {
-        let degrees = relation.degrees();
-        let mut unique = degrees.clone();
+    /// The weights on a coset, from every oracle's challenge pair and degree
+    /// shift, with the powers of the listed oracles' shifts.
+    fn new(coefficients: &[Element], shifts: &[usize], coset: u128, oracles: &[usize]) -> Self {
+        let mut unique = shifts.to_vec();
         unique.sort_unstable();
         unique.dedup();
+        let classes: Vec<usize> = shifts
+            .iter()
+            .map(|shift| unique.binary_search(shift).unwrap())
+            .collect();
+        let needed: BTreeSet<usize> = oracles.iter().map(|oracle| classes[*oracle]).collect();
         let powers = unique
             .iter()
-            .map(|degree| {
-                let shift = MAX_DEGREE - *degree;
-                let mut value = base::power(coset, shift as u128);
-                let step = base::power(field::root(SYSTEMATIC), shift as u128);
+            .enumerate()
+            .map(|(class, shift)| {
+                if !needed.contains(&class) {
+                    return Vec::new();
+                }
+                let mut value = base::power(coset, *shift as u128);
+                let step = base::power(field::root(SYSTEMATIC), *shift as u128);
                 (0..SYSTEMATIC)
                     .map(|_| {
                         let previous = value;
@@ -34,14 +75,9 @@ impl Weights {
             })
             .collect();
         Self {
-            coefficients: (0..2 * relation.oracles())
-                .map(|index| challenge(message, index, false))
-                .collect(),
+            coefficients: coefficients.to_vec(),
             powers,
-            classes: degrees
-                .iter()
-                .map(|degree| unique.binary_search(degree).unwrap())
-                .collect(),
+            classes,
         }
     }
     fn value(&self, oracle: usize, position: usize) -> Element {
@@ -140,6 +176,480 @@ fn lookup_oracles(relation: &Relation, lookup_index: usize) -> LookupOracles {
         factor: relation.lookup(lookup_index).1,
     }
 }
+
+// The combination challenges, every oracle's degree shift and the lookup
+// challenge, which every job reads.
+struct Common {
+    coefficients: Vec<Element>,
+    shifts: Vec<usize>,
+    beta: Element,
+}
+fn encode_common(relation: &Relation, message: &[u8], beta: Element) -> Vec<u8> {
+    let oracles = relation.oracles();
+    let mut bytes = Vec::from((oracles as u32).to_le_bytes());
+    for index in 0..2 * oracles {
+        bytes.extend(field::encode(challenge(message, index, false)));
+    }
+    for degree in relation.degrees() {
+        bytes.extend(((MAX_DEGREE - degree) as u32).to_le_bytes());
+    }
+    bytes.extend(field::encode(beta));
+    bytes
+}
+
+// A job input read in order.
+struct Reader<'a>(&'a [u8]);
+impl<'a> Reader<'a> {
+    fn take(&mut self, length: usize) -> &'a [u8] {
+        let (taken, rest) = self.0.split_at(length);
+        self.0 = rest;
+        taken
+    }
+    fn number(&mut self) -> usize {
+        u32::from_le_bytes(self.take(4).try_into().unwrap()) as usize
+    }
+    fn word(&mut self) -> u128 {
+        u128::from_le_bytes(self.take(WORD_BYTES).try_into().unwrap())
+    }
+    fn element(&mut self) -> Element {
+        field::decode(self.take(ELEMENT_BYTES))
+    }
+    fn words(&mut self, count: usize) -> Zeroizing<Vec<u128>> {
+        Zeroizing::new((0..count).map(|_| self.word()).collect())
+    }
+    fn elements(&mut self, count: usize) -> Zeroizing<Vec<Element>> {
+        Zeroizing::new((0..count).map(|_| self.element()).collect())
+    }
+    fn common(&mut self) -> Common {
+        let oracles = self.number();
+        Common {
+            coefficients: (0..2 * oracles).map(|_| self.element()).collect(),
+            shifts: (0..oracles).map(|_| self.number()).collect(),
+            beta: self.element(),
+        }
+    }
+    fn finish(self) {
+        assert!(self.0.is_empty());
+    }
+}
+fn push_number(bytes: &mut Vec<u8>, value: usize) {
+    bytes.extend((value as u32).to_le_bytes());
+}
+
+// The weights and reciprocal vanishing values of both cosets.
+struct Cosets {
+    points: [u128; 2],
+    weights: [Weights; 2],
+    inverse_vanishing: [u128; 2],
+}
+impl Cosets {
+    fn new(common: &Common, oracles: &[usize]) -> Self {
+        let points = COSETS.map(oracles::coset);
+        Self {
+            points,
+            weights: points
+                .map(|coset| Weights::new(&common.coefficients, &common.shifts, coset, oracles)),
+            inverse_vanishing: points.map(|coset| {
+                base::power(
+                    base::subtract(base::power(coset, SYSTEMATIC as u128), 1),
+                    MODULUS - 2,
+                )
+            }),
+        }
+    }
+}
+// Adds a job's terms to both cosets' halves of the sums.
+fn with_cosets(input: &[u8], action: impl FnOnce(Reader, [&mut [Element]; 2])) {
+    let (session, length, rest) = sums::header(input);
+    assert_eq!(length, 2 * SYSTEMATIC);
+    sums::with(session, length, |sums| {
+        let (first, second) = sums.split_at_mut(SYSTEMATIC);
+        action(Reader(rest), [first, second]);
+    });
+}
+
+// The groups of committed columns that zero products join, each in
+// column order.
+fn components(relation: &Relation) -> Vec<Vec<usize>> {
+    let columns = relation.columns();
+    let mut root: Vec<usize> = (0..columns).collect();
+    fn find(root: &mut [usize], mut column: usize) -> usize {
+        while root[column] != column {
+            root[column] = root[root[column]];
+            column = root[column];
+        }
+        column
+    }
+    for pair in 0..relation.zero_products() {
+        let (left, right) = relation.zero_product_columns(pair);
+        let (left, right) = (find(&mut root, left), find(&mut root, right));
+        root[left.max(right)] = left.min(right);
+    }
+    let mut groups = vec![Vec::new(); columns];
+    for column in 0..columns {
+        groups[find(&mut root, column)].push(column);
+    }
+    groups.retain(|group| !group.is_empty());
+    groups
+}
+
+// A group of committed columns: each column's oracle, Boolean residual
+// oracle, mask, words and lookups, then the zero products inside it. Only
+// a group with lookups needs the reciprocal table.
+fn encode_columns(
+    witness: &Witness,
+    first: &FirstOracle,
+    second: &SecondOracle,
+    group: &[usize],
+) -> (Zeroizing<Vec<u8>>, bool) {
+    let relation = &witness.relation;
+    let words = relation.words();
+    let original = relation.original_oracles();
+    let mut bytes = Zeroizing::new(Vec::new());
+    let mut lookups = false;
+    push_number(&mut bytes, group.len());
+    for &column in group {
+        push_number(&mut bytes, column);
+        push_number(
+            &mut bytes,
+            if column < words {
+                UNWEIGHTED
+            } else {
+                original + column - words
+            },
+        );
+        for mask in &first.masks[column] {
+            bytes.extend(mask.to_le_bytes());
+        }
+        for value in &witness.columns[column] {
+            bytes.extend(value.to_le_bytes());
+        }
+        let indices: Vec<usize> = (0..relation.lookups())
+            .filter(|index| column < words && relation.lookup(*index).0 == column)
+            .collect();
+        push_number(&mut bytes, indices.len());
+        for index in indices {
+            lookups = true;
+            let oracles = lookup_oracles(relation, index);
+            push_number(&mut bytes, oracles.inverse);
+            push_number(&mut bytes, oracles.residual);
+            bytes.extend(oracles.factor.to_le_bytes());
+            for mask in &second.masks[index] {
+                bytes.extend(field::encode(*mask));
+            }
+        }
+    }
+    let pairs: Vec<_> = (0..relation.zero_products())
+        .filter(|pair| group.contains(&relation.zero_product_columns(*pair).0))
+        .collect();
+    push_number(&mut bytes, pairs.len());
+    for pair in pairs {
+        let (left, right) = relation.zero_product_columns(pair);
+        assert!(left < right);
+        for column in [left, right] {
+            push_number(&mut bytes, group.binary_search(&column).unwrap());
+        }
+        push_number(&mut bytes, original + relation.booleans() + pair);
+    }
+    bytes.push(u8::from(lookups));
+    (bytes, lookups)
+}
+// A column's lookup: its oracles and word scale, and its reciprocal mask.
+struct Lookup<'a> {
+    oracles: LookupOracles,
+    mask: &'a [u8],
+}
+struct Column<'a> {
+    oracle: usize,
+    boolean: Option<usize>,
+    mask: Zeroizing<Vec<u128>>,
+    words: &'a [u8],
+    lookups: Vec<Lookup<'a>>,
+}
+fn add_columns(input: &[u8]) -> Vec<u8> {
+    with_cosets(input, |mut reader, outputs| {
+        let common = reader.common();
+        let columns: Vec<Column> = (0..reader.number())
+            .map(|_| {
+                let oracle = reader.number();
+                let boolean = Some(reader.number()).filter(|oracle| *oracle != UNWEIGHTED);
+                let mask = reader.words(MASKS);
+                let words = reader.take(2 * SYSTEMATIC);
+                let lookups = (0..reader.number())
+                    .map(|_| Lookup {
+                        oracles: LookupOracles {
+                            inverse: reader.number(),
+                            residual: reader.number(),
+                            factor: reader.word(),
+                        },
+                        mask: reader.take(MASKS * ELEMENT_BYTES),
+                    })
+                    .collect();
+                Column {
+                    oracle,
+                    boolean,
+                    mask,
+                    words,
+                    lookups,
+                }
+            })
+            .collect();
+        let pairs: Vec<[usize; 3]> = (0..reader.number())
+            .map(|_| std::array::from_fn(|_| reader.number()))
+            .collect();
+        let inverses = (reader.take(1)[0] == 1).then(|| reader.take(SYSTEMATIC * ELEMENT_BYTES));
+        reader.finish();
+        let mut used = Vec::new();
+        for column in &columns {
+            used.push(column.oracle);
+            used.extend(column.boolean);
+            for lookup in &column.lookups {
+                used.extend([lookup.oracles.inverse, lookup.oracles.residual]);
+            }
+        }
+        used.extend(pairs.iter().map(|pair| pair[2]));
+        let cosets = Cosets::new(&common, &used);
+        let transform = Transform::cached(SYSTEMATIC);
+        let mut values = Vec::with_capacity(columns.len());
+        for column in &columns {
+            let words: Zeroizing<Vec<u16>> = Zeroizing::new(
+                column
+                    .words
+                    .chunks_exact(2)
+                    .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
+                    .collect(),
+            );
+            let mut coefficients: Zeroizing<Vec<u128>> =
+                Zeroizing::new(words.iter().map(|value| u128::from(*value)).collect());
+            transform.base(&mut coefficients, true);
+            let column_values = cosets.points.map(|coset| {
+                Zeroizing::new(oracles::masked_base_coefficients(
+                    coefficients.to_vec(),
+                    &column.mask,
+                    coset,
+                    transform,
+                    None,
+                ))
+            });
+            for coset in 0..2 {
+                cosets.weights[coset].add_base(
+                    outputs[coset],
+                    column.oracle,
+                    &column_values[coset],
+                );
+            }
+            for lookup in &column.lookups {
+                let inverses = inverses.unwrap();
+                let raw = words
+                    .iter()
+                    .map(|value| {
+                        let index = usize::from(*value) * lookup.oracles.factor as usize;
+                        field::decode(&inverses[ELEMENT_BYTES * index..])
+                    })
+                    .collect();
+                let mask = Reader(lookup.mask).elements(MASKS);
+                let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
+                    raw, &mask, transform,
+                ));
+                for coset in 0..2 {
+                    let reciprocal = Zeroizing::new(oracles::extension_values(
+                        &coefficients,
+                        cosets.points[coset],
+                        transform,
+                    ));
+                    cosets.weights[coset].add_lookup(
+                        outputs[coset],
+                        lookup.oracles,
+                        common.beta,
+                        cosets.inverse_vanishing[coset],
+                        &column_values[coset],
+                        &reciprocal,
+                    );
+                }
+            }
+            if let Some(oracle) = column.boolean {
+                for coset in 0..2 {
+                    let residuals = Zeroizing::new(
+                        column_values[coset]
+                            .iter()
+                            .map(|value| {
+                                base::multiply(
+                                    base::multiply(*value, base::subtract(*value, 1)),
+                                    cosets.inverse_vanishing[coset],
+                                )
+                            })
+                            .collect::<Vec<u128>>(),
+                    );
+                    cosets.weights[coset].add_base(outputs[coset], oracle, &residuals);
+                }
+            }
+            values.push(column_values);
+        }
+        for [left, right, oracle] in pairs {
+            for coset in 0..2 {
+                let residuals = Zeroizing::new(
+                    values[left][coset]
+                        .iter()
+                        .zip(values[right][coset].iter())
+                        .map(|(left, right)| {
+                            base::multiply(
+                                base::multiply(*left, *right),
+                                cosets.inverse_vanishing[coset],
+                            )
+                        })
+                        .collect::<Vec<u128>>(),
+                );
+                cosets.weights[coset].add_base(outputs[coset], oracle, &residuals);
+            }
+        }
+    });
+    Vec::new()
+}
+
+// The multiplicities with their mask, the table reciprocals' mask, and the
+// oracles of the multiplicity, table reciprocal and table residual.
+fn encode_counts(
+    witness: &Witness,
+    first: &FirstOracle,
+    second: &SecondOracle,
+) -> Zeroizing<Vec<u8>> {
+    let relation = &witness.relation;
+    let (columns, lookups) = (relation.columns(), relation.lookups());
+    let mut bytes = Zeroizing::new(Vec::new());
+    for oracle in [columns, columns + 1 + lookups, relation.oracles() - 2] {
+        push_number(&mut bytes, oracle);
+    }
+    for mask in &first.masks[columns] {
+        bytes.extend(mask.to_le_bytes());
+    }
+    for mask in &second.masks[lookups] {
+        bytes.extend(field::encode(*mask));
+    }
+    for count in &witness.counts {
+        bytes.extend(count.to_le_bytes());
+    }
+    bytes
+}
+fn add_counts(input: &[u8]) -> Vec<u8> {
+    with_cosets(input, |mut reader, outputs| {
+        let common = reader.common();
+        let [multiplicity_oracle, table_oracle, residual_oracle] =
+            std::array::from_fn(|_| reader.number());
+        let first_mask = reader.words(MASKS);
+        let second_mask = reader.elements(MASKS);
+        let counts = reader.words(SYSTEMATIC);
+        let inverses = reader.elements(SYSTEMATIC);
+        reader.finish();
+        let cosets = Cosets::new(
+            &common,
+            &[multiplicity_oracle, table_oracle, residual_oracle],
+        );
+        let transform = Transform::cached(SYSTEMATIC);
+        let mut count_coefficients = Zeroizing::new(counts.to_vec());
+        transform.base(&mut count_coefficients, true);
+        let raw = counts
+            .iter()
+            .zip(inverses.iter())
+            .map(|(count, inverse)| field::scale(*inverse, *count))
+            .collect();
+        let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
+            raw,
+            &second_mask,
+            transform,
+        ));
+        for (coset_index, output) in outputs.into_iter().enumerate() {
+            let coset = cosets.points[coset_index];
+            let weights = &cosets.weights[coset_index];
+            let inverse_vanishing = cosets.inverse_vanishing[coset_index];
+            let multiplicity = Zeroizing::new(oracles::masked_base_coefficients(
+                count_coefficients.to_vec(),
+                &first_mask,
+                coset,
+                transform,
+                None,
+            ));
+            weights.add_base(output, multiplicity_oracle, &multiplicity);
+            let table_inverse =
+                Zeroizing::new(oracles::extension_values(&coefficients, coset, transform));
+            weights.add_extension(output, table_oracle, &table_inverse);
+            let table = oracles::masked_base(
+                &(0..SYSTEMATIC)
+                    .map(|value| value as u128)
+                    .collect::<Vec<_>>(),
+                &[],
+                coset,
+                transform,
+            );
+            let residuals = Zeroizing::new(
+                table_inverse
+                    .iter()
+                    .zip(&table)
+                    .zip(multiplicity.iter())
+                    .map(|((inverse, table), multiplicity)| {
+                        field::scale(
+                            field::subtract(
+                                field::multiply(
+                                    field::subtract(common.beta, [*table, 0, 0]),
+                                    *inverse,
+                                ),
+                                [*multiplicity, 0, 0],
+                            ),
+                            inverse_vanishing,
+                        )
+                    })
+                    .collect::<Vec<Element>>(),
+            );
+            weights.add_extension(output, residual_oracle, &residuals);
+        }
+    });
+    Vec::new()
+}
+
+// An extension oracle's coefficients, or the degree mask's without a
+// weight.
+fn encode_extension(oracle: usize, coefficients: &[Element]) -> Zeroizing<Vec<u8>> {
+    assert!(coefficients.len() <= 2 * SYSTEMATIC + 1);
+    let mut bytes = Zeroizing::new(Vec::with_capacity(8 + ELEMENT_BYTES * coefficients.len()));
+    push_number(&mut bytes, oracle);
+    push_number(&mut bytes, coefficients.len());
+    for coefficient in coefficients {
+        bytes.extend(field::encode(*coefficient));
+    }
+    bytes
+}
+fn add_extension_oracle(input: &[u8]) -> Vec<u8> {
+    with_cosets(input, |mut reader, outputs| {
+        let common = reader.common();
+        let oracle = reader.number();
+        let count = reader.number();
+        assert!(count <= 2 * SYSTEMATIC + 1);
+        let coefficients = reader.elements(count);
+        reader.finish();
+        let used = if oracle == UNWEIGHTED {
+            Vec::new()
+        } else {
+            vec![oracle]
+        };
+        let cosets = Cosets::new(&common, &used);
+        let transform = Transform::cached(SYSTEMATIC);
+        for (coset, output) in outputs.into_iter().enumerate() {
+            let values = Zeroizing::new(oracles::extension_values(
+                &coefficients,
+                cosets.points[coset],
+                transform,
+            ));
+            if oracle == UNWEIGHTED {
+                for (sum, value) in output.iter_mut().zip(values.iter()) {
+                    *sum = field::add(*sum, *value);
+                }
+            } else {
+                cosets.weights[coset].add_extension(output, oracle, &values);
+            }
+        }
+    });
+    Vec::new()
+}
+
 pub fn polynomial(
     witness: &Witness,
     first: &FirstOracle,
@@ -150,222 +660,60 @@ pub fn polynomial(
     message: &[u8],
 ) -> Vec<Element> {
     let relation = &witness.relation;
-    let columns = relation.columns();
-    let lookups = relation.lookups();
-    let original = relation.original_oracles();
-    let oracles = relation.oracles();
-    let transform = Transform::new(SYSTEMATIC);
-    // Every honest combined oracle has degree below twice the systematic size.
-    // Interpolate on that many points; the verifier still checks the full domain.
-    let shifts = [oracles::coset(0), oracles::coset(2)];
-    let weights = shifts.map(|coset| Weights::new(relation, message, coset));
-    let inverse_vanishing = shifts.map(|coset| {
-        base::power(
-            base::subtract(base::power(coset, SYSTEMATIC as u128), 1),
-            MODULUS - 2,
-        )
-    });
-    let mut outputs = shifts.map(|coset| {
-        Zeroizing::new(oracles::extension_values(
-            &first.degree_mask,
-            coset,
-            &transform,
-        ))
-    });
-    let mut product_inputs: Vec<[Option<Zeroizing<Vec<u128>>>; 2]> = (0..relation.zero_products())
-        .map(|_| [None, None])
-        .collect();
-    // Both cosets use the same inverse transform. Retain just this column's
-    // coefficients while computing their different forward evaluations.
-    for column in 0..columns {
-        let mut coefficients = Zeroizing::new(
-            witness.columns[column]
-                .iter()
-                .map(|value| u128::from(*value))
-                .collect::<Vec<u128>>(),
-        );
-        transform.base(&mut coefficients, true);
-        let values = shifts.map(|coset| {
-            Zeroizing::new(oracles::masked_base_coefficients(
-                coefficients.to_vec(),
-                &first.masks[column],
-                coset,
-                &transform,
-                None,
-            ))
-        });
-        for coset in 0..2 {
-            weights[coset].add_base(&mut outputs[coset], column, &values[coset]);
-        }
-        if column < relation.words() {
-            for lookup_index in 0..lookups {
-                let (source, factor) = relation.lookup(lookup_index);
-                if source != column {
-                    continue;
-                }
-                let raw = witness.columns[column]
-                    .iter()
-                    .map(|value| inverses[usize::from(*value) * factor as usize])
-                    .collect();
-                let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
-                    raw,
-                    &second.masks[lookup_index],
-                    &transform,
-                ));
-                for coset in 0..2 {
-                    let reciprocal = Zeroizing::new(oracles::extension_values(
-                        &coefficients,
-                        shifts[coset],
-                        &transform,
-                    ));
-                    weights[coset].add_lookup(
-                        &mut outputs[coset],
-                        lookup_oracles(relation, lookup_index),
-                        beta,
-                        inverse_vanishing[coset],
-                        &values[coset],
-                        &reciprocal,
-                    );
-                }
-            }
-        } else {
-            for coset in 0..2 {
-                let values = &values[coset];
-                let residuals = Zeroizing::new(
-                    values
-                        .iter()
-                        .map(|value| {
-                            base::multiply(
-                                base::multiply(*value, base::subtract(*value, 1)),
-                                inverse_vanishing[coset],
-                            )
-                        })
-                        .collect::<Vec<u128>>(),
-                );
-                weights[coset].add_base(
-                    &mut outputs[coset],
-                    original + column - relation.words(),
-                    &residuals,
-                );
-            }
-        }
-        for (pair, cached) in product_inputs.iter_mut().enumerate() {
-            let (left, right) = relation.zero_product_columns(pair);
-            assert!(left < right && right < columns);
-            if column == left {
-                for coset in 0..2 {
-                    cached[coset] = Some(values[coset].clone());
-                }
-            } else if column == right {
-                for coset in 0..2 {
-                    let left_values = cached[coset].take().unwrap();
-                    let residuals = Zeroizing::new(
-                        left_values
-                            .iter()
-                            .zip(values[coset].iter())
-                            .map(|(left, right)| {
-                                base::multiply(
-                                    base::multiply(*left, *right),
-                                    inverse_vanishing[coset],
-                                )
-                            })
-                            .collect::<Vec<u128>>(),
-                    );
-                    weights[coset].add_base(
-                        &mut outputs[coset],
-                        original + relation.booleans() + pair,
-                        &residuals,
-                    );
-                }
-            }
-        }
+    let (columns, lookups, oracles) = (relation.columns(), relation.lookups(), relation.oracles());
+    let common = share(Zeroizing::new(encode_common(relation, message, beta)));
+    let mut table = Zeroizing::new(Vec::with_capacity(ELEMENT_BYTES * inverses.len()));
+    for inverse in inverses {
+        table.extend(field::encode(*inverse));
     }
-    let mut count_coefficients = Zeroizing::new(witness.counts.clone());
-    transform.base(&mut count_coefficients, true);
-    let raw = witness
-        .counts
-        .iter()
-        .zip(inverses)
-        .map(|(count, inverse)| field::scale(*inverse, *count))
-        .collect();
-    let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
-        raw,
-        &second.masks[lookups],
-        &transform,
+    let table = share(table);
+    let mut sums = Sums::new(2 * SYSTEMATIC);
+    let header = sums.header();
+    for group in components(relation) {
+        let (unit, lookups) = encode_columns(witness, first, second, &group);
+        let mut parts = vec![
+            Part::Bytes(&header),
+            Part::Shared(&common),
+            Part::Bytes(&unit),
+        ];
+        if lookups {
+            parts.push(Part::Shared(&table));
+        }
+        sums.add(submit(&COLUMNS, None, &parts, 0));
+    }
+    let counts = encode_counts(witness, first, second);
+    sums.add(submit(
+        &COUNTS,
+        None,
+        &[
+            Part::Bytes(&header),
+            Part::Shared(&common),
+            Part::Bytes(&counts),
+            Part::Shared(&table),
+        ],
+        0,
     ));
-    for coset_index in 0..2 {
-        let coset = shifts[coset_index];
-        let weights = &weights[coset_index];
-        let output = &mut outputs[coset_index];
-        let inverse_vanishing = inverse_vanishing[coset_index];
-        let multiplicity = Zeroizing::new(oracles::masked_base_coefficients(
-            count_coefficients.to_vec(),
-            &first.masks[columns],
-            coset,
-            &transform,
+    for (oracle, coefficients) in [
+        (UNWEIGHTED, &first.degree_mask),
+        (columns + lookups + 2, &second.sum_mask),
+        (columns + lookups + 3, &linear.quotient),
+        (oracles - 1, &linear.remainder),
+    ] {
+        let unit = encode_extension(oracle, coefficients);
+        sums.add(submit(
+            &EXTENSION,
             None,
+            &[
+                Part::Bytes(&header),
+                Part::Shared(&common),
+                Part::Bytes(&unit),
+            ],
+            0,
         ));
-        weights.add_base(output, columns, &multiplicity);
-        let table_inverse =
-            Zeroizing::new(oracles::extension_values(&coefficients, coset, &transform));
-        weights.add_extension(output, columns + 1 + lookups, &table_inverse);
-        let table = oracles::masked_base(
-            &(0..SYSTEMATIC)
-                .map(|value| value as u128)
-                .collect::<Vec<_>>(),
-            &[],
-            coset,
-            &transform,
-        );
-        let residuals = Zeroizing::new(
-            table_inverse
-                .iter()
-                .zip(&table)
-                .zip(multiplicity.iter())
-                .map(|((inverse, table), multiplicity)| {
-                    field::scale(
-                        field::subtract(
-                            field::multiply(field::subtract(beta, [*table, 0, 0]), *inverse),
-                            [*multiplicity, 0, 0],
-                        ),
-                        inverse_vanishing,
-                    )
-                })
-                .collect::<Vec<Element>>(),
-        );
-        weights.add_extension(output, oracles - 2, &residuals);
-        weights.add_extension(
-            output,
-            columns + lookups + 2,
-            &Zeroizing::new(oracles::extension_values(
-                &second.sum_mask,
-                coset,
-                &transform,
-            )),
-        );
-        weights.add_extension(
-            output,
-            columns + lookups + 3,
-            &Zeroizing::new(oracles::extension_values(
-                &linear.quotient,
-                coset,
-                &transform,
-            )),
-        );
-        weights.add_extension(
-            output,
-            oracles - 1,
-            &Zeroizing::new(oracles::extension_values(
-                &linear.remainder,
-                coset,
-                &transform,
-            )),
-        );
-        #[cfg(not(target_arch = "wasm32"))]
-        println!("Combined oracle coset {coset_index}");
     }
+    let total = sums.finish();
     let mut evaluations = Zeroizing::new(vec![ZERO; 2 * SYSTEMATIC]);
-    for (coset, output) in outputs.iter().enumerate() {
+    for (coset, output) in total.chunks_exact(SYSTEMATIC).enumerate() {
         for (position, value) in output.iter().copied().enumerate() {
             evaluations[coset + 2 * position] = value;
         }

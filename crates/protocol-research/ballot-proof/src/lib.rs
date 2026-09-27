@@ -30,6 +30,8 @@ pub mod combination;
 mod engine;
 #[path = "../../word-proof/src/fri.rs"]
 pub mod fri;
+#[path = "../../word-proof/src/jobs.rs"]
+pub mod jobs;
 #[path = "../../registration-proof/src/linear.rs"]
 pub mod linear;
 #[path = "../../word-proof/src/linear-oracle.rs"]
@@ -37,6 +39,10 @@ pub mod linear_oracle;
 #[path = "private-ballot.rs"]
 pub mod private_ballot;
 pub mod proof;
+#[path = "../../word-proof/src/rows.rs"]
+pub mod rows;
+#[path = "../../word-proof/src/sums.rs"]
+pub mod sums;
 pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 use statement::{StatementOutput, StatementStream};
 use supported_profile::{Profile, relation::ballot_relation};

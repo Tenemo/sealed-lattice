@@ -30,6 +30,7 @@ import {
 } from './run-command.js';
 
 import { kernelFunctions } from '#packages/sdk/src/participant/worker/kernel.js';
+import { helperFunctions } from '#packages/sdk/src/participant/worker/parallel.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const expectedPackageFiles = [
@@ -229,8 +230,8 @@ const requireFoundationOnlyKernel = async (
     }
 };
 
-// The published participant module exports exactly what the worker calls,
-// the worker is one self-contained module, and the source manifest names no
+// The published participant module exports exactly what the worker and its
+// helpers call, the worker is one self-contained module, and the source manifest names no
 // machine path. Returns the runtime identity of the published files.
 const requireParticipantRuntime = async (packageDirectoryPath: string) => {
     const dist = path.join(packageDirectoryPath, 'dist');
@@ -247,6 +248,7 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
         .sort();
     const expectedExportNames = [
         ...kernelFunctions,
+        ...helperFunctions,
         '__data_end',
         '__heap_base',
         'memory',
@@ -256,7 +258,7 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
             `Published participant module exports differ from the worker's inventory: ${exportNames.join(', ')}.`,
         );
     if (
-        /^\s*import\s*(?:[\w$*{]|["'])|\bimport\s*\(/mu.test(worker) ||
+        /^\s*import(?:\s+[\w$*{"']|\s*[{*"'])|\bimport\s*\(/mu.test(worker) ||
         worker.includes('@sealed-lattice/')
     )
         throw new Error('The published participant worker imports a module.');

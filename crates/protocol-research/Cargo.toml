@@ -19,6 +19,7 @@ members = [
     "proof-lookup-table",
     "contribution-prover",
     "supported-profile",
+    "parallel-work",
 ]
 exclude = ["vendor/fhe-rs", "vendor/keccak"]
 resolver = "3"

@@ -17,8 +17,10 @@ numerical-probes = []
 fhe-math = { path = "../vendor/fhe-rs/crates/fhe-math", default-features = false, features = ["scalar-only"] }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
+parallel-work = { path = "../parallel-work" }
 registration-credentials = { path = "../registration-credentials", default-features = false }
 supported-profile = { path = "../supported-profile" }
+zeroize = "=1.8.2"
 
 [[bin]]
 name = "check-requested-output"

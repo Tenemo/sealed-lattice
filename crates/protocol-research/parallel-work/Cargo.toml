@@ -1,0 +1,12 @@
+[package]
+name = "parallel-work"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+[dependencies]
+zeroize = "=1.8.2"
+
+[lib]
+crate-type = ["rlib"]

@@ -396,13 +396,10 @@ pub fn checkpoint_command(operation: u32, position: usize, length: usize) -> u32
             let bytes = input.get(..length).ok_or(())?;
             match operation {
                 1 if length == 0 && checkpoint_export.is_none() && checkpoint_import.is_none() => {
-                    let proof = work
-                        .as_ref()
-                        .and_then(|work| work.proof.as_ref())
-                        .ok_or(())?;
+                    let work = work.as_mut().ok_or(())?;
                     let export = first_checkpoint::Export::begin_with_inputs(
-                        proof,
-                        &work.as_ref().ok_or(())?.input_hashes,
+                        work.proof.as_mut().ok_or(())?,
+                        &work.input_hashes,
                     )
                     .map_err(|_| ())?;
                     *output = export.header();

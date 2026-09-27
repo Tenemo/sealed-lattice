@@ -1,8 +1,10 @@
 use super::{
     CHUNK_LIMIT, Element, Error, MODULUS, ONE, PolynomialStream, ZERO, arithmetic, fingerprint_in,
-    minus, plus, power, query, times,
+    jobs, minus, plus, power, query, times,
 };
+use parallel_work::{Pipeline, Ticket};
 use sha3::{Digest, Sha3_512};
+use std::collections::VecDeque;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT, DEGREE, FHE_LIMB_BITS, FHE_SECRET_SUPPORT, Family,
     Profile, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT,
@@ -122,11 +124,11 @@ struct Variable {
     degree: usize,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct GeometryKey {
-    degree: usize,
-    automorphism: usize,
-    shift: usize,
-    constant: bool,
+pub(crate) struct GeometryKey {
+    pub(crate) degree: usize,
+    pub(crate) automorphism: usize,
+    pub(crate) shift: usize,
+    pub(crate) constant: bool,
 }
 impl GeometryKey {
     fn identity(degree: usize) -> Self {
@@ -147,6 +149,30 @@ impl GeometryKey {
 struct Geometry {
     sum: Element,
     queries: Vec<Element>,
+}
+/// A geometry's values: ones, or the powers of alpha at the automorphism
+/// and shift of each position, negated past the degree.
+pub(crate) fn geometry_values(key: GeometryKey, alpha: Element) -> Vec<Element> {
+    if key.constant {
+        return vec![ONE; key.degree];
+    }
+    let mut powers = Vec::with_capacity(key.degree);
+    let mut value = ONE;
+    for _ in 0..key.degree {
+        powers.push(value);
+        value = times(value, alpha);
+    }
+    (0..key.degree)
+        .map(|position| {
+            let exponent = (position * key.automorphism + key.shift) % (2 * key.degree);
+            let value = powers[exponent % key.degree];
+            if exponent < key.degree {
+                value
+            } else {
+                minus(ZERO, value)
+            }
+        })
+        .collect()
 }
 enum PublicUse {
     Common(Variable, Element),
@@ -175,17 +201,53 @@ struct Accumulator {
     geometries: Vec<(GeometryKey, Geometry)>,
     uses: Vec<Vec<PublicUse>>,
     recorded_terms: Option<Vec<ProverFixedTerm>>,
+    // A planning pass only records the geometries its terms use.
+    planning: bool,
+    // The query jobs of consumed common polynomials, oldest first.
+    pending: VecDeque<(usize, Ticket)>,
 }
 impl Accumulator {
     fn new(layout: Layout, alpha: Element, indices: &[u32]) -> Result<Self, Error> {
         query::validate_indices_in(indices, 4 * layout.degree)?;
-        Self::build(layout, alpha, indices, false)
+        // Jobs evaluate every geometry the terms use before the terms.
+        let keys: Vec<GeometryKey> =
+            Self::build_with(layout, alpha, indices, false, true, Vec::new())?
+                .geometries
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect();
+        let mut geometries = Vec::with_capacity(keys.len());
+        let mut pipeline = Pipeline::new(parallel_work::window());
+        let mut add = |index: usize, output: &[u8]| {
+            let (sum, queries) = jobs::decode_geometry(output);
+            geometries.push((keys[index], Geometry { sum, queries }));
+        };
+        for (index, key) in keys.iter().enumerate() {
+            let ticket = jobs::geometry_job(*key, alpha, indices, layout.degree)?;
+            if let Some((index, output)) = pipeline.push(index, ticket) {
+                add(index, &output);
+            }
+        }
+        for (index, output) in pipeline.finish() {
+            add(index, &output);
+        }
+        Self::build_with(layout, alpha, indices, false, false, geometries)
     }
     fn build(
         layout: Layout,
         alpha: Element,
         indices: &[u32],
         record_terms: bool,
+    ) -> Result<Self, Error> {
+        Self::build_with(layout, alpha, indices, record_terms, false, Vec::new())
+    }
+    fn build_with(
+        layout: Layout,
+        alpha: Element,
+        indices: &[u32],
+        record_terms: bool,
+        planning: bool,
+        geometries: Vec<(GeometryKey, Geometry)>,
     ) -> Result<Self, Error> {
         let profile = layout.profile;
         let shape = profile.setup_shape();
@@ -195,17 +257,23 @@ impl Accumulator {
             fhe_modulus: profile.family_modulus(Family::Fhe),
             alpha,
             indices: indices.to_vec(),
-            coefficients: vec![ZERO; columns * indices.len()],
+            coefficients: if planning {
+                Vec::new()
+            } else {
+                vec![ZERO; columns * indices.len()]
+            },
             target: ZERO,
             weight: ONE,
             next_word: 0,
             next_boolean: shape.word_columns,
             supports: Vec::new(),
-            geometries: Vec::new(),
+            geometries,
             uses: (0..profile.setup_polynomials())
                 .map(|_| Vec::new())
                 .collect(),
             recorded_terms: record_terms.then(Vec::new),
+            planning,
+            pending: VecDeque::new(),
         };
         let secret = result.sparse(layout.degree, layout.fhe_half_support);
         let auxiliary = result.sparse(layout.degree, layout.fhe_half_support);
@@ -332,34 +400,22 @@ impl Accumulator {
         {
             return Ok(index);
         }
-        let values = if key.constant {
-            vec![ONE; key.degree]
-        } else {
-            let mut powers = Vec::with_capacity(key.degree);
-            let mut value = ONE;
-            for _ in 0..key.degree {
-                powers.push(value);
-                value = times(value, self.alpha);
+        let geometry = if self.planning {
+            Geometry {
+                sum: ZERO,
+                queries: Vec::new(),
             }
-            (0..key.degree)
-                .map(|position| {
-                    let exponent = (position * key.automorphism + key.shift) % (2 * key.degree);
-                    let value = powers[exponent % key.degree];
-                    if exponent < key.degree {
-                        value
-                    } else {
-                        minus(ZERO, value)
-                    }
-                })
-                .collect()
-        };
-        let sum = values.iter().copied().fold(ZERO, plus);
-        let queries = if self.indices.is_empty() {
-            Vec::new()
         } else {
-            query::evaluate_in(values, &self.indices, self.layout.degree)?
+            let values = geometry_values(key, self.alpha);
+            let sum = values.iter().copied().fold(ZERO, plus);
+            let queries = if self.indices.is_empty() {
+                Vec::new()
+            } else {
+                query::evaluate_in(values, &self.indices, self.layout.degree)?
+            };
+            Geometry { sum, queries }
         };
-        self.geometries.push((key, Geometry { sum, queries }));
+        self.geometries.push((key, geometry));
         Ok(self.geometries.len() - 1)
     }
     fn put(&mut self, variable: &Variable, key: GeometryKey, weight: Element) -> Result<(), Error> {
@@ -367,6 +423,9 @@ impl Accumulator {
             return Err(Error::Arithmetic);
         }
         let index = self.geometry(key)?;
+        if self.planning {
+            return Ok(());
+        }
         let geometry = &self.geometries[index].1;
         self.target = minus(
             self.target,
@@ -538,19 +597,16 @@ impl Accumulator {
     }
     fn consume(&mut self, polynomial: usize, parser: PolynomialStream) -> Result<(), Error> {
         if self.is_common(polynomial) {
-            let values = parser.finish_queries_in(&self.indices, self.layout.degree)?;
-            for usage in &self.uses[polynomial] {
-                let PublicUse::Common(variable, weight) = usage else {
-                    return Err(Error::Arithmetic);
-                };
-                for (point, value) in values.iter().enumerate() {
-                    let weighted = times(*weight, *value);
-                    for (column, factor) in &variable.terms {
-                        let output = column * self.indices.len() + point;
-                        self.coefficients[output] =
-                            plus(self.coefficients[output], scale(weighted, base(*factor)));
-                    }
-                }
+            if self.uses[polynomial]
+                .iter()
+                .any(|usage| !matches!(usage, PublicUse::Common(_, _)))
+            {
+                return Err(Error::Arithmetic);
+            }
+            let ticket = parser.queries_job(&self.indices, self.layout.degree)?;
+            self.pending.push_back((polynomial, ticket));
+            while self.pending.len() > parallel_work::window() {
+                self.add_oldest();
             }
         } else {
             let value = parser.finish_value()?;
@@ -562,6 +618,32 @@ impl Accumulator {
             }
         }
         Ok(())
+    }
+}
+
+impl Accumulator {
+    // Adds the oldest pending common polynomial's weighted query values.
+    fn add_oldest(&mut self) {
+        let (polynomial, ticket) = self.pending.pop_front().unwrap();
+        let values = jobs::decode_values(&ticket.wait());
+        for usage in &self.uses[polynomial] {
+            let PublicUse::Common(variable, weight) = usage else {
+                unreachable!("A common polynomial has only common uses.");
+            };
+            for (point, value) in values.iter().enumerate() {
+                let weighted = times(*weight, *value);
+                for (column, factor) in &variable.terms {
+                    let output = column * self.indices.len() + point;
+                    self.coefficients[output] =
+                        plus(self.coefficients[output], scale(weighted, base(*factor)));
+                }
+            }
+        }
+    }
+    fn settle(&mut self) {
+        while !self.pending.is_empty() {
+            self.add_oldest();
+        }
     }
 }
 
@@ -744,7 +826,8 @@ impl SetupStatementStream {
         if digest != self.expected_digest {
             return Err(Error::Binding);
         }
-        let accumulator = self.accumulator.ok_or(Error::Incomplete)?;
+        let mut accumulator = self.accumulator.ok_or(Error::Incomplete)?;
+        accumulator.settle();
         Ok(SetupStatementOutput {
             statement_digest: digest,
             target: accumulator.target,

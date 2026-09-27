@@ -65,16 +65,24 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // roster's records to a member of the other. A plain run carries one roster
 // of honest participants through each stage once, with no crash, forgery or
 // other roster. With --profile, Chrome records every operation's CPU samples,
-// and their summary lies beside the run.
+// and their summary lies beside the run. With --base-port, the origins start
+// at another port, so runs of other checkouts may run beside this one.
 const foreignOption = '--foreign-poll=';
 const profileOption = '--profile';
+const basePortOption = '--base-port=';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
     .find((value) => value.startsWith(foreignOption))
     ?.slice(foreignOption.length);
 const profiling = allArguments.includes(profileOption);
+const basePortArgument = allArguments
+    .find((value) => value.startsWith(basePortOption))
+    ?.slice(basePortOption.length);
 const commandArguments = allArguments.filter(
-    (value) => !value.startsWith(foreignOption) && value !== profileOption,
+    (value) =>
+        !value.startsWith(foreignOption) &&
+        value !== profileOption &&
+        !value.startsWith(basePortOption),
 );
 const mode =
     (['no-result', 'empty', 'rosters', 'plain'] as const).find(
@@ -87,7 +95,7 @@ assert.ok(
     counts.length === 0 ||
         (counts.length === 2 &&
             counts.every((value) => /^[1-9]\d*$/u.test(value))),
-    'Optionally select the participant and option counts, then no-result, empty, rosters or plain, another poll with --foreign-poll=<run directory>, and --profile.',
+    'Optionally select the participant and option counts, then no-result, empty, rosters or plain, another poll with --foreign-poll=<run directory>, --profile and --base-port=<port>.',
 );
 assert.ok(
     (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
@@ -96,7 +104,14 @@ assert.ok(
 const [participantCount, optionCount] =
     counts.length === 0 ? [3, 2] : counts.map(Number);
 const root = path.resolve('.');
-const basePort = 43_600;
+const basePort =
+    basePortArgument === undefined ? 43_600 : Number(basePortArgument);
+assert.ok(
+    /^[1-9]\d*$/u.test(basePortArgument ?? '1') &&
+        basePort >= 1024 &&
+        basePort + 2 * participantCount + 1 <= 65_535,
+    'The base port leaves no room for every origin.',
+);
 // A registrant that the organizer leaves out of the roster has the origin
 // after the roster participants'. In a rosters run the second roster's
 // registrants take the origins from there on instead.
@@ -502,6 +517,10 @@ const startRelay = async (
                 ? secondRoster
                 : publicDirectory;
         const server = createServer((request, response) => {
+            // Every page is cross-origin isolated, so its worker may start
+            // parallel helpers.
+            response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+            response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
             const client = halting.get(position);
             handle(
                 origin,
@@ -709,6 +728,9 @@ await runWithLocalRunLog(
             ...(mode === 'result' ? [] : [mode]),
             ...(foreignPoll === undefined ? [] : [foreignOption + foreignPoll]),
             ...(profiling ? [profileOption] : []),
+            ...(basePortArgument === undefined
+                ? []
+                : [basePortOption + basePortArgument]),
         ],
         lanes: [
             'Participant runtime assembly',

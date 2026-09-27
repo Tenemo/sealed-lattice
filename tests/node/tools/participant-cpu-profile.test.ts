@@ -76,7 +76,7 @@ const trace = [
 ];
 
 describe('summarizeCpuTrace', () => {
-    it('charges each sample until the next one to its stack, once per function', () => {
+    it('charges each sample until the next one to its stack and thread, once per function', () => {
         // The first thread's samples last 50, 30, 1000, 20 (idle) and 0
         // microseconds, and the second thread's 0 (a negative delta), 400
         // and 0.
@@ -91,6 +91,24 @@ describe('summarizeCpuTrace', () => {
                 { name: 'run https://p/worker.js', milliseconds: 1.08 },
                 { name: 'transform', milliseconds: 1.05 },
                 { name: '(anonymous)', milliseconds: 0.4 },
+            ],
+            threads: [
+                {
+                    sampledMilliseconds: 1.08,
+                    self: [
+                        { name: 'transform', milliseconds: 1.05 },
+                        { name: 'run https://p/worker.js', milliseconds: 0.03 },
+                    ],
+                    inclusive: [
+                        { name: 'run https://p/worker.js', milliseconds: 1.08 },
+                        { name: 'transform', milliseconds: 1.05 },
+                    ],
+                },
+                {
+                    sampledMilliseconds: 0.4,
+                    self: [{ name: '(anonymous)', milliseconds: 0.4 }],
+                    inclusive: [{ name: '(anonymous)', milliseconds: 0.4 }],
+                },
             ],
         });
     });
@@ -109,6 +127,11 @@ describe('summarizeCpuTrace', () => {
     it('summarizes a trace without samples as empty', () => {
         expect(
             summarizeCpuTrace([{ name: 'TracingStartedInBrowser' }], 5),
-        ).toEqual({ sampledMilliseconds: 0, self: [], inclusive: [] });
+        ).toEqual({
+            sampledMilliseconds: 0,
+            self: [],
+            inclusive: [],
+            threads: [],
+        });
     });
 });

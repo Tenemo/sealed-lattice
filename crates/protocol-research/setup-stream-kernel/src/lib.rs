@@ -1,6 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod arithmetic;
+mod jobs;
 mod query;
 mod setup;
 use arithmetic::{Columns, MODULUS, add, multiply, subtract};
@@ -9,6 +10,7 @@ pub use setup::{
     prover_operator_plan, setup_polynomial_stream,
 };
 
+pub use jobs::{JOBS, evaluate_public_columns};
 pub type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
@@ -254,13 +256,14 @@ impl PolynomialStream {
         Ok(self.total)
     }
 
-    pub(crate) fn finish_queries_in(
+    /// Starts the evaluation of the adjoint at the indices.
+    pub(crate) fn queries_job(
         self,
         indices: &[u32],
         systematic_size: usize,
-    ) -> Result<Vec<Element>, Error> {
+    ) -> Result<parallel_work::Ticket, Error> {
         query::validate_indices_in(indices, 4 * systematic_size)?;
-        query::evaluate_in(self.adjoint()?, indices, systematic_size)
+        jobs::queries_job(&self.adjoint()?, indices, systematic_size)
     }
 
     pub fn adjoint(mut self) -> Result<Vec<Element>, Error> {

@@ -11,6 +11,7 @@ crate-type = ["rlib"]
 
 
 [dependencies]
+parallel-work = { path = "../parallel-work" }
 sha3 = "=0.10.9"
 supported-profile = { path = "../supported-profile" }
 

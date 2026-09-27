@@ -3,7 +3,7 @@ use crate::{
     parameters::*,
 };
 use num_bigint::{BigInt, Sign};
-use setup_stream_kernel::{PolynomialStream, SetupStatementOutput, evaluate_public_values};
+use setup_stream_kernel::{PolynomialStream, SetupStatementOutput, evaluate_public_columns};
 use sha3::{Digest, Sha3_512};
 
 #[derive(Debug)]
@@ -263,12 +263,8 @@ impl StatementStream {
             self.adjoint.ok_or(Error::Shape)?,
             self.public_value.ok_or(Error::Shape)?,
         );
-        let mut coefficients = Vec::with_capacity(operator.coefficients.len() * self.queries.len());
-        for values in operator.coefficients {
-            coefficients.extend(
-                evaluate_public_values(values, &self.queries).map_err(|_| Error::Arithmetic)?,
-            );
-        }
+        let coefficients = evaluate_public_columns(operator.coefficients, &self.queries)
+            .map_err(|_| Error::Arithmetic)?;
         Ok(SetupStatementOutput {
             statement_digest: self.expected,
             target: operator.target,

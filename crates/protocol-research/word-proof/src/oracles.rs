@@ -1,9 +1,12 @@
 use crate::{
     field::{self, Element, MODULUS, Transform, ZERO, base},
+    jobs::{self, BaseValues, SecondValues},
     parameters::*,
+    rows::RowShards,
     tree::Tree,
 };
-use stateful_sha3::{Digest, Sha3_512};
+use parallel_work::{Job, Part, Pipeline, Shared, Ticket, share, submit};
+use std::collections::VecDeque;
 use zeroize::{Zeroize, Zeroizing};
 
 pub fn random_base(count: usize) -> Vec<u128> {
@@ -99,7 +102,10 @@ pub struct FirstOracle {
     pub masks: Vec<Vec<u128>>,
     pub degree_mask: Vec<Element>,
     pub tree: Tree,
-    pub(crate) hashers: Vec<Sha3_512>,
+    // The leaf hashers until the commitment finishes.
+    pub(crate) rows: Option<RowShards>,
+    // The coefficient jobs of the next columns, in column order.
+    pub(crate) prefetched: VecDeque<(usize, Ticket)>,
 }
 
 pub struct SecondOracle {
@@ -108,8 +114,39 @@ pub struct SecondOracle {
     pub mask_sum: Element,
     pub lookup_coefficients: Vec<Element>,
     pub tree: Tree,
-    hashers: Vec<Sha3_512>,
+    rows: Option<RowShards>,
+    prefetched: VecDeque<(usize, Ticket)>,
+    // The reciprocal table that the column jobs read.
+    table: Option<Shared>,
 }
+
+// Starts the coefficient jobs of the columns after the next committed one
+// that a helper may run ahead, and returns the next column's job. Jobs of
+// other columns are abandoned.
+fn next_coefficients(
+    prefetched: &mut VecDeque<(usize, Ticket)>,
+    column: usize,
+    last: usize,
+    mut start: impl FnMut(usize) -> Ticket,
+) -> Ticket {
+    if prefetched
+        .front()
+        .is_some_and(|(index, _)| *index != column)
+    {
+        prefetched.clear();
+    }
+    let mut next = prefetched.back().map_or(column, |(index, _)| index + 1);
+    while next <= last.min(column + parallel_work::helpers()) {
+        prefetched.push_back((next, start(next)));
+        next += 1;
+    }
+    prefetched.pop_front().unwrap().1
+}
+// A column's coefficient job on its input parts.
+fn coefficient_job(job: &'static Job, parts: &[Part], width: usize) -> Ticket {
+    submit(job, None, parts, jobs::coefficient_bytes(width))
+}
+
 impl Drop for Witness {
     fn drop(&mut self) {
         self.columns.zeroize();
@@ -130,6 +167,20 @@ impl Drop for SecondOracle {
     }
 }
 
+/// The coefficients of a base column's masked polynomial: its interpolant
+/// less the mask, then the mask times the systematic power.
+pub(crate) fn masked_base_polynomial(values: BaseValues, mask: &[u128]) -> Zeroizing<Vec<u128>> {
+    let mut coefficients = Zeroizing::new(match values {
+        BaseValues::Words(values) => values.iter().map(|value| u128::from(*value)).collect(),
+        BaseValues::Counts(values) => values.to_vec(),
+    });
+    Transform::cached(SYSTEMATIC).base(&mut coefficients, true);
+    for (coefficient, value) in coefficients.iter_mut().zip(mask) {
+        *coefficient = base::subtract(*coefficient, *value);
+    }
+    coefficients.extend_from_slice(mask);
+    coefficients
+}
 pub(crate) fn masked_extension_coefficients(
     values: Vec<Element>,
     mask: &[Element],
@@ -164,67 +215,72 @@ impl SecondOracle {
             SYSTEMATIC as u128,
         );
         let tree = Tree::new(role, 1, DOMAIN, relation.second_width());
-        let prefix = tree.leaf_hash_prefix();
-        let hashers = (0..DOMAIN)
-            .map(|row| tree.leaf_hasher(row, &prefix))
-            .collect();
+        let rows = Some(RowShards::open(&tree));
         Self {
             masks,
             sum_mask,
             mask_sum,
             lookup_coefficients: vec![ZERO; WITNESS_DEGREE + 1],
             tree,
-            hashers,
+            rows,
+            prefetched: VecDeque::new(),
+            table: None,
+        }
+    }
+    // A committed column's values: a lookup's scaled words, whose
+    // reciprocals it holds, or the multiplicities, which scale the table
+    // reciprocals.
+    fn column_values(witness: &Witness, column: usize) -> SecondValues<'_> {
+        if column == witness.relation.lookups() {
+            SecondValues::Counts(&witness.counts)
+        } else {
+            let (index, factor) = witness.relation.lookup(column);
+            SecondValues::Lookup {
+                words: &witness.columns[index],
+                factor,
+            }
         }
     }
     pub fn commit_column(&mut self, witness: &Witness, inverses: &[Element], column: usize) {
         let lookups = witness.relation.lookups();
         assert!(column < lookups + 2 && inverses.len() == SYSTEMATIC);
-        let transform = Transform::new(SYSTEMATIC);
-        let coefficients = Zeroizing::new(if column == lookups + 1 {
-            self.sum_mask.clone()
-        } else {
-            let values = if column == lookups {
-                witness
-                    .counts
-                    .iter()
-                    .zip(inverses)
-                    .map(|(count, inverse)| field::scale(*inverse, *count))
-                    .collect()
-            } else {
-                let (index, factor) = witness.relation.lookup(column);
-                witness.columns[index]
-                    .iter()
-                    .map(|value| inverses[usize::from(*value) * factor as usize])
-                    .collect()
-            };
-            let coefficients =
-                masked_extension_coefficients(values, &self.masks[column], &transform);
-            for (sum, value) in self.lookup_coefficients.iter_mut().zip(&coefficients) {
-                *sum = if column == lookups {
-                    field::subtract(*sum, *value)
-                } else {
-                    field::add(*sum, *value)
-                };
-            }
-            coefficients
-        });
-        for coset_index in 0..4 {
-            let values = Zeroizing::new(extension_values(
-                &coefficients,
-                coset(coset_index),
-                &transform,
-            ));
-            for (row, value) in values.iter().copied().enumerate() {
-                self.hashers[coset_index + 4 * row].update(field::encode(value));
-            }
+        if column == lookups + 1 {
+            self.prefetched.clear();
+            self.rows.as_mut().unwrap().absorb_extension(&self.sum_mask);
+            return;
         }
+        let table = self
+            .table
+            .get_or_insert_with(|| share(jobs::reciprocal_table(inverses)));
+        let masks = &self.masks;
+        let ticket = next_coefficients(&mut self.prefetched, column, lookups, |next| {
+            let input = jobs::second_column(Self::column_values(witness, next), &masks[next]);
+            coefficient_job(
+                &jobs::SECOND_COEFFICIENTS,
+                &[Part::Bytes(&input), Part::Shared(table)],
+                48,
+            )
+        });
+        let coefficients = ticket.wait();
+        for (sum, value) in self
+            .lookup_coefficients
+            .iter_mut()
+            .zip(coefficients.chunks_exact(48))
+        {
+            let value = field::decode(value);
+            *sum = if column == lookups {
+                field::subtract(*sum, value)
+            } else {
+                field::add(*sum, value)
+            };
+        }
+        self.rows
+            .as_mut()
+            .unwrap()
+            .absorb_extension_encoded(coefficients);
     }
     pub fn finish_commitment(&mut self) {
-        for (row, hasher) in std::mem::take(&mut self.hashers).into_iter().enumerate() {
-            self.tree.leaf(row, hasher);
-        }
-        self.tree.finish();
+        self.rows.take().unwrap().close(&mut self.tree);
     }
     pub fn openings(
         &self,
@@ -232,45 +288,48 @@ impl SecondOracle {
         inverses: &[Element],
         indices: &[usize],
     ) -> Vec<Vec<u8>> {
-        let transform = Transform::new(SYSTEMATIC);
+        let transform = Transform::cached(SYSTEMATIC);
         let lookups = witness.relation.lookups();
         let mut data = vec![Vec::with_capacity(witness.relation.second_width()); indices.len()];
         let groups = query_groups(indices);
-        for column in 0..lookups + 1 {
-            let raw = if column == lookups {
-                witness
-                    .counts
-                    .iter()
-                    .zip(inverses)
-                    .map(|(count, inverse)| field::scale(*inverse, *count))
-                    .collect()
-            } else {
-                let (index, factor) = witness.relation.lookup(column);
-                witness.columns[index]
-                    .iter()
-                    .map(|value| inverses[usize::from(*value) * factor as usize])
-                    .collect()
-            };
-            let coefficients = Zeroizing::new(masked_extension_coefficients(
-                raw,
-                &self.masks[column],
-                &transform,
-            ));
-            for (coset_index, selected) in groups.iter().enumerate() {
-                if selected.is_empty() {
-                    continue;
-                }
-                let positions: Vec<_> = selected.iter().map(|(_, position)| *position).collect();
-                let values = extension_values_selected(
-                    &coefficients,
-                    coset(coset_index),
-                    &transform,
-                    &positions,
-                );
-                for ((output, _), value) in selected.iter().zip(values) {
-                    data[*output].extend(field::encode(value));
+        let positions = jobs::positions(&groups);
+        let mut consume = |output: Zeroizing<Vec<u8>>| {
+            let mut values = output.chunks_exact(48);
+            for selected in &groups {
+                for (index, _) in selected {
+                    data[*index].extend(values.next().unwrap());
                 }
             }
+            assert!(values.next().is_none());
+        };
+        let local;
+        let table = match &self.table {
+            Some(table) => table,
+            None => {
+                local = share(jobs::reciprocal_table(inverses));
+                &local
+            }
+        };
+        let mut pipeline = Pipeline::new(parallel_work::window());
+        for column in 0..lookups + 1 {
+            let input =
+                jobs::second_column(Self::column_values(witness, column), &self.masks[column]);
+            let ticket = submit(
+                &jobs::SECOND_OPENINGS,
+                None,
+                &[
+                    Part::Bytes(&positions),
+                    Part::Bytes(&input),
+                    Part::Shared(table),
+                ],
+                48 * indices.len(),
+            );
+            if let Some((_, output)) = pipeline.push(column, ticket) {
+                consume(output);
+            }
+        }
+        for (_, output) in pipeline.finish() {
+            consume(output);
         }
         for (coset_index, selected) in groups.iter().enumerate() {
             if selected.is_empty() {
@@ -280,7 +339,7 @@ impl SecondOracle {
             let values = extension_values_selected(
                 &self.sum_mask,
                 coset(coset_index),
-                &transform,
+                transform,
                 &positions,
             );
             for ((output, _), value) in selected.iter().zip(values) {
@@ -363,20 +422,22 @@ fn extension_values_inner(
     let high = base::power(coset, SYSTEMATIC as u128);
     let mut power = 1;
     let mut values = Zeroizing::new(vec![ZERO; SYSTEMATIC]);
-    for (index, value) in values.iter_mut().enumerate() {
-        *value = field::scale(
+    // Only the coefficients above the systematic length wrap onto lower
+    // ones, and a position without a coefficient stays zero.
+    let wrapped = coefficients
+        .len()
+        .saturating_sub(SYSTEMATIC)
+        .min(SYSTEMATIC);
+    for (index, (value, coefficient)) in values.iter_mut().zip(coefficients).enumerate() {
+        let folded = if index < wrapped {
             field::add(
-                coefficients.get(index).copied().unwrap_or(ZERO),
-                field::scale(
-                    coefficients
-                        .get(SYSTEMATIC + index)
-                        .copied()
-                        .unwrap_or(ZERO),
-                    high,
-                ),
-            ),
-            power,
-        );
+                *coefficient,
+                field::scale(coefficients[SYSTEMATIC + index], high),
+            )
+        } else {
+            *coefficient
+        };
+        *value = field::scale(folded, power);
         power = base::multiply(power, coset);
     }
     if coefficients.len() == 2 * SYSTEMATIC + 1 {
@@ -410,93 +471,79 @@ impl FirstOracle {
             degree_mask.push(field::ONE);
         }
         let tree = Tree::new(role, 0, DOMAIN, relation.first_width());
-        let prefix = tree.leaf_hash_prefix();
-        let hashers = (0..DOMAIN)
-            .map(|row| tree.leaf_hasher(row, &prefix))
-            .collect();
+        let rows = Some(RowShards::open(&tree));
         Self {
             masks,
             degree_mask,
             tree,
-            hashers,
+            rows,
+            prefetched: VecDeque::new(),
+        }
+    }
+    // A committed base column's values: a witness column, or the lookup
+    // multiplicities.
+    fn column_values(witness: &Witness, column: usize) -> BaseValues<'_> {
+        if column == witness.relation.columns() {
+            BaseValues::Counts(&witness.counts)
+        } else {
+            BaseValues::Words(&witness.columns[column])
         }
     }
     pub fn commit_column(&mut self, witness: &Witness, column: usize) {
         let columns = witness.relation.columns();
         assert!(column < columns + 2);
-        let transform = Transform::new(SYSTEMATIC);
-        if column <= columns {
-            let mut coefficients = Zeroizing::new(if column == columns {
-                witness.counts.clone()
-            } else {
-                witness.columns[column]
-                    .iter()
-                    .map(|value| u128::from(*value))
-                    .collect::<Vec<u128>>()
-            });
-            transform.base(&mut coefficients, true);
-            for coset_index in 0..4 {
-                let values = Zeroizing::new(masked_base_coefficients(
-                    coefficients.to_vec(),
-                    &self.masks[column],
-                    coset(coset_index),
-                    &transform,
-                    None,
-                ));
-                for (row, value) in values.iter().copied().enumerate() {
-                    self.hashers[coset_index + 4 * row].update(value.to_le_bytes());
-                }
-            }
-        } else {
-            for coset_index in 0..4 {
-                let values = Zeroizing::new(extension_values(
-                    &self.degree_mask,
-                    coset(coset_index),
-                    &transform,
-                ));
-                for (row, value) in values.iter().copied().enumerate() {
-                    self.hashers[coset_index + 4 * row].update(field::encode(value));
-                }
-            }
+        if column > columns {
+            self.prefetched.clear();
+            self.rows
+                .as_mut()
+                .unwrap()
+                .absorb_extension(&self.degree_mask);
+            return;
         }
+        let masks = &self.masks;
+        let ticket = next_coefficients(&mut self.prefetched, column, columns, |next| {
+            let input = jobs::base_column(Self::column_values(witness, next), &masks[next]);
+            coefficient_job(&jobs::FIRST_COEFFICIENTS, &[Part::Bytes(&input)], 16)
+        });
+        self.rows
+            .as_mut()
+            .unwrap()
+            .absorb_base_encoded(ticket.wait());
     }
     pub fn finish_commitment(&mut self) {
-        for (row, hasher) in std::mem::take(&mut self.hashers).into_iter().enumerate() {
-            self.tree.leaf(row, hasher);
-        }
-        self.tree.finish();
+        self.rows.take().unwrap().close(&mut self.tree);
     }
     pub fn openings(&self, witness: &Witness, indices: &[usize]) -> Vec<Vec<u8>> {
         let columns = witness.relation.columns();
         let mut data = vec![Vec::with_capacity(witness.relation.first_width()); indices.len()];
-        let transform = Transform::new(SYSTEMATIC);
+        let transform = Transform::cached(SYSTEMATIC);
         let groups = query_groups(indices);
-        for column in 0..columns + 1 {
-            let mut coefficients = Zeroizing::new(if column == columns {
-                witness.counts.clone()
-            } else {
-                witness.columns[column]
-                    .iter()
-                    .map(|value| u128::from(*value))
-                    .collect::<Vec<u128>>()
-            });
-            transform.base(&mut coefficients, true);
-            for (coset_index, selected) in groups.iter().enumerate() {
-                if selected.is_empty() {
-                    continue;
-                }
-                let positions: Vec<_> = selected.iter().map(|(_, position)| *position).collect();
-                let values = masked_base_coefficients(
-                    coefficients.to_vec(),
-                    &self.masks[column],
-                    coset(coset_index),
-                    &transform,
-                    Some(&positions),
-                );
-                for ((output, _), value) in selected.iter().zip(values) {
-                    data[*output].extend(value.to_le_bytes());
+        let positions = jobs::positions(&groups);
+        let mut consume = |output: Zeroizing<Vec<u8>>| {
+            let mut values = output.chunks_exact(16);
+            for selected in &groups {
+                for (index, _) in selected {
+                    data[*index].extend(values.next().unwrap());
                 }
             }
+            assert!(values.next().is_none());
+        };
+        let mut pipeline = Pipeline::new(parallel_work::window());
+        for column in 0..columns + 1 {
+            let input =
+                jobs::base_column(Self::column_values(witness, column), &self.masks[column]);
+            let ticket = submit(
+                &jobs::FIRST_OPENINGS,
+                None,
+                &[Part::Bytes(&positions), Part::Bytes(&input)],
+                16 * indices.len(),
+            );
+            if let Some((_, output)) = pipeline.push(column, ticket) {
+                consume(output);
+            }
+        }
+        for (_, output) in pipeline.finish() {
+            consume(output);
         }
         for (coset_index, selected) in groups.iter().enumerate() {
             if selected.is_empty() {
@@ -506,7 +553,7 @@ impl FirstOracle {
             let values = extension_values_selected(
                 &self.degree_mask,
                 coset(coset_index),
-                &transform,
+                transform,
                 &positions,
             );
             for ((output, _), value) in selected.iter().zip(values) {

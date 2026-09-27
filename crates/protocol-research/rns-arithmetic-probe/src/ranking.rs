@@ -1,12 +1,12 @@
 use super::word_arithmetic::{MAXIMUM_WORDS, larger, words_of};
-use super::{Arithmetic, Polynomial, Transformed, unpack};
+use super::{Arithmetic, Polynomial, Transformed, shared, unpack};
 use num_bigint::BigUint;
 use num_traits::Zero;
 use registration_credentials::{
     foundation::CanonicalItem,
     identity::{IdentityHasher, identity},
 };
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, rc::Rc};
 pub use supported_profile::DEGREE;
 use supported_profile::{PLAINTEXT_MODULUS, Profile};
 
@@ -72,7 +72,7 @@ pub struct Requirements {
 
 pub struct Engine {
     profile: Profile,
-    arithmetic: Arithmetic,
+    arithmetic: Rc<Arithmetic>,
     program_hash: [u8; 64],
     instructions: Vec<Instruction>,
     remaining_uses: Vec<usize>,
@@ -248,7 +248,7 @@ impl Engine {
             plaintext::parameters(profile, top_count.unwrap_or(options));
         Ok(Self {
             profile,
-            arithmetic: Arithmetic::new(profile, DEGREE),
+            arithmetic: shared(profile, DEGREE),
             program_hash: expected_hash,
             instructions,
             remaining_uses,
