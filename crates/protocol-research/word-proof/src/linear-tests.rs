@@ -2,10 +2,9 @@
 // four cosets.
 use crate::{
     field::{self, Element, MODULUS, Transform, ZERO},
-    linear_oracle::{self, Public},
-    oracles::{coset, extension_values, masked_base},
+    linear_oracle::{AffineValues, Public},
+    oracles::{coset, extension_values},
     parameters::*,
-    sums::Sums,
 };
 use parallel_work::share;
 use zeroize::Zeroizing;
@@ -77,8 +76,8 @@ fn direct_products(weight: Element, left: &[Element], right: &[Element]) -> Vec<
     }
     output
 }
-fn finished(sums: Sums) -> Vec<Element> {
-    std::mem::take(&mut *sums.finish())
+fn finished(values: AffineValues) -> Vec<Element> {
+    std::mem::take(&mut *values.finish())
 }
 
 #[test]
@@ -95,9 +94,8 @@ fn product_jobs_equal_the_direct_products_across_their_chunks() {
         bytes.extend(field::encode(*value));
     }
     let shared = share(bytes);
-    let mut sums = Sums::new(DOMAIN);
-    linear_oracle::products(
-        &mut sums,
+    let mut sums = AffineValues::new();
+    sums.products(
         weight,
         Public::Adjoint {
             values: &shared,
@@ -149,9 +147,8 @@ fn geometric_products_equal_their_adjoint_values() {
             bytes.extend(field::encode(*value));
         }
         let shared = share(bytes);
-        let mut adjoint = Sums::new(DOMAIN);
-        linear_oracle::products(
-            &mut adjoint,
+        let mut adjoint = AffineValues::new();
+        adjoint.products(
             weight,
             Public::Adjoint {
                 values: &shared,
@@ -161,9 +158,8 @@ fn geometric_products_equal_their_adjoint_values() {
             &words,
             &masks,
         );
-        let mut geometric = Sums::new(DOMAIN);
-        linear_oracle::products(
-            &mut geometric,
+        let mut geometric = AffineValues::new();
+        geometric.products(
             weight,
             Public::Geometric {
                 alpha,
@@ -180,33 +176,63 @@ fn geometric_products_equal_their_adjoint_values() {
     }
 }
 
+// Terms of every coefficient length the oracle adds, with products
+// between them, equal the weighted values of their coefficients on the four
+// cosets.
 #[test]
-fn column_and_term_jobs_equal_their_direct_values() {
+fn term_jobs_equal_their_direct_values() {
     let words = words(2);
     let masks = masks(2);
-    let weight = element(11);
-    let public: Vec<_> = (0..SYSTEMATIC).map(|index| element(index + 5)).collect();
-    let coefficients: Vec<_> = (0..WITNESS_DEGREE + 1)
-        .map(|index| element(index + 9))
+    let weights = [element(11), element(12)];
+    let terms: Vec<Vec<Element>> = [WITNESS_DEGREE + 1, SYSTEMATIC - 1]
+        .into_iter()
+        .map(|length| (0..length).map(|index| element(index + 9)).collect())
         .collect();
-    let mut sums = Sums::new(DOMAIN);
-    linear_oracle::column(&mut sums, weight, &public, &masks[1], &words[1]);
-    linear_oracle::term(&mut sums, weight, &coefficients);
+    let mut sums = AffineValues::new();
+    sums.term(weights[0], &terms[0]);
+    sums.products(
+        weights[1],
+        Public::Geometric {
+            alpha: element(3),
+            degree: 16,
+            automorphism: 1,
+            shift: 0,
+            constant: false,
+        },
+        &[(1, element(4))],
+        &words,
+        &masks,
+    );
+    sums.term(weights[1], &terms[1]);
+    let mut products = AffineValues::new();
+    products.products(
+        weights[1],
+        Public::Geometric {
+            alpha: element(3),
+            degree: 16,
+            automorphism: 1,
+            shift: 0,
+            constant: false,
+        },
+        &[(1, element(4))],
+        &words,
+        &masks,
+    );
+    let products = finished(products);
     let transform = Transform::new(SYSTEMATIC);
-    let mut public_coefficients = public;
-    transform.extension(&mut public_coefficients, true);
-    let raw: Vec<u128> = words[1].iter().map(|value| u128::from(*value)).collect();
     let mut expected = vec![ZERO; DOMAIN];
     for index in 0..4 {
-        let public = extension_values(&public_coefficients, coset(index), &transform);
-        let column = masked_base(&raw, &masks[1], coset(index), &transform);
-        let term = extension_values(&coefficients, coset(index), &transform);
-        for row in 0..SYSTEMATIC {
-            expected[index + 4 * row] = field::multiply(
-                weight,
-                field::add(field::scale(public[row], column[row]), term[row]),
-            );
+        for (weight, coefficients) in weights.iter().zip(&terms) {
+            let values = extension_values(coefficients, coset(index), &transform);
+            for (row, value) in values.iter().enumerate() {
+                let position = index + 4 * row;
+                expected[position] =
+                    field::add(expected[position], field::multiply(*weight, *value));
+            }
         }
+    }
+    for (value, product) in expected.iter_mut().zip(&products) {
+        *value = field::add(*value, *product);
     }
     assert_eq!(finished(sums), expected);
 }

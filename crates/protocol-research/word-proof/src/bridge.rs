@@ -321,23 +321,33 @@ impl Prover {
         if self.rows.is_empty() {
             self.multiproof = Multiproof::default();
             let indices = fri::requested(&folding.queries, length);
+            let multiproof = &mut self.multiproof;
             let rows = match self.output_stage {
-                0 => self
-                    .first
-                    .as_ref()
-                    .unwrap()
-                    .opened_rows(self.witness.as_ref().unwrap(), &indices),
-                1 => self.second.as_ref().unwrap().opened_rows(
-                    self.witness.as_ref().unwrap(),
-                    &self.inverses,
-                    &indices,
-                ),
-                2 => self.linear.as_ref().unwrap().opened_rows(&indices),
+                0 => {
+                    let first = self.first.as_ref().unwrap();
+                    first.tree.opened_rows(multiproof, &indices, |leaves| {
+                        first.opened_rows(self.witness.as_ref().unwrap(), leaves)
+                    })
+                }
+                1 => {
+                    let second = self.second.as_ref().unwrap();
+                    second.tree.opened_rows(multiproof, &indices, |leaves| {
+                        second.opened_rows(self.witness.as_ref().unwrap(), &self.inverses, leaves)
+                    })
+                }
+                2 => {
+                    let linear = self.linear.as_ref().unwrap();
+                    linear
+                        .tree
+                        .opened_rows(multiproof, &indices, |leaves| linear.opened_rows(leaves))
+                }
                 stage => {
                     let layer = &folding.layers[stage - 3];
-                    indices
-                        .iter()
-                        .map(|index| field::encode(layer.values[*index]).to_vec())
+                    layer
+                        .tree
+                        .opened_rows(multiproof, &indices, |leaves| layer.rows(leaves))
+                        .into_iter()
+                        .map(Vec::from)
                         .collect()
                 }
             };

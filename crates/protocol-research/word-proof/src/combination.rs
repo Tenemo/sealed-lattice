@@ -7,11 +7,11 @@ use crate::{
     linear::LinearOracle,
     oracles::{self, FirstOracle, SecondOracle, Witness},
     parameters::*,
+    rows,
     sums::{self, Sums},
     transcript::challenge,
 };
 use parallel_work::{Job, Part, share, submit};
-use std::collections::BTreeSet;
 use zeroize::Zeroizing;
 
 /// Adds the terms of committed columns that only their own zero products
@@ -20,7 +20,8 @@ pub static COLUMNS: Job = Job {
     kind: 0x0130,
     run: add_columns,
 };
-/// Adds the multiplicity, table reciprocal and table residual terms.
+/// Adds the multiplicity, table reciprocal and table residual terms on one
+/// coset.
 pub static COUNTS: Job = Job {
     kind: 0x0131,
     run: add_counts,
@@ -41,37 +42,30 @@ const ELEMENT_BYTES: usize = 48;
 
 struct Weights {
     coefficients: Vec<Element>,
-    powers: Vec<Vec<u128>>,
+    // Each class's shift power at the coset's first position and its step
+    // from one position to the next.
+    powers: Vec<(u128, u128)>,
     classes: Vec<usize>,
 }
 impl Weights {
     /// The weights on a coset, from every oracle's challenge pair and degree
-    /// shift, with the powers of the listed oracles' shifts.
-    fn new(coefficients: &[Element], shifts: &[usize], coset: u128, oracles: &[usize]) -> Self {
+    /// shift.
+    fn new(coefficients: &[Element], shifts: &[usize], coset: u128) -> Self {
         let mut unique = shifts.to_vec();
         unique.sort_unstable();
         unique.dedup();
-        let classes: Vec<usize> = shifts
+        let classes = shifts
             .iter()
             .map(|shift| unique.binary_search(shift).unwrap())
             .collect();
-        let needed: BTreeSet<usize> = oracles.iter().map(|oracle| classes[*oracle]).collect();
+        let root = field::root(SYSTEMATIC);
         let powers = unique
             .iter()
-            .enumerate()
-            .map(|(class, shift)| {
-                if !needed.contains(&class) {
-                    return Vec::new();
-                }
-                let mut value = base::power(coset, *shift as u128);
-                let step = base::power(field::root(SYSTEMATIC), *shift as u128);
-                (0..SYSTEMATIC)
-                    .map(|_| {
-                        let previous = value;
-                        value = base::multiply(value, step);
-                        previous
-                    })
-                    .collect()
+            .map(|shift| {
+                (
+                    base::power(coset, *shift as u128),
+                    base::power(root, *shift as u128),
+                )
             })
             .collect();
         Self {
@@ -80,23 +74,38 @@ impl Weights {
             classes,
         }
     }
-    fn value(&self, oracle: usize, position: usize) -> Element {
-        field::add(
-            self.coefficients[2 * oracle],
-            field::scale(
-                self.coefficients[2 * oracle + 1],
-                self.powers[self.classes[oracle]][position],
-            ),
-        )
+    // The oracle's shift powers at the positions in order.
+    fn powers(&self, oracle: usize) -> impl Iterator<Item = u128> + use<> {
+        let (first, step) = self.powers[self.classes[oracle]];
+        std::iter::successors(Some(first), move |power| Some(base::multiply(*power, step)))
     }
-    fn add_base(&self, output: &mut [Element], oracle: usize, values: &[u128]) {
-        for (position, (sum, value)) in output.iter_mut().zip(values).enumerate() {
-            *sum = field::add(*sum, field::scale(self.value(oracle, position), *value));
+    // The oracle's weights at the positions in order.
+    fn values(&self, oracle: usize) -> impl Iterator<Item = Element> + use<> {
+        let (constant, shifted) = (
+            self.coefficients[2 * oracle],
+            self.coefficients[2 * oracle + 1],
+        );
+        self.powers(oracle)
+            .map(move |power| field::add(constant, field::scale(shifted, power)))
+    }
+    fn add_base(
+        &self,
+        output: &mut [Element],
+        oracle: usize,
+        values: impl IntoIterator<Item = u128>,
+    ) {
+        for ((sum, weight), value) in output.iter_mut().zip(self.values(oracle)).zip(values) {
+            *sum = field::add(*sum, field::scale(weight, value));
         }
     }
-    fn add_extension(&self, output: &mut [Element], oracle: usize, values: &[Element]) {
-        for (position, (sum, value)) in output.iter_mut().zip(values).enumerate() {
-            *sum = field::add(*sum, field::multiply(self.value(oracle, position), *value));
+    fn add_extension(
+        &self,
+        output: &mut [Element],
+        oracle: usize,
+        values: impl IntoIterator<Item = Element>,
+    ) {
+        for ((sum, weight), value) in output.iter_mut().zip(self.values(oracle)).zip(values) {
+            *sum = field::add(*sum, field::multiply(weight, value));
         }
     }
     fn add_lookup(
@@ -128,11 +137,13 @@ impl Weights {
         let word_shifted = field::scale(residual_shifted, factor);
         // Collect both occurrences of the reciprocal before multiplying it.
         // The verifier still evaluates the original inverse and quotient rows.
-        for (position, ((sum, word), reciprocal)) in
-            output.iter_mut().zip(words).zip(reciprocals).enumerate()
+        for ((((sum, word), reciprocal), inverse_power), residual_power) in output
+            .iter_mut()
+            .zip(words)
+            .zip(reciprocals)
+            .zip(self.powers(inverse_oracle))
+            .zip(self.powers(residual_oracle))
         {
-            let inverse_power = self.powers[self.classes[inverse_oracle]][position];
-            let residual_power = self.powers[self.classes[residual_oracle]][position];
             let coefficient = field::subtract(
                 field::add(
                     constant,
@@ -243,12 +254,11 @@ struct Cosets {
     inverse_vanishing: [u128; 2],
 }
 impl Cosets {
-    fn new(common: &Common, oracles: &[usize]) -> Self {
+    fn new(common: &Common) -> Self {
         let points = COSETS.map(oracles::coset);
         Self {
             points,
-            weights: points
-                .map(|coset| Weights::new(&common.coefficients, &common.shifts, coset, oracles)),
+            weights: points.map(|coset| Weights::new(&common.coefficients, &common.shifts, coset)),
             inverse_vanishing: points.map(|coset| {
                 base::power(
                     base::subtract(base::power(coset, SYSTEMATIC as u128), 1),
@@ -260,9 +270,9 @@ impl Cosets {
 }
 // Adds a job's terms to both cosets' halves of the sums.
 fn with_cosets(input: &[u8], action: impl FnOnce(Reader, [&mut [Element]; 2])) {
-    let (session, length, rest) = sums::header(input);
+    let (session, shard, length, rest) = sums::header(input);
     assert_eq!(length, 2 * SYSTEMATIC);
-    sums::with(session, length, |sums| {
+    sums::with(session, shard, length, |sums| {
         let (first, second) = sums.split_at_mut(SYSTEMATIC);
         action(Reader(rest), [first, second]);
     });
@@ -399,49 +409,55 @@ fn add_columns(input: &[u8]) -> Vec<u8> {
             .collect();
         let inverses = (reader.take(1)[0] == 1).then(|| reader.take(SYSTEMATIC * ELEMENT_BYTES));
         reader.finish();
-        let mut used = Vec::new();
-        for column in &columns {
-            used.push(column.oracle);
-            used.extend(column.boolean);
-            for lookup in &column.lookups {
-                used.extend([lookup.oracles.inverse, lookup.oracles.residual]);
-            }
-        }
-        used.extend(pairs.iter().map(|pair| pair[2]));
-        let cosets = Cosets::new(&common, &used);
+        let cosets = Cosets::new(&common);
         let transform = Transform::cached(SYSTEMATIC);
-        let mut values = Vec::with_capacity(columns.len());
-        for column in &columns {
-            let words: Zeroizing<Vec<u16>> = Zeroizing::new(
+        // The last column whose zero products need each column's values.
+        let needed: Vec<usize> = (0..columns.len())
+            .map(|index| {
+                pairs
+                    .iter()
+                    .filter(|pair| pair[..2].contains(&index))
+                    .map(|pair| pair[1])
+                    .fold(index, usize::max)
+            })
+            .collect();
+        let mut values: Vec<Option<[Zeroizing<Vec<u128>>; 2]>> =
+            (0..columns.len()).map(|_| None).collect();
+        for (index, column) in columns.iter().enumerate() {
+            let words = || {
                 column
                     .words
                     .chunks_exact(2)
-                    .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
-                    .collect(),
-            );
+                    .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+            };
             let mut coefficients: Zeroizing<Vec<u128>> =
-                Zeroizing::new(words.iter().map(|value| u128::from(*value)).collect());
+                Zeroizing::new(words().map(u128::from).collect());
             transform.base(&mut coefficients, true);
-            let column_values = cosets.points.map(|coset| {
-                Zeroizing::new(oracles::masked_base_coefficients(
-                    coefficients.to_vec(),
-                    &column.mask,
-                    coset,
-                    transform,
-                    None,
-                ))
-            });
+            let column_values = [coefficients.to_vec(), std::mem::take(&mut *coefficients)]
+                .into_iter()
+                .zip(cosets.points)
+                .map(|(coefficients, coset)| {
+                    Zeroizing::new(oracles::masked_base_coefficients(
+                        coefficients,
+                        &column.mask,
+                        coset,
+                        transform,
+                        None,
+                    ))
+                });
+            let column_values: [Zeroizing<Vec<u128>>; 2] =
+                column_values.collect::<Vec<_>>().try_into().unwrap();
             for coset in 0..2 {
                 cosets.weights[coset].add_base(
                     outputs[coset],
                     column.oracle,
-                    &column_values[coset],
+                    column_values[coset].iter().copied(),
                 );
             }
             for lookup in &column.lookups {
                 let inverses = inverses.unwrap();
-                let raw = words.iter().map(|value| {
-                    let index = usize::from(*value) * lookup.oracles.factor as usize;
+                let raw = words().map(|value| {
+                    let index = usize::from(value) * lookup.oracles.factor as usize;
                     field::decode(&inverses[ELEMENT_BYTES * index..])
                 });
                 let mask = Reader(lookup.mask).elements(MASKS);
@@ -466,46 +482,54 @@ fn add_columns(input: &[u8]) -> Vec<u8> {
             }
             if let Some(oracle) = column.boolean {
                 for coset in 0..2 {
-                    let residuals = Zeroizing::new(
-                        column_values[coset]
-                            .iter()
-                            .map(|value| {
-                                base::multiply(
-                                    base::multiply(*value, base::subtract(*value, 1)),
-                                    cosets.inverse_vanishing[coset],
-                                )
-                            })
-                            .collect::<Vec<u128>>(),
+                    let inverse_vanishing = cosets.inverse_vanishing[coset];
+                    cosets.weights[coset].add_base(
+                        outputs[coset],
+                        oracle,
+                        column_values[coset].iter().map(|value| {
+                            base::multiply(
+                                base::multiply(*value, base::subtract(*value, 1)),
+                                inverse_vanishing,
+                            )
+                        }),
                     );
-                    cosets.weights[coset].add_base(outputs[coset], oracle, &residuals);
                 }
             }
-            values.push(column_values);
-        }
-        for [left, right, oracle] in pairs {
-            for coset in 0..2 {
-                let residuals = Zeroizing::new(
-                    values[left][coset]
-                        .iter()
-                        .zip(values[right][coset].iter())
-                        .map(|(left, right)| {
-                            base::multiply(
-                                base::multiply(*left, *right),
-                                cosets.inverse_vanishing[coset],
-                            )
-                        })
-                        .collect::<Vec<u128>>(),
+            values[index] = Some(column_values);
+            for [left, right, oracle] in pairs.iter().filter(|pair| pair[1] == index) {
+                let (left, right) = (
+                    values[*left].as_ref().unwrap(),
+                    values[*right].as_ref().unwrap(),
                 );
-                cosets.weights[coset].add_base(outputs[coset], oracle, &residuals);
+                for coset in 0..2 {
+                    let inverse_vanishing = cosets.inverse_vanishing[coset];
+                    cosets.weights[coset].add_base(
+                        outputs[coset],
+                        *oracle,
+                        left[coset]
+                            .iter()
+                            .zip(right[coset].iter())
+                            .map(|(left, right)| {
+                                base::multiply(base::multiply(*left, *right), inverse_vanishing)
+                            }),
+                    );
+                }
+            }
+            for (column, last) in needed.iter().enumerate() {
+                if *last <= index {
+                    values[column] = None;
+                }
             }
         }
     });
     Vec::new()
 }
 
-// The multiplicities with their mask, the table reciprocals' mask, and the
-// oracles of the multiplicity, table reciprocal and table residual.
+// The coset, the oracles of the multiplicity, table reciprocal and table
+// residual, and the multiplicities with their mask and the table
+// reciprocals' mask.
 fn encode_counts(
+    coset: usize,
     witness: &Witness,
     first: &FirstOracle,
     second: &SecondOracle,
@@ -513,7 +537,12 @@ fn encode_counts(
     let relation = &witness.relation;
     let (columns, lookups) = (relation.columns(), relation.lookups());
     let mut bytes = Zeroizing::new(Vec::new());
-    for oracle in [columns, columns + 1 + lookups, relation.oracles() - 2] {
+    for oracle in [
+        coset,
+        columns,
+        columns + 1 + lookups,
+        relation.oracles() - 2,
+    ] {
         push_number(&mut bytes, oracle);
     }
     for mask in &first.masks[columns] {
@@ -530,73 +559,73 @@ fn encode_counts(
 fn add_counts(input: &[u8]) -> Vec<u8> {
     with_cosets(input, |mut reader, outputs| {
         let common = reader.common();
+        let coset_index = reader.number();
         let [multiplicity_oracle, table_oracle, residual_oracle] =
             std::array::from_fn(|_| reader.number());
         let first_mask = reader.words(MASKS);
         let second_mask = reader.elements(MASKS);
-        let counts = reader.words(SYSTEMATIC);
-        let inverses = reader.elements(SYSTEMATIC);
+        let counts = reader.take(SYSTEMATIC * WORD_BYTES);
+        let inverses = reader.take(SYSTEMATIC * ELEMENT_BYTES);
         reader.finish();
-        let cosets = Cosets::new(
-            &common,
-            &[multiplicity_oracle, table_oracle, residual_oracle],
-        );
+        let cosets = Cosets::new(&common);
         let transform = Transform::cached(SYSTEMATIC);
-        let mut count_coefficients = Zeroizing::new(counts.to_vec());
+        let count = |index: usize| {
+            u128::from_le_bytes(
+                counts[WORD_BYTES * index..WORD_BYTES * (index + 1)]
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        let output = outputs.into_iter().nth(coset_index).unwrap();
+        let coset = cosets.points[coset_index];
+        let weights = &cosets.weights[coset_index];
+        let inverse_vanishing = cosets.inverse_vanishing[coset_index];
+        let mut count_coefficients: Zeroizing<Vec<u128>> =
+            Zeroizing::new((0..SYSTEMATIC).map(count).collect());
         transform.base(&mut count_coefficients, true);
-        let raw = counts
-            .iter()
-            .zip(inverses.iter())
-            .map(|(count, inverse)| field::scale(*inverse, *count));
-        let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
-            raw,
-            &second_mask,
+        let multiplicity = Zeroizing::new(oracles::masked_base_coefficients(
+            std::mem::take(&mut *count_coefficients),
+            &first_mask,
+            coset,
+            transform,
+            None,
+        ));
+        weights.add_base(output, multiplicity_oracle, multiplicity.iter().copied());
+        let raw = (0..SYSTEMATIC).map(|index| {
+            field::scale(
+                field::decode(&inverses[ELEMENT_BYTES * index..]),
+                count(index),
+            )
+        });
+        let table_inverse = Zeroizing::new(oracles::extension_values_owned(
+            oracles::masked_extension_coefficients(raw, &second_mask, transform),
+            coset,
             transform,
         ));
-        for (coset_index, output) in outputs.into_iter().enumerate() {
-            let coset = cosets.points[coset_index];
-            let weights = &cosets.weights[coset_index];
-            let inverse_vanishing = cosets.inverse_vanishing[coset_index];
-            let multiplicity = Zeroizing::new(oracles::masked_base_coefficients(
-                count_coefficients.to_vec(),
-                &first_mask,
-                coset,
-                transform,
-                None,
-            ));
-            weights.add_base(output, multiplicity_oracle, &multiplicity);
-            let table_inverse =
-                Zeroizing::new(oracles::extension_values(&coefficients, coset, transform));
-            weights.add_extension(output, table_oracle, &table_inverse);
-            let table = oracles::masked_base(
-                &(0..SYSTEMATIC)
-                    .map(|value| value as u128)
-                    .collect::<Vec<_>>(),
-                &[],
-                coset,
-                transform,
-            );
-            let residuals = Zeroizing::new(
-                table_inverse
-                    .iter()
-                    .zip(&table)
-                    .zip(multiplicity.iter())
-                    .map(|((inverse, table), multiplicity)| {
-                        field::scale(
-                            field::subtract(
-                                field::multiply(
-                                    field::subtract(common.beta, [*table, 0, 0]),
-                                    *inverse,
-                                ),
-                                [*multiplicity, 0, 0],
-                            ),
-                            inverse_vanishing,
-                        )
-                    })
-                    .collect::<Vec<Element>>(),
-            );
-            weights.add_extension(output, residual_oracle, &residuals);
-        }
+        weights.add_extension(output, table_oracle, table_inverse.iter().copied());
+        // The table's coefficients, from its values on the systematic
+        // domain.
+        let mut table_coefficients: Vec<u128> = (0..SYSTEMATIC as u128).collect();
+        transform.base(&mut table_coefficients, true);
+        let table =
+            oracles::masked_base_coefficients(table_coefficients, &[], coset, transform, None);
+        weights.add_extension(
+            output,
+            residual_oracle,
+            table_inverse
+                .iter()
+                .zip(&table)
+                .zip(multiplicity.iter())
+                .map(|((inverse, table), multiplicity)| {
+                    field::scale(
+                        field::subtract(
+                            field::multiply(field::subtract(common.beta, [*table, 0, 0]), *inverse),
+                            [*multiplicity, 0, 0],
+                        ),
+                        inverse_vanishing,
+                    )
+                }),
+        );
     });
     Vec::new()
 }
@@ -619,27 +648,18 @@ fn add_extension_oracle(input: &[u8]) -> Vec<u8> {
         let oracle = reader.number();
         let count = reader.number();
         assert!(count <= 2 * SYSTEMATIC + 1);
-        let coefficients = reader.elements(count);
+        let coefficients = reader.take(count * ELEMENT_BYTES);
         reader.finish();
-        let used = if oracle == UNWEIGHTED {
-            Vec::new()
-        } else {
-            vec![oracle]
-        };
-        let cosets = Cosets::new(&common, &used);
-        let transform = Transform::cached(SYSTEMATIC);
-        for (coset, output) in outputs.into_iter().enumerate() {
-            let values = Zeroizing::new(oracles::extension_values(
-                &coefficients,
-                cosets.points[coset],
-                transform,
-            ));
+        let cosets = Cosets::new(&common);
+        for (index, output) in outputs.into_iter().enumerate() {
+            // Each coset's values from its coefficients in the input.
+            let values = rows::shard_extension_values(coefficients, COSETS[index] as u32, 1);
             if oracle == UNWEIGHTED {
                 for (sum, value) in output.iter_mut().zip(values.iter()) {
                     *sum = field::add(*sum, *value);
                 }
             } else {
-                cosets.weights[coset].add_extension(output, oracle, &values);
+                cosets.weights[index].add_extension(output, oracle, values.iter().copied());
             }
         }
     });
@@ -677,18 +697,20 @@ pub fn polynomial(
         }
         sums.add(submit(&COLUMNS, None, &parts, 0));
     }
-    let counts = encode_counts(witness, first, second);
-    sums.add(submit(
-        &COUNTS,
-        None,
-        &[
-            Part::Bytes(&header),
-            Part::Shared(&common),
-            Part::Bytes(&counts),
-            Part::Shared(&table),
-        ],
-        0,
-    ));
+    for coset in 0..COSETS.len() {
+        let counts = encode_counts(coset, witness, first, second);
+        sums.add(submit(
+            &COUNTS,
+            None,
+            &[
+                Part::Bytes(&header),
+                Part::Shared(&common),
+                Part::Bytes(&counts),
+                Part::Shared(&table),
+            ],
+            0,
+        ));
+    }
     for (oracle, coefficients) in [
         (UNWEIGHTED, &first.degree_mask),
         (columns + lookups + 2, &second.sum_mask),
@@ -707,14 +729,13 @@ pub fn polynomial(
             0,
         ));
     }
-    let total = sums.finish();
+    // Each coset's sums interleave with the other's in interpolation order.
     let mut evaluations = Zeroizing::new(vec![ZERO; 2 * SYSTEMATIC]);
-    for (coset, output) in total.chunks_exact(SYSTEMATIC).enumerate() {
-        for (position, value) in output.iter().copied().enumerate() {
-            evaluations[coset + 2 * position] = value;
-        }
-    }
-    Transform::new(2 * SYSTEMATIC).extension(&mut evaluations, true);
+    sums.finish(|index, value| {
+        let position = index / SYSTEMATIC + 2 * (index % SYSTEMATIC);
+        evaluations[position] = field::add(evaluations[position], value);
+    });
+    Transform::cached(SYSTEMATIC).extension(&mut evaluations, true);
     let inverse_coset = base::power(7, MODULUS - 2);
     let mut power = 1;
     for value in evaluations.iter_mut() {
@@ -757,7 +778,8 @@ mod tests {
                 coefficients: (0..2 * relation.oracles())
                     .map(|_| [sample(), sample(), sample()])
                     .collect(),
-                powers: vec![vec![0, 1, MODULUS - 1, 37], vec![11, 0, 2, MODULUS - 1]],
+                // Powers -1, -37, ... and 11, 0, 0, ...
+                powers: vec![(MODULUS - 1, 37), (11, 0)],
                 classes: (0..relation.oracles()).map(|index| index % 2).collect(),
             };
             let words = [0, 1, MODULUS - 1, sample()];
@@ -811,11 +833,11 @@ mod tests {
                                 ONE,
                                 field::add(
                                     field::multiply(
-                                        weights.value(inverse_oracle, position),
+                                        weights.values(inverse_oracle).nth(position).unwrap(),
                                         reciprocals[position],
                                     ),
                                     field::multiply(
-                                        weights.value(residual_oracle, position),
+                                        weights.values(residual_oracle).nth(position).unwrap(),
                                         residue,
                                     ),
                                 ),

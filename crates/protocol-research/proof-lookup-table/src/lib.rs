@@ -16,7 +16,9 @@ pub fn evaluate_on_proof_domain(coefficients: &[u128]) -> Vec<u128> {
         *value = field::base::multiply(*coefficient, twist);
         twist = field::base::multiply(twist, 7);
     }
-    field::Transform::new(values.len()).base(&mut values, false);
+    // Tables no longer than the systematic length; the longer stages
+    // compute their twiddles as they go.
+    field::Transform::new(values.len().min(SYSTEMATIC)).base(&mut values, false);
     values
 }
 

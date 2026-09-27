@@ -1,10 +1,9 @@
 pub use crate::linear_oracle::LinearOracle;
 use crate::{
     field::{self, Element, ONE, ZERO},
-    linear_oracle::{self, Public},
+    linear_oracle::{AffineValues, Public},
     oracles::{FirstOracle, SecondOracle, Witness},
     parameters::*,
-    sums::Sums,
 };
 use parallel_work::share;
 use zeroize::Zeroizing;
@@ -132,7 +131,7 @@ impl LinearOracle {
         mask_challenge: Element,
         adversarial: bool,
     ) -> Self {
-        let mut sums = Sums::new(DOMAIN);
+        let mut values = AffineValues::new();
         let alpha = operator.alpha;
         // Each term adds the products of its public polynomial with the
         // weighted sum of the committed columns it names.
@@ -153,7 +152,7 @@ impl LinearOracle {
                 shift: 0,
                 constant,
             };
-            let values: parallel_work::Shared;
+            let shared: parallel_work::Shared;
             let public = match &term.public {
                 PublicColumn::Powers(degree) => geometric(*degree, false),
                 PublicColumn::Ones(degree) => geometric(*degree, true),
@@ -162,15 +161,14 @@ impl LinearOracle {
                     for value in elements {
                         bytes.extend(field::encode(*value));
                     }
-                    values = share(bytes);
+                    shared = share(bytes);
                     Public::Adjoint {
-                        values: &values,
+                        values: &shared,
                         count: elements.len(),
                     }
                 }
             };
-            linear_oracle::products(
-                &mut sums,
+            values.products(
                 mask_challenge,
                 public,
                 &columns,
@@ -178,13 +176,12 @@ impl LinearOracle {
                 &first.masks,
             );
         }
-        linear_oracle::term(
-            &mut sums,
+        values.term(
             field::multiply(mask_challenge, operator.lookup_weight),
             &second.lookup_coefficients,
         );
-        linear_oracle::term(&mut sums, ONE, &second.sum_mask);
-        let mut evaluations = sums.finish();
+        values.term(ONE, &second.sum_mask);
+        let mut evaluations = values.finish();
         Self::from_evaluations(
             role,
             std::mem::take(&mut *evaluations),

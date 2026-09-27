@@ -125,33 +125,29 @@ impl ReleaseRelationProof {
             .write_all(&field::encode(self.folding.terminal))
             .unwrap();
         let indices = fri::requested(&self.folding.queries, DOMAIN);
-        let rows = self.first.opened_rows(&self.witness, &indices);
-        let payloads: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
-        self.first
-            .tree
-            .write_multiproof(&indices, &payloads, output);
-        drop(rows);
-        let rows = self
-            .second
-            .opened_rows(&self.witness, &self.inverses, &indices);
-        let payloads: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
-        self.second
-            .tree
-            .write_multiproof(&indices, &payloads, output);
-        drop(rows);
-        let rows = self.linear.opened_rows(&indices);
-        let payloads: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
-        self.linear
-            .tree
-            .write_multiproof(&indices, &payloads, output);
+        self.first.tree.write_multiproof(
+            &indices,
+            |leaves| self.first.opened_rows(&self.witness, leaves),
+            output,
+        );
+        self.second.tree.write_multiproof(
+            &indices,
+            |leaves| {
+                self.second
+                    .opened_rows(&self.witness, &self.inverses, leaves)
+            },
+            output,
+        );
+        self.linear.tree.write_multiproof(
+            &indices,
+            |leaves| self.linear.opened_rows(leaves),
+            output,
+        );
         for layer in &self.folding.layers {
             let indices = fri::requested(&self.folding.queries, layer.tree.length);
-            let payloads: Vec<_> = indices
-                .iter()
-                .map(|index| field::encode(layer.values[*index]))
-                .collect();
-            let views: Vec<&[u8]> = payloads.iter().map(|value| value.as_slice()).collect();
-            layer.tree.write_multiproof(&indices, &views, output);
+            layer
+                .tree
+                .write_multiproof(&indices, |leaves| layer.rows(leaves), output);
         }
     }
 }

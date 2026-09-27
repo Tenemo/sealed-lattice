@@ -1,9 +1,7 @@
 use crate::{
     field::{self, Element, ONE, ZERO},
-    linear_oracle::{self, Public},
+    linear_oracle::{AffineValues, Public},
     oracles::{FirstOracle, SecondOracle, Witness},
-    parameters::*,
-    sums::Sums,
 };
 use parallel_work::share;
 use setup_stream_kernel::{ProverOperatorPlan, prover_operator_plan};
@@ -27,7 +25,7 @@ pub struct AffineSum {
     plan: ProverOperatorPlan,
     mask: Element,
     target: Element,
-    sums: Sums,
+    values: AffineValues,
     next: usize,
 }
 impl AffineSum {
@@ -40,7 +38,7 @@ impl AffineSum {
     ) -> Self {
         let Challenges { alpha, mask } = challenges;
         let plan = prover_operator_plan(profile, alpha).unwrap();
-        let mut sums = Sums::new(DOMAIN);
+        let mut values = AffineValues::new();
         let mut groups: BTreeMap<(usize, usize, usize, bool), Vec<Element>> = BTreeMap::new();
         for term in &plan.fixed_terms {
             let group = groups
@@ -59,8 +57,7 @@ impl AffineSum {
             if columns.is_empty() {
                 continue;
             }
-            linear_oracle::products(
-                &mut sums,
+            values.products(
                 mask,
                 Public::Geometric {
                     alpha,
@@ -80,7 +77,7 @@ impl AffineSum {
             target: plan.target_offset,
             plan,
             mask,
-            sums,
+            values,
             next: 0,
         }
     }
@@ -117,8 +114,7 @@ impl AffineSum {
                 }
                 drop(values);
                 let values = share(bytes);
-                linear_oracle::products(
-                    &mut self.sums,
+                self.values.products(
                     self.mask,
                     Public::Adjoint {
                         values: &values,
@@ -143,17 +139,16 @@ impl AffineSum {
             plan,
             mask,
             target,
-            mut sums,
+            mut values,
             next,
         } = self;
         assert_eq!(next, plan.common_columns.len());
-        linear_oracle::term(
-            &mut sums,
+        values.term(
             field::multiply(mask, plan.lookup_weight),
             &second.lookup_coefficients,
         );
-        linear_oracle::term(&mut sums, ONE, &second.sum_mask);
-        let mut evaluations = sums.finish();
+        values.term(ONE, &second.sum_mask);
+        let mut evaluations = values.finish();
         LinearOracle::from_evaluations(
             role,
             std::mem::take(&mut *evaluations),

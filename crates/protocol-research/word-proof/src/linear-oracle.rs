@@ -1,40 +1,61 @@
 use crate::{
     field::{self, Element, MODULUS, ONE, Transform, ZERO, base},
-    oracles::{coset, extension_values, masked_base_coefficients},
     parameters::*,
-    rows::RowShards,
-    sums::{self, Sums},
+    rows::{self, RowShards},
+    sums::{self, ShardSums},
     tree::Tree,
 };
-use parallel_work::{Job, MAXIMUM_JOB_BYTES, Part, Shared, submit};
+use parallel_work::{Job, Part, Shared, Ticket, share, submit};
+use std::collections::VecDeque;
 use zeroize::{Zeroize, Zeroizing};
 
-// The jobs that add the terms of the masked affine sum's values on the
-// four cosets to the domain's sums. Each weight is the mask challenge,
-// possibly times a public factor, so the finished sums are the values the
-// oracle interpolates.
+// The jobs of the masked affine sum's values on the domain. A product's
+// weighted public polynomial and its combination of committed columns are
+// each computed once; then each shard of the domain's rows adds its values
+// of the product, or of a weighted extension polynomial, to its sums where
+// its jobs run. Each weight is the mask challenge, possibly times a public
+// factor, so the finished sums are the values the oracle interpolates.
 
-/// Adds an extension polynomial's weighted values.
+/// Adds a weighted extension polynomial's values at a shard's rows.
 pub static TERM: Job = Job {
     kind: 0x0140,
     run: add_term,
 };
-/// Adds a committed column's products with its weighted public column.
-pub static COLUMN: Job = Job {
+/// The masked coefficients of a weighted combination of committed columns.
+pub static COMBINATION: Job = Job {
     kind: 0x0141,
-    run: add_column,
+    run: combination,
 };
-/// Adds a weighted public polynomial's products with a combination of
-/// committed columns.
+/// Adds the products of a public polynomial with a combination of committed
+/// columns at a shard's rows.
 pub static PRODUCT: Job = Job {
     kind: 0x0142,
     run: add_product,
 };
+/// A weighted public polynomial's coefficients, which repeat with the
+/// period of its values: a challenge's geometric sequence or adjoint
+/// values, interpolated.
+pub static PUBLIC: Job = Job {
+    kind: 0x0143,
+    run: public_coefficients,
+};
 
 const ELEMENT_BYTES: usize = 48;
 const WORD_BYTES: usize = 16;
-// A combined column's weight, mask and words in a product job.
+/// The residue classes of each coset's rows that the shards hold.
+const CLASSES: usize = 2;
+/// The shards of the domain's rows, one for each residue class of each
+/// coset.
+const SHARDS: usize = 4 * CLASSES;
+const SHARD_ROWS: usize = SYSTEMATIC / CLASSES;
+// A combined column's weight, mask and words in a combination job.
 const COMBINED_COLUMN_BYTES: usize = ELEMENT_BYTES + WORD_BYTES * MASKS + 2 * SYSTEMATIC;
+/// The most bytes of columns one combination job reads, which bounds its
+/// memory beside its values and output.
+const COMBINATION_INPUT_BYTES: usize = 4 << 20;
+/// The products whose public polynomial and combinations run before their
+/// shards' jobs start.
+const PREPARED: usize = 2;
 
 fn number(bytes: &[u8]) -> usize {
     u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize
@@ -42,252 +63,38 @@ fn number(bytes: &[u8]) -> usize {
 fn word(bytes: &[u8]) -> u128 {
     u128::from_le_bytes(bytes[..WORD_BYTES].try_into().unwrap())
 }
-fn elements(bytes: &[u8]) -> Vec<Element> {
-    bytes
-        .chunks_exact(ELEMENT_BYTES)
-        .map(field::decode)
-        .collect()
-}
-// The sums' header and the weight that begin a job's input, with room for
-// the bytes that follow them.
-fn start(sums: &Sums, weight: Element, room: usize) -> Zeroizing<Vec<u8>> {
-    let mut bytes = Zeroizing::new(Vec::with_capacity(
-        sums::HEADER_BYTES + ELEMENT_BYTES + room,
-    ));
-    bytes.extend(sums.header());
-    bytes.extend(field::encode(weight));
-    bytes
-}
-// A job's session, weight and the bytes that follow them.
-fn read_start(input: &[u8]) -> (u64, Element, &[u8]) {
-    let (session, length, rest) = sums::header(input);
-    assert_eq!(length, DOMAIN);
-    let (weight, rest) = rest.split_at(ELEMENT_BYTES);
-    (session, field::decode(weight), rest)
-}
-
-/// Starts the job that adds the weighted values of the coefficients.
-pub fn term(sums: &mut Sums, weight: Element, coefficients: &[Element]) {
-    let mut input = start(sums, weight, ELEMENT_BYTES * coefficients.len());
-    for coefficient in coefficients {
-        input.extend(field::encode(*coefficient));
-    }
-    sums.add(submit(&TERM, None, &[Part::Bytes(&input)], 0));
-}
-fn add_term(input: &[u8]) -> Vec<u8> {
-    let (session, weight, rest) = read_start(input);
-    let coefficients = Zeroizing::new(elements(rest));
-    let transform = Transform::cached(SYSTEMATIC);
-    sums::with(session, DOMAIN, |sums| {
-        for index in 0..4 {
-            let values = Zeroizing::new(extension_values(&coefficients, coset(index), transform));
-            for (row, value) in values.iter().enumerate() {
-                let position = index + 4 * row;
-                sums[position] = field::add(sums[position], field::multiply(weight, *value));
-            }
-        }
-    });
-    Vec::new()
-}
-
-/// Starts the job that adds the products of the committed column of the
-/// words and mask with the weighted public column of the values.
-pub fn column(sums: &mut Sums, weight: Element, values: &[Element], mask: &[u128], words: &[u16]) {
-    assert_eq!(
-        (values.len(), mask.len(), words.len()),
-        (SYSTEMATIC, MASKS, SYSTEMATIC)
-    );
-    let mut input = start(
-        sums,
-        weight,
-        ELEMENT_BYTES * SYSTEMATIC + WORD_BYTES * MASKS + 2 * SYSTEMATIC,
-    );
+fn encoded(values: &[Element]) -> Zeroizing<Vec<u8>> {
+    let mut bytes = Zeroizing::new(Vec::with_capacity(ELEMENT_BYTES * values.len()));
     for value in values {
-        input.extend(field::encode(*value));
+        bytes.extend(field::encode(*value));
     }
-    for value in mask {
-        input.extend(value.to_le_bytes());
-    }
-    for value in words {
-        input.extend(value.to_le_bytes());
-    }
-    sums.add(submit(&COLUMN, None, &[Part::Bytes(&input)], 0));
+    bytes
 }
-fn add_column(input: &[u8]) -> Vec<u8> {
-    let (session, weight, rest) = read_start(input);
-    let (public, rest) = rest.split_at(ELEMENT_BYTES * SYSTEMATIC);
-    let (mask, words) = rest.split_at(WORD_BYTES * MASKS);
-    assert_eq!(words.len(), 2 * SYSTEMATIC);
-    let transform = Transform::cached(SYSTEMATIC);
-    let mut public = elements(public);
-    transform.extension(&mut public, true);
-    for value in public.iter_mut() {
-        *value = field::multiply(*value, weight);
-    }
-    let mask = Zeroizing::new(mask.chunks_exact(WORD_BYTES).map(word).collect::<Vec<_>>());
-    let mut coefficients = Zeroizing::new(
-        words
-            .chunks_exact(2)
-            .map(|value| u128::from(u16::from_le_bytes([value[0], value[1]])))
-            .collect::<Vec<_>>(),
-    );
-    transform.base(&mut coefficients, true);
-    sums::with(session, DOMAIN, |sums| {
-        for index in 0..4 {
-            let public = extension_values(&public, coset(index), transform);
-            let values = Zeroizing::new(masked_base_coefficients(
-                coefficients.to_vec(),
-                &mask,
-                coset(index),
-                transform,
-                None,
-            ));
-            for (row, (public, value)) in public.iter().zip(values.iter()).enumerate() {
-                let position = index + 4 * row;
-                sums[position] = field::add(sums[position], field::scale(*public, *value));
-            }
+
+fn add_term(input: &[u8]) -> Vec<u8> {
+    let (session, shard, length, rest) = sums::header(input);
+    assert_eq!(length, SHARD_ROWS);
+    let (weight, coefficients) = rest.split_at(ELEMENT_BYTES);
+    let weight = field::decode(weight);
+    let values = rows::shard_extension_values(coefficients, shard, CLASSES);
+    sums::with(session, shard, length, |sums| {
+        for (sum, value) in sums.iter_mut().zip(values.iter()) {
+            *sum = field::add(*sum, field::multiply(weight, *value));
         }
     });
     Vec::new()
 }
 
-/// A product job's public polynomial: a challenge's geometric sequence, or
-/// adjoint values that the jobs share.
-pub enum Public<'a> {
-    Geometric {
-        alpha: Element,
-        degree: usize,
-        automorphism: usize,
-        shift: usize,
-        constant: bool,
-    },
-    Adjoint {
-        values: &'a Shared,
-        count: usize,
-    },
-}
-/// Starts the jobs that add the products of the weighted public
-/// polynomial with the combination of the weighted committed columns of
-/// the words and masks, each job combining as many columns as its input
-/// holds.
-pub fn products(
-    sums: &mut Sums,
-    weight: Element,
-    public: Public,
-    columns: &[(usize, Element)],
-    words: &[Vec<u16>],
-    masks: &[Vec<u128>],
-) {
-    let mut prefix = start(sums, weight, 1 + ELEMENT_BYTES + 13);
-    let shared = match public {
-        Public::Geometric {
-            alpha,
-            degree,
-            automorphism,
-            shift,
-            constant,
-        } => {
-            prefix.push(0);
-            prefix.extend(field::encode(alpha));
-            for value in [degree, automorphism, shift] {
-                prefix.extend((value as u32).to_le_bytes());
-            }
-            prefix.push(u8::from(constant));
-            None
-        }
-        Public::Adjoint { values, count } => {
-            assert!(count.is_power_of_two() && count <= SYSTEMATIC);
-            prefix.push(1);
-            prefix.extend((count as u32).to_le_bytes());
-            Some((values, ELEMENT_BYTES * count))
-        }
-    };
-    let room = MAXIMUM_JOB_BYTES - prefix.len() - shared.map_or(0, |(_, length)| length) - 4;
-    for chunk in columns.chunks(room / COMBINED_COLUMN_BYTES) {
-        let mut bytes = Zeroizing::new(Vec::with_capacity(4 + COMBINED_COLUMN_BYTES * chunk.len()));
-        bytes.extend((chunk.len() as u32).to_le_bytes());
-        for (column, weight) in chunk {
-            assert_eq!(
-                (masks[*column].len(), words[*column].len()),
-                (MASKS, SYSTEMATIC)
-            );
-            bytes.extend(field::encode(*weight));
-            for value in &masks[*column] {
-                bytes.extend(value.to_le_bytes());
-            }
-            for value in &words[*column] {
-                bytes.extend(value.to_le_bytes());
-            }
-        }
-        let ticket = match shared {
-            Some((values, _)) => submit(
-                &PRODUCT,
-                None,
-                &[
-                    Part::Bytes(&prefix),
-                    Part::Shared(values),
-                    Part::Bytes(&bytes),
-                ],
-                0,
-            ),
-            None => submit(
-                &PRODUCT,
-                None,
-                &[Part::Bytes(&prefix), Part::Bytes(&bytes)],
-                0,
-            ),
-        };
-        sums.add(ticket);
-    }
-}
-fn add_product(input: &[u8]) -> Vec<u8> {
-    let (session, weight, rest) = read_start(input);
-    let (mut coefficient, rest) = match rest[0] {
-        0 => {
-            let alpha = field::decode(&rest[1..1 + ELEMENT_BYTES]);
-            let rest = &rest[1 + ELEMENT_BYTES..];
-            let constant = match rest[12] {
-                0 => false,
-                1 => true,
-                _ => panic!("Geometric constant"),
-            };
-            (
-                geometric(
-                    alpha,
-                    number(rest),
-                    number(&rest[4..]),
-                    number(&rest[8..]),
-                    constant,
-                ),
-                &rest[13..],
-            )
-        }
-        1 => {
-            let count = number(&rest[1..]);
-            let (values, rest) = rest[5..].split_at(ELEMENT_BYTES * count);
-            (embed(elements(values)), rest)
-        }
-        _ => panic!("Public polynomial"),
-    };
-    for value in coefficient.iter_mut() {
-        *value = field::multiply(*value, weight);
-    }
-    let count = number(rest);
-    let columns = &rest[4..];
+fn combination(input: &[u8]) -> Vec<u8> {
+    let count = number(input);
+    let columns = &input[4..];
     assert_eq!(columns.len(), COMBINED_COLUMN_BYTES * count);
-    let transform = Transform::cached(SYSTEMATIC);
-    let variable = Zeroizing::new(combined(columns, transform));
-    sums::with(session, DOMAIN, |sums| {
-        for index in 0..4 {
-            let left = extension_values(&coefficient, coset(index), transform);
-            let right = Zeroizing::new(extension_values(&variable, coset(index), transform));
-            for (row, (left, right)) in left.into_iter().zip(right.iter()).enumerate() {
-                let position = index + 4 * row;
-                sums[position] = field::add(sums[position], field::multiply(left, *right));
-            }
-        }
-    });
-    Vec::new()
+    let coefficients = Zeroizing::new(combined(columns, Transform::cached(SYSTEMATIC)));
+    let mut output = Vec::with_capacity(ELEMENT_BYTES * coefficients.len());
+    for coefficient in coefficients.iter() {
+        output.extend(field::encode(*coefficient));
+    }
+    output
 }
 // The masked coefficients of the weighted sum of the encoded committed
 // columns.
@@ -316,16 +123,81 @@ fn combined(columns: &[u8], transform: &Transform) -> Vec<Element> {
     values.extend_from_slice(&masks);
     std::mem::take(&mut *values)
 }
-fn embed(mut values: Vec<Element>) -> Vec<Element> {
+
+fn add_product(input: &[u8]) -> Vec<u8> {
+    let (session, shard, length, rest) = sums::header(input);
+    assert_eq!(length, SHARD_ROWS);
+    let degree = number(rest);
+    assert!(degree.is_power_of_two() && degree <= SYSTEMATIC);
+    let (public, combination) = rest[4..].split_at(ELEMENT_BYTES * degree);
+    assert_eq!(combination.len(), ELEMENT_BYTES * (WITNESS_DEGREE + 1));
+    let public = rows::shard_extension_values_of(
+        SYSTEMATIC,
+        |index| field::decode(&public[ELEMENT_BYTES * (index % degree)..]),
+        shard,
+        CLASSES,
+    );
+    let combination = rows::shard_extension_values(combination, shard, CLASSES);
+    sums::with(session, shard, length, |sums| {
+        for ((sum, public), combination) in
+            sums.iter_mut().zip(public.iter()).zip(combination.iter())
+        {
+            *sum = field::add(*sum, field::multiply(*public, *combination));
+        }
+    });
+    Vec::new()
+}
+
+fn public_coefficients(input: &[u8]) -> Vec<u8> {
+    let (weight, rest) = input.split_at(ELEMENT_BYTES);
+    let weight = field::decode(weight);
+    let values = match rest[0] {
+        0 => {
+            let alpha = field::decode(&rest[1..1 + ELEMENT_BYTES]);
+            let rest = &rest[1 + ELEMENT_BYTES..];
+            assert_eq!(rest.len(), 13);
+            let constant = match rest[12] {
+                0 => false,
+                1 => true,
+                _ => panic!("Geometric constant"),
+            };
+            geometric(
+                alpha,
+                number(rest),
+                number(&rest[4..]),
+                number(&rest[8..]),
+                constant,
+            )
+        }
+        1 => {
+            let count = number(&rest[1..]);
+            let values = &rest[5..];
+            assert_eq!(values.len(), ELEMENT_BYTES * count);
+            values
+                .chunks_exact(ELEMENT_BYTES)
+                .map(field::decode)
+                .collect()
+        }
+        _ => panic!("Public polynomial"),
+    };
+    std::mem::take(&mut *encoded(&interpolated(values, weight)))
+}
+// The weighted coefficients of the polynomial whose values on the
+// systematic domain are the values at every stride-th row and zero between
+// them. They repeat with the values' period, so one period represents
+// them.
+fn interpolated(mut values: Vec<Element>, weight: Element) -> Vec<Element> {
     let degree = values.len();
-    Transform::new(degree).extension(&mut values, true);
-    let stride = SYSTEMATIC / degree;
-    let inverse = base::power(stride as u128, MODULUS - 2);
-    let mut coefficients = vec![ZERO; SYSTEMATIC];
-    for (block, value) in coefficients.iter_mut().enumerate() {
-        *value = field::scale(values[block % degree], inverse);
+    assert!(degree.is_power_of_two() && degree <= SYSTEMATIC);
+    if degree > 1 {
+        Transform::cached(SYSTEMATIC).extension(&mut values, true);
     }
-    coefficients
+    let stride = SYSTEMATIC / degree;
+    let factor = field::scale(weight, base::power(stride as u128, MODULUS - 2));
+    for value in values.iter_mut() {
+        *value = field::multiply(*value, factor);
+    }
+    values
 }
 fn geometric(
     alpha: Element,
@@ -334,8 +206,9 @@ fn geometric(
     shift: usize,
     constant: bool,
 ) -> Vec<Element> {
+    assert!(degree.is_power_of_two() && degree <= SYSTEMATIC);
     if constant {
-        return embed(vec![ONE; degree]);
+        return vec![ONE; degree];
     }
     let mut powers = Vec::with_capacity(degree);
     let mut current = ONE;
@@ -343,18 +216,226 @@ fn geometric(
         powers.push(current);
         current = field::multiply(current, alpha);
     }
-    embed(
-        (0..degree)
-            .map(|index| {
-                let exponent = (index * automorphism + shift) % (2 * degree);
-                if exponent < degree {
-                    powers[exponent % degree]
-                } else {
-                    field::subtract(ZERO, powers[exponent % degree])
+    (0..degree)
+        .map(|index| {
+            let exponent = (index * automorphism + shift) % (2 * degree);
+            if exponent < degree {
+                powers[exponent % degree]
+            } else {
+                field::subtract(ZERO, powers[exponent % degree])
+            }
+        })
+        .collect()
+}
+
+/// A product's public polynomial: a challenge's geometric sequence, or
+/// adjoint values that the jobs share.
+pub enum Public<'a> {
+    Geometric {
+        alpha: Element,
+        degree: usize,
+        automorphism: usize,
+        shift: usize,
+        constant: bool,
+    },
+    Adjoint {
+        values: &'a Shared,
+        count: usize,
+    },
+}
+// A product whose public polynomial's and combinations' jobs run: the sum
+// of its ended combinations and the count still running.
+struct Prepared {
+    degree: usize,
+    public: Ticket,
+    combination: Option<Zeroizing<Vec<u8>>>,
+    running: usize,
+}
+/// The masked affine sum's values on the domain, which the jobs of its
+/// terms add in the shards of the domain's rows.
+pub struct AffineValues {
+    sums: ShardSums,
+    // Products whose shards' jobs have yet to start, oldest first.
+    prepared: VecDeque<Prepared>,
+    // The running combinations, oldest first, each with its product's
+    // position among the prepared products that have ever started.
+    combinations: VecDeque<(usize, Ticket)>,
+    // The products that have left the prepared ones.
+    started: usize,
+}
+impl Default for AffineValues {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl AffineValues {
+    pub fn new() -> Self {
+        Self {
+            sums: ShardSums::new(SHARDS, SHARD_ROWS),
+            prepared: VecDeque::new(),
+            combinations: VecDeque::new(),
+            started: 0,
+        }
+    }
+    // Adds the oldest running combination into its product's sum.
+    fn end_combination(&mut self) {
+        let (product, ticket) = self.combinations.pop_front().unwrap();
+        let output = ticket.wait();
+        let index = product - self.started;
+        let prepared = &mut self.prepared[index];
+        prepared.running -= 1;
+        if let Some(sum) = &mut prepared.combination {
+            for (sum, value) in sum
+                .chunks_exact_mut(ELEMENT_BYTES)
+                .zip(output.chunks_exact(ELEMENT_BYTES))
+            {
+                let total = field::add(field::decode(sum), field::decode(value));
+                sum.copy_from_slice(&field::encode(total));
+            }
+        } else {
+            prepared.combination = Some(output);
+        }
+    }
+    /// Starts the jobs that add the products of the weighted public
+    /// polynomial with the combination of the weighted committed columns of
+    /// the words and masks: its coefficients' and the combination's jobs,
+    /// each combining as many columns as its input bound allows, with at most
+    /// one combination running for each helper, and once those of later
+    /// products have started, the shards' jobs.
+    pub fn products(
+        &mut self,
+        weight: Element,
+        public: Public,
+        columns: &[(usize, Element)],
+        words: &[Vec<u16>],
+        masks: &[Vec<u128>],
+    ) {
+        assert!(!columns.is_empty());
+        let mut prefix = Vec::with_capacity(2 * ELEMENT_BYTES + 14);
+        prefix.extend(field::encode(weight));
+        let (degree, public) = match public {
+            Public::Geometric {
+                alpha,
+                degree,
+                automorphism,
+                shift,
+                constant,
+            } => {
+                prefix.push(0);
+                prefix.extend(field::encode(alpha));
+                for value in [degree, automorphism, shift] {
+                    prefix.extend((value as u32).to_le_bytes());
                 }
-            })
-            .collect(),
-    )
+                prefix.push(u8::from(constant));
+                let parts = [Part::Bytes(&prefix)];
+                (
+                    degree,
+                    submit(&PUBLIC, None, &parts, ELEMENT_BYTES * degree),
+                )
+            }
+            Public::Adjoint { values, count } => {
+                prefix.push(1);
+                prefix.extend((count as u32).to_le_bytes());
+                let parts = [Part::Bytes(&prefix), Part::Shared(values)];
+                (count, submit(&PUBLIC, None, &parts, ELEMENT_BYTES * count))
+            }
+        };
+        assert!(degree.is_power_of_two() && degree <= SYSTEMATIC);
+        let product = self.started + self.prepared.len();
+        self.prepared.push_back(Prepared {
+            degree,
+            public,
+            combination: None,
+            running: 0,
+        });
+        for chunk in columns.chunks(COMBINATION_INPUT_BYTES / COMBINED_COLUMN_BYTES) {
+            while self.combinations.len() >= parallel_work::helpers().max(1) {
+                self.end_combination();
+            }
+            let mut bytes =
+                Zeroizing::new(Vec::with_capacity(4 + COMBINED_COLUMN_BYTES * chunk.len()));
+            bytes.extend((chunk.len() as u32).to_le_bytes());
+            for (column, weight) in chunk {
+                assert_eq!(
+                    (masks[*column].len(), words[*column].len()),
+                    (MASKS, SYSTEMATIC)
+                );
+                bytes.extend(field::encode(*weight));
+                for value in &masks[*column] {
+                    bytes.extend(value.to_le_bytes());
+                }
+                for value in &words[*column] {
+                    bytes.extend(value.to_le_bytes());
+                }
+            }
+            let ticket = submit(
+                &COMBINATION,
+                None,
+                &[Part::Bytes(&bytes)],
+                ELEMENT_BYTES * (WITNESS_DEGREE + 1),
+            );
+            self.combinations.push_back((product, ticket));
+            self.prepared.back_mut().unwrap().running += 1;
+        }
+        while self.prepared.len() > PREPARED {
+            self.start_oldest();
+        }
+    }
+    // Starts the shards' jobs of the oldest prepared product on its public
+    // polynomial's coefficients and the sum of its combinations, whose
+    // combinations run before any later product's.
+    fn start_oldest(&mut self) {
+        while self.prepared[0].running > 0 {
+            self.end_combination();
+        }
+        let Prepared {
+            degree,
+            public,
+            combination,
+            ..
+        } = self.prepared.pop_front().unwrap();
+        self.started += 1;
+        let public = share(public.wait());
+        let combination = share(combination.unwrap());
+        let prefix = (degree as u32).to_le_bytes();
+        for shard in 0..SHARDS {
+            self.sums.submit(
+                &PRODUCT,
+                shard,
+                &[
+                    Part::Bytes(&prefix),
+                    Part::Shared(&public),
+                    Part::Shared(&combination),
+                ],
+            );
+        }
+    }
+    /// Starts the jobs that add the weighted values of the coefficients.
+    pub fn term(&mut self, weight: Element, coefficients: &[Element]) {
+        assert!(coefficients.len() <= 2 * SYSTEMATIC + 1);
+        let coefficients = share(encoded(coefficients));
+        let weight = field::encode(weight);
+        for shard in 0..SHARDS {
+            self.sums.submit(
+                &TERM,
+                shard,
+                &[Part::Bytes(&weight), Part::Shared(&coefficients)],
+            );
+        }
+    }
+    /// The values on the domain once every term's jobs have ended.
+    pub fn finish(mut self) -> Zeroizing<Vec<Element>> {
+        while !self.prepared.is_empty() {
+            self.start_oldest();
+        }
+        let mut values = Zeroizing::new(vec![ZERO; DOMAIN]);
+        self.sums.finish(|shard, first, output| {
+            for (row, value) in output.chunks_exact(ELEMENT_BYTES).enumerate() {
+                values[shard + SHARDS * (first + row)] = field::decode(value);
+            }
+        });
+        values
+    }
 }
 
 pub struct LinearOracle {
@@ -384,7 +465,7 @@ impl LinearOracle {
     ) -> Self {
         let mut evaluations = Zeroizing::new(evaluations);
         assert_eq!(evaluations.len(), DOMAIN);
-        Transform::new(DOMAIN).extension(&mut evaluations, true);
+        Transform::cached(SYSTEMATIC).extension(&mut evaluations, true);
         let inverse_coset = base::power(7, MODULUS - 2);
         let mut weight = 1;
         for value in evaluations.iter_mut() {
@@ -430,6 +511,8 @@ impl LinearOracle {
         let mut remainder = Zeroizing::new(evaluations[1..SYSTEMATIC].to_vec());
         drop(evaluations);
         let mut tree = Tree::new(role, 2, DOMAIN, 48);
+        // Openings compute the quotient's values again.
+        tree.forget_leaves();
         let mut rows = RowShards::open(&tree);
         rows.absorb_extension(&quotient);
         rows.close(&mut tree);

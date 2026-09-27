@@ -415,6 +415,37 @@ pub fn extension_values_selected(
 ) -> Vec<Element> {
     extension_values_inner(coefficients, coset, transform, Some(indices))
 }
+/// The values on a coset of the coefficients, computed in their own
+/// memory.
+pub(crate) fn extension_values_owned(
+    mut coefficients: Vec<Element>,
+    coset: u128,
+    transform: &Transform,
+) -> Vec<Element> {
+    let length = coefficients.len();
+    assert!(length <= 2 * SYSTEMATIC + 1);
+    let high = base::power(coset, SYSTEMATIC as u128);
+    if length == 2 * SYSTEMATIC + 1 {
+        coefficients[0] = field::add(
+            coefficients[0],
+            field::scale(coefficients[2 * SYSTEMATIC], base::multiply(high, high)),
+        );
+    }
+    for index in 0..length.saturating_sub(SYSTEMATIC).min(SYSTEMATIC) {
+        coefficients[index] = field::add(
+            coefficients[index],
+            field::scale(coefficients[SYSTEMATIC + index], high),
+        );
+    }
+    coefficients.resize(SYSTEMATIC, ZERO);
+    let mut power = 1;
+    for value in coefficients.iter_mut() {
+        *value = field::scale(*value, power);
+        power = base::multiply(power, coset);
+    }
+    transform.extension(&mut coefficients, false);
+    coefficients
+}
 fn extension_values_inner(
     coefficients: &[Element],
     coset: u128,

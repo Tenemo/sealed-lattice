@@ -15,6 +15,15 @@ impl Drop for Layer {
         self.values.zeroize();
     }
 }
+impl Layer {
+    /// The layer's encoded values at the leaves.
+    pub fn rows(&self, leaves: &[usize]) -> Vec<[u8; 48]> {
+        leaves
+            .iter()
+            .map(|index| field::encode(self.values[*index]))
+            .collect()
+    }
+}
 pub struct Fri {
     pub layers: Vec<Layer>,
     pub terminal: Element,
@@ -56,12 +65,14 @@ impl Fri {
                 if round == 0 { 2 * oracles } else { 0 },
                 false,
             );
-            coefficients = Zeroizing::new(
-                coefficients
-                    .chunks_exact(2)
-                    .map(|pair| field::add(pair[0], field::multiply(scalar, pair[1])))
-                    .collect(),
-            );
+            for index in 0..coefficients.len() / 2 {
+                coefficients[index] = field::add(
+                    coefficients[2 * index],
+                    field::multiply(scalar, coefficients[2 * index + 1]),
+                );
+            }
+            let folded = coefficients.len() / 2;
+            coefficients.truncate(folded);
             length /= 2;
             coset = base::multiply(coset, coset);
             if length == 2 {
@@ -74,13 +85,11 @@ impl Fri {
                     *destination = field::scale(*coefficient, power);
                     power = base::multiply(power, coset);
                 }
-                Transform::new(length).extension(&mut values, false);
+                Transform::cached(SYSTEMATIC).extension(&mut values, false);
                 let mut tree = Tree::new(role, 3 + round, length, 48);
-                let mut rows = Zeroizing::new(Vec::with_capacity(48 * length));
-                for value in values.iter() {
-                    rows.extend(field::encode(*value));
-                }
-                tree.hash_rows(&rows);
+                // Openings read the layer's values again.
+                tree.forget_leaves();
+                tree.hash_rows(|index, rows| rows.extend(field::encode(values[index])));
                 transcript.respond(&[&tree.root()]);
                 layers.push(Layer {
                     tree,

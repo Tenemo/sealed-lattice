@@ -36,7 +36,7 @@ pub static SECOND_COEFFICIENTS: Job = Job {
     kind: 0x0105,
     run: second_coefficients,
 };
-pub static JOBS: [&Job; 21] = [
+pub static JOBS: [&Job; 22] = [
     &FIRST_OPENINGS,
     &SECOND_OPENINGS,
     &FIRST_COEFFICIENTS,
@@ -54,8 +54,9 @@ pub static JOBS: [&Job; 21] = [
     &combination::COUNTS,
     &combination::EXTENSION,
     &linear_oracle::TERM,
-    &linear_oracle::COLUMN,
+    &linear_oracle::COMBINATION,
     &linear_oracle::PRODUCT,
+    &linear_oracle::PUBLIC,
     &tree::NODES,
     &tree::LEAVES,
 ];
@@ -311,18 +312,20 @@ fn first_coefficients(input: &[u8]) -> Vec<u8> {
         );
         masked_base_polynomial(BaseValues::Counts(&counts), &mask)
     };
-    coefficients
-        .iter()
-        .flat_map(|value| value.to_le_bytes())
-        .collect()
+    let mut output = Vec::with_capacity(WORD_BYTES * coefficients.len());
+    for value in coefficients.iter() {
+        output.extend(value.to_le_bytes());
+    }
+    output
 }
 fn second_coefficients(input: &[u8]) -> Vec<u8> {
     let (coefficients, rest) = decode_second(input);
     assert!(rest.is_empty());
-    coefficients
-        .iter()
-        .flat_map(|value| field::encode(*value))
-        .collect()
+    let mut output = Vec::with_capacity(ELEMENT_BYTES * coefficients.len());
+    for value in coefficients.iter() {
+        output.extend(field::encode(*value));
+    }
+    output
 }
 
 /// Decodes a job's base values, each 16 bytes.

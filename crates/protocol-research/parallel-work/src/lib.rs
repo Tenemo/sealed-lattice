@@ -147,6 +147,7 @@ impl Drop for Shared {
 }
 
 /// A part of a job's input: bytes, or shared bytes.
+#[derive(Clone, Copy)]
 pub enum Part<'a> {
     Bytes(&'a [u8]),
     Shared(&'a Shared),

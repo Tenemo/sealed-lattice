@@ -97,9 +97,12 @@ fn stage_twiddles(root: u128, length: usize) -> Vec<u128> {
 
 // An in-place iterative transform of bit-reversed values: each stage's
 // first butterfly has twiddle one, and the width-two stage has no other.
+// A stage beyond the tables multiplies each twiddle by the stage's root to
+// reach the next, which gives the powers its table would hold.
 fn butterflies<T: Copy>(
     values: &mut [T],
     twiddles: &[u128],
+    stage_root: impl Fn(usize) -> u128,
     add: impl Fn(T, T) -> T,
     subtract: impl Fn(T, T) -> T,
     scale: impl Fn(T, u128) -> T,
@@ -111,23 +114,39 @@ fn butterflies<T: Copy>(
             values.swap(index, reversed);
         }
     }
+    let butterfly = |lower: &mut T, upper: &mut T, twiddle: u128| {
+        let value = scale(*upper, twiddle);
+        let old = *lower;
+        *lower = add(old, value);
+        *upper = subtract(old, value);
+    };
     let mut width = 2;
     while width <= values.len() {
-        let stage = &twiddles[width / 2 - 1..width - 1];
+        let stage = twiddles.get(width / 2 - 1..width - 1);
+        let root = if stage.is_none() {
+            stage_root(width)
+        } else {
+            1
+        };
         for block in values.chunks_exact_mut(width) {
             let (left, right) = block.split_at_mut(width / 2);
             let (lower, upper) = (left[0], right[0]);
             left[0] = add(lower, upper);
             right[0] = subtract(lower, upper);
-            for ((lower, upper), twiddle) in left[1..]
-                .iter_mut()
-                .zip(right[1..].iter_mut())
-                .zip(&stage[1..])
-            {
-                let value = scale(*upper, *twiddle);
-                let old = *lower;
-                *lower = add(old, value);
-                *upper = subtract(old, value);
+            let pairs = left[1..].iter_mut().zip(right[1..].iter_mut());
+            match stage {
+                Some(stage) => {
+                    for ((lower, upper), twiddle) in pairs.zip(&stage[1..]) {
+                        butterfly(lower, upper, *twiddle);
+                    }
+                }
+                None => {
+                    let mut twiddle = 1;
+                    for (lower, upper) in pairs {
+                        twiddle = base::multiply(twiddle, root);
+                        butterfly(lower, upper, twiddle);
+                    }
+                }
             }
         }
         width *= 2;
@@ -195,17 +214,53 @@ impl Transform {
             inverse_length: base::power(length as u128, MODULUS - 2),
         }
     }
-    pub fn base(&self, values: &mut [u128], inverse: bool) {
-        assert_eq!(values.len(), self.length);
+    // The stage twiddles of a transform of the length that the tables hold:
+    // those of every stage up to the tables' length, which begin those of
+    // every longer transform, since each stage's twiddles are powers of its
+    // own width's root.
+    fn stages(&self, length: usize, inverse: bool) -> &[u128] {
+        assert!(length.is_power_of_two() && length >= 2);
         let twiddles = if inverse {
             &self.backward
         } else {
             &self.forward
         };
-        butterflies(values, twiddles, base::add, base::subtract, base::multiply);
+        &twiddles[..length.min(self.length) - 1]
+    }
+    // A stage's primitive root of its width, or that root's inverse.
+    fn stage_root(inverse: bool) -> impl Fn(usize) -> u128 {
+        move |width| {
+            let root = root(width);
+            if inverse {
+                base::power(root, MODULUS - 2)
+            } else {
+                root
+            }
+        }
+    }
+    fn inverse_length(&self, length: usize) -> u128 {
+        if length == self.length {
+            self.inverse_length
+        } else {
+            base::power(length as u128, MODULUS - 2)
+        }
+    }
+    /// Transforms base values of any power-of-two length from the
+    /// transform's tables.
+    pub fn base(&self, values: &mut [u128], inverse: bool) {
+        let twiddles = self.stages(values.len(), inverse);
+        butterflies(
+            values,
+            twiddles,
+            Self::stage_root(inverse),
+            base::add,
+            base::subtract,
+            base::multiply,
+        );
         if inverse {
+            let inverse_length = self.inverse_length(values.len());
             for value in values {
-                *value = base::multiply(*value, self.inverse_length);
+                *value = base::multiply(*value, inverse_length);
             }
         }
     }
@@ -247,17 +302,22 @@ impl Transform {
         );
         output
     }
+    /// Transforms extension values of any power-of-two length from the
+    /// transform's tables.
     pub fn extension(&self, values: &mut [Element], inverse: bool) {
-        assert_eq!(values.len(), self.length);
-        let twiddles = if inverse {
-            &self.backward
-        } else {
-            &self.forward
-        };
-        butterflies(values, twiddles, add, subtract, scale);
+        let twiddles = self.stages(values.len(), inverse);
+        butterflies(
+            values,
+            twiddles,
+            Self::stage_root(inverse),
+            add,
+            subtract,
+            scale,
+        );
         if inverse {
+            let inverse_length = self.inverse_length(values.len());
             for value in values {
-                *value = scale(*value, self.inverse_length);
+                *value = scale(*value, inverse_length);
             }
         }
     }
@@ -365,6 +425,46 @@ mod tests {
             let mut first: Vec<u128> = data.iter().map(|x| x[0]).collect();
             transform.base(&mut first, false);
             assert_eq!(first, expected.iter().map(|x| x[0]).collect::<Vec<_>>());
+        }
+    }
+    // One transform's tables give every length the values of that length's
+    // own transform, both ways and in both fields, whether the length is
+    // shorter than the tables' or longer; a length that is not a power of
+    // two, or below two, is refused.
+    #[test]
+    fn tables_transform_every_length() {
+        let longer = Transform::new(64);
+        for n in [2, 4, 16, 32, 64, 128, 512] {
+            let data: Vec<Element> = (0..n)
+                .map(|i| {
+                    [
+                        (3 * i + 1) as u128,
+                        MODULUS - 2 - i as u128,
+                        (i * i * i) as u128,
+                    ]
+                })
+                .collect();
+            let own = Transform::new(n);
+            for inverse in [false, true] {
+                let (mut expected, mut actual) = (data.clone(), data.clone());
+                own.extension(&mut expected, inverse);
+                longer.extension(&mut actual, inverse);
+                assert_eq!(actual, expected);
+                let mut expected: Vec<u128> = data.iter().map(|x| x[2]).collect();
+                let mut actual = expected.clone();
+                own.base(&mut expected, inverse);
+                longer.base(&mut actual, inverse);
+                assert_eq!(actual, expected);
+            }
+        }
+        for length in [1, 12, 96] {
+            let mut data = vec![ONE; length];
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || longer.extension(&mut data, false)
+                ))
+                .is_err()
+            );
         }
     }
 }

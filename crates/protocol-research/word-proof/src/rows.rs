@@ -38,7 +38,7 @@ pub static EXTENSION: Job = Job {
     kind: 0x0112,
     run: absorb_extension,
 };
-/// A shard's leaf digests, after which the shard is gone.
+/// A range of a shard's leaf digests; the last range removes the shard.
 pub static CLOSE: Job = Job {
     kind: 0x0113,
     run: close,
@@ -200,25 +200,36 @@ fn shard_base_values(coefficients: &[u8], shard: u32, classes: usize) -> Zeroizi
         classes,
         shard / 4,
     );
-    Transform::cached(SYSTEMATIC / classes).base(&mut values, false);
+    Transform::cached(SYSTEMATIC).base(&mut values, false);
     values
 }
-fn shard_extension_values(
+/// An extension polynomial's values at a shard's rows, in row order, from
+/// its coefficients of the length, each read as the fold needs it.
+pub(crate) fn shard_extension_values_of(
+    length: usize,
+    coefficient: impl Fn(usize) -> Element,
+    shard: u32,
+    classes: usize,
+) -> Zeroizing<Vec<Element>> {
+    let shard = shard as usize;
+    let mut values = residue_values(length, coefficient, shard % 4, classes, shard / 4);
+    Transform::cached(SYSTEMATIC).extension(&mut values, false);
+    values
+}
+/// An extension polynomial's values at a shard's rows, in row order, from
+/// its encoded coefficients.
+pub(crate) fn shard_extension_values(
     coefficients: &[u8],
     shard: u32,
     classes: usize,
 ) -> Zeroizing<Vec<Element>> {
     assert!(coefficients.len().is_multiple_of(48));
-    let shard = shard as usize;
-    let mut values = residue_values(
+    shard_extension_values_of(
         coefficients.len() / 48,
         |index| field::decode(&coefficients[48 * index..48 * (index + 1)]),
-        shard % 4,
+        shard,
         classes,
-        shard / 4,
-    );
-    Transform::cached(SYSTEMATIC / classes).extension(&mut values, false);
-    values
+    )
 }
 
 fn open(input: &[u8]) -> Vec<u8> {
@@ -282,14 +293,22 @@ fn absorb_extension(input: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 fn close(input: &[u8]) -> Vec<u8> {
-    let (session, shard, classes, _) = header(input);
-    let state = SHARDS.with(|shards| shards.borrow_mut().remove(&(session, shard)).unwrap());
-    assert_eq!(state.hashers.len(), SYSTEMATIC / classes);
-    state
-        .hashers
-        .into_iter()
-        .flat_map(|hasher| <[u8; 64]>::from(hasher.finalize()))
-        .collect()
+    let (session, shard, classes, rest) = header(input);
+    let (first, count) = (word(rest) as usize, word(&rest[4..]) as usize);
+    let rows = SYSTEMATIC / classes;
+    assert!(first + count <= rows);
+    let output = with_shard(session, shard, |state| {
+        assert_eq!(state.hashers.len(), rows);
+        let mut output = Vec::with_capacity(64 * count);
+        for hasher in &mut state.hashers[first..first + count] {
+            output.extend(<[u8; 64]>::from(std::mem::take(hasher).finalize()));
+        }
+        output
+    });
+    if first + count == rows {
+        SHARDS.with(|shards| shards.borrow_mut().remove(&(session, shard)));
+    }
+    output
 }
 fn discard(input: &[u8]) -> Vec<u8> {
     let (session, shard, _, _) = header(input);
@@ -300,10 +319,11 @@ fn export(input: &[u8]) -> Vec<u8> {
     let (session, shard, _, rest) = header(input);
     let (first, count) = (word(rest) as usize, word(&rest[4..]) as usize);
     with_shard(session, shard, |state| {
-        state.hashers[first..first + count]
-            .iter()
-            .flat_map(|hasher| <[u8; STATE_BYTES]>::from(hasher.serialize()))
-            .collect()
+        let mut output = Vec::with_capacity(STATE_BYTES * count);
+        for hasher in &state.hashers[first..first + count] {
+            output.extend(<[u8; STATE_BYTES]>::from(hasher.serialize()));
+        }
+        output
     })
 }
 fn import(input: &[u8]) -> Vec<u8> {
@@ -358,14 +378,13 @@ impl RowShards {
         &self,
         job: &'static Job,
         shard: usize,
-        first: usize,
+        (first, count): (usize, usize),
         bytes: &[&[u8]],
         output: usize,
     ) -> Ticket {
-        let count = (ROWS_PER_JOB.min(self.rows() - first)) as u32;
         let mut input = Zeroizing::new(self.header(shard).to_vec());
         input.extend((first as u32).to_le_bytes());
-        input.extend(count.to_le_bytes());
+        input.extend((count as u32).to_le_bytes());
         for part in bytes {
             input.extend_from_slice(part);
         }
@@ -454,26 +473,27 @@ impl RowShards {
             }
         }
     }
-    /// Finishes every row's leaf and the tree above them.
+    /// Finishes every row's leaf and the tree above them, a subtree of
+    /// leaves at a time: each shard's range of rows holds its residue class
+    /// of the subtree's leaves.
     pub fn close(mut self, tree: &mut Tree) {
         self.settle();
-        let tickets: Vec<_> = (0..self.shards())
-            .map(|shard| {
-                submit(
-                    &CLOSE,
-                    Some(shard),
-                    &[Part::Bytes(&self.header(shard))],
-                    64 * self.rows(),
-                )
-            })
-            .collect();
-        for (shard, ticket) in tickets.into_iter().enumerate() {
-            for (q, digest) in ticket.wait().chunks_exact(64).enumerate() {
-                tree.set_leaf(shard + self.shards() * q, digest);
+        let shards = self.shards();
+        let count = tree::SUBTREE_LEAVES.min(DOMAIN) / shards;
+        let subtrees = (0..self.rows()).step_by(count).map(|first| {
+            let tickets: Vec<_> = (0..shards)
+                .map(|shard| self.range_job(&CLOSE, shard, (first, count), &[], 64 * count))
+                .collect();
+            let mut digests = vec![[0; 64]; shards * count];
+            for (shard, ticket) in tickets.into_iter().enumerate() {
+                for (q, digest) in ticket.wait().chunks_exact(64).enumerate() {
+                    digests[shard + shards * q].copy_from_slice(digest);
+                }
             }
-        }
+            digests
+        });
+        tree.finish_from(subtrees);
         self.closed = true;
-        tree.finish();
     }
     /// Every row's hash state, in row order.
     pub fn export(&mut self) -> Zeroizing<Vec<[u8; STATE_BYTES]>> {
@@ -483,7 +503,7 @@ impl RowShards {
             for first in (0..self.rows()).step_by(ROWS_PER_JOB) {
                 let count = ROWS_PER_JOB.min(self.rows() - first);
                 let output = self
-                    .range_job(&EXPORT, shard, first, &[], STATE_BYTES * count)
+                    .range_job(&EXPORT, shard, (first, count), &[], STATE_BYTES * count)
                     .wait();
                 for (offset, state) in output.chunks_exact(STATE_BYTES).enumerate() {
                     states[shard + self.shards() * (first + offset)].copy_from_slice(state);
@@ -509,7 +529,7 @@ impl RowShards {
                         states[shard + shards.shards() * q].serialize(),
                     ));
                 }
-                tickets.push(shards.range_job(&IMPORT, shard, first, &[&bytes], 0));
+                tickets.push(shards.range_job(&IMPORT, shard, (first, count), &[&bytes], 0));
             }
         }
         self.running.push_back(tickets);
