@@ -28,7 +28,7 @@ pub mod release_body;
 #[path = "scalar-allocator.rs"]
 mod scalar_allocator;
 #[cfg(target_arch = "wasm32")]
-pub use scalar_allocator::limit_linear_memory;
+pub use scalar_allocator::{limit_linear_memory, linear_memory_high_water};
 pub mod target;
 pub mod terminal;
 

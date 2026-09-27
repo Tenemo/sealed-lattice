@@ -45,6 +45,7 @@ import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { participantRuntimeLabel } from './identity.js';
 import { instantiateParticipantKernel, ResourceFailure } from './kernel.js';
+import type { ParticipantKernel } from './kernel.js';
 import {
     helperRole,
     listenAsHelper,
@@ -811,6 +812,19 @@ const execute = async (
     };
 };
 
+// The WebAssembly memory a completed operation held: the worker instance's
+// linear memory and how far its allocations reached, and its helpers' and
+// the shared arena's.
+const operationMemory = (
+    kernel: ParticipantKernel,
+    helpers: ParallelHelpers,
+) => ({
+    workerBytes: kernel.memory.buffer.byteLength,
+    workerUsedBytes: kernel.linear_memory_high_water() >>> 0,
+    helpers: helpers.count,
+    ...helpers.memory(),
+});
+
 // The operations that evaluate the ranking program, whose helpers keep the
 // evaluation's tables and keys.
 const evaluatingOperations: ReadonlySet<string> = new Set([
@@ -860,7 +874,7 @@ const run = async (
                 try {
                     const { kernel, handlers } =
                         await instantiateParticipantKernel(module, parallel);
-                    return await execute(
+                    const result = await execute(
                         {
                             namespace: command.namespace,
                             database: opened,
@@ -875,6 +889,15 @@ const run = async (
                             authorityStarted = true;
                         },
                     );
+                    return result.status === 'completed'
+                        ? {
+                              status: 'completed',
+                              details: {
+                                  ...result.details,
+                                  memory: operationMemory(kernel, parallel),
+                              },
+                          }
+                        : result;
                 } catch (error) {
                     // A local failure after authority started stops the
                     // participant before any other operation takes the lock.

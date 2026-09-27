@@ -165,6 +165,13 @@ mod browser {
             |profile| publish(super::profile_bounds(profile)),
         )
     }
+
+    /// The highest linear-memory address any allocation of this instance has
+    /// reached, which the worker reports with each operation.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn linear_memory_high_water() -> usize {
+        evaluation_target::linear_memory_high_water()
+    }
 }
 
 #[cfg(test)]

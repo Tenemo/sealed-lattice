@@ -9,6 +9,8 @@ export const kernelFunctions = [
     'participant_bounds_pointer',
     'participant_limits',
     'participant_profile_bounds',
+    // The highest linear-memory address any allocation has reached.
+    'linear_memory_high_water',
     'input_pointer',
     'input_capacity',
     'poll_identity_pointer',

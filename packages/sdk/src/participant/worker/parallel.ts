@@ -47,15 +47,18 @@ const exhausted = 3;
 
 // The shared control words: a stop flag, one wake word per helper, the
 // unpinned queue's head and tail, each helper's pinned queue head and tail,
-// the queues' entries, and the job slots. A slot holds its state, kind,
-// output offset and length, part count and each part's offset and length.
+// the queues' entries, the job slots and each helper's linear-memory pages.
+// A slot holds its state, kind, output offset and length, part count and
+// each part's offset and length.
 const slotWords = 16;
+const pageBytes = 65_536;
 const controlLayout = (helpers: number) => {
     const wakeBase = 1;
     const unpinnedHead = wakeBase + helpers;
     const pinnedBase = unpinnedHead + 2;
     const entriesBase = pinnedBase + 2 * helpers;
     const slotBase = entriesBase + (helpers + 1) * maximumTickets;
+    const memoryBase = slotBase + maximumTickets * slotWords;
     return {
         stopWord: 0,
         wakeBase,
@@ -64,8 +67,9 @@ const controlLayout = (helpers: number) => {
         entriesBase,
         slotBase,
         slotWords,
+        memoryBase,
         queueEntries: maximumTickets,
-        words: slotBase + maximumTickets * slotWords,
+        words: memoryBase + helpers,
         queued,
         done,
         failed,
@@ -144,6 +148,13 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
         return;
     }
     const { call, memory } = instance;
+    // The helper's linear memory, which the worker reports with the
+    // operation.
+    const memoryWord = layout.memoryBase + index;
+    const recordMemory = () => {
+        Atomics.store(control, memoryWord, memory().byteLength / pageBytes);
+    };
+    recordMemory();
     port.postMessage(true);
     const mask = layout.queueEntries - 1;
     const wake = layout.wakeBase + index;
@@ -233,6 +244,7 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
                     error === exhaustion ? layout.exhausted : layout.failed;
                 state = trapped;
             }
+        recordMemory();
         const stateWord = layout.slotBase + slot * layout.slotWords;
         Atomics.store(control, stateWord, state);
         Atomics.notify(control, stateWord);
@@ -259,6 +271,13 @@ export type ParallelHelpers = Readonly<{
     count: number;
     // The module's parallel imports, reading its memory through the getter.
     imports: (memory: () => WebAssembly.Memory) => WebAssembly.ModuleImports;
+    // The linear memory the helpers hold together and the largest one's,
+    // and the shared arena's length.
+    memory: () => Readonly<{
+        helperBytes: number;
+        largestHelperBytes: number;
+        arenaBytes: number;
+    }>;
     stop: () => void;
 }>;
 
@@ -277,6 +296,7 @@ export const noParallelHelpers: ParallelHelpers = {
         take: noJobs,
         discard: noJobs,
     }),
+    memory: () => ({ helperBytes: 0, largestHelperBytes: 0, arenaBytes: 0 }),
     stop: () => undefined,
 };
 
@@ -666,6 +686,22 @@ const createHost = (
     return {
         count: helpers,
         imports,
+        memory: () => {
+            let helperBytes = 0;
+            let largestHelperBytes = 0;
+            for (let helper = 0; helper < helpers; helper += 1) {
+                const bytes =
+                    Atomics.load(control, layout.memoryBase + helper) *
+                    pageBytes;
+                helperBytes += bytes;
+                largestHelperBytes = Math.max(largestHelperBytes, bytes);
+            }
+            return {
+                helperBytes,
+                largestHelperBytes,
+                arenaBytes: arenaBuffer.byteLength,
+            };
+        },
         // Each helper leaves its loop and closes; the page ends its worker.
         stop: () => {
             Atomics.store(control, layout.stopWord, 1);

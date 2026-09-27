@@ -27,6 +27,14 @@ static LINEAR_MEMORY_BYTES: AtomicUsize = AtomicUsize::new(MAXIMUM_LINEAR_MEMORY
 // selects.
 static GROWS_ON_DEMAND: AtomicBool = AtomicBool::new(false);
 static ACQUIRED: AtomicBool = AtomicBool::new(false);
+// The highest address, exclusive, that any allocation has reached.
+static HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
+
+/// The highest linear-memory address, exclusive, that any allocation of the
+/// instance has reached: how much of its region the instance has used.
+pub fn linear_memory_high_water() -> usize {
+    HIGH_WATER.load(Ordering::Relaxed)
+}
 
 /// Lowers the instance's memory bound to whole pages before its first
 /// allocation; the region then grows as allocations need it. Returns
@@ -50,12 +58,17 @@ unsafe extern "C" {
     fn exhausted(bytes: usize);
 }
 
-// Returns an allocation, or ends the call when there was no memory for it.
+// Returns an allocation after recording its end, or ends the call when
+// there was no memory for it.
 fn available(pointer: *mut u8, bytes: usize) -> *mut u8 {
     if pointer.is_null() {
         // SAFETY: The import takes one integer and never returns.
         unsafe { exhausted(bytes) };
         wasm32::unreachable();
+    }
+    let end = pointer as usize + bytes;
+    if end > HIGH_WATER.load(Ordering::Relaxed) {
+        HIGH_WATER.store(end, Ordering::Relaxed);
     }
     pointer
 }
