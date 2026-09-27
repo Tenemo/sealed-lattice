@@ -1,5 +1,6 @@
 use crate::{
     field::{self, Element, MODULUS, ONE, ZERO},
+    linear::{Operator, PublicColumn, Term},
     parameters::*,
 };
 use ballot_encryption::{
@@ -11,6 +12,7 @@ use parallel_work::{HashStream, Sponge};
 use setup_stream_kernel::PolynomialStream;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
 use sha3::{Digest, Sha3_512};
+use std::collections::BTreeMap;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, FHE_LIMB_BITS, Family, PLAINTEXT_MODULUS,
     Profile, SETUP_ERROR_BITS, WORD_BITS, auxiliary_modulus,
@@ -178,11 +180,6 @@ impl PublicStatement {
         builder.finish()
     }
 }
-pub struct Operator {
-    pub coefficients: Vec<Vec<Element>>,
-    pub target: Element,
-    pub lookup_weight: Element,
-}
 fn power(mut value: Element, mut exponent: usize) -> Element {
     let mut result = ONE;
     while exponent > 0 {
@@ -226,7 +223,14 @@ struct Builder {
     profile: Profile,
     columns: BallotColumns,
     alpha: Element,
-    coefficients: Vec<Vec<Element>>,
+    column_count: usize,
+    // Each column's weight on the powers of alpha and on ones, by degree;
+    // each positive support column's weighted adjoints, which its negative
+    // column subtracts; and the scores column's rows.
+    powers: BTreeMap<usize, Vec<Element>>,
+    ones: BTreeMap<usize, Vec<Element>>,
+    adjoints: BTreeMap<usize, Vec<Element>>,
+    scores: Vec<Element>,
     target: Element,
     consumed: usize,
 }
@@ -238,7 +242,11 @@ impl Builder {
             profile,
             columns: BallotColumns::new(profile),
             alpha,
-            coefficients: vec![vec![ZERO; SYSTEMATIC]; ballot_relation(profile).columns()],
+            column_count: ballot_relation(profile).columns(),
+            powers: BTreeMap::new(),
+            ones: BTreeMap::new(),
+            adjoints: BTreeMap::new(),
+            scores: vec![ZERO; profile.options()],
             target: ZERO,
             consumed: 0,
         })
@@ -252,14 +260,15 @@ impl Builder {
     fn auxiliary_row(&self, component: usize) -> usize {
         self.packing_row() + SYSTEMATIC + component * AUXILIARY_DEGREE
     }
+    /// Adds the weight to the column's weight on the powers of alpha at
+    /// every (SYSTEMATIC / degree)-th row.
     fn add_geometric(&mut self, column: usize, weight: Element, degree: usize) {
-        let stride = SYSTEMATIC / degree;
-        for (index, value) in powers(self.alpha, degree).into_iter().enumerate() {
-            self.coefficients[column][stride * index] = field::add(
-                self.coefficients[column][stride * index],
-                field::multiply(weight, value),
-            );
-        }
+        let count = self.column_count;
+        let weights = self
+            .powers
+            .entry(degree)
+            .or_insert_with(|| vec![ZERO; count]);
+        weights[column] = field::add(weights[column], weight);
     }
     fn polynomial(&mut self, index: usize, parser: PolynomialStream) -> Result<(), Error> {
         if self.consumed != index || index >= POLYNOMIALS {
@@ -281,20 +290,21 @@ impl Builder {
             },
         );
         if local < 2 {
-            let degree = self.profile.family_degree(family(index));
             let adjoint = parser.adjoint().map_err(|_| Error::Encoding)?;
             let positive = if auxiliary {
                 self.columns.auxiliary_positive()
             } else {
                 self.columns.fhe_positive()
             };
-            for (position, value) in adjoint.into_iter().enumerate() {
-                let value = field::multiply(weight, value);
-                let position = position * (SYSTEMATIC / degree);
-                self.coefficients[positive][position] =
-                    field::add(self.coefficients[positive][position], value);
-                self.coefficients[positive + 1][position] =
-                    field::subtract(self.coefficients[positive + 1][position], value);
+            let combined = self
+                .adjoints
+                .entry(positive)
+                .or_insert_with(|| vec![ZERO; adjoint.len()]);
+            if combined.len() != adjoint.len() {
+                return Err(Error::Shape);
+            }
+            for (target, value) in combined.iter_mut().zip(adjoint) {
+                *target = field::add(*target, field::multiply(weight, value));
             }
         } else {
             self.target = field::add(
@@ -375,10 +385,8 @@ impl Builder {
                 .fold(ZERO, |sum, (coefficient, weight)| {
                     field::add(sum, field::scale(*weight, signed(i64::from(*coefficient))))
                 });
-            self.coefficients[columns.scores()][option] = field::subtract(
-                self.coefficients[columns.scores()][option],
-                field::multiply(packing_weight, value),
-            );
+            self.scores[option] =
+                field::subtract(self.scores[option], field::multiply(packing_weight, value));
         }
         let mut modulus_word = [0; 16];
         modulus_word[..auxiliary_modulus().len()].copy_from_slice(auxiliary_modulus());
@@ -396,8 +404,8 @@ impl Builder {
                 // The auxiliary plaintext carries each score at its option's
                 // coefficient.
                 for (option, point) in geometric.iter().take(options).enumerate() {
-                    self.coefficients[columns.scores()][option] = field::add(
-                        self.coefficients[columns.scores()][option],
+                    self.scores[option] = field::add(
+                        self.scores[option],
                         field::scale(field::multiply(weight, *point), auxiliary_scale),
                     );
                 }
@@ -412,11 +420,53 @@ impl Builder {
             for column in [positive, negative] {
                 let weight = power(self.alpha, row);
                 row += 1;
-                for position in (0..SYSTEMATIC).step_by(stride) {
-                    self.coefficients[column][position] =
-                        field::add(self.coefficients[column][position], weight);
-                }
+                let count = self.column_count;
+                let weights = self
+                    .ones
+                    .entry(SYSTEMATIC / stride)
+                    .or_insert_with(|| vec![ZERO; count]);
+                weights[column] = field::add(weights[column], weight);
                 self.target = field::add(self.target, field::scale(weight, u128::from(half)));
+            }
+        }
+        let nonzero = |weights: Vec<Element>| -> Vec<(usize, Element)> {
+            weights
+                .into_iter()
+                .enumerate()
+                .filter(|(_, weight)| *weight != ZERO)
+                .collect()
+        };
+        let mut terms = Vec::new();
+        for (degree, weights) in std::mem::take(&mut self.powers) {
+            terms.push(Term {
+                public: PublicColumn::Powers(degree),
+                weights: nonzero(weights),
+            });
+        }
+        for (degree, weights) in std::mem::take(&mut self.ones) {
+            terms.push(Term {
+                public: PublicColumn::Ones(degree),
+                weights: nonzero(weights),
+            });
+        }
+        for (positive, adjoint) in std::mem::take(&mut self.adjoints) {
+            terms.push(Term {
+                public: PublicColumn::Values(adjoint),
+                weights: vec![(positive, ONE), (positive + 1, field::subtract(ZERO, ONE))],
+            });
+        }
+        let mut scores = vec![ZERO; SYSTEMATIC];
+        scores[..options].copy_from_slice(&self.scores);
+        terms.push(Term {
+            public: PublicColumn::Values(scores),
+            weights: vec![(columns.scores(), ONE)],
+        });
+        // Each column's rows sum to its weighted public columns' sums.
+        let mut sums = vec![ZERO; self.column_count];
+        for term in &terms {
+            let sum = term.public.sum(self.alpha);
+            for (column, weight) in &term.weights {
+                sums[*column] = field::add(sums[*column], field::multiply(*weight, sum));
             }
         }
         // Signed words are offset by half their range and scores less one
@@ -427,7 +477,7 @@ impl Builder {
             columns.auxiliary_error(0),
             columns.auxiliary_error(1),
         ];
-        for column in 0..columns.words() {
+        for (column, sum) in sums.into_iter().enumerate().take(columns.words()) {
             let offset = if column == columns.scores() {
                 -1
             } else if narrow.contains(&column) {
@@ -435,14 +485,11 @@ impl Builder {
             } else {
                 1 << (WORD_BITS - 1)
             };
-            let sum = self.coefficients[column]
-                .iter()
-                .copied()
-                .fold(ZERO, field::add);
             self.target = field::add(self.target, field::scale(sum, signed(offset)));
         }
         Ok(Operator {
-            coefficients: self.coefficients,
+            alpha: self.alpha,
+            terms,
             target: self.target,
             lookup_weight: power(self.alpha, row),
         })
@@ -561,13 +608,14 @@ impl StatementStream {
             return Err(Error::Binding);
         }
         let operator = self.builder.ok_or(Error::Shape)?.finish()?;
-        let coefficients =
-            setup_stream_kernel::evaluate_public_columns(operator.coefficients, &self.queries)
-                .map_err(|_| Error::Arithmetic)?;
+        let (target, lookup_weight) = (operator.target, operator.lookup_weight);
+        let coefficients = operator
+            .at_queries(ballot_relation(self.profile).columns(), &self.queries)
+            .map_err(|_| Error::Arithmetic)?;
         Ok(StatementOutput {
             statement_digest: self.expected,
-            target: operator.target,
-            lookup_weight: operator.lookup_weight,
+            target,
+            lookup_weight,
             coefficients,
         })
     }
@@ -664,19 +712,17 @@ pub(crate) mod tests {
         alpha: Element,
     ) -> (Element, Element) {
         let operator = statement.operator(alpha).unwrap();
-        let actual =
-            operator
-                .coefficients
-                .iter()
-                .zip(columns)
-                .fold(ZERO, |sum, (coefficients, column)| {
-                    coefficients
-                        .iter()
-                        .zip(column)
-                        .fold(sum, |sum, (coefficient, value)| {
-                            field::add(sum, field::scale(*coefficient, u128::from(*value)))
-                        })
-                });
+        let actual = operator.columns(columns.len()).iter().zip(columns).fold(
+            ZERO,
+            |sum, (coefficients, column)| {
+                coefficients
+                    .iter()
+                    .zip(column)
+                    .fold(sum, |sum, (coefficient, value)| {
+                        field::add(sum, field::scale(*coefficient, u128::from(*value)))
+                    })
+            },
+        );
         (actual, operator.target)
     }
 

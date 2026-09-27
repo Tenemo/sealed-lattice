@@ -4,18 +4,27 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
+    compileLinkedReleaseWordProofLayout,
     proverInterpolationAlias,
 } from '#tests/full-word-proof-layout-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 
 describe('full word-proof layout and theorem operands', () => {
-    it('accounts for the emitted linked ballot rows and full public operator', () => {
+    it('accounts for the emitted linked ballot rows and public operator values', () => {
         const layout = compileBallotWordProofLayout(completionProfile());
         expect(layout.headerBytes).toBe(4004n);
         expect(layout.firstWidth).toBe(33n * 16n + 48n);
         expect(layout.secondWidth).toBe(34n * 48n);
-        expect(layout.residentPublicOperatorBytes).toBe(32n * 65536n * 48n);
+        // The FHE and auxiliary adjoints and the score column, not the 32
+        // columns' every row.
+        expect(layout.residentPublicOperatorBytes).toBe(
+            (65536n + 4096n + 65536n) * 48n,
+        );
+        expect(
+            compileLinkedReleaseWordProofLayout(completionProfile())
+                .residentPublicOperatorBytes,
+        ).toBe(2n * 65536n * 48n);
         expect(layout.minimumRequestedRandomBytes).toBe(
             layout.leafSaltBytes +
                 20n * 128n +

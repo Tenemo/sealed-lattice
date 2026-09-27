@@ -1,3 +1,4 @@
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
@@ -106,18 +107,25 @@ export const compileRegistrationWordProofLayout = () => {
     );
 };
 
+// An affine operator keeps the public values of its terms. The powers of
+// the challenge and the support indicators are regenerated where they are
+// used.
 export const compileBallotWordProofLayout = (profile: SupportedProfile) => {
     const columns = compileBallotEncryptionColumnLayout(profile);
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
+    // Each encryption's weighted common-polynomial and key adjoints, at the
+    // FHE ring degree and at the auxiliary degree, and the score column.
+    const fheAdjointRows = BigInt(agreement.systematicSize);
+    const auxiliaryAdjointRows = auxiliaryInputEncryptionParameters.degree;
+    const scoreRows = BigInt(agreement.systematicSize);
     return {
         ...compileWordProofLayout(
             columns.columns.length,
             columns.lookups.length,
         ),
         residentPublicOperatorBytes:
-            BigInt(columns.columns.length) *
-            BigInt(agreement.systematicSize) *
+            (fheAdjointRows + auxiliaryAdjointRows + scoreRows) *
             field.packedExtensionElementByteLength,
     };
 };
@@ -128,14 +136,17 @@ export const compileLinkedReleaseWordProofLayout = (
     const columns = compileLinkedReleaseColumnLayout(profile);
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
+    // The share polynomial's adjoint and the recipient key's weighted
+    // common-polynomial and key adjoints.
+    const shareAdjointRows = BigInt(agreement.systematicSize);
+    const recipientAdjointRows = BigInt(agreement.systematicSize);
     return {
         ...compileWordProofLayout(
             columns.wordColumns + columns.booleanColumns,
             columns.lookups.length,
         ),
         residentPublicOperatorBytes:
-            BigInt(columns.wordColumns + columns.booleanColumns) *
-            BigInt(agreement.systematicSize) *
+            (shareAdjointRows + recipientAdjointRows) *
             field.packedExtensionElementByteLength,
     };
 };

@@ -480,7 +480,7 @@ pub(crate) mod tests {
     fn affine_value(prepared: &PreparedRelease, alpha: Element) -> (Element, Element) {
         let operator = prepared.statement.operator(alpha).unwrap();
         let actual = operator
-            .coefficients
+            .columns(prepared.columns.len())
             .iter()
             .zip(prepared.columns.iter())
             .fold(ZERO, |sum, (coefficients, column)| {

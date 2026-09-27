@@ -1,9 +1,10 @@
 use crate::{
     field::{self, Element, MODULUS, ONE, ZERO},
+    linear::{Operator, PublicColumn, Term},
     parameters::*,
 };
 use num_bigint::{BigInt, Sign};
-use setup_stream_kernel::{PolynomialStream, SetupStatementOutput, evaluate_public_columns};
+use setup_stream_kernel::{PolynomialStream, SetupStatementOutput};
 use sha3::{Digest, Sha3_512};
 use std::sync::OnceLock;
 
@@ -67,22 +68,18 @@ pub fn digest(common: &[u8], public_key: &[u8]) -> [u8; 64] {
     hash.update(public_key);
     hash.finalize().into()
 }
-pub struct Operator {
-    pub coefficients: Vec<Vec<Element>>,
-    pub target: Element,
-    pub lookup_weight: Element,
-}
+/// The key equation's operator: the powers of alpha scaled by the modulus,
+/// the carry and minus one, and the common polynomial's adjoint with each
+/// support weight.
 pub fn operator_from_parts(
     alpha: Element,
     adjoint: Vec<Element>,
     public_value: Element,
 ) -> Operator {
     assert_eq!(adjoint.len(), SYSTEMATIC);
-    let mut powers = Vec::with_capacity(SYSTEMATIC);
     let mut current = ONE;
     let mut sum = ZERO;
     for _ in 0..SYSTEMATIC {
-        powers.push(current);
         sum = field::add(sum, current);
         current = field::multiply(current, alpha);
     }
@@ -110,30 +107,27 @@ pub fn operator_from_parts(
         ),
         field::scale(field::add(support_positive, support_negative), 128),
     );
-    let coefficients = vec![
-        powers
-            .iter()
-            .map(|power| field::subtract(ZERO, field::multiply(*power, modulus)))
-            .collect(),
-        powers
-            .iter()
-            .map(|power| field::multiply(*power, carry))
-            .collect(),
-        powers
-            .iter()
-            .map(|power| field::subtract(ZERO, *power))
-            .collect(),
-        adjoint
-            .iter()
-            .map(|value| field::add(*value, support_positive))
-            .collect(),
-        adjoint
-            .iter()
-            .map(|value| field::subtract(support_negative, *value))
-            .collect(),
-    ];
+    let minus_one = field::subtract(ZERO, ONE);
     Operator {
-        coefficients,
+        alpha,
+        terms: vec![
+            Term {
+                public: PublicColumn::Powers(SYSTEMATIC),
+                weights: vec![
+                    (0, field::subtract(ZERO, modulus)),
+                    (1, carry),
+                    (2, minus_one),
+                ],
+            },
+            Term {
+                public: PublicColumn::Values(adjoint),
+                weights: vec![(3, ONE), (4, minus_one)],
+            },
+            Term {
+                public: PublicColumn::Ones(SYSTEMATIC),
+                weights: vec![(3, support_positive), (4, support_negative)],
+            },
+        ],
         target,
         lookup_weight: field::multiply(support_negative, alpha),
     }
@@ -261,12 +255,14 @@ impl StatementStream {
             self.adjoint.ok_or(Error::Shape)?,
             self.public_value.ok_or(Error::Shape)?,
         );
-        let coefficients = evaluate_public_columns(operator.coefficients, &self.queries)
+        let (target, lookup_weight) = (operator.target, operator.lookup_weight);
+        let coefficients = operator
+            .at_queries(registration_relation().columns(), &self.queries)
             .map_err(|_| Error::Arithmetic)?;
         Ok(SetupStatementOutput {
             statement_digest: self.expected,
-            target: operator.target,
-            lookup_weight: operator.lookup_weight,
+            target,
+            lookup_weight,
             coefficients,
         })
     }
