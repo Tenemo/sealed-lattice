@@ -117,7 +117,7 @@ impl RegistrationVerifier {
             bytes = &bytes[count..];
             if self.proof_prefix.len() == HEADER_LENGTH {
                 let common = statement::common_bytes();
-                let digest = statement::digest(&common, &self.key);
+                let digest = statement::digest(common, &self.key);
                 let role = registration_proof_role(
                     self.header.poll,
                     self.header.runtime,
@@ -128,7 +128,7 @@ impl RegistrationVerifier {
                 verifier
                     .push_statement(&statement::header())
                     .map_err(|_| Error::Crypto)?;
-                for value in [&common, &self.key] {
+                for value in [common, self.key.as_slice()] {
                     for part in value.chunks(CHUNK_LIMIT) {
                         verifier.push_statement(part).map_err(|_| Error::Crypto)?;
                     }

@@ -5,6 +5,7 @@ use crate::{
 use num_bigint::{BigInt, Sign};
 use setup_stream_kernel::{PolynomialStream, SetupStatementOutput, evaluate_public_columns};
 use sha3::{Digest, Sha3_512};
+use std::sync::OnceLock;
 
 #[derive(Debug)]
 pub enum Error {
@@ -51,8 +52,13 @@ pub fn encode_key(values: &[BigInt]) -> Result<Vec<u8>, Error> {
     }
     Ok(output)
 }
-pub fn common_bytes() -> Vec<u8> {
-    encode_key(&setup_witness::contribution::common_share_polynomial()).unwrap()
+/// The encoded common share polynomial, which every registration statement
+/// begins with, computed once per instance.
+pub fn common_bytes() -> &'static [u8] {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    BYTES.get_or_init(|| {
+        encode_key(&setup_witness::contribution::common_share_polynomial()).unwrap()
+    })
 }
 pub fn digest(common: &[u8], public_key: &[u8]) -> [u8; 64] {
     let mut hash = Sha3_512::new();
@@ -154,8 +160,6 @@ pub struct StatementStream {
     alpha: Element,
     queries: Vec<u32>,
     hash: Sha3_512,
-    common_hash: Sha3_512,
-    expected_common: [u8; 64],
     prefix: Vec<u8>,
     consumed: usize,
     parser: Option<PolynomialStream>,
@@ -179,8 +183,6 @@ impl StatementStream {
             alpha,
             queries: queries.to_vec(),
             hash: Sha3_512::new(),
-            common_hash: Sha3_512::new(),
-            expected_common: Sha3_512::digest(common_bytes()).into(),
             prefix: Vec::new(),
             consumed: 0,
             parser: None,
@@ -230,18 +232,14 @@ impl StatementStream {
                 .unwrap()
                 .push(chunk)
                 .map_err(|_| Error::Encoding)?;
-            if index == 0 {
-                self.common_hash.update(chunk);
+            if index == 0 && common_bytes().get(position..position + count) != Some(chunk) {
+                return Err(Error::Context);
             }
             self.consumed += count;
             bytes = &bytes[count..];
             if position + count == SYSTEMATIC * 21 {
                 let parser = self.parser.take().unwrap();
                 if index == 0 {
-                    if <[u8; 64]>::from(self.common_hash.clone().finalize()) != self.expected_common
-                    {
-                        return Err(Error::Context);
-                    }
                     self.adjoint = Some(parser.adjoint().map_err(|_| Error::Encoding)?);
                 } else {
                     self.public_value = Some(parser.finish_value().map_err(|_| Error::Encoding)?);
@@ -285,13 +283,13 @@ mod tests {
         wrong_header[4] ^= 1;
         let mut hash = Sha3_512::new();
         hash.update(&wrong_header);
-        hash.update(&common);
+        hash.update(common);
         hash.update(&key);
         let mut decoder = StatementStream::new(hash.finalize().into(), ONE, &[0]).unwrap();
         assert!(decoder.push(&wrong_header).is_err());
         assert!(decoder.push(&common[..128]).is_err());
         assert!(decoder.finish().is_err());
-        let mut changed = common;
+        let mut changed = common.to_vec();
         changed[1] ^= 1;
         let mut hash = Sha3_512::new();
         hash.update(header());

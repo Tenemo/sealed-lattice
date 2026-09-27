@@ -650,6 +650,9 @@ dependencies = [
 [[package]]
 name = "proof-lookup-table"
 version = "0.0.0"
+dependencies = [
+ "supported-profile",
+]
 
 [[package]]
 name = "prost"

@@ -1,5 +1,8 @@
 #[path = "../../word-proof/src/field.rs"]
 pub mod field;
+use field::base::{MODULUS, multiply, power, subtract};
+use std::sync::OnceLock;
+use supported_profile::relation::SYSTEMATIC;
 
 // The caller supplies the fixed lookup polynomial coefficients under this
 // field. This computes its complete coset evaluation; it creates no proof or
@@ -17,9 +20,69 @@ pub fn evaluate_on_proof_domain(coefficients: &[u128]) -> Vec<u128> {
     values
 }
 
+/// The coefficients of the lookup polynomial, which takes the systematic
+/// subgroup's element of each index to that index: (H - 1) / 2 at degree
+/// zero and 1 / (w^-k - 1) at each degree k, for the subgroup's root w.
+pub fn coefficients() -> Vec<u128> {
+    let inverse_root = power(field::root(SYSTEMATIC), MODULUS - 2);
+    let mut denominators = Vec::with_capacity(SYSTEMATIC - 1);
+    let mut value = 1;
+    for _ in 1..SYSTEMATIC {
+        value = multiply(value, inverse_root);
+        denominators.push(subtract(value, 1));
+    }
+    let mut product = 1;
+    let prefixes: Vec<u128> = denominators
+        .iter()
+        .map(|value| {
+            let previous = product;
+            product = multiply(product, *value);
+            previous
+        })
+        .collect();
+    let mut suffix = power(product, MODULUS - 2);
+    let mut values = vec![multiply((SYSTEMATIC - 1) as u128, power(2, MODULUS - 2)); SYSTEMATIC];
+    for index in (0..denominators.len()).rev() {
+        values[index + 1] = multiply(prefixes[index], suffix);
+        suffix = multiply(suffix, denominators[index]);
+    }
+    values
+}
+
+/// The lookup polynomial's values on the proof domain, which every verifier
+/// of this instance reads, computed once.
+pub fn on_proof_domain() -> &'static [u128] {
+    static VALUES: OnceLock<Vec<u128>> = OnceLock::new();
+    VALUES.get_or_init(|| evaluate_on_proof_domain(&coefficients()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Each coefficient is the subgroup's discrete Fourier sum of the indices
+    // divided by the subgroup's size.
+    #[test]
+    fn coefficients_match_direct_fourier_sums() {
+        use field::base::add;
+        let coefficients = coefficients();
+        for index in [0, 1, SYSTEMATIC / 2, SYSTEMATIC - 1] {
+            let mut sum = 0;
+            let step = power(
+                field::root(SYSTEMATIC),
+                ((SYSTEMATIC - index) % SYSTEMATIC) as u128,
+            );
+            let mut weight = 1;
+            for value in 0..SYSTEMATIC {
+                sum = add(sum, multiply(value as u128, weight));
+                weight = multiply(weight, step);
+            }
+            assert_eq!(
+                coefficients[index],
+                multiply(sum, power(SYSTEMATIC as u128, MODULUS - 2))
+            );
+        }
+    }
 
     #[test]
     fn matches_horner_at_every_small_coset_point() {

@@ -8,7 +8,7 @@ use sha3::{
     Digest, Sha3_512, Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 use supported_profile::relation::{
     DOMAIN as D, MASKS, MAX_DEGREE, QUERY_COUNT as QUERIES, Relation, SYSTEMATIC as H,
     WITNESS_DEGREE,
@@ -373,6 +373,75 @@ fn requested(queries: &[usize], length: usize) -> Vec<usize> {
     values
 }
 
+/// The degrees whose corrections raise an oracle to the largest degree.
+const CORRECTED_DEGREES: [usize; 4] = [
+    WITNESS_DEGREE,
+    WITNESS_DEGREE - 1,
+    2 * WITNESS_DEGREE - H,
+    H - 2,
+];
+/// The low bits of an exponent of the domain's root, which index the table
+/// of its first powers.
+const LOW_BITS: usize = 9;
+
+/// The proof domain is the coset of the shift seven by the subgroup of the
+/// domain's root w. Every queried point's values follow from constants this
+/// instance computes once: the powers of w as two tables, the shift's
+/// inverse, the systematic vanishing polynomial's values on the coset and
+/// their inverses, which repeat with the index modulo four because w^H has
+/// order four, and the shift's power at each degree correction.
+struct Coset {
+    low: Vec<u128>,
+    high: Vec<u128>,
+    inverse_shift: u128,
+    vanishing: [u128; 4],
+    inverse_vanishing: [u128; 4],
+    shifts: [u128; 4],
+}
+impl Coset {
+    fn get() -> &'static Self {
+        static COSET: OnceLock<Coset> = OnceLock::new();
+        COSET.get_or_init(|| {
+            let root = root(D);
+            let powers = |step: u128, count: usize| {
+                let mut value = 1;
+                (0..count)
+                    .map(|_| {
+                        let current = value;
+                        value = multiply_base(value, step);
+                        current
+                    })
+                    .collect()
+            };
+            let order_four = power_base(root, H as u128);
+            let shifted = power_base(7, H as u128);
+            let vanishing: [u128; 4] = std::array::from_fn(|residue| {
+                subtract_base(
+                    multiply_base(shifted, power_base(order_four, residue as u128)),
+                    1,
+                )
+            });
+            Self {
+                low: powers(root, 1 << LOW_BITS),
+                high: powers(power_base(root, 1 << LOW_BITS), D >> LOW_BITS),
+                inverse_shift: power_base(7, MODULUS - 2),
+                inverse_vanishing: vanishing.map(|value| power_base(value, MODULUS - 2)),
+                vanishing,
+                shifts: CORRECTED_DEGREES
+                    .map(|degree| power_base(7, (MAX_DEGREE - degree) as u128)),
+            }
+        })
+    }
+    /// w to the exponent modulo the domain's size.
+    fn root_power(&self, exponent: u64) -> u128 {
+        let exponent = (exponent % D as u64) as usize;
+        multiply_base(
+            self.high[exponent >> LOW_BITS],
+            self.low[exponent & ((1 << LOW_BITS) - 1)],
+        )
+    }
+}
+
 struct Point {
     inverse: u128,
     vanishing: u128,
@@ -381,19 +450,22 @@ struct Point {
     table: u128,
 }
 impl Point {
-    fn new(value: u128, table: u128) -> Self {
-        let vanishing = subtract_base(power_base(value, H as u128), 1);
+    /// The values at the point 7 w^index: its inverse 7^-1 w^(D - index),
+    /// the vanishing polynomial's value, and 7^e w^(index e) for each
+    /// correction exponent e.
+    fn new(index: usize, table: u128) -> Self {
+        let coset = Coset::get();
+        let index = index as u64;
         Self {
-            inverse: power_base(value, MODULUS - 2),
-            vanishing,
-            inverse_vanishing: power_base(vanishing, MODULUS - 2),
-            powers: [
-                WITNESS_DEGREE,
-                WITNESS_DEGREE - 1,
-                2 * WITNESS_DEGREE - H,
-                H - 2,
-            ]
-            .map(|degree| power_base(value, (MAX_DEGREE - degree) as u128)),
+            inverse: multiply_base(coset.inverse_shift, coset.root_power(D as u64 - index)),
+            vanishing: coset.vanishing[index as usize % 4],
+            inverse_vanishing: coset.inverse_vanishing[index as usize % 4],
+            powers: std::array::from_fn(|correction| {
+                multiply_base(
+                    coset.shifts[correction],
+                    coset.root_power(index * (MAX_DEGREE - CORRECTED_DEGREES[correction]) as u64),
+                )
+            }),
             table,
         }
     }
@@ -412,31 +484,6 @@ impl Point {
             scale(challenges.combination[2 * index + 1], self.powers[class]),
         )
     }
-}
-fn table_coefficients() -> Vec<u128> {
-    let inverse_root = power_base(root(H), MODULUS - 2);
-    let mut denominators = Vec::with_capacity(H - 1);
-    let mut power = 1;
-    for _ in 1..H {
-        power = multiply_base(power, inverse_root);
-        denominators.push(subtract_base(power, 1));
-    }
-    let mut product = 1;
-    let prefixes: Vec<u128> = denominators
-        .iter()
-        .map(|value| {
-            let previous = product;
-            product = multiply_base(product, *value);
-            previous
-        })
-        .collect();
-    let mut suffix = power_base(product, MODULUS - 2);
-    let mut values = vec![multiply_base((H - 1) as u128, power_base(2, MODULUS - 2)); H];
-    for index in (0..denominators.len()).rev() {
-        values[index + 1] = multiply_base(prefixes[index], suffix);
-        suffix = multiply_base(suffix, denominators[index]);
-    }
-    values
 }
 struct Row {
     words: Vec<u128>,
@@ -563,16 +610,11 @@ impl<S: Statement> Verifier<S> {
                 .finish()
                 .ok_or(Refusal::Encoding)?,
         );
-        let table = proof_lookup_table::evaluate_on_proof_domain(&table_coefficients());
+        let table = proof_lookup_table::on_proof_domain();
         self.points = self
             .indices
             .iter()
-            .map(|index| {
-                Point::new(
-                    multiply_base(7, power_base(root(D), *index as u128)),
-                    table[*index],
-                )
-            })
+            .map(|index| Point::new(*index, table[*index]))
             .collect();
         self.statement_done = true;
         Ok(())
@@ -1052,21 +1094,36 @@ mod tests {
         assert!(matches!(verifier.finish_statement(), Err(Refusal::Stage)));
         assert!(!verifier.finish());
     }
+    // The table-driven values at a point equal direct powers of the point
+    // 7 w^index, at both ends of the domain and at every residue modulo four.
     #[test]
-    fn table_coefficients_match_direct_fourier_sums() {
-        let coefficients = table_coefficients();
-        for index in [0, 1, H / 2, H - 1] {
-            let mut sum = 0;
-            let step = power_base(root(H), ((H - index) % H) as u128);
-            let mut weight = 1;
-            for value in 0..H {
-                sum = add_base(sum, multiply_base(value as u128, weight));
-                weight = multiply_base(weight, step);
+    fn points_match_direct_powers() {
+        for index in [
+            0,
+            1,
+            2,
+            3,
+            4,
+            511,
+            512,
+            513,
+            H - 1,
+            H,
+            D / 2 + 5,
+            D - 2,
+            D - 1,
+        ] {
+            let value = multiply_base(7, power_base(root(D), index as u128));
+            let vanishing = subtract_base(power_base(value, H as u128), 1);
+            let point = Point::new(index, 11);
+            assert_eq!(point.inverse, power_base(value, MODULUS - 2));
+            assert_eq!(multiply_base(point.inverse, value), 1);
+            assert_eq!(point.vanishing, vanishing);
+            assert_eq!(point.inverse_vanishing, power_base(vanishing, MODULUS - 2));
+            for (power, degree) in point.powers.iter().zip(CORRECTED_DEGREES) {
+                assert_eq!(*power, power_base(value, (MAX_DEGREE - degree) as u128));
             }
-            assert_eq!(
-                coefficients[index],
-                multiply_base(sum, power_base(H as u128, MODULUS - 2))
-            );
+            assert_eq!(point.table, 11);
         }
     }
     #[test]

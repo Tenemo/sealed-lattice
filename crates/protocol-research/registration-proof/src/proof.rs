@@ -28,11 +28,11 @@ impl RegistrationProof {
         let mut key = RegistrationKey::new();
         let public_key = statement::encode_key(key.public_key()).unwrap();
         let common = statement::common_bytes();
-        let statement_digest = statement::digest(&common, &public_key);
+        let statement_digest = statement::digest(common, &public_key);
         let relation = registration_relation();
         let mut context_hash = transcript::context_hasher(&relation, role);
         context_hash.update(statement::header());
-        context_hash.update(&common);
+        context_hash.update(common);
         context_hash.update(&public_key);
         let context = context_hash.finalize().into();
         let mut witness = Witness::from_columns(
@@ -66,7 +66,7 @@ impl RegistrationProof {
         transcript.next();
         let alpha = transcript::challenge(&transcript.message, 0, false);
         let mask = transcript::challenge(&transcript.message, 1, false);
-        let operator = statement::operator(alpha, &common, &public_key).unwrap();
+        let operator = statement::operator(alpha, common, &public_key).unwrap();
         let linear = LinearOracle::create(
             role,
             &witness,
