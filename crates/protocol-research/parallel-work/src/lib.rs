@@ -7,6 +7,8 @@
 //! equals the one this instance computes alone.
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[cfg(not(target_arch = "wasm32"))]
+mod simulated;
 mod stream;
 use std::{
     collections::VecDeque,
@@ -76,7 +78,7 @@ pub fn helpers() -> usize {
         unsafe { host::helpers() as usize }
     }
     #[cfg(not(target_arch = "wasm32"))]
-    0
+    simulated::helpers()
 }
 
 /// Bytes that several jobs read; with helpers only the host holds them.
@@ -131,6 +133,8 @@ pub struct Ticket {
     remote: u32,
     #[cfg(target_arch = "wasm32")]
     output_length: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    simulated: Option<std::sync::Arc<simulated::Slot>>,
 }
 
 /// Starts the job on its joined parts. A job with a shard runs where that
@@ -182,7 +186,6 @@ pub fn submit(
             };
         }
     }
-    let _ = shard;
     let mut input = Zeroizing::new(Vec::new());
     for part in parts {
         input.extend_from_slice(match part {
@@ -191,6 +194,18 @@ pub fn submit(
         });
     }
     assert!(input.len() <= MAXIMUM_JOB_BYTES, "Job input bound");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let helpers = helpers();
+        if helpers > 0 {
+            let pin = shard.map_or(0, |shard| shard % helpers + 1);
+            return Ticket {
+                output: None,
+                simulated: Some(simulated::submit(job, pin, input, output_length)),
+            };
+        }
+    }
+    let _ = shard;
     let output = Zeroizing::new((job.run)(&input));
     assert_eq!(output.len(), output_length, "Job output length");
     Ticket {
@@ -199,6 +214,8 @@ pub fn submit(
         remote: 0,
         #[cfg(target_arch = "wasm32")]
         output_length,
+        #[cfg(not(target_arch = "wasm32"))]
+        simulated: None,
     }
 }
 
@@ -212,6 +229,10 @@ impl Ticket {
             let mut output = Zeroizing::new(vec![0; self.output_length]);
             assert_eq!(unsafe { host::take(remote, output.as_mut_ptr()) }, 0);
             return output;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(slot) = self.simulated.take() {
+            return slot.wait();
         }
         self.output.take().unwrap()
     }
@@ -377,6 +398,7 @@ mod tests {
 
     #[test]
     fn refuses_undeclared_lengths_and_oversized_jobs() {
+        // A job with helpers fails when its output is taken.
         for length in [1, 3] {
             assert!(
                 std::panic::catch_unwind(|| submit(
@@ -384,7 +406,8 @@ mod tests {
                     None,
                     &[Part::Bytes(&[1, 2])],
                     length
-                ))
+                )
+                .wait())
                 .is_err()
             );
         }

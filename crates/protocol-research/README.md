@@ -32,6 +32,14 @@ Each native ceremony case optionally takes its participant and option counts:
 pnpm run research:protocol -- native-result 3 2
 ```
 
+The browser participant's worker may hand independent jobs to helper workers, and the Rust sources that run there also build natively. An executing case can run every job on one to eight native threads that stand in for those helpers, each holding its jobs' state as a helper instance does; the run records the count:
+
+```text
+pnpm run research:protocol -- native-invalid-only 3 2 --simulated-helpers 3
+```
+
+Every case runs the unit tests alone and then with three simulated helpers.
+
 The runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
 
 The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:

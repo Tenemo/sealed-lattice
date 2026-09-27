@@ -1,5 +1,9 @@
 import { completionProfileCounts } from '#tests/supported-profile-model.js';
 
+// The most helpers a participant's worker starts, which native threads
+// simulate for an executing case.
+const maximumSimulatedHelpers = 8;
+
 // Only the native ceremony cases take a profile; the build check and the
 // requested-output probe cover fixed profiles.
 const protocolResearchCases = {
@@ -11,7 +15,11 @@ const protocolResearchCases = {
 } as const;
 
 export const selectProtocolResearchCase = (arguments_: readonly string[]) => {
-    const [name, ...counts] = arguments_.filter((value) => value !== '--');
+    const values = arguments_.filter((value) => value !== '--');
+    const option = values.indexOf('--simulated-helpers');
+    const helpers = option === -1 ? undefined : values[option + 1];
+    if (option !== -1) values.splice(option, 2);
+    const [name, ...counts] = values;
     if (
         name === undefined ||
         !Object.prototype.hasOwnProperty.call(protocolResearchCases, name)
@@ -20,6 +28,20 @@ export const selectProtocolResearchCase = (arguments_: readonly string[]) => {
     }
     const { profile, ...selected } =
         protocolResearchCases[name as keyof typeof protocolResearchCases];
+    if (
+        option !== -1 &&
+        (!selected.execution ||
+            helpers === undefined ||
+            !/^[1-9][0-9]*$/u.test(helpers) ||
+            Number(helpers) > maximumSimulatedHelpers ||
+            values.includes('--simulated-helpers'))
+    ) {
+        throw new Error(
+            'Only an executing case runs its jobs on simulated helpers, one to ' +
+                String(maximumSimulatedHelpers) +
+                ' of them, named once.',
+        );
+    }
     if (
         counts.length !== 0 &&
         (!profile ||
@@ -37,7 +59,13 @@ export const selectProtocolResearchCase = (arguments_: readonly string[]) => {
                   completionProfileCounts.optionCount,
               ]
             : counts.map(Number);
-    return { name, ...selected, participantCount, optionCount };
+    return {
+        name,
+        ...selected,
+        participantCount,
+        optionCount,
+        simulatedHelpers: helpers === undefined ? 0 : Number(helpers),
+    };
 };
 
 export const selectPublicCompletionCase = (arguments_: readonly string[]) => {

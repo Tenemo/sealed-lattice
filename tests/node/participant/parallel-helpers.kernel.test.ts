@@ -7,13 +7,22 @@ import { MessageChannel, Worker } from 'node:worker_threads';
 import binaryen from 'binaryen';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createCanonicalManifest } from '#packages/sdk/dist/index.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
+import {
+    concatenate,
+    unsigned16,
+    unsigned32,
+} from '#packages/sdk/src/participant/worker/bytes.js';
 import {
     custodyIdentity,
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
 import {
     instantiateParticipantKernel,
+    readKernel,
     ResourceFailure,
+    writeInput,
 } from '#packages/sdk/src/participant/worker/kernel.js';
 import {
     helperStartMilliseconds,
@@ -21,6 +30,12 @@ import {
     startParallelHelpers,
 } from '#packages/sdk/src/participant/worker/parallel.js';
 import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
+import {
+    registrationFile,
+    registrationPath,
+    streamRegistrations,
+} from '#packages/sdk/src/participant/worker/roster.js';
 
 // The packaged participant module and worker, whose helper role runs on
 // threads here as the page starts it beside an operation's worker in a
@@ -266,6 +281,256 @@ describe('participant helpers', () => {
             ).toEqual(independentIdentity(rootDomain, payload(200_000)));
         } finally {
             fresh.stop();
+        }
+    });
+});
+
+// Enrollment inputs as the worker frames them. Every randomness request is
+// answered from a SHAKE256 stream of the participant's name and the
+// request's index, so an enrollment is a function of its inputs alone.
+const shake = (label: string, length: number) =>
+    new Uint8Array(
+        createHash('shake256', { outputLength: length }).update(label).digest(),
+    );
+const runtimeIdentity = shake('runtime', 64);
+type Enrollment = Readonly<{
+    poll: Uint8Array;
+    records: ReadonlyMap<number, Uint8Array>;
+    requests: number;
+}>;
+type JoinedPoll = Readonly<{
+    poll: Uint8Array;
+    definition: Uint8Array;
+    signature: Uint8Array;
+}>;
+const enroll = async (
+    helpers: ParallelHelpers,
+    name: string,
+    joining?: JoinedPoll,
+): Promise<Enrollment> => {
+    const { kernel, handlers } = await instantiateParticipantKernel(
+        participantModule,
+        helpers,
+    );
+    const username = new TextEncoder().encode(name);
+    const input =
+        joining === undefined
+            ? concatenate(
+                  runtimeIdentity,
+                  unsigned16(1),
+                  unsigned32(manifest.length),
+                  manifest,
+                  unsigned32(username.length),
+                  username,
+              )
+            : concatenate(
+                  joining.poll,
+                  runtimeIdentity,
+                  unsigned32(joining.definition.length),
+                  joining.definition,
+                  joining.signature,
+                  unsigned32(username.length),
+                  username,
+              );
+    writeInput(kernel, input);
+    expect(
+        joining === undefined
+            ? kernel.validate_creator(input.length)
+            : kernel.validate_join(input.length),
+    ).toBe(0);
+    const parts = new Map<number, Uint8Array[]>();
+    handlers.staged = (kind, _offset, bytes) => {
+        parts.set(kind, [...(parts.get(kind) ?? []), bytes.slice()]);
+    };
+    let requests = 0;
+    handlers.random = (_source, target) => {
+        target.set(shake(name + '/' + String(requests), target.length));
+        requests += 1;
+    };
+    const control = concatenate(input, shake(name + '/data-keys', 64));
+    writeInput(kernel, control);
+    expect(
+        joining === undefined
+            ? kernel.prepare_creator(control.length)
+            : kernel.prepare_join(control.length),
+    ).toBe(0);
+    expect(kernel.check_retained()).toBe(0);
+    return {
+        poll: readKernel(kernel, kernel.poll_identity_pointer(), 64),
+        records: new Map(
+            [...parts].map(([kind, chunks]) => [kind, concatenate(...chunks)]),
+        ),
+        requests,
+    };
+};
+const manifest = (
+    await createCanonicalManifest({
+        question: 'Which option leads?',
+        options: ['Option 0', 'Option 1'],
+    })
+).canonicalBytes;
+
+// A roster verifier's verdict on the registrations, streamed as the worker
+// streams them from its relay: the proposal body it accepts, or undefined
+// when a step or the roster is refused.
+const verifyRoster = async (
+    helpers: ParallelHelpers,
+    poll: JoinedPoll,
+    registrations: readonly ReadonlyMap<number, Uint8Array>[],
+) => {
+    const { kernel } = await instantiateParticipantKernel(
+        participantModule,
+        helpers,
+    );
+    const begin = concatenate(
+        poll.poll,
+        runtimeIdentity,
+        unsigned16(registrations.length),
+        unsigned32(poll.definition.length),
+        poll.definition,
+        poll.signature,
+    );
+    writeInput(kernel, begin);
+    expect(kernel.roster_begin(begin.length)).toBe(0);
+    const recordIds = registrations.map((_records, position) =>
+        String(position).padStart(128, '0'),
+    );
+    const files = new Map(
+        registrations.flatMap((records, position) =>
+            (
+                [
+                    [registrationFile.header, dataKind.header],
+                    [registrationFile.signature, dataKind.signature],
+                    [registrationFile.publicKey, dataKind.publicKey],
+                    [registrationFile.proof, dataKind.proof],
+                ] as const
+            ).map(([file, kind]) => [
+                registrationPath(recordIds[position], file),
+                records.get(kind)!,
+            ]),
+        ),
+    );
+    const relay = {
+        base: 'unused/',
+        transcript: {
+            read: async (
+                name: string,
+                maximum: number,
+                accept: (bytes: Uint8Array) => void | Promise<void>,
+            ) => {
+                const bytes = files.get(name)!;
+                expect(bytes.length).toBeLessThanOrEqual(maximum);
+                for (let offset = 0; offset < bytes.length; offset += 1 << 20)
+                    await accept(bytes.subarray(offset, offset + (1 << 20)));
+                return bytes.length;
+            },
+        },
+    };
+    try {
+        await streamRegistrations(
+            relay,
+            recordIds,
+            readParticipantLimits(kernel).registration,
+            kernel.roster_open_records(),
+            (operation, position, bytes) => {
+                writeInput(kernel, bytes);
+                return (
+                    kernel.roster_record(operation, position, bytes.length) ===
+                    0
+                );
+            },
+        );
+    } catch {
+        return undefined;
+    }
+    return kernel.roster_finish() === 1
+        ? readKernel(
+              kernel,
+              kernel.roster_body_pointer(),
+              kernel.roster_body_length(),
+          )
+        : undefined;
+};
+// Runs an operation with three fresh helpers, as each operation's worker
+// has its own.
+const withHelpers = async <Value>(
+    operation: (helpers: ParallelHelpers) => Promise<Value>,
+) => {
+    const helpers = await startParallelHelpers(
+        participantModule,
+        helperPorts(3),
+        false,
+    );
+    expect(helpers.count).toBe(3);
+    try {
+        return await operation(helpers);
+    } finally {
+        helpers.stop();
+    }
+};
+// A copy of the registrations with one byte of one record changed.
+const changed = (
+    registrations: readonly ReadonlyMap<number, Uint8Array>[],
+    position: number,
+    kind: number,
+    offset: number,
+) =>
+    registrations.map((records, index) => {
+        if (index !== position) return records;
+        const bytes = records.get(kind)!.slice();
+        bytes[offset] ^= 1;
+        return new Map([...records, [kind, bytes]]);
+    });
+
+describe('participant helpers with registration work', () => {
+    it('prove the registration the worker proves alone, and verify true and false rosters as it does', async () => {
+        const alone = await enroll(noParallelHelpers, 'Organizer');
+        const creator = await withHelpers((helpers) =>
+            enroll(helpers, 'Organizer'),
+        );
+        expect(creator.requests).toBe(alone.requests);
+        expect(creator.poll).toEqual(alone.poll);
+        expect([...creator.records.keys()].sort()).toEqual(
+            [...alone.records.keys()].sort(),
+        );
+        for (const [kind, bytes] of alone.records)
+            expect(
+                Buffer.from(creator.records.get(kind)!).equals(
+                    Buffer.from(bytes),
+                ),
+                'staged record ' + String(kind),
+            ).toBe(true);
+        const poll = {
+            poll: creator.poll,
+            definition: creator.records.get(dataKind.pollDefinition)!,
+            signature: creator.records.get(dataKind.pollSignature)!,
+        };
+        const registrations = [creator.records];
+        for (const name of ['First voter', 'Second voter'])
+            registrations.push(
+                (await withHelpers((helpers) => enroll(helpers, name, poll)))
+                    .records,
+            );
+        const proofBytes = registrations[1].get(dataKind.proof)!.length;
+        // The true roster, a proof changed at its middle, a public key
+        // coefficient changed and a signature changed.
+        for (const [candidate, accepted] of [
+            [registrations, true],
+            [changed(registrations, 1, dataKind.proof, proofBytes >> 1), false],
+            [changed(registrations, 2, dataKind.publicKey, 1000), false],
+            [changed(registrations, 0, dataKind.signature, 7), false],
+        ] as const) {
+            const verdictAlone = await verifyRoster(
+                noParallelHelpers,
+                poll,
+                candidate,
+            );
+            expect(verdictAlone !== undefined).toBe(accepted);
+            expect(
+                await withHelpers((helpers) =>
+                    verifyRoster(helpers, poll, candidate),
+                ),
+            ).toEqual(verdictAlone);
         }
     });
 });

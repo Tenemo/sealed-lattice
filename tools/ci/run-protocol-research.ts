@@ -70,6 +70,11 @@ const prefixProfiles = [
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
 const memoryLimit = 1_073_741_824;
+// Native threads that take the browser module's path with helpers; only
+// the runner names their count, so every run records it.
+const simulatedHelpersVariable = 'SEALED_LATTICE_SIMULATED_HELPERS';
+// The unit tests run alone and then with this many simulated helpers.
+const unitSimulatedHelpers = 3;
 // A native ceremony generates and proves one contribution per participant,
 // which dominates its duration.
 const executionTimeout = prefixCase
@@ -82,6 +87,9 @@ await runWithLocalRunLog(
             selected.name,
             String(selected.participantCount),
             String(selected.optionCount),
+            ...(selected.simulatedHelpers === 0
+                ? []
+                : ['--simulated-helpers', String(selected.simulatedHelpers)]),
         ],
         lanes: [
             'Pinned protocol research build',
@@ -101,21 +109,31 @@ await runWithLocalRunLog(
             root,
         );
         try {
-            const environment = {
-                ...process.env,
+            const inherited: NodeJS.ProcessEnv = { ...process.env };
+            delete inherited[simulatedHelpersVariable];
+            const environment: NodeJS.ProcessEnv = {
+                ...inherited,
                 RUSTFLAGS: '',
                 CARGO_TARGET_DIR: path.join(workspace, 'target'),
             };
+            const withSimulatedHelpers = (count: number): NodeJS.ProcessEnv =>
+                count === 0
+                    ? environment
+                    : {
+                          ...environment,
+                          [simulatedHelpersVariable]: String(count),
+                      };
             const execute = async (
                 command: string,
                 args: string[],
                 name: string,
+                env = environment,
             ) => {
                 const result = await runCommandAndCaptureOutput(
                     {
                         command,
                         args,
-                        env: environment,
+                        env,
                         workingDirectoryPath: workspace,
                         description: name,
                         logFileSlug: name,
@@ -398,19 +416,23 @@ await runWithLocalRunLog(
                 'browser-completion-target',
             );
             // Unit tests of every member, including the ceremony's
-            // profile-derived roles.
+            // profile-derived roles, alone and then with every job on a
+            // simulated helper.
+            const unitTests = [
+                '+1.95.0',
+                'test',
+                '--offline',
+                '--locked',
+                '--workspace',
+                '--lib',
+                '--bins',
+            ];
+            await execute('cargo', unitTests, 'unit-verification');
             await execute(
                 'cargo',
-                [
-                    '+1.95.0',
-                    'test',
-                    '--offline',
-                    '--locked',
-                    '--workspace',
-                    '--lib',
-                    '--bins',
-                ],
-                'unit-verification',
+                unitTests,
+                'unit-verification-simulated-helpers',
+                withSimulatedHelpers(unitSimulatedHelpers),
             );
             await execute(
                 'cargo',
@@ -451,6 +473,7 @@ await runWithLocalRunLog(
                     JSON.stringify({
                         case: selected.name,
                         executableSha512: runtime.toString('hex'),
+                        unitSimulatedHelpers,
                         unmeasured: {
                             completion: null,
                             peakMemory: null,
@@ -499,7 +522,9 @@ await runWithLocalRunLog(
                                             ? ['empty']
                                             : []),
                                   ],
-                            env: environment,
+                            env: withSimulatedHelpers(
+                                selected.simulatedHelpers,
+                            ),
                             description: prefixCase
                                 ? 'Verify encrypted requested-output coefficients'
                                 : 'Execute original credentials through terminal verification',
@@ -707,6 +732,8 @@ await runWithLocalRunLog(
                         case: selected.name,
                         participantCount: selected.participantCount,
                         optionCount: selected.optionCount,
+                        simulatedHelpers: selected.simulatedHelpers,
+                        unitSimulatedHelpers,
                         output,
                         runtimeIdentity: runtime.toString('hex'),
                         result,

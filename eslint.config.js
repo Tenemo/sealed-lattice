@@ -226,6 +226,7 @@ export default defineConfig(
     {
         files: [
             'packages/sdk/tests/node/election-foundation-public-api.test.ts',
+            'tests/node/participant/parallel-helpers.kernel.test.ts',
             'tests/node/protocol/public-archive.kernel.test.ts',
             'tests/node/protocol/public-archive-route.kernel.test.ts',
             'tools/ci/check-protocol-public-completion.ts',

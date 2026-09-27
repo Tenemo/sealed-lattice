@@ -158,13 +158,13 @@ mod tests {
     use crate::registration::{KEY_BYTES, session::tests::unproved_record};
     use registration_verifier::CHUNK_LIMIT;
 
-    // Natively one record is open at a time. Each position opens once, every
-    // step names an open record, and the roster finishes only once every
-    // record has finished and its session's verdict accepts it; a refused
-    // record refuses the roster, and the roster stays refused.
+    // One record is open for each helper, or one without helpers. Each
+    // position opens once, every step names an open record, and the roster
+    // finishes only once every record has finished and its session's verdict
+    // accepts it; a refused record refuses the roster, and the roster stays
+    // refused.
     #[test]
     fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
-        assert_eq!(open_record_limit(), 1);
         let (packet, header) = unproved_record([4; 64]);
         let input = [
             packet.identity.as_slice(),
@@ -187,11 +187,20 @@ mod tests {
         };
         let key = vec![0; KEY_BYTES];
         roster.begin_record(&record(0)).unwrap();
-        assert!(matches!(roster.begin_record(&record(1)), Err(Error::Shape)));
         assert!(matches!(roster.push_key(1, &key[..1]), Err(Error::Shape)));
         assert!(matches!(roster.finish(), Err(Error::Shape)));
+        let opened = open_record_limit().min(3) as u16;
+        for position in 1..opened {
+            roster.begin_record(&record(position)).unwrap();
+        }
+        if opened < 3 {
+            assert!(matches!(
+                roster.begin_record(&record(opened)),
+                Err(Error::Shape)
+            ));
+        }
         for position in 0..3 {
-            if position > 0 {
+            if position >= opened {
                 roster.begin_record(&record(position)).unwrap();
             }
             for part in key.chunks(CHUNK_LIMIT) {

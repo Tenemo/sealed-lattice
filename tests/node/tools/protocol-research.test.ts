@@ -64,6 +64,19 @@ describe('guarded protocol research entry', () => {
             ['native-empty', '', '2'],
             ['native-prefix', '3', '2'],
             ['check', '10', '10'],
+            ['check', '--simulated-helpers', '3'],
+            ['native-result', '--simulated-helpers'],
+            ['native-result', '--simulated-helpers', '0'],
+            ['native-result', '--simulated-helpers', '9'],
+            ['native-result', '--simulated-helpers', '03'],
+            ['native-result', '--simulated-helpers', '2.5'],
+            [
+                'native-result',
+                '--simulated-helpers',
+                '3',
+                '--simulated-helpers',
+                '3',
+            ],
         ]) {
             expect(() => selectProtocolResearchCase(values)).toThrow();
         }
@@ -73,6 +86,7 @@ describe('guarded protocol research entry', () => {
             noResult: true,
             participantCount: 10,
             optionCount: 10,
+            simulatedHelpers: 0,
         });
         expect(
             selectProtocolResearchCase(['native-invalid-only', '3', '2']),
@@ -82,6 +96,7 @@ describe('guarded protocol research entry', () => {
             noResult: true,
             participantCount: 3,
             optionCount: 2,
+            simulatedHelpers: 0,
         });
         expect(
             selectProtocolResearchCase(['--', 'native-result', '20', '20']),
@@ -91,7 +106,26 @@ describe('guarded protocol research entry', () => {
             noResult: false,
             participantCount: 20,
             optionCount: 20,
+            simulatedHelpers: 0,
         });
+        // An executing case may run its jobs on one to eight simulated
+        // helpers, named before or after its profile.
+        for (const [values, helpers] of [
+            [['native-invalid-only', '3', '2', '--simulated-helpers', '1'], 1],
+            [['--', 'native-result', '--simulated-helpers', '8', '4', '3'], 8],
+        ] as const) {
+            expect(selectProtocolResearchCase(values)).toMatchObject({
+                execution: true,
+                simulatedHelpers: helpers,
+            });
+        }
+        expect(
+            selectProtocolResearchCase([
+                'native-prefix',
+                '--simulated-helpers',
+                '3',
+            ]).simulatedHelpers,
+        ).toBe(3);
         expect(selectProtocolResearchCase(['check']).execution).toBe(false);
         expect(selectProtocolResearchCase(['native-prefix'])).toEqual({
             name: 'native-prefix',
@@ -99,6 +133,7 @@ describe('guarded protocol research entry', () => {
             noResult: false,
             participantCount: 10,
             optionCount: 10,
+            simulatedHelpers: 0,
         });
     });
 
