@@ -99,13 +99,13 @@ fn window() -> usize {
 // The centered residues modulo the prime of the polynomial the bytes hold,
 // transformed.
 fn transformed_residues(arithmetic: &Arithmetic, prime: usize, bytes: &[u8]) -> Vec<u64> {
-    let polynomial = words(bytes);
-    assert_eq!(polynomial.len(), arithmetic.polynomial_words());
-    let mut residues = arithmetic
-        .projections(&polynomial, prime..prime + 1)
-        .remove(0);
+    assert_eq!(bytes.len(), 8 * arithmetic.polynomial_words());
+    let mut residues = arithmetic.residues(bytes, prime);
     arithmetic.transform(prime).forward(&mut residues);
     residues
+}
+fn word(bytes: &[u8]) -> u64 {
+    u64::from_le_bytes(bytes.try_into().unwrap())
 }
 
 fn forward(input: &[u8]) -> Vec<u8> {
@@ -117,14 +117,13 @@ fn forward(input: &[u8]) -> Vec<u8> {
 }
 fn product(input: &[u8]) -> Vec<u8> {
     let (arithmetic, prime, rest) = read(input);
-    let values = words(rest);
-    assert_eq!(values.len(), 2 * arithmetic.degree);
-    let (left, right) = values.split_at(arithmetic.degree);
+    assert_eq!(rest.len(), 16 * arithmetic.degree);
+    let (left, right) = rest.split_at(8 * arithmetic.degree);
     let reduction = &arithmetic.reductions[prime];
     let mut product: Vec<u64> = left
-        .iter()
-        .zip(right)
-        .map(|(left, right)| reduction.mul(*left, *right))
+        .chunks_exact(8)
+        .zip(right.chunks_exact(8))
+        .map(|(left, right)| reduction.mul(word(left), word(right)))
         .collect();
     arithmetic.transform(prime).backward(&mut product);
     let mut output = Vec::with_capacity(8 * product.len());
@@ -150,12 +149,11 @@ fn keyed(input: &[u8]) -> Vec<u8> {
         number(&rest[8..]),
         number(&rest[12..]),
     );
-    let polynomial = words(&rest[16..]);
-    assert_eq!(polynomial.len(), arithmetic.polynomial_words());
+    let polynomial = &rest[16..];
+    assert_eq!(polynomial.len(), 8 * arithmetic.polynomial_words());
     let (degree, gadget_length) = (arithmetic.degree, arithmetic.gadget_length);
     let transform = arithmetic.transform(prime);
-    let mut digits = arithmetic.prime_digits(&polynomial, prime);
-    drop(polynomial);
+    let mut digits = arithmetic.prime_digits(polynomial, prime);
     for digit in &mut digits {
         transform.forward(digit);
     }
@@ -184,10 +182,7 @@ fn lift(input: &[u8]) -> Vec<u8> {
     let positions = number(rest);
     let values = words(&rest[4..]);
     assert_eq!(values.len(), lift.count * positions);
-    let residues: Vec<Vec<u64>> = values
-        .chunks_exact(positions)
-        .map(|residues| residues.to_vec())
-        .collect();
+    let residues: Vec<&[u64]> = values.chunks_exact(positions).collect();
     let mut coefficients = vec![0u64; positions * arithmetic.words];
     for (position, coefficient) in coefficients.chunks_exact_mut(arithmetic.words).enumerate() {
         lift.coefficient(

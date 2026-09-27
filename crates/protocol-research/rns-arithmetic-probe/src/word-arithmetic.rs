@@ -395,7 +395,7 @@ impl Lift {
     /// The canonical coefficient the residues at one position determine.
     pub(super) fn coefficient(
         &self,
-        residues: &[Vec<u64>],
+        residues: &[&[u64]],
         position: usize,
         reductions: &[Modulus],
         modulus: &WideModulus,
@@ -677,6 +677,7 @@ mod tests {
                             .collect()
                     })
                     .collect();
+                let residues: Vec<&[u64]> = residues.iter().map(Vec::as_slice).collect();
                 let mut output = vec![0; wide.words];
                 for (position, integer) in integers.iter().enumerate() {
                     let values: Vec<u64> = residues.iter().map(|values| values[position]).collect();

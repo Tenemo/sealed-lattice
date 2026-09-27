@@ -43,6 +43,12 @@ fn unpack(value: &[u64]) -> BigUint {
             .collect::<Vec<_>>(),
     )
 }
+/// Reads little-endian words in place.
+fn read_words(bytes: &[u8], output: &mut [u64]) {
+    for (word, bytes) in output.iter_mut().zip(bytes.chunks_exact(8)) {
+        *word = u64::from_le_bytes(bytes.try_into().unwrap());
+    }
+}
 /// The least prefix of the primes whose product covers the bound.
 fn prefix(primes: &[u64], bound: &BigUint) -> usize {
     let mut product = BigUint::from(1u32);
@@ -291,59 +297,62 @@ impl Arithmetic {
         }
         output
     }
-    /// The primes' residues of the centered coefficients, a coefficient's
-    /// words read once for all of them.
-    fn projections(&self, polynomial: &[u64], primes: std::ops::Range<usize>) -> Transformed {
-        let mut output: Transformed = primes
-            .clone()
-            .map(|_| Vec::with_capacity(self.degree))
-            .collect();
-        for value in self.coefficients(polynomial) {
-            let negative = larger(value, &self.wide.half);
-            for (((residues, prime), powers), negated) in output
-                .iter_mut()
-                .zip(&self.reductions[primes.clone()])
-                .zip(&self.word_powers[primes.clone()])
-                .zip(&self.negated_modulus[primes.clone()])
-            {
-                residues.push(words_residue(
-                    prime,
-                    powers,
-                    value,
-                    if negative { *negated } else { 0 },
-                ));
-            }
-        }
-        output
+    /// The residues modulo the prime of the centered coefficients whose
+    /// little-endian words the bytes hold.
+    fn residues(&self, bytes: &[u8], prime: usize) -> Vec<u64> {
+        let (reduction, powers) = (&self.reductions[prime], &self.word_powers[prime]);
+        let negated = self.negated_modulus[prime];
+        let mut value = [0u64; MAXIMUM_WORDS];
+        let value = &mut value[..self.words];
+        bytes
+            .chunks_exact(8 * self.words)
+            .map(|coefficient| {
+                read_words(coefficient, value);
+                let negative = larger(value, &self.wide.half);
+                words_residue(reduction, powers, value, if negative { negated } else { 0 })
+            })
+            .collect()
     }
     /// The four tensor products of two ciphertexts' components: component
-    /// k / 2 of the first times component k % 2 of the second.
+    /// k / 2 of the first times component k % 2 of the second. A square's
+    /// two cross products are one product modulo every prime, so its two
+    /// sources and that product are computed once.
     fn tensors(&self, first: &[Polynomial; 2], second: &[Polynomial; 2]) -> [Polynomial; 4] {
         let count = self.tensor_primes();
+        let square = std::ptr::eq(first, second);
+        let second: &[Polynomial] = if square { &[] } else { second };
         let sources: Vec<Transformed> = first
             .iter()
             .chain(second)
             .map(|polynomial| self.transformed(polynomial, count))
             .collect();
-        std::array::from_fn(|index| {
-            let products = self.products(&sources[index / 2], &sources[2 + index % 2]);
+        let tensor = |left: usize, right: usize| {
+            let products = self.products(&sources[left], &sources[right]);
             self.lifted(&products, jobs::Lifted::Tensor)
-        })
+        };
+        if square {
+            let cross = tensor(0, 1);
+            return [tensor(0, 0), cross.clone(), cross, tensor(1, 1)];
+        }
+        std::array::from_fn(|index| tensor(index / 2, 2 + index % 2))
     }
     /// Each gadget digit of the canonical coefficients' residues modulo the
-    /// prime, untransformed.
-    fn prime_digits(&self, value: &[u64], prime: usize) -> Vec<Vec<u64>> {
+    /// prime, untransformed, from the coefficients' little-endian words.
+    fn prime_digits(&self, bytes: &[u8], prime: usize) -> Vec<Vec<u64>> {
         let bits = Profile::gadget_base_bits();
         let parts = bits.div_ceil(64);
         let mut output: Vec<Vec<u64>> = (0..self.gadget_length)
             .map(|_| Vec::with_capacity(self.degree))
             .collect();
+        let mut value = [0u64; MAXIMUM_WORDS];
+        let value = &mut value[..self.words];
         let mut words = [0u64; MAXIMUM_WORDS];
         let words = &mut words[..parts];
         let (reduction, powers) = (&self.reductions[prime], &self.word_powers[prime]);
-        for coefficient in self.coefficients(value) {
+        for coefficient in bytes.chunks_exact(8 * self.words) {
+            read_words(coefficient, value);
             for (digit, residues) in output.iter_mut().enumerate() {
-                digit_words(coefficient, bits * digit, bits, words);
+                digit_words(value, bits * digit, bits, words);
                 residues.push(words_residue(reduction, powers, words, 0));
             }
         }
@@ -675,9 +684,18 @@ mod tests {
             assert_eq!(tensor, canonical(&arithmetic, exact));
             // Tensor k multiplies component k / 2 of the first ciphertext by
             // component k % 2 of the second.
-            let tensors = arithmetic.tensors(&[left.clone(), right.clone()], &[right, left]);
+            let tensors = arithmetic.tensors(
+                &[left.clone(), right.clone()],
+                &[right.clone(), left.clone()],
+            );
             assert_eq!(tensors[0], tensor);
             assert_eq!(tensors[3], tensor);
+            // A square's tensors equal those of the value and its copy.
+            let value = [left, right];
+            assert_eq!(
+                arithmetic.tensors(&value, &value),
+                arithmetic.tensors(&value, &value.clone())
+            );
         }
     }
 
@@ -849,6 +867,12 @@ mod tests {
             assert_eq!(
                 arithmetic.decode(&product, &secret),
                 plaintext_product(&first_plain, &second_plain),
+                "profile={profile:?}"
+            );
+            let square = arithmetic.relinearized_product(&first, &first, &multiplication_keys);
+            assert_eq!(
+                arithmetic.decode(&square, &secret),
+                plaintext_product(&first_plain, &first_plain),
                 "profile={profile:?}"
             );
             let rotated = arithmetic.rotated(&first, &rotation_keys);
