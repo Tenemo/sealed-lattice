@@ -33,8 +33,11 @@ export const helperStartMilliseconds = 10_000;
 // queue.
 const maximumTickets = 4096;
 // The shared bytes the queued jobs, their outputs and the shared inputs may
-// occupy together, and the granularity of their blocks.
+// occupy together, and the granularity of their blocks. Beyond the soft
+// bound the arena grows only when no queued job's input remains for a
+// helper to copy and so release.
 const initialArenaBytes = 16 << 20;
+const softArenaBytes = 32 << 20;
 const maximumArenaBytes = 256 << 20;
 const blockAlignment = 64;
 
@@ -47,10 +50,12 @@ const exhausted = 3;
 
 // The shared control words: a stop flag, one wake word per helper, the
 // unpinned queue's head and tail, each helper's pinned queue head and tail,
-// the queues' entries, the job slots and each helper's linear-memory pages.
-// A slot holds its state, kind, output offset and length, part count and
-// each part's offset and length.
+// the queues' entries, the job slots, each helper's linear-memory pages and
+// the count of inputs the helpers have copied. A slot holds its state, kind,
+// output offset and length, part count, each part's offset and length, and
+// whether its helper has copied its input.
 const slotWords = 16;
+const copiedOffset = 13;
 const pageBytes = 65_536;
 const controlLayout = (helpers: number) => {
     const wakeBase = 1;
@@ -67,9 +72,11 @@ const controlLayout = (helpers: number) => {
         entriesBase,
         slotBase,
         slotWords,
+        copiedOffset,
         memoryBase,
+        copiedWord: memoryBase + helpers,
         queueEntries: maximumTickets,
-        words: memoryBase + helpers,
+        words: memoryBase + helpers + 1,
         queued,
         done,
         failed,
@@ -208,6 +215,11 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
             target.set(arena.subarray(offset, offset + partLength), at);
             at += partLength;
         }
+        // The helper reads the input's arena ranges no more, so the worker
+        // may reuse them.
+        Atomics.store(control, base + layout.copiedOffset, 1);
+        Atomics.add(control, layout.copiedWord, 1);
+        Atomics.notify(control, layout.copiedWord);
         // A call that ends without returning leaves the instance unusable,
         // so only a job whose calls returned clears its buffers.
         let completed = false;
@@ -248,6 +260,12 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
         const stateWord = layout.slotBase + slot * layout.slotWords;
         Atomics.store(control, stateWord, state);
         Atomics.notify(control, stateWord);
+        // A job that ended before its input was copied releases the input
+        // too, so a worker waiting for arena space wakes.
+        if (Atomics.load(control, stateWord + layout.copiedOffset) === 0) {
+            Atomics.add(control, layout.copiedWord, 1);
+            Atomics.notify(control, layout.copiedWord);
+        }
     }
     self.close();
 };
@@ -388,6 +406,8 @@ type Running = {
     slot: number;
     inputs: Block[];
     shared: SharedInput[];
+    // Whether the job's input ranges are still held for its helper.
+    holding: boolean;
     output: Block | undefined;
     outputLength: number;
     settled: boolean;
@@ -405,6 +425,8 @@ const createHost = (
     const shares = new Map<number, SharedInput>();
     const tickets = new Map<number, Running>();
     const discarded = new Set<number>();
+    // The queued jobs whose input ranges are still held.
+    const holding = new Set<Running>();
     const freeSlots = Array.from(
         { length: maximumTickets },
         (_unused, slot) => maximumTickets - 1 - slot,
@@ -461,11 +483,28 @@ const createHost = (
         releaseBlock({ offset: previous, length: next - previous });
         return true;
     };
+    const releaseInputs = (running: Running) => {
+        if (!running.holding) return;
+        running.holding = false;
+        holding.delete(running);
+        for (const block of running.inputs) releaseBlock(block);
+        for (const input of running.shared) dereference(input);
+    };
+    // Releases the inputs that helpers have copied or whose jobs have ended.
+    const releaseCopied = () => {
+        for (const running of holding) {
+            const word = stateWord(running.slot);
+            if (
+                Atomics.load(control, word + layout.copiedOffset) !== 0 ||
+                Atomics.load(control, word) !== queued
+            )
+                releaseInputs(running);
+        }
+    };
     const settle = (running: Running) => {
         if (running.settled) return;
         running.settled = true;
-        for (const block of running.inputs) releaseBlock(block);
-        for (const input of running.shared) dereference(input);
+        releaseInputs(running);
     };
     const finish = (ticket: number, running: Running) => {
         settle(running);
@@ -492,9 +531,17 @@ const createHost = (
         for (;;) {
             const block = firstFit(aligned);
             if (block !== undefined) return block;
+            const copied = Atomics.load(control, layout.copiedWord);
+            releaseCopied();
             sweep();
             const retry = firstFit(aligned);
             if (retry !== undefined) return retry;
+            // Beyond the soft bound, a queued job's input that its helper
+            // will copy frees memory without growing the arena.
+            if (arenaBuffer.byteLength >= softArenaBytes && holding.size > 0) {
+                Atomics.wait(control, layout.copiedWord, copied);
+                continue;
+            }
             if (!grow(aligned)) {
                 // Only a discarded job still frees memory without the module.
                 const [ticket] = discarded;
@@ -597,6 +644,7 @@ const createHost = (
                 slot,
                 inputs: [],
                 shared: [],
+                holding: true,
                 output: undefined,
                 outputLength,
                 settled: false,
@@ -633,10 +681,13 @@ const createHost = (
             control[base + 2] = running.output?.offset ?? 0;
             control[base + 3] = outputLength;
             control[base + 4] = count;
+            control[base + layout.copiedOffset] = 0;
             Atomics.store(control, base, queued);
             const ticket = nextTicket;
             nextTicket += 1;
             tickets.set(ticket, running);
+            if (count > 0) holding.add(running);
+            else running.holding = false;
             enqueue(pin, slot);
             return ticket;
         },

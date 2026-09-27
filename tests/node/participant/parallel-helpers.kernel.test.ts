@@ -536,25 +536,34 @@ describe('participant helpers with registration work', () => {
 });
 
 // A stand-in module whose jobs complete with eight bytes (kind 3), exhaust
-// the helper's memory through the allocator's import (kind 1), trap
-// (kind 2) or name no job (any other kind). As in the participant module,
-// a run that never returned leaves the job's buffers held, so clearing
-// them traps.
+// the helper's memory through the allocator's import (kind 1), trap at once
+// (kind 2) or after a long computation (kind 4), or name no job (any other
+// kind); its input buffer holds the largest job input. As in the
+// participant module, a run that never returned leaves the job's buffers
+// held, so clearing them traps.
 const standIn = `(module
   (import "allocator" "exhausted" (func $exhausted (param i32)))
-  (memory (export "memory") 1)
+  (memory (export "memory") 130)
   (global $running (mut i32) (i32.const 0))
+  (global $steps (mut i32) (i32.const 0))
   (data (i32.const 2048) "complete")
   (func (export "parallel_reserve") (param i32 i32) (result i32)
     (i32.const 0))
   (func (export "parallel_input") (param i32) (result i32)
-    (i32.const 1024))
+    (i32.const 65536))
   (func (export "parallel_run") (param $kind i32) (result i32)
     (global.set $running (i32.const 1))
     (if (i32.eq (local.get $kind) (i32.const 1))
       (then (call $exhausted (i32.const 65536))))
     (if (i32.eq (local.get $kind) (i32.const 2))
       (then (unreachable)))
+    (if (i32.eq (local.get $kind) (i32.const 4))
+      (then
+        (global.set $steps (i32.const 0))
+        (loop $compute
+          (global.set $steps (i32.add (global.get $steps) (i32.const 1)))
+          (br_if $compute (i32.lt_u (global.get $steps) (i32.const 1000000000))))
+        (unreachable)))
     (global.set $running (i32.const 0))
     (i32.ne (local.get $kind) (i32.const 3)))
   (func (export "parallel_output_length") (result i32)
@@ -652,6 +661,72 @@ describe('parallel job host', () => {
             expect(accepted).toBeGreaterThan(0);
         } finally {
             arenaHelpers.stop();
+        }
+    });
+
+    it("reuses the arena range of an input its helper has copied, so held jobs' inputs may exceed the arena bound", async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(standIn),
+            helperPorts(1),
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        try {
+            const memory = new WebAssembly.Memory({ initial: 129 });
+            const host = helpers.imports(
+                () => memory,
+            ) as unknown as HostImports;
+            const inputBytes = 8 << 20;
+            new Uint32Array(memory.buffer, 0, 3).set([0, 65_536, inputBytes]);
+            // Forty such inputs held until their jobs are waited for would
+            // exceed the arena's largest length.
+            const tickets = Array.from({ length: 40 }, () =>
+                host.submit(3, 1, 0, 1, 8),
+            );
+            expect(helpers.memory().arenaBytes).toBeLessThanOrEqual(32 << 20);
+            for (const ticket of tickets) {
+                host.wait(ticket);
+                expect(host.take(ticket, 512)).toBe(0);
+                expect(
+                    Buffer.from(
+                        new Uint8Array(memory.buffer, 512, 8),
+                    ).toString(),
+                ).toBe('complete');
+            }
+        } finally {
+            helpers.stop();
+        }
+    });
+
+    it('releases the inputs of jobs that a trapped helper ended without copying them', async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(standIn),
+            helperPorts(1),
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        try {
+            const memory = new WebAssembly.Memory({ initial: 129 });
+            const host = helpers.imports(
+                () => memory,
+            ) as unknown as HostImports;
+            new Uint32Array(memory.buffer, 0, 3).set([0, 65_536, 16]);
+            // The helper traps only after the worker waits for arena space
+            // that the later jobs' inputs hold beyond the soft bound.
+            const trapping = host.submit(4, 1, 0, 1, 8);
+            new Uint32Array(memory.buffer, 0, 3).set([0, 65_536, 8 << 20]);
+            const tickets = Array.from({ length: 8 }, () =>
+                host.submit(3, 1, 0, 1, 8),
+            );
+            for (const ticket of [trapping, ...tickets]) {
+                const failure = failureOf(() => host.wait(ticket));
+                expect(failure).toBeInstanceOf(ResourceFailure);
+                expect((failure as Error).message).toBe(
+                    'A participant helper failed.',
+                );
+            }
+        } finally {
+            helpers.stop();
         }
     });
 
