@@ -108,19 +108,43 @@ fn with_shard<T>(session: u64, shard: u32, action: impl FnOnce(&mut Shard) -> T)
     SHARDS.with(|shards| action(shards.borrow_mut().get_mut(&(session, shard)).unwrap()))
 }
 
+/// A base or extension field element that a shard folds.
+trait Folded: Copy + zeroize::Zeroize {
+    const ZERO: Self;
+    fn add(self, other: Self) -> Self;
+    fn scale(self, scalar: u128) -> Self;
+}
+impl Folded for u128 {
+    const ZERO: Self = 0;
+    fn add(self, other: Self) -> Self {
+        base::add(self, other)
+    }
+    fn scale(self, scalar: u128) -> Self {
+        base::multiply(self, scalar)
+    }
+}
+impl Folded for Element {
+    const ZERO: Self = ZERO;
+    fn add(self, other: Self) -> Self {
+        field::add(self, other)
+    }
+    fn scale(self, scalar: u128) -> Self {
+        field::scale(self, scalar)
+    }
+}
+
 /// The values at the positions `residue + classes * q` of the coset `k` of
-/// a polynomial whose coefficients above the systematic length wrap there,
-/// before the transform of `SYSTEMATIC / classes` points.
-fn residue_values<T: Copy + zeroize::Zeroize>(
-    coefficients: &[T],
+/// a polynomial of the length whose coefficients above the systematic
+/// length wrap there, before the transform of `SYSTEMATIC / classes` points.
+/// Each coefficient is read as the fold needs it.
+fn residue_values<T: Folded>(
+    length: usize,
+    coefficient: impl Fn(usize) -> T,
     coset_index: usize,
     classes: usize,
     residue: usize,
-    zero: T,
-    add: impl Fn(T, T) -> T,
-    scale: impl Fn(T, u128) -> T,
 ) -> Zeroizing<Vec<T>> {
-    assert!(coefficients.len() <= 2 * SYSTEMATIC + 1);
+    assert!(length <= 2 * SYSTEMATIC + 1);
     let block = SYSTEMATIC / classes;
     let coset = coset(coset_index);
     let high = base::power(coset, SYSTEMATIC as u128);
@@ -132,60 +156,66 @@ fn residue_values<T: Copy + zeroize::Zeroize>(
     );
     let twist = base::multiply(coset, base::power(omega, residue as u128));
     let wrapped = |index: usize| {
-        let mut value = coefficients.get(index).copied().unwrap_or(zero);
-        if let Some(upper) = coefficients.get(SYSTEMATIC + index) {
-            value = add(value, scale(*upper, high));
+        let mut value = if index < length {
+            coefficient(index)
+        } else {
+            T::ZERO
+        };
+        if SYSTEMATIC + index < length {
+            value = value.add(coefficient(SYSTEMATIC + index).scale(high));
         }
-        if index == 0 && coefficients.len() == 2 * SYSTEMATIC + 1 {
-            value = add(
-                value,
-                scale(coefficients[2 * SYSTEMATIC], base::multiply(high, high)),
-            );
+        if index == 0 && length == 2 * SYSTEMATIC + 1 {
+            value = value.add(coefficient(2 * SYSTEMATIC).scale(base::multiply(high, high)));
         }
         value
     };
     let mut values = Zeroizing::new(Vec::with_capacity(block));
     let mut power = 1;
     for index in 0..block {
-        let mut sum = zero;
+        let mut sum = T::ZERO;
         for fold in (0..classes).rev() {
-            sum = add(scale(sum, step), wrapped(index + block * fold));
+            sum = sum.scale(step).add(wrapped(index + block * fold));
         }
-        values.push(scale(sum, power));
+        values.push(sum.scale(power));
         power = base::multiply(power, twist);
     }
     values
 }
 
-/// A polynomial's values at a shard's rows, in row order.
-fn shard_base_values(coefficients: &[u128], shard: u32, classes: usize) -> Zeroizing<Vec<u128>> {
+/// A polynomial's values at a shard's rows, in row order, from its encoded
+/// coefficients.
+fn shard_base_values(coefficients: &[u8], shard: u32, classes: usize) -> Zeroizing<Vec<u128>> {
+    assert!(coefficients.len().is_multiple_of(16));
     let shard = shard as usize;
     let mut values = residue_values(
-        coefficients,
+        coefficients.len() / 16,
+        |index| {
+            u128::from_le_bytes(
+                coefficients[16 * index..16 * (index + 1)]
+                    .try_into()
+                    .unwrap(),
+            )
+        },
         shard % 4,
         classes,
         shard / 4,
-        0,
-        base::add,
-        base::multiply,
     );
     Transform::cached(SYSTEMATIC / classes).base(&mut values, false);
     values
 }
 fn shard_extension_values(
-    coefficients: &[Element],
+    coefficients: &[u8],
     shard: u32,
     classes: usize,
 ) -> Zeroizing<Vec<Element>> {
+    assert!(coefficients.len().is_multiple_of(48));
     let shard = shard as usize;
     let mut values = residue_values(
-        coefficients,
+        coefficients.len() / 48,
+        |index| field::decode(&coefficients[48 * index..48 * (index + 1)]),
         shard % 4,
         classes,
         shard / 4,
-        ZERO,
-        field::add,
-        field::scale,
     );
     Transform::cached(SYSTEMATIC / classes).extension(&mut values, false);
     values
@@ -230,13 +260,8 @@ fn extend(
     });
 }
 fn absorb_base(input: &[u8]) -> Vec<u8> {
-    let (session, shard, classes, rest) = header(input);
-    let coefficients = Zeroizing::new(
-        rest.chunks_exact(16)
-            .map(|bytes| u128::from_le_bytes(bytes.try_into().unwrap()))
-            .collect::<Vec<_>>(),
-    );
-    let values = shard_base_values(&coefficients, shard, classes);
+    let (session, shard, classes, coefficients) = header(input);
+    let values = shard_base_values(coefficients, shard, classes);
     with_shard(session, shard, |state| {
         assert_eq!(state.hashers.len(), values.len());
         for (hasher, value) in state.hashers.iter_mut().zip(values.iter()) {
@@ -246,17 +271,8 @@ fn absorb_base(input: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 fn absorb_extension(input: &[u8]) -> Vec<u8> {
-    let (session, shard, classes, rest) = header(input);
-    let coefficients = Zeroizing::new(
-        rest.chunks_exact(48)
-            .map(|bytes| {
-                std::array::from_fn(|index| {
-                    u128::from_le_bytes(bytes[16 * index..16 * (index + 1)].try_into().unwrap())
-                })
-            })
-            .collect::<Vec<Element>>(),
-    );
-    let values = shard_extension_values(&coefficients, shard, classes);
+    let (session, shard, classes, coefficients) = header(input);
+    let values = shard_extension_values(coefficients, shard, classes);
     with_shard(session, shard, |state| {
         assert_eq!(state.hashers.len(), values.len());
         for (hasher, value) in state.hashers.iter_mut().zip(values.iter()) {
@@ -685,13 +701,20 @@ mod tests {
             let coefficients: Vec<Element> = (0..length)
                 .map(|_| [sample(&mut state), sample(&mut state), sample(&mut state)])
                 .collect();
-            let bases: Vec<u128> = coefficients.iter().map(|value| value[0]).collect();
+            let encoded: Vec<u8> = coefficients
+                .iter()
+                .flat_map(|value| field::encode(*value))
+                .collect();
+            let bases: Vec<u8> = coefficients
+                .iter()
+                .flat_map(|value| value[0].to_le_bytes())
+                .collect();
             for coset_index in 0..4 {
                 let full = extension_values(&coefficients, coset(coset_index), transform);
                 for classes in [1, 2, 8] {
                     for residue in [0, classes - 1] {
                         let shard = (coset_index + 4 * residue) as u32;
-                        let values = shard_extension_values(&coefficients, shard, classes);
+                        let values = shard_extension_values(&encoded, shard, classes);
                         let base_values = shard_base_values(&bases, shard, classes);
                         for (q, (value, base_value)) in
                             values.iter().zip(base_values.iter()).enumerate()

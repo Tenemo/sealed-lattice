@@ -6,7 +6,7 @@ use crate::{
     sums::Sums,
 };
 use parallel_work::share;
-use setup_stream_kernel::prover_operator_plan;
+use setup_stream_kernel::{ProverOperatorPlan, prover_operator_plan};
 use std::collections::BTreeMap;
 use supported_profile::Profile;
 use zeroize::Zeroizing;
@@ -20,30 +20,32 @@ pub enum PreparedPolynomial {
     Value(Element),
     Adjoint(Vec<Element>),
 }
-impl LinearOracle {
-    pub fn create_prepared(
+/// The masked affine sum of a setup proof. Its fixed bases' jobs start with
+/// it and each public polynomial's jobs start as the polynomial arrives, so
+/// the prover keeps no prepared polynomial after its jobs start.
+pub struct AffineSum {
+    plan: ProverOperatorPlan,
+    mask: Element,
+    target: Element,
+    sums: Sums,
+    next: usize,
+}
+impl AffineSum {
+    /// Starts the jobs of the fixed affine bases.
+    pub fn begin(
         profile: Profile,
-        role: &[u8],
         witness: &Witness,
         first: &FirstOracle,
-        second: &SecondOracle,
         challenges: Challenges,
-        mut polynomials: impl Iterator<Item = PreparedPolynomial>,
     ) -> Self {
-        let Challenges {
-            alpha,
-            mask: mask_challenge,
-        } = challenges;
-        let relation = &witness.relation;
-        let polynomial_count = profile.setup_polynomials();
+        let Challenges { alpha, mask } = challenges;
         let plan = prover_operator_plan(profile, alpha).unwrap();
-        let mut target = plan.target_offset;
         let mut sums = Sums::new(DOMAIN);
         let mut groups: BTreeMap<(usize, usize, usize, bool), Vec<Element>> = BTreeMap::new();
         for term in &plan.fixed_terms {
             let group = groups
                 .entry((term.degree, term.automorphism, term.shift, term.constant))
-                .or_insert_with(|| vec![ZERO; relation.columns()]);
+                .or_insert_with(|| vec![ZERO; witness.relation.columns()]);
             for (column, weight) in &term.columns {
                 group[*column] = field::add(group[*column], *weight);
             }
@@ -59,7 +61,7 @@ impl LinearOracle {
             }
             linear_oracle::products(
                 &mut sums,
-                mask_challenge,
+                mask,
                 Public::Geometric {
                     alpha,
                     degree,
@@ -74,54 +76,90 @@ impl LinearOracle {
         }
         #[cfg(not(target_arch = "wasm32"))]
         println!("Started fixed affine bases");
-        for index in 0..polynomial_count {
-            let polynomial = polynomials.next().unwrap();
-            if plan.common_columns[index].is_empty() {
-                let PreparedPolynomial::Value(value) = polynomial else {
-                    panic!("Expected public value");
-                };
-                target = field::subtract(target, field::multiply(plan.value_weights[index], value));
-            } else {
-                let PreparedPolynomial::Adjoint(values) = polynomial else {
-                    panic!("Expected public adjoint");
-                };
+        Self {
+            target: plan.target_offset,
+            plan,
+            mask,
+            sums,
+            next: 0,
+        }
+    }
+    /// The index of the next public polynomial.
+    pub fn next(&self) -> usize {
+        self.next
+    }
+    /// Whether the next public polynomial arrives as its adjoint, since it
+    /// has common columns, rather than as its value.
+    pub fn next_is_adjoint(&self) -> bool {
+        !self.plan.common_columns[self.next].is_empty()
+    }
+    /// Adds the next public polynomial: its weighted value leaves the
+    /// target, or the jobs of its adjoint's products start.
+    pub fn polynomial(
+        &mut self,
+        witness: &Witness,
+        first: &FirstOracle,
+        polynomial: PreparedPolynomial,
+    ) {
+        let index = self.next;
+        match (self.next_is_adjoint(), polynomial) {
+            (false, PreparedPolynomial::Value(value)) => {
+                self.target = field::subtract(
+                    self.target,
+                    field::multiply(self.plan.value_weights[index], value),
+                );
+            }
+            (true, PreparedPolynomial::Adjoint(values)) => {
                 let count = values.len();
                 let mut bytes = Zeroizing::new(Vec::with_capacity(48 * count));
                 for value in &values {
                     bytes.extend(field::encode(*value));
                 }
+                drop(values);
                 let values = share(bytes);
                 linear_oracle::products(
-                    &mut sums,
-                    mask_challenge,
+                    &mut self.sums,
+                    self.mask,
                     Public::Adjoint {
                         values: &values,
                         count,
                     },
-                    &plan.common_columns[index],
+                    &self.plan.common_columns[index],
                     &witness.columns,
                     &first.masks,
                 );
             }
-            if index % 14 == 0 {
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("Started public polynomial {index}");
-            }
+            _ => panic!("Public polynomial kind"),
         }
-        assert!(polynomials.next().is_none());
+        if index.is_multiple_of(14) {
+            #[cfg(not(target_arch = "wasm32"))]
+            println!("Started public polynomial {index}");
+        }
+        self.next += 1;
+    }
+    /// The linear oracle once every public polynomial has arrived.
+    pub fn finish(self, role: &[u8], second: &SecondOracle) -> LinearOracle {
+        let Self {
+            plan,
+            mask,
+            target,
+            mut sums,
+            next,
+        } = self;
+        assert_eq!(next, plan.common_columns.len());
         linear_oracle::term(
             &mut sums,
-            field::multiply(mask_challenge, plan.lookup_weight),
+            field::multiply(mask, plan.lookup_weight),
             &second.lookup_coefficients,
         );
         linear_oracle::term(&mut sums, ONE, &second.sum_mask);
         let mut evaluations = sums.finish();
-        Self::from_evaluations(
+        LinearOracle::from_evaluations(
             role,
             std::mem::take(&mut *evaluations),
             target,
             plan.lookup_weight,
-            mask_challenge,
+            mask,
             second.mask_sum,
             false,
         )

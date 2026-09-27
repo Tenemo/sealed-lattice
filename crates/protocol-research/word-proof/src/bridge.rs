@@ -2,13 +2,13 @@ use crate::{
     combination,
     field::{self, Element},
     fri::{self, Fri},
-    linear::{Challenges, LinearOracle, PreparedPolynomial},
+    linear::{AffineSum, Challenges, LinearOracle, PreparedPolynomial},
     oracles::{FirstOracle, SecondOracle, Witness},
     parameters::*,
     transcript::{self, Transcript},
     tree::Multiproof,
 };
-use setup_stream_kernel::{PolynomialStream, prover_operator_plan, setup_polynomial_stream};
+use setup_stream_kernel::{PolynomialStream, setup_polynomial_stream};
 use stateful_sha3::{Digest, Sha3_512};
 use std::collections::VecDeque;
 use supported_profile::Profile;
@@ -42,9 +42,8 @@ pub struct Prover {
     first: Option<FirstOracle>,
     second: Option<SecondOracle>,
     inverses: Vec<Element>,
-    common: Vec<bool>,
     polynomial: Option<PolynomialStream>,
-    polynomials: Vec<PreparedPolynomial>,
+    affine: Option<AffineSum>,
     second_pass_hash: Sha3_512,
     linear: Option<LinearOracle>,
     folding: Option<Fri>,
@@ -132,9 +131,8 @@ impl Prover {
             first: None,
             second: None,
             inverses: Vec::new(),
-            common: Vec::new(),
             polynomial: None,
-            polynomials: Vec::new(),
+            affine: None,
             second_pass_hash: Sha3_512::new(),
             linear: None,
             folding: None,
@@ -147,7 +145,10 @@ impl Prover {
     fn begin_polynomial(&mut self, index: usize) -> Result<(), ()> {
         if self.phase != Phase::Polynomials
             || self.polynomial.is_some()
-            || index != self.polynomials.len()
+            || self
+                .affine
+                .as_ref()
+                .is_none_or(|affine| index != affine.next())
             || index >= self.profile.setup_polynomials()
         {
             return Err(());
@@ -174,13 +175,18 @@ impl Prover {
             return Err(());
         }
         let parser = self.polynomial.take().ok_or(())?;
-        let prepared = if self.common[self.polynomials.len()] {
+        let affine = self.affine.as_mut().ok_or(())?;
+        let prepared = if affine.next_is_adjoint() {
             PreparedPolynomial::Adjoint(parser.adjoint().map_err(|_| ())?)
         } else {
             PreparedPolynomial::Value(parser.finish_value().map_err(|_| ())?)
         };
-        self.polynomials.push(prepared);
-        if self.polynomials.len() == self.profile.setup_polynomials() {
+        affine.polynomial(
+            self.witness.as_ref().ok_or(())?,
+            self.first.as_ref().ok_or(())?,
+            prepared,
+        );
+        if affine.next() == self.profile.setup_polynomials() {
             if <[u8; 64]>::from(self.second_pass_hash.clone().finalize()) != self.expected {
                 return Err(());
             }
@@ -227,34 +233,25 @@ impl Prover {
                     second.finish_commitment();
                     transcript.respond(&[&second.tree.root(), &field::encode(second.mask_sum)]);
                     transcript.next();
-                    let plan = prover_operator_plan(
+                    self.affine = Some(AffineSum::begin(
                         self.profile,
-                        transcript::challenge(&transcript.message, 0, false),
-                    )
-                    .map_err(|_| ())?;
-                    self.common = plan
-                        .common_columns
-                        .iter()
-                        .map(|columns| !columns.is_empty())
-                        .collect();
+                        witness,
+                        self.first.as_ref().unwrap(),
+                        Challenges {
+                            alpha: transcript::challenge(&transcript.message, 0, false),
+                            mask: transcript::challenge(&transcript.message, 1, false),
+                        },
+                    ));
                     self.second_pass_hash.update(&self.statement_header);
                     self.phase = Phase::Polynomials;
                 }
             }
             Phase::Linear => {
-                let challenges = Challenges {
-                    alpha: transcript::challenge(&transcript.message, 0, false),
-                    mask: transcript::challenge(&transcript.message, 1, false),
-                };
-                let linear = LinearOracle::create_prepared(
-                    self.profile,
-                    &self.role,
-                    witness,
-                    self.first.as_ref().unwrap(),
-                    self.second.as_ref().unwrap(),
-                    challenges,
-                    std::mem::take(&mut self.polynomials).into_iter(),
-                );
+                let linear = self
+                    .affine
+                    .take()
+                    .ok_or(())?
+                    .finish(&self.role, self.second.as_ref().unwrap());
                 transcript.respond(&[&linear.tree.root()]);
                 transcript.next();
                 self.linear = Some(linear);
