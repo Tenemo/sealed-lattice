@@ -1,8 +1,11 @@
-//! Query evaluations that helper instances of the participant module run
-//! on their own. The owner checks each job's parameters with the
-//! refusals of a direct evaluation before it submits the job, so a job's
-//! output is a function of its input bytes.
-use super::{Element, Error, ZERO, plus, query, setup};
+//! Query evaluations and coefficient fingerprints that helper instances of
+//! the participant module run on their own. The owner checks each job's
+//! parameters with the refusals of a direct evaluation before it submits the
+//! job, so a job's output is a function of its input bytes.
+use super::{
+    Element, Error, ZERO, adjoint_of, limb_powers, plus, power, query, record_fingerprint, setup,
+    times,
+};
 use parallel_work::{Job, Part, Pipeline, Ticket, submit};
 
 /// A geometry's sum and query values.
@@ -15,7 +18,20 @@ pub static QUERIES: Job = Job {
     kind: 0x0201,
     run: queries,
 };
-pub static JOBS: [&Job; 2] = [&GEOMETRY, &QUERIES];
+/// A run of canonical coefficient records' fingerprints, weighted by the
+/// powers of alpha from the run's position and summed, then with retention
+/// each record's fingerprint.
+pub static FINGERPRINTS: Job = Job {
+    kind: 0x0202,
+    run: fingerprints,
+};
+/// A polynomial's adjoint from its coefficients' fingerprints and their
+/// weighted sum, at queried positions of its masked interpolant.
+pub static ADJOINT: Job = Job {
+    kind: 0x0203,
+    run: adjoint,
+};
+pub static JOBS: [&Job; 4] = [&GEOMETRY, &QUERIES, &FINGERPRINTS, &ADJOINT];
 
 const ELEMENT_BYTES: usize = 48;
 
@@ -82,6 +98,110 @@ fn queries(input: &[u8]) -> Vec<u8> {
         encode(value, &mut output);
     }
     output
+}
+
+/// Starts the fingerprints of a run of canonical records of width bytes,
+/// from its position in a polynomial whose parameters were checked.
+pub(crate) fn fingerprints_job(
+    width: usize,
+    radix_bits: usize,
+    degree: usize,
+    position: usize,
+    retain: bool,
+    alpha: Element,
+    records: &[u8],
+) -> Ticket {
+    let count = records.len() / width;
+    assert!(records.len() == count * width && position + count <= degree);
+    let mut header = Vec::with_capacity(17 + ELEMENT_BYTES);
+    for value in [width, radix_bits, degree, position] {
+        header.extend((value as u32).to_le_bytes());
+    }
+    header.push(u8::from(retain));
+    encode(alpha, &mut header);
+    submit(
+        &FINGERPRINTS,
+        None,
+        &[Part::Bytes(&header), Part::Bytes(records)],
+        ELEMENT_BYTES * (1 + if retain { count } else { 0 }),
+    )
+}
+fn fingerprints(input: &[u8]) -> Vec<u8> {
+    let [width, radix_bits, degree, position] =
+        std::array::from_fn(|index| number(&input[4 * index..]));
+    let retain = input[16] == 1;
+    let alpha = decode(&input[17..17 + ELEMENT_BYTES]);
+    let records = &input[17 + ELEMENT_BYTES..];
+    let powers = limb_powers(width - 1, radix_bits, power(alpha, degree));
+    let mut weight = power(alpha, position);
+    let mut sum = ZERO;
+    let mut retained = Vec::new();
+    for record in records.chunks_exact(width) {
+        let value = record_fingerprint(record, radix_bits, &powers);
+        sum = plus(sum, times(weight, value));
+        weight = times(weight, alpha);
+        if retain {
+            encode(value, &mut retained);
+        }
+    }
+    let mut output = Vec::with_capacity(ELEMENT_BYTES + retained.len());
+    encode(sum, &mut output);
+    output.extend(retained);
+    output
+}
+/// A fingerprints job's weighted sum, then its retained fingerprints.
+pub(crate) fn split_fingerprints(output: &[u8]) -> (Element, &[u8]) {
+    (decode(output), &output[ELEMENT_BYTES..])
+}
+
+/// Starts the evaluation at the indices of the adjoint of the encoded
+/// fingerprints whose weighted sum is the total, after the refusals of a
+/// direct evaluation.
+pub(crate) fn adjoint_job(
+    fingerprints: &[u8],
+    total: Element,
+    alpha: Element,
+    indices: &[u32],
+    systematic_size: usize,
+) -> Result<Ticket, Error> {
+    query::check_in(fingerprints.len() / ELEMENT_BYTES, indices, systematic_size)?;
+    let mut header = Vec::with_capacity(8 + 4 * indices.len() + 2 * ELEMENT_BYTES);
+    push_queries(&mut header, indices, systematic_size);
+    encode(total, &mut header);
+    encode(alpha, &mut header);
+    Ok(submit(
+        &ADJOINT,
+        None,
+        &[Part::Bytes(&header), Part::Bytes(fingerprints)],
+        1 + ELEMENT_BYTES * indices.len(),
+    ))
+}
+fn adjoint(input: &[u8]) -> Vec<u8> {
+    let (systematic_size, indices, rest) = read_queries(input);
+    let total = decode(rest);
+    let alpha = decode(&rest[ELEMENT_BYTES..]);
+    let fingerprints = decode_values(&rest[2 * ELEMENT_BYTES..]);
+    let limb_weight = power(alpha, fingerprints.len());
+    let mut output = Vec::with_capacity(1 + ELEMENT_BYTES * indices.len());
+    match adjoint_of(fingerprints, total, alpha, limb_weight) {
+        Ok(values) => {
+            output.push(0);
+            for value in
+                query::evaluate_in(values, &indices, systematic_size).expect("Checked queries")
+            {
+                encode(value, &mut output);
+            }
+        }
+        Err(_) => output.resize(1 + ELEMENT_BYTES * indices.len(), 1),
+    }
+    output
+}
+/// An adjoint job's query values, refused when the adjoint does not close.
+pub(crate) fn decode_adjoint(output: &[u8]) -> Result<Vec<Element>, Error> {
+    match output[0] {
+        0 => Ok(decode_values(&output[1..])),
+        _ => Err(Error::Arithmetic),
+    }
 }
 
 /// Starts the evaluation of a geometry's sum and query values.

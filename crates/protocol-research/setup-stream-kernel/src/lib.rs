@@ -74,6 +74,78 @@ fn fingerprint_in(bytes: &[u8], radix_bits: usize, weight: Element) -> Element {
     }
     result
 }
+// The fingerprint of a canonical coefficient record: its magnitude's limbs
+// weighted by the powers, negated for a negative sign.
+fn record_fingerprint(record: &[u8], radix_bits: usize, powers: &[Element]) -> Element {
+    let result = fingerprint_with(&record[1..], radix_bits, powers);
+    if record[0] == 1 {
+        minus(ZERO, result)
+    } else {
+        result
+    }
+}
+// Half an odd little-endian modulus, rounded down, in its byte length.
+fn half_modulus(modulus: &[u8]) -> Vec<u8> {
+    (0..modulus.len())
+        .map(|index| {
+            (modulus[index] >> 1) | ((modulus.get(index + 1).copied().unwrap_or(0) & 1) << 7)
+        })
+        .collect()
+}
+// Whether a coefficient record is canonical: a sign byte of zero or one, a
+// magnitude at most half the modulus, and no negative zero.
+fn canonical(record: &[u8], half_modulus: &[u8]) -> bool {
+    let magnitude = &record[1..];
+    record[0] <= 1
+        && magnitude
+            .iter()
+            .rev()
+            .cmp(half_modulus.iter().rev())
+            .is_le()
+        && !(record[0] == 1 && magnitude.iter().all(|byte| *byte == 0))
+}
+// The refusals of a polynomial's parameters.
+fn check_parameters(
+    modulus: &[u8],
+    degree: usize,
+    radix_bits: usize,
+    alpha: Element,
+) -> Result<(), Error> {
+    if !degree.is_power_of_two()
+        || !(2..=65_536).contains(&degree)
+        || modulus.is_empty()
+        || modulus[0] & 1 == 0
+        || !(17..=96).contains(&radix_bits)
+        || alpha.iter().any(|value| *value >= MODULUS)
+    {
+        return Err(Error::Parameters);
+    }
+    Ok(())
+}
+// The adjoint of a polynomial from its coefficients' fingerprints and their
+// sum weighted by the powers of alpha, whose degree-th power is the limb
+// weight.
+fn adjoint_of(
+    mut coefficients: Vec<Element>,
+    total: Element,
+    alpha: Element,
+    limb_weight: Element,
+) -> Result<Vec<Element>, Error> {
+    // Reverse first so each original fingerprint can be overwritten after
+    // its only remaining use; a second full-degree vector is unnecessary.
+    coefficients.reverse();
+    let mut value = total;
+    let wrap = plus(limb_weight, ONE);
+    for coefficient in &mut coefficients {
+        let next = minus(times(alpha, value), times(wrap, *coefficient));
+        *coefficient = value;
+        value = next;
+    }
+    if value != minus(ZERO, total) {
+        return Err(Error::Arithmetic);
+    }
+    Ok(coefficients)
+}
 fn power(mut value: Element, mut exponent: usize) -> Element {
     if value[1] == 0 && value[2] == 0 {
         return [arithmetic::power(value[0], exponent as u128), 0, 0];
@@ -119,7 +191,6 @@ pub struct PolynomialStream {
     record_length: usize,
     consumed: usize,
     failed: bool,
-    retain_coefficients: bool,
 }
 
 impl PolynomialStream {
@@ -129,32 +200,8 @@ impl PolynomialStream {
         radix_bits: usize,
         alpha: Element,
     ) -> Result<Self, Error> {
-        Self::with_retention(modulus, degree, radix_bits, alpha, true)
-    }
-
-    pub(crate) fn with_retention(
-        modulus: &[u8],
-        degree: usize,
-        radix_bits: usize,
-        alpha: Element,
-        retain_coefficients: bool,
-    ) -> Result<Self, Error> {
-        if !degree.is_power_of_two()
-            || !(2..=65_536).contains(&degree)
-            || modulus.is_empty()
-            || modulus[0] & 1 == 0
-            || !(17..=96).contains(&radix_bits)
-        {
-            return Err(Error::Parameters);
-        }
-        if alpha.iter().any(|value| *value >= MODULUS) {
-            return Err(Error::Parameters);
-        }
-        let half_modulus = (0..modulus.len())
-            .map(|index| {
-                (modulus[index] >> 1) | ((modulus.get(index + 1).copied().unwrap_or(0) & 1) << 7)
-            })
-            .collect();
+        check_parameters(modulus, degree, radix_bits, alpha)?;
+        let half_modulus = half_modulus(modulus);
         let limb_weight = power(alpha, degree);
         Ok(Self {
             degree,
@@ -166,38 +213,23 @@ impl PolynomialStream {
             limb_powers: limb_powers(modulus.len(), radix_bits, limb_weight),
             position_weight: ONE,
             total: ZERO,
-            coefficients: if retain_coefficients {
-                Vec::with_capacity(degree)
-            } else {
-                Vec::new()
-            },
+            coefficients: Vec::with_capacity(degree),
             record: vec![0; modulus.len() + 1],
             record_length: 0,
             consumed: 0,
             failed: false,
-            retain_coefficients,
         })
     }
 
     fn coefficient(&self) -> Result<Element, Error> {
-        let negative = self.record[0] == 1;
-        let magnitude = &self.record[1..self.width];
-        if self.record[0] > 1
-            || magnitude
-                .iter()
-                .rev()
-                .cmp(self.half_modulus.iter().rev())
-                .is_gt()
-            || (negative && magnitude.iter().all(|byte| *byte == 0))
-        {
+        if !canonical(&self.record, &self.half_modulus) {
             return Err(Error::Encoding);
         }
-        let result = fingerprint_with(magnitude, self.radix_bits, &self.limb_powers);
-        Ok(if negative {
-            minus(ZERO, result)
-        } else {
-            result
-        })
+        Ok(record_fingerprint(
+            &self.record,
+            self.radix_bits,
+            &self.limb_powers,
+        ))
     }
 
     pub fn push(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
@@ -225,17 +257,11 @@ impl PolynomialStream {
                 };
                 self.total = plus(self.total, times(self.position_weight, coefficient));
                 self.position_weight = times(self.position_weight, self.alpha);
-                if self.retain_coefficients {
-                    self.coefficients.push(coefficient);
-                }
+                self.coefficients.push(coefficient);
                 self.record_length = 0;
             }
         }
         Ok(())
-    }
-
-    pub(crate) fn remaining(&self) -> usize {
-        self.degree * self.width - self.consumed
     }
 
     fn complete(&self) -> Result<(), Error> {
@@ -244,7 +270,7 @@ impl PolynomialStream {
         }
         if self.consumed != self.degree * self.width
             || self.record_length != 0
-            || (self.retain_coefficients && self.coefficients.len() != self.degree)
+            || self.coefficients.len() != self.degree
         {
             return Err(Error::Incomplete);
         }
@@ -256,35 +282,83 @@ impl PolynomialStream {
         Ok(self.total)
     }
 
-    /// Starts the evaluation of the adjoint at the indices.
-    pub(crate) fn queries_job(
-        self,
-        indices: &[u32],
-        systematic_size: usize,
-    ) -> Result<parallel_work::Ticket, Error> {
-        query::validate_indices_in(indices, 4 * systematic_size)?;
-        jobs::queries_job(&self.adjoint()?, indices, systematic_size)
-    }
-
-    pub fn adjoint(mut self) -> Result<Vec<Element>, Error> {
+    pub fn adjoint(self) -> Result<Vec<Element>, Error> {
         self.complete()?;
-        if !self.retain_coefficients {
-            return Err(Error::Parameters);
+        adjoint_of(self.coefficients, self.total, self.alpha, self.limb_weight)
+    }
+}
+
+/// A polynomial's coefficient records, checked canonical and passed on in
+/// runs of whole records that each fit one chunk.
+pub(crate) struct PolynomialRecords {
+    width: usize,
+    half_modulus: Vec<u8>,
+    degree: usize,
+    // The records of each run but the last.
+    run: usize,
+    // The records passed on.
+    taken: usize,
+    buffer: Vec<u8>,
+}
+impl PolynomialRecords {
+    pub(crate) fn new(
+        modulus: &[u8],
+        degree: usize,
+        radix_bits: usize,
+        alpha: Element,
+    ) -> Result<Self, Error> {
+        check_parameters(modulus, degree, radix_bits, alpha)?;
+        let width = modulus.len() + 1;
+        let run = (CHUNK_LIMIT / width).clamp(1, degree);
+        Ok(Self {
+            width,
+            half_modulus: half_modulus(modulus),
+            degree,
+            run,
+            taken: 0,
+            buffer: Vec::with_capacity(run * width),
+        })
+    }
+    pub(crate) fn width(&self) -> usize {
+        self.width
+    }
+    pub(crate) fn remaining(&self) -> usize {
+        (self.degree - self.taken) * self.width - self.buffer.len()
+    }
+    /// Keeps bytes that fit the polynomial and passes on each run they
+    /// complete: the position of its first record, its records, and whether
+    /// it is the last.
+    pub(crate) fn push(
+        &mut self,
+        mut bytes: &[u8],
+        mut take: impl FnMut(usize, &[u8], bool) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        if bytes.len() > self.remaining() {
+            return Err(Error::Length);
         }
-        // Reverse first so each original fingerprint can be overwritten after
-        // its only remaining use; a second full-degree vector is unnecessary.
-        self.coefficients.reverse();
-        let mut value = self.total;
-        let wrap = plus(self.limb_weight, ONE);
-        for coefficient in &mut self.coefficients {
-            let next = minus(times(self.alpha, value), times(wrap, *coefficient));
-            *coefficient = value;
-            value = next;
+        while !bytes.is_empty() {
+            let records = self.run.min(self.degree - self.taken);
+            let length = bytes.len().min(records * self.width - self.buffer.len());
+            self.buffer.extend_from_slice(&bytes[..length]);
+            bytes = &bytes[length..];
+            if self.buffer.len() == records * self.width {
+                if !self
+                    .buffer
+                    .chunks_exact(self.width)
+                    .all(|record| canonical(record, &self.half_modulus))
+                {
+                    return Err(Error::Encoding);
+                }
+                take(
+                    self.taken,
+                    &self.buffer,
+                    self.taken + records == self.degree,
+                )?;
+                self.taken += records;
+                self.buffer.clear();
+            }
         }
-        if value != minus(ZERO, self.total) {
-            return Err(Error::Arithmetic);
-        }
-        Ok(self.coefficients)
+        Ok(())
     }
 }
 
@@ -346,5 +420,103 @@ mod tests {
         assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Error::Length));
         assert_eq!(stream.push(&[]), Err(Error::Encoding));
         assert_eq!(stream.finish_value(), Err(Error::Encoding));
+    }
+
+    #[test]
+    fn record_runs_and_their_jobs_match_one_stream() {
+        use supported_profile::{DEGREE, FHE_LIMB_BITS, Family, Profile};
+        // The widest full-degree records span several runs, and parts of
+        // 1,000 bytes split them.
+        let modulus = Profile::all()
+            .map(|profile| profile.family_modulus(Family::Fhe))
+            .max_by_key(Vec::len)
+            .unwrap();
+        let (width, alpha) = (modulus.len() + 1, [17, 37, 91]);
+        let half = half_modulus(&modulus);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut bytes = Vec::with_capacity(DEGREE * width);
+        for index in 0..DEGREE {
+            let mut record = vec![0; width];
+            if index < 2 {
+                // The largest magnitude of either sign.
+                record[0] = index as u8;
+                record[1..].copy_from_slice(&half);
+            } else {
+                for byte in &mut record[1..width - 2] {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    *byte = state as u8;
+                }
+                record[0] = u8::from(state >> 40 & 1 == 1);
+            }
+            bytes.extend(record);
+        }
+        let stream = || {
+            let mut stream = PolynomialStream::new(&modulus, DEGREE, FHE_LIMB_BITS, alpha).unwrap();
+            for part in bytes.chunks(CHUNK_LIMIT) {
+                stream.push(part).unwrap();
+            }
+            stream
+        };
+        let indices = [0, 5, 70_000, 262_143];
+        let expected = query::evaluate_in(stream().adjoint().unwrap(), &indices, DEGREE).unwrap();
+        let (mut total, mut value, mut fingerprints, mut runs) = (ZERO, ZERO, Vec::new(), 0);
+        let mut records = PolynomialRecords::new(&modulus, DEGREE, FHE_LIMB_BITS, alpha).unwrap();
+        for part in bytes.chunks(1_000) {
+            records
+                .push(part, |position, run, last| {
+                    assert_eq!(last, position + run.len() / width == DEGREE);
+                    for retain in [true, false] {
+                        let output = jobs::fingerprints_job(
+                            width,
+                            FHE_LIMB_BITS,
+                            DEGREE,
+                            position,
+                            retain,
+                            alpha,
+                            run,
+                        )
+                        .wait();
+                        let (sum, retained) = jobs::split_fingerprints(&output);
+                        if retain {
+                            total = plus(total, sum);
+                            fingerprints.extend_from_slice(retained);
+                        } else {
+                            assert!(retained.is_empty());
+                            value = plus(value, sum);
+                        }
+                    }
+                    runs += 1;
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert!(runs > 1 && records.remaining() == 0);
+        assert_eq!(value, stream().finish_value().unwrap());
+        assert_eq!(total, value);
+        let adjoint = |total| {
+            jobs::decode_adjoint(
+                &jobs::adjoint_job(&fingerprints, total, alpha, &indices, DEGREE)
+                    .unwrap()
+                    .wait(),
+            )
+        };
+        assert_eq!(adjoint(total), Ok(expected));
+        // Fingerprints whose weighted sum is not the total never close.
+        assert_eq!(adjoint(plus(total, ONE)), Err(Error::Arithmetic));
+        // A run refuses a magnitude beyond half the modulus, a negative zero
+        // and a sign byte beyond one.
+        for (offset, value) in [(width - 1, half[half.len() - 1] + 1), (0, 1), (0, 2)] {
+            let mut changed = bytes[..CHUNK_LIMIT].to_vec();
+            changed[2 * width..3 * width].fill(0);
+            changed[2 * width + offset] = value;
+            let mut records =
+                PolynomialRecords::new(&modulus, DEGREE, FHE_LIMB_BITS, alpha).unwrap();
+            assert_eq!(
+                records.push(&changed, |_, _, _| Ok(())),
+                Err(Error::Encoding)
+            );
+        }
     }
 }

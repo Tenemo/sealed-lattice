@@ -1,6 +1,6 @@
 use super::{
-    CHUNK_LIMIT, Element, Error, MODULUS, ONE, PolynomialStream, ZERO, arithmetic, fingerprint_in,
-    jobs, minus, plus, power, query, times,
+    CHUNK_LIMIT, Element, Error, MODULUS, ONE, PolynomialRecords, PolynomialStream, ZERO,
+    arithmetic, fingerprint_in, jobs, minus, plus, power, query, times,
 };
 use parallel_work::{HashStream, Pipeline, Sponge, Ticket};
 use std::collections::VecDeque;
@@ -43,14 +43,12 @@ fn family_stream(
     family: Family,
     degree: usize,
     alpha: Element,
-    retain_coefficients: bool,
 ) -> Result<PolynomialStream, Error> {
-    PolynomialStream::with_retention(
+    PolynomialStream::new(
         &profile.family_modulus(family),
         degree,
         family_radix(profile, family),
         alpha,
-        retain_coefficients,
     )
 }
 /// The parser of one setup polynomial, which fingerprints its coefficients
@@ -61,7 +59,7 @@ pub fn setup_polynomial_stream(
     alpha: Element,
 ) -> Result<PolynomialStream, Error> {
     let family = profile.setup_family(index).ok_or(Error::Parameters)?;
-    family_stream(profile, family, profile.family_degree(family), alpha, true)
+    family_stream(profile, family, profile.family_degree(family), alpha)
 }
 
 // The setup relation of one supported profile. Tests reduce the ring degrees
@@ -202,8 +200,26 @@ struct Accumulator {
     recorded_terms: Option<Vec<ProverFixedTerm>>,
     // A planning pass only records the geometries its terms use.
     planning: bool,
-    // The query jobs of consumed common polynomials, oldest first.
-    pending: VecDeque<(usize, Ticket)>,
+    // The statement jobs of consumed records, oldest first.
+    pending: VecDeque<StatementJob>,
+    // The weighted sum of the waited runs of the polynomial whose runs are
+    // oldest, and the encoded fingerprints of a common polynomial's records.
+    partial: Option<(Element, Vec<u8>)>,
+}
+// A job of the statement's polynomials, in submission order.
+enum StatementJob {
+    // The fingerprints of a run of a polynomial's records; the last run
+    // completes the polynomial.
+    Run {
+        polynomial: usize,
+        last: bool,
+        ticket: Ticket,
+    },
+    // A common polynomial's adjoint at the query indices.
+    Adjoint {
+        polynomial: usize,
+        ticket: Ticket,
+    },
 }
 impl Accumulator {
     fn new(layout: Layout, alpha: Element, indices: &[u32]) -> Result<Self, Error> {
@@ -273,6 +289,7 @@ impl Accumulator {
             recorded_terms: record_terms.then(Vec::new),
             planning,
             pending: VecDeque::new(),
+            partial: None,
         };
         let secret = result.sparse(layout.degree, layout.fhe_half_support);
         let auxiliary = result.sparse(layout.degree, layout.fhe_half_support);
@@ -594,55 +611,108 @@ impl Accumulator {
             .iter()
             .any(|usage| matches!(usage, PublicUse::Common(_, _)))
     }
-    fn consume(&mut self, polynomial: usize, parser: PolynomialStream) -> Result<(), Error> {
-        if self.is_common(polynomial) {
-            if self.uses[polynomial]
-                .iter()
-                .any(|usage| !matches!(usage, PublicUse::Common(_, _)))
-            {
-                return Err(Error::Arithmetic);
-            }
-            let ticket = parser.queries_job(&self.indices, self.layout.degree)?;
-            self.pending.push_back((polynomial, ticket));
-            while self.pending.len() > parallel_work::window() {
-                self.add_oldest();
-            }
-        } else {
-            let value = parser.finish_value()?;
-            for usage in &self.uses[polynomial] {
-                let PublicUse::Value(weight) = usage else {
-                    return Err(Error::Arithmetic);
-                };
-                self.target = minus(self.target, times(*weight, value));
-            }
+    // Starts the fingerprints of a run of a polynomial's canonical records
+    // of width bytes, from its position.
+    fn run(
+        &mut self,
+        polynomial: usize,
+        width: usize,
+        position: usize,
+        records: &[u8],
+        last: bool,
+    ) -> Result<(), Error> {
+        let (family, degree) = self.layout.polynomial(polynomial).ok_or(Error::Length)?;
+        let common = self.is_common(polynomial);
+        if self.uses[polynomial]
+            .iter()
+            .any(|usage| matches!(usage, PublicUse::Common(_, _)) != common)
+        {
+            return Err(Error::Arithmetic);
+        }
+        let ticket = jobs::fingerprints_job(
+            width,
+            family_radix(self.layout.profile, family),
+            degree,
+            position,
+            common,
+            self.alpha,
+            records,
+        );
+        self.pending.push_back(StatementJob::Run {
+            polynomial,
+            last,
+            ticket,
+        });
+        while self.pending.len() > parallel_work::window() {
+            self.take_oldest()?;
         }
         Ok(())
     }
 }
 
 impl Accumulator {
-    // Adds the oldest pending common polynomial's weighted query values.
-    fn add_oldest(&mut self) {
-        let (polynomial, ticket) = self.pending.pop_front().unwrap();
-        let values = jobs::decode_values(&ticket.wait());
-        for usage in &self.uses[polynomial] {
-            let PublicUse::Common(variable, weight) = usage else {
-                unreachable!("A common polynomial has only common uses.");
-            };
-            for (point, value) in values.iter().enumerate() {
-                let weighted = times(*weight, *value);
-                for (column, factor) in &variable.terms {
-                    let output = column * self.indices.len() + point;
-                    self.coefficients[output] =
-                        plus(self.coefficients[output], scale(weighted, base(*factor)));
+    // Takes the oldest statement job. A polynomial's last run subtracts its
+    // weighted value from the target or starts its adjoint, whose weighted
+    // query values are added to the coefficients.
+    fn take_oldest(&mut self) -> Result<(), Error> {
+        match self.pending.pop_front().unwrap() {
+            StatementJob::Run {
+                polynomial,
+                last,
+                ticket,
+            } => {
+                let output = ticket.wait();
+                let (sum, fingerprints) = jobs::split_fingerprints(&output);
+                let (total, retained) = self.partial.get_or_insert_with(|| (ZERO, Vec::new()));
+                *total = plus(*total, sum);
+                retained.extend_from_slice(fingerprints);
+                if !last {
+                    return Ok(());
+                }
+                let (total, retained) = self.partial.take().unwrap();
+                if self.is_common(polynomial) {
+                    let ticket = jobs::adjoint_job(
+                        &retained,
+                        total,
+                        self.alpha,
+                        &self.indices,
+                        self.layout.degree,
+                    )?;
+                    self.pending
+                        .push_back(StatementJob::Adjoint { polynomial, ticket });
+                } else {
+                    for usage in &self.uses[polynomial] {
+                        let PublicUse::Value(weight) = usage else {
+                            unreachable!("A value polynomial has only value uses.");
+                        };
+                        self.target = minus(self.target, times(*weight, total));
+                    }
+                }
+            }
+            StatementJob::Adjoint { polynomial, ticket } => {
+                let values = jobs::decode_adjoint(&ticket.wait())?;
+                for usage in &self.uses[polynomial] {
+                    let PublicUse::Common(variable, weight) = usage else {
+                        unreachable!("A common polynomial has only common uses.");
+                    };
+                    for (point, value) in values.iter().enumerate() {
+                        let weighted = times(*weight, *value);
+                        for (column, factor) in &variable.terms {
+                            let output = column * self.indices.len() + point;
+                            self.coefficients[output] =
+                                plus(self.coefficients[output], scale(weighted, base(*factor)));
+                        }
+                    }
                 }
             }
         }
+        Ok(())
     }
-    fn settle(&mut self) {
+    fn settle(&mut self) -> Result<(), Error> {
         while !self.pending.is_empty() {
-            self.add_oldest();
+            self.take_oldest()?;
         }
+        Ok(())
     }
 }
 
@@ -710,7 +780,7 @@ pub struct SetupStatementStream {
     header: Vec<u8>,
     consumed: usize,
     polynomial: usize,
-    parser: Option<PolynomialStream>,
+    records: Option<PolynomialRecords>,
     accumulator: Option<Accumulator>,
     failed: bool,
 }
@@ -744,7 +814,7 @@ impl SetupStatementStream {
             header: Vec::new(),
             consumed: 0,
             polynomial: 0,
-            parser: None,
+            records: None,
             accumulator: None,
             failed: false,
         })
@@ -756,7 +826,7 @@ impl SetupStatementStream {
         if bytes.len() > CHUNK_LIMIT || bytes.len() > self.encoded_length - self.consumed {
             self.failed = true;
             self.accumulator = None;
-            self.parser = None;
+            self.records = None;
             return Err(Error::Length);
         }
         self.hasher.update(bytes);
@@ -765,7 +835,7 @@ impl SetupStatementStream {
         if result.is_err() {
             self.failed = true;
             self.accumulator = None;
-            self.parser = None;
+            self.records = None;
         }
         result
     }
@@ -789,24 +859,24 @@ impl SetupStatementStream {
                 .polynomial(self.polynomial)
                 .ok_or(Error::Length)?;
             let accumulator = self.accumulator.as_mut().ok_or(Error::Incomplete)?;
-            if self.parser.is_none() {
-                self.parser = Some(family_stream(
-                    self.layout.profile,
-                    family,
+            let profile = self.layout.profile;
+            if self.records.is_none() {
+                self.records = Some(PolynomialRecords::new(
+                    &profile.family_modulus(family),
                     degree,
+                    family_radix(profile, family),
                     self.alpha,
-                    accumulator.is_common(self.polynomial),
                 )?);
             }
-            let parser = self.parser.as_mut().ok_or(Error::Incomplete)?;
-            let length = bytes.len().min(parser.remaining());
-            parser.push(&bytes[..length])?;
+            let records = self.records.as_mut().ok_or(Error::Incomplete)?;
+            let (polynomial, width) = (self.polynomial, records.width());
+            let length = bytes.len().min(records.remaining());
+            records.push(&bytes[..length], |position, run, last| {
+                accumulator.run(polynomial, width, position, run, last)
+            })?;
             bytes = &bytes[length..];
-            if parser.remaining() == 0 {
-                accumulator.consume(
-                    self.polynomial,
-                    self.parser.take().ok_or(Error::Incomplete)?,
-                )?;
+            if records.remaining() == 0 {
+                self.records = None;
                 self.polynomial += 1;
             }
         }
@@ -818,7 +888,7 @@ impl SetupStatementStream {
         }
         if self.consumed != self.encoded_length
             || self.polynomial != self.layout.profile.setup_polynomials()
-            || self.parser.is_some()
+            || self.records.is_some()
         {
             return Err(Error::Incomplete);
         }
@@ -827,7 +897,7 @@ impl SetupStatementStream {
             return Err(Error::Binding);
         }
         let mut accumulator = self.accumulator.ok_or(Error::Incomplete)?;
-        accumulator.settle();
+        accumulator.settle()?;
         Ok(SetupStatementOutput {
             statement_digest: digest,
             target: accumulator.target,
@@ -1399,7 +1469,7 @@ mod tests {
         for index in 0..profile.setup_polynomials() {
             let (family, degree) = layout.polynomial(index).unwrap();
             let length = degree * (1 + profile.family_magnitude_bytes(family));
-            let mut parser = family_stream(profile, family, degree, alpha, true).unwrap();
+            let mut parser = family_stream(profile, family, degree, alpha).unwrap();
             parser.push(&statement[offset..offset + length]).unwrap();
             offset += length;
             if accumulator.is_common(index) {
