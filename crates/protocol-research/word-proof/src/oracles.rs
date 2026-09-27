@@ -193,6 +193,15 @@ pub(crate) fn masked_extension_coefficients(
 ) -> Vec<Element> {
     let mut coefficients = Zeroizing::new(Vec::with_capacity(SYSTEMATIC + mask.len()));
     coefficients.extend(values);
+    masked_extension_coefficients_of(coefficients, mask, transform)
+}
+/// The same coefficients from the column's values, which have room for the
+/// mask.
+pub(crate) fn masked_extension_coefficients_of(
+    mut coefficients: Zeroizing<Vec<Element>>,
+    mask: &[Element],
+    transform: &Transform,
+) -> Vec<Element> {
     transform.extension(&mut coefficients, true);
     for (coefficient, value) in coefficients.iter_mut().zip(mask) {
         *coefficient = field::subtract(*coefficient, *value);
@@ -263,7 +272,7 @@ impl SecondOracle {
             let input = jobs::second_column(Self::column_values(witness, next), &masks[next]);
             coefficient_job(
                 &jobs::SECOND_COEFFICIENTS,
-                &[Part::Bytes(&input), Part::Shared(table)],
+                &[Part::Bytes(&input), Part::Streamed(table)],
                 48,
             )
         });
@@ -327,7 +336,7 @@ impl SecondOracle {
                 &[
                     Part::Bytes(&positions),
                     Part::Bytes(&input),
-                    Part::Shared(table),
+                    Part::Streamed(table),
                 ],
                 48 * indices.len(),
             );

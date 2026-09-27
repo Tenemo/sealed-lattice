@@ -73,23 +73,28 @@ pub fn decode(bytes: &[u8]) -> Element {
 pub struct Transform {
     pub length: usize,
     // Each stage's twiddles lie together: the stage of width w keeps the w/2
-    // powers of a primitive w-th root at offset w/2 - 1.
-    forward: Vec<u128>,
-    backward: Vec<u128>,
+    // powers of a primitive w-th root at offset w/2 - 1. The inverse
+    // transform reads them too, since the inverse root's power j is the
+    // root's power w/2 - j negated.
+    twiddles: Vec<u128>,
     inverse_length: u128,
 }
 
-// The stage twiddles of a transform of the given length and root.
+// The stage twiddles of a transform of the given length and root. The
+// widest stage's are the root's powers, of which each narrower stage's are
+// every stride-th.
 fn stage_twiddles(root: u128, length: usize) -> Vec<u128> {
-    let mut powers = vec![1; length / 2];
-    for index in 1..powers.len() {
-        powers[index] = base::multiply(powers[index - 1], root);
+    let mut twiddles = vec![1; length - 1];
+    let widest = length / 2 - 1;
+    for index in 1..length / 2 {
+        twiddles[widest + index] = base::multiply(twiddles[widest + index - 1], root);
     }
-    let mut twiddles = Vec::with_capacity(length - 1);
     let mut width = 2;
-    while width <= length {
+    while width < length {
         let stride = length / width;
-        twiddles.extend((0..width / 2).map(|index| powers[index * stride]));
+        for index in 0..width / 2 {
+            twiddles[width / 2 - 1 + index] = twiddles[widest + index * stride];
+        }
         width *= 2;
     }
     twiddles
@@ -97,12 +102,15 @@ fn stage_twiddles(root: u128, length: usize) -> Vec<u128> {
 
 // An in-place iterative transform of bit-reversed values: each stage's
 // first butterfly has twiddle one, and the width-two stage has no other.
-// A stage beyond the tables multiplies each twiddle by the stage's root to
-// reach the next, which gives the powers its table would hold.
+// The inverse takes a stage's forward twiddles in reverse order, each the
+// negated inverse twiddle, so its butterflies exchange sum and difference.
+// A stage beyond the tables multiplies each twiddle by the stage's root, or
+// that root's inverse, to reach the next, which gives the powers its table
+// would hold.
 fn butterflies<T: Copy>(
     values: &mut [T],
     twiddles: &[u128],
-    stage_root: impl Fn(usize) -> u128,
+    inverse: bool,
     add: impl Fn(T, T) -> T,
     subtract: impl Fn(T, T) -> T,
     scale: impl Fn(T, u128) -> T,
@@ -124,7 +132,7 @@ fn butterflies<T: Copy>(
     while width <= values.len() {
         let stage = twiddles.get(width / 2 - 1..width - 1);
         let root = if stage.is_none() {
-            stage_root(width)
+            Transform::stage_root(width, inverse)
         } else {
             1
         };
@@ -135,6 +143,14 @@ fn butterflies<T: Copy>(
             right[0] = subtract(lower, upper);
             let pairs = left[1..].iter_mut().zip(right[1..].iter_mut());
             match stage {
+                Some(stage) if inverse => {
+                    for ((lower, upper), twiddle) in pairs.zip(stage[1..].iter().rev()) {
+                        let value = scale(*upper, *twiddle);
+                        let old = *lower;
+                        *lower = subtract(old, value);
+                        *upper = add(old, value);
+                    }
+                }
                 Some(stage) => {
                     for ((lower, upper), twiddle) in pairs.zip(&stage[1..]) {
                         butterfly(lower, upper, *twiddle);
@@ -206,11 +222,9 @@ impl Transform {
         TRANSFORMS[length.ilog2() as usize].get_or_init(|| Self::new(length))
     }
     pub fn new(length: usize) -> Self {
-        let root = root(length);
         Self {
             length,
-            forward: stage_twiddles(root, length),
-            backward: stage_twiddles(base::power(root, MODULUS - 2), length),
+            twiddles: stage_twiddles(root(length), length),
             inverse_length: base::power(length as u128, MODULUS - 2),
         }
     }
@@ -218,24 +232,17 @@ impl Transform {
     // those of every stage up to the tables' length, which begin those of
     // every longer transform, since each stage's twiddles are powers of its
     // own width's root.
-    fn stages(&self, length: usize, inverse: bool) -> &[u128] {
+    fn stages(&self, length: usize) -> &[u128] {
         assert!(length.is_power_of_two() && length >= 2);
-        let twiddles = if inverse {
-            &self.backward
-        } else {
-            &self.forward
-        };
-        &twiddles[..length.min(self.length) - 1]
+        &self.twiddles[..length.min(self.length) - 1]
     }
     // A stage's primitive root of its width, or that root's inverse.
-    fn stage_root(inverse: bool) -> impl Fn(usize) -> u128 {
-        move |width| {
-            let root = root(width);
-            if inverse {
-                base::power(root, MODULUS - 2)
-            } else {
-                root
-            }
+    fn stage_root(width: usize, inverse: bool) -> u128 {
+        let root = root(width);
+        if inverse {
+            base::power(root, MODULUS - 2)
+        } else {
+            root
         }
     }
     fn inverse_length(&self, length: usize) -> u128 {
@@ -248,11 +255,11 @@ impl Transform {
     /// Transforms base values of any power-of-two length from the
     /// transform's tables.
     pub fn base(&self, values: &mut [u128], inverse: bool) {
-        let twiddles = self.stages(values.len(), inverse);
+        let twiddles = self.stages(values.len());
         butterflies(
             values,
             twiddles,
-            Self::stage_root(inverse),
+            inverse,
             base::add,
             base::subtract,
             base::multiply,
@@ -277,7 +284,7 @@ impl Transform {
         selected_forward(
             values,
             &selected,
-            &self.forward,
+            &self.twiddles,
             &mut output,
             &(base::add, base::subtract, base::multiply),
         );
@@ -296,7 +303,7 @@ impl Transform {
         selected_forward(
             values,
             &selected,
-            &self.forward,
+            &self.twiddles,
             &mut output,
             &(add, subtract, scale),
         );
@@ -305,15 +312,8 @@ impl Transform {
     /// Transforms extension values of any power-of-two length from the
     /// transform's tables.
     pub fn extension(&self, values: &mut [Element], inverse: bool) {
-        let twiddles = self.stages(values.len(), inverse);
-        butterflies(
-            values,
-            twiddles,
-            Self::stage_root(inverse),
-            add,
-            subtract,
-            scale,
-        );
+        let twiddles = self.stages(values.len());
+        butterflies(values, twiddles, inverse, add, subtract, scale);
         if inverse {
             let inverse_length = self.inverse_length(values.len());
             for value in values {

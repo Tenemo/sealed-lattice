@@ -2,17 +2,18 @@
 //! classes per coset, the shard `s = k + 4 j` holds the rows congruent to `s`
 //! modulo `4 P`, which are the positions `j + P q` of the coset `k`. A shard
 //! computes those positions' values of each committed polynomial from its
-//! coefficients by folding them onto a transform of `SYSTEMATIC / P` points,
-//! and absorbs them into its rows, so neither the values nor the row states
-//! leave the instance that holds the shard. The folded sums equal the full
-//! transform's values exactly.
+//! coefficients, which its job streams as the folds read them, by folding
+//! them onto a transform of `SYSTEMATIC / P` points, and absorbs them into
+//! its rows, so neither the values nor the row states leave the instance
+//! that holds the shard. The folded sums equal the full transform's values
+//! exactly.
 use crate::{
     field::{self, Element, Transform, ZERO, base},
     oracles::coset,
     parameters::*,
     tree::{self, Tree},
 };
-use parallel_work::{Job, Part, Ticket, share, submit};
+use parallel_work::{Job, Part, StreamedRecords, Ticket, share, submit};
 use stateful_sha3::{
     Digest, Sha3_512,
     digest::common::hazmat::{SerializableState, SerializedState},
@@ -139,7 +140,7 @@ impl Folded for Element {
 /// Each coefficient is read as the fold needs it.
 fn residue_values<T: Folded>(
     length: usize,
-    coefficient: impl Fn(usize) -> T,
+    mut coefficient: impl FnMut(usize) -> T,
     coset_index: usize,
     classes: usize,
     residue: usize,
@@ -155,7 +156,7 @@ fn residue_values<T: Folded>(
         base::power(omega, (block * residue) as u128),
     );
     let twist = base::multiply(coset, base::power(omega, residue as u128));
-    let wrapped = |index: usize| {
+    let mut wrapped = |index: usize| {
         let mut value = if index < length {
             coefficient(index)
         } else {
@@ -182,24 +183,16 @@ fn residue_values<T: Folded>(
     values
 }
 
-/// A polynomial's values at a shard's rows, in row order, from its encoded
-/// coefficients.
-fn shard_base_values(coefficients: &[u8], shard: u32, classes: usize) -> Zeroizing<Vec<u128>> {
-    assert!(coefficients.len().is_multiple_of(16));
+/// A base polynomial's values at a shard's rows, in row order, from its
+/// coefficients of the length, each read as the fold needs it.
+fn shard_base_values_of(
+    length: usize,
+    coefficient: impl FnMut(usize) -> u128,
+    shard: u32,
+    classes: usize,
+) -> Zeroizing<Vec<u128>> {
     let shard = shard as usize;
-    let mut values = residue_values(
-        coefficients.len() / 16,
-        |index| {
-            u128::from_le_bytes(
-                coefficients[16 * index..16 * (index + 1)]
-                    .try_into()
-                    .unwrap(),
-            )
-        },
-        shard % 4,
-        classes,
-        shard / 4,
-    );
+    let mut values = residue_values(length, coefficient, shard % 4, classes, shard / 4);
     Transform::cached(SYSTEMATIC).base(&mut values, false);
     values
 }
@@ -207,7 +200,7 @@ fn shard_base_values(coefficients: &[u8], shard: u32, classes: usize) -> Zeroizi
 /// its coefficients of the length, each read as the fold needs it.
 pub(crate) fn shard_extension_values_of(
     length: usize,
-    coefficient: impl Fn(usize) -> Element,
+    coefficient: impl FnMut(usize) -> Element,
     shard: u32,
     classes: usize,
 ) -> Zeroizing<Vec<Element>> {
@@ -227,6 +220,19 @@ pub(crate) fn shard_extension_values(
     shard_extension_values_of(
         coefficients.len() / 48,
         |index| field::decode(&coefficients[48 * index..48 * (index + 1)]),
+        shard,
+        classes,
+    )
+}
+/// An extension polynomial's values at a shard's rows, in row order, from
+/// the encoded coefficients the job streams; each fold reads a region of
+/// the classes' span in order.
+pub(crate) fn streamed_extension_values(shard: u32, classes: usize) -> Zeroizing<Vec<Element>> {
+    let mut coefficients = StreamedRecords::new(48, SYSTEMATIC / classes);
+    let length = coefficients.count();
+    shard_extension_values_of(
+        length,
+        |index| field::decode(coefficients.record(index)),
         shard,
         classes,
     )
@@ -271,8 +277,16 @@ fn extend(
     });
 }
 fn absorb_base(input: &[u8]) -> Vec<u8> {
-    let (session, shard, classes, coefficients) = header(input);
-    let values = shard_base_values(coefficients, shard, classes);
+    let (session, shard, classes, rest) = header(input);
+    assert!(rest.is_empty());
+    let mut coefficients = StreamedRecords::new(16, SYSTEMATIC / classes);
+    let length = coefficients.count();
+    let values = shard_base_values_of(
+        length,
+        |index| u128::from_le_bytes(coefficients.record(index).try_into().unwrap()),
+        shard,
+        classes,
+    );
     with_shard(session, shard, |state| {
         assert_eq!(state.hashers.len(), values.len());
         for (hasher, value) in state.hashers.iter_mut().zip(values.iter()) {
@@ -282,8 +296,9 @@ fn absorb_base(input: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 fn absorb_extension(input: &[u8]) -> Vec<u8> {
-    let (session, shard, classes, coefficients) = header(input);
-    let values = shard_extension_values(coefficients, shard, classes);
+    let (session, shard, classes, rest) = header(input);
+    assert!(rest.is_empty());
+    let values = streamed_extension_values(shard, classes);
     with_shard(session, shard, |state| {
         assert_eq!(state.hashers.len(), values.len());
         for (hasher, value) in state.hashers.iter_mut().zip(values.iter()) {
@@ -415,8 +430,8 @@ impl RowShards {
         self.running.push_back(tickets);
         self
     }
-    // Starts every shard's job on the coefficients, after waiting for the
-    // oldest polynomial's jobs once enough run.
+    // Starts every shard's job on the coefficients, which each streams,
+    // after waiting for the oldest polynomial's jobs once enough run.
     fn absorb(&mut self, job: &'static Job, coefficients: Zeroizing<Vec<u8>>) {
         let coefficients = share(coefficients);
         let tickets = (0..self.shards())
@@ -426,7 +441,7 @@ impl RowShards {
                     Some(shard),
                     &[
                         Part::Bytes(&self.header(shard)),
-                        Part::Shared(&coefficients),
+                        Part::Streamed(&coefficients),
                     ],
                     0,
                 )
@@ -721,21 +736,23 @@ mod tests {
             let coefficients: Vec<Element> = (0..length)
                 .map(|_| [sample(&mut state), sample(&mut state), sample(&mut state)])
                 .collect();
-            let encoded: Vec<u8> = coefficients
-                .iter()
-                .flat_map(|value| field::encode(*value))
-                .collect();
-            let bases: Vec<u8> = coefficients
-                .iter()
-                .flat_map(|value| value[0].to_le_bytes())
-                .collect();
             for coset_index in 0..4 {
                 let full = extension_values(&coefficients, coset(coset_index), transform);
                 for classes in [1, 2, 8] {
                     for residue in [0, classes - 1] {
                         let shard = (coset_index + 4 * residue) as u32;
-                        let values = shard_extension_values(&encoded, shard, classes);
-                        let base_values = shard_base_values(&bases, shard, classes);
+                        let values = shard_extension_values_of(
+                            length,
+                            |index| coefficients[index],
+                            shard,
+                            classes,
+                        );
+                        let base_values = shard_base_values_of(
+                            length,
+                            |index| coefficients[index][0],
+                            shard,
+                            classes,
+                        );
                         for (q, (value, base_value)) in
                             values.iter().zip(base_values.iter()).enumerate()
                         {

@@ -11,22 +11,24 @@ use crate::{
     sums::{self, Sums},
     transcript::challenge,
 };
-use parallel_work::{Job, Part, share, submit};
+use parallel_work::{Job, Part, Shared, StreamedRecords, gather, share, submit};
 use zeroize::Zeroizing;
 
 /// Adds the terms of committed columns that only their own zero products
-/// join, with their lookups', on both cosets.
+/// join, with their lookups', on both cosets; a group with lookups streams
+/// the reciprocal table.
 pub static COLUMNS: Job = Job {
     kind: 0x0130,
     run: add_columns,
 };
 /// Adds the multiplicity, table reciprocal and table residual terms on one
-/// coset.
+/// coset from the reciprocal table it streams.
 pub static COUNTS: Job = Job {
     kind: 0x0131,
     run: add_counts,
 };
-/// Adds an extension oracle's weighted values, or the degree mask's values.
+/// Adds an extension oracle's weighted values, or the degree mask's values,
+/// from the coefficients it streams.
 pub static EXTENSION: Job = Job {
     kind: 0x0132,
     run: add_extension_oracle,
@@ -305,7 +307,7 @@ fn components(relation: &Relation) -> Vec<Vec<usize>> {
 
 // A group of committed columns: each column's oracle, Boolean residual
 // oracle, mask, words and lookups, then the zero products inside it. Only
-// a group with lookups needs the reciprocal table.
+// a group with lookups streams the reciprocal table.
 fn encode_columns(
     witness: &Witness,
     first: &FirstOracle,
@@ -407,8 +409,9 @@ fn add_columns(input: &[u8]) -> Vec<u8> {
         let pairs: Vec<[usize; 3]> = (0..reader.number())
             .map(|_| std::array::from_fn(|_| reader.number()))
             .collect();
-        let inverses = (reader.take(1)[0] == 1).then(|| reader.take(SYSTEMATIC * ELEMENT_BYTES));
+        let lookups = reader.take(1)[0] == 1;
         reader.finish();
+        assert!(!lookups || parallel_work::streamed_length() == SYSTEMATIC * ELEMENT_BYTES);
         let cosets = Cosets::new(&common);
         let transform = Transform::cached(SYSTEMATIC);
         // The last column whose zero products need each column's values.
@@ -455,13 +458,24 @@ fn add_columns(input: &[u8]) -> Vec<u8> {
                 );
             }
             for lookup in &column.lookups {
-                let inverses = inverses.unwrap();
-                let raw = words().map(|value| {
-                    let index = usize::from(value) * lookup.oracles.factor as usize;
-                    field::decode(&inverses[ELEMENT_BYTES * index..])
-                });
+                assert!(lookups);
+                // Each word's reciprocal at its scaled index, gathered from
+                // the streamed table.
+                let mut raw = Zeroizing::new(Vec::with_capacity(SYSTEMATIC + MASKS));
+                raw.resize(SYSTEMATIC, ZERO);
+                gather(
+                    ELEMENT_BYTES,
+                    SYSTEMATIC,
+                    |position| {
+                        usize::from(u16::from_le_bytes([
+                            column.words[2 * position],
+                            column.words[2 * position + 1],
+                        ])) * lookup.oracles.factor as usize
+                    },
+                    |position, record| raw[position] = field::decode(record),
+                );
                 let mask = Reader(lookup.mask).elements(MASKS);
-                let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
+                let coefficients = Zeroizing::new(oracles::masked_extension_coefficients_of(
                     raw, &mask, transform,
                 ));
                 for coset in 0..2 {
@@ -565,8 +579,9 @@ fn add_counts(input: &[u8]) -> Vec<u8> {
         let first_mask = reader.words(MASKS);
         let second_mask = reader.elements(MASKS);
         let counts = reader.take(SYSTEMATIC * WORD_BYTES);
-        let inverses = reader.take(SYSTEMATIC * ELEMENT_BYTES);
         reader.finish();
+        let mut table = StreamedRecords::new(ELEMENT_BYTES, SYSTEMATIC);
+        assert_eq!(table.count(), SYSTEMATIC);
         let cosets = Cosets::new(&common);
         let transform = Transform::cached(SYSTEMATIC);
         let count = |index: usize| {
@@ -591,12 +606,8 @@ fn add_counts(input: &[u8]) -> Vec<u8> {
             None,
         ));
         weights.add_base(output, multiplicity_oracle, multiplicity.iter().copied());
-        let raw = (0..SYSTEMATIC).map(|index| {
-            field::scale(
-                field::decode(&inverses[ELEMENT_BYTES * index..]),
-                count(index),
-            )
-        });
+        let raw = (0..SYSTEMATIC)
+            .map(|index| field::scale(field::decode(table.record(index)), count(index)));
         let table_inverse = Zeroizing::new(oracles::extension_values_owned(
             oracles::masked_extension_coefficients(raw, &second_mask, transform),
             coset,
@@ -630,30 +641,27 @@ fn add_counts(input: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-// An extension oracle's coefficients, or the degree mask's without a
-// weight.
-fn encode_extension(oracle: usize, coefficients: &[Element]) -> Zeroizing<Vec<u8>> {
+// An extension oracle, or the degree mask's without a weight, and its
+// coefficients, which the job streams.
+fn encode_extension(oracle: usize, coefficients: &[Element]) -> (Vec<u8>, Shared) {
     assert!(coefficients.len() <= 2 * SYSTEMATIC + 1);
-    let mut bytes = Zeroizing::new(Vec::with_capacity(8 + ELEMENT_BYTES * coefficients.len()));
-    push_number(&mut bytes, oracle);
-    push_number(&mut bytes, coefficients.len());
+    let mut unit = Vec::new();
+    push_number(&mut unit, oracle);
+    let mut bytes = Zeroizing::new(Vec::with_capacity(ELEMENT_BYTES * coefficients.len()));
     for coefficient in coefficients {
         bytes.extend(field::encode(*coefficient));
     }
-    bytes
+    (unit, share(bytes))
 }
 fn add_extension_oracle(input: &[u8]) -> Vec<u8> {
     with_cosets(input, |mut reader, outputs| {
         let common = reader.common();
         let oracle = reader.number();
-        let count = reader.number();
-        assert!(count <= 2 * SYSTEMATIC + 1);
-        let coefficients = reader.take(count * ELEMENT_BYTES);
         reader.finish();
         let cosets = Cosets::new(&common);
         for (index, output) in outputs.into_iter().enumerate() {
-            // Each coset's values from its coefficients in the input.
-            let values = rows::shard_extension_values(coefficients, COSETS[index] as u32, 1);
+            // Each coset's values from the coefficients the job streams.
+            let values = rows::streamed_extension_values(COSETS[index] as u32, 1);
             if oracle == UNWEIGHTED {
                 for (sum, value) in output.iter_mut().zip(values.iter()) {
                     *sum = field::add(*sum, *value);
@@ -693,7 +701,7 @@ pub fn polynomial(
             Part::Bytes(&unit),
         ];
         if lookups {
-            parts.push(Part::Shared(&table));
+            parts.push(Part::Streamed(&table));
         }
         sums.add(submit(&COLUMNS, None, &parts, 0));
     }
@@ -706,7 +714,7 @@ pub fn polynomial(
                 Part::Bytes(&header),
                 Part::Shared(&common),
                 Part::Bytes(&counts),
-                Part::Shared(&table),
+                Part::Streamed(&table),
             ],
             0,
         ));
@@ -717,7 +725,7 @@ pub fn polynomial(
         (columns + lookups + 3, &linear.quotient),
         (oracles - 1, &linear.remainder),
     ] {
-        let unit = encode_extension(oracle, coefficients);
+        let (unit, coefficients) = encode_extension(oracle, coefficients);
         sums.add(submit(
             &EXTENSION,
             None,
@@ -725,6 +733,7 @@ pub fn polynomial(
                 Part::Bytes(&header),
                 Part::Shared(&common),
                 Part::Bytes(&unit),
+                Part::Streamed(&coefficients),
             ],
             0,
         ));

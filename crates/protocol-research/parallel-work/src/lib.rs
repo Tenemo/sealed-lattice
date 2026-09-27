@@ -214,6 +214,117 @@ pub fn read(position: usize, output: &mut [u8]) {
     }
 }
 
+/// The bytes one window of a streamed part holds, and one gathered chunk.
+const WINDOW_BYTES: usize = 16 << 10;
+
+/// Fixed-width records of the running job's streamed part. Each region of
+/// `span` consecutive records keeps a window of its own, which moves to the
+/// record a read names when that record lies outside it, so reads that
+/// advance through each region read each byte once.
+pub struct StreamedRecords {
+    width: usize,
+    count: usize,
+    span: usize,
+    windows: Vec<Window>,
+}
+struct Window {
+    first: usize,
+    held: usize,
+    bytes: Zeroizing<Vec<u8>>,
+}
+
+impl StreamedRecords {
+    pub fn new(width: usize, span: usize) -> Self {
+        let length = streamed_length();
+        assert!(
+            width > 0 && span > 0 && length.is_multiple_of(width),
+            "Streamed record width"
+        );
+        let count = length / width;
+        let capacity = (WINDOW_BYTES / width).max(1).min(span) * width;
+        Self {
+            width,
+            count,
+            span,
+            windows: (0..count.div_ceil(span))
+                .map(|_| Window {
+                    first: 0,
+                    held: 0,
+                    bytes: Zeroizing::new(vec![0; capacity]),
+                })
+                .collect(),
+        }
+    }
+    /// The records the part holds.
+    pub fn count(&self) -> usize {
+        self.count
+    }
+    /// The bytes of the record of the index.
+    pub fn record(&mut self, index: usize) -> &[u8] {
+        assert!(index < self.count, "Streamed record bound");
+        let width = self.width;
+        let region = index / self.span;
+        let window = &mut self.windows[region];
+        if index < window.first || index >= window.first + window.held {
+            let end = ((region + 1) * self.span).min(self.count);
+            window.held = (window.bytes.len() / width).min(end - index);
+            read(index * width, &mut window.bytes[..window.held * width]);
+            window.first = index;
+        }
+        &window.bytes[(index - window.first) * width..][..width]
+    }
+}
+
+/// Visits the running job's streamed records that the positions name, each
+/// with its position: it sorts the positions by the chunk of records their
+/// record lies in, then reads the part one chunk at a time, in order.
+pub fn gather(
+    width: usize,
+    positions: usize,
+    index: impl Fn(usize) -> usize,
+    mut visit: impl FnMut(usize, &[u8]),
+) {
+    let length = streamed_length();
+    assert!(
+        width > 0 && length.is_multiple_of(width) && u32::try_from(positions).is_ok(),
+        "Streamed record width"
+    );
+    let count = length / width;
+    let per_chunk = (WINDOW_BYTES / width).max(1);
+    let chunks = count.div_ceil(per_chunk);
+    // Each chunk's first place in the sorted positions.
+    let mut starts = vec![0; chunks + 1];
+    for position in 0..positions {
+        let record = index(position);
+        assert!(record < count, "Streamed record bound");
+        starts[record / per_chunk + 1] += 1;
+    }
+    for chunk in 0..chunks {
+        starts[chunk + 1] += starts[chunk];
+    }
+    let mut next = starts.clone();
+    let mut sorted = Zeroizing::new(vec![0_u32; positions]);
+    for position in 0..positions {
+        let chunk = index(position) / per_chunk;
+        sorted[next[chunk]] = position as u32;
+        next[chunk] += 1;
+    }
+    let mut bytes = Zeroizing::new(vec![0; per_chunk * width]);
+    for chunk in 0..chunks {
+        if starts[chunk] == starts[chunk + 1] {
+            continue;
+        }
+        let first = chunk * per_chunk;
+        let held = per_chunk.min(count - first);
+        read(first * width, &mut bytes[..held * width]);
+        for &position in &sorted[starts[chunk]..starts[chunk + 1]] {
+            let position = position as usize;
+            let record = index(position) - first;
+            visit(position, &bytes[record * width..][..width]);
+        }
+    }
+}
+
 /// A submitted job, whose output its waiter takes.
 pub struct Ticket {
     output: Option<Zeroizing<Vec<u8>>>,
@@ -501,6 +612,33 @@ mod tests {
         kind: 10,
         run: stream_back,
     };
+    // The streamed part's two-byte records at the indices that the input's
+    // two-byte words name, read in order through windows over regions of
+    // three records, then gathered in the indices' reverse order.
+    fn read_records(input: &[u8]) -> Vec<u8> {
+        let indices: Vec<usize> = input
+            .chunks_exact(2)
+            .map(|pair| usize::from(u16::from_le_bytes([pair[0], pair[1]])))
+            .collect();
+        let mut records = StreamedRecords::new(2, 3);
+        let mut output: Vec<u8> = indices
+            .iter()
+            .flat_map(|index| records.record(*index).to_vec())
+            .collect();
+        let mut gathered = vec![[0; 2]; indices.len()];
+        gather(
+            2,
+            indices.len(),
+            |position| indices[indices.len() - 1 - position],
+            |position, record| gathered[position].copy_from_slice(record),
+        );
+        output.extend(gathered.into_iter().flatten());
+        output
+    }
+    static READ_RECORDS: Job = Job {
+        kind: 12,
+        run: read_records,
+    };
     // Reads one byte beyond the streamed part.
     fn read_beyond(_: &[u8]) -> Vec<u8> {
         let mut byte = [0];
@@ -580,6 +718,56 @@ mod tests {
         );
         // A job without a streamed part cannot read one.
         assert!(std::panic::catch_unwind(|| submit(&READ_BEYOND, None, &[], 1).wait()).is_err());
+    }
+
+    #[test]
+    fn streamed_records_read_through_windows_or_gathered_by_chunk_equal_the_part() {
+        // Twenty thousand records, each its index's two bytes, which a
+        // gather reads in three chunks.
+        let part: Vec<u8> = (0..20_000_u16).flat_map(u16::to_le_bytes).collect();
+        let streamed = share(Zeroizing::new(part));
+        // Forward and backward within and across regions and chunks.
+        let indices = [0_u16, 1, 4, 3, 19_999, 2, 2, 8_200, 16_384, 8_191, 0];
+        let input: Vec<u8> = indices
+            .iter()
+            .flat_map(|index| index.to_le_bytes())
+            .collect();
+        let mut expected = input.clone();
+        expected.extend(indices.iter().rev().flat_map(|index| index.to_le_bytes()));
+        let output = submit(
+            &READ_RECORDS,
+            None,
+            &[Part::Bytes(&input), Part::Streamed(&streamed)],
+            2 * input.len(),
+        )
+        .wait();
+        assert_eq!(output.to_vec(), expected);
+        // A record beyond the part fails the job, and the records' width
+        // must divide the part.
+        assert!(
+            std::panic::catch_unwind(|| submit(
+                &READ_RECORDS,
+                None,
+                &[
+                    Part::Bytes(&20_000_u16.to_le_bytes()),
+                    Part::Streamed(&streamed)
+                ],
+                4
+            )
+            .wait())
+            .is_err()
+        );
+        let odd = share(Zeroizing::new(vec![1, 2, 3]));
+        assert!(
+            std::panic::catch_unwind(|| submit(
+                &READ_RECORDS,
+                None,
+                &[Part::Bytes(&[0, 0]), Part::Streamed(&odd)],
+                4
+            )
+            .wait())
+            .is_err()
+        );
     }
 
     #[test]
