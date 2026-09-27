@@ -43,6 +43,9 @@ pub const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
 /// Every participant signature is one ML-DSA-65 signature.
 pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
 
+/// The jobs this crate defines.
+pub static JOBS: [&parallel_work::Job; 1] = [&registration::session::REGISTRATION];
+
 #[derive(Debug)]
 pub enum Error {
     Shape,
@@ -176,13 +179,7 @@ pub struct BodyHasher {
 }
 impl BodyHasher {
     pub fn new(header: RegistrationHeader) -> Result<Self, Error> {
-        if !(PROOF_HEADER_BYTES..=registration_relation().maximum_proof_bytes())
-            .contains(&header.proof_length)
-        {
-            return Err(Error::Shape);
-        }
-        ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Error::Shape)?;
-        ml_kem_768::EncapsKey::try_from_bytes(header.mailbox_public).map_err(|_| Error::Shape)?;
+        check_header(&header)?;
         let encoded = header.encode()?;
         let prefix = [CanonicalItem::variable_bytes(encoded).map_err(|_| Error::Shape)?];
         let hash = StreamingFoundationTupleHash512::new_variable_bytes(
@@ -233,6 +230,35 @@ impl BodyHasher {
             mailbox_public: self.mailbox_public,
         })
     }
+}
+
+// The proof length and public keys that every registration header carries.
+fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
+    if !(PROOF_HEADER_BYTES..=registration_relation().maximum_proof_bytes())
+        .contains(&header.proof_length)
+    {
+        return Err(Error::Shape);
+    }
+    ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Error::Shape)?;
+    ml_kem_768::EncapsKey::try_from_bytes(header.mailbox_public).map_err(|_| Error::Shape)?;
+    Ok(())
+}
+/// A complete registration header of the poll and runtime, checked as the
+/// registration verifier checks it.
+pub(crate) fn checked_header(
+    bytes: &[u8],
+    poll: [u8; 64],
+    runtime: [u8; 64],
+) -> Result<RegistrationHeader, Error> {
+    let (header, consumed) = RegistrationHeader::decode_prefix(bytes)?;
+    if consumed != bytes.len() {
+        return Err(Error::Shape);
+    }
+    if header.poll != poll || header.runtime != runtime {
+        return Err(Error::Context);
+    }
+    check_header(&header)?;
+    Ok(header)
 }
 
 pub fn verify_registration_signature(body: BodyDigest, signature: &[u8]) -> bool {

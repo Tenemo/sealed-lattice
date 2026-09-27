@@ -58,6 +58,121 @@ export const proposalRecordIds = (body: Uint8Array): string[] => {
     );
 };
 
+// The steps of one registration record in a roster verifier. A record
+// begins with its position, header and signature.
+const recordStep = {
+    begin: 0,
+    key: 1,
+    keyFinish: 2,
+    proof: 3,
+    finish: 4,
+} as const;
+
+// Streams the proposed registration records into a roster verifier, as many
+// at once as it keeps open, so that their verifications run side by side on
+// the module's helpers. The first refused step stops every record and is
+// thrown once every started record has stopped.
+export const streamRegistrations = async (
+    relay: PublicRelay,
+    recordIds: readonly string[],
+    registration: ParticipantLimits['registration'],
+    openRecords: number,
+    step: (operation: number, position: number, bytes: Uint8Array) => boolean,
+) => {
+    let failure: { error: unknown } | undefined;
+    const run = (
+        operation: number,
+        position: number,
+        bytes: Uint8Array,
+        refusal: string,
+    ) => {
+        if (failure !== undefined) throw failure.error;
+        if (!step(operation, position, bytes))
+            throw new PublicInputFailure(refusal);
+    };
+    const record = async (position: number) => {
+        const id = recordIds[position];
+        const header = await readPublic(
+            relay,
+            registrationPath(id, registrationFile.header),
+            registration.maximumHeaderBytes,
+        );
+        const signature = await readPublic(
+            relay,
+            registrationPath(id, registrationFile.signature),
+            registration.signatureBytes,
+        );
+        run(
+            recordStep.begin,
+            position,
+            concatenate(
+                unsigned16(position),
+                unsigned32(header.length),
+                header,
+                signature,
+            ),
+            'A registration header was refused.',
+        );
+        await streamPublic(
+            relay,
+            registrationPath(id, registrationFile.publicKey),
+            registration.publicKeyBytes,
+            (bytes) => {
+                run(
+                    recordStep.key,
+                    position,
+                    bytes,
+                    'A registration key was refused.',
+                );
+            },
+        );
+        run(
+            recordStep.keyFinish,
+            position,
+            new Uint8Array(),
+            'A registration key is incomplete.',
+        );
+        await streamPublic(
+            relay,
+            registrationPath(id, registrationFile.proof),
+            registration.maximumProofBytes,
+            (bytes) => {
+                run(
+                    recordStep.proof,
+                    position,
+                    bytes,
+                    'A registration proof was refused.',
+                );
+            },
+        );
+        run(
+            recordStep.finish,
+            position,
+            new Uint8Array(),
+            'A registration record was refused.',
+        );
+    };
+    let next = 0;
+    const stream = async () => {
+        while (failure === undefined && next < recordIds.length) {
+            const position = next;
+            next += 1;
+            try {
+                await record(position);
+            } catch (error) {
+                failure ??= { error };
+            }
+        }
+    };
+    await Promise.all(
+        Array.from(
+            { length: Math.min(Math.max(openRecords, 1), recordIds.length) },
+            stream,
+        ),
+    );
+    if (failure !== undefined) throw failure.error;
+};
+
 // The module decides whether it supports a roster of this size; a request
 // outside every supported size is refused before it reaches the module.
 const validRecordIds = (ids: readonly string[], limits: ParticipantLimits) =>
@@ -98,55 +213,18 @@ const verifyProposalInputs = async (
     sessionInput(context, begin);
     if (kernel.roster_begin(begin.length) !== 0)
         throw new PublicInputFailure('The proposed poll was refused.');
-    for (const [position, id] of recordIds.entries()) {
-        const header = await readPublic(
-            relay,
-            registrationPath(id, registrationFile.header),
-            registration.maximumHeaderBytes,
-        );
-        const signature = await readPublic(
-            relay,
-            registrationPath(id, registrationFile.signature),
-            registration.signatureBytes,
-        );
-        const record = concatenate(
-            unsigned16(position),
-            unsigned32(header.length),
-            header,
-            signature,
-        );
-        sessionInput(context, record);
-        if (kernel.roster_record_begin(record.length) !== 0)
-            throw new PublicInputFailure('A registration header was refused.');
-        await streamPublic(
-            relay,
-            registrationPath(id, registrationFile.publicKey),
-            registration.publicKeyBytes,
-            (bytes) => {
-                sessionInput(context, bytes);
-                if (kernel.roster_record_key(bytes.length) !== 0)
-                    throw new PublicInputFailure(
-                        'A registration key was refused.',
-                    );
-            },
-        );
-        if (kernel.roster_record_key_finish() !== 0)
-            throw new PublicInputFailure('A registration key is incomplete.');
-        await streamPublic(
-            relay,
-            registrationPath(id, registrationFile.proof),
-            registration.maximumProofBytes,
-            (bytes) => {
-                sessionInput(context, bytes);
-                if (kernel.roster_record_proof(bytes.length) !== 0)
-                    throw new PublicInputFailure(
-                        'A registration proof was refused.',
-                    );
-            },
-        );
-        if (kernel.roster_record_finish() !== 0)
-            throw new PublicInputFailure('A registration record was refused.');
-    }
+    await streamRegistrations(
+        relay,
+        recordIds,
+        registration,
+        kernel.roster_open_records(),
+        (operation, position, bytes) => {
+            sessionInput(context, bytes);
+            return (
+                kernel.roster_record(operation, position, bytes.length) === 0
+            );
+        },
+    );
     if (kernel.roster_finish() !== 1)
         throw new PublicInputFailure('The roster proposal was refused.');
     const body = readKernel(

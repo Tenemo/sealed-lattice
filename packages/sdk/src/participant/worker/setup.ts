@@ -29,11 +29,7 @@ import {
     referenceData,
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
-import {
-    proposalRecordIds,
-    registrationFile,
-    registrationPath,
-} from './roster.js';
+import { proposalRecordIds, streamRegistrations } from './roster.js';
 import { awaitLater, namespacedName } from './storage.js';
 
 // Verifies the complete setup from public records in the participant's own
@@ -398,56 +394,22 @@ const verifyCompleteSetup = async (
     writeSetupInput(kernel, begin);
     if (kernel.setup_roster_begin(begin.length) !== 0)
         throw new Error('The setup verifier refused the retained poll.');
-    const registration = profile.registration;
-    for (const [position, id] of recordIds.entries()) {
-        const header = await readPublic(
-            relay,
-            registrationPath(id, registrationFile.header),
-            registration.maximumHeaderBytes,
-        );
-        const signature = await readPublic(
-            relay,
-            registrationPath(id, registrationFile.signature),
-            registration.signatureBytes,
-        );
-        const record = concatenate(
-            unsigned16(position),
-            unsigned32(header.length),
-            header,
-            signature,
-        );
-        writeSetupInput(kernel, record);
-        if (kernel.setup_roster_record(0, record.length) !== 0)
-            throw new PublicInputFailure('A registration header was refused.');
-        await streamPublic(
-            relay,
-            registrationPath(id, registrationFile.publicKey),
-            registration.publicKeyBytes,
-            (bytes) => {
-                writeSetupInput(kernel, bytes);
-                if (kernel.setup_roster_record(1, bytes.length) !== 0)
-                    throw new PublicInputFailure(
-                        'A registration key was refused.',
-                    );
-            },
-        );
-        if (kernel.setup_roster_record(2, 0) !== 0)
-            throw new PublicInputFailure('A registration key is incomplete.');
-        await streamPublic(
-            relay,
-            registrationPath(id, registrationFile.proof),
-            registration.maximumProofBytes,
-            (bytes) => {
-                writeSetupInput(kernel, bytes);
-                if (kernel.setup_roster_record(3, bytes.length) !== 0)
-                    throw new PublicInputFailure(
-                        'A registration proof was refused.',
-                    );
-            },
-        );
-        if (kernel.setup_roster_record(4, 0) !== 0)
-            throw new PublicInputFailure('A registration record was refused.');
-    }
+    await streamRegistrations(
+        relay,
+        recordIds,
+        profile.registration,
+        kernel.roster_open_records(),
+        (operation, position, bytes) => {
+            writeSetupInput(kernel, bytes);
+            return (
+                kernel.setup_roster_record(
+                    operation,
+                    position,
+                    bytes.length,
+                ) === 0
+            );
+        },
+    );
     const proposalSignature = await readDataKind(
         context,
         manifest,

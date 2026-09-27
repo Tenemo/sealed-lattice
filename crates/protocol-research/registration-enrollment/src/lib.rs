@@ -22,6 +22,9 @@ pub mod finality_work;
 mod operation_random;
 #[path = "participant-bounds.rs"]
 pub mod participant_bounds;
+#[cfg(test)]
+#[path = "registration-session-tests.rs"]
+mod registration_session_tests;
 #[path = "release-work.rs"]
 pub mod release_work;
 

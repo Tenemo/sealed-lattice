@@ -75,7 +75,7 @@ pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
     })
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn setup_roster_record(operation: u32, length: usize) -> u32 {
+pub extern "C" fn setup_roster_record(operation: u32, position: usize, length: usize) -> u32 {
     SESSION.with(|value| {
         let mut value = value.borrow_mut();
         let Session {
@@ -95,10 +95,10 @@ pub extern "C" fn setup_roster_record(operation: u32, length: usize) -> u32 {
         };
         let result = match operation {
             0 => roster.begin_record(bytes),
-            1 => roster.push_key(bytes),
-            2 if length == 0 => roster.finish_key(),
-            3 => roster.push_proof(bytes),
-            4 if length == 0 => roster.finish_record(),
+            1 => roster.push_key(position, bytes),
+            2 if length == 0 => roster.finish_key(position),
+            3 => roster.push_proof(position, bytes),
+            4 if length == 0 => roster.finish_record(position),
             _ => return 1,
         };
         u32::from(result.is_err())
@@ -111,7 +111,7 @@ pub extern "C" fn setup_roster_finish(length: usize) -> u32 {
         if value.proposal.is_some() || length != 3309 {
             return 0;
         }
-        let Some(roster) = &value.roster else {
+        let Some(roster) = value.roster.as_mut() else {
             return 0;
         };
         let Ok(proposal) = roster.finish() else {

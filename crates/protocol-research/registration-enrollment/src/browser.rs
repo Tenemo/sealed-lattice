@@ -336,7 +336,15 @@ pub extern "C" fn roster_begin(length: usize) -> u32 {
         0
     })
 }
-fn roster_step(operation: u32, length: usize) -> u32 {
+/// The registration records the host may keep open at once.
+#[unsafe(no_mangle)]
+pub extern "C" fn roster_open_records() -> u32 {
+    registration_credentials::roster_input::open_record_limit() as u32
+}
+/// Begins, feeds or finishes the record at a position; a record begins
+/// with its position, header and signature.
+#[unsafe(no_mangle)]
+pub extern "C" fn roster_record(operation: u32, position: usize, length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         let Session {
@@ -357,41 +365,21 @@ fn roster_step(operation: u32, length: usize) -> u32 {
         u32::from(
             match operation {
                 0 => roster.begin_record(bytes),
-                1 => roster.push_key(bytes),
-                2 => roster.finish_key(),
-                3 => roster.push_proof(bytes),
-                4 => roster.finish_record(),
-                _ => unreachable!(),
+                1 => roster.push_key(position, bytes),
+                2 if length == 0 => roster.finish_key(position),
+                3 => roster.push_proof(position, bytes),
+                4 if length == 0 => roster.finish_record(position),
+                _ => return 1,
             }
             .is_err(),
         )
     })
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn roster_record_begin(length: usize) -> u32 {
-    roster_step(0, length)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn roster_record_key(length: usize) -> u32 {
-    roster_step(1, length)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn roster_record_key_finish() -> u32 {
-    roster_step(2, 0)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn roster_record_proof(length: usize) -> u32 {
-    roster_step(3, length)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn roster_record_finish() -> u32 {
-    roster_step(4, 0)
-}
-#[unsafe(no_mangle)]
 pub extern "C" fn roster_finish() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        let Some(roster) = state.roster.as_ref() else {
+        let Some(roster) = state.roster.as_mut() else {
             return 0;
         };
         let Ok(proposal) = roster.finish() else {
@@ -501,7 +489,7 @@ pub extern "C" fn verify_roster_signature(length: usize) -> u32 {
         if length != 3309 {
             return 0;
         }
-        let Some(roster) = state.roster.as_ref() else {
+        let Some(roster) = state.roster.as_mut() else {
             return 0;
         };
         let Ok(proposal) = roster.finish() else {

@@ -6,6 +6,9 @@ use registration_proof::statement;
 use registration_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
 use sha3::{Digest, Sha3_512};
 
+#[path = "registration-session.rs"]
+pub mod session;
+
 /// A registration public key: a sign byte and a share-modulus magnitude for
 /// each coefficient.
 pub const KEY_BYTES: usize = 65536 * 21;
@@ -54,11 +57,21 @@ pub struct RegistrationVerifier {
 }
 impl RegistrationVerifier {
     pub fn new(poll: &VerifiedPoll, header_bytes: &[u8], signature: &[u8]) -> Result<Self, Error> {
+        Self::open(poll.identity(), poll.runtime(), header_bytes, signature)
+    }
+    // A verification against the identity and runtime of the verified poll
+    // the registration must name.
+    fn open(
+        poll: [u8; 64],
+        runtime: [u8; 64],
+        header_bytes: &[u8],
+        signature: &[u8],
+    ) -> Result<Self, Error> {
         let (header, consumed) = RegistrationHeader::decode_prefix(header_bytes)?;
         if consumed != header_bytes.len() {
             return Err(Error::Shape);
         }
-        let (body, _) = BodyHasher::from_header(header_bytes, poll.identity(), poll.runtime())?;
+        let (body, _) = BodyHasher::from_header(header_bytes, poll, runtime)?;
         Ok(Self {
             header,
             body: Some(body),

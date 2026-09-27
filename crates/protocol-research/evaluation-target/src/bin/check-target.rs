@@ -304,16 +304,16 @@ fn main() -> io::Result<()> {
                     break;
                 }
                 if ordinal == 0 {
-                    roster.push_key(&buffer[..count])
+                    roster.push_key(position, &buffer[..count])
                 } else {
-                    roster.push_proof(&buffer[..count])
+                    roster.push_proof(position, &buffer[..count])
                 }
                 .map_err(refusal)?;
             }
             if ordinal == 0 {
-                roster.finish_key()
+                roster.finish_key(position)
             } else {
-                roster.finish_record()
+                roster.finish_record(position)
             }
             .map_err(refusal)?;
         }

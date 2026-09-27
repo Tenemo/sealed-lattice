@@ -28,11 +28,9 @@ export const kernelFunctions = [
     // The verified poll's option count, or zero before verification.
     'own_registration_option_count',
     'roster_begin',
-    'roster_record_begin',
-    'roster_record_key',
-    'roster_record_key_finish',
-    'roster_record_proof',
-    'roster_record_finish',
+    // The registration records the worker may stream at once.
+    'roster_open_records',
+    'roster_record',
     // One when the proposal is complete.
     'roster_finish',
     'roster_body_pointer',
