@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 
 // Keeps participants' browsers open between their operations while the host
-// has room for them. Another browser opens only while it has a processor of
-// its own and the host's free memory, once every open browser has grown to
-// its guard, still holds twice the guard: the new browser's guard and as much
-// again for the host. Without room, the least recently used idle browser ends
+// has room for them. Another browser opens only while fewer than the host's
+// browser count are open and the host's free memory, once every open browser
+// has grown to its guard, still holds twice the guard: the new browser's
+// guard and as much again for the host. Without room, the least recently used idle browser ends
 // first, as a crash would, or the opening waits until a browser is idle. A
 // browser ends completely before another opens under its key, since both
 // would use one profile.
@@ -27,7 +27,8 @@ type OpenBrowser<Browser extends PooledBrowser> = {
 
 export const createBrowserPool = <Browser extends PooledBrowser>(
     options: Readonly<{
-        processors: number;
+        // The most browsers the host's processors run at once.
+        browsers: number;
         guardBytes: number;
         freeMemory: () => number;
         // Reports a browser that ended to make room for another.
@@ -43,7 +44,7 @@ export const createBrowserPool = <Browser extends PooledBrowser>(
         for (const resolve of woken) resolve();
     };
     const hasRoom = () =>
-        open.size < options.processors &&
+        open.size < options.browsers &&
         options.freeMemory() -
             [...open.values()].reduce(
                 (total, entry) =>

@@ -24,7 +24,7 @@ type FakeBrowser = Readonly<{
 // crash waits for its gate, when one is set for the key.
 const fakePool = (
     options: Readonly<{
-        processors: number;
+        browsers: number;
         freeMemory: () => number;
         failLaunch?: (key: string) => boolean;
         failClose?: (key: string) => boolean;
@@ -33,7 +33,7 @@ const fakePool = (
     const events: string[] = [];
     const crashGates = new Map<string, Promise<void>>();
     const pool = createBrowserPool<FakeBrowser>({
-        processors: options.processors,
+        browsers: options.browsers,
         guardBytes,
         freeMemory: options.freeMemory,
         onEndedForRoom: (key) => events.push(`room ${key}`),
@@ -75,9 +75,9 @@ const fakePool = (
 const plentifulMemory = () => 100 * guardBytes;
 
 describe('participant browser pool', () => {
-    it('keeps a browser open between visits and opens one per processor', async () => {
+    it('keeps a browser open between visits and opens up to the browser count', async () => {
         const { events, visit } = fakePool({
-            processors: 2,
+            browsers: 2,
             freeMemory: plentifulMemory,
         });
         await visit('a');
@@ -103,7 +103,7 @@ describe('participant browser pool', () => {
 
     it('waits for a busy browser to become idle before ending it', async () => {
         const { events, use, visit } = fakePool({
-            processors: 1,
+            browsers: 1,
             freeMemory: plentifulMemory,
         });
         const started = deferred();
@@ -133,7 +133,7 @@ describe('participant browser pool', () => {
         // Free memory for one browser's guard and as much again, with 80
         // bytes to spare.
         const { pool, events, visit } = fakePool({
-            processors: 8,
+            browsers: 8,
             freeMemory: () => 2 * guardBytes + 80,
         });
         await visit('a');
@@ -166,7 +166,7 @@ describe('participant browser pool', () => {
 
     it('refuses a browser the host has no room for', async () => {
         const { events, visit } = fakePool({
-            processors: 8,
+            browsers: 8,
             freeMemory: () => 2 * guardBytes - 1,
         });
         await expect(visit('a')).rejects.toThrow(
@@ -177,7 +177,7 @@ describe('participant browser pool', () => {
 
     it('shares one launch among concurrent users of a key', async () => {
         const { events, use, visit } = fakePool({
-            processors: 1,
+            browsers: 1,
             freeMemory: plentifulMemory,
         });
         const finish = deferred();
@@ -207,7 +207,7 @@ describe('participant browser pool', () => {
 
     it('ends a crashed browser completely before reopening its key', async () => {
         const { pool, events, crashGates, use, visit } = fakePool({
-            processors: 4,
+            browsers: 4,
             freeMemory: plentifulMemory,
         });
         const started = deferred();
@@ -239,7 +239,7 @@ describe('participant browser pool', () => {
     it('frees the key and room of a browser that fails to launch', async () => {
         let failing = true;
         const { events, visit } = fakePool({
-            processors: 1,
+            browsers: 1,
             freeMemory: plentifulMemory,
             failLaunch: () => failing,
         });
@@ -258,7 +258,7 @@ describe('participant browser pool', () => {
 
     it('closes every open browser at the end despite a failing close', async () => {
         const { pool, events, visit } = fakePool({
-            processors: 4,
+            browsers: 4,
             freeMemory: plentifulMemory,
             failClose: (key) => key === 'a',
         });

@@ -124,6 +124,11 @@ const secondRosterCopy = 'second-roster';
 const secondRosterPath = '/second-roster/';
 // The host guard for each participant's Chrome process tree.
 const participantMemoryLimit = 3_221_225_472;
+// Each browser's page starts a helper per spare processor, up to eight,
+// beside the operation's worker, so the host runs as many browsers at once
+// as it has processors for all of their workers, and no operation's work
+// waits for another's.
+const browserProcessors = Math.min(availableParallelism(), 9);
 // The functions each operation's CPU profile summary ranks.
 const cpuProfileEntries = 60;
 const operationMilliseconds = 3_600_000;
@@ -760,7 +765,7 @@ await runWithLocalRunLog(
             Readonly<{ position: number; copy?: string }>
         >();
         const browsers = createBrowserPool<ChromeParticipant>({
-            processors: availableParallelism(),
+            browsers: Math.floor(availableParallelism() / browserProcessors),
             guardBytes: participantMemoryLimit,
             freeMemory: freemem,
             onEndedForRoom: (key) => {
