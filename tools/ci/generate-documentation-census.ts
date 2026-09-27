@@ -2900,7 +2900,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof hash byte and permutation work',
         '',
-        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.",
+        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's and the verifier's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.",
         '',
         table(
             [
@@ -2910,7 +2910,8 @@ export const renderDocumentationCensus = (): string => {
                 'Prover permutations without prefix reuse',
                 'Prover permutations with prefix reuse',
                 'Verifier core hash input bytes',
-                'Verifier core permutations',
+                'Verifier permutations without prefix reuse',
+                'Verifier permutations with prefix reuse',
                 'One statement-digest pass permutations',
             ],
             proofHashProfiles(completion).map((profile) => {
@@ -2924,6 +2925,9 @@ export const renderDocumentationCensus = (): string => {
                     ),
                     formatCount(value.proverCore.permutations),
                     formatCount(value.verifierCore.inputBytes),
+                    formatCount(
+                        value.verifierCoreWithoutPrefixReuse.permutations,
+                    ),
                     formatCount(value.verifierCore.permutations),
                     formatCount(value.statementDigestPass.permutations),
                 ];

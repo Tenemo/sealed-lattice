@@ -6,6 +6,7 @@ import {
     framedProofHashBytes,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
+import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('proof hash work', () => {
@@ -156,6 +157,41 @@ describe('proof hash work', () => {
                     0n,
                 ),
             ).toBe(2097125n);
+        }
+    });
+
+    it('charges the verifier one leaf and one node prefix per opened group', () => {
+        const values = proofHashProfiles(completionProfile()).map((profile) =>
+            compileProofHashWork(completionProfile(), profile),
+        );
+        // Every leaf and node hash of a group but the first of each reuses
+        // the prefix blocks of its domain, role and stage: four blocks for
+        // roles of 266, 272 and 282 bytes and five for 341 bytes.
+        const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
+            (sum, group) =>
+                sum +
+                BigInt(group.maximumLeafQueries - 1) +
+                BigInt(group.maximumNodeQueries - 1),
+            0n,
+        );
+        expect(
+            values.map(
+                (value) =>
+                    value.verifierCoreWithoutPrefixReuse.permutations -
+                    value.verifierCore.permutations,
+            ),
+        ).toEqual(
+            [4n, 4n, 4n, 5n].map(
+                (prefixBlocks) => reusedPrefixes * prefixBlocks,
+            ),
+        );
+        for (const value of values) {
+            expect(value.verifierCore.queries).toBe(
+                value.verifierCoreWithoutPrefixReuse.queries,
+            );
+            expect(value.verifierCore.inputBytes).toBe(
+                value.verifierCoreWithoutPrefixReuse.inputBytes,
+            );
         }
     });
 });

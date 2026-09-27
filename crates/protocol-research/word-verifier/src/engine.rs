@@ -131,6 +131,24 @@ fn part(hash: &mut Sha3_512, bytes: &[u8]) {
     Digest::update(hash, (bytes.len() as u32).to_le_bytes());
     Digest::update(hash, bytes);
 }
+/// The sponge of a hash that has absorbed its domain and first parts, which
+/// every hash with that prefix continues.
+fn prefix(domain: &[u8], parts: &[&[u8]]) -> Sha3_512 {
+    let mut hash = Sha3_512::new();
+    part(&mut hash, domain);
+    for value in parts {
+        part(&mut hash, value);
+    }
+    hash
+}
+/// The hash of the prefix's domain and parts followed by these parts.
+fn hash_after(prefix: &Sha3_512, parts: &[&[u8]]) -> [u8; 64] {
+    let mut hash = prefix.clone();
+    for value in parts {
+        part(&mut hash, value);
+    }
+    hash.finalize().into()
+}
 fn stream_part(stream: &mut HashStream, bytes: &[u8]) {
     stream.update(&(bytes.len() as u32).to_le_bytes());
     stream.update(bytes);
@@ -389,7 +407,9 @@ const LOW_BITS: usize = 9;
 /// instance computes once: the powers of w as two tables, the shift's
 /// inverse, the systematic vanishing polynomial's values on the coset and
 /// their inverses, which repeat with the index modulo four because w^H has
-/// order four, and the shift's power at each degree correction.
+/// order four, and the shift's power at each degree correction. Each fold
+/// round's points follow from the shift's inverse raised to that round's
+/// power of two.
 struct Coset {
     low: Vec<u128>,
     high: Vec<u128>,
@@ -397,6 +417,9 @@ struct Coset {
     vanishing: [u128; 4],
     inverse_vanishing: [u128; 4],
     shifts: [u128; 4],
+    inverse_fold_shifts: [u128; FOLDS],
+    half: u128,
+    inverse_systematic: u128,
 }
 impl Coset {
     fn get() -> &'static Self {
@@ -421,16 +444,29 @@ impl Coset {
                     1,
                 )
             });
+            let inverse_shift = power_base(7, MODULUS - 2);
             Self {
                 low: powers(root, 1 << LOW_BITS),
                 high: powers(power_base(root, 1 << LOW_BITS), D >> LOW_BITS),
-                inverse_shift: power_base(7, MODULUS - 2),
+                inverse_shift,
                 inverse_vanishing: vanishing.map(|value| power_base(value, MODULUS - 2)),
                 vanishing,
                 shifts: CORRECTED_DEGREES
                     .map(|degree| power_base(7, (MAX_DEGREE - degree) as u128)),
+                inverse_fold_shifts: std::array::from_fn(|round| {
+                    power_base(inverse_shift, 1 << round)
+                }),
+                half: power_base(2, MODULUS - 2),
+                inverse_systematic: power_base(H as u128, MODULUS - 2),
             }
         })
+    }
+    /// The inverse of a fold round's point 7^(2^round) w^(index 2^round).
+    fn inverse_fold_point(&self, round: usize, index: usize) -> u128 {
+        multiply_base(
+            self.inverse_fold_shifts[round],
+            self.root_power(D as u64 - ((index as u64) << round)),
+        )
     }
     /// w to the exponent modulo the domain's size.
     fn root_power(&self, exponent: u64) -> u128 {
@@ -513,6 +549,10 @@ pub struct Verifier<S> {
     reading_count: bool,
     buffer: Vec<u8>,
     authenticated_nodes: BTreeMap<usize, [u8; 64]>,
+    // The current stage's leaf and node hashes after their domain, the
+    // role and the stage.
+    leaf_prefix: Sha3_512,
+    node_prefix: Sha3_512,
     failed: bool,
     complete: bool,
 }
@@ -572,6 +612,8 @@ impl<S: Statement> Verifier<S> {
             reading_count: true,
             buffer: Vec::new(),
             authenticated_nodes: BTreeMap::new(),
+            leaf_prefix: prefix(b"bounded-proof/leaf", &[role, &0u32.to_le_bytes()]),
+            node_prefix: prefix(b"bounded-proof/node", &[role, &0u32.to_le_bytes()]),
             failed: false,
             complete: false,
         })
@@ -653,15 +695,9 @@ impl<S: Statement> Verifier<S> {
             fields.base()?;
         }
         let salt = reader.take(128)?;
-        let mut digest = hash(
-            b"bounded-proof/leaf",
-            &[
-                &self.role,
-                &(self.stage as u32).to_le_bytes(),
-                &(index as u32).to_le_bytes(),
-                salt,
-                data,
-            ],
+        let mut digest = hash_after(
+            &self.leaf_prefix,
+            &[&(index as u32).to_le_bytes(), salt, data],
         );
         let mut node = length + index;
         let mut pending = Vec::new();
@@ -676,26 +712,14 @@ impl<S: Statement> Verifier<S> {
                 supplied
             };
             digest = if node.is_multiple_of(2) {
-                hash(
-                    b"bounded-proof/node",
-                    &[
-                        &self.role,
-                        &(self.stage as u32).to_le_bytes(),
-                        &level.to_le_bytes(),
-                        &digest,
-                        &sibling,
-                    ],
+                hash_after(
+                    &self.node_prefix,
+                    &[&level.to_le_bytes(), &digest, &sibling],
                 )
             } else {
-                hash(
-                    b"bounded-proof/node",
-                    &[
-                        &self.role,
-                        &(self.stage as u32).to_le_bytes(),
-                        &level.to_le_bytes(),
-                        &sibling,
-                        &digest,
-                    ],
+                hash_after(
+                    &self.node_prefix,
+                    &[&level.to_le_bytes(), &sibling, &digest],
                 )
             };
             node /= 2;
@@ -882,7 +906,7 @@ impl<S: Statement> Verifier<S> {
         );
         let numerator = subtract(
             add(multiply(self.challenges.mask, linear), mask),
-            scale(claimed, power_base(H as u128, MODULUS - 2)),
+            scale(claimed, Coset::get().inverse_systematic),
         );
         let remainder_weight = point.weight(shape, &self.challenges, shape.oracles - 1);
         row.combined = add(
@@ -913,7 +937,7 @@ impl<S: Statement> Verifier<S> {
                 D >> (self.stage - 2)
             };
             let round = if self.stage == 2 { 0 } else { self.stage - 2 };
-            let coset = power_base(7, 1u128 << round);
+            let coset = Coset::get();
             let mut expected = Vec::new();
             for index in requested(&self.challenges.queries, length)
                 .into_iter()
@@ -927,17 +951,13 @@ impl<S: Statement> Verifier<S> {
                     .indices
                     .binary_search(&(index + length / 2))
                     .map_err(|_| Refusal::Encoding)?];
-                let point = multiply_base(coset, power_base(root(length), index as u128));
                 let folded = add(
-                    scale(add(left, right), power_base(2, MODULUS - 2)),
+                    scale(add(left, right), coset.half),
                     multiply(
                         self.challenges.folds[round],
                         scale(
                             subtract(left, right),
-                            multiply_base(
-                                power_base(2, MODULUS - 2),
-                                power_base(point, MODULUS - 2),
-                            ),
+                            multiply_base(coset.half, coset.inverse_fold_point(round, index)),
                         ),
                     ),
                 );
@@ -964,6 +984,9 @@ impl<S: Statement> Verifier<S> {
             }
         }
         self.stage += 1;
+        let stage = (self.stage as u32).to_le_bytes();
+        self.leaf_prefix = prefix(b"bounded-proof/leaf", &[&self.role, &stage]);
+        self.node_prefix = prefix(b"bounded-proof/node", &[&self.role, &stage]);
         let length = if self.stage < 3 {
             D
         } else {
@@ -1124,6 +1147,53 @@ mod tests {
                 assert_eq!(*power, power_base(value, (MAX_DEGREE - degree) as u128));
             }
             assert_eq!(point.table, 11);
+        }
+    }
+    // Each fold round's point inverse is the direct inverse of the round's
+    // point 7^(2^round) w_length^index, and the halving and systematic
+    // constants invert two and the subgroup's size.
+    #[test]
+    fn fold_points_invert_the_direct_points() {
+        let coset = Coset::get();
+        assert_eq!(multiply_base(coset.half, 2), 1);
+        assert_eq!(multiply_base(coset.inverse_systematic, H as u128), 1);
+        for round in [0, 1, 7, FOLDS - 2, FOLDS - 1] {
+            let length = D >> round;
+            for index in [0, 1, 2, 3, length / 4 + 1, length / 2 - 1] {
+                if index >= length / 2 {
+                    continue;
+                }
+                let point = multiply_base(
+                    power_base(7, 1 << round),
+                    power_base(root(length), index as u128),
+                );
+                assert_eq!(
+                    coset.inverse_fold_point(round, index),
+                    power_base(point, MODULUS - 2)
+                );
+            }
+        }
+    }
+    // A hash that continues a prefix's sponge equals the direct hash of the
+    // prefix's domain and parts followed by its own parts.
+    #[test]
+    fn prefixed_hashes_equal_the_direct_hashes() {
+        let role: Vec<u8> = (0..282).map(|index| index as u8).collect();
+        for (stage, rest) in [
+            (0u32, vec![vec![1, 2, 3, 4], vec![5; 128], vec![6; 144]]),
+            (3, vec![vec![9; 4], vec![7; 64], vec![8; 64]]),
+            (19, vec![]),
+        ] {
+            let stage = stage.to_le_bytes();
+            let parts: Vec<&[u8]> = rest.iter().map(Vec::as_slice).collect();
+            let direct: Vec<&[u8]> = [role.as_slice(), &stage]
+                .into_iter()
+                .chain(parts.iter().copied())
+                .collect();
+            assert_eq!(
+                hash_after(&prefix(b"bounded-proof/node", &[&role, &stage]), &parts),
+                hash(b"bounded-proof/node", &direct)
+            );
         }
     }
     #[test]

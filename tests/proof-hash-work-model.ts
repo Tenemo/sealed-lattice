@@ -255,6 +255,10 @@ export const compileProofHashWork = (
         const nodePrefixPermutations =
             framedProofHashBytes('bounded-proof/node', [roleBytes, 4n, 4n]) /
             72n;
+        // The verifier keeps one leaf and one node prefix per group, whose
+        // node prefix ends before the level.
+        const verifierNodePrefixPermutations =
+            framedProofHashBytes('bounded-proof/node', [roleBytes, 4n]) / 72n;
         const levels = BigInt(Math.log2(group.length));
         const savedPermutations =
             BigInt(group.length - 1) * leafPrefixPermutations +
@@ -262,6 +266,10 @@ export const compileProofHashWork = (
         const proverWithoutPrefixReuse = total([
             work(BigInt(group.length), leafInput, tag, 72n),
             work(BigInt(group.length - 1), nodeInput, tag, 72n),
+        ]);
+        const verifierWithoutPrefixReuse = total([
+            work(BigInt(group.maximumLeafQueries), leafInput, tag, 72n),
+            work(BigInt(group.maximumNodeQueries), nodeInput, tag, 72n),
         ]);
         return {
             length: group.length,
@@ -277,10 +285,16 @@ export const compileProofHashWork = (
                 stateClones: 2n * BigInt(group.length) - 1n,
                 initializations: 1n + levels,
             },
-            verifier: total([
-                work(BigInt(group.maximumLeafQueries), leafInput, tag, 72n),
-                work(BigInt(group.maximumNodeQueries), nodeInput, tag, 72n),
-            ]),
+            verifier: {
+                ...verifierWithoutPrefixReuse,
+                permutations:
+                    verifierWithoutPrefixReuse.permutations -
+                    BigInt(group.maximumLeafQueries - 1) *
+                        leafPrefixPermutations -
+                    BigInt(group.maximumNodeQueries - 1) *
+                        verifierNodePrefixPermutations,
+            },
+            verifierWithoutPrefixReuse,
         };
     });
     const contextInput = framedProofHashBytes('bounded-proof/statement', [
@@ -339,6 +353,10 @@ export const compileProofHashWork = (
         verifierCore: total([
             transcript,
             ...groups.map((group) => group.verifier),
+        ]),
+        verifierCoreWithoutPrefixReuse: total([
+            transcript,
+            ...groups.map((group) => group.verifierWithoutPrefixReuse),
         ]),
         // A separate operand for callers' plain statement-identity passes.
         // Multiplicity, common-matrix generation and outer envelopes are not
