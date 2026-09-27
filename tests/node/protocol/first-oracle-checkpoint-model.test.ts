@@ -23,7 +23,7 @@ describe('complete first-oracle proof checkpoint', () => {
                         ? remaining
                         : field.unitsPerRecord;
                 const plaintext = units * field.unitBytes;
-                expect(plaintext).toBeLessThanOrEqual(16384n);
+                expect(plaintext).toBeLessThanOrEqual(1_048_576n);
                 expect(plaintext % field.unitBytes).toBe(0n);
                 bytes += plaintext + 16n;
                 remaining -= units;

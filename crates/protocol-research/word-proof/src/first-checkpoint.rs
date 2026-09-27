@@ -15,7 +15,9 @@ use stateful_sha3::{
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
-pub const RECORD_BYTES: usize = 16_384;
+/// The most plaintext bytes one record seals, the chunk bound of the
+/// participant's other retained records.
+pub const RECORD_BYTES: usize = 1 << 20;
 const MAGIC: &[u8; 4] = b"FPC4";
 const MAXIMUM_ROLE_BYTES: usize = 1024;
 /// Each record is sealed with an AES-GCM tag of this many bytes.

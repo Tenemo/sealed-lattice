@@ -126,6 +126,8 @@ const signingEntryBytes = 2 + 4 + 32 + 64;
 const keyBytes = 32;
 const coinBytes = 32;
 const identityBytes = 64;
+// The sealed checkpoint bytes one write stores while the next are sealed.
+const checkpointWriteBytes = 4 << 20;
 
 // Prover phases: generation below one hundred, then one hundred plus the
 // proof phase.
@@ -992,6 +994,7 @@ export const generateContribution = async (session: ContributionSession) => {
             throw new Error('The checkpoint header has an invalid length.');
         // Each batch is written while the next one is sealed.
         const batch: { key: number; bytes: Uint8Array }[] = [];
+        let batchBytes = 0;
         let writing: Promise<void> = Promise.resolve();
         for (const [index, length] of bounds.checkpointLengths.entries()) {
             const key = crypto.getRandomValues(new Uint8Array(keyBytes));
@@ -1005,8 +1008,9 @@ export const generateContribution = async (session: ContributionSession) => {
                 hash: custodyIdentity(kernel, custodyPurpose.record, sealed),
             });
             batch.push({ key: index, bytes: sealed });
+            batchBytes += sealed.length;
             if (
-                batch.length === 64 ||
+                batchBytes >= checkpointWriteBytes ||
                 index === bounds.checkpointLengths.length - 1
             ) {
                 await writing;
@@ -1017,6 +1021,7 @@ export const generateContribution = async (session: ContributionSession) => {
                         batch.splice(0),
                     ),
                 );
+                batchBytes = 0;
             }
         }
         await writing;

@@ -4,6 +4,9 @@ import { merkleSaltSeedBytes } from '#tests/full-word-proof-layout-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
+// The most plaintext bytes one checkpoint record seals.
+const recordBytes = 1n << 20n;
+
 export const compileFirstOracleCheckpointCensus = (
     profile: SupportedProfile,
 ) => {
@@ -24,7 +27,7 @@ export const compileFirstOracleCheckpointCensus = (
         { name: 'leaf salt seed', units: 1n, unitBytes: merkleSaltSeedBytes },
         { name: 'partial row hashes', units: domain, unitBytes: 25n * 8n + 1n },
     ].map((field) => {
-        const unitsPerRecord = 16384n / field.unitBytes;
+        const unitsPerRecord = recordBytes / field.unitBytes;
         const recordCount =
             (field.units + unitsPerRecord - 1n) / unitsPerRecord;
         return {
@@ -75,8 +78,8 @@ export const compileFirstOracleCheckpointCensus = (
         ciphertextBytes: plaintextBytes + 16n * recordCount,
         dataKeyBytes: 32n * recordCount,
         recordHashBytes: 64n * recordCount,
-        maximumPlaintextRecordBytes: 16384n,
-        maximumCiphertextRecordBytes: 16384n + 16n,
+        maximumPlaintextRecordBytes: recordBytes,
+        maximumCiphertextRecordBytes: recordBytes + 16n,
         maximumHeaderBytes,
         publicRecordCount,
         publicPlaintextBytes,

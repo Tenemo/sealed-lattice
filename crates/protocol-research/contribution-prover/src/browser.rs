@@ -19,8 +19,10 @@ use word_proof::{
 use zeroize::Zeroize;
 
 const CHUNK: usize = 1 << 20;
-/// The input buffer: one polynomial chunk, or one checkpoint import context.
+/// The input buffer: one polynomial chunk, one checkpoint import context,
+/// or one checkpoint record with its key.
 const INPUT_BYTES: usize = 1_572_864;
+const _: () = assert!(32 + first_checkpoint::RECORD_BYTES + 16 <= INPUT_BYTES);
 struct PublicOutput {
     profile: Profile,
     // The statement's digest and context, which helpers hash when there are
