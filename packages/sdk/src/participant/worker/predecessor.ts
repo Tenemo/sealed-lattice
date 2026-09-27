@@ -19,6 +19,11 @@ export type ParticipantStoredRecord = Readonly<{
           }>
     );
 
+// The most records, and the most of their bytes, that one batch of the
+// predecessor check reads and authenticates at once.
+const checkedRecords = 64;
+const checkedBytes = 8_388_608;
+
 // The identities the caller derives for a sealed root and a stored record.
 export type ParticipantIdentities = Readonly<{
     root: (bytes: Uint8Array) => Uint8Array | Promise<Uint8Array>;
@@ -139,7 +144,7 @@ export async function validateParticipantPredecessor(
     } finally {
         manifest.fill(0);
     }
-    for (const record of expected.records) {
+    const check = async (record: ParticipantStoredRecord) => {
         const blob = await reader.get(record.store, record.key);
         if (!(blob instanceof Blob) || blob.size !== record.byteLength)
             throw new Error('Required predecessor record is missing.');
@@ -176,5 +181,25 @@ export async function validateParticipantPredecessor(
         } finally {
             bytes.fill(0);
         }
+    };
+    // Records authenticate in batches whose reads and checks overlap. Every
+    // check of a batch settles before the next batch starts, and the first
+    // failure in record order is reported, as checking the records one at a
+    // time reports it.
+    for (let start = 0; start < expected.records.length;) {
+        let end = start + 1;
+        let bytes = expected.records[start].byteLength;
+        while (
+            end < expected.records.length &&
+            end - start < checkedRecords &&
+            bytes + expected.records[end].byteLength <= checkedBytes
+        )
+            bytes += expected.records[end++].byteLength;
+        const results = await Promise.allSettled(
+            expected.records.slice(start, end).map(check),
+        );
+        for (const result of results)
+            if (result.status === 'rejected') throw result.reason;
+        start = end;
     }
 }

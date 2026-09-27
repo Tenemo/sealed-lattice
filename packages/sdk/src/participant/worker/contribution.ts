@@ -42,6 +42,7 @@ import {
 import type { VerifiedProposal } from './roster.js';
 import {
     addParticipantRecords,
+    awaitLater,
     discardStagedRecords,
     readParticipantValue,
     snapshotParticipant,
@@ -783,30 +784,33 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         lengths.set(object, offset + bytes.length);
         emitted += bytes.length;
     };
-    // Seals pending body output in the profile's record order.
-    const store = async () => {
-        const records = pending.splice(0);
+    // Seals body output in the profile's record order and stores it.
+    const storeRecords = async (records: typeof pending) => {
         const outputs: SealedOutput[] = [];
         try {
-            for (const record of records) {
-                const expected =
-                    bounds.publicRecords[stored.length + outputs.length];
+            for (const [index, record] of records.entries()) {
+                const expected = bounds.publicRecords[stored.length + index];
                 if (
-                    stored.length + outputs.length >=
-                        bounds.publicRecords.length ||
+                    stored.length + index >= bounds.publicRecords.length ||
                     record.object !== expected.object ||
                     record.offset !== expected.offset ||
                     record.bytes.length !== expected.length
                 )
                     throw new Error('Generated body output is noncanonical.');
-                outputs.push(
-                    await sealRecord(
+            }
+            const sealed = await Promise.allSettled(
+                records.map((record) =>
+                    sealRecord(
                         session,
                         record.object,
                         record.offset,
                         record.bytes,
                     ),
-                );
+                ),
+            );
+            for (const result of sealed) {
+                if (result.status === 'rejected') throw result.reason;
+                outputs.push(result.value);
             }
         } finally {
             for (const record of records) record.bytes.fill(0);
@@ -822,6 +826,15 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         );
         stored.push(...outputs.map((output) => output.record));
     };
+    // Stores the pending body output once every earlier store ends, while
+    // the prover continues. A prover command waits only for the stores
+    // before the latest, so at most one runs beside the prover.
+    let storing: Promise<void> = Promise.resolve();
+    const store = () => {
+        const records = pending.splice(0);
+        storing = awaitLater(storing.then(() => storeRecords(records)));
+        return storing;
+    };
     const advance = async (
         operation: number,
         argument = 0,
@@ -836,11 +849,15 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
             ) !== 0
         )
             throw new Error('The contribution prover refused an operation.');
-        await store();
+        const earlier = storing;
+        void store();
+        await earlier;
     };
     return {
         advance,
         store,
+        // Waits until every body output emitted so far is stored.
+        flush: () => storing,
         stored,
         phase: () => kernel.contribution_proof_phase(),
         objects: () => lengths.size,
@@ -948,6 +965,7 @@ export const generateContribution = async (session: ContributionSession) => {
             throw new Error('The credential refused contribution generation.');
         await run.store();
         while (run.phase() < 100) await run.advance(proverCommand.generate);
+        await run.flush();
         if (
             run.phase() !== proverPhase.firstInitialize ||
             run.objects() !== bounds.expandedPolynomials + 1 ||
@@ -971,7 +989,9 @@ export const generateContribution = async (session: ContributionSession) => {
             header.length > bounds.maximumCheckpointHeaderBytes
         )
             throw new Error('The checkpoint header has an invalid length.');
+        // Each batch is written while the next one is sealed.
         const batch: { key: number; bytes: Uint8Array }[] = [];
+        let writing: Promise<void> = Promise.resolve();
         for (const [index, length] of bounds.checkpointLengths.entries()) {
             const key = crypto.getRandomValues(new Uint8Array(keyBytes));
             if (checkpoint(context, checkpointCommand.seal, 0, key) !== 0)
@@ -987,13 +1007,19 @@ export const generateContribution = async (session: ContributionSession) => {
             if (
                 batch.length === 64 ||
                 index === bounds.checkpointLengths.length - 1
-            )
-                await addParticipantRecords(
-                    context.database,
-                    'checkpoint',
-                    batch.splice(0),
+            ) {
+                await writing;
+                writing = awaitLater(
+                    addParticipantRecords(
+                        context.database,
+                        'checkpoint',
+                        batch.splice(0),
+                    ),
                 );
+            }
         }
+        await writing;
+        await run.flush();
         if (checkpoint(context, checkpointCommand.complete) !== 0)
             throw new Error('The checkpoint is incomplete.');
     } finally {
@@ -1112,6 +1138,30 @@ export const continueContribution = async (session: ContributionSession) => {
     const buffer = new Uint8Array(chunkBytes);
     let used = 0;
     let proofBytes = 0;
+    // The retained body records in the order the prover takes them; the
+    // next one is opened while the prover takes the current one.
+    const retained = Array.from(
+        { length: bounds.expandedPolynomials },
+        (_, index) =>
+            state.publicRecords.filter((record) => record.object === index + 1),
+    );
+    const order = retained.flat();
+    let taken = 0;
+    let opening =
+        order.length > 0
+            ? awaitLater(openRecord(session, order[0]))
+            : undefined;
+    const openNext = async () => {
+        if (opening === undefined)
+            throw new Error('A contribution record is missing.');
+        const bytes = await opening;
+        taken++;
+        opening =
+            taken < order.length
+                ? awaitLater(openRecord(session, order[taken]))
+                : undefined;
+        return bytes;
+    };
     const sealProof = async () => {
         const output = await sealRecord(
             session,
@@ -1132,17 +1182,14 @@ export const continueContribution = async (session: ContributionSession) => {
     try {
         while (run.phase() !== proverPhase.polynomials)
             await run.advance(proverCommand.step);
-        for (let index = 0; index < bounds.expandedPolynomials; index++) {
-            const records = state.publicRecords.filter(
-                (record) => record.object === index + 1,
-            );
+        for (const [index, records] of retained.entries()) {
             if (records.length === 0) {
                 await run.advance(proverCommand.consumePredecessor, index);
                 continue;
             }
             await run.advance(proverCommand.beginPolynomial, index);
-            for (const record of records) {
-                const bytes = await openRecord(session, record);
+            for (let count = records.length; count > 0; count--) {
+                const bytes = await openNext();
                 try {
                     await run.advance(proverCommand.pushPolynomial, 0, bytes);
                 } finally {
@@ -1180,6 +1227,9 @@ export const continueContribution = async (session: ContributionSession) => {
     } finally {
         buffer.fill(0);
         run.close();
+        // A record opened ahead that the prover never took is cleared too.
+        if (opening !== undefined)
+            (await opening.catch(() => undefined))?.fill(0);
     }
     await commitContribution(session, {
         generation: 7,

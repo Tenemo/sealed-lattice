@@ -34,7 +34,7 @@ import {
     registrationFile,
     registrationPath,
 } from './roster.js';
-import { namespacedName } from './storage.js';
+import { awaitLater, namespacedName } from './storage.js';
 
 // Verifies the complete setup from public records in the participant's own
 // module: the poll and every registration again, the organizer's proposal
@@ -95,25 +95,61 @@ const writeCache = async (
     }
 };
 
-const readCachedChunk = async (
-    cache: IDBDatabase,
-    key: readonly number[],
-    length: number,
+// The chunk capacity of one body polynomial, as setup verification streams
+// and caches its aggregate: the whole coefficients that fit the module's
+// setup chunk capacity.
+const aggregateCapacity = (
+    context: ProfileContext,
+    polynomial: Readonly<{ bytes: number; coefficients: number }>,
 ) => {
-    let value: unknown;
+    const width = polynomial.bytes / polynomial.coefficients;
+    return Math.floor(context.kernel.setup_chunk_capacity() / width) * width;
+};
+
+// The chunks of an aggregate of the given length: each but the last fills
+// the capacity.
+type AggregateChunk = Readonly<{ offset: number; length: number }>;
+const aggregateChunks = (capacity: number, bytes: number) => {
+    const chunks: AggregateChunk[] = [];
+    for (let offset = 0; offset < bytes; offset += capacity)
+        chunks.push({ offset, length: Math.min(capacity, bytes - offset) });
+    return chunks;
+};
+
+// Reads one body polynomial's aggregate after the given count of accepted
+// contributions, every chunk in one transaction.
+const readCachedAggregate = async (
+    cache: IDBDatabase,
+    accepted: number,
+    expandedIndex: number,
+    chunks: readonly AggregateChunk[],
+) => {
+    let values: unknown[];
     try {
         const transaction = cache.transaction(cacheStore, 'readonly');
-        const done = cacheCompletion(transaction);
-        value = await cacheRequest<unknown>(
-            transaction.objectStore(cacheStore).get([...key]),
-        );
-        await done;
+        const store = transaction.objectStore(cacheStore);
+        [values] = await Promise.all([
+            Promise.all(
+                chunks.map(({ offset }) =>
+                    cacheRequest<unknown>(
+                        store.get([accepted, expandedIndex, offset]),
+                    ),
+                ),
+            ),
+            cacheCompletion(transaction),
+        ]);
     } catch {
         throw new PublicInputFailure('The setup cache refused a read.');
     }
-    if (!(value instanceof Blob) || value.size !== length)
-        throw new PublicInputFailure('A cached aggregate chunk is missing.');
-    return new Uint8Array(await value.arrayBuffer());
+    return Promise.all(
+        values.map(async (value, index) => {
+            if (!(value instanceof Blob) || value.size !== chunks[index].length)
+                throw new PublicInputFailure(
+                    'A cached aggregate chunk is missing.',
+                );
+            return new Uint8Array(await value.arrayBuffer());
+        }),
+    );
 };
 
 // Streams the final public aggregate of one body polynomial from the cache
@@ -124,25 +160,26 @@ export const readFinalAggregate = async (
     expandedIndex: number,
     consume: (offset: number, bytes: Uint8Array) => void,
 ) => {
-    const { kernel, profile } = context;
+    const { profile } = context;
     const polynomial = profile.contribution.polynomials.find(
         (value) => value.expandedIndex === expandedIndex,
     );
     if (polynomial === undefined)
         throw new Error('No body polynomial has this index.');
-    const width = polynomial.bytes / polynomial.coefficients;
-    const capacity = Math.floor(kernel.setup_chunk_capacity() / width) * width;
+    const chunks = aggregateChunks(
+        aggregateCapacity(context, polynomial),
+        polynomial.bytes,
+    );
     const cache = await openSetupCache(context.namespace);
     try {
-        for (let offset = 0; offset < polynomial.bytes; offset += capacity)
-            consume(
-                offset,
-                await readCachedChunk(
-                    cache,
-                    [profile.setupContributorCount - 1, expandedIndex, offset],
-                    Math.min(capacity, polynomial.bytes - offset),
-                ),
-            );
+        const values = await readCachedAggregate(
+            cache,
+            profile.setupContributorCount - 1,
+            expandedIndex,
+            chunks,
+        );
+        for (const [index, { offset }] of chunks.entries())
+            consume(offset, values[index]);
     } finally {
         cache.close();
     }
@@ -200,23 +237,47 @@ const verifyContribution = async (
     if (kernel.setup_begin_opening(control.length) !== 0)
         throw new PublicInputFailure('An opening was refused.');
     const chunk = kernel.setup_chunk_capacity();
-    for (const polynomial of bounds.polynomials) {
-        const width = polynomial.bytes / polynomial.coefficients;
-        const capacity = Math.floor(chunk / width) * width;
+    // Each polynomial's previous aggregate is read while the polynomial
+    // before it is verified, and its new aggregate is written while the one
+    // after it is verified. The cache's transactions run in the order they
+    // start, so a read follows every write started before it.
+    const readPrevious = (index: number) => {
+        const polynomial = bounds.polynomials[index];
+        return accepted === 0 || polynomial === undefined
+            ? undefined
+            : awaitLater(
+                  readCachedAggregate(
+                      cache,
+                      accepted - 1,
+                      polynomial.expandedIndex,
+                      aggregateChunks(
+                          aggregateCapacity(context, polynomial),
+                          polynomial.bytes,
+                      ),
+                  ),
+              );
+    };
+    let reading = readPrevious(0);
+    let writing: Promise<void> | undefined;
+    for (const [index, polynomial] of bounds.polynomials.entries()) {
+        const previous = await reading;
+        reading = readPrevious(index + 1);
+        const capacity = aggregateCapacity(context, polynomial);
         const pending = new Uint8Array(capacity);
+        const written: { offset: number; bytes: Uint8Array }[] = [];
         let used = 0;
         let offset = 0;
-        const absorb = async (incoming: Uint8Array) => {
-            const previous =
-                accepted === 0
+        const absorb = (incoming: Uint8Array) => {
+            const prior =
+                previous === undefined
                     ? new Uint8Array(incoming.length)
-                    : await readCachedChunk(
-                          cache,
-                          [accepted - 1, polynomial.expandedIndex, offset],
-                          incoming.length,
-                      );
+                    : previous[written.length];
+            if (prior?.length !== incoming.length)
+                throw new PublicInputFailure(
+                    'A cached aggregate chunk is missing.',
+                );
             writeSetupInput(kernel, incoming);
-            writeSetupInput(kernel, previous, chunk);
+            writeSetupInput(kernel, prior, chunk);
             if (
                 kernel.setup_polynomial(
                     polynomial.expandedIndex,
@@ -227,25 +288,21 @@ const verifyContribution = async (
                 throw new PublicInputFailure(
                     'A contribution polynomial was refused.',
                 );
-            const aggregate = readKernel(
-                kernel,
-                kernel.setup_input_pointer() + chunk,
-                incoming.length,
-            );
-            await writeCache(cache, (store) =>
-                store.put(new Blob([new Uint8Array(aggregate)]), [
-                    accepted,
-                    polynomial.expandedIndex,
-                    offset,
-                ]),
-            );
+            written.push({
+                offset,
+                bytes: readKernel(
+                    kernel,
+                    kernel.setup_input_pointer() + chunk,
+                    incoming.length,
+                ),
+            });
             offset += incoming.length;
         };
         await streamPublic(
             relay,
             directory + polynomialFile(polynomial.expandedIndex),
             polynomial.bytes,
-            async (bytes) => {
+            (bytes) => {
                 for (let start = 0; start < bytes.length;) {
                     const count = Math.min(
                         bytes.length - start,
@@ -255,17 +312,28 @@ const verifyContribution = async (
                     start += count;
                     used += count;
                     if (used === capacity) {
-                        await absorb(pending.subarray(0, used));
+                        absorb(pending.subarray(0, used));
                         used = 0;
                     }
                 }
             },
         );
-        if (used > 0) await absorb(pending.subarray(0, used));
+        if (used > 0) absorb(pending.subarray(0, used));
         if (offset !== polynomial.bytes)
             throw new PublicInputFailure(
                 'A contribution polynomial is incomplete.',
             );
+        await writing;
+        writing = awaitLater(
+            writeCache(cache, (store) => {
+                for (const value of written)
+                    store.put(new Blob([new Uint8Array(value.bytes)]), [
+                        accepted,
+                        polynomial.expandedIndex,
+                        value.offset,
+                    ]);
+            }),
+        );
     }
     for (let offset = 0; offset < proof.length; offset += chunkBytes) {
         const bytes = proof.subarray(offset, offset + chunkBytes);
@@ -273,6 +341,7 @@ const verifyContribution = async (
         if (kernel.setup_proof(offset, bytes.length) !== 0)
             throw new PublicInputFailure('A contribution proof was refused.');
     }
+    await writing;
     if (
         kernel.setup_finish_contribution() !== 1 ||
         kernel.setup_accepted() !== accepted + 1

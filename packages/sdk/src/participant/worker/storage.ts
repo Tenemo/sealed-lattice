@@ -54,6 +54,13 @@ const transactionCompletion = (transaction: IDBTransaction) =>
             );
     });
 
+// Keeps a promise that is awaited later, while other work continues, from
+// reporting an unhandled rejection meanwhile.
+export const awaitLater = <Value>(promise: Promise<Value>) => {
+    void promise.catch(() => undefined);
+    return promise;
+};
+
 export const openParticipantDatabase = async (
     namespace: string,
 ): Promise<IDBDatabase> => {
