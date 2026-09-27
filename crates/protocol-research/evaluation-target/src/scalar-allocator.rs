@@ -1,5 +1,8 @@
-//! One bounded system region for the standard library's pinned dlmalloc version.
-//! Later allocations reuse that region instead of repeatedly growing Wasm memory.
+//! A bounded system region for the standard library's pinned dlmalloc version.
+//! The worker's instance acquires its whole bound on its first allocation,
+//! because growing its large memory during an operation also slowed the
+//! operation's helpers. A helper instance, whose smaller bound its jobs set,
+//! grows its region in few geometric steps as its allocations need it.
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::wasm32,
@@ -13,13 +16,19 @@ compile_error!("The evaluation allocator requires an unshared scalar Wasm instan
 
 pub const MAXIMUM_LINEAR_MEMORY_BYTES: usize = 671_088_640;
 const PAGE_BYTES: usize = 65_536;
+/// The fewest pages a growing region adds at once.
+const MINIMUM_GROWTH_PAGES: usize = 16;
 // The instance's memory bound, which a helper instance lowers before its
-// first allocation acquires the region.
+// first allocation starts the region.
 static LINEAR_MEMORY_BYTES: AtomicUsize = AtomicUsize::new(MAXIMUM_LINEAR_MEMORY_BYTES);
+// Whether the region grows as allocations need it, which a lowered bound
+// selects.
+static GROWS_ON_DEMAND: AtomicBool = AtomicBool::new(false);
 static ACQUIRED: AtomicBool = AtomicBool::new(false);
 
 /// Lowers the instance's memory bound to whole pages before its first
-/// allocation. Returns whether the bound applies.
+/// allocation; the region then grows as allocations need it. Returns
+/// whether the bound applies.
 pub fn limit_linear_memory(bytes: usize) -> bool {
     if ACQUIRED.load(Ordering::Relaxed)
         || bytes > MAXIMUM_LINEAR_MEMORY_BYTES
@@ -28,13 +37,16 @@ pub fn limit_linear_memory(bytes: usize) -> bool {
         return false;
     }
     LINEAR_MEMORY_BYTES.store(bytes, Ordering::Relaxed);
+    GROWS_ON_DEMAND.store(true, Ordering::Relaxed);
     true
 }
 struct SystemRegion;
 
 // SAFETY: A successful call returns only newly grown, zero-filled Wasm pages.
 // The scalar instance cannot interleave another allocation during memory_grow.
-// The returned region is page aligned, non-overlapping and below the fixed cap.
+// The returned region is page aligned, non-overlapping, at least the request
+// and below the fixed cap; dlmalloc joins it to the region that ends where it
+// begins.
 unsafe impl dlmalloc::Allocator for SystemRegion {
     fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
         ACQUIRED.store(true, Ordering::Relaxed);
@@ -44,11 +56,29 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
             return (ptr::null_mut(), 0, 0);
         }
         let remaining_pages = maximum_pages - previous_pages;
-        let available = remaining_pages * PAGE_BYTES;
-        if size > available || wasm32::memory_grow(0, remaining_pages) != previous_pages {
+        let requested_pages = size.div_ceil(PAGE_BYTES);
+        if requested_pages > remaining_pages {
             return (ptr::null_mut(), 0, 0);
         }
-        ((previous_pages * PAGE_BYTES) as *mut u8, available, 0)
+        // A growing region adds the request or, when more, half its held
+        // pages, so its growths stay few and it stays near what its
+        // allocations use. Otherwise the region takes every remaining page.
+        let pages = if GROWS_ON_DEMAND.load(Ordering::Relaxed) {
+            requested_pages
+                .max(previous_pages / 2)
+                .max(MINIMUM_GROWTH_PAGES)
+                .min(remaining_pages)
+        } else {
+            remaining_pages
+        };
+        if wasm32::memory_grow(0, pages) != previous_pages {
+            return (ptr::null_mut(), 0, 0);
+        }
+        (
+            (previous_pages * PAGE_BYTES) as *mut u8,
+            pages * PAGE_BYTES,
+            0,
+        )
     }
     fn remap(&self, _pointer: *mut u8, _old: usize, _new: usize, _can_move: bool) -> *mut u8 {
         ptr::null_mut()
