@@ -126,18 +126,17 @@ export const launchChromeParticipant = async (
             'Chrome did not close within its deadline.',
         );
     };
+    // Taskkill also reports a failure when a process of the tree ends by
+    // itself while it runs, so the browser process's exit decides whether
+    // the crash happened.
     const crash = async () => {
         socket?.close();
         if (exited()) return;
         const termination = killProcessTree(child, { signal: 'SIGKILL' });
-        if (!termination.succeeded)
-            throw new Error(
-                'Chrome could not be terminated: ' +
-                    JSON.stringify(termination),
-            );
         await exit(
             () => undefined,
-            'Chrome did not exit after its termination.',
+            'Chrome did not exit after its termination: ' +
+                JSON.stringify(termination),
         );
     };
     try {
