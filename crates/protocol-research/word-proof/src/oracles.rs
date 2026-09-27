@@ -170,10 +170,13 @@ impl Drop for SecondOracle {
 /// The coefficients of a base column's masked polynomial: its interpolant
 /// less the mask, then the mask times the systematic power.
 pub(crate) fn masked_base_polynomial(values: BaseValues, mask: &[u128]) -> Zeroizing<Vec<u128>> {
-    let mut coefficients = Zeroizing::new(match values {
-        BaseValues::Words(values) => values.iter().map(|value| u128::from(*value)).collect(),
-        BaseValues::Counts(values) => values.to_vec(),
-    });
+    let mut coefficients = Zeroizing::new(Vec::with_capacity(SYSTEMATIC + mask.len()));
+    match values {
+        BaseValues::Words(values) => {
+            coefficients.extend(values.iter().map(|value| u128::from(*value)))
+        }
+        BaseValues::Counts(values) => coefficients.extend_from_slice(values),
+    }
     Transform::cached(SYSTEMATIC).base(&mut coefficients, true);
     for (coefficient, value) in coefficients.iter_mut().zip(mask) {
         *coefficient = base::subtract(*coefficient, *value);
@@ -181,18 +184,21 @@ pub(crate) fn masked_base_polynomial(values: BaseValues, mask: &[u128]) -> Zeroi
     coefficients.extend_from_slice(mask);
     coefficients
 }
+/// The coefficients of an extension column's masked polynomial: its
+/// interpolant less the mask, then the mask times the systematic power.
 pub(crate) fn masked_extension_coefficients(
-    values: Vec<Element>,
+    values: impl Iterator<Item = Element>,
     mask: &[Element],
     transform: &Transform,
 ) -> Vec<Element> {
-    let mut values = Zeroizing::new(values);
-    transform.extension(&mut values, true);
-    for (index, value) in mask.iter().enumerate() {
-        values[index] = field::subtract(values[index], *value);
+    let mut coefficients = Zeroizing::new(Vec::with_capacity(SYSTEMATIC + mask.len()));
+    coefficients.extend(values);
+    transform.extension(&mut coefficients, true);
+    for (coefficient, value) in coefficients.iter_mut().zip(mask) {
+        *coefficient = field::subtract(*coefficient, *value);
     }
-    values.extend_from_slice(mask);
-    std::mem::take(&mut *values)
+    coefficients.extend_from_slice(mask);
+    std::mem::take(&mut *coefficients)
 }
 
 impl SecondOracle {

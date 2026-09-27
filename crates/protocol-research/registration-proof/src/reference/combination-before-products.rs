@@ -185,8 +185,7 @@ pub fn polynomial(
                 }
                 let raw = witness.columns[column]
                     .iter()
-                    .map(|value| inverses[usize::from(*value) * factor as usize])
-                    .collect();
+                    .map(|value| inverses[usize::from(*value) * factor as usize]);
                 let coefficients = oracles::masked_extension_coefficients(
                     raw,
                     &second.masks[lookup_index],
@@ -253,8 +252,7 @@ pub fn polynomial(
         .counts
         .iter()
         .zip(inverses)
-        .map(|(count, inverse)| field::scale(*inverse, *count))
-        .collect();
+        .map(|(count, inverse)| field::scale(*inverse, *count));
     let coefficients =
         oracles::masked_extension_coefficients(raw, &second.masks[LOOKUPS], &transform);
     for coset_index in 0..2 {

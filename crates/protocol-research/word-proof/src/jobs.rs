@@ -195,33 +195,29 @@ fn decode_second(input: &[u8]) -> (Zeroizing<Vec<Element>>, &[u8]) {
             .map(element)
             .collect::<Vec<_>>(),
     );
-    let (values, rest) = if counts {
+    let transform = Transform::cached(SYSTEMATIC);
+    let (coefficients, rest) = if counts {
         let (counts, rest) = rest.split_at(SYSTEMATIC * WORD_BYTES);
         let values = counts
             .chunks_exact(WORD_BYTES)
             .enumerate()
-            .map(|(index, count)| field::scale(reciprocal(index), word(count)))
-            .collect::<Vec<_>>();
-        (values, rest)
+            .map(|(index, count)| field::scale(reciprocal(index), word(count)));
+        (
+            masked_extension_coefficients(values, &mask, transform),
+            rest,
+        )
     } else {
         let factor = word(&rest[..WORD_BYTES]) as usize;
         let (words, rest) = rest[WORD_BYTES..].split_at(SYSTEMATIC * 2);
-        let values = words
-            .chunks_exact(2)
-            .map(|value| {
-                reciprocal(usize::from(u16::from_le_bytes(value.try_into().unwrap())) * factor)
-            })
-            .collect::<Vec<_>>();
-        (values, rest)
+        let values = words.chunks_exact(2).map(|value| {
+            reciprocal(usize::from(u16::from_le_bytes(value.try_into().unwrap())) * factor)
+        });
+        (
+            masked_extension_coefficients(values, &mask, transform),
+            rest,
+        )
     };
-    (
-        Zeroizing::new(masked_extension_coefficients(
-            values,
-            &mask,
-            Transform::cached(SYSTEMATIC),
-        )),
-        rest,
-    )
+    (Zeroizing::new(coefficients), rest)
 }
 /// Each coset's queried positions, each list preceded by its count.
 pub fn positions(groups: &[Vec<(usize, usize)>; 4]) -> Vec<u8> {

@@ -440,13 +440,10 @@ fn add_columns(input: &[u8]) -> Vec<u8> {
             }
             for lookup in &column.lookups {
                 let inverses = inverses.unwrap();
-                let raw = words
-                    .iter()
-                    .map(|value| {
-                        let index = usize::from(*value) * lookup.oracles.factor as usize;
-                        field::decode(&inverses[ELEMENT_BYTES * index..])
-                    })
-                    .collect();
+                let raw = words.iter().map(|value| {
+                    let index = usize::from(*value) * lookup.oracles.factor as usize;
+                    field::decode(&inverses[ELEMENT_BYTES * index..])
+                });
                 let mask = Reader(lookup.mask).elements(MASKS);
                 let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
                     raw, &mask, transform,
@@ -550,8 +547,7 @@ fn add_counts(input: &[u8]) -> Vec<u8> {
         let raw = counts
             .iter()
             .zip(inverses.iter())
-            .map(|(count, inverse)| field::scale(*inverse, *count))
-            .collect();
+            .map(|(count, inverse)| field::scale(*inverse, *count));
         let coefficients = Zeroizing::new(oracles::masked_extension_coefficients(
             raw,
             &second_mask,
