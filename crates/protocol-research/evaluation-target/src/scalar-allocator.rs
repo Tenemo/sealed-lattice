@@ -1,10 +1,13 @@
 //! A bounded system region for the standard library's pinned dlmalloc version.
-//! The worker's instance acquires its whole bound on its first allocation,
-//! because growing its large memory during an operation also slowed the
-//! operation's helpers. A helper instance, whose smaller bound its jobs set,
-//! grows its region in few geometric steps as its allocations need it. An
-//! allocation that finds no memory within the bound hands the call to the
-//! host, which ends it, so the host tells exhaustion apart from a trap.
+//! The region grows as its allocations need it, each growth adding the
+//! request or, when more, a quarter of its held pages, so its growths stay
+//! few and it stays near what its allocations use. A growth in Chrome
+//! briefly commits about as much again as the region already holds, so an
+//! operation that knows what it will hold plans it, and the next growth
+//! reaches that plan at once. A helper instance lowers its bound, which its
+//! jobs set, before its first allocation. An allocation that finds no memory
+//! within the bound hands the call to the host, which ends it, so the host
+//! tells exhaustion apart from a trap.
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::wasm32,
@@ -23,10 +26,10 @@ const MINIMUM_GROWTH_PAGES: usize = 16;
 // The instance's memory bound, which a helper instance lowers before its
 // first allocation starts the region.
 static LINEAR_MEMORY_BYTES: AtomicUsize = AtomicUsize::new(MAXIMUM_LINEAR_MEMORY_BYTES);
-// Whether the region grows as allocations need it, which a lowered bound
-// selects.
-static GROWS_ON_DEMAND: AtomicBool = AtomicBool::new(false);
 static ACQUIRED: AtomicBool = AtomicBool::new(false);
+// The pages the next growth reaches at least, which an operation's plan
+// sets.
+static PLANNED_PAGES: AtomicUsize = AtomicUsize::new(0);
 // The highest address, exclusive, that any allocation has reached.
 static HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 
@@ -37,8 +40,7 @@ pub fn linear_memory_high_water() -> usize {
 }
 
 /// Lowers the instance's memory bound to whole pages before its first
-/// allocation; the region then grows as allocations need it. Returns
-/// whether the bound applies.
+/// allocation. Returns whether the bound applies.
 pub fn limit_linear_memory(bytes: usize) -> bool {
     if ACQUIRED.load(Ordering::Relaxed)
         || bytes > MAXIMUM_LINEAR_MEMORY_BYTES
@@ -47,8 +49,13 @@ pub fn limit_linear_memory(bytes: usize) -> bool {
         return false;
     }
     LINEAR_MEMORY_BYTES.store(bytes, Ordering::Relaxed);
-    GROWS_ON_DEMAND.store(true, Ordering::Relaxed);
     true
+}
+
+/// Plans the instance's memory: its next growth reaches at least the bytes,
+/// within its bound.
+pub fn plan_linear_memory(bytes: usize) {
+    PLANNED_PAGES.store(bytes.div_ceil(PAGE_BYTES), Ordering::Relaxed);
 }
 
 #[link(wasm_import_module = "allocator")]
@@ -93,17 +100,12 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
         if requested_pages > remaining_pages {
             return (ptr::null_mut(), 0, 0);
         }
-        // A growing region adds the request or, when more, a quarter of its
-        // held pages, so its growths stay few and it stays near what its
-        // allocations use. Otherwise the region takes every remaining page.
-        let pages = if GROWS_ON_DEMAND.load(Ordering::Relaxed) {
-            requested_pages
-                .max(previous_pages / 4)
-                .max(MINIMUM_GROWTH_PAGES)
-                .min(remaining_pages)
-        } else {
-            remaining_pages
-        };
+        let planned = PLANNED_PAGES.swap(0, Ordering::Relaxed);
+        let pages = requested_pages
+            .max(previous_pages / 4)
+            .max(MINIMUM_GROWTH_PAGES)
+            .max(planned.saturating_sub(previous_pages))
+            .min(remaining_pages);
         if wasm32::memory_grow(0, pages) != previous_pages {
             return (ptr::null_mut(), 0, 0);
         }

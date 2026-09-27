@@ -79,6 +79,7 @@ pub struct Engine {
     program_hash: [u8; 64],
     instructions: Vec<Instruction>,
     remaining_uses: Vec<usize>,
+    peak_values: usize,
     values: Vec<Option<Ciphertext>>,
     stored: Vec<Option<[u8; 64]>>,
     step: usize,
@@ -114,6 +115,23 @@ pub fn helper_memory_bytes(helpers: usize) -> usize {
         })
         .max()
         .unwrap()
+}
+
+/// The most values a program holds at once when each stays from its
+/// instruction until its last use, given each value's count of uses.
+fn peak_values(instructions: &[Instruction], mut remaining_uses: Vec<usize>) -> usize {
+    let (mut held, mut peak) = (0usize, 0usize);
+    for instruction in instructions {
+        held += 1;
+        peak = peak.max(held);
+        for input in &instruction.inputs {
+            remaining_uses[*input] -= 1;
+            if remaining_uses[*input] == 0 {
+                held -= 1;
+            }
+        }
+    }
+    peak
 }
 
 /// Bytes of one stored working value of the profile: every coefficient word
@@ -277,6 +295,7 @@ impl Engine {
             keys: ResidentKeys::new(&arithmetic),
             arithmetic,
             program_hash: expected_hash,
+            peak_values: peak_values(&instructions, remaining_uses.clone()),
             instructions,
             remaining_uses,
             values: (0..count).map(|_| None).collect(),
@@ -328,33 +347,8 @@ impl Engine {
             self.keys.clear();
             self.cache = wanted;
         }
-        let gadget_length = self.arithmetic.gadget_length;
-        let key_count = match self.cache {
-            Some(Cache::Multiplication) => MULTIPLICATION_KEYS * gadget_length,
-            Some(Cache::Rotation) => 2 * gadget_length,
-            None => 0,
-        };
-        let residue_bytes = DEGREE * 8;
-        let polynomial_bytes = self.arithmetic.polynomial_words() * 8;
-        let tensor_primes = self.arithmetic.tensor_primes();
-        let external_primes = self.arithmetic.external_primes;
-        // The tables and kept keys count wherever the primes' jobs run.
-        let table_bytes = tensor_primes * TRANSFORM_TABLES * residue_bytes;
-        let key_bytes = key_count * external_primes * residue_bytes;
-        // A multiplication holds its four transformed tensor sources and one
-        // product; a rotation holds its shifted component, that component's
-        // shared copy and both key groups' residues.
-        let scratch = match instruction.operation {
-            2 => 5 * tensor_primes * residue_bytes + 2 * polynomial_bytes,
-            6 => 2 * external_primes * residue_bytes + 2 * polynomial_bytes,
-            _ => 0,
-        };
-        let available = MEMORY_BYTES
-            .checked_sub(
-                RUNTIME_RESERVE_BYTES + TRANSFER_RESERVE_BYTES + table_bytes + key_bytes + scratch,
-            )
-            .ok_or(Refusal::Allocation)?;
-        let capacity = available / (2 * polynomial_bytes);
+        let key_count = self.key_total(self.cache);
+        let capacity = self.capacity(instruction.operation, self.cache)?;
         let required: BTreeSet<_> = instruction.inputs.iter().copied().collect();
         let reloads: Vec<_> = required
             .iter()
@@ -394,6 +388,71 @@ impl Engine {
             reloads,
             input_position: (instruction.operation == 0).then_some(instruction.parameter as usize),
         })
+    }
+
+    /// The keys a cache holds.
+    fn key_total(&self, cache: Option<Cache>) -> usize {
+        match cache {
+            Some(Cache::Multiplication) => MULTIPLICATION_KEYS * self.arithmetic.gadget_length,
+            Some(Cache::Rotation) => 2 * self.arithmetic.gadget_length,
+            None => 0,
+        }
+    }
+    /// Bytes of one resident working value.
+    fn value_bytes(&self) -> usize {
+        2 * self.arithmetic.polynomial_words() * 8
+    }
+    /// An instruction's scratch: a multiplication holds its four
+    /// transformed tensor sources and one product; a rotation holds its
+    /// shifted component, that component's shared copy and both key groups'
+    /// residues.
+    fn scratch_bytes(&self, operation: u32) -> usize {
+        let residue_bytes = DEGREE * 8;
+        let polynomial_bytes = self.arithmetic.polynomial_words() * 8;
+        match operation {
+            2 => 5 * self.arithmetic.tensor_primes() * residue_bytes + 2 * polynomial_bytes,
+            6 => 2 * self.arithmetic.external_primes * residue_bytes + 2 * polynomial_bytes,
+            _ => 0,
+        }
+    }
+    /// The resident values an instruction of the operation allows with the
+    /// cache's keys. The tables and kept keys count wherever the primes'
+    /// jobs run.
+    fn capacity(&self, operation: u32, cache: Option<Cache>) -> Result<usize, Refusal> {
+        let residue_bytes = DEGREE * 8;
+        let table_bytes = self.arithmetic.tensor_primes() * TRANSFORM_TABLES * residue_bytes;
+        let key_bytes = self.key_total(cache) * self.arithmetic.external_primes * residue_bytes;
+        let available = MEMORY_BYTES
+            .checked_sub(
+                RUNTIME_RESERVE_BYTES
+                    + TRANSFER_RESERVE_BYTES
+                    + table_bytes
+                    + key_bytes
+                    + self.scratch_bytes(operation),
+            )
+            .ok_or(Refusal::Allocation)?;
+        Ok(available / self.value_bytes())
+    }
+    /// The linear memory the evaluation's instance plans to hold. Without
+    /// helpers it holds the tables and kept keys too and plans the whole
+    /// bound. With them it holds at most the reserves and, at the kind of
+    /// instruction that needs the most, that instruction's scratch and the
+    /// resident values its capacity allows, never more than the program
+    /// holds at once.
+    pub fn planned_memory_bytes(&self) -> usize {
+        if parallel_work::helpers() == 0 {
+            return MEMORY_BYTES;
+        }
+        let held = |operation: u32, cache: Option<Cache>| {
+            self.capacity(operation, cache).map_or(0, |capacity| {
+                self.scratch_bytes(operation) + capacity.min(self.peak_values) * self.value_bytes()
+            })
+        };
+        RUNTIME_RESERVE_BYTES
+            + TRANSFER_RESERVE_BYTES
+            + held(2, Some(Cache::Multiplication))
+                .max(held(6, Some(Cache::Rotation)))
+                .max(held(1, None))
     }
 
     /// Whether a cached key is a public common polynomial, and its setup
@@ -716,9 +775,92 @@ impl Engine {
 mod tests {
     use super::{
         super::{prime_count_bounds, primes},
-        DEGREE, Profile, Refusal, evictions, helper_memory_bytes,
+        DEGREE, Instruction, Profile, Refusal, evictions, helper_memory_bytes, peak_values,
     };
     use std::collections::BTreeSet;
+
+    // The peak counts the values alive at each instruction: those defined
+    // no later and last used no earlier, where the final value lives to the
+    // end. Programs of pseudorandom shape, repeated inputs and one hand
+    // count check it.
+    #[test]
+    fn peak_values_are_the_most_overlapping_lifetimes() {
+        let check = |inputs: &[Vec<usize>]| {
+            let instructions: Vec<Instruction> = inputs
+                .iter()
+                .map(|inputs| Instruction {
+                    operation: 1,
+                    inputs: inputs.clone(),
+                    parameter: 0,
+                })
+                .collect();
+            let count = inputs.len();
+            let mut uses = vec![0; count];
+            let mut last = (0..count).collect::<Vec<_>>();
+            for (index, inputs) in inputs.iter().enumerate() {
+                for input in inputs {
+                    uses[*input] += 1;
+                    last[*input] = index;
+                }
+            }
+            uses[count - 1] = 1;
+            last[count - 1] = count;
+            let overlapping = (0..count)
+                .map(|step| (0..=step).filter(|value| last[*value] >= step).count())
+                .max()
+                .unwrap();
+            let peak = peak_values(&instructions, uses);
+            assert_eq!(peak, overlapping);
+            peak
+        };
+        // Inputs summed as a chain hold at most three values: a sum's two
+        // inputs beside the sum itself.
+        assert_eq!(
+            check(&[
+                vec![],
+                vec![],
+                vec![0, 1],
+                vec![],
+                vec![2, 3],
+                vec![],
+                vec![4, 5]
+            ]),
+            3
+        );
+        // A value squared and then used again stays beside its square and
+        // the last product.
+        assert_eq!(check(&[vec![], vec![0, 0], vec![1, 0]]), 3);
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as usize
+        };
+        for _ in 0..200 {
+            let count = 2 + next(60);
+            let mut inputs = vec![Vec::new()];
+            let mut unused: BTreeSet<usize> = BTreeSet::from([0]);
+            for index in 1..count {
+                let arity = if index == count - 1 { 1 } else { next(3) };
+                let mut chosen = Vec::new();
+                for _ in 0..arity {
+                    // Each earlier value is used at least once.
+                    let input = match unused.iter().next() {
+                        Some(first) if next(2) == 0 => *first,
+                        _ => next(index),
+                    };
+                    unused.remove(&input);
+                    chosen.push(input);
+                }
+                inputs.push(chosen);
+                unused.insert(index);
+            }
+            let last = inputs.len() - 1;
+            inputs[last].extend(unused.iter().copied().filter(|value| *value != last));
+            check(&inputs);
+        }
+    }
 
     // The prime counts the helper bound assumes cover every profile's
     // primes, helpers that share the primes need less evaluation memory
