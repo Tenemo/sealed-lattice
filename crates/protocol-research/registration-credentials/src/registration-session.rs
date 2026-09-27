@@ -29,8 +29,10 @@ const OPERATION_BYTES: usize = 9;
 /// refusal that ended the session.
 const VERDICT_BYTES: usize = 129;
 /// The steps a session keeps running before the worker waits for the
-/// oldest, which bounds the shared memory its bytes hold.
-const WINDOW: usize = 2;
+/// oldest: a whole record's, so that a busy session's helper holds up no
+/// other session's input. The shared arena's bound limits the bytes that
+/// queued steps hold.
+const WINDOW: usize = 16;
 
 thread_local! {
     // Each open session's verifier, or the refusal that ended it.

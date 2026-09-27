@@ -14,15 +14,28 @@ use parallel_work::{HashStream, Sponge};
 pub const PUBLIC_POLYNOMIAL_DOMAIN: &str = "sealed-lattice/public-polynomial/v1";
 
 /// Computes `H_512(domain, prefix..., bytes(payload))` over a payload whose
-/// length is committed before absorption. The sponge runs on a helper when
-/// there are helpers.
+/// length is committed before absorption.
 pub struct IdentityHasher {
     hash: HashStream,
     remaining: usize,
 }
 impl IdentityHasher {
+    /// A hasher whose sponge runs on a helper when there are helpers, for a
+    /// caller that does other work between its parts.
     pub fn new(domain: &str, prefix: &[CanonicalItem], length: usize) -> Result<Self, Error> {
-        let mut hash = HashStream::new(Sponge::Shake256);
+        Self::with_stream(HashStream::new(Sponge::Shake256), domain, prefix, length)
+    }
+    /// A hasher whose sponge runs here, for a caller that waits for the
+    /// identity right after its last part.
+    pub fn local(domain: &str, prefix: &[CanonicalItem], length: usize) -> Result<Self, Error> {
+        Self::with_stream(HashStream::local(Sponge::Shake256), domain, prefix, length)
+    }
+    fn with_stream(
+        mut hash: HashStream,
+        domain: &str,
+        prefix: &[CanonicalItem],
+        length: usize,
+    ) -> Result<Self, Error> {
         hash.update(&framing(domain, prefix, length)?);
         Ok(Self {
             hash,
@@ -73,7 +86,7 @@ fn framing(domain: &str, prefix: &[CanonicalItem], length: usize) -> Result<Vec<
 
 /// The identity of one complete payload without prefix items.
 pub fn identity(domain: &str, bytes: &[u8]) -> Result<[u8; 64], Error> {
-    let mut hasher = IdentityHasher::new(domain, &[], bytes.len())?;
+    let mut hasher = IdentityHasher::local(domain, &[], bytes.len())?;
     hasher.absorb(bytes)?;
     hasher.finish()
 }

@@ -1,8 +1,9 @@
 //! Hashes of long byte streams whose sponge one helper holds. The caller
 //! streams the bytes to that helper and waits only for the digest, so the
-//! hashing overlaps its own work and the other streams'. Without helpers the
-//! sponge stays here. Either way the digest equals the one this instance
-//! computes alone, however the bytes are divided.
+//! hashing overlaps its own work and the other streams'. Without helpers, or
+//! for a caller that needs the digest at once, the sponge stays here. Either
+//! way the digest equals the one this instance computes alone, however the
+//! bytes are divided.
 use crate::{Job, Part, Ticket, helpers, session, submit};
 use sha3::{
     Digest, Sha3_512, Shake256,
@@ -122,6 +123,12 @@ impl HashStream {
     /// An empty stream, held by a helper when there are helpers.
     pub fn new(sponge: Sponge) -> Self {
         Self::held(sponge, helpers() > 0)
+    }
+    /// An empty stream that this instance holds. A caller that waits for
+    /// the digest right after its last bytes gains nothing from a helper,
+    /// whose queue and wake would only delay the digest.
+    pub fn local(sponge: Sponge) -> Self {
+        Self::held(sponge, false)
     }
     fn held(sponge: Sponge, remote: bool) -> Self {
         Self {

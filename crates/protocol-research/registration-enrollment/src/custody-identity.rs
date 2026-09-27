@@ -1,6 +1,7 @@
 //! Identities the participant runtime binds into its retained state or
 //! addresses public records by. The module computes them so that the host
-//! carries no hash of its own.
+//! carries no hash of its own, and computes them here, since the host waits
+//! for each identity right after its last bytes.
 
 use crate::Error;
 use registration_credentials::{
@@ -44,7 +45,7 @@ impl State {
     pub fn begin(&mut self, purpose: u32, length: usize) -> Result<(), Error> {
         self.output = [0; 64];
         self.hash = None;
-        let hash = IdentityHasher::new(domain(purpose).ok_or(Error::Shape)?, &[], length)
+        let hash = IdentityHasher::local(domain(purpose).ok_or(Error::Shape)?, &[], length)
             .map_err(|_| Error::Shape)?;
         self.hash = Some(hash);
         Ok(())

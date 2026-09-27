@@ -114,8 +114,8 @@ const payload = (length: number) =>
                   .update(String(length))
                   .digest(),
           );
-// Lengths below, at and above the module's input buffer and a stream's
-// batch, and several whole sends.
+// Lengths below, at and above the module's input buffer, and several whole
+// buffers.
 const payloadLengths = [
     0,
     1,
@@ -162,7 +162,7 @@ const failureOf = (call: () => unknown) => {
     return undefined;
 };
 
-describe('participant helpers', () => {
+describe('participant custody identities', () => {
     it('encode the custody identity framing as its pinned independent vector', () => {
         // SHAKE256 over the empty public-polynomial identity, computed outside
         // the module.
@@ -178,110 +178,20 @@ describe('participant helpers', () => {
         );
     });
 
-    it('return the identities the worker computes alone, which the independent framing yields', async () => {
-        const expected = payloadLengths.map((length) =>
-            independentIdentity(rootDomain, payload(length)),
-        );
-        const alone = await instantiateParticipantKernel(
+    it('return the identities the independent framing yields', async () => {
+        const { kernel } = await instantiateParticipantKernel(
             participantModule,
             noParallelHelpers,
         );
         expect(
             payloadLengths.map((length) =>
-                custodyIdentity(
-                    alone.kernel,
-                    custodyPurpose.root,
-                    payload(length),
-                ),
+                custodyIdentity(kernel, custodyPurpose.root, payload(length)),
             ),
-        ).toEqual(expected);
-        const helpers = await startParallelHelpers(
-            participantModule,
-            helperPorts(3),
-            true,
+        ).toEqual(
+            payloadLengths.map((length) =>
+                independentIdentity(rootDomain, payload(length)),
+            ),
         );
-        expect(helpers.count).toBe(3);
-        try {
-            const { kernel } = await instantiateParticipantKernel(
-                participantModule,
-                helpers,
-            );
-            expect(
-                payloadLengths.map((length) =>
-                    custodyIdentity(
-                        kernel,
-                        custodyPurpose.root,
-                        payload(length),
-                    ),
-                ),
-            ).toEqual(expected);
-        } finally {
-            helpers.stop();
-        }
-    });
-
-    it('end the call whose job failed, and its instance refuses every later call', async () => {
-        const helpers = await startParallelHelpers(
-            participantModule,
-            helperPorts(2),
-            false,
-        );
-        expect(helpers.count).toBe(2);
-        // Every job names a kind no helper runs.
-        const failing: ParallelHelpers = {
-            ...helpers,
-            imports: (memory) => {
-                const imports = helpers.imports(memory) as Record<
-                    string,
-                    (...values: number[]) => number
-                >;
-                return {
-                    ...imports,
-                    submit: (_kind: number, ...values: number[]) =>
-                        imports.submit(0xffff, ...values),
-                };
-            },
-        };
-        try {
-            const { kernel } = await instantiateParticipantKernel(
-                participantModule,
-                failing,
-            );
-            const failure = failureOf(() =>
-                custodyIdentity(kernel, custodyPurpose.root, payload(200_000)),
-            );
-            expect(failure).toBeInstanceOf(ResourceFailure);
-            expect((failure as Error).message).toBe(
-                'A participant helper failed.',
-            );
-            expect(
-                failureOf(() => kernel.custody_identity_input_capacity()),
-            ).toBe(failure);
-            expect(
-                failureOf(() =>
-                    kernel.custody_identity_begin(custodyPurpose.root, 0),
-                ),
-            ).toBe(failure);
-        } finally {
-            helpers.stop();
-        }
-        // A later operation starts fresh helpers and a fresh instance.
-        const fresh = await startParallelHelpers(
-            participantModule,
-            helperPorts(2),
-            false,
-        );
-        try {
-            const { kernel } = await instantiateParticipantKernel(
-                participantModule,
-                fresh,
-            );
-            expect(
-                custodyIdentity(kernel, custodyPurpose.root, payload(200_000)),
-            ).toEqual(independentIdentity(rootDomain, payload(200_000)));
-        } finally {
-            fresh.stop();
-        }
     });
 });
 
@@ -303,15 +213,15 @@ type JoinedPoll = Readonly<{
     definition: Uint8Array;
     signature: Uint8Array;
 }>;
-const enroll = async (
-    helpers: ParallelHelpers,
+type ParticipantInstance = Awaited<
+    ReturnType<typeof instantiateParticipantKernel>
+>;
+// Validates and prepares an enrollment in the instance.
+const prepare = (
+    { kernel, handlers }: ParticipantInstance,
     name: string,
     joining?: JoinedPoll,
-): Promise<Enrollment> => {
-    const { kernel, handlers } = await instantiateParticipantKernel(
-        participantModule,
-        helpers,
-    );
+): Enrollment => {
     const username = new TextEncoder().encode(name);
     const input =
         joining === undefined
@@ -363,6 +273,16 @@ const enroll = async (
         requests,
     };
 };
+const enroll = async (
+    helpers: ParallelHelpers,
+    name: string,
+    joining?: JoinedPoll,
+) =>
+    prepare(
+        await instantiateParticipantKernel(participantModule, helpers),
+        name,
+        joining,
+    );
 const manifest = (
     await createCanonicalManifest({
         question: 'Which option leads?',
@@ -532,6 +452,59 @@ describe('participant helpers with registration work', () => {
                 ),
             ).toEqual(verdictAlone);
         }
+    });
+
+    it('end the call whose job failed, and its instance refuses every later call', async () => {
+        const helpers = await startParallelHelpers(
+            participantModule,
+            helperPorts(2),
+            false,
+        );
+        expect(helpers.count).toBe(2);
+        // Every job names a kind no helper runs.
+        const failing: ParallelHelpers = {
+            ...helpers,
+            imports: (memory) => {
+                const imports = helpers.imports(memory) as Record<
+                    string,
+                    (...values: number[]) => number
+                >;
+                return {
+                    ...imports,
+                    submit: (_kind: number, ...values: number[]) =>
+                        imports.submit(0xffff, ...values),
+                };
+            },
+        };
+        try {
+            const instance = await instantiateParticipantKernel(
+                participantModule,
+                failing,
+            );
+            const failure = failureOf(() => prepare(instance, 'Organizer'));
+            expect(failure).toBeInstanceOf(ResourceFailure);
+            expect((failure as Error).message).toBe(
+                'A participant helper failed.',
+            );
+            expect(
+                failureOf(() =>
+                    instance.kernel.custody_identity_input_capacity(),
+                ),
+            ).toBe(failure);
+            expect(
+                failureOf(() =>
+                    instance.kernel.custody_identity_begin(
+                        custodyPurpose.root,
+                        0,
+                    ),
+                ),
+            ).toBe(failure);
+        } finally {
+            helpers.stop();
+        }
+        // A later operation's fresh helpers and instance complete the
+        // enrollment.
+        await withHelpers((fresh) => enroll(fresh, 'Organizer'));
     });
 });
 
