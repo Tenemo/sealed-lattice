@@ -282,7 +282,8 @@ impl SecondOracle {
     pub fn finish_commitment(&mut self) {
         self.rows.take().unwrap().close(&mut self.tree);
     }
-    pub fn openings(
+    /// The oracle's rows at the leaves, in their order.
+    pub fn opened_rows(
         &self,
         witness: &Witness,
         inverses: &[Element],
@@ -346,11 +347,7 @@ impl SecondOracle {
                 data[*output].extend(field::encode(value));
             }
         }
-        indices
-            .iter()
-            .zip(data)
-            .map(|(index, data)| self.tree.opening(*index, &data))
-            .collect()
+        data
     }
 }
 pub(crate) fn coset(index: usize) -> u128 {
@@ -513,7 +510,8 @@ impl FirstOracle {
     pub fn finish_commitment(&mut self) {
         self.rows.take().unwrap().close(&mut self.tree);
     }
-    pub fn openings(&self, witness: &Witness, indices: &[usize]) -> Vec<Vec<u8>> {
+    /// The oracle's rows at the leaves, in their order.
+    pub fn opened_rows(&self, witness: &Witness, indices: &[usize]) -> Vec<Vec<u8>> {
         let columns = witness.relation.columns();
         let mut data = vec![Vec::with_capacity(witness.relation.first_width()); indices.len()];
         let transform = Transform::cached(SYSTEMATIC);
@@ -560,10 +558,6 @@ impl FirstOracle {
                 data[*output].extend(field::encode(value));
             }
         }
-        indices
-            .iter()
-            .zip(data)
-            .map(|(index, data)| self.tree.opening(*index, &data))
-            .collect()
+        data
     }
 }

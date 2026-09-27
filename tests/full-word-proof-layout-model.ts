@@ -9,6 +9,10 @@ import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
+// Each tree draws one 512-bit seed and expands every leaf's salt from it and
+// the leaf's index through SHAKE256.
+export const merkleSaltSeedBytes = 64n;
+
 const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
@@ -34,7 +38,8 @@ const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     let maximumProofBytes = headerBytes;
     let maximumMultiproofBytes = headerBytes;
     let maximumCachedNodes = 0;
-    let totalLeaves = 3n * BigInt(agreement.domainSize);
+    // The three oracle trees, then one tree for each folded layer.
+    let treeCount = 3n;
     const openingGroup = (length: number, width: bigint) =>
         4n +
         BigInt(Math.min(2 * agreement.queries, length)) *
@@ -56,7 +61,7 @@ const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
     for (let length = agreement.domainSize / 2; length > 2; length /= 2) {
         maximumProofBytes += openingGroup(length, extensionBytes);
         maximumMultiproofBytes += multiproofGroup(length, extensionBytes);
-        totalLeaves += BigInt(length);
+        treeCount++;
     }
     return {
         foldCount,
@@ -69,9 +74,10 @@ const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
         proverInterpolationPoints: agreement.codeDimension,
         expandedFirstOracleBytes: firstWidth * BigInt(agreement.domainSize),
         expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
-        leafSaltBytes: totalLeaves * saltBytes,
+        treeCount,
+        saltSeedBytes: treeCount * merkleSaltSeedBytes,
         minimumRequestedRandomBytes:
-            totalLeaves * saltBytes +
+            treeCount * merkleSaltSeedBytes +
             BigInt(foldCount + 3) * saltBytes +
             BigInt(wordCount + 1) *
                 randomFieldBytes(BigInt(agreement.maskDimension)) +

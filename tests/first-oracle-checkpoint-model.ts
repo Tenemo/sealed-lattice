@@ -1,5 +1,6 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { merkleSaltSeedBytes } from '#tests/full-word-proof-layout-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
@@ -20,7 +21,7 @@ export const compileFirstOracleCheckpointCensus = (
             unitBytes: 16n,
         },
         { name: 'degree mask', units: 2n * systematic, unitBytes: 48n },
-        { name: 'leaf salts', units: domain, unitBytes: 128n },
+        { name: 'leaf salt seed', units: 1n, unitBytes: merkleSaltSeedBytes },
         { name: 'partial row hashes', units: domain, unitBytes: 25n * 8n + 1n },
     ].map((field) => {
         const unitsPerRecord = 16384n / field.unitBytes;

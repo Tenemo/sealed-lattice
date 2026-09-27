@@ -25,13 +25,15 @@ describe('full word-proof layout and theorem operands', () => {
             compileLinkedReleaseWordProofLayout(completionProfile())
                 .residentPublicOperatorBytes,
         ).toBe(2n * 65536n * 48n);
+        // One 64-byte salt seed for each of the three oracle trees and the
+        // sixteen folded layers' trees, and twenty 128-byte message salts.
+        expect(layout.treeCount).toBe(19n);
+        expect(layout.saltSeedBytes).toBe(19n * 64n);
         expect(layout.minimumRequestedRandomBytes).toBe(
-            layout.leafSaltBytes +
-                20n * 128n +
-                (33n + 96n + 66n + 50n) * 65536n,
+            19n * 64n + 20n * 128n + (33n + 96n + 66n + 50n) * 65536n,
         );
         expect(layout.minimumRequestedRandomBytes).toBeGreaterThan(
-            layout.leafSaltBytes + layout.proverMaskBytes,
+            layout.saltSeedBytes + layout.proverMaskBytes,
         );
         expect(layout.maximumMultiproofBytes).toBeGreaterThan(8_388_608n);
         expect(layout.maximumMultiproofBytes).toBeLessThan(

@@ -10,7 +10,7 @@ describe('complete first-oracle proof checkpoint', () => {
             359n * 65536n * 2n,
             360n * 1409n * 16n,
             131072n * 48n,
-            262144n * 128n,
+            64n,
             262144n * 201n,
         ]);
         let bytes = 0n;

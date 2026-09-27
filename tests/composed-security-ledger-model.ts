@@ -18,6 +18,13 @@ import {
 } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
+    compileBallotWordProofLayout,
+    compileFullWordProofLayout,
+    compileLinkedReleaseWordProofLayout,
+    compileRegistrationWordProofLayout,
+    merkleSaltSeedBytes,
+} from '#tests/full-word-proof-layout-model.js';
+import {
     operationSeedBytes,
     operationSeedCount,
 } from '#tests/operation-seed-model.js';
@@ -118,14 +125,31 @@ const dyadic = (numerator: bigint, denominator: bigint): bigint => {
     );
 };
 
-// Smallest integer r with value <= r^2, for the small counts the ledger takes
-// square roots of.
+// Smallest integer r with value <= r^2. Newton's iteration from above
+// descends to the integer square root's floor.
 const ceilingSquareRoot = (value: bigint) => {
-    assert.ok(value >= 0n && value <= 1n << 20n);
-    let root = 0n;
-    while (root * root < value) root += 1n;
-    return root;
+    assert.ok(value >= 0n);
+    let root = value;
+    let next = (value + 1n) / 2n;
+    while (next < root) {
+        root = next;
+        next = (root + value / root) / 2n;
+    }
+    return root * root < value ? root + 1n : root;
 };
+
+// The most trees that one honest proof of the profile commits to.
+const maximumTreesPerProof = (profile: SupportedProfile) =>
+    [
+        compileRegistrationWordProofLayout(),
+        compileFullWordProofLayout(profile),
+        compileBallotWordProofLayout(profile),
+        compileLinkedReleaseWordProofLayout(profile),
+    ].reduce(
+        (largest, layout) =>
+            layout.treeCount > largest ? layout.treeCount : largest,
+        0n,
+    );
 
 const power = (bits: bigint) =>
     bits >= statisticalDenominatorBits
@@ -346,6 +370,22 @@ export const profileStatisticalTerms = (
                     (caps.adversaryQueries + 1n) *
                     ceilingSquareRoot(operationSeedCount(profile)),
                 1n << (4n * operationSeedBytes),
+            ),
+        },
+        {
+            // Every tree of an honest proof expands its leaves' salts from
+            // its own uniform seed through the ideal SHAKE256, and nothing
+            // else reads a tree seed. Replacing the salts of the k trees of
+            // every honest proof within the compiler's budget by uniform
+            // salts costs, by the same lemma, at most 4(q+1)*sqrt(k)/2^(s/2).
+            name: 'Merkle salt seed expansion',
+            numerator: dyadic(
+                4n *
+                    (caps.adversaryQueries + 1n) *
+                    ceilingSquareRoot(
+                        caps.honestProofBudget * maximumTreesPerProof(profile),
+                    ),
+                1n << (4n * merkleSaltSeedBytes),
             ),
         },
         {

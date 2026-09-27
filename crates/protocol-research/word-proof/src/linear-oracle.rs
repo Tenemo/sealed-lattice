@@ -442,7 +442,8 @@ impl LinearOracle {
             lookup_weight,
         }
     }
-    pub fn openings(&self, indices: &[usize]) -> Vec<Vec<u8>> {
+    /// The oracle's encoded values at the leaves, in their order.
+    pub fn opened_rows(&self, indices: &[usize]) -> Vec<Vec<u8>> {
         let transform = Transform::cached(SYSTEMATIC);
         let mut data = vec![ZERO; indices.len()];
         for coset in 0..4 {
@@ -466,10 +467,8 @@ impl LinearOracle {
                 data[output] = value;
             }
         }
-        indices
-            .iter()
-            .zip(data)
-            .map(|(index, value)| self.tree.opening(*index, &field::encode(value)))
+        data.into_iter()
+            .map(|value| field::encode(value).to_vec())
             .collect()
     }
 }

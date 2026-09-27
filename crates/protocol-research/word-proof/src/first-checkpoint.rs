@@ -5,7 +5,7 @@ use crate::{
     parameters::*,
     rows::RowShards,
     transcript::Transcript,
-    tree::Tree,
+    tree::{SALT_SEED_BYTES, Tree},
 };
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
 use stateful_sha3::{
@@ -16,7 +16,7 @@ use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub const RECORD_BYTES: usize = 16_384;
-const MAGIC: &[u8; 4] = b"FPC3";
+const MAGIC: &[u8; 4] = b"FPC4";
 const MAXIMUM_ROLE_BYTES: usize = 1024;
 /// Each record is sealed with an AES-GCM tag of this many bytes.
 const TAG_BYTES: usize = 16;
@@ -104,7 +104,7 @@ fn fields(relation: &Relation) -> [(usize, usize); 5] {
         (relation.columns() * SYSTEMATIC, 2),
         ((relation.columns() + 1) * MASKS, 16),
         (MAX_DEGREE + 1, 48),
-        (DOMAIN, 128),
+        (1, SALT_SEED_BYTES),
         (DOMAIN, 201),
     ]
 }
@@ -222,7 +222,7 @@ impl Export {
                     .extend(witness.columns[index / SYSTEMATIC][index % SYSTEMATIC].to_le_bytes()),
                 1 => bytes.extend(first.masks[index / MASKS][index % MASKS].to_le_bytes()),
                 2 => bytes.extend(field::encode(first.degree_mask[index])),
-                3 => bytes.extend(first.tree.salts[index]),
+                3 => bytes.extend(first.tree.seed()),
                 4 => bytes.extend(self.states[index]),
                 _ => unreachable!(),
             }
@@ -248,7 +248,7 @@ pub struct Import {
     columns: Zeroizing<Vec<Vec<u16>>>,
     masks: Zeroizing<Vec<Vec<u128>>>,
     degree_mask: Zeroizing<Vec<Element>>,
-    salts: Zeroizing<Vec<[u8; 128]>>,
+    seed: Zeroizing<[u8; SALT_SEED_BYTES]>,
     hashers: Vec<Sha3_512>,
 }
 impl Import {
@@ -274,7 +274,7 @@ impl Import {
             columns: Zeroizing::new(Vec::new()),
             masks: Zeroizing::new(Vec::new()),
             degree_mask: Zeroizing::new(Vec::new()),
-            salts: Zeroizing::new(Vec::new()),
+            seed: Zeroizing::new([0; SALT_SEED_BYTES]),
             hashers: Vec::new(),
         })
     }
@@ -339,7 +339,7 @@ impl Import {
                     }
                     self.degree_mask.push(value);
                 }
-                3 => self.salts.push(bytes.try_into().unwrap()),
+                3 => self.seed.copy_from_slice(bytes),
                 4 => {
                     let expected_cursor = (crate::tree::leaf_prefix_bytes(self.header.role.len())
                         + 16 * self.header.column)
@@ -380,14 +380,13 @@ impl Import {
         prover.first = Some(FirstOracle {
             masks: std::mem::take(&mut *self.masks),
             degree_mask: std::mem::take(&mut *self.degree_mask),
-            tree: Tree {
-                length: DOMAIN,
-                width: self.relation.first_width(),
-                stage: 0,
-                role: self.header.role,
-                salts: std::mem::take(&mut *self.salts),
-                nodes: vec![[0; 64]; 2 * DOMAIN],
-            },
+            tree: Tree::with_seed(
+                &self.header.role,
+                0,
+                DOMAIN,
+                self.relation.first_width(),
+                self.seed,
+            ),
             rows: Some(RowShards::import(&self.hashers)),
             prefetched: Default::default(),
         });

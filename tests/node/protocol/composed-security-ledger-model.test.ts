@@ -514,6 +514,32 @@ describe('composed security ledger', () => {
         }
     });
 
+    it('charges the seeded Merkle salts their one-way-to-hiding bound', () => {
+        // Three oracle trees and sixteen folded layers' trees, each with a
+        // 512-bit seed, for each of the 2^28 honest proofs the compiler
+        // allows, and 2^80 oracle calls in any experiment within the target.
+        const calls = 1n << 80n;
+        const seeds = 19n << 28n;
+        // 71417^2 = 5,100,387,889 and 71416^2 = 5,100,245,056 bracket
+        // 19 * 2^28 = 5,100,273,664.
+        const root = 71_417n;
+        expect(root * root).toBeGreaterThanOrEqual(seeds);
+        expect((root - 1n) * (root - 1n)).toBeLessThan(seeds);
+        for (const [participantCount, optionCount] of [
+            [3, 2],
+            [10, 10],
+            [20, 20],
+        ] as const) {
+            const term = profileStatisticalTerms(
+                deriveSupportedProfile(participantCount, optionCount),
+            ).find((value) => value.name === 'Merkle salt seed expansion')!;
+            expect(term.numerator).toBe(4n * (calls + 1n) * root);
+            expect(16n * (calls + 1n) * calls * seeds).toBeLessThanOrEqual(
+                term.numerator * term.numerator,
+            );
+        }
+    });
+
     it('charges proof soundness at every hop that relies on it', () => {
         for (const participantCount of [3, 10, 20]) {
             const honest = Array.from(

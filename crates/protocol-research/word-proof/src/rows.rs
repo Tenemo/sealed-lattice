@@ -202,12 +202,12 @@ fn open(input: &[u8]) -> Vec<u8> {
         word(&rest[8..]) as usize,
         word(&rest[12..]) as usize,
     );
-    let salts = &rest[16..];
-    assert!(salts.len() == 128 * count && first + count <= SYSTEMATIC / classes);
+    let seed: &[u8; tree::SALT_SEED_BYTES] = rest[16..].try_into().unwrap();
+    assert!(first + count <= SYSTEMATIC / classes);
     let prefix = tree::leaf_prefix(role, stage);
-    let hashers = salts.chunks_exact(128).enumerate().map(|(offset, salt)| {
-        let row = shard as usize + 4 * classes * (first + offset);
-        tree::leaf_start(&prefix, row, salt.try_into().unwrap(), width)
+    let hashers = (first..first + count).map(|q| {
+        let row = shard as usize + 4 * classes * q;
+        tree::leaf_start(&prefix, row, &tree::salt(seed, row), width)
     });
     extend(session, shard, classes, first, hashers);
     Vec::new()
@@ -373,9 +373,7 @@ impl RowShards {
                 input.extend(&prefix);
                 input.extend((first as u32).to_le_bytes());
                 input.extend((count as u32).to_le_bytes());
-                for q in first..first + count {
-                    input.extend(tree.salts[shard + shards.shards() * q]);
-                }
+                input.extend(tree.seed());
                 tickets.push(submit(&OPEN, Some(shard), &[Part::Bytes(&input)], 0));
             }
         }
@@ -455,7 +453,7 @@ impl RowShards {
             .collect();
         for (shard, ticket) in tickets.into_iter().enumerate() {
             for (q, digest) in ticket.wait().chunks_exact(64).enumerate() {
-                tree.nodes[tree.length + shard + self.shards() * q].copy_from_slice(digest);
+                tree.set_leaf(shard + self.shards() * q, digest);
             }
         }
         self.closed = true;
@@ -549,15 +547,14 @@ mod tests {
         ]
     }
     // The tree whose leaves hash each row's values directly.
-    fn direct_tree(salts: &[[u8; 128]], polynomials: &[Polynomial]) -> Tree {
-        let mut tree = Tree {
-            length: DOMAIN,
-            width: polynomials.len(),
-            stage: 3,
-            role: b"row shards".to_vec(),
-            salts: salts.to_vec(),
-            nodes: vec![[0; 64]; 2 * DOMAIN],
-        };
+    fn direct_tree(seed: &[u8; tree::SALT_SEED_BYTES], polynomials: &[Polynomial]) -> Tree {
+        let mut tree = Tree::with_seed(
+            b"row shards",
+            3,
+            DOMAIN,
+            polynomials.len(),
+            Zeroizing::new(*seed),
+        );
         let prefix = tree.leaf_hash_prefix();
         let mut hashers: Vec<_> = (0..DOMAIN)
             .map(|row| tree.leaf_hasher(row, &prefix))
@@ -589,16 +586,15 @@ mod tests {
         tree.finish();
         tree
     }
-    // The tree's salts without its nodes.
+    // The tree's salt seed without its nodes.
     fn unfinished(tree: &Tree) -> Tree {
-        Tree {
-            length: tree.length,
-            width: tree.width,
-            stage: tree.stage,
-            role: tree.role.clone(),
-            salts: tree.salts.clone(),
-            nodes: vec![[0; 64]; 2 * tree.length],
-        }
+        Tree::with_seed(
+            &tree.role,
+            tree.stage,
+            tree.length,
+            tree.width,
+            Zeroizing::new(*tree.seed()),
+        )
     }
     fn absorb(shards: &mut RowShards, polynomial: &Polynomial) {
         match polynomial {
@@ -614,10 +610,8 @@ mod tests {
     fn shards_hash_the_rows_of_the_direct_tree() {
         let mut state = 0x9e3779b97f4a7c15f39cc0605cedc834u128;
         let polynomials = polynomials(&mut state);
-        let salts: Vec<[u8; 128]> = (0..DOMAIN)
-            .map(|_| std::array::from_fn(|_| sample(&mut state) as u8))
-            .collect();
-        let expected = direct_tree(&salts, &polynomials);
+        let seed = std::array::from_fn(|_| sample(&mut state) as u8);
+        let expected = direct_tree(&seed, &polynomials);
         for classes in [1, 2, 16] {
             let mut tree = unfinished(&expected);
             let mut shards = RowShards::with_classes(classes).opened(&tree);
@@ -627,7 +621,7 @@ mod tests {
             }
             shards.close(&mut tree);
             assert!(!resident(session));
-            assert!(tree.nodes == expected.nodes, "{classes} classes");
+            assert!(tree.root() == expected.root(), "{classes} classes");
         }
         // Rows exported after a polynomial continue where they stopped.
         let mut tree = unfinished(&expected);
@@ -646,7 +640,7 @@ mod tests {
             absorb(&mut shards, polynomial);
         }
         shards.close(&mut tree);
-        assert!(tree.nodes == expected.nodes);
+        assert!(tree.root() == expected.root());
     }
 
     #[test]

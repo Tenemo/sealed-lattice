@@ -1700,8 +1700,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(ballotWordProof.maximumCachedNodeDigestBytes),
                 ],
                 [
-                    'Retained leaf salt bytes',
-                    formatCount(ballotWordProof.leafSaltBytes),
+                    'Retained leaf-salt seed bytes',
+                    formatCount(ballotWordProof.saltSeedBytes),
                 ],
                 [
                     'Prover mask bytes',
@@ -3743,8 +3743,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(fullWordProof.expandedSecondOracleBytes),
                 ],
                 [
-                    'Retained leaf-salt bytes',
-                    formatCount(fullWordProof.leafSaltBytes),
+                    'Retained leaf-salt seed bytes',
+                    formatCount(fullWordProof.saltSeedBytes),
                 ],
                 [
                     'Uniform prover-mask bytes',
@@ -4244,7 +4244,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## First-oracle checkpoint census',
         '',
-        'The complete first-oracle checkpoint retains the actual witness, masks, salts, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. Counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
+        'The complete first-oracle checkpoint retains the actual witness, masks, leaf-salt seed, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. Counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
         '',
         table(
             ['Private field', 'Plaintext bytes', 'Encrypted records'],

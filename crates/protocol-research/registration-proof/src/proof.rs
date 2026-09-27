@@ -134,28 +134,22 @@ impl RegistrationProof {
             .write_all(&field::encode(self.folding.terminal))
             .unwrap();
         let indices = fri::requested(&self.folding.queries, DOMAIN);
-        let openings = self.first.openings(&self.witness, &indices);
-        let payloads: Vec<&[u8]> = openings
-            .iter()
-            .map(|value| &value[4..4 + self.witness.relation.first_width()])
-            .collect();
+        let rows = self.first.opened_rows(&self.witness, &indices);
+        let payloads: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
         self.first
             .tree
             .write_multiproof(&indices, &payloads, output);
-        drop(openings);
-        let openings = self
+        drop(rows);
+        let rows = self
             .second
-            .openings(&self.witness, &self.inverses, &indices);
-        let payloads: Vec<&[u8]> = openings
-            .iter()
-            .map(|value| &value[4..4 + self.witness.relation.second_width()])
-            .collect();
+            .opened_rows(&self.witness, &self.inverses, &indices);
+        let payloads: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
         self.second
             .tree
             .write_multiproof(&indices, &payloads, output);
-        drop(openings);
-        let openings = self.linear.openings(&indices);
-        let payloads: Vec<&[u8]> = openings.iter().map(|value| &value[4..52]).collect();
+        drop(rows);
+        let rows = self.linear.opened_rows(&indices);
+        let payloads: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
         self.linear
             .tree
             .write_multiproof(&indices, &payloads, output);

@@ -6,10 +6,11 @@ use crate::{
     oracles::{FirstOracle, SecondOracle, Witness},
     parameters::*,
     transcript::{self, Transcript},
+    tree::Multiproof,
 };
 use setup_stream_kernel::{PolynomialStream, prover_operator_plan, setup_polynomial_stream};
 use stateful_sha3::{Digest, Sha3_512};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
@@ -49,8 +50,10 @@ pub struct Prover {
     folding: Option<Fri>,
     output_stage: usize,
     output_started: bool,
-    openings: VecDeque<Vec<u8>>,
-    known: BTreeSet<usize>,
+    // The current tree's leaves and rows that its multiproof has yet to
+    // write.
+    rows: VecDeque<(usize, Vec<u8>)>,
+    multiproof: Multiproof,
 }
 impl Prover {
     pub fn profile(&self) -> Profile {
@@ -137,8 +140,8 @@ impl Prover {
             folding: None,
             output_stage: 0,
             output_started: false,
-            openings: VecDeque::new(),
-            known: BTreeSet::new(),
+            rows: VecDeque::new(),
+            multiproof: Multiproof::default(),
         }
     }
     fn begin_polynomial(&mut self, index: usize) -> Result<(), ()> {
@@ -318,57 +321,42 @@ impl Prover {
         } else {
             DOMAIN >> (self.output_stage - 2)
         };
-        if self.openings.is_empty() {
-            self.known.clear();
+        if self.rows.is_empty() {
+            self.multiproof = Multiproof::default();
             let indices = fri::requested(&folding.queries, length);
             let rows = match self.output_stage {
                 0 => self
                     .first
                     .as_ref()
                     .unwrap()
-                    .openings(self.witness.as_ref().unwrap(), &indices),
-                1 => self.second.as_ref().unwrap().openings(
+                    .opened_rows(self.witness.as_ref().unwrap(), &indices),
+                1 => self.second.as_ref().unwrap().opened_rows(
                     self.witness.as_ref().unwrap(),
                     &self.inverses,
                     &indices,
                 ),
-                2 => self.linear.as_ref().unwrap().openings(&indices),
+                2 => self.linear.as_ref().unwrap().opened_rows(&indices),
                 stage => {
                     let layer = &folding.layers[stage - 3];
                     indices
                         .iter()
-                        .map(|index| {
-                            layer
-                                .tree
-                                .opening(*index, &field::encode(layer.values[*index]))
-                        })
+                        .map(|index| field::encode(layer.values[*index]).to_vec())
                         .collect()
                 }
             };
             output.extend((rows.len() as u32).to_le_bytes());
-            self.openings = rows.into();
+            self.rows = indices.into_iter().zip(rows).collect();
             return Ok(());
         }
-        let row = self.openings.pop_front().unwrap();
-        let width = match self.output_stage {
-            0 => self.relation.first_width(),
-            1 => self.relation.second_width(),
-            _ => 48,
+        let (index, row) = self.rows.pop_front().unwrap();
+        let tree = match self.output_stage {
+            0 => &self.first.as_ref().unwrap().tree,
+            1 => &self.second.as_ref().unwrap().tree,
+            2 => &self.linear.as_ref().unwrap().tree,
+            stage => &folding.layers[stage - 3].tree,
         };
-        output.extend(&row[..4 + width + 128]);
-        let index = u32::from_le_bytes(row[..4].try_into().unwrap()) as usize;
-        let mut node = length + index;
-        let mut level = 0;
-        while node > 1 && !self.known.contains(&node) {
-            self.known.insert(node);
-            if self.known.insert(node ^ 1) {
-                output
-                    .extend(&row[4 + width + 128 + 64 * level..4 + width + 128 + 64 * (level + 1)]);
-            }
-            node /= 2;
-            level += 1;
-        }
-        if self.openings.is_empty() {
+        tree.write_record(&mut self.multiproof, index, &row, output);
+        if self.rows.is_empty() {
             match self.output_stage {
                 0 => self.first = None,
                 1 => {
