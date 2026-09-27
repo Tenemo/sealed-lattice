@@ -169,11 +169,10 @@ impl ReleaseCollector {
         if target.ciphertext().is_none() {
             return Err(Error::NoResult);
         }
-        let profile = target.inventory().setup().profile();
-        if target.inventory().setup().inventory().confirmations().len() != profile.participants()
-            || target.inventory().poll().manifest().option_count() != profile.options()
-            || !(1..=profile.options())
-                .contains(&usize::from(target.inventory().poll().top_count()))
+        let profile = target.setup().profile();
+        if target.setup().inventory().confirmations().len() != profile.participants()
+            || target.poll().manifest().option_count() != profile.options()
+            || !(1..=profile.options()).contains(&usize::from(target.poll().top_count()))
         {
             return Err(Error::Context);
         }
@@ -205,7 +204,7 @@ impl ReleaseCollector {
     /// modulo the release modulus and the other modulo the plaintext
     /// modulus.
     pub fn result(&self) -> Result<VerifiedResult, Error> {
-        let profile = self.certificate.target().inventory().setup().profile();
+        let profile = self.certificate.target().setup().profile();
         let threshold = profile.release_threshold();
         let chosen: Vec<_> = self
             .shares
@@ -273,15 +272,9 @@ impl ReleaseCollector {
         let ordered = selected_positions(
             profile,
             &plaintext,
-            usize::from(self.certificate.target().inventory().poll().top_count()),
+            usize::from(self.certificate.target().poll().top_count()),
         )?;
-        let options = self
-            .certificate
-            .target()
-            .inventory()
-            .poll()
-            .manifest()
-            .options();
+        let options = self.certificate.target().poll().manifest().options();
         let identifiers = ordered
             .into_iter()
             .map(|position| options[position].option_identifier().to_owned())

@@ -16,6 +16,8 @@ pub mod poll;
 pub mod registration;
 #[path = "release-signing.rs"]
 pub mod release_signing;
+#[path = "retained-roster.rs"]
+pub mod retained_roster;
 pub mod roster;
 #[path = "roster-authentication.rs"]
 pub mod roster_authentication;
@@ -36,12 +38,16 @@ use foundation::{
     CanonicalItem, RegistrationHeader, hash::StreamingFoundationTupleHash512,
     participant_identity::derive_participant_identity,
 };
+use poll::VerifiedPoll;
+use stateful_sha3::{Digest as _, Sha3_512};
 use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
 use zeroize::Zeroizing;
 
 pub const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
 /// Every participant signature is one ML-DSA-65 signature.
 pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
+/// A tag that keys retained bytes to a credential is this long.
+pub const RETAINED_TAG_BYTES: usize = 64;
 
 /// The jobs this crate defines.
 pub static JOBS: [&parallel_work::Job; 1] = [&registration::session::REGISTRATION];
@@ -149,6 +155,48 @@ impl Credential {
         let (public, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         drop(private);
         public.into_bytes() == self.signing_public
+    }
+
+    /// Keys a result that its owning verifier or evaluator produced to this
+    /// credential's secret seed, under the label of what the bytes are and
+    /// the poll and runtime they belong to. Only the transition that
+    /// consumes the owner's result requests a tag, so a later operation of
+    /// the same participant refuses bytes it did not retain. The tag is
+    /// local custody evidence, not a public capability.
+    pub fn retained_tag(
+        &self,
+        label: &[u8],
+        poll: &VerifiedPoll,
+        bytes: &[u8],
+    ) -> [u8; RETAINED_TAG_BYTES] {
+        let mut hash = Sha3_512::new();
+        hash.update((label.len() as u64).to_le_bytes());
+        hash.update(label);
+        hash.update(self.signing_seed.as_slice());
+        hash.update(poll.identity());
+        hash.update(poll.runtime());
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+        hash.finalize().into()
+    }
+    pub fn check_retained_tag(
+        &self,
+        label: &[u8],
+        poll: &VerifiedPoll,
+        bytes: &[u8],
+        tag: &[u8],
+    ) -> Result<(), Error> {
+        let expected = self.retained_tag(label, poll, bytes);
+        if tag.len() != expected.len()
+            || tag
+                .iter()
+                .zip(expected)
+                .fold(0, |difference, (left, right)| difference | (left ^ right))
+                != 0
+        {
+            return Err(Error::Crypto);
+        }
+        Ok(())
     }
 }
 

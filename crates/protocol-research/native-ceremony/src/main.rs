@@ -9,7 +9,8 @@ mod public_output;
 mod scenario;
 use aggregate::{ballot_keys, final_keys, polynomial_bytes};
 use registration_credentials::{
-    ballot_authentication::{BallotEnvelope, RETAINED_SETUP_TAG_BYTES},
+    RETAINED_TAG_BYTES,
+    ballot_authentication::BallotEnvelope,
     contribution_authentication::{CommitmentInventory, SignedOpening, verify_confirmation},
     foundation::{
         StabilizedDisplayText,
@@ -602,8 +603,27 @@ fn main() {
         &setup,
     )
     .unwrap();
-    let retained_record =
-        &retained_reference[..retained_reference.len() - RETAINED_SETUP_TAG_BYTES];
+    let retained_record = &retained_reference[..retained_reference.len() - RETAINED_TAG_BYTES];
+    // The setup verifier's result comes back for the same inventory from the
+    // reference the participant's credential keyed, as a later visit restores
+    // it instead of verifying every opening again.
+    let restore = |credential: &registration_credentials::Credential, retained: &[u8]| {
+        setup_aggregate::verified::SetupAggregator::new(setup.inventory().clone())
+            .unwrap()
+            .restore(credential, &poll, retained)
+    };
+    let restored = restore(&enrollments[0].credential, &retained_reference).unwrap();
+    assert_eq!(
+        restored.inventory().identity(),
+        setup.inventory().identity()
+    );
+    assert_eq!(restored.polynomials().len(), setup.polynomials().len());
+    for (left, right) in restored.polynomials().iter().zip(setup.polynomials()) {
+        assert_eq!(
+            (left.index(), left.bytes(), left.digest()),
+            (right.index(), right.bytes(), right.digest())
+        );
+    }
     let inputs =
         setup_aggregate::RetainedSetupInputs::parse(profile, retained_record, inventory.identity())
             .unwrap();
@@ -656,7 +676,11 @@ fn main() {
             )
             .is_err()
         );
+        assert!(restore(&enrollments[0].credential, reference).is_err());
     }
+    // Another participant's credential restores nothing from this one's
+    // reference.
+    assert!(restore(&enrollments[1].credential, &retained_reference).is_err());
     // The last position contributes nothing. Its owner comes only from the
     // setup reference its own credential keyed, never from an opening, and a
     // contributor's never from its reference alone.
@@ -676,7 +700,7 @@ fn main() {
     )
     .unwrap();
     let (outsider_record, outsider_tag) =
-        outsider_reference.split_at(outsider_reference.len() - RETAINED_SETUP_TAG_BYTES);
+        outsider_reference.split_at(outsider_reference.len() - RETAINED_TAG_BYTES);
     let outsider_owner = enrollments[outsider]
         .credential
         .retain_setup_ballot_owner(

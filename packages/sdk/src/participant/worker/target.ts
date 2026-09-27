@@ -24,7 +24,7 @@ import { moduleChunkBytes, readKernel, writeChunkInput } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
-import { readFinalAggregate } from './setup.js';
+import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import { namespacedName } from './storage.js';
 import {
     decodeTargetState,
@@ -40,6 +40,10 @@ import type { TargetState } from './target-state.js';
 // evaluates again and must reproduce the retained body. The values the
 // evaluation spills are public work in their own database, which each
 // evaluation clears first; the engine checks every value it reads back.
+// The evaluated target, keyed to the credential, lives in another database
+// of the participant's origin, from which release and result restore it
+// instead of evaluating again; a missing or refused copy only means
+// evaluating again.
 
 const coinBytes = 32;
 const listedEntryBytes = 2 + 64;
@@ -47,6 +51,8 @@ const unusedWord = 0xff_ff_ff_ff;
 export const completionDirectory = 'completion/';
 const evaluationDatabase = 'sealed-lattice-public-evaluation';
 const evaluationStore = 'values';
+const evaluatedTargetDatabase = 'sealed-lattice-evaluated-target';
+const evaluatedTargetStore = 'target';
 
 // The own ballot's status in the target, by the finality work's code.
 const ballotStatuses = ['not cast', 'late', 'included', 'omitted'] as const;
@@ -253,16 +259,18 @@ const beginClassification = async (
             kernel.ballot_classification_key_begin(index) !== 0
         )
             throw new Error('The ballot classifier refused its key.');
-        await readFinalAggregate(context, index, (_offset, bytes) => {
-            if (
-                kernel.ballot_classification_key_chunk(
-                    classifierInput(context, bytes),
-                ) !== 0
-            )
+        await deliverFinalAggregate(context, async () => {
+            await readFinalAggregate(context, index, (_offset, bytes) => {
+                if (
+                    kernel.ballot_classification_key_chunk(
+                        classifierInput(context, bytes),
+                    ) !== 0
+                )
+                    throw new PublicInputFailure('A ballot key was refused.');
+            });
+            if (kernel.ballot_classification_key_finish() !== 0)
                 throw new PublicInputFailure('A ballot key was refused.');
         });
-        if (kernel.ballot_classification_key_finish() !== 0)
-            throw new PublicInputFailure('A ballot key was refused.');
     }
 };
 
@@ -386,6 +394,87 @@ const writeEvaluationStorage = async (
     await done;
 };
 
+// Runs one request on the evaluated-target store in its own transaction.
+const evaluatedTargetRequest = async <Value>(
+    namespace: string,
+    mode: IDBTransactionMode,
+    run: (store: IDBObjectStore) => IDBRequest<Value>,
+) => {
+    const opened = indexedDB.open(
+        namespacedName(evaluatedTargetDatabase, namespace),
+        1,
+    );
+    opened.onupgradeneeded = () =>
+        opened.result.createObjectStore(evaluatedTargetStore);
+    const database = await request(opened);
+    try {
+        const transaction = database.transaction(evaluatedTargetStore, mode);
+        const done = completion(transaction);
+        const value = await request(
+            run(transaction.objectStore(evaluatedTargetStore)),
+        );
+        await done;
+        return value;
+    } finally {
+        database.close();
+    }
+};
+
+// Retains the target this instance evaluated, keyed to the credential.
+const retainEvaluation = async (context: ProfileContext) => {
+    const { kernel } = context;
+    if (kernel.retain_evaluation() !== 0)
+        throw new Error('The credential refused the evaluated target.');
+    const bytes = readKernel(
+        kernel,
+        kernel.contribution_output_pointer(),
+        kernel.contribution_output_length(),
+    );
+    await evaluatedTargetRequest(context.namespace, 'readwrite', (store) =>
+        store.put(new Blob([new Uint8Array(bytes)]), 0),
+    );
+};
+
+// Discards the retained evaluated target, so that the next visit evaluates
+// the target again.
+export const discardEvaluation = async (context: ProfileContext) => {
+    await evaluatedTargetRequest(context.namespace, 'readwrite', (store) =>
+        store.clear(),
+    );
+};
+
+// Restores the target this participant evaluated earlier from its retained
+// copy, for the verified setup live in this instance. A copy that cannot be
+// read or that the module refuses is discarded. Returns whether the target
+// was restored.
+const restoreEvaluation = async (context: ProfileContext) => {
+    const value = await evaluatedTargetRequest<unknown>(
+        context.namespace,
+        'readonly',
+        (store) => store.get(0),
+    );
+    if (!(value instanceof Blob)) return false;
+    const bytes = await value.arrayBuffer().then(
+        (buffer) => new Uint8Array(buffer),
+        () => undefined,
+    );
+    const { kernel } = context;
+    let restored =
+        bytes !== undefined && kernel.restore_evaluation(0, bytes.length) === 0;
+    for (
+        let offset = 0;
+        restored && bytes !== undefined && offset < bytes.length;
+        offset += moduleChunkBytes
+    ) {
+        const chunk = bytes.subarray(offset, offset + moduleChunkBytes);
+        sessionInput(context, chunk);
+        restored = kernel.restore_evaluation(1, chunk.length) === 0;
+    }
+    restored &&= kernel.restore_evaluation(2, 0) === 0;
+    if (!restored) await discardEvaluation(context);
+    return restored;
+};
+
 const readStoredChunk = async (
     storage: IDBDatabase,
     node: number,
@@ -488,15 +577,17 @@ const evaluate = async (
             for (let ordinal = loaded; ordinal < keyCount; ordinal++) {
                 const [index] = words(evaluationCommand(context, 11));
                 if (index !== unusedWord)
-                    await deliverEvaluationInput(
-                        context,
-                        (accept) =>
-                            readFinalAggregate(
-                                context,
-                                index,
-                                (_offset, bytes) => accept(bytes),
-                            ),
-                        'An evaluation key was refused.',
+                    await deliverFinalAggregate(context, () =>
+                        deliverEvaluationInput(
+                            context,
+                            (accept) =>
+                                readFinalAggregate(
+                                    context,
+                                    index,
+                                    (_offset, bytes) => accept(bytes),
+                                ),
+                            'An evaluation key was refused.',
+                        ),
                     );
             }
             if (author !== unusedWord) {
@@ -601,7 +692,7 @@ const commitTarget = async (
 // usable and how many usable ballots were valid. The completed close must be
 // restored first, after the owning setup verifier verified the complete setup
 // in this instance.
-export const evaluateClosedTarget = async (
+const evaluateClosedTarget = async (
     context: ProfileContext,
     relay: PublicRelay,
 ) => {
@@ -625,6 +716,30 @@ export const evaluateClosedTarget = async (
     };
 };
 
+// The target this participant evaluated earlier, restored from its retained
+// copy, or else the target evaluated now from the public close records and
+// retained. The completed close and the verified setup must be restored in
+// this instance first. Returns the target body and whether it was restored.
+export const restoreOrEvaluateTarget = async (
+    context: ProfileContext,
+    relay: PublicRelay,
+) => {
+    if (await restoreEvaluation(context)) {
+        const { kernel } = context;
+        return {
+            body: readKernel(
+                kernel,
+                kernel.evaluation_target_body_pointer(),
+                kernel.evaluation_target_body_length(),
+            ),
+            restored: true,
+        };
+    }
+    const { body } = await evaluateClosedTarget(context, relay);
+    await retainEvaluation(context);
+    return { body, restored: false };
+};
+
 // Evaluates the target from the public close records and signs this
 // participant's target vote. The owning setup verifier must have verified
 // the complete setup in this instance first. Returns the own ballot's status
@@ -638,6 +753,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         context,
         relay,
     );
+    await retainEvaluation(context);
     const finality = finalityCommand(context, 0);
     if (!equalBytes(finality.subarray(1), body))
         throw new Error('The finality work names another target.');

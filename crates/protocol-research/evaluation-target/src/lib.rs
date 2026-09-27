@@ -5,6 +5,12 @@ mod browser;
 pub fn verified_browser_target() -> Option<std::sync::Arc<target::VerifiedEvaluationTarget>> {
     browser::verified_target()
 }
+/// Takes a target restored from the participant's retained copy while this
+/// instance holds no target and runs no evaluation.
+#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+pub fn restore_browser_target(target: target::VerifiedEvaluationTarget) -> bool {
+    browser::restore_target(target)
+}
 #[cfg(all(target_arch = "wasm32", feature = "browser"))]
 pub fn verified_browser_release_context() -> Option<std::sync::Arc<release::ReleaseContext>> {
     completion_browser::verified_context()

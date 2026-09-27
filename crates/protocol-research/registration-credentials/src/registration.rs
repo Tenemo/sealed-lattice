@@ -6,8 +6,11 @@ use registration_proof::statement;
 use registration_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
 use sha3::{Digest, Sha3_512};
 
+#[path = "retained-registration.rs"]
+mod retained;
 #[path = "registration-session.rs"]
 pub mod session;
+pub use retained::RETAINED_REGISTRATION_BYTES;
 
 /// A registration public key: a sign byte and a share-modulus magnitude for
 /// each coefficient.
@@ -30,6 +33,22 @@ impl VerifiedRegistration {
     }
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
+    }
+    /// The registration verifier's result as a retained roster keeps it:
+    /// the accepted header, body digest and proof hash, and the key whose
+    /// hash that header names.
+    pub(crate) fn restored(
+        header: RegistrationHeader,
+        body_digest: [u8; 64],
+        proof_hash: [u8; 64],
+        public_key: Vec<u8>,
+    ) -> Self {
+        Self {
+            header,
+            body_digest,
+            proof_hash,
+            public_key,
+        }
     }
     /// A record with only the verified header and body digest that a roster
     /// proposal reads; it carries no key or registration proof.

@@ -201,24 +201,58 @@ pub fn run(
             ))
         })
         .collect();
+    // Each participant's later visit restores the target from the copy its
+    // credential keyed, without the barrier or classifications that only
+    // target signing reads, and from no other copy; the certificate, the
+    // releases and the result below take the restored target.
+    let evaluated = target;
+    let retained = evaluated.retain(&enrollments[0].credential).unwrap();
+    let restore = |credential: &Credential, retained: &[u8]| {
+        evaluation_target::target::VerifiedEvaluationTarget::restore(
+            credential,
+            poll.clone(),
+            setup.clone(),
+            retained,
+        )
+    };
+    let target = Arc::new(restore(&enrollments[0].credential, &retained).unwrap());
+    assert_eq!(
+        (target.body(), target.identity(), target.ciphertext()),
+        (
+            evaluated.body(),
+            evaluated.identity(),
+            evaluated.ciphertext()
+        )
+    );
+    assert!(target.classified().is_none());
+    assert!(target.retain(&enrollments[0].credential).is_err());
+    assert!(restore(&enrollments[1].credential, &retained).is_err());
+    for position in [0, 4, 8, retained.len() / 2, retained.len() - 1] {
+        let mut changed = retained.clone();
+        changed[position] ^= 1;
+        assert!(restore(&enrollments[0].credential, &changed).is_err());
+    }
+    assert!(restore(&enrollments[0].credential, &retained[..retained.len() - 1]).is_err());
     let mut collector = CertificateCollector::new(target.clone());
     assert_eq!(collector.threshold(), profile.inventory_threshold());
     assert!(collector.certificate().is_err());
     assert_eq!(statuses.len(), enrollments.len());
+    // Target signing reads the barrier, which only the evaluated target has.
+    assert!(FinalityWork::new(owners[0].clone(), target.clone()).is_err());
     for (position, status) in statuses {
-        let work = FinalityWork::new(owners[position].clone(), target.clone()).unwrap();
+        let work = FinalityWork::new(owners[position].clone(), evaluated.clone()).unwrap();
         assert_eq!(
             work.ballot_status(&enrollments[position].credential),
             status
         );
     }
     for (position, credential, status) in &forks {
-        let work = FinalityWork::new(owners[*position].clone(), target.clone()).unwrap();
+        let work = FinalityWork::new(owners[*position].clone(), evaluated.clone()).unwrap();
         assert_eq!(work.ballot_status(credential), *status);
     }
     for (ordinal, &position) in signers.iter().enumerate() {
         let owner = owners[position].clone();
-        let work = FinalityWork::new(owner, target.clone()).unwrap();
+        let work = FinalityWork::new(owner, evaluated.clone()).unwrap();
         let mut wrong = work.body().to_vec();
         wrong[0] ^= 1;
         assert!(

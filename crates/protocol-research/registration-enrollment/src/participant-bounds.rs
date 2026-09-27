@@ -14,8 +14,9 @@ use registration_credentials::{
     contribution_commitment::{self, BODY_HEADER_BYTES, SALT_BYTES},
     foundation::{MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader},
     poll::MAXIMUM_POLL_BYTES,
-    registration::KEY_BYTES,
+    registration::{KEY_BYTES, RETAINED_REGISTRATION_BYTES},
     release_signing::{self, RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES},
+    retained_roster::retained_roster_bytes,
     roster::{MAXIMUM_PROPOSAL_BYTES, proposal_bytes},
     target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_VOTE_BYTES},
 };
@@ -48,6 +49,7 @@ pub fn limits() -> Vec<u64> {
         setup_witness::registration::SEALED_KEY_BYTES,
         SEALED_SIGNING_SEED_BYTES,
         MAXIMUM_PROPOSAL_BYTES,
+        RETAINED_REGISTRATION_BYTES,
         SALT_BYTES,
         BODY_HEADER_BYTES,
         PROOF_HEADER_BYTES,
@@ -89,6 +91,7 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         participants,
         profile.options(),
         proposal_bytes(participants),
+        retained_roster_bytes(participants),
         profile.setup_polynomials(),
         setup_relation(profile).columns(),
         profile.setup_statement_length(),
@@ -176,12 +179,12 @@ mod tests {
     #[test]
     fn records_have_their_declared_lengths() {
         let limits = limits();
-        assert_eq!(limits.len(), 35);
+        assert_eq!(limits.len(), 36);
         for profile in [Profile::new(3, 2).unwrap(), Profile::new(20, 20).unwrap()] {
             let bounds = profile_bounds(profile);
-            let checkpoints = bounds[21] as usize;
-            let polynomials = bounds[22 + checkpoints] as usize;
-            assert_eq!(bounds.len(), 23 + checkpoints + 3 * polynomials);
+            let checkpoints = bounds[22] as usize;
+            let polynomials = bounds[23 + checkpoints] as usize;
+            assert_eq!(bounds.len(), 24 + checkpoints + 3 * polynomials);
             assert_eq!(
                 bounds[..2],
                 [profile.participants() as u64, profile.options() as u64]

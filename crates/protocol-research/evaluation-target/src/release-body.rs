@@ -31,22 +31,16 @@ impl ReleaseContext {
         let envelope = ReleaseEnvelope::decode(self.profile(), &packet[..RELEASE_ENVELOPE_BYTES])
             .map_err(|_| Error::Encoding)?;
         let target = self.certificate().target();
-        let inventory = target.inventory();
-        if envelope.poll() != &inventory.poll().identity()
-            || envelope.inventory() != &inventory.setup().inventory().identity()
+        if envelope.poll() != &target.poll().identity()
+            || envelope.inventory() != &target.setup().inventory().identity()
             || envelope.target() != target.identity()
             || envelope.position() != self.position()
         {
             return Err(Error::Context);
         }
-        let public = inventory
-            .setup()
-            .inventory()
-            .proposal()
-            .proposal()
-            .records()[self.position()]
-        .header()
-        .signing_public;
+        let public = target.setup().inventory().proposal().proposal().records()[self.position()]
+            .header()
+            .signing_public;
         let key = ml_dsa_65::PublicKey::try_from_bytes(public).map_err(|_| Error::Context)?;
         let signature = packet[RELEASE_ENVELOPE_BYTES..].try_into().unwrap();
         if !key.verify(envelope.bytes(), &signature, RELEASE_SIGNATURE_CONTEXT) {
@@ -194,11 +188,10 @@ impl VerifiedReleaseBody {
     }
     pub fn envelope(&self) -> ReleaseEnvelope {
         let target = self.certificate.target();
-        let inventory = target.inventory();
         ReleaseEnvelope::new(
-            inventory.setup().profile(),
-            inventory.poll().identity(),
-            inventory.setup().inventory().identity(),
+            target.setup().profile(),
+            target.poll().identity(),
+            target.setup().inventory().identity(),
             *target.identity(),
             self.position,
             self.length,

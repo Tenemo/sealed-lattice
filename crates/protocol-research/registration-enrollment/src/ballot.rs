@@ -1,10 +1,8 @@
 use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
 use ballot_proof::statement::setup_inputs;
 use registration_credentials::{
-    Credential, Error,
-    ballot_authentication::{
-        BallotEnvelope, ENVELOPE_BYTES, RETAINED_SETUP_TAG_BYTES, RetainedBallotOwner,
-    },
+    Credential, Error, RETAINED_TAG_BYTES,
+    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
     poll::{VerifiedPoll, verify_poll},
     roster::RetainedContributionContext,
 };
@@ -90,7 +88,7 @@ impl BallotWork {
         let (reference, tag) = retained.split_at(
             retained
                 .len()
-                .checked_sub(RETAINED_SETUP_TAG_BYTES)
+                .checked_sub(RETAINED_TAG_BYTES)
                 .ok_or(Error::Shape)?,
         );
         let owner = if contributor {

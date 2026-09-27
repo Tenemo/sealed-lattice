@@ -69,6 +69,11 @@ export const dataKind = {
     setupReference: 10,
     // The setup contributors' confirmations the setup was verified against.
     setupInventory: 11,
+    // This participant's roster verification, keyed to its credential.
+    retainedRoster: 12,
+    // This participant's verification of its own registration, keyed to its
+    // credential.
+    retainedRegistration: 13,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -150,8 +155,8 @@ export const encodeManifest = (
 // Checks the canonical reference inventory: ascending kinds, contiguous
 // chunks of at most one mebibyte, only the last chunk of a kind shorter, and
 // the complete records that the generation requires. The profile's exact
-// proposal, setup reference and setup inventory lengths are checked once it
-// is known.
+// proposal, retained roster, setup reference and setup inventory lengths are
+// checked once it is known.
 const checkReferences = (
     references: readonly RecordReference[],
     generation: number,
@@ -187,6 +192,7 @@ const checkReferences = (
         lengths[dataKind.pollDefinition] === 0 ||
         !exact(dataKind.pollSignature, registration.signatureBytes) ||
         generation >= 2 !== lengths[dataKind.proposal] > 0 ||
+        generation >= 2 !== lengths[dataKind.retainedRoster] > 0 ||
         !exact(
             dataKind.proposalSignature,
             generation >= 3 ? registration.signatureBytes : 0,
@@ -427,7 +433,7 @@ export type RootTransition = Readonly<{
     write?: (transaction: IDBTransaction) => void;
 }>;
 
-export const referenceData = (
+const referenceData = (
     context: ParticipantContext,
     records: readonly Readonly<{ kind: number; bytes: Uint8Array }>[],
 ) => {
@@ -455,6 +461,17 @@ export const referenceData = (
         }
     return references;
 };
+
+// A successor's references: the predecessor's and those of the records it
+// adds, whose kinds the predecessor lacks, in manifest order.
+export const addedReferences = (
+    context: ParticipantContext,
+    references: readonly RecordReference[],
+    records: readonly Readonly<{ kind: number; bytes: Uint8Array }>[],
+) =>
+    [...references, ...referenceData(context, records)].sort(
+        (left, right) => left.kind - right.kind || left.offset - right.offset,
+    );
 
 // Seals the successor root under a fresh key and commits it with its added
 // records only after the exact predecessor authenticates inside the same

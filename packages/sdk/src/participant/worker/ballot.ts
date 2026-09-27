@@ -56,7 +56,11 @@ import {
     readDataKind,
     StoragePending,
 } from './root.js';
-import { readFinalAggregate } from './setup.js';
+import {
+    deliverFinalAggregate,
+    ensureFinalAggregate,
+    readFinalAggregate,
+} from './setup.js';
 import { snapshotParticipant } from './storage.js';
 
 // Creates, retains, signs and delivers a participant's ballot through the
@@ -390,10 +394,12 @@ const startBallotWork = async (session: BallotSession) => {
         const index = kernel.participant_ballot_key_index(ordinal) >>> 0;
         ballotCommand(context, 1, index);
         try {
-            await readFinalAggregate(context, index, (offset, bytes) => {
-                ballotCommand(context, 2, offset, bytes);
+            await deliverFinalAggregate(context, async () => {
+                await readFinalAggregate(context, index, (offset, bytes) => {
+                    ballotCommand(context, 2, offset, bytes);
+                });
+                ballotCommand(context, 3);
             });
-            ballotCommand(context, 3);
         } catch (error) {
             if (
                 error instanceof PublicInputFailure ||
@@ -493,12 +499,18 @@ const importBody = async (session: BallotSession) => {
         throw new Error('The verified ballot changed its envelope.');
 };
 
-// Carries a retained ballot to its signed completion.
-export const completeBallot = async (session: BallotSession) => {
+// Carries a retained ballot to its signed completion. Its keys come from the
+// final aggregate, which the setup is verified again to rewrite when the
+// cache no longer holds it.
+export const completeBallot = async (
+    session: BallotSession,
+    relay: PublicRelay,
+) => {
     const { participant } = session;
     const { context } = participant;
     const generation = () => participant.root.head.generation;
     if (generation() >= ballotPhase.signed) return;
+    await ensureFinalAggregate(participant, relay);
     await startBallotWork(session);
     if (generation() === ballotPhase.locked)
         await commitBallot(session, {

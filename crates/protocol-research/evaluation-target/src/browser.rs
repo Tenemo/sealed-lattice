@@ -467,6 +467,21 @@ thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
 pub(crate) fn verified_target() -> Option<Arc<VerifiedEvaluationTarget>> {
     STATE.with(|state| state.borrow().target.clone())
 }
+pub(crate) fn restore_target(target: VerifiedEvaluationTarget) -> bool {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.target.is_some()
+            || state.context.is_some()
+            || state.session.is_some()
+            || state.incoming.is_some()
+            || !state.classifications.is_empty()
+        {
+            return false;
+        }
+        state.target = Some(Arc::new(target));
+        true
+    })
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn evaluation_target_input_pointer() -> usize {
     STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)

@@ -10,8 +10,8 @@ use ballot_proof::{
     },
 };
 use registration_credentials::{
-    Credential, Error,
-    ballot_authentication::{BallotEnvelope, RETAINED_SETUP_TAG_BYTES, RetainedBallotOwner},
+    Credential, Error, RETAINED_TAG_BYTES,
+    ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage, close_quorum,
         maximum_close_message_bytes,
@@ -119,7 +119,7 @@ pub fn owner_of(
             let reference =
                 registration_enrollment::ballot::retained_setup_reference(credential, poll, setup)
                     .unwrap();
-            let (reference, tag) = reference.split_at(reference.len() - RETAINED_SETUP_TAG_BYTES);
+            let (reference, tag) = reference.split_at(reference.len() - RETAINED_TAG_BYTES);
             credential
                 .retain_setup_ballot_owner(
                     poll,

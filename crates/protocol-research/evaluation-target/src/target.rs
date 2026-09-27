@@ -4,9 +4,13 @@ use ballot_proof::{
     close::{ClosedSlot, VerifiedCloseBarrier},
 };
 use registration_credentials::{
+    Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
-    foundation::{CanonicalItem, CanonicalTuple, hash_foundation_tuple_512},
+    foundation::{
+        CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+        hash_foundation_tuple_512,
+    },
     identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
     target_signing::{
@@ -343,11 +347,19 @@ fn read_ballot(
     ])
 }
 
+const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target/v1";
+const RETAINED_TARGET_MAGIC: &[u8; 4] = b"RET1";
+
 /// Only completed deterministic evaluation (or an accepted set below the
-/// minimum turnout) creates this value. Target signatures and durable handoff
-/// are separate.
+/// minimum turnout) creates this value, or its restoration from the copy the
+/// same participant's credential keyed when it evaluated. Target signatures
+/// and durable handoff are separate.
 pub struct VerifiedEvaluationTarget {
-    inventory: ClassifiedClosedInventory,
+    poll: Arc<VerifiedPoll>,
+    setup: Arc<VerifiedSetupAggregate>,
+    // The classified closed inventory this instance evaluated; a restored
+    // target has none.
+    classified: Option<ClassifiedClosedInventory>,
     body: Vec<u8>,
     identity: [u8; 64],
     ciphertext: Option<Vec<u8>>,
@@ -361,22 +373,11 @@ impl VerifiedEvaluationTarget {
         let body = CanonicalTuple::new(1, 1, fields)
             .encode()
             .map_err(|_| Error::Encoding)?;
-        if body.len() > MAXIMUM_TARGET_BODY_BYTES {
-            return Err(Error::Encoding);
-        }
-        let identity = hash_foundation_tuple_512(
-            TARGET_IDENTITY_DOMAIN,
-            &[CanonicalItem::variable_bytes(&body).map_err(|_| Error::Encoding)?],
-        )
-        .map_err(|_| Error::Encoding)?
-        .into_bytes();
-        let message = TargetMessage::parse(&body, inventory.setup.profile().participants())
-            .map_err(|_| Error::Encoding)?;
-        if message.identity() != &identity {
-            return Err(Error::Encoding);
-        }
+        let identity = target_identity(&body, inventory.setup.profile().participants())?;
         Ok(Self {
-            inventory,
+            poll: inventory.poll.clone(),
+            setup: inventory.setup.clone(),
+            classified: Some(inventory),
             body,
             identity,
             ciphertext,
@@ -391,7 +392,130 @@ impl VerifiedEvaluationTarget {
     pub fn ciphertext(&self) -> Option<&[u8]> {
         self.ciphertext.as_deref()
     }
-    pub fn inventory(&self) -> &ClassifiedClosedInventory {
-        &self.inventory
+    pub fn poll(&self) -> &Arc<VerifiedPoll> {
+        &self.poll
     }
+    pub fn setup(&self) -> &Arc<VerifiedSetupAggregate> {
+        &self.setup
+    }
+    /// The classified closed inventory of an evaluation in this instance.
+    pub fn classified(&self) -> Option<&ClassifiedClosedInventory> {
+        self.classified.as_ref()
+    }
+    /// Keys this target, which this instance evaluated, to the participant's
+    /// credential: its body and ciphertext, so that a later visit of the same
+    /// participant restores it instead of evaluating again.
+    pub fn retain(&self, credential: &Credential) -> Result<Vec<u8>, Error> {
+        if self.classified.is_none() {
+            return Err(Error::Context);
+        }
+        let ciphertext = self.ciphertext.as_deref().unwrap_or_default();
+        let mut bytes = Vec::with_capacity(8 + self.body.len() + ciphertext.len() + 64);
+        bytes.extend(RETAINED_TARGET_MAGIC);
+        bytes.extend((self.body.len() as u32).to_le_bytes());
+        bytes.extend(&self.body);
+        bytes.extend(ciphertext);
+        let tag = credential.retained_tag(RETAINED_TARGET_LABEL, &self.poll, &bytes);
+        bytes.extend(tag);
+        Ok(bytes)
+    }
+    /// Restores the target this participant evaluated from the copy its
+    /// credential keyed, for the verified poll and setup of this instance:
+    /// the body must name both, and the ciphertext must be the one it names,
+    /// or none when it names no evaluation.
+    pub fn restore(
+        credential: &Credential,
+        poll: Arc<VerifiedPoll>,
+        setup: Arc<VerifiedSetupAggregate>,
+        retained: &[u8],
+    ) -> Result<Self, Error> {
+        let split = retained
+            .len()
+            .checked_sub(RETAINED_TAG_BYTES)
+            .ok_or(Error::Encoding)?;
+        let (bytes, tag) = retained.split_at(split);
+        credential
+            .check_retained_tag(RETAINED_TARGET_LABEL, &poll, bytes, tag)
+            .map_err(|_| Error::Context)?;
+        if bytes.len() < 8 || &bytes[..4] != RETAINED_TARGET_MAGIC {
+            return Err(Error::Encoding);
+        }
+        let length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        if length > MAXIMUM_TARGET_BODY_BYTES || bytes.len() < 8 + length {
+            return Err(Error::Encoding);
+        }
+        let (body, ciphertext) = bytes[8..].split_at(length);
+        // The finality message's parser accepts only a canonical target body
+        // of this profile, so its fields are read at their positions.
+        let identity = target_identity(body, setup.profile().participants())?;
+        let limits = CanonicalDecodeLimits {
+            maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
+            maximum_item_count: 9,
+            maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
+            maximum_nesting_depth: 0,
+            ..CanonicalDecodeLimits::default()
+        };
+        let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Encoding)?;
+        let items = &tuple.items;
+        let hash = |index: usize| {
+            items
+                .get(index)
+                .filter(|item| item.item_type() == CanonicalItemType::Hash512)
+                .map(|item| item.canonical_bytes())
+        };
+        if hash(1) != Some(poll.identity().as_slice())
+            || hash(2) != Some(setup.inventory().identity().as_slice())
+        {
+            return Err(Error::Context);
+        }
+        let evaluated = match items.len() {
+            6 => false,
+            9 => true,
+            _ => return Err(Error::Encoding),
+        };
+        let ciphertext = if evaluated {
+            let expected = hash_foundation_tuple_512(
+                "sealed-lattice/evaluation-ciphertext/v1",
+                &[CanonicalItem::variable_bytes(ciphertext).map_err(|_| Error::Encoding)?],
+            )
+            .map_err(|_| Error::Encoding)?
+            .into_bytes();
+            if hash(7) != Some(expected.as_slice())
+                || items[8].canonical_bytes() != (ciphertext.len() as u64).to_le_bytes()
+            {
+                return Err(Error::Context);
+            }
+            Some(ciphertext.to_vec())
+        } else if ciphertext.is_empty() {
+            None
+        } else {
+            return Err(Error::Encoding);
+        };
+        Ok(Self {
+            poll,
+            setup,
+            classified: None,
+            body: body.to_vec(),
+            identity,
+            ciphertext,
+        })
+    }
+}
+
+// A target body's identity, which the finality message it parses as names.
+fn target_identity(body: &[u8], participants: usize) -> Result<[u8; 64], Error> {
+    if body.len() > MAXIMUM_TARGET_BODY_BYTES {
+        return Err(Error::Encoding);
+    }
+    let identity = hash_foundation_tuple_512(
+        TARGET_IDENTITY_DOMAIN,
+        &[CanonicalItem::variable_bytes(body).map_err(|_| Error::Encoding)?],
+    )
+    .map_err(|_| Error::Encoding)?
+    .into_bytes();
+    let message = TargetMessage::parse(body, participants).map_err(|_| Error::Encoding)?;
+    if message.identity() != &identity {
+        return Err(Error::Encoding);
+    }
+    Ok(identity)
 }

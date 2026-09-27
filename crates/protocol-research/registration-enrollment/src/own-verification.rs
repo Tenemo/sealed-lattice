@@ -1,7 +1,7 @@
 use registration_credentials::{
-    Error,
-    poll::{MAXIMUM_POLL_BYTES, verify_poll},
-    registration::{RegistrationVerifier, VerifiedRegistration},
+    Credential, Error,
+    poll::{MAXIMUM_POLL_BYTES, VerifiedPoll, verify_poll},
+    registration::{RETAINED_REGISTRATION_BYTES, RegistrationVerifier, VerifiedRegistration},
 };
 use std::{cell::RefCell, sync::Arc};
 
@@ -13,18 +13,28 @@ const CONTROL_BYTES: usize =
 struct State {
     input: Vec<u8>,
     pending: Option<RegistrationVerifier>,
-    // The option count of the poll that the pending or verified registration
-    // names; no later input can replace it.
+    // The verified poll that the pending or verified registration names, and
+    // its option count; no later input can replace them.
+    poll: Option<VerifiedPoll>,
     options: usize,
+    // The retained copy of an earlier visit's verification, which replaces
+    // the proof once the credential it is keyed to is open.
+    retained: Option<Vec<u8>>,
     verified: Option<Arc<VerifiedRegistration>>,
+    // Whether the verified registration is that retained copy's rather than
+    // this instance's verification.
+    restored: bool,
 }
 impl State {
     fn new() -> Self {
         Self {
             input: vec![0; CONTROL_BYTES],
             pending: None,
+            poll: None,
             options: 0,
+            retained: None,
             verified: None,
+            restored: false,
         }
     }
     fn begin(&mut self, bytes: &[u8]) -> Result<(), Error> {
@@ -58,6 +68,8 @@ impl State {
             &bytes[header_start + header_bytes..],
         )?);
         self.options = poll.manifest().option_count();
+        self.poll = Some(poll);
+        self.retained = None;
         Ok(())
     }
     fn command(&mut self, operation: u32, length: usize) -> Result<(), Error> {
@@ -89,6 +101,13 @@ impl State {
                 self.verified = Some(Arc::new(verified));
                 Ok(())
             }
+            5 if length == RETAINED_REGISTRATION_BYTES => {
+                if self.pending.is_none() || self.retained.is_some() {
+                    return Err(Error::Consumed);
+                }
+                self.retained = Some(self.input[..length].to_vec());
+                Ok(())
+            }
             _ => Err(Error::Shape),
         }
     }
@@ -97,6 +116,46 @@ thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
 
 pub(super) fn verified() -> Option<Arc<VerifiedRegistration>> {
     STATE.with(|state| state.borrow().verified.clone())
+}
+
+/// Restores the participant's own registration from the retained copy the
+/// host delivered in place of the proof, for the credential that the
+/// registration's capsules opened.
+pub(super) fn restore(credential: &Credential) -> Option<Arc<VerifiedRegistration>> {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let state = &mut *state;
+        if state.verified.is_some() {
+            return None;
+        }
+        let retained = state.retained.take()?;
+        let pending = state.pending.take()?;
+        let verified = Arc::new(
+            pending
+                .restore(credential, state.poll.as_ref()?, &retained)
+                .ok()?,
+        );
+        state.verified = Some(verified.clone());
+        state.restored = true;
+        Some(verified)
+    })
+}
+
+/// Keys this instance's verification of the participant's own registration
+/// to its credential. A registration restored from its retained copy is not
+/// retained again.
+pub(super) fn retain(credential: &Credential) -> Option<Vec<u8>> {
+    STATE.with(|state| {
+        let state = state.borrow();
+        if state.restored {
+            return None;
+        }
+        state
+            .verified
+            .as_ref()?
+            .retain(credential, state.poll.as_ref()?)
+            .ok()
+    })
 }
 
 /// The option count of the poll this instance verified the registration of.

@@ -28,6 +28,9 @@ export const kernelFunctions = [
     // The verified poll's option count, or zero before verification.
     'own_registration_option_count',
     'roster_begin',
+    // Restores the retained roster from the begin input and the retained
+    // roster after it.
+    'roster_begin_retained',
     // The registration records the worker may stream at once.
     'roster_open_records',
     'roster_record',
@@ -41,6 +44,12 @@ export const kernelFunctions = [
     'roster_signature_pointer',
     // One when the signature verifies.
     'verify_roster_signature',
+    // Emits the credential-keyed retained roster of a roster verified in
+    // full.
+    'retain_roster',
+    // The module's verification of the participant's own registration,
+    // keyed to the restored credential.
+    'retain_registration',
     'retain_proposal',
     'retained_proposal_identity_pointer',
     'participant_ballot_command',
@@ -79,6 +88,11 @@ export const kernelFunctions = [
     'evaluation_target_ciphertext_length',
     // One when every evaluation step has run.
     'evaluation_target_finished',
+    // The evaluated target keyed to the credential, and its restoration:
+    // zero begins a copy of a length, one appends input bytes and two
+    // restores it.
+    'retain_evaluation',
+    'restore_evaluation',
     'contribution_signing',
     'contribution_output_pointer',
     'contribution_output_length',
@@ -101,6 +115,7 @@ export const kernelFunctions = [
     'setup_input_capacity',
     'setup_chunk_capacity',
     'setup_roster_begin',
+    'setup_roster_begin_retained',
     'setup_roster_record',
     // One when the organizer's proposal verifies.
     'setup_roster_finish',
@@ -117,6 +132,8 @@ export const kernelFunctions = [
     'setup_finish',
     'setup_inventory_pointer',
     'retain_setup',
+    // Restores the verified setup from the retained setup reference.
+    'restore_setup',
     // The identities the runtime binds into its retained state.
     'custody_identity_input_pointer',
     'custody_identity_input_capacity',

@@ -26,7 +26,7 @@ fn read_operand(
     index: usize,
     work: &mut Work,
 ) -> io::Result<VerifiedAggregatePolynomial> {
-    let setup = target.inventory().setup();
+    let setup = target.setup();
     let (length, capacity) = polynomial_bytes(setup.profile(), index)?;
     let mut file = File::open(directory.join(polynomial_name(index)))?;
     if file.metadata()?.len() != length as u64 {
@@ -62,7 +62,7 @@ pub fn verify(
         return Err(refusal("published target differs from recomputation"));
     }
     work.depend(&directory.join("target.bin"))?;
-    let profile = target.inventory().setup().profile();
+    let profile = target.setup().profile();
     let count = profile.participants();
     let mut votes = CertificateCollector::new(target.clone());
     let mut unavailable_votes = Vec::new();

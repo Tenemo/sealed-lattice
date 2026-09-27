@@ -18,8 +18,9 @@ pub enum OwnBallotStatus {
     Omitted,
 }
 
-/// Signing continuation from a genuinely evaluated target. Persistence stays in
-/// the root worker.
+/// Signing continuation from a target this instance evaluated, whose
+/// classified closed inventory it keeps. Persistence stays in the root
+/// worker.
 pub struct FinalityWork {
     owner: Arc<RetainedBallotOwner>,
     target: Arc<VerifiedEvaluationTarget>,
@@ -30,11 +31,11 @@ impl FinalityWork {
         owner: Arc<RetainedBallotOwner>,
         target: Arc<VerifiedEvaluationTarget>,
     ) -> Result<Self, Error> {
-        let inventory = target.inventory();
-        let count = inventory.setup().profile().participants();
-        if owner.poll() != &inventory.poll().identity()
-            || owner.runtime() != &inventory.poll().runtime()
-            || owner.inventory() != &inventory.setup().inventory().identity()
+        let count = target.setup().profile().participants();
+        if target.classified().is_none()
+            || owner.poll() != &target.poll().identity()
+            || owner.runtime() != &target.poll().runtime()
+            || owner.inventory() != &target.setup().inventory().identity()
             || owner.position() >= count
         {
             return Err(Error::Context);
@@ -55,8 +56,16 @@ impl FinalityWork {
     pub fn identity(&self) -> &[u8; 64] {
         self.message.identity()
     }
+    // The close barrier the target was evaluated from, which the constructor
+    // requires.
+    fn barrier(&self) -> &ballot_proof::close::VerifiedCloseBarrier {
+        self.target
+            .classified()
+            .expect("A finality target keeps its classified inventory.")
+            .barrier()
+    }
     pub fn ballot_status(&self, credential: &Credential) -> OwnBallotStatus {
-        let barrier = self.target.inventory().barrier();
+        let barrier = self.barrier();
         let Some((identity, time)) = credential.signed_ballot() else {
             return OwnBallotStatus::NotCast;
         };
@@ -82,7 +91,7 @@ impl FinalityWork {
         if retained_body != self.body() {
             return Err(Error::Context);
         }
-        let barrier = self.target.inventory().barrier();
+        let barrier = self.barrier();
         if barrier.responses().iter().any(|response| {
             response.message().responder() == self.owner.position()
                 && Some(response.message().identity()) != credential.close_response_identity()
@@ -91,7 +100,7 @@ impl FinalityWork {
         }
         credential.sign_target(
             &self.owner,
-            self.target.inventory().setup().inventory().proposal(),
+            self.target.setup().inventory().proposal(),
             &self.message,
             coins,
         )

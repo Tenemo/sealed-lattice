@@ -11,16 +11,17 @@ import {
 } from './bytes.js';
 import { PublicInputFailure, sessionInput } from './context.js';
 import type { ParticipantContext, ProfileContext } from './context.js';
+import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { readKernel } from './kernel.js';
 import { readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
+    addedReferences,
     commitRoot,
     dataKind,
     dataRecordInventory,
     readDataKind,
-    referenceData,
     rootBound,
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
@@ -70,14 +71,16 @@ const recordStep = {
 
 // Streams the proposed registration records into a roster verifier, as many
 // at once as it keeps open, so that their verifications run side by side on
-// the module's helpers. The first refused step stops every record and is
-// thrown once every started record has stopped.
+// the module's helpers. A verifier that restores a retained roster takes
+// each record's header and key alone. The first refused step stops every
+// record and is thrown once every started record has stopped.
 export const streamRegistrations = async (
     relay: PublicRelay,
     recordIds: readonly string[],
     registration: ParticipantLimits['registration'],
     openRecords: number,
     step: (operation: number, position: number, bytes: Uint8Array) => boolean,
+    restoring = false,
 ) => {
     let failure: { error: unknown } | undefined;
     const run = (
@@ -97,11 +100,13 @@ export const streamRegistrations = async (
             registrationPath(id, registrationFile.header),
             registration.maximumHeaderBytes,
         );
-        const signature = await readPublic(
-            relay,
-            registrationPath(id, registrationFile.signature),
-            registration.signatureBytes,
-        );
+        const signature = restoring
+            ? new Uint8Array()
+            : await readPublic(
+                  relay,
+                  registrationPath(id, registrationFile.signature),
+                  registration.signatureBytes,
+              );
         run(
             recordStep.begin,
             position,
@@ -132,19 +137,20 @@ export const streamRegistrations = async (
             new Uint8Array(),
             'A registration key is incomplete.',
         );
-        await streamPublic(
-            relay,
-            registrationPath(id, registrationFile.proof),
-            registration.maximumProofBytes,
-            (bytes) => {
-                run(
-                    recordStep.proof,
-                    position,
-                    bytes,
-                    'A registration proof was refused.',
-                );
-            },
-        );
+        if (!restoring)
+            await streamPublic(
+                relay,
+                registrationPath(id, registrationFile.proof),
+                registration.maximumProofBytes,
+                (bytes) => {
+                    run(
+                        recordStep.proof,
+                        position,
+                        bytes,
+                        'A registration proof was refused.',
+                    );
+                },
+            );
         run(
             recordStep.finish,
             position,
@@ -188,35 +194,39 @@ export type VerifiedProposal = Readonly<{
     position: number;
 }>;
 
-// Streams every proposed registration record into the module's roster
-// verifier. The verified proposal stays live in the module; its body must
-// list exactly the requested records and include this participant.
-const verifyProposalInputs = async (
+// A roster verifier's begin input: the retained poll, its definition and
+// signature, and the record count.
+export const rosterBegin = (
+    context: ParticipantContext,
+    root: AuthenticatedRoot,
+    definition: Uint8Array,
+    definitionSignature: Uint8Array,
+    count: number,
+) =>
+    concatenate(
+        root.manifest.poll,
+        context.runtime,
+        unsigned16(count),
+        unsigned32(definition.length),
+        definition,
+        definitionSignature,
+    );
+
+// Streams the records into the module's roster verifier, which the caller
+// began. The verified proposal stays live in the module; its body must list
+// exactly the requested records and include this participant.
+const finishProposal = async (
     context: ParticipantContext,
     relay: PublicRelay,
-    root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
+    restoring: boolean,
 ): Promise<VerifiedProposal> => {
-    const { kernel, limits, runtime } = context;
-    const registration = limits.registration;
-    if (!validRecordIds(recordIds, limits))
-        throw new PublicInputFailure('The proposed records are invalid.');
-    const begin = concatenate(
-        root.manifest.poll,
-        runtime,
-        unsigned16(recordIds.length),
-        unsigned32(enrollment.definition.length),
-        enrollment.definition,
-        enrollment.definitionSignature,
-    );
-    sessionInput(context, begin);
-    if (kernel.roster_begin(begin.length) !== 0)
-        throw new PublicInputFailure('The proposed poll was refused.');
+    const { kernel, limits } = context;
     await streamRegistrations(
         relay,
         recordIds,
-        registration,
+        limits.registration,
         kernel.roster_open_records(),
         (operation, position, bytes) => {
             sessionInput(context, bytes);
@@ -224,9 +234,14 @@ const verifyProposalInputs = async (
                 kernel.roster_record(operation, position, bytes.length) === 0
             );
         },
+        restoring,
     );
     if (kernel.roster_finish() !== 1)
-        throw new PublicInputFailure('The roster proposal was refused.');
+        throw new PublicInputFailure(
+            restoring
+                ? 'The published registrations are not the retained roster.'
+                : 'The roster proposal was refused.',
+        );
     const body = readKernel(
         kernel,
         kernel.roster_body_pointer(),
@@ -243,6 +258,43 @@ const verifyProposalInputs = async (
         recordIds,
         position,
     };
+};
+
+// Verifies every proposed registration record in the module's roster
+// verifier.
+const verifyProposalInputs = async (
+    context: ParticipantContext,
+    relay: PublicRelay,
+    root: AuthenticatedRoot,
+    enrollment: RestoredEnrollment,
+    recordIds: readonly string[],
+): Promise<VerifiedProposal> => {
+    if (!validRecordIds(recordIds, context.limits))
+        throw new PublicInputFailure('The proposed records are invalid.');
+    const begin = rosterBegin(
+        context,
+        root,
+        enrollment.definition,
+        enrollment.definitionSignature,
+        recordIds.length,
+    );
+    sessionInput(context, begin);
+    if (context.kernel.roster_begin(begin.length) !== 0)
+        throw new PublicInputFailure('The proposed poll was refused.');
+    return finishProposal(context, relay, enrollment, recordIds, false);
+};
+
+// The credential keys the roster the module verified in full, so that later
+// visits restore it from the published headers and keys alone.
+const retainRoster = (context: ParticipantContext) => {
+    const { kernel } = context;
+    if (kernel.retain_roster() !== 0)
+        throw new Error('The credential refused the verified roster.');
+    return readKernel(
+        kernel,
+        kernel.contribution_output_pointer(),
+        kernel.contribution_output_length(),
+    );
 };
 
 const verifySignature = (
@@ -272,21 +324,28 @@ export const proposeRoster = async (
         recordIds,
     );
     if (context.kernel.validate_roster_signer() !== 0) return undefined;
+    const added = [
+        { kind: dataKind.proposal, bytes: proposal.body },
+        { kind: dataKind.retainedRoster, bytes: retainRoster(context) },
+        {
+            kind: dataKind.retainedRegistration,
+            bytes: retainRegistration(context),
+        },
+    ];
     const proposalCoins = crypto.getRandomValues(new Uint8Array(32));
     const locked = await commitRoot(context, root, {
         generation: 2,
         manifest: {
             ...root.manifest,
-            references: [
-                ...root.manifest.references,
-                ...referenceData(context, [
-                    { kind: dataKind.proposal, bytes: proposal.body },
-                ]),
-            ],
+            references: addedReferences(
+                context,
+                root.manifest.references,
+                added,
+            ),
             proposalCoins,
         },
         predecessorRecords: dataRecordInventory(root.manifest),
-        addedData: [{ kind: dataKind.proposal, bytes: proposal.body }],
+        addedData: added,
     });
     return signRoster(context, locked, proposal);
 };
@@ -322,12 +381,9 @@ export const signRoster = async (
         generation: 3,
         manifest: {
             ...manifest,
-            references: [
-                ...manifest.references,
-                ...referenceData(context, [
-                    { kind: dataKind.proposalSignature, bytes: signature },
-                ]),
-            ],
+            references: addedReferences(context, manifest.references, [
+                { kind: dataKind.proposalSignature, bytes: signature },
+            ]),
         },
         predecessorRecords: dataRecordInventory(root.manifest),
         addedData: [{ kind: dataKind.proposalSignature, bytes: signature }],
@@ -363,23 +419,30 @@ export const acceptRoster = async (
     const added = [
         { kind: dataKind.proposal, bytes: proposal.body },
         { kind: dataKind.proposalSignature, bytes: signature },
+        { kind: dataKind.retainedRoster, bytes: retainRoster(context) },
+        {
+            kind: dataKind.retainedRegistration,
+            bytes: retainRegistration(context),
+        },
     ];
     return commitRoot(context, root, {
         generation: 3,
         manifest: {
             ...root.manifest,
-            references: [
-                ...root.manifest.references,
-                ...referenceData(context, added),
-            ],
+            references: addedReferences(
+                context,
+                root.manifest.references,
+                added,
+            ),
         },
         predecessorRecords: dataRecordInventory(root.manifest),
         addedData: added,
     });
 };
 
-// Verifies the retained proposal again from its public records so that the
-// module holds the live signed proposal that contribution generation needs.
+// Restores this participant's roster verification from the retained roster
+// and the published headers and keys, so that the module holds the live
+// signed proposal that contribution generation needs.
 export const reverifyRoster = async (
     context: ParticipantContext,
     relay: PublicRelay,
@@ -391,12 +454,27 @@ export const reverifyRoster = async (
         root.manifest,
         dataKind.proposal,
     );
-    const proposal = await verifyProposalInputs(
+    const recordIds = proposalRecordIds(stored);
+    const begin = rosterBegin(
+        context,
+        root,
+        enrollment.definition,
+        enrollment.definitionSignature,
+        recordIds.length,
+    );
+    const input = concatenate(
+        begin,
+        await readDataKind(context, root.manifest, dataKind.retainedRoster),
+    );
+    sessionInput(context, input);
+    if (context.kernel.roster_begin_retained(begin.length, input.length) !== 0)
+        throw new Error('The credential refused the retained roster.');
+    const proposal = await finishProposal(
         context,
         relay,
-        root,
         enrollment,
-        proposalRecordIds(stored),
+        recordIds,
+        true,
     );
     if (!equalBytes(proposal.body, stored))
         throw new Error('The retained proposal differs from its records.');
@@ -414,9 +492,9 @@ export const reverifyRoster = async (
 
 // The profile the retained roster names: its participant count from the
 // retained proposal and its option count from the poll the module verified.
-// The retained root, proposal, setup reference and setup inventory must meet
-// its bounds. The participant's position is its registration's in the
-// retained proposal.
+// The retained root, proposal, retained roster, setup reference and setup
+// inventory must meet its bounds. The participant's position is its
+// registration's in the retained proposal.
 export const retainedProfile = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
@@ -442,6 +520,8 @@ export const retainedProfile = async (
     if (
         profile === undefined ||
         proposal.length !== profile.proposalBytes ||
+        retainedLength(dataKind.retainedRoster) !==
+            profile.root.retainedRosterBytes ||
         root.plaintext.length + 16 >
             rootBound({ ...context, profile }, root.head.generation) ||
         (setupReference !== 0 &&

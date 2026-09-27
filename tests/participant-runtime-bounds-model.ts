@@ -74,12 +74,19 @@ export const compileParticipantRuntimeProfile = (
             recipientCapsuleBytes: number(enrollment.recipientCapsuleBytes),
             signingCapsuleBytes: number(enrollment.signingCapsuleBytes),
             maximumProposalBytes: number(enrollment.maximumProposalBytes),
+            retainedRegistrationBytes: number(
+                enrollment.retainedRegistrationBytes,
+            ),
         },
         root: {
             maximumRecords: number(custody.maximumRootRecords),
             maximumRootBytes: number(custody.maximumRootBytes),
             setupReferenceBytes: number(custody.setupReferenceBytes),
             setupInventoryBytes: number(custody.setupInventoryBytes),
+            retainedRosterBytes: number(
+                compileRosterProposalCensus(participantCount)
+                    .retainedRosterBytes,
+            ),
         },
         contribution: {
             expandedPolynomials: number(
@@ -197,6 +204,7 @@ export const compileParticipantRuntimeLimits = (): ParticipantLimits => {
             maximumRootBytes: largest.root.maximumRootBytes,
             maximumSetupReferenceBytes: largest.root.setupReferenceBytes,
             maximumSetupInventoryBytes: largest.root.setupInventoryBytes,
+            maximumRetainedRosterBytes: largest.root.retainedRosterBytes,
         },
     };
 };

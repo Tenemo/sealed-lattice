@@ -3,6 +3,7 @@ use crate::{
     verified::{SetupAggregator, VerifiedSetupAggregate},
 };
 use registration_credentials::{
+    Credential,
     contribution_authentication::{CommitmentInventory, VerifiedConfirmation, verify_confirmation},
     poll::VerifiedPoll,
     roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
@@ -54,16 +55,11 @@ pub extern "C" fn setup_input_capacity() -> usize {
 pub extern "C" fn setup_chunk_capacity() -> usize {
     CHUNK_BYTES
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
+/// Starts a setup verification with the roster verifier that reads its
+/// registrations, discarding any earlier one.
+pub fn begin_roster(roster: RosterInputVerifier) {
     SESSION.with(|value| {
         let mut value = value.borrow_mut();
-        let Some(bytes) = value.input.get(..length) else {
-            return 1;
-        };
-        let Ok(roster) = RosterInputVerifier::new(bytes) else {
-            return 1;
-        };
         value.roster = Some(roster);
         value.proposal = None;
         value.poll = None;
@@ -71,7 +67,34 @@ pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
         value.aggregator = None;
         value.verified = None;
         value.inventory.fill(0);
-        0
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
+    let Some(roster) = SESSION.with(|value| {
+        let value = value.borrow();
+        RosterInputVerifier::new(value.input.get(..length)?).ok()
+    }) else {
+        return 1;
+    };
+    begin_roster(roster);
+    0
+}
+/// Restores the setup verifier's earlier result, once this visit verified
+/// the roster and every confirmation, from the retained setup reference and
+/// its tag instead of verifying the openings again.
+pub fn restore(credential: &Credential, retained: &[u8]) -> bool {
+    SESSION.with(|value| {
+        let mut value = value.borrow_mut();
+        let (Some(poll), Some(aggregator)) = (value.poll.clone(), value.aggregator.take()) else {
+            return false;
+        };
+        let Ok(verified) = aggregator.restore(credential, &poll, retained) else {
+            return false;
+        };
+        value.inventory = verified.inventory().identity();
+        value.verified = Some(Arc::new(verified));
+        true
     })
 }
 #[unsafe(no_mangle)]

@@ -92,6 +92,9 @@ impl RetainedSetupInputs {
     pub fn profile(&self) -> Profile {
         self.profile
     }
+    pub(crate) fn into_polynomials(self) -> Vec<AggregatePolynomial> {
+        self.polynomials
+    }
     pub fn read_polynomial(&self, index: usize) -> Result<RetainedPolynomialReader, Refusal> {
         let expected = self
             .polynomials

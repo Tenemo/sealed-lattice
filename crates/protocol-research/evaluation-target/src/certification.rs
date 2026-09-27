@@ -41,7 +41,6 @@ pub struct CertificateCollector {
 impl CertificateCollector {
     pub fn new(target: Arc<VerifiedEvaluationTarget>) -> Self {
         let keys: Vec<_> = target
-            .inventory()
             .setup()
             .inventory()
             .proposal()

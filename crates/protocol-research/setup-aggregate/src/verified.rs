@@ -1,8 +1,10 @@
-use crate::{CHUNK_BYTES, PolynomialAdder};
+use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
 use opened_contribution::OpenedContributionVerifier;
 use registration_credentials::{
+    Credential, RETAINED_TAG_BYTES,
     contribution_authentication::CommitmentInventory,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
+    poll::VerifiedPoll,
 };
 use std::sync::Arc;
 use supported_profile::Profile;
@@ -105,6 +107,41 @@ impl SetupAggregator {
     }
     pub fn accepted(&self) -> usize {
         self.accepted
+    }
+    /// Restores this verifier's earlier result for the same inventory from
+    /// the setup reference that the participant's credential keyed when the
+    /// verifier accepted it, instead of verifying every opening again. The
+    /// reference must carry that credential's tag for the verified poll and
+    /// name this inventory; the aggregate values it names stay with the
+    /// host, and every reader checks them against its digests.
+    pub fn restore(
+        self,
+        credential: &Credential,
+        poll: &VerifiedPoll,
+        retained: &[u8],
+    ) -> Result<VerifiedSetupAggregate, Refusal> {
+        let proposal = self.inventory.proposal().proposal();
+        if self.accepted != 0
+            || self.pending.is_some()
+            || proposal.records()[0].header().poll != poll.identity()
+            || proposal.records()[0].header().runtime != poll.runtime()
+        {
+            return Err(Refusal::Order);
+        }
+        let split = retained
+            .len()
+            .checked_sub(RETAINED_TAG_BYTES)
+            .ok_or(Refusal::Context)?;
+        let (reference, tag) = retained.split_at(split);
+        credential
+            .check_retained_setup_tag(poll, reference, tag)
+            .map_err(|_| Refusal::Context)?;
+        let inputs =
+            RetainedSetupInputs::parse(self.profile, reference, self.inventory.identity())?;
+        Ok(VerifiedSetupAggregate {
+            inventory: self.inventory,
+            polynomials: inputs.into_polynomials(),
+        })
     }
     /// Every setup contributor's opening is accepted and none is pending.
     pub fn complete(&self) -> bool {

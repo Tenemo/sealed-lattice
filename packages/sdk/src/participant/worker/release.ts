@@ -38,13 +38,14 @@ import {
 } from './release-state.js';
 import type { ReleaseState } from './release-state.js';
 import { commitRoot, dataRecordInventory } from './root.js';
-import { readFinalAggregate } from './setup.js';
+import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import { snapshotParticipant } from './storage.js';
 import { targetPhase } from './target-state.js';
 import type { TargetState } from './target-state.js';
 import {
     completionDirectory,
-    evaluateClosedTarget,
+    discardEvaluation,
+    restoreOrEvaluateTarget,
     resumeTarget,
 } from './target.js';
 
@@ -52,9 +53,10 @@ import {
 // follows the participant's own signed target, or its completed close when it
 // signed no target and a certificate already exists; a pending target
 // signature cannot be bypassed. Each visit restores the completed close and
-// any signed target, evaluates the target again from the public close records
-// and certifies it from the published votes; only the certificate verifier
-// creates the release context. The
+// any signed target, restores the target this participant evaluated or else
+// evaluates it from the public close records, and certifies it from the
+// published votes; only the certificate verifier creates the release
+// context. The
 // seed of all release randomness enters the root before any private
 // generation, and the module proves the release from that seed alone, so an
 // interrupted generation draws the same bytes again. The body and envelope
@@ -202,12 +204,21 @@ const completionCommand = (
     return output;
 };
 
-// Certifies the evaluated target from the published target votes, stopping
-// at the certificate threshold. A missing or refused vote is skipped; too few
-// leave the participant pending. Returns whether the target is encrypted.
-const certifyTarget = async (context: ProfileContext, relay: PublicRelay) => {
+// Certifies the target from the published target votes, stopping at the
+// certificate threshold. A missing or refused vote is skipped; too few leave
+// the participant pending. A restored target that the votes leave
+// uncertified while one of them was refused, as every vote for another target
+// is, is discarded, so that the next visit evaluates the target the public
+// close records name; missing votes alone keep it. Returns whether the target
+// is encrypted.
+const certifyTarget = async (
+    context: ProfileContext,
+    relay: PublicRelay,
+    restored: boolean,
+) => {
     const [count, threshold] = words(completionCommand(context, 0));
     let accepted = 0;
+    let refused = false;
     for (
         let position = 0;
         position < count && accepted < threshold;
@@ -228,11 +239,14 @@ const certifyTarget = async (context: ProfileContext, relay: PublicRelay) => {
             throw error;
         }
         const inserted = tryCompletionCommand(context, 1, 0, vote);
-        if (inserted !== undefined) accepted = words(inserted)[1];
+        if (inserted === undefined) refused = true;
+        else accepted = words(inserted)[1];
     }
     const certified = tryCompletionCommand(context, 2);
-    if (certified === undefined)
+    if (certified === undefined) {
+        if (restored && refused) await discardEvaluation(context);
         throw new PublicInputFailure('The target votes are incomplete.');
+    }
     return words(certified)[0] === 1;
 };
 
@@ -247,9 +261,20 @@ const establishReleaseContext = async (
             if (tryCompletionCommand(context, 4, offset, bytes) === undefined)
                 throw new PublicInputFailure('A release key was refused.');
         });
-    await stream(words(completionCommand(context, 3, position))[0]);
-    await stream(words(completionCommand(context, 5))[0]);
-    completionCommand(context, 5);
+    // Finishing a polynomial checks its bytes against the retained setup
+    // reference.
+    const finish = () => {
+        const output = tryCompletionCommand(context, 5);
+        if (output === undefined)
+            throw new PublicInputFailure('A release key was refused.');
+        return output;
+    };
+    const constant = words(completionCommand(context, 3, position))[0];
+    await deliverFinalAggregate(context, async () => {
+        await stream(constant);
+        await stream(words(finish())[0]);
+        finish();
+    });
 };
 
 const openReleaseRecord = (session: ReleaseSession, index: number) => {
@@ -523,15 +548,17 @@ export const advanceRelease = async (
     await restoreCompletedClose(close);
     if (session.signed !== undefined)
         restoreSignedTarget(context, session.signed);
-    const evaluated = await evaluateClosedTarget(context, relay);
+    const evaluated = await restoreOrEvaluateTarget(context, relay);
     if (
         session.target !== undefined &&
         !equalBytes(evaluated.body, session.target.body)
-    )
+    ) {
+        if (evaluated.restored) await discardEvaluation(context);
         throw new PublicInputFailure(
             'The public close records name another target.',
         );
-    const encrypted = await certifyTarget(context, relay);
+    }
+    const encrypted = await certifyTarget(context, relay, evaluated.restored);
     await archiveClosure?.();
     if (!encrypted) return false;
     // A release that follows the completed close takes the certified target.
@@ -601,8 +628,8 @@ export const computeResult = async (
     const { profile } = context;
     const bounds = profile.release;
     await restoreCompletedClose(close);
-    await evaluateClosedTarget(context, relay);
-    const encrypted = await certifyTarget(context, relay);
+    const { restored } = await restoreOrEvaluateTarget(context, relay);
+    const encrypted = await certifyTarget(context, relay, restored);
     let result = encrypted ? undefined : tryCompletionCommand(context, 10);
     for (
         let position = 0;

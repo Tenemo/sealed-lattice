@@ -58,7 +58,7 @@ impl State {
                     return Err(Error::Context);
                 }
                 let target = crate::browser::verified_target().ok_or(Error::Incomplete)?;
-                let count = target.inventory().setup().profile().participants();
+                let count = target.setup().profile().participants();
                 let collector = CertificateCollector::new(target);
                 self.word(count);
                 self.word(collector.threshold());
@@ -100,7 +100,7 @@ impl State {
                 if target.ciphertext().is_none() {
                     return Err(Error::NoResult);
                 }
-                let setup = target.inventory().setup();
+                let setup = target.setup();
                 let profile = setup.profile();
                 if argument >= profile.participants() {
                     return Err(Error::Context);
@@ -143,7 +143,7 @@ impl State {
                     )?));
                     self.word(0);
                 } else {
-                    let setup = certificate.target().inventory().setup();
+                    let setup = certificate.target().setup();
                     let index = setup.profile().share_linear_polynomial(operand.position);
                     let reader = setup.read_polynomial(index).map_err(|_| Error::Context)?;
                     self.operand = Some(Operand {

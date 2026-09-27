@@ -331,10 +331,29 @@ export type RestoredEnrollment = Readonly<{
     definitionSignature: Uint8Array;
 }>;
 
+// From the roster transition on, the root retains the module's verification
+// of the participant's own registration, keyed to its credential.
+const retainedRegistrationGeneration = 2;
+
+// The credential keys the module's verification of the participant's own
+// registration, so that later visits restore it instead of reading and
+// verifying the proof again.
+export const retainRegistration = (context: ParticipantContext) => {
+    const { kernel } = context;
+    if (kernel.retain_registration() !== 0)
+        throw new Error('The credential refused the verified registration.');
+    return readKernel(
+        kernel,
+        kernel.contribution_output_pointer(),
+        kernel.contribution_output_length(),
+    );
+};
+
 // Verifies the retained registration through the module's own registration
-// verifier, checks the retained poll definition, and restores the original
-// keys. The purposes the root shows unused stay available; an instance that
-// created the credential in this invocation keeps its live authority.
+// verifier, or restores that verification from its retained copy in place of
+// the proof, restores the original keys and checks the retained poll
+// definition. The purposes the root shows unused stay available; an instance
+// that created the credential in this invocation keeps its live authority.
 export const restoreEnrollment = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
@@ -369,20 +388,57 @@ export const restoreEnrollment = async (
     for (let offset = 0; offset < publicKey.length; offset += chunkBytes)
         own(1, publicKey.subarray(offset, offset + chunkBytes));
     own(2);
-    for (const reference of manifest.references)
-        if (reference.kind === dataKind.proof)
-            own(3, await readDataRecord(context, reference));
-    own(4);
-    const proofHash = readKernel(
-        kernel,
-        kernel.own_registration_proof_hash_pointer(),
-        64,
+    let proofHash: Uint8Array;
+    let bodyDigest: Uint8Array;
+    if (root.head.generation >= retainedRegistrationGeneration) {
+        // The module checks the copy's tag once the capsules open the
+        // credential it is keyed to.
+        const retained = await read(dataKind.retainedRegistration);
+        own(5, retained);
+        proofHash = retained.slice(0, 64);
+        bodyDigest = retained.slice(64, 128);
+    } else {
+        for (const reference of manifest.references)
+            if (reference.kind === dataKind.proof)
+                own(3, await readDataRecord(context, reference));
+        own(4);
+        proofHash = readKernel(
+            kernel,
+            kernel.own_registration_proof_hash_pointer(),
+            64,
+        );
+        bodyDigest = readKernel(
+            kernel,
+            kernel.own_registration_body_digest_pointer(),
+            64,
+        );
+    }
+    const control = concatenate(
+        pollContext,
+        unsigned32(header.length),
+        header,
+        proofHash,
+        bodyDigest,
+        manifest.dataKeys,
+        publicKey,
+        await read(dataKind.recipientCapsule),
+        await read(dataKind.signingCapsule),
+        unsigned16(created ? 0 : unusedPurposes(root.head.generation)),
     );
-    const bodyDigest = readKernel(
-        kernel,
-        kernel.own_registration_body_digest_pointer(),
-        64,
-    );
+    let status: number;
+    try {
+        sessionInput(context, control);
+        status = kernel.restore(control.length);
+    } finally {
+        control.fill(0);
+    }
+    if (
+        status !== 0 ||
+        kernel.prepare_creator(0) !== 1 ||
+        kernel.prepare_join(0) !== 1 ||
+        kernel.restore(0) !== 1
+    )
+        throw new Error('The original enrollment keys could not be restored.');
     const usernameBytes = readKernel(
         kernel,
         kernel.own_registration_username_pointer(),
@@ -406,34 +462,6 @@ export const restoreEnrollment = async (
         tupleFields(header)[3],
         tupleFields(definition)[3],
     );
-    const control = concatenate(
-        pollContext,
-        unsigned32(header.length),
-        header,
-        proofHash,
-        bodyDigest,
-        manifest.dataKeys,
-        publicKey,
-        await read(dataKind.recipientCapsule),
-        await read(dataKind.signingCapsule),
-        unsigned16(created ? 0 : unusedPurposes(root.head.generation)),
-    );
-    let status: number;
-    try {
-        sessionInput(context, control);
-        status = kernel.restore(control.length);
-    } finally {
-        control.fill(0);
-    }
-    if (
-        status !== 0 ||
-        kernel.check_retained() !== 0 ||
-        kernel.prepare_creator(0) !== 1 ||
-        kernel.prepare_join(0) !== 1 ||
-        kernel.restore(0) !== 1 ||
-        kernel.check_retained() !== 0
-    )
-        throw new Error('The original enrollment keys could not be restored.');
     return {
         username,
         isOrganizer,

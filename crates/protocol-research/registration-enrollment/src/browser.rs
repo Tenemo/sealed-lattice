@@ -31,8 +31,10 @@ struct Session {
     close: Option<crate::close_work::CloseWork>,
     finality: Option<crate::finality_work::FinalityWork>,
     release: Option<release_browser::ReleaseState>,
+    // A retained evaluated target the host streams in, and its length.
+    evaluation: Option<(usize, Vec<u8>)>,
 }
-thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,close:None,finality:None,release:None});}
+thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,close:None,finality:None,release:None,evaluation:None});}
 #[unsafe(no_mangle)]
 pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
@@ -263,16 +265,6 @@ pub extern "C" fn restore(length: usize) -> u32 {
         // show unused. Every other purpose of the restored credential stays
         // locked; completed messages are restored from their own records.
         let unused = u16::from_le_bytes(input[length - 2..].try_into().unwrap());
-        let Some(verified) = crate::own_verification::verified() else {
-            return 1;
-        };
-        if verified.header().encode().ok().as_deref() != Some(&input[132..132 + header_length])
-            || verified.proof_hash() != proof_hash
-            || verified.body_digest() != body_digest
-            || verified.public_key() != &input[public_start..capsule_start]
-        {
-            return 1;
-        }
         let Ok(mut enrollment) = Enrollment::restore(
             &header,
             &input[public_start..capsule_start],
@@ -284,6 +276,21 @@ pub extern "C" fn restore(length: usize) -> u32 {
         ) else {
             return 1;
         };
+        // The registration this instance verified, or else the verification
+        // of an earlier visit, which only the credential just opened restores.
+        // The keys stay only if it names the root's exact inputs.
+        let Some(verified) = crate::own_verification::verified()
+            .or_else(|| crate::own_verification::restore(&enrollment.credential))
+        else {
+            return 1;
+        };
+        if verified.header().encode().ok().as_deref() != Some(&input[132..132 + header_length])
+            || verified.proof_hash() != proof_hash
+            || verified.body_digest() != body_digest
+            || verified.public_key() != &input[public_start..capsule_start]
+        {
+            return 1;
+        }
         if let Some(original) = state.enrollment.as_ref() {
             // A newly created instance retains its actual consumed authority.
             // Reopening validates the saved capsules without replacing it.
@@ -329,10 +336,88 @@ pub extern "C" fn roster_begin(length: usize) -> u32 {
         let Ok(roster) = RosterInputVerifier::new(input) else {
             return 1;
         };
-        state.roster = Some(roster);
-        state.proposal = None;
-        state.proposal_signature = None;
-        state.signed_proposal = None;
+        begin_roster(&mut state, roster);
+        0
+    })
+}
+fn begin_roster(state: &mut Session, roster: RosterInputVerifier) {
+    state.roster = Some(roster);
+    state.proposal = None;
+    state.proposal_signature = None;
+    state.signed_proposal = None;
+}
+// A roster verifier that restores the retained roster the restored
+// credential keyed: the input is the verifier's begin input and then the
+// retained roster.
+fn retained_roster(state: &Session, begin: usize, length: usize) -> Option<RosterInputVerifier> {
+    let enrollment = state.enrollment.as_ref()?;
+    let (begin, retained) = state.input.get(..length)?.split_at_checked(begin)?;
+    RosterInputVerifier::retained(begin, &enrollment.credential, retained).ok()
+}
+/// Restores this participant's earlier roster verification: each record
+/// then takes its header and key, and no proof.
+#[unsafe(no_mangle)]
+pub extern "C" fn roster_begin_retained(begin: usize, length: usize) -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(roster) = retained_roster(&state, begin, length) else {
+            return 1;
+        };
+        begin_roster(&mut state, roster);
+        0
+    })
+}
+/// Starts a setup verification whose roster restores this participant's
+/// earlier roster verification.
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_roster_begin_retained(begin: usize, length: usize) -> u32 {
+    let Some(roster) = SESSION.with(|state| retained_roster(&state.borrow(), begin, length)) else {
+        return 1;
+    };
+    setup_aggregate::setup_browser::begin_roster(roster);
+    0
+}
+/// Emits this instance's verification of the participant's own
+/// registration, keyed to the restored credential, so that a later visit
+/// restores it instead of reading and verifying the proof again.
+#[unsafe(no_mangle)]
+pub extern "C" fn retain_registration() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.contribution_output.clear();
+        let Some(retained) = state
+            .enrollment
+            .as_ref()
+            .and_then(|enrollment| crate::own_verification::retain(&enrollment.credential))
+        else {
+            return 1;
+        };
+        state.contribution_output = retained;
+        0
+    })
+}
+/// Emits the retained roster from the proposal this instance's roster
+/// verifier built by verifying every record, keyed to the restored
+/// credential. A restored roster is not retained again.
+#[unsafe(no_mangle)]
+pub extern "C" fn retain_roster() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.contribution_output.clear();
+        let (Some(enrollment), Some(roster), Some(proposal)) = (
+            state.enrollment.as_ref(),
+            state.roster.as_ref(),
+            state.proposal.as_ref(),
+        ) else {
+            return 1;
+        };
+        if roster.is_retained() {
+            return 1;
+        }
+        let Ok(retained) = enrollment.credential.retain_roster(roster.poll(), proposal) else {
+            return 1;
+        };
+        state.contribution_output = retained;
         0
     })
 }
@@ -845,6 +930,98 @@ pub extern "C" fn retain_setup() -> u32 {
         };
         state.contribution_output = reference;
         0
+    })
+}
+
+/// Restores the verified setup from the retained setup reference and its
+/// tag, once the setup verifier holds this visit's verified roster and
+/// confirmations, instead of verifying every opening again.
+#[unsafe(no_mangle)]
+pub extern "C" fn restore_setup(length: usize) -> u32 {
+    SESSION.with(|state| {
+        let state = state.borrow();
+        let (Some(enrollment), Some(retained)) =
+            (state.enrollment.as_ref(), state.input.get(..length))
+        else {
+            return 1;
+        };
+        u32::from(!setup_aggregate::setup_browser::restore(
+            &enrollment.credential,
+            retained,
+        ))
+    })
+}
+
+/// Emits the target this instance evaluated, keyed to the restored
+/// credential, so that a later visit restores it instead of evaluating
+/// again.
+#[unsafe(no_mangle)]
+pub extern "C" fn retain_evaluation() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.contribution_output.clear();
+        let (Some(enrollment), Some(target)) = (
+            state.enrollment.as_ref(),
+            evaluation_target::verified_browser_target(),
+        ) else {
+            return 1;
+        };
+        let Ok(retained) = target.retain(&enrollment.credential) else {
+            return 1;
+        };
+        state.contribution_output = retained;
+        0
+    })
+}
+
+fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -> Option<()> {
+    match operation {
+        0 => {
+            let (_, setup) = setup_aggregate::setup_browser::context()?;
+            let maximum = 8
+                + registration_credentials::target_signing::MAXIMUM_TARGET_BODY_BYTES
+                + 2 * supported_profile::relation::SYSTEMATIC
+                    * linked_release_proof::statement::release_coefficient_bytes(setup.profile())
+                + registration_credentials::RETAINED_TAG_BYTES;
+            (state.evaluation.is_none() && length <= maximum).then_some(())?;
+            state.evaluation = Some((length, Vec::with_capacity(length)));
+        }
+        1 => {
+            let bytes = state.input.get(..length)?;
+            let (expected, copy) = state.evaluation.as_mut()?;
+            (length <= *expected - copy.len()).then_some(())?;
+            copy.extend(bytes);
+        }
+        2 => {
+            let (expected, copy) = state.evaluation.take()?;
+            (length == 0 && copy.len() == expected).then_some(())?;
+            let (poll, setup) = setup_aggregate::setup_browser::context()?;
+            let target = evaluation_target::target::VerifiedEvaluationTarget::restore(
+                &state.enrollment.as_ref()?.credential,
+                poll,
+                setup,
+                &copy,
+            )
+            .ok()?;
+            evaluation_target::restore_browser_target(target).then_some(())?;
+        }
+        _ => return None,
+    }
+    Some(())
+}
+/// Restores the target this participant evaluated from its retained copy,
+/// which the host streams in: operation zero begins a copy of the given
+/// length, one appends that many input bytes and two restores the complete
+/// copy for this instance's verified poll and setup.
+#[unsafe(no_mangle)]
+pub extern "C" fn restore_evaluation(operation: u32, length: usize) -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let restored = restore_evaluation_step(&mut state, operation, length);
+        if restored.is_none() {
+            state.evaluation = None;
+        }
+        u32::from(restored.is_none())
     })
 }
 

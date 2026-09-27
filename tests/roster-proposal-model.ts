@@ -1,4 +1,7 @@
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import {
+    compileRegistrationEnrollmentCensus,
+    retainedRosterBytes,
+} from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 
 export const compileRosterProposalCensus = (participantCount: number) => {
@@ -32,6 +35,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
         participantCount,
         roleBytes,
         proposalBytes,
+        retainedRosterBytes: retainedRosterBytes(count),
         retainedRecipientKeyBytes: count * key.publicKeyBytes,
         canonicalRosterBytes:
             8n +

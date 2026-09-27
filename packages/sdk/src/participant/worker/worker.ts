@@ -77,7 +77,7 @@ import {
     reverifyRoster,
     signRoster,
 } from './roster.js';
-import { retainSetup, reverifySetup, verifySetup } from './setup.js';
+import { restoreSetup, retainSetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
 import {
     isEmptyParticipant,
@@ -550,7 +550,7 @@ const execute = async (
                 )
                     return { status: 'refused' };
             }
-            await completeBallot(session);
+            await completeBallot(session, relay);
             root = participant.root;
             await publishBallot(session, relay);
             // A ballot created in this visit reports the proof randomness
@@ -581,7 +581,7 @@ const execute = async (
                 enrollment.isOrganizer,
             );
             if (!isCloseComplete(session)) {
-                await reverifySetup(participant, relay);
+                await restoreSetup(participant, relay);
                 await advanceClose(session, relay, request);
             }
             root = participant.root;
@@ -612,7 +612,7 @@ const execute = async (
             );
             let signed = {};
             if (generation < targetPhase.signed) {
-                await reverifySetup(participant, relay);
+                await restoreSetup(participant, relay);
                 signed = await signTarget(session, relay);
             }
             root = participant.root;
@@ -680,7 +680,7 @@ const execute = async (
                     session.state === undefined
                         ? {}
                         : { resumedFrom: { generation } };
-                await reverifySetup(participant, source);
+                await restoreSetup(participant, source);
                 let closure: ArchivedTranscript | undefined;
                 const encrypted = await advanceRelease(
                     session,
@@ -761,7 +761,7 @@ const execute = async (
                 participant,
                 enrollment.isOrganizer,
             );
-            await reverifySetup(participant, source);
+            await restoreSetup(participant, source);
             const result = await computeResult(session, source);
             const transcript =
                 recorder === undefined ? undefined : await recorder.archive();

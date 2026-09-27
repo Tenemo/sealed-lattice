@@ -4035,7 +4035,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Registration enrollment census',
         '',
-        'The combined enrollment record binds a canonical public username, actual credentials, and the complete recipient-key proof. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. Payload counts exclude database metadata and browser-managed root-key storage.',
+        'The combined enrollment record binds a canonical public username, actual credentials, and the complete recipient-key proof. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the retained roster and the retained registration, each keyed to the credential. Payload counts exclude database metadata and browser-managed root-key storage.',
         '',
         table(
             ['Property', 'Value'],
@@ -4137,6 +4137,18 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum encrypted root bytes',
                     formatCount(registrationEnrollment.maximumRootBytes),
+                ],
+                [
+                    'Maximum retained roster bytes',
+                    formatCount(
+                        registrationEnrollment.maximumRetainedRosterBytes,
+                    ),
+                ],
+                [
+                    'Retained registration bytes',
+                    formatCount(
+                        registrationEnrollment.retainedRegistrationBytes,
+                    ),
                 ],
                 [
                     'Recipient capsule associated-data bytes',

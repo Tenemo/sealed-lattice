@@ -92,8 +92,7 @@ impl ReleaseContext {
         linear: VerifiedAggregatePolynomial,
     ) -> Result<Self, Error> {
         let target = certificate.target();
-        let inventory = target.inventory();
-        let setup = inventory.setup();
+        let setup = target.setup();
         let profile = setup.profile();
         let ciphertext = target.ciphertext().ok_or(Error::NoResult)?;
         let records = setup.inventory().proposal().proposal().records();
@@ -120,7 +119,7 @@ impl ReleaseContext {
         )?;
         let mut header = [0; RELEASE_HEADER_BYTES];
         header[..4].copy_from_slice(b"LRS1");
-        header[4..68].copy_from_slice(&inventory.poll().identity());
+        header[4..68].copy_from_slice(&target.poll().identity());
         header[68..132].copy_from_slice(&setup.inventory().identity());
         header[132..196].copy_from_slice(target.identity());
         header[196..].copy_from_slice(&(position as u16).to_le_bytes());
@@ -149,11 +148,10 @@ impl ReleaseContext {
     }
     pub fn proof_role(&self) -> Result<Vec<u8>, Error> {
         let target = self.certificate.target();
-        let inventory = target.inventory();
         encode_release_proof_role(
-            inventory.poll().identity(),
-            inventory.poll().runtime(),
-            inventory.setup().inventory().identity(),
+            target.poll().identity(),
+            target.poll().runtime(),
+            target.setup().inventory().identity(),
             *target.identity(),
             self.position,
         )

@@ -1,4 +1,7 @@
-use crate::{Credential, Error, SigningPurpose, roster_authentication::OrganizerSignedRoster};
+use crate::{
+    Credential, Error, RETAINED_TAG_BYTES, SigningPurpose,
+    roster_authentication::OrganizerSignedRoster,
+};
 use crate::{
     foundation::{CanonicalItem, hash_foundation_tuple_512},
     poll::VerifiedPoll,
@@ -8,14 +11,12 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
-use stateful_sha3::{Digest, Sha3_512};
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
 pub const ENVELOPE_BYTES: usize = 4 + 64 + 64 + 2 + 8 + 8 + 64;
 pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-id/v1";
-pub const RETAINED_SETUP_TAG_BYTES: usize = 64;
 const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v1";
 
 /// Original credential correspondence beneath the authenticated participant root.
@@ -132,16 +133,8 @@ impl Credential {
         &self,
         poll: &VerifiedPoll,
         reference: &[u8],
-    ) -> [u8; RETAINED_SETUP_TAG_BYTES] {
-        let mut hash = Sha3_512::new();
-        hash.update((RETAINED_SETUP_TAG_LABEL.len() as u64).to_le_bytes());
-        hash.update(RETAINED_SETUP_TAG_LABEL);
-        hash.update(self.signing_seed.as_slice());
-        hash.update(poll.identity());
-        hash.update(poll.runtime());
-        hash.update((reference.len() as u64).to_le_bytes());
-        hash.update(reference);
-        hash.finalize().into()
+    ) -> [u8; RETAINED_TAG_BYTES] {
+        self.retained_tag(RETAINED_SETUP_TAG_LABEL, poll, reference)
     }
     pub fn check_retained_setup_tag(
         &self,
@@ -149,17 +142,7 @@ impl Credential {
         reference: &[u8],
         tag: &[u8],
     ) -> Result<(), Error> {
-        let expected = self.retained_setup_tag(poll, reference);
-        if tag.len() != expected.len()
-            || tag
-                .iter()
-                .zip(expected)
-                .fold(0, |difference, (left, right)| difference | (left ^ right))
-                != 0
-        {
-            return Err(Error::Crypto);
-        }
-        Ok(())
+        self.check_retained_tag(RETAINED_SETUP_TAG_LABEL, poll, reference, tag)
     }
     pub(crate) fn check_ballot_owner(&self, owner: &RetainedBallotOwner) -> Result<(), Error> {
         if self.completed_body != Some(owner.owner_body)
@@ -471,14 +454,9 @@ mod tests {
             );
         }
         let mut forged = tag;
-        forged[RETAINED_SETUP_TAG_BYTES - 1] ^= 1;
+        forged[RETAINED_TAG_BYTES - 1] ^= 1;
         let long_tag = [tag.as_slice(), &[0]].concat();
-        for candidate in [
-            &forged[..],
-            &tag[..RETAINED_SETUP_TAG_BYTES - 1],
-            &long_tag,
-            &[],
-        ] {
+        for candidate in [&forged[..], &tag[..RETAINED_TAG_BYTES - 1], &long_tag, &[]] {
             assert!(
                 participant
                     .check_retained_setup_tag(&poll, &reference, candidate)

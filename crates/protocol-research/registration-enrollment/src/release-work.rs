@@ -17,11 +17,11 @@ impl ReleaseWork {
         owner: Arc<RetainedBallotOwner>,
         context: Arc<ReleaseContext>,
     ) -> Result<Self, Error> {
-        let inventory = context.certificate().target().inventory();
+        let target = context.certificate().target();
         if owner.position() != context.position()
-            || owner.poll() != &inventory.poll().identity()
-            || owner.runtime() != &inventory.poll().runtime()
-            || owner.inventory() != &inventory.setup().inventory().identity()
+            || owner.poll() != &target.poll().identity()
+            || owner.runtime() != &target.poll().runtime()
+            || owner.inventory() != &target.setup().inventory().identity()
         {
             return Err(Error::Context);
         }
@@ -42,7 +42,7 @@ impl ReleaseWork {
         }
         key.validate_retained().map_err(|_| Error::Crypto)?;
         let target = self.context.certificate().target();
-        let setup = target.inventory().setup();
+        let setup = target.setup();
         let message = TargetMessage::parse(target.body(), setup.profile().participants())?;
         credential.begin_release(&self.owner, setup.inventory().proposal(), &message)?;
         let prepared = key
