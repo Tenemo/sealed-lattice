@@ -583,6 +583,7 @@ name = "opened-contribution"
 version = "0.0.0"
 dependencies = [
  "num-bigint",
+ "parallel-work",
  "registration-credentials",
  "setup-witness",
  "word-verifier",
@@ -947,6 +948,7 @@ dependencies = [
  "linked-release-proof",
  "num-bigint",
  "num-traits",
+ "parallel-work",
  "sha3 0.10.9",
  "supported-profile",
  "zeroize",

@@ -7,7 +7,7 @@ use registration_credentials::{
 };
 use setup_witness::{
     PolynomialOutput,
-    contribution::{Contribution, common_polynomial},
+    contribution::{Contribution, common_records},
 };
 use stateful_sha3::{Digest, Sha3_512};
 use std::{cell::RefCell, sync::Arc};
@@ -273,34 +273,12 @@ impl Work {
                 .advance(10, 0, &[], &mut unused_output)
                 .map_err(|_| ());
         }
-        let values = common_polynomial(profile, index).map_err(|_| ())?;
-        let width = profile.family_magnitude_bytes(profile.setup_family(index).ok_or(())?);
-        let mut encoded = vec![0u8; 1 + width];
-        let mut buffer = Vec::with_capacity(CHUNK);
-        for value in values {
-            let (sign, magnitude) = value.to_bytes_le();
-            if magnitude.len() > width {
-                return Err(());
-            }
-            encoded.fill(0);
-            encoded[0] = u8::from(sign == Sign::Minus);
-            encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-            let mut remaining = encoded.as_slice();
-            while !remaining.is_empty() {
-                let count = remaining.len().min(CHUNK - buffer.len());
-                buffer.extend_from_slice(&remaining[..count]);
-                remaining = &remaining[count..];
-                if buffer.len() == CHUNK {
-                    proof
-                        .advance(9, 0, &buffer, &mut unused_output)
-                        .map_err(|_| ())?;
-                    buffer.clear();
-                }
-            }
-        }
-        if !buffer.is_empty() {
+        for chunk in common_records(profile, index)
+            .map_err(|_| ())?
+            .chunks(CHUNK)
+        {
             proof
-                .advance(9, 0, &buffer, &mut unused_output)
+                .advance(9, 0, chunk, &mut unused_output)
                 .map_err(|_| ())?;
         }
         proof

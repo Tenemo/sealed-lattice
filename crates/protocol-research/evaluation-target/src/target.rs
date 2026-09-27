@@ -3,7 +3,6 @@ use ballot_proof::{
     body::BallotBodyClassification,
     close::{ClosedSlot, VerifiedCloseBarrier},
 };
-use num_bigint::Sign;
 use registration_credentials::{
     ballot_authentication::BallotEnvelope,
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
@@ -195,17 +194,10 @@ impl ClassifiedClosedInventory {
                     let (common, index) = Engine::key_identity(profile, cache, ordinal)
                         .map_err(|_| Error::Arithmetic)?;
                     let bytes = if common {
-                        let values = setup_witness::contribution::common_polynomial(profile, index)
+                        let bytes = setup_witness::contribution::common_records(profile, index)
                             .map_err(|_| Error::PublicInput)?;
-                        let mut bytes = Vec::with_capacity(DEGREE * width);
-                        for value in values {
-                            let (sign, magnitude) = value.to_bytes_le();
-                            if magnitude.len() >= width {
-                                return Err(Error::PublicInput);
-                            }
-                            bytes.push(u8::from(sign == Sign::Minus));
-                            bytes.extend(&magnitude);
-                            bytes.resize(bytes.len() + width - 1 - magnitude.len(), 0);
+                        if bytes.len() != DEGREE * width {
+                            return Err(Error::PublicInput);
                         }
                         bytes
                     } else {

@@ -9,7 +9,7 @@ use num_traits::Signed;
 use sha3::digest::XofReader;
 #[path = "common-polynomial.rs"]
 mod common_polynomial;
-use common_polynomial::public_polynomial;
+use common_polynomial::{public_polynomial, public_records};
 pub use supported_profile::Profile;
 use supported_profile::{
     AUXILIARY_DEGREE, DEGREE, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS,
@@ -17,6 +17,9 @@ use supported_profile::{
 use zeroize::{Zeroize, Zeroizing};
 
 const SCALE: i128 = supported_profile::SHARE_SCALE as i128;
+
+/// The jobs this crate defines.
+pub static JOBS: [&parallel_work::Job; 1] = [&contribution::COMMON_RECORDS];
 
 fn errors(label: &str, degree: usize) -> Vec<i128> {
     let mut random = private_reader(label);

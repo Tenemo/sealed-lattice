@@ -1,4 +1,5 @@
 use super::*;
+use parallel_work::{Job, Part, Ticket, submit};
 use supported_profile::{
     AUXILIARY_SECRET_SUPPORT, FHE_SECRET_SUPPORT, Family, SHARE_EPHEMERAL_SUPPORT,
     auxiliary_modulus, fixed_common_sample_bits, share_modulus,
@@ -36,7 +37,8 @@ pub fn common_share_polynomial() -> Vec<BigInt> {
         fixed_common_sample_bits(),
     )
 }
-pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, Error> {
+// The label, ring degree, modulus and sample bits of a common polynomial.
+fn common_source(profile: Profile, index: usize) -> Result<(String, usize, Vec<u8>, usize), Error> {
     if let Some((gadget, component)) = profile.fhe_polynomial_position(index) {
         let name = match component {
             0 => "a",
@@ -44,24 +46,72 @@ pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, 
             5 => "k",
             _ => return Err(Error::Phase),
         };
-        Ok(public_polynomial(
-            &format!("common-fhe-{name}-{gadget}"),
+        Ok((
+            format!("common-fhe-{name}-{gadget}"),
             DEGREE,
-            &integer(&profile.family_modulus(Family::Fhe)),
+            profile.family_modulus(Family::Fhe),
             profile.fhe_common_sample_bits(),
         ))
     } else if index == profile.share_common_polynomial() {
-        Ok(common_share_polynomial())
+        Ok((
+            "common-share".to_owned(),
+            DEGREE,
+            share_modulus().to_vec(),
+            fixed_common_sample_bits(),
+        ))
     } else if index == profile.auxiliary_common_polynomial() {
-        Ok(public_polynomial(
-            "common-auxiliary",
+        Ok((
+            "common-auxiliary".to_owned(),
             AUXILIARY_DEGREE,
-            &integer(auxiliary_modulus()),
+            auxiliary_modulus().to_vec(),
             fixed_common_sample_bits(),
         ))
     } else {
         Err(Error::Phase)
     }
+}
+pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, Error> {
+    let (label, degree, modulus, sample_bits) = common_source(profile, index)?;
+    Ok(public_polynomial(
+        &label,
+        degree,
+        &integer(&modulus),
+        sample_bits,
+    ))
+}
+/// The canonical records of a common polynomial: each coefficient's sign
+/// byte and its magnitude in the family's magnitude bytes.
+pub fn common_records(profile: Profile, index: usize) -> Result<Vec<u8>, Error> {
+    let (label, degree, modulus, sample_bits) = common_source(profile, index)?;
+    Ok(public_records(&label, degree, &modulus, sample_bits))
+}
+/// A common polynomial's canonical records, which helper instances of the
+/// participant module compute. Its input is the profile's participant and
+/// option counts and the polynomial's index, which the owner checks.
+pub static COMMON_RECORDS: Job = Job {
+    kind: 0x0500,
+    run: run_common_records,
+};
+fn run_common_records(input: &[u8]) -> Vec<u8> {
+    let [participants, options, index] = std::array::from_fn(|position| {
+        u32::from_le_bytes(input[4 * position..4 * (position + 1)].try_into().unwrap()) as usize
+    });
+    let profile = Profile::new(participants, options).expect("Checked profile");
+    common_records(profile, index).expect("Checked common polynomial")
+}
+/// Starts the canonical records of a common polynomial of the profile.
+pub fn common_records_job(profile: Profile, index: usize) -> Result<Ticket, Error> {
+    let (_, degree, modulus, _) = common_source(profile, index)?;
+    let input: Vec<u8> = [profile.participants(), profile.options(), index]
+        .into_iter()
+        .flat_map(|value| (value as u32).to_le_bytes())
+        .collect();
+    Ok(submit(
+        &COMMON_RECORDS,
+        None,
+        &[Part::Bytes(&input)],
+        degree * (1 + modulus.len()),
+    ))
 }
 impl Contribution {
     pub fn new(profile: Profile) -> Self {
@@ -323,5 +373,60 @@ impl Contribution {
         let mut columns = std::mem::take(&mut self.witness.words);
         columns.append(&mut self.witness.booleans);
         Ok(columns)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parallel_work::MAXIMUM_JOB_BYTES;
+
+    // Every common polynomial's records fit one job output. The job, which
+    // reconstructs the profile from its input, returns the direct records,
+    // which decode to the common polynomial, and refuses other polynomials.
+    #[test]
+    fn common_records_jobs_match_the_direct_records() {
+        let profiles: Vec<Profile> = Profile::all().collect();
+        for profile in &profiles {
+            for index in 0..profile.setup_polynomials() {
+                if let Ok((_, degree, modulus, _)) = common_source(*profile, index) {
+                    assert!(degree * (1 + modulus.len()) <= MAXIMUM_JOB_BYTES);
+                }
+            }
+        }
+        let widest = profiles
+            .iter()
+            .max_by_key(|profile| profile.family_magnitude_bytes(Family::Fhe))
+            .unwrap();
+        for profile in [profiles[0], *widest] {
+            let last = profile.gadget_length() - 1;
+            for index in [
+                profile.fhe_polynomial(0, 0),
+                profile.fhe_polynomial(last, 3),
+                profile.fhe_polynomial(last, 5),
+                profile.share_common_polynomial(),
+                profile.auxiliary_common_polynomial(),
+            ] {
+                let records = common_records(profile, index).unwrap();
+                assert_eq!(*common_records_job(profile, index).unwrap().wait(), records);
+                let values = common_polynomial(profile, index).unwrap();
+                let width = records.len() / values.len();
+                for (record, value) in records.chunks_exact(width).zip(values) {
+                    let sign = if record[0] == 1 {
+                        Sign::Minus
+                    } else {
+                        Sign::Plus
+                    };
+                    assert_eq!(BigInt::from_bytes_le(sign, &record[1..]), value);
+                }
+            }
+            for index in [
+                profile.fhe_polynomial(0, 1),
+                profile.recipient_key_polynomial(0),
+                profile.auxiliary_key_polynomial(),
+            ] {
+                assert!(common_records_job(profile, index).is_err());
+            }
+        }
     }
 }

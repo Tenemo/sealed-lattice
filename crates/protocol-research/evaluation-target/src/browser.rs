@@ -2,7 +2,6 @@ use crate::target::{
     ClassifiedClosedInventory, Error, EvaluationSession, VerifiedEvaluationTarget,
 };
 use ballot_proof::body::BallotBodyClassification;
-use num_bigint::Sign;
 use registration_credentials::{
     ballot_body::{BallotBodyHasher, HEADER_BYTES},
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
@@ -270,17 +269,10 @@ impl State {
                 )
                 .map_err(|_| Error::Arithmetic)?;
                 if common {
-                    let values = setup_witness::contribution::common_polynomial(profile, index)
+                    let bytes = setup_witness::contribution::common_records(profile, index)
                         .map_err(|_| Error::PublicInput)?;
-                    let mut bytes = Vec::with_capacity(DEGREE * width);
-                    for value in values {
-                        let (sign, magnitude) = value.to_bytes_le();
-                        if magnitude.len() >= width {
-                            return Err(Error::PublicInput);
-                        }
-                        bytes.push(u8::from(sign == Sign::Minus));
-                        bytes.extend(&magnitude);
-                        bytes.resize(bytes.len() + width - 1 - magnitude.len(), 0);
+                    if bytes.len() != DEGREE * width {
+                        return Err(Error::PublicInput);
                     }
                     let value = engine
                         .decode_polynomial(&bytes)

@@ -33,6 +33,7 @@ pub extern "C" fn parallel_run(kind: u32) -> u32 {
             &parallel_work::JOBS,
             &registration_proof::jobs::JOBS,
             &setup_stream_kernel::JOBS,
+            &setup_witness::JOBS,
             &rns_arithmetic_probe::JOBS,
         ],
         kind,

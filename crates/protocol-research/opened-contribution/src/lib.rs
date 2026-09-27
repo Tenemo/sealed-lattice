@@ -1,11 +1,16 @@
-use num_bigint::Sign;
+use parallel_work::Ticket;
 use registration_credentials::{
     contribution_authentication::{CommitmentInventory, verify_opening},
     contribution_commitment::ContributionCommitmentHasher,
 };
-use setup_witness::{Profile, contribution::common_polynomial};
-use std::sync::Arc;
+use setup_witness::{Profile, contribution::common_records_job};
+use std::{collections::VecDeque, sync::Arc};
 use word_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
+
+/// The most common polynomials whose records helpers compute ahead of
+/// their use; the host holds each one's records until the verifier takes
+/// them.
+const COMMON_AHEAD: usize = 4;
 
 #[derive(Debug)]
 pub enum Refusal {
@@ -44,6 +49,10 @@ pub struct OpenedContributionVerifier {
     verifier: Verifier,
     proof_header: Vec<u8>,
     statement_index: usize,
+    // The common polynomials the statement supplies, in its order: those
+    // whose records are being computed, then those not yet started.
+    computing: VecDeque<(usize, Ticket)>,
+    common: VecDeque<usize>,
     statement_done: bool,
     failed: bool,
 }
@@ -80,6 +89,16 @@ impl OpenedContributionVerifier {
         verifier
             .push_statement(&profile.setup_statement_header())
             .map_err(|_| Refusal::Statement)?;
+        // Every polynomial that is neither the body's nor a recipient's
+        // registered key is common.
+        let body = profile.contribution_body_polynomials();
+        let common = (0..profile.setup_polynomials())
+            .filter(|index| {
+                !body.contains(index)
+                    && (0..profile.participants())
+                        .all(|recipient| profile.recipient_key_polynomial(recipient) != *index)
+            })
+            .collect();
         let mut result = Self {
             inventory,
             profile,
@@ -88,11 +107,28 @@ impl OpenedContributionVerifier {
             verifier,
             proof_header: proof_header.to_vec(),
             statement_index: 0,
+            computing: VecDeque::new(),
+            common,
             statement_done: false,
             failed: false,
         };
+        result.compute_common()?;
         result.fixed_inputs()?;
         Ok(result)
+    }
+
+    // Starts the records of the next common polynomials, as many as the
+    // helpers can compute ahead; without helpers each is computed when it
+    // is started.
+    fn compute_common(&mut self) -> Result<(), Refusal> {
+        while self.computing.len() < parallel_work::window().min(COMMON_AHEAD) {
+            let Some(index) = self.common.pop_front() else {
+                break;
+            };
+            let ticket = common_records_job(self.profile, index).map_err(|_| Refusal::Statement)?;
+            self.computing.push_back((index, ticket));
+        }
+        Ok(())
     }
 
     /// Supplies every statement polynomial before the next one the body
@@ -116,34 +152,16 @@ impl OpenedContributionVerifier {
                         .map_err(|_| Refusal::Statement)?;
                 }
             } else {
-                let values = common_polynomial(profile, index).map_err(|_| Refusal::Statement)?;
-                let width = profile
-                    .family_magnitude_bytes(profile.setup_family(index).ok_or(Refusal::Statement)?);
-                let mut buffer = Vec::with_capacity(CHUNK_LIMIT);
-                let mut encoded = vec![0u8; 1 + width];
-                for value in values {
-                    let (sign, magnitude) = value.to_bytes_le();
-                    if magnitude.len() > width {
-                        return Err(Refusal::Statement);
-                    }
-                    encoded.fill(0);
-                    encoded[0] = u8::from(sign == Sign::Minus);
-                    encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-                    for byte in &encoded {
-                        buffer.push(*byte);
-                        if buffer.len() == CHUNK_LIMIT {
-                            self.verifier
-                                .push_statement(&buffer)
-                                .map_err(|_| Refusal::Statement)?;
-                            buffer.clear();
-                        }
-                    }
+                let (expected, ticket) = self.computing.pop_front().ok_or(Refusal::Statement)?;
+                if expected != index {
+                    return Err(Refusal::Statement);
                 }
-                if !buffer.is_empty() {
+                for chunk in ticket.wait().chunks(CHUNK_LIMIT) {
                     self.verifier
-                        .push_statement(&buffer)
+                        .push_statement(chunk)
                         .map_err(|_| Refusal::Statement)?;
                 }
+                self.compute_common()?;
             }
             self.statement_index += 1;
         }
