@@ -526,6 +526,32 @@ pub(crate) mod tests {
         }
     }
 
+    // The weighted operator places at every row of every column the
+    // coefficient the dense reference builds there, with the same target and
+    // lookup weight.
+    #[test]
+    fn weighted_operators_equal_the_dense_reference_at_every_row() {
+        use crate::field::MODULUS;
+        for (participants, options) in [(3, 2), (10, 10), (20, 20)] {
+            let profile = Profile::new(participants, options).unwrap();
+            let (prepared, _) = synthetic_release(profile);
+            for alpha in [
+                [1, 0, 0],
+                [13, 17, 19],
+                [MODULUS - 2, MODULUS - 3, MODULUS - 5],
+            ] {
+                let weighted = prepared.statement.operator(alpha).unwrap();
+                let dense =
+                    statement::dense_operator::operator(&prepared.statement, alpha).unwrap();
+                assert_eq!(weighted.columns(prepared.columns.len()), dense.coefficients);
+                assert_eq!(
+                    (weighted.target, weighted.lookup_weight),
+                    (dense.target, dense.lookup_weight)
+                );
+            }
+        }
+    }
+
     #[test]
     fn headers_outside_the_roster_or_with_another_magic_are_refused() {
         let profile = Profile::new(3, 2).unwrap();

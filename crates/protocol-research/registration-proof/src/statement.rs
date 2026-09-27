@@ -269,8 +269,46 @@ impl StatementStream {
 }
 
 #[cfg(test)]
+#[path = "reference/dense-operator.rs"]
+mod dense_operator;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    // The weighted operator places at every row of every column the
+    // coefficient the dense reference builds there, with the same target and
+    // lookup weight, for any adjoint and public value.
+    #[test]
+    fn weighted_operators_equal_the_dense_reference_at_every_row() {
+        let element = |seed: u128| {
+            [
+                (seed * 0x9e37_79b9_7f4a_7c15 + 1) % MODULUS,
+                (seed * 0x632b_e59b_d9b4_e019 + 2) % MODULUS,
+                (seed * 0x1234_5678_9abc_def1 + 3) % MODULUS,
+            ]
+        };
+        let adjoint: Vec<Element> = (0..SYSTEMATIC as u128).map(element).collect();
+        let columns = registration_relation().columns();
+        for (index, alpha) in [
+            [1, 0, 0],
+            [13, 17, 19],
+            [MODULUS - 2, MODULUS - 3, MODULUS - 5],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let public_value = element((SYSTEMATIC + index) as u128);
+            let weighted = operator_from_parts(alpha, adjoint.clone(), public_value);
+            let dense =
+                super::dense_operator::operator_from_parts(alpha, adjoint.clone(), public_value);
+            assert_eq!(weighted.columns(columns), dense.coefficients);
+            assert_eq!(
+                (weighted.target, weighted.lookup_weight),
+                (dense.target, dense.lookup_weight)
+            );
+        }
+    }
     #[test]
     fn rejected_prefixes_and_changed_fixed_matrices_never_produce_an_operator() {
         let common = common_bytes();

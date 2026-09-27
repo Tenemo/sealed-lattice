@@ -521,6 +521,9 @@ impl PublicStatement {
         builder.finish()
     }
 }
+#[cfg(test)]
+#[path = "reference/dense-operator.rs"]
+pub(crate) mod dense_operator;
 pub struct StatementStream {
     profile: Profile,
     statement_bytes: usize,
