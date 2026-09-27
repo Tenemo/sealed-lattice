@@ -208,4 +208,18 @@ describe('guarded protocol research entry', () => {
         expect(sumProtocolProcessTree(2, [...rows].reverse())).toBe(90);
         expect(sumProtocolProcessTree(5, rows)).toBeUndefined();
     });
+
+    it('charges no process that started before the process of its recorded parent identifier, nor its descendants', () => {
+        const rows = [
+            { identifier: 2, parent: 1, bytes: 20, started: 500 },
+            { identifier: 3, parent: 2, bytes: 30, started: 500 },
+            { identifier: 4, parent: 3, bytes: 40, started: 900 },
+            // An exited process that had the identifier 2 started these.
+            { identifier: 7, parent: 2, bytes: 7000, started: 100 },
+            { identifier: 9, parent: 7, bytes: 900, started: 499 },
+        ];
+        expect(sumProtocolProcessTree(2, rows)).toBe(90);
+        expect(sumProtocolProcessTree(2, [...rows].reverse())).toBe(90);
+        expect(sumProtocolProcessTree(7, rows)).toBe(7900);
+    });
 });

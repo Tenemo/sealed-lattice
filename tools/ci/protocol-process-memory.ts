@@ -2,17 +2,27 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+// A process's identifier, its recorded parent's, its private bytes and,
+// where the host reports it, when it started in milliseconds.
 type ProcessMemory = Readonly<{
     identifier: number;
     parent: number;
     bytes: number;
+    started?: number;
 }>;
 
+// Sums the private bytes of the process and its descendants. Windows keeps
+// an exited parent's identifier, which a later process may take, so a
+// process that started before the process of its parent's identifier is
+// not that process's child.
 export const sumProtocolProcessTree = (
     identifier: number,
     processes: readonly ProcessMemory[],
 ): number | undefined => {
-    if (!processes.some((process) => process.identifier === identifier)) {
+    const started = new Map(
+        processes.map((process) => [process.identifier, process.started]),
+    );
+    if (!started.has(identifier)) {
         return undefined;
     }
     const owned = new Set([identifier]);
@@ -20,7 +30,14 @@ export const sumProtocolProcessTree = (
     while (changed) {
         changed = false;
         for (const process of processes) {
-            if (owned.has(process.parent) && !owned.has(process.identifier)) {
+            const parentStarted = started.get(process.parent);
+            if (
+                owned.has(process.parent) &&
+                !owned.has(process.identifier) &&
+                (process.started === undefined ||
+                    parentStarted === undefined ||
+                    process.started >= parentStarted)
+            ) {
                 owned.add(process.identifier);
                 changed = true;
             }
@@ -32,8 +49,10 @@ export const sumProtocolProcessTree = (
     }, 0);
 };
 
-// Reads every process's parent and private bytes in one snapshot, from which
-// several process trees can be summed.
+// Reads every process's parent and private bytes, and on Windows when it
+// started, in one snapshot, from which several process trees can be summed.
+// Elsewhere an exited parent's children pass to another process, so their
+// recorded parent is alive.
 export const readProtocolProcesses = async (): Promise<
     readonly ProcessMemory[]
 > => {
@@ -44,7 +63,7 @@ export const readProtocolProcesses = async (): Promise<
             [
                 '-NoProfile',
                 '-Command',
-                '$taskRows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,PrivatePageCount); ConvertTo-Json -Compress -InputObject $taskRows',
+                "$taskRows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,PrivatePageCount,@{Name='Started';Expression={if ($_.CreationDate) { [math]::Floor($_.CreationDate.ToFileTimeUtc() / 10000) } else { $null }}}); ConvertTo-Json -Compress -InputObject $taskRows",
             ],
             { windowsHide: true, timeout: 10_000, maxBuffer: 2 ** 22 },
         );
@@ -52,12 +71,14 @@ export const readProtocolProcesses = async (): Promise<
             ProcessId: number;
             ParentProcessId: number;
             PrivatePageCount: number | string;
+            Started: number | null;
         }[];
         assert.ok(Array.isArray(rows));
         return rows.map((row) => ({
             identifier: row.ProcessId,
             parent: row.ParentProcessId,
             bytes: Number(row.PrivatePageCount),
+            ...(row.Started === null ? {} : { started: row.Started }),
         }));
     }
     const result = await execute('ps', ['-axo', 'pid=,ppid=,rss='], {
