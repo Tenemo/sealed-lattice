@@ -546,6 +546,43 @@ const standIn = `(module
   (func (export "parallel_clear")
     (if (global.get $running)
       (then (unreachable)))))`;
+// A stand-in whose job of kind 5 outputs the first eight bytes of its
+// streamed part, of kind 6 reads one byte beyond that part, and of kind 7
+// completes after a long computation.
+const streamingStandIn = `(module
+  (import "parallel" "read" (func $read (param i32 i32 i32)))
+  (memory (export "memory") 2)
+  (global $streamed (mut i32) (i32.const 0))
+  (global $steps (mut i32) (i32.const 0))
+  (func (export "parallel_reserve") (param i32 i32) (result i32)
+    (i32.const 0))
+  (func (export "parallel_input") (param i32) (result i32)
+    (i32.const 65536))
+  (func (export "parallel_streamed") (param $length i32) (result i32)
+    (global.set $streamed (local.get $length))
+    (i32.const 1))
+  (func (export "parallel_run") (param $kind i32) (result i32)
+    (if (i32.eq (local.get $kind) (i32.const 5))
+      (then
+        (call $read (i32.const 0) (i32.const 2048) (i32.const 8))
+        (return (i32.const 0))))
+    (if (i32.eq (local.get $kind) (i32.const 6))
+      (then
+        (call $read (global.get $streamed) (i32.const 2048) (i32.const 1))
+        (return (i32.const 0))))
+    (if (i32.eq (local.get $kind) (i32.const 7))
+      (then
+        (global.set $steps (i32.const 0))
+        (loop $compute
+          (global.set $steps (i32.add (global.get $steps) (i32.const 1)))
+          (br_if $compute (i32.lt_u (global.get $steps) (i32.const 100000000))))
+        (return (i32.const 0))))
+    (i32.const 1))
+  (func (export "parallel_output_length") (result i32)
+    (i32.const 8))
+  (func (export "parallel_output_pointer") (result i32)
+    (i32.const 2048))
+  (func (export "parallel_clear")))`;
 const compileText = (text: string) => {
     const parsed = binaryen.parseText(text);
     try {
@@ -565,6 +602,8 @@ type HostImports = Readonly<{
     ) => number;
     wait: (ticket: number) => void;
     take: (ticket: number, pointer: number) => number;
+    share: (pointer: number, length: number) => number;
+    release: (handle: number) => void;
 }>;
 // The worker's side of the stand-in's jobs, each one sixteen-byte part.
 const standInHost = (helpers: ParallelHelpers) => {
@@ -698,6 +737,61 @@ describe('parallel job host', () => {
                     'A participant helper failed.',
                 );
             }
+        } finally {
+            helpers.stop();
+        }
+    });
+
+    it('serves a streamed part to its job until the job ends, and fails a job that reads beyond it', async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(streamingStandIn),
+            helperPorts(1),
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        try {
+            const memory = new WebAssembly.Memory({ initial: 1 });
+            const host = helpers.imports(
+                () => memory,
+            ) as unknown as HostImports;
+            const bytes = new Uint8Array(memory.buffer);
+            const text = (offset: number) =>
+                Buffer.from(bytes.subarray(offset, offset + 8)).toString();
+            // The helper is still busy when the worker releases the part and
+            // shares other bytes, which must not take the part's range.
+            const busy = host.submit(7, 1, 0, 0, 8);
+            bytes.set(new TextEncoder().encode('streamed'), 1024);
+            const streamed = host.share(1024, 8);
+            new Uint32Array(memory.buffer, 0, 3).set([2, streamed, 0]);
+            const ticket = host.submit(5, 1, 0, 1, 8);
+            host.release(streamed);
+            bytes.set(new TextEncoder().encode('replaced'), 1024);
+            const other = host.share(1024, 8);
+            host.wait(busy);
+            expect(host.take(busy, 256)).toBe(0);
+            host.wait(ticket);
+            expect(host.take(ticket, 512)).toBe(0);
+            expect(text(512)).toBe('streamed');
+            new Uint32Array(memory.buffer, 0, 3).set([2, other, 0]);
+            const beyond = host.submit(6, 1, 0, 1, 8);
+            const failure = failureOf(() => host.wait(beyond));
+            expect(failure).toBeInstanceOf(ResourceFailure);
+            expect((failure as Error).message).toBe(
+                'A participant helper failed.',
+            );
+            // A job streams at most one part.
+            new Uint32Array(memory.buffer, 0, 6).set([
+                2,
+                other,
+                0,
+                2,
+                other,
+                0,
+            ]);
+            expect(() => host.submit(5, 1, 0, 2, 8)).toThrow(
+                'A parallel job exceeds its bound.',
+            );
+            host.release(other);
         } finally {
             helpers.stop();
         }

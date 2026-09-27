@@ -47,6 +47,7 @@ impl PublicInputs for Inputs<'_> {
 struct Spool {
     directory: PathBuf,
     indices: BTreeSet<usize>,
+    records: BTreeSet<(usize, usize)>,
     value_bytes: usize,
 }
 impl WorkingStore for Spool {
@@ -71,6 +72,30 @@ impl WorkingStore for Spool {
     fn remove(&mut self, index: usize) -> Result<(), Error> {
         if self.indices.remove(&index) {
             fs::remove_file(self.directory.join(format!("{index}.bin")))
+                .map_err(|_| Error::Storage)?;
+        }
+        Ok(())
+    }
+    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Error> {
+        if !self.records.insert((ordinal, prime)) {
+            return Err(Error::Storage);
+        }
+        crate::write(
+            self.directory.join(format!("key-{ordinal}-{prime}.bin")),
+            record,
+        );
+        Ok(())
+    }
+    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Error> {
+        if !self.records.contains(&(ordinal, prime)) {
+            return Err(Error::Storage);
+        }
+        fs::read(self.directory.join(format!("key-{ordinal}-{prime}.bin")))
+            .map_err(|_| Error::Storage)
+    }
+    fn clear_records(&mut self) -> Result<(), Error> {
+        for (ordinal, prime) in std::mem::take(&mut self.records) {
+            fs::remove_file(self.directory.join(format!("key-{ordinal}-{prime}.bin")))
                 .map_err(|_| Error::Storage)?;
         }
         Ok(())
@@ -169,6 +194,7 @@ pub fn run(
     let mut spool = Spool {
         directory: scratch,
         indices: BTreeSet::new(),
+        records: BTreeSet::new(),
         value_bytes: stored_value_bytes(profile),
     };
     let target = Arc::new(
@@ -183,7 +209,7 @@ pub fn run(
             )
             .unwrap(),
     );
-    assert!(spool.indices.is_empty());
+    assert!(spool.indices.is_empty() && spool.records.is_empty());
     crate::write(directory.join("target.bin"), target.body());
     if let Some(bytes) = target.ciphertext() {
         crate::write(directory.join("ciphertext.bin"), bytes);

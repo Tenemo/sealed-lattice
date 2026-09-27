@@ -826,7 +826,7 @@ const operationMemory = (
 });
 
 // The operations that evaluate the ranking program, whose helpers keep the
-// evaluation's tables and keys.
+// evaluation's tables and the polynomials its multiplications keep.
 const evaluatingOperations: ReadonlySet<string> = new Set([
     'target',
     'release',

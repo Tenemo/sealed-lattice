@@ -65,7 +65,7 @@ describe('exact RNS arithmetic resource floor', () => {
         expect(census.coefficientWords).toBe(14n);
         expect(census.canonicalPolynomialBytes).toBe(7340032n);
         expect(census.externalProductPrimes).toBe(18n);
-        expect(census.cachedMultiplicationKeyBytes).toBe(226492416n);
+        expect(census.multiplicationKeyRecordBytes).toBe(226492416n);
     });
 
     it('selects decreasing certified transform primes below 2^58', () => {
@@ -113,7 +113,7 @@ describe('exact RNS arithmetic resource floor', () => {
                 expect(count >= (bits + 57n) / 58n).toBe(true);
                 expect(count <= bits / 57n + 1n).toBe(true);
             }
-            expect(census.cachedMultiplicationKeyBytes).toBe(
+            expect(census.multiplicationKeyRecordBytes).toBe(
                 4n * gadgetLength * census.externalProductPrimes * 65536n * 8n,
             );
         }

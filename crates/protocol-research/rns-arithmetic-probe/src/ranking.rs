@@ -1,12 +1,19 @@
+pub use super::RecordRequest;
+use super::jobs::KEYED_GROUPS;
 use super::word_arithmetic::{MAXIMUM_WORDS, larger, words_of};
-use super::{Arithmetic, Polynomial, ResidentKeys, prime_count_bounds, shared, unpack};
+use super::{
+    Arithmetic, KeyedWork, Polynomial, RecordContext, Step, prime_count_bounds, shared, unpack,
+};
 use num_bigint::BigUint;
 use num_traits::Zero;
 use registration_credentials::{
     foundation::CanonicalItem,
     identity::{IdentityHasher, identity},
 };
-use std::{collections::BTreeSet, rc::Rc};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    rc::Rc,
+};
 pub use supported_profile::DEGREE;
 use supported_profile::{PLAINTEXT_MODULUS, Profile};
 
@@ -18,18 +25,20 @@ mod requested_output;
 #[cfg(feature = "numerical-probes")]
 pub use requested_output::probe as requested_output_probe;
 
-/// The browser's memory bound, the reserve for the runtime and the
-/// module's own state, and the reserve for the host's transfer buffers.
-const MEMORY_BYTES: usize = 671_088_640;
+/// The planning target for the peak linear memory of the evaluation's
+/// instances together, the reserve for the runtime and the module's own
+/// state, the reserve for the host's transfer buffers, and the reserve for
+/// a helper instance's own state.
+const MEMORY_BYTES: usize = 402_653_184;
 const RUNTIME_RESERVE_BYTES: usize = 67_108_864;
 const TRANSFER_RESERVE_BYTES: usize = 2_097_152;
+const HELPER_RESERVE_BYTES: usize = 2_097_152;
 /// Each transform owns two tables of a word per coefficient: the forward
 /// twiddles and their Shoup companions, from which the backward transform
 /// reads its own.
 const TRANSFORM_TABLES: usize = 2;
-/// Keys a multiplication uses for each gadget coordinate, more than a
-/// rotation's two.
-const MULTIPLICATION_KEYS: usize = 4;
+/// The tensor sources a multiplication keeps at once.
+const KEPT_SOURCES: usize = 3;
 /// Every supported profile's ranking program is shorter.
 pub const MAXIMUM_INSTRUCTIONS: usize = 1024;
 /// The identity of a ranking program's complete bytecode.
@@ -42,6 +51,9 @@ pub fn program_identity(program: &[u8]) -> Result<[u8; 64], Refusal> {
 }
 
 pub type Ciphertext = [Polynomial; 2];
+/// Bytes of one key record: a key polynomial's transformed residues modulo
+/// one prime.
+pub const KEY_RECORD_BYTES: usize = 8 * DEGREE;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -57,6 +69,24 @@ pub enum Refusal {
 pub enum Cache {
     Multiplication,
     Rotation,
+}
+impl Cache {
+    /// The cache's number in its key records' identities.
+    fn number(self) -> u32 {
+        match self {
+            Self::Multiplication => 0,
+            Self::Rotation => 1,
+        }
+    }
+}
+
+/// What an instruction's execution reached: its completion, with the
+/// values whose last use it was, or the key records it needs before it
+/// continues.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Progress {
+    Executed(Vec<usize>),
+    Records(RecordRequest),
 }
 
 #[derive(Clone, Debug)]
@@ -86,7 +116,14 @@ pub struct Engine {
     stored: Vec<Option<[u8; 64]>>,
     step: usize,
     cache: Option<Cache>,
-    keys: ResidentKeys,
+    /// The identity of each loaded key's record modulo each external-product
+    /// prime, by ordinal, which the host's working storage holds.
+    records: Vec<Vec<[u8; 64]>>,
+    /// The last loaded key's records that the host has yet to store, in
+    /// prime order.
+    pending: VecDeque<Vec<u8>>,
+    /// The current instruction's keyed work.
+    work: Option<KeyedWork>,
     input: Option<Ciphertext>,
     comparison_coefficients: Vec<i32>,
     ranking_coefficients: Vec<Vec<i32>>,
@@ -97,81 +134,92 @@ fn word(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().unwrap())
 }
 
-/// The memory a helper instance keeps for evaluation beside its jobs' own,
-/// one of `helpers` helpers that hold the primes in turn: the transform
-/// tables of the tensor primes it holds and a multiplication's kept keys
-/// modulo the external-product primes it holds, for the profile that needs
-/// the most. A helper computes it before its first allocation, so it
-/// allocates nothing.
-pub fn helper_memory_bytes(helpers: usize) -> usize {
+/// The memory a helper keeps for evaluation beside its jobs' own when it
+/// holds the given counts of tensor and external-product primes: their
+/// transform tables and the transformed polynomials a multiplication keeps
+/// there, its tensor sources or one prime's digits, since a helper runs the
+/// last keyed job of a prime before the next prime's digits.
+fn helper_kept_bytes(tensor_primes: usize, external_primes: usize, gadget_length: usize) -> usize {
     let residue_bytes = DEGREE * 8;
+    tensor_primes * TRANSFORM_TABLES * residue_bytes
+        + (KEPT_SOURCES * tensor_primes).max(gadget_length * external_primes.min(1)) * residue_bytes
+}
+/// The memory a helper instance keeps for evaluation beside its jobs' own,
+/// one of `helpers` helpers that hold the primes in turn, for the profile
+/// that needs the most. A helper computes it before its first allocation,
+/// so it allocates nothing.
+pub fn helper_memory_bytes(helpers: usize) -> usize {
     let held = |count: usize| count.div_ceil(helpers.max(1));
     Profile::all()
         .map(|profile| {
             let (tensor_primes, external_primes) = prime_count_bounds(profile, DEGREE);
-            held(tensor_primes) * TRANSFORM_TABLES * residue_bytes
-                + held(external_primes)
-                    * MULTIPLICATION_KEYS
-                    * profile.gadget_length()
-                    * residue_bytes
+            helper_kept_bytes(
+                held(tensor_primes),
+                held(external_primes),
+                profile.gadget_length(),
+            )
         })
         .max()
         .unwrap()
 }
-
-/// The keys a cache holds.
-fn key_total(arithmetic: &Arithmetic, cache: Option<Cache>) -> usize {
-    match cache {
-        Some(Cache::Multiplication) => MULTIPLICATION_KEYS * arithmetic.gadget_length,
-        Some(Cache::Rotation) => 2 * arithmetic.gadget_length,
-        None => 0,
-    }
+/// The memory one of the helpers reserves for the evaluation: what it
+/// keeps for the primes it holds and one job.
+fn helper_reserved_bytes(arithmetic: &Arithmetic, helper: usize, helpers: usize) -> usize {
+    let held = |count: usize| (helper..count).step_by(helpers).count();
+    helper_kept_bytes(
+        held(arithmetic.tensor_primes()),
+        held(arithmetic.external_primes),
+        arithmetic.gadget_length,
+    ) + arithmetic.job_bytes(helpers)
 }
+
 /// Bytes of one resident working value.
 fn value_bytes(arithmetic: &Arithmetic) -> usize {
     2 * arithmetic.polynomial_words() * 8
 }
-/// An instruction's scratch: a multiplication holds at most three
-/// transformed tensor sources, one product and three tensors, one of them
-/// being lifted; a rotation holds its shifted component, that component's
-/// shared copy and both key groups' residues.
-fn scratch_bytes(arithmetic: &Arithmetic, operation: u32) -> usize {
+/// The memory an instruction of the operation adds in the instance that
+/// runs it beside its inputs and output: a multiplication holds three
+/// lifted tensors beside one tensor's products, and later two of them
+/// beside a keyed product's sums and a delivered group's records; a
+/// plaintext product holds the plaintext beside one component's products; a
+/// rotation holds its automorphic components, and later one of them beside
+/// the same. Without helpers the instance also keeps what they would, since
+/// it runs each job as it starts: at most three transformed tensor sources,
+/// a plaintext product's copied component and its products' bytes, or a
+/// keyed product's polynomial and one prime's digits.
+fn scratch_bytes(arithmetic: &Arithmetic, operation: u32, helpers: usize) -> usize {
     let residue_bytes = DEGREE * 8;
     let polynomial_bytes = arithmetic.polynomial_words() * 8;
+    let kept = usize::from(helpers == 0);
+    let tensor = 3 * polynomial_bytes
+        + (1 + kept * KEPT_SOURCES) * arithmetic.tensor_primes() * residue_bytes;
+    let keyed = kept * polynomial_bytes
+        + (2 * arithmetic.external_primes + (1 + kept) * arithmetic.gadget_length) * residue_bytes;
     match operation {
-        2 => 4 * arithmetic.tensor_primes() * residue_bytes + 3 * polynomial_bytes,
-        6 => 2 * arithmetic.external_primes * residue_bytes + 2 * polynomial_bytes,
+        2 => tensor.max(2 * polynomial_bytes + keyed),
+        4 => (1 + kept) * (polynomial_bytes + arithmetic.key_primes * residue_bytes),
+        6 => (2 * polynomial_bytes).max(polynomial_bytes + keyed),
         _ => 0,
     }
 }
-/// The resident values an instruction of the operation allows with the
-/// cache's keys when the helpers run the primes' jobs. The tables and kept
-/// keys count wherever those jobs run, and so does each helper's keyed job.
-/// Helpers keep the memory they reserved for a multiplication's keys while
-/// another cache's keys replace them.
-fn capacity(
-    arithmetic: &Arithmetic,
-    operation: u32,
-    cache: Option<Cache>,
-    helpers: usize,
-) -> Result<usize, Refusal> {
-    let residue_bytes = DEGREE * 8;
-    let table_bytes = arithmetic.tensor_primes() * TRANSFORM_TABLES * residue_bytes;
-    let kept = if helpers > 0 {
-        Some(Cache::Multiplication)
+/// The resident values an instruction of the operation allows within the
+/// planning target. Without helpers the instance also holds the transform
+/// tables and one job; with them each helper holds its reservation at every
+/// instruction, since an instance's memory never shrinks.
+fn capacity(arithmetic: &Arithmetic, operation: u32, helpers: usize) -> Result<usize, Refusal> {
+    let held = if helpers == 0 {
+        arithmetic.tensor_primes() * TRANSFORM_TABLES * DEGREE * 8 + arithmetic.job_bytes(0)
     } else {
-        cache
+        (0..helpers)
+            .map(|helper| HELPER_RESERVE_BYTES + helper_reserved_bytes(arithmetic, helper, helpers))
+            .sum()
     };
-    let key_bytes = key_total(arithmetic, kept) * arithmetic.external_primes * residue_bytes;
-    let helper_job_bytes = helpers * arithmetic.keyed_job_bytes(MULTIPLICATION_KEYS / 2);
     let available = MEMORY_BYTES
         .checked_sub(
             RUNTIME_RESERVE_BYTES
                 + TRANSFER_RESERVE_BYTES
-                + table_bytes
-                + key_bytes
-                + helper_job_bytes
-                + scratch_bytes(arithmetic, operation),
+                + held
+                + scratch_bytes(arithmetic, operation, helpers),
         )
         .ok_or(Refusal::Allocation)?;
     Ok(available / value_bytes(arithmetic))
@@ -352,7 +400,6 @@ impl Engine {
         let arithmetic = shared(profile, DEGREE);
         Ok(Self {
             profile,
-            keys: ResidentKeys::new(&arithmetic),
             arithmetic,
             program_hash: expected_hash,
             peak_values: peak_values(&instructions, remaining_uses.clone()),
@@ -362,6 +409,9 @@ impl Engine {
             stored: vec![None; count],
             step: 0,
             cache: None,
+            records: Vec::new(),
+            pending: VecDeque::new(),
+            work: None,
             input: None,
             comparison_coefficients,
             ranking_coefficients,
@@ -381,8 +431,9 @@ impl Engine {
         self.step
     }
 
+    /// The keys of the current cache whose records exist.
     pub fn key_count(&self) -> usize {
-        self.keys.len()
+        self.records.len()
     }
 
     /// Bytes of one canonical public coefficient: a sign byte and the
@@ -396,7 +447,13 @@ impl Engine {
         std::array::from_fn(|_| self.arithmetic.zero())
     }
 
+    /// The next instruction's requirements, before it starts: its cache's
+    /// keys, the values to spill and reload, and its ballot input. A new
+    /// cache forgets the earlier cache's records.
     pub fn requirements(&mut self) -> Result<Requirements, Refusal> {
+        if self.work.is_some() || !self.pending.is_empty() {
+            return Err(Refusal::Phase);
+        }
         let instruction = self.instructions.get(self.step).ok_or(Refusal::Phase)?;
         let wanted = match instruction.operation {
             2 => Some(Cache::Multiplication),
@@ -404,11 +461,11 @@ impl Engine {
             _ => self.cache,
         };
         if wanted != self.cache {
-            self.keys.clear();
+            self.records.clear();
             self.cache = wanted;
         }
         let key_count = self.key_total(self.cache);
-        let capacity = self.capacity(instruction.operation, self.cache)?;
+        let capacity = self.capacity(instruction.operation)?;
         let required: BTreeSet<_> = instruction.inputs.iter().copied().collect();
         let reloads: Vec<_> = required
             .iter()
@@ -450,58 +507,45 @@ impl Engine {
         })
     }
 
-    /// The keys a cache holds.
+    /// The keys a cache uses.
     fn key_total(&self, cache: Option<Cache>) -> usize {
-        key_total(&self.arithmetic, cache)
+        let gadget_length = self.arithmetic.gadget_length;
+        match cache {
+            Some(Cache::Multiplication) => 2 * KEYED_GROUPS * gadget_length,
+            Some(Cache::Rotation) => KEYED_GROUPS * gadget_length,
+            None => 0,
+        }
     }
     /// Bytes of one resident working value.
     fn value_bytes(&self) -> usize {
         value_bytes(&self.arithmetic)
     }
-    fn scratch_bytes(&self, operation: u32) -> usize {
-        scratch_bytes(&self.arithmetic, operation)
-    }
-    fn capacity(&self, operation: u32, cache: Option<Cache>) -> Result<usize, Refusal> {
-        capacity(&self.arithmetic, operation, cache, parallel_work::helpers())
+    fn capacity(&self, operation: u32) -> Result<usize, Refusal> {
+        capacity(&self.arithmetic, operation, parallel_work::helpers())
     }
     /// The linear memory the evaluation's instance plans to add for it.
-    /// Without helpers it holds the tables and kept keys too and plans the
-    /// whole bound but the reserves. With them it plans, at the kind of
-    /// instruction that needs the most, that instruction's scratch and the
-    /// resident values its capacity allows, never more than the program
-    /// holds at once.
+    /// Without helpers it runs every job itself and plans the whole target
+    /// but the reserves. With them it plans, at the kind of instruction
+    /// that needs the most, that instruction's scratch and the resident
+    /// values its capacity allows, never more than the program holds at
+    /// once.
     pub fn planned_memory_bytes(&self) -> usize {
-        if parallel_work::helpers() == 0 {
+        let helpers = parallel_work::helpers();
+        if helpers == 0 {
             return MEMORY_BYTES - RUNTIME_RESERVE_BYTES - TRANSFER_RESERVE_BYTES;
         }
-        let held = |operation: u32, cache: Option<Cache>| {
-            self.capacity(operation, cache).map_or(0, |capacity| {
-                self.scratch_bytes(operation) + capacity.min(self.peak_values) * self.value_bytes()
+        let held = |operation: u32| {
+            self.capacity(operation).map_or(0, |capacity| {
+                scratch_bytes(&self.arithmetic, operation, helpers)
+                    + capacity.min(self.peak_values) * self.value_bytes()
             })
         };
-        held(2, Some(Cache::Multiplication))
-            .max(held(6, Some(Cache::Rotation)))
-            .max(held(1, None))
+        [1, 2, 4, 6].into_iter().map(held).max().unwrap()
     }
 
-    /// The memory one of the helpers reserves for the evaluation: the
-    /// transform tables of the tensor primes it holds, a multiplication's
-    /// kept keys modulo the external-product primes it holds, and one keyed
-    /// job of a multiplication's key groups.
-    fn helper_reserved_bytes(&self, helper: usize, helpers: usize) -> usize {
-        let residue_bytes = DEGREE * 8;
-        let held = |count: usize| (helper..count).step_by(helpers).count();
-        held(self.arithmetic.tensor_primes()) * TRANSFORM_TABLES * residue_bytes
-            + held(self.arithmetic.external_primes)
-                * self.key_total(Some(Cache::Multiplication))
-                * residue_bytes
-            + self.arithmetic.keyed_job_bytes(MULTIPLICATION_KEYS / 2)
-    }
-    /// Has each helper reserve at once the memory it will hold for the
-    /// evaluation.
-    pub fn reserve_helpers(&self) {
-        let helpers = parallel_work::helpers();
-        parallel_work::reserve_helpers(|helper| self.helper_reserved_bytes(helper, helpers));
+    /// The memory one of the helpers plans for the evaluation.
+    pub fn helper_planned_bytes(&self, helper: usize, helpers: usize) -> usize {
+        helper_reserved_bytes(&self.arithmetic, helper, helpers)
     }
 
     /// Whether a cached key is a public common polynomial, and its setup
@@ -561,14 +605,48 @@ impl Engine {
         Ok(output)
     }
 
+    /// The records of the key of a cache and ordinal, for this program.
+    fn record_context(&self, cache: Cache, ordinal: usize) -> RecordContext {
+        RecordContext {
+            program: self.program_hash,
+            cache: cache.number(),
+            ordinal,
+        }
+    }
+    /// Loads the next key of the current cache: its record modulo each
+    /// external-product prime, which the host stores, and each record's
+    /// identity, which the engine keeps.
     pub fn load_key(&mut self, ordinal: usize, polynomial: Polynomial) -> Result<(), Refusal> {
         let cache = self.cache.ok_or(Refusal::Phase)?;
         Self::key_identity(self.profile, cache, ordinal)?;
-        if ordinal != self.keys.len() {
+        if ordinal != self.records.len() || !self.pending.is_empty() || self.work.is_some() {
             return Err(Refusal::Phase);
         }
         self.validate_polynomial(&polynomial)?;
-        self.arithmetic.keep(&mut self.keys, &polynomial);
+        let (identities, records) = self
+            .arithmetic
+            .key_records(&polynomial, self.record_context(cache, ordinal));
+        self.records.push(identities);
+        self.pending = records.into();
+        Ok(())
+    }
+    /// The next record of the last loaded key for the host to store, with
+    /// its prime, in prime order.
+    pub fn take_record(&mut self) -> Option<(usize, Vec<u8>)> {
+        let prime = self.arithmetic.external_primes - self.pending.len();
+        self.pending.pop_front().map(|record| (prime, record))
+    }
+    /// Takes the next key record the running instruction's request names.
+    pub fn key_record(
+        &mut self,
+        ordinal: usize,
+        prime: usize,
+        record: &[u8],
+    ) -> Result<(), Refusal> {
+        let work = self.work.as_mut().ok_or(Refusal::Phase)?;
+        if !self.arithmetic.deliver(work, ordinal, prime, record) {
+            return Err(Refusal::Phase);
+        }
         Ok(())
     }
 
@@ -699,66 +777,40 @@ impl Engine {
         })
     }
 
-    pub fn execute(&mut self) -> Result<Vec<usize>, Refusal> {
-        let requirements = self.requirements()?;
-        if !requirements.spills.is_empty()
-            || !requirements.reloads.is_empty()
-            || self.keys.len() != requirements.key_count
-        {
-            return Err(Refusal::Phase);
-        }
-        let options = self.profile.options();
-        let instruction = self.instructions[self.step].clone();
-        let output = if instruction.operation == 0 {
-            self.input.take().ok_or(Refusal::Phase)?
-        } else {
-            let left = self.value(instruction.inputs[0])?;
-            match instruction.operation {
-                1 => {
-                    let right = self.value(instruction.inputs[1])?;
-                    let mut output = left.clone();
-                    for (value, other) in output.iter_mut().zip(right) {
-                        self.arithmetic.add(value, other);
-                    }
+    /// Executes the next instruction, or continues its keyed work: its
+    /// completion, or the key records it needs next. Refuses records whose
+    /// identities differ from the loaded keys'; a refusal ends the
+    /// evaluation.
+    pub fn execute(&mut self) -> Result<Progress, Refusal> {
+        let output = match self.work.as_mut() {
+            Some(work) => match self
+                .arithmetic
+                .advance(work, &self.records)
+                .map_err(|()| Refusal::Identity)?
+            {
+                Step::Records(request) => return Ok(Progress::Records(request)),
+                Step::Done(output) => {
+                    self.work = None;
                     output
                 }
-                2 => self.arithmetic.relinearized_product(
-                    left,
-                    self.value(instruction.inputs[1])?,
-                    &self.keys,
-                ),
-                3 => self.multiply_scalar(
-                    left,
-                    self.comparison_coefficients[instruction.parameter as usize],
-                ),
-                4 => {
-                    let coefficients =
-                        &self.ranking_coefficients[instruction.parameter as usize % options];
-                    assert_eq!(coefficients.len(), DEGREE);
-                    let plaintext = self.arithmetic.signed(coefficients);
-                    std::array::from_fn(|part| {
-                        self.arithmetic.multiply(&plaintext, &left[part], false)
-                    })
+            },
+            None => {
+                let requirements = self.requirements()?;
+                if !requirements.spills.is_empty()
+                    || !requirements.reloads.is_empty()
+                    || self.records.len() != requirements.key_count
+                {
+                    return Err(Refusal::Phase);
                 }
-                5 => match instruction.parameter {
-                    0 => self.add_plaintext(left, &self.input_offset),
-                    1 => {
-                        let mut constant = vec![0; DEGREE];
-                        constant[0] = self.comparison_coefficients[0];
-                        self.add_plaintext(left, &constant)
-                    }
-                    parameter if (parameter as usize) < options + 2 => {
-                        self.add_plaintext(left, &self.ranking_coefficients[0])
-                    }
-                    _ => return Err(Refusal::Program),
-                },
-                6 => self.arithmetic.rotated(left, &self.keys),
-                _ => return Err(Refusal::Program),
+                match self.start()? {
+                    Some(output) => output,
+                    None => return self.execute(),
+                }
             }
         };
         self.values[self.step] = Some(output);
         let mut retired = Vec::new();
-        for input in instruction.inputs {
+        for input in self.instructions[self.step].inputs.clone() {
             self.remaining_uses[input] -= 1;
             if self.remaining_uses[input] == 0 {
                 self.values[input] = None;
@@ -767,7 +819,63 @@ impl Engine {
             }
         }
         self.step += 1;
-        Ok(retired)
+        Ok(Progress::Executed(retired))
+    }
+    // Computes the instruction's output, or starts its keyed work.
+    fn start(&mut self) -> Result<Option<Ciphertext>, Refusal> {
+        let options = self.profile.options();
+        let instruction = self.instructions[self.step].clone();
+        if instruction.operation == 0 {
+            return Ok(Some(self.input.take().ok_or(Refusal::Phase)?));
+        }
+        let left = self.value(instruction.inputs[0])?;
+        let output = match instruction.operation {
+            1 => {
+                let right = self.value(instruction.inputs[1])?;
+                let mut output = left.clone();
+                for (value, other) in output.iter_mut().zip(right) {
+                    self.arithmetic.add(value, other);
+                }
+                output
+            }
+            2 | 6 => {
+                let cache = self.cache.ok_or(Refusal::Phase)?;
+                let context = self.record_context(cache, 0);
+                let work = if instruction.operation == 2 {
+                    let right = self.value(instruction.inputs[1])?;
+                    self.arithmetic.start_product(left, right, context)
+                } else {
+                    self.arithmetic.start_rotation(left, context)
+                };
+                self.work = Some(work);
+                return Ok(None);
+            }
+            3 => self.multiply_scalar(
+                left,
+                self.comparison_coefficients[instruction.parameter as usize],
+            ),
+            4 => {
+                let coefficients =
+                    &self.ranking_coefficients[instruction.parameter as usize % options];
+                assert_eq!(coefficients.len(), DEGREE);
+                let plaintext = self.arithmetic.signed(coefficients);
+                std::array::from_fn(|part| self.arithmetic.multiply(&plaintext, &left[part], false))
+            }
+            5 => match instruction.parameter {
+                0 => self.add_plaintext(left, &self.input_offset),
+                1 => {
+                    let mut constant = vec![0; DEGREE];
+                    constant[0] = self.comparison_coefficients[0];
+                    self.add_plaintext(left, &constant)
+                }
+                parameter if (parameter as usize) < options + 2 => {
+                    self.add_plaintext(left, &self.ranking_coefficients[0])
+                }
+                _ => return Err(Refusal::Program),
+            },
+            _ => return Err(Refusal::Program),
+        };
+        Ok(Some(output))
     }
 
     pub fn finished(&self) -> bool {
@@ -824,7 +932,7 @@ impl Engine {
 mod tests {
     use super::{
         super::{prime_count_bounds, primes, shared},
-        Cache, DEGREE, Instruction, Profile, Refusal, capacity, evictions, helper_memory_bytes,
+        DEGREE, Instruction, Profile, Refusal, capacity, evictions, helper_memory_bytes,
         peak_values,
     };
     use std::collections::BTreeSet;
@@ -937,12 +1045,8 @@ mod tests {
         for (participants, options) in [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)] {
             let arithmetic = shared(Profile::new(participants, options).unwrap(), DEGREE);
             for helpers in 0..=8 {
-                for (operation, cache) in [
-                    (1, None),
-                    (2, Some(Cache::Multiplication)),
-                    (6, Some(Cache::Rotation)),
-                ] {
-                    assert!(capacity(&arithmetic, operation, cache, helpers).unwrap() >= 3);
+                for operation in [1, 2, 4, 6] {
+                    assert!(capacity(&arithmetic, operation, helpers).unwrap() >= 3);
                 }
             }
         }

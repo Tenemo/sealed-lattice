@@ -7,7 +7,9 @@ use registration_credentials::{
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
 };
-use rns_arithmetic_probe::ranking::{DEGREE, Engine, stored_value, stored_value_bytes};
+use rns_arithmetic_probe::ranking::{
+    DEGREE, Engine, KEY_RECORD_BYTES, Progress, Refusal, stored_value, stored_value_bytes,
+};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{cell::RefCell, sync::Arc};
 
@@ -365,10 +367,26 @@ impl State {
                 if argument != 0 || length != 0 {
                     return Err(Error::Encoding);
                 }
-                let retired = self.engine()?.execute().map_err(|_| Error::Arithmetic)?;
-                self.word(retired.len());
-                for index in retired {
-                    self.word(index);
+                // Executed: the values whose last use it was. Records: the
+                // request the host delivers next. A delivered key record that
+                // is not the stored one ends the evaluation.
+                match self.engine()?.execute() {
+                    Ok(Progress::Executed(retired)) => {
+                        self.word(0);
+                        for index in retired {
+                            self.word(index);
+                        }
+                    }
+                    Ok(Progress::Records(request)) => {
+                        for value in [1, request.first, request.count, request.prime] {
+                            self.word(value);
+                        }
+                    }
+                    Err(Refusal::Identity) => {
+                        self.session = None;
+                        self.word(2);
+                    }
+                    Err(_) => return Err(Error::Arithmetic),
                 }
                 Ok(())
             }
@@ -433,6 +451,33 @@ impl State {
                 self.target = Some(Arc::new(
                     self.session.take().ok_or(Error::Context)?.finish()?,
                 ));
+                Ok(())
+            }
+            21 => {
+                // The request's next key record of the ordinal, after its
+                // prime.
+                if length != 4 + KEY_RECORD_BYTES {
+                    return Err(Error::Encoding);
+                }
+                let prime = u32::from_le_bytes(self.input[..4].try_into().unwrap()) as usize;
+                let record = &self.input[4..length];
+                self.session
+                    .as_mut()
+                    .and_then(|session| session.engine.as_mut())
+                    .ok_or(Error::Arithmetic)?
+                    .key_record(argument, prime, record)
+                    .map_err(|_| Error::Storage)
+            }
+            22 => {
+                // The last loaded key's next record for the host to store,
+                // after its prime, or nothing once every record is stored.
+                if argument != 0 || length != 0 {
+                    return Err(Error::Encoding);
+                }
+                if let Some((prime, record)) = self.engine()?.take_record() {
+                    self.word(prime);
+                    self.output.extend_from_slice(&record);
+                }
                 Ok(())
             }
             20 => {

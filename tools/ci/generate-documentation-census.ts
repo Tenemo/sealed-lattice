@@ -3435,7 +3435,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Exact RNS arithmetic census',
         '',
-        'The recursive-context floor comes from the pinned library allocation structure. The alternative uses flat scalar transform plans and sufficiently wide auxiliary integer residues, then exact CRT lifting and rounding under the existing cryptographic modulus. Cached public transforms and scheduled ciphertexts remain separate live-set costs.',
+        "The recursive-context floor comes from the pinned library allocation structure. The alternative uses flat scalar transform plans and sufficiently wide auxiliary integer residues, then exact CRT lifting and rounding under the existing cryptographic modulus. The evaluation's working storage holds the transformed key records; scheduled ciphertexts remain a separate live-set cost.",
         '',
         table(
             ['Property', 'Value'],
@@ -3478,8 +3478,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(rnsArithmetic.canonicalPolynomialBytes),
                 ],
                 [
-                    'All transformed multiplication-key working bytes',
-                    formatCount(rnsArithmetic.cachedMultiplicationKeyBytes),
+                    "Stored records of a multiplication's keys",
+                    formatCount(rnsArithmetic.multiplicationKeyRecordBytes),
                 ],
             ],
         ),

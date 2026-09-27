@@ -90,7 +90,10 @@ export const compileRnsArithmeticResourceCensus = (
     const flatTableBytes = flatTableBytesPerPrime * exactProductPrimes;
     const coefficientWords = (bits + 63n) / 64n;
     const canonicalPolynomialBytes = coefficientWords * 8n * degree;
-    const cachedMultiplicationKeyBytes =
+    // A multiplication's key records, which the evaluation's working
+    // storage holds: each of its keys' transformed residues modulo each
+    // external-product prime.
+    const multiplicationKeyRecordBytes =
         4n * gadgetLength * externalProductPrimes * degree * 8n;
     return {
         degree,
@@ -104,6 +107,6 @@ export const compileRnsArithmeticResourceCensus = (
         flatTableBytes,
         coefficientWords,
         canonicalPolynomialBytes,
-        cachedMultiplicationKeyBytes,
+        multiplicationKeyRecordBytes,
     };
 };

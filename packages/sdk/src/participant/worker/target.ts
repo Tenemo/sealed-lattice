@@ -38,8 +38,9 @@ import type { TargetState } from './target-state.js';
 // the public ranking target and retains the exact target body with fresh
 // signing coins before its target vote exists. An interrupted signing
 // evaluates again and must reproduce the retained body. The values the
-// evaluation spills are public work in their own database, which each
-// evaluation clears first; the engine checks every value it reads back.
+// evaluation spills and the records of its keys are public work in their own
+// database, which each evaluation clears first; the engine checks every value
+// and record it reads back.
 // The evaluated target, keyed to the credential, lives in another database
 // of the participant's origin, from which release and result restore it
 // instead of evaluating again; a missing or refused copy only means
@@ -475,27 +476,68 @@ const restoreEvaluation = async (context: ProfileContext) => {
     return restored;
 };
 
+const readStoredBlob = async (storage: IDBDatabase, key: IDBValidKey) => {
+    const transaction = storage.transaction(evaluationStore, 'readonly');
+    const done = completion(transaction);
+    const value = await request<unknown>(
+        transaction.objectStore(evaluationStore).get(key),
+    );
+    await done;
+    return value instanceof Blob ? value : undefined;
+};
+
 const readStoredChunk = async (
     storage: IDBDatabase,
     node: number,
     offset: number,
     length: number,
 ) => {
-    const transaction = storage.transaction(evaluationStore, 'readonly');
-    const done = completion(transaction);
-    const value = await request<unknown>(
-        transaction.objectStore(evaluationStore).get([node, offset]),
-    );
-    await done;
-    if (!(value instanceof Blob) || value.size !== length)
+    const value = await readStoredBlob(storage, [node, offset]);
+    if (value === undefined || value.size !== length)
         throw new PublicInputFailure('A stored evaluation value is missing.');
     return new Uint8Array(await value.arrayBuffer());
+};
+
+// A key's record modulo a prime sorts after every stored value's chunk.
+const keyRecord = (ordinal: number, prime: number) => ['key', ordinal, prime];
+
+// The stored records modulo a prime of the keys from the first ordinal, in
+// one transaction, each after the prime, as the module takes it.
+const readStoredRecords = async (
+    storage: IDBDatabase,
+    first: number,
+    count: number,
+    prime: number,
+) => {
+    const transaction = storage.transaction(evaluationStore, 'readonly');
+    const done = completion(transaction);
+    const store = transaction.objectStore(evaluationStore);
+    const values = await Promise.all(
+        Array.from({ length: count }, (_unused, index) =>
+            request<unknown>(store.get(keyRecord(first + index, prime))),
+        ),
+    );
+    await done;
+    return Promise.all(
+        values.map(async (value) => {
+            if (!(value instanceof Blob) || 4 + value.size > moduleChunkBytes)
+                throw new PublicInputFailure(
+                    'A stored evaluation key is missing.',
+                );
+            return concatenate(
+                unsigned32(prime),
+                new Uint8Array(await value.arrayBuffer()),
+            );
+        }),
+    );
 };
 
 // Runs the public ranking evaluation from the closed inventory. The engine
 // names each step's keys, ballot input, and values to spill or reload; a
 // spilled value is read back through the engine before it leaves memory. A
-// ballot input is the body of the barrier's usable slot of its author.
+// ballot input is the body of the barrier's usable slot of its author. Each
+// loaded key leaves its records in storage, and a product or rotation
+// requests them back one key group and prime at a time.
 const evaluate = async (
     context: ProfileContext,
     relay: PublicRelay,
@@ -540,6 +582,24 @@ const evaluate = async (
                 'A stored evaluation value changed.',
             );
         };
+        // Stores the records of the key just loaded, which the module hands
+        // over one prime at a time.
+        const storeKeyRecords = async (ordinal: number) => {
+            const records: Uint8Array[] = [];
+            for (
+                let output = evaluationCommand(context, 22);
+                output.length > 0;
+                output = evaluationCommand(context, 22)
+            )
+                records.push(output);
+            await writeEvaluationStorage(storage, (store) => {
+                for (const output of records)
+                    store.put(
+                        new Blob([output.slice(4)]),
+                        keyRecord(ordinal, readUnsigned32(output, 0)),
+                    );
+            });
+        };
         evaluationCommand(context, 2);
         while (
             kernel.evaluation_target_body_length() === 0 &&
@@ -574,6 +634,11 @@ const evaluate = async (
             }
             for (const node of required.slice(7 + spillCount))
                 await deliverStored(18, node);
+            // A new cache replaces the earlier cache's records.
+            if (loaded === 0 && keyCount > 0)
+                await writeEvaluationStorage(storage, (store) =>
+                    store.delete(IDBKeyRange.bound(['key'], ['key', []])),
+                );
             for (let ordinal = loaded; ordinal < keyCount; ordinal++) {
                 const [index] = words(evaluationCommand(context, 11));
                 if (index !== unusedWord)
@@ -589,6 +654,7 @@ const evaluate = async (
                             'An evaluation key was refused.',
                         ),
                     );
+                await storeKeyRecords(ordinal);
             }
             if (author !== unusedWord) {
                 const [length] = words(evaluationCommand(context, 14, author));
@@ -609,13 +675,50 @@ const evaluate = async (
                         'An accepted ballot changed.',
                     );
             }
-            const retired = words(evaluationCommand(context, 15));
-            await writeEvaluationStorage(storage, (store) => {
-                for (const node of retired.slice(1))
-                    store.delete(
-                        IDBKeyRange.bound([node], [node + 1], false, true),
+            // The step ends with the values whose last use it was, or asks
+            // for key records first.
+            for (;;) {
+                const [status, ...rest] = words(evaluationCommand(context, 15));
+                if (status === 0) {
+                    await writeEvaluationStorage(storage, (store) => {
+                        for (const node of rest)
+                            store.delete(
+                                IDBKeyRange.bound(
+                                    [node],
+                                    [node + 1],
+                                    false,
+                                    true,
+                                ),
+                            );
+                    });
+                    break;
+                }
+                if (status === 2)
+                    throw new PublicInputFailure(
+                        'A stored evaluation key changed.',
                     );
-            });
+                const [first, count, prime] = rest;
+                if (status !== 1 || rest.length !== 3)
+                    throw new Error('The evaluation step is malformed.');
+                const records = await readStoredRecords(
+                    storage,
+                    first,
+                    count,
+                    prime,
+                );
+                for (const [index, record] of records.entries())
+                    if (
+                        tryEvaluationCommand(
+                            context,
+                            21,
+                            first + index,
+                            record,
+                        ) === undefined
+                    )
+                        throw new PublicInputFailure(
+                            'A stored evaluation key changed.',
+                        );
+            }
         }
         if (kernel.evaluation_target_body_length() === 0)
             evaluationCommand(context, 19);

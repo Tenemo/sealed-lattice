@@ -6,7 +6,9 @@
 // refused and memory bounded to what one helper needs. The module submits
 // deterministic jobs through a shared queue and later takes each output of
 // the length it declared, so every output equals the one it computes alone;
-// without helpers it runs every job itself. A job pinned to a helper runs
+// without helpers it runs every job itself. A job may stream one shared
+// part, which its helper reads in pieces as it runs instead of copying it
+// with the rest of its input. A job pinned to a helper runs
 // there after that helper's earlier pinned jobs, which lets the module keep
 // state on a helper between jobs. After startup the worker and its helpers
 // exchange only shared memory. The helpers are the page's workers rather
@@ -52,10 +54,12 @@ const exhausted = 3;
 // unpinned queue's head and tail, each helper's pinned queue head and tail,
 // the queues' entries, the job slots, each helper's linear-memory pages and
 // the count of inputs the helpers have copied. A slot holds its state, kind,
-// output offset and length, part count, each part's offset and length, and
-// whether its helper has copied its input.
+// output offset and length, part count, each part's offset and length,
+// whether its helper has copied its input, and one more than the index of
+// its streamed part, or zero.
 const slotWords = 16;
 const copiedOffset = 13;
+const streamedOffset = 14;
 const pageBytes = 65_536;
 const controlLayout = (helpers: number) => {
     const wakeBase = 1;
@@ -73,6 +77,7 @@ const controlLayout = (helpers: number) => {
         slotBase,
         slotWords,
         copiedOffset,
+        streamedOffset,
         memoryBase,
         copiedWord: memoryBase + helpers,
         queueEntries: maximumTickets,
@@ -101,6 +106,7 @@ export const helperRole = 'helper';
 export const helperFunctions = [
     'parallel_reserve',
     'parallel_input',
+    'parallel_streamed',
     'parallel_run',
     'parallel_output_length',
     'parallel_output_pointer',
@@ -113,19 +119,52 @@ const refuse = () => {
 // What the allocator's import throws in a helper once no memory is left.
 const exhaustion = new Error('A helper exhausted its memory bound.');
 
-// Instantiates the module with every host function refused, the allocator's
-// exhaustion told apart, and bounds its memory; undefined when it cannot.
-const instantiateHelper = ({ module, helpers, evaluation }: HelperStart) => {
-    const imports: Record<string, Record<string, () => number>> = {};
+// The arena range of the running job's streamed part.
+type StreamedPart = Readonly<{ offset: number; length: number }>;
+
+// Instantiates the module with every host function refused but the reads of
+// the running job's streamed part, the allocator's exhaustion told apart,
+// and bounds its memory; undefined when it cannot.
+const instantiateHelper = (
+    { module, helpers, evaluation }: HelperStart,
+    arena: Uint8Array,
+    streamed: () => StreamedPart | undefined,
+) => {
+    const imports: Record<
+        string,
+        Record<string, (...values: number[]) => number | undefined>
+    > = {};
     for (const entry of WebAssembly.Module.imports(module))
         (imports[entry.module] ??= {})[entry.name] = refuse;
+    let instanceMemory: WebAssembly.Memory | undefined;
     // A helper has no helpers of its own.
     (imports.parallel ??= {}).helpers = () => 0;
+    imports.parallel.read = (
+        position: number,
+        pointer: number,
+        length: number,
+    ) => {
+        const part = streamed();
+        const start = position >>> 0;
+        const count = length >>> 0;
+        if (
+            part === undefined ||
+            instanceMemory === undefined ||
+            start > part.length ||
+            count > part.length - start
+        )
+            throw new Error('A job read beyond its streamed part.');
+        new Uint8Array(instanceMemory.buffer, pointer >>> 0, count).set(
+            arena.subarray(part.offset + start, part.offset + start + count),
+        );
+        return undefined;
+    };
     (imports.allocator ??= {}).exhausted = () => {
         throw exhaustion;
     };
     try {
         const { exports } = new WebAssembly.Instance(module, imports);
+        instanceMemory = exports.memory as WebAssembly.Memory;
         const call = (name: string, ...values: number[]): number =>
             (exports[name] as (...values: number[]) => number)(...values) >>> 0;
         if (call('parallel_reserve', helpers, evaluation ? 1 : 0) !== 0)
@@ -148,7 +187,8 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
     const { layout, index } = helperStart;
     const control = new Int32Array(helperStart.control);
     const arena = new Uint8Array(helperStart.arena);
-    const instance = instantiateHelper(helperStart);
+    let streamed: StreamedPart | undefined;
+    const instance = instantiateHelper(helperStart, arena, () => streamed);
     if (instance === undefined) {
         port.postMessage(false);
         self.close();
@@ -202,9 +242,11 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
         const outputOffset = control[base + 2] >>> 0;
         const outputLength = control[base + 3] >>> 0;
         const parts = control[base + 4];
+        const streamedPart = control[base + layout.streamedOffset] - 1;
         let length = 0;
         for (let part = 0; part < parts; part += 1)
-            length += control[base + 6 + 2 * part] >>> 0;
+            if (part !== streamedPart)
+                length += control[base + 6 + 2 * part] >>> 0;
         const pointer = call('parallel_input', length);
         if (pointer === 0) return false;
         let target = memory();
@@ -212,6 +254,11 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
         for (let part = 0; part < parts; part += 1) {
             const offset = control[base + 5 + 2 * part] >>> 0;
             const partLength = control[base + 6 + 2 * part] >>> 0;
+            if (part === streamedPart) {
+                streamed = { offset, length: partLength };
+                if (call('parallel_streamed', partLength) === 0) return false;
+                continue;
+            }
             target.set(arena.subarray(offset, offset + partLength), at);
             at += partLength;
         }
@@ -256,13 +303,18 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
                     error === exhaustion ? layout.exhausted : layout.failed;
                 state = trapped;
             }
+        streamed = undefined;
         recordMemory();
         const stateWord = layout.slotBase + slot * layout.slotWords;
         Atomics.store(control, stateWord, state);
         Atomics.notify(control, stateWord);
-        // A job that ended before its input was copied releases the input
-        // too, so a worker waiting for arena space wakes.
-        if (Atomics.load(control, stateWord + layout.copiedOffset) === 0) {
+        // A job that ended before its input was copied, or that streamed a
+        // part, releases that input now, so a worker waiting for arena space
+        // wakes.
+        if (
+            Atomics.load(control, stateWord + layout.copiedOffset) === 0 ||
+            control[stateWord + layout.streamedOffset] !== 0
+        ) {
             Atomics.add(control, layout.copiedWord, 1);
             Atomics.notify(control, layout.copiedWord);
         }
@@ -313,6 +365,7 @@ export const noParallelHelpers: ParallelHelpers = {
         wait: noJobs,
         take: noJobs,
         discard: noJobs,
+        read: noJobs,
     }),
     memory: () => ({ helperBytes: 0, largestHelperBytes: 0, arenaBytes: 0 }),
     stop: () => undefined,
@@ -335,11 +388,11 @@ export const affordedHelpers = () => {
 };
 
 // Starts the helpers listening on the ports and waits until each has
-// instantiated the module, with room for the evaluation's tables and kept
-// keys when the operation evaluates. Without ports, beyond the helper
-// bound, without growable shared memory, or when a helper fails to start or
-// has not started in time, the module runs every job itself and every
-// started helper stops.
+// instantiated the module, with room for the evaluation's tables and the
+// polynomials its multiplications keep when the operation evaluates. Without
+// ports, beyond the helper bound, without growable shared memory, or when a
+// helper fails to start or has not started in time, the module runs every
+// job itself and every started helper stops.
 export const startParallelHelpers = async (
     module: WebAssembly.Module,
     ports: readonly MessagePort[],
@@ -406,7 +459,9 @@ type Running = {
     slot: number;
     inputs: Block[];
     shared: SharedInput[];
-    // Whether the job's input ranges are still held for its helper.
+    // The shared input the job streams, which it reads until it ends.
+    streamed: SharedInput[];
+    // Whether the job's copied input ranges are still held for its helper.
     holding: boolean;
     output: Block | undefined;
     outputLength: number;
@@ -483,28 +538,36 @@ const createHost = (
         releaseBlock({ offset: previous, length: next - previous });
         return true;
     };
-    const releaseInputs = (running: Running) => {
-        if (!running.holding) return;
-        running.holding = false;
-        holding.delete(running);
-        for (const block of running.inputs) releaseBlock(block);
-        for (const input of running.shared) dereference(input);
+    // Releases a job's copied inputs and, once it has ended, the part it
+    // streamed.
+    const releaseInputs = (running: Running, ended: boolean) => {
+        if (running.holding) {
+            running.holding = false;
+            for (const block of running.inputs) releaseBlock(block);
+            for (const input of running.shared) dereference(input);
+        }
+        if (ended) {
+            for (const input of running.streamed) dereference(input);
+            running.streamed = [];
+        }
+        if (running.streamed.length === 0) holding.delete(running);
     };
     // Releases the inputs that helpers have copied or whose jobs have ended.
     const releaseCopied = () => {
         for (const running of holding) {
             const word = stateWord(running.slot);
+            const ended = Atomics.load(control, word) !== queued;
             if (
-                Atomics.load(control, word + layout.copiedOffset) !== 0 ||
-                Atomics.load(control, word) !== queued
+                ended ||
+                Atomics.load(control, word + layout.copiedOffset) !== 0
             )
-                releaseInputs(running);
+                releaseInputs(running, ended);
         }
     };
     const settle = (running: Running) => {
         if (running.settled) return;
         running.settled = true;
-        releaseInputs(running);
+        releaseInputs(running, true);
     };
     const finish = (ticket: number, running: Running) => {
         settle(running);
@@ -624,17 +687,19 @@ const createHost = (
                 3 * count,
             ).slice();
             let total = 0;
+            let streamedParts = 0;
             for (let part = 0; part < count; part += 1) {
                 const tag = words[3 * part];
                 if (tag === 0) total += words[3 * part + 2];
-                else if (tag === 1) {
+                else if (tag === 1 || tag === 2) {
                     const input = shares.get(words[3 * part + 1]);
                     if (input === undefined)
                         throw new Error('The shared input is unknown.');
                     total += input.length;
+                    if (tag === 2) streamedParts += 1;
                 } else throw new Error('A parallel job part is malformed.');
             }
-            if (total > maximumJobBytes)
+            if (total > maximumJobBytes || streamedParts > 1)
                 throw new Error('A parallel job exceeds its bound.');
             if (tickets.size >= maximumTickets) sweep();
             const slot = freeSlots.pop();
@@ -644,12 +709,14 @@ const createHost = (
                 slot,
                 inputs: [],
                 shared: [],
+                streamed: [],
                 holding: true,
                 output: undefined,
                 outputLength,
                 settled: false,
             };
             const base = stateWord(slot);
+            control[base + layout.streamedOffset] = 0;
             for (let part = 0; part < count; part += 1) {
                 let offset: number;
                 let length: number;
@@ -669,7 +736,10 @@ const createHost = (
                 } else {
                     const input = shares.get(words[3 * part + 1])!;
                     input.references += 1;
-                    running.shared.push(input);
+                    if (words[3 * part] === 2) {
+                        running.streamed.push(input);
+                        control[base + layout.streamedOffset] = part + 1;
+                    } else running.shared.push(input);
                     offset = input.block.offset;
                     length = input.length;
                 }
@@ -732,6 +802,9 @@ const createHost = (
             if (running === undefined) return;
             discarded.add(ticket);
             sweep();
+        },
+        read: () => {
+            throw new Error('Only a helper serves a streamed part.');
         },
     });
     return {

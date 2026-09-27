@@ -25,6 +25,7 @@ const allowedImports = [
     'enrollment.staged_chunk',
     'parallel.discard',
     'parallel.helpers',
+    'parallel.read',
     'parallel.release',
     'parallel.share',
     'parallel.submit',

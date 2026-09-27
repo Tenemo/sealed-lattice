@@ -16,8 +16,8 @@ pub mod ranking;
 #[path = "word-arithmetic.rs"]
 mod word_arithmetic;
 
-pub use jobs::JOBS;
-use jobs::ResidentKeys;
+use jobs::{DROP_LEFT, DROP_RIGHT, Keyed, KeyedProduct, PrimeSet, RecordContext};
+pub use jobs::{JOBS, RecordRequest};
 
 #[cfg(any(test, feature = "numerical-probes"))]
 use word_arithmetic::words_of;
@@ -26,7 +26,6 @@ use word_arithmetic::{Lift, MAXIMUM_WORDS, WideModulus, extract, larger};
 /// Canonical coefficients below the ciphertext modulus, each in the
 /// arithmetic's count of little-endian 64-bit words, in coefficient order.
 pub type Polynomial = Vec<u64>;
-type Transformed = Vec<Vec<u64>>;
 
 #[cfg(any(test, feature = "numerical-probes"))]
 fn next(state: &mut u64) -> u64 {
@@ -297,97 +296,122 @@ impl Arithmetic {
         }
         output
     }
-    /// The residues modulo the prime of the centered coefficients whose
-    /// little-endian words the bytes hold.
-    fn residues(&self, bytes: &[u8], prime: usize) -> Vec<u64> {
-        let (reduction, powers) = (&self.reductions[prime], &self.word_powers[prime]);
-        let negated = self.negated_modulus[prime];
+    /// The residues modulo each prime of the set of the centered
+    /// coefficients of the job's streamed polynomial, reading each
+    /// coefficient once.
+    fn set_residues(&self, set: PrimeSet) -> Vec<Vec<u64>> {
+        let mut output: Vec<Vec<u64>> = set
+            .primes()
+            .map(|_| Vec::with_capacity(self.degree))
+            .collect();
         let mut value = [0u64; MAXIMUM_WORDS];
         let value = &mut value[..self.words];
-        bytes
-            .chunks_exact(8 * self.words)
-            .map(|coefficient| {
-                read_words(coefficient, value);
-                let negative = larger(value, &self.wide.half);
-                words_residue(reduction, powers, value, if negative { negated } else { 0 })
-            })
-            .collect()
+        self.streamed_coefficients(|coefficient| {
+            read_words(coefficient, value);
+            let negative = larger(value, &self.wide.half);
+            for (residues, prime) in output.iter_mut().zip(set.primes()) {
+                let initial = if negative {
+                    self.negated_modulus[prime]
+                } else {
+                    0
+                };
+                residues.push(words_residue(
+                    &self.reductions[prime],
+                    &self.word_powers[prime],
+                    value,
+                    initial,
+                ));
+            }
+        });
+        output
     }
-    /// The four tensor products of two ciphertexts' components: component
-    /// k / 2 of the first times component k % 2 of the second. Each source
-    /// is transformed when its first product needs it and dropped after its
-    /// last, so at most three are held. A square's two cross products are
-    /// one product modulo every prime, so its two sources and that product
-    /// are computed once.
-    fn tensors(&self, first: &[Polynomial; 2], second: &[Polynomial; 2]) -> [Polynomial; 4] {
-        let count = self.tensor_primes();
-        let tensor = |left: &Transformed, right: &Transformed| {
-            let products = self.products(left, right);
+    /// The tensor products of two ciphertexts' components: the constant
+    /// product, the sum of the two cross products and the quadratic product,
+    /// each lifted on its own. Each component's residues stay with the
+    /// instances that run their primes' jobs from its first product to its
+    /// last, so at most three are kept. A square's two cross products are
+    /// one product modulo every prime, so its two components' residues and
+    /// that product are computed once.
+    fn tensors(&self, first: &[Polynomial; 2], second: &[Polynomial; 2]) -> [Polynomial; 3] {
+        let mut sources = self.sources(self.tensor_primes());
+        let tensor = |sources: &mut jobs::Sources, left, right, drops| {
+            let products = self.source_products(sources, left, right, drops);
             self.lifted(&products, jobs::Lifted::Tensor)
         };
-        let first_constant = self.transformed(&first[0], count);
+        self.keep_source(&mut sources, 0, &first[0]);
         if std::ptr::eq(first, second) {
-            let first_linear = self.transformed(&first[1], count);
-            let constant = tensor(&first_constant, &first_constant);
-            let cross = tensor(&first_constant, &first_linear);
-            drop(first_constant);
-            let quadratic = tensor(&first_linear, &first_linear);
-            return [constant, cross.clone(), cross, quadratic];
+            self.keep_source(&mut sources, 1, &first[1]);
+            let constant = tensor(&mut sources, 0, 0, 0);
+            let mut linear = tensor(&mut sources, 0, 1, DROP_LEFT);
+            let cross = linear.clone();
+            self.add(&mut linear, &cross);
+            drop(cross);
+            let quadratic = tensor(&mut sources, 1, 1, DROP_LEFT);
+            return [constant, linear, quadratic];
         }
-        let second_constant = self.transformed(&second[0], count);
-        let constant = tensor(&first_constant, &second_constant);
-        let second_linear = self.transformed(&second[1], count);
-        let first_cross = tensor(&first_constant, &second_linear);
-        drop(first_constant);
-        let first_linear = self.transformed(&first[1], count);
-        let quadratic = tensor(&first_linear, &second_linear);
-        drop(second_linear);
-        let second_cross = tensor(&first_linear, &second_constant);
-        [constant, first_cross, second_cross, quadratic]
+        self.keep_source(&mut sources, 2, &second[0]);
+        let constant = tensor(&mut sources, 0, 2, 0);
+        self.keep_source(&mut sources, 3, &second[1]);
+        let mut linear = tensor(&mut sources, 0, 3, DROP_LEFT);
+        self.keep_source(&mut sources, 1, &first[1]);
+        let products = self.source_products(&mut sources, 1, 2, DROP_RIGHT);
+        self.add_lifted(&mut linear, &products, jobs::Lifted::Tensor);
+        drop(products);
+        let quadratic = tensor(&mut sources, 1, 3, DROP_LEFT | DROP_RIGHT);
+        [constant, linear, quadratic]
     }
-    /// Each gadget digit of the canonical coefficients' residues modulo the
-    /// prime, untransformed, from the coefficients' little-endian words.
-    fn prime_digits(&self, bytes: &[u8], prime: usize) -> Vec<Vec<u64>> {
+    /// Each gadget digit of the canonical coefficients' residues modulo each
+    /// prime of the set, untransformed, from the job's streamed polynomial,
+    /// reading each coefficient once.
+    fn set_digits(&self, set: PrimeSet) -> Vec<Vec<Vec<u64>>> {
         let bits = Profile::gadget_base_bits();
         let parts = bits.div_ceil(64);
-        let mut output: Vec<Vec<u64>> = (0..self.gadget_length)
-            .map(|_| Vec::with_capacity(self.degree))
+        let mut output: Vec<Vec<Vec<u64>>> = set
+            .primes()
+            .map(|_| {
+                (0..self.gadget_length)
+                    .map(|_| Vec::with_capacity(self.degree))
+                    .collect()
+            })
             .collect();
         let mut value = [0u64; MAXIMUM_WORDS];
         let value = &mut value[..self.words];
         let mut words = [0u64; MAXIMUM_WORDS];
         let words = &mut words[..parts];
-        let (reduction, powers) = (&self.reductions[prime], &self.word_powers[prime]);
-        for coefficient in bytes.chunks_exact(8 * self.words) {
+        self.streamed_coefficients(|coefficient| {
             read_words(coefficient, value);
-            for (digit, residues) in output.iter_mut().enumerate() {
+            for digit in 0..self.gadget_length {
                 digit_words(value, bits * digit, bits, words);
-                residues.push(words_residue(reduction, powers, words, 0));
+                for (digits, prime) in output.iter_mut().zip(set.primes()) {
+                    digits[digit].push(words_residue(
+                        &self.reductions[prime],
+                        &self.word_powers[prime],
+                        words,
+                        0,
+                    ));
+                }
             }
-        }
+        });
         output
     }
-    /// The product of two ciphertexts, relinearized with each gadget
+    /// Starts the product of two ciphertexts, relinearized with each gadget
     /// coordinate's encryption key, first relinearization key, second
     /// relinearization key and second relinearization common polynomial, in
-    /// that key order.
-    fn relinearized_product(
+    /// that key order from the context's ordinal.
+    fn start_product(
         &self,
         left: &[Polynomial; 2],
         right: &[Polynomial; 2],
-        keys: &ResidentKeys,
-    ) -> [Polynomial; 2] {
-        let [mut constant, mut linear, other_linear, quadratic] = self.tensors(left, right);
-        self.add(&mut linear, &other_linear);
-        drop(other_linear);
-        let [intermediate, quadratic_linear] = self.keyed(&quadratic, keys, 0);
-        drop(quadratic);
-        self.add(&mut linear, &quadratic_linear);
-        drop(quadratic_linear);
-        let [constant_term, linear_term] = self.keyed(&intermediate, keys, 2);
-        self.add(&mut constant, &constant_term);
-        self.add(&mut linear, &linear_term);
-        [constant, linear]
+        context: RecordContext,
+    ) -> KeyedWork {
+        let [constant, linear, quadratic] = self.tensors(left, right);
+        let keyed = self.keyed_product(&quadratic, context);
+        KeyedWork::Product {
+            constant,
+            linear,
+            keyed,
+            context,
+        }
     }
     /// The automorphism X to X^5, which rotates the plaintext slots.
     fn automorphism(&self, polynomial: &[u64]) -> Polynomial {
@@ -404,16 +428,76 @@ impl Arithmetic {
         }
         output
     }
-    /// A ciphertext under the automorphism, switched back to the secret with
-    /// each gadget coordinate's automorphism key and then its common
-    /// polynomial.
-    fn rotated(&self, value: &[Polynomial; 2], keys: &ResidentKeys) -> [Polynomial; 2] {
-        let mut constant = self.automorphism(&value[0]);
-        let [constant_term, linear] = self.keyed(&self.automorphism(&value[1]), keys, 0);
-        self.add(&mut constant, &constant_term);
-        [constant, linear]
+    /// Starts switching a ciphertext under the automorphism back to the
+    /// secret with each gadget coordinate's automorphism key and then its
+    /// common polynomial, in that key order from the context's ordinal.
+    fn start_rotation(&self, value: &[Polynomial; 2], context: RecordContext) -> KeyedWork {
+        let constant = self.automorphism(&value[0]);
+        let keyed = self.keyed_product(&self.automorphism(&value[1]), context);
+        KeyedWork::Rotation { constant, keyed }
     }
-    fn add(&self, target: &mut Polynomial, other: &[u64]) {
+    /// Advances the work's keyed products: the key records they need next,
+    /// or the resulting ciphertext. Fails when delivered records are not
+    /// those whose identities the caller holds, by ordinal and prime.
+    fn advance(&self, work: &mut KeyedWork, identities: &[Vec<[u8; 64]>]) -> Result<Step, ()> {
+        loop {
+            match work {
+                KeyedWork::Product {
+                    constant,
+                    linear,
+                    keyed,
+                    context,
+                } => match self.advance_keyed(keyed, identities)? {
+                    Keyed::Records(request) => return Ok(Step::Records(request)),
+                    // The first pair of groups' sums: the intermediate
+                    // polynomial and the quadratic product's linear term.
+                    Keyed::Done([intermediate, quadratic_linear])
+                        if context.ordinal == keyed.first_ordinal() =>
+                    {
+                        self.add_lifted(linear, &quadratic_linear, jobs::Lifted::External);
+                        drop(quadratic_linear);
+                        let intermediate = self.lifted(&intermediate, jobs::Lifted::External);
+                        *keyed = self.keyed_product(
+                            &intermediate,
+                            RecordContext {
+                                ordinal: context.ordinal + jobs::KEYED_GROUPS * self.gadget_length,
+                                ..*context
+                            },
+                        );
+                    }
+                    Keyed::Done([constant_term, linear_term]) => {
+                        self.add_lifted(constant, &constant_term, jobs::Lifted::External);
+                        drop(constant_term);
+                        self.add_lifted(linear, &linear_term, jobs::Lifted::External);
+                        return Ok(Step::Done([
+                            std::mem::take(constant),
+                            std::mem::take(linear),
+                        ]));
+                    }
+                },
+                KeyedWork::Rotation { constant, keyed } => {
+                    return match self.advance_keyed(keyed, identities)? {
+                        Keyed::Records(request) => Ok(Step::Records(request)),
+                        Keyed::Done([constant_term, linear]) => {
+                            self.add_lifted(constant, &constant_term, jobs::Lifted::External);
+                            drop(constant_term);
+                            Ok(Step::Done([
+                                std::mem::take(constant),
+                                self.lifted(&linear, jobs::Lifted::External),
+                            ]))
+                        }
+                    };
+                }
+            }
+        }
+    }
+    /// Takes the next record that the work's pending request names; false
+    /// when it is not that record.
+    fn deliver(&self, work: &mut KeyedWork, ordinal: usize, prime: usize, record: &[u8]) -> bool {
+        let (KeyedWork::Product { keyed, .. } | KeyedWork::Rotation { keyed, .. }) = work;
+        self.deliver_record(keyed, ordinal, prime, record)
+    }
+    fn add(&self, target: &mut [u64], other: &[u64]) {
         let mut sum = [0u64; MAXIMUM_WORDS];
         let sum = &mut sum[..self.words];
         for (target, other) in target
@@ -457,6 +541,27 @@ impl Arithmetic {
             .collect()
     }
 }
+/// A relinearized product or a rotation whose keyed products run over key
+/// records that the caller delivers. A product's context names its first
+/// pair of key groups.
+enum KeyedWork {
+    Product {
+        constant: Polynomial,
+        linear: Polynomial,
+        keyed: KeyedProduct,
+        context: RecordContext,
+    },
+    Rotation {
+        constant: Polynomial,
+        keyed: KeyedProduct,
+    },
+}
+/// Keyed work's next need: the records of a request, or its ciphertext.
+enum Step {
+    Records(RecordRequest),
+    Done([Polynomial; 2]),
+}
+
 thread_local! {
     static SHARED: RefCell<Option<Rc<Arithmetic>>> = const { RefCell::new(None) };
 }
@@ -580,6 +685,41 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
     }
+    fn record_context(cache: u32, ordinal: usize) -> RecordContext {
+        RecordContext {
+            program: [3; 64],
+            cache,
+            ordinal,
+        }
+    }
+    // Delivers the records that each request of keyed work names until the
+    // work ends.
+    fn finish(
+        arithmetic: &Arithmetic,
+        mut work: KeyedWork,
+        (identities, records): &jobs::HeldRecords,
+    ) -> [Polynomial; 2] {
+        loop {
+            match arithmetic.advance(&mut work, identities).unwrap() {
+                Step::Done(value) => return value,
+                Step::Records(request) => {
+                    for (ordinal, record) in records
+                        .iter()
+                        .enumerate()
+                        .skip(request.first)
+                        .take(request.count)
+                    {
+                        assert!(arithmetic.deliver(
+                            &mut work,
+                            ordinal,
+                            request.prime,
+                            &record[request.prime]
+                        ));
+                    }
+                }
+            }
+        }
+    }
     fn plaintext_automorphism(values: &[i16]) -> Vec<u64> {
         let mut output = vec![0i64; values.len()];
         for (index, value) in values.iter().enumerate() {
@@ -691,14 +831,18 @@ mod tests {
             .collect();
             let tensor = arithmetic.multiply(&left, &right, true);
             assert_eq!(tensor, canonical(&arithmetic, exact));
-            // Tensor k multiplies component k / 2 of the first ciphertext by
-            // component k % 2 of the second.
-            let tensors = arithmetic.tensors(
+            // The constant tensor multiplies both first components, the linear
+            // one adds the two cross products, each lifted on its own, and
+            // the quadratic one multiplies both second components.
+            let [constant, linear, quadratic] = arithmetic.tensors(
                 &[left.clone(), right.clone()],
                 &[right.clone(), left.clone()],
             );
-            assert_eq!(tensors[0], tensor);
-            assert_eq!(tensors[3], tensor);
+            assert_eq!(constant, tensor);
+            assert_eq!(quadratic, tensor);
+            let mut cross = arithmetic.multiply(&left, &left, true);
+            arithmetic.add(&mut cross, &arithmetic.multiply(&right, &right, true));
+            assert_eq!(linear, cross);
             // A square's tensors equal those of the value and its copy.
             let value = [left, right];
             assert_eq!(
@@ -708,8 +852,8 @@ mod tests {
         }
     }
 
-    // Each group's external product, alone or beside the next group's,
-    // equals the exact sum of the gadget digits' products with its keys.
+    // Each group's external product, beside the next group's, equals the
+    // exact sum of the gadget digits' products with its keys.
     #[test]
     fn keyed_products_match_exact_gadget_digit_sums() {
         let bits = Profile::gadget_base_bits();
@@ -727,10 +871,15 @@ mod tests {
                         .collect()
                 })
                 .collect();
-            let mut kept = ResidentKeys::new(&arithmetic);
-            for key in groups.iter().flatten() {
-                arithmetic.keep(&mut kept, key);
-            }
+            let held = arithmetic.held_records(
+                &groups.iter().flatten().collect::<Vec<_>>(),
+                record_context(0, 0),
+            );
+            let keyed = |group: usize| {
+                let product = arithmetic
+                    .keyed_product(&value, record_context(0, group * arithmetic.gadget_length));
+                arithmetic.run_keyed(product, &held).unwrap()
+            };
             let mask = (BigUint::from(1u32) << bits) - 1u32;
             let exact = |keys: &[Polynomial]| {
                 let mut exact = vec![BigInt::zero(); TEST_DEGREE];
@@ -750,10 +899,10 @@ mod tests {
                 }
                 canonical(&arithmetic, exact)
             };
-            let [second, third] = arithmetic.keyed(&value, &kept, 1);
+            let [second, third] = keyed(1);
             assert_eq!(second, exact(&groups[1]));
             assert_eq!(third, exact(&groups[2]));
-            assert_eq!(arithmetic.keyed(&value, &kept, 0), [exact(&groups[0])]);
+            assert_eq!(keyed(0), [exact(&groups[0]), second]);
         }
     }
 
@@ -820,20 +969,19 @@ mod tests {
                 second_commons.push(second_common);
                 rotation_commons.push(rotation_common);
             }
-            let keep = |groups: &[&[Polynomial]]| {
-                let mut kept = ResidentKeys::new(&arithmetic);
-                for key in groups.iter().copied().flatten() {
-                    arithmetic.keep(&mut kept, key);
-                }
-                kept
-            };
-            let multiplication_keys = keep(&[
-                &encryption,
-                &first_relinearization,
-                &second_relinearization,
-                &second_commons,
-            ]);
-            let rotation_keys = keep(&[&rotation, &rotation_commons]);
+            let multiplication_keys = arithmetic.held_records(
+                &encryption
+                    .iter()
+                    .chain(&first_relinearization)
+                    .chain(&second_relinearization)
+                    .chain(&second_commons)
+                    .collect::<Vec<_>>(),
+                record_context(0, 0),
+            );
+            let rotation_keys = arithmetic.held_records(
+                &rotation.iter().chain(&rotation_commons).collect::<Vec<_>>(),
+                record_context(1, 0),
+            );
             let delta =
                 BigInt::from((&arithmetic.modulus + PLAINTEXT_MODULUS / 2) / PLAINTEXT_MODULUS);
             let encrypt = |plain: &[i16], seed| {
@@ -872,19 +1020,31 @@ mod tests {
                         .collect::<Vec<_>>()
                 )
             );
-            let product = arithmetic.relinearized_product(&first, &second, &multiplication_keys);
+            let product = finish(
+                &arithmetic,
+                arithmetic.start_product(&first, &second, record_context(0, 0)),
+                &multiplication_keys,
+            );
             assert_eq!(
                 arithmetic.decode(&product, &secret),
                 plaintext_product(&first_plain, &second_plain),
                 "profile={profile:?}"
             );
-            let square = arithmetic.relinearized_product(&first, &first, &multiplication_keys);
+            let square = finish(
+                &arithmetic,
+                arithmetic.start_product(&first, &first, record_context(0, 0)),
+                &multiplication_keys,
+            );
             assert_eq!(
                 arithmetic.decode(&square, &secret),
                 plaintext_product(&first_plain, &first_plain),
                 "profile={profile:?}"
             );
-            let rotated = arithmetic.rotated(&first, &rotation_keys);
+            let rotated = finish(
+                &arithmetic,
+                arithmetic.start_rotation(&first, record_context(1, 0)),
+                &rotation_keys,
+            );
             assert_eq!(
                 arithmetic.decode(&rotated, &secret),
                 plaintext_automorphism(&first_plain),

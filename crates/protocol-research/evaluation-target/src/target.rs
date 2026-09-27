@@ -17,7 +17,7 @@ use registration_credentials::{
         MAXIMUM_TARGET_BODY_BYTES, TARGET_IDENTITY_DOMAIN, TargetMessage, minimum_turnout,
     },
 };
-use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE, Engine};
+use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE, Engine, Progress, Refusal};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Read, sync::Arc};
 
@@ -38,12 +38,19 @@ pub trait PublicInputs {
     fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error>;
 }
 
-/// Public working ciphertexts. Every readback is checked against the identity
-/// retained in the live evaluator before a value is retired or used again.
+/// Public working ciphertexts and key records. Every readback is checked
+/// against the identity retained in the live evaluator before a value is
+/// retired or used again, and every key record before its product is used.
 pub trait WorkingStore {
     fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Error>;
     fn get(&mut self, index: usize) -> Result<Ciphertext, Error>;
     fn remove(&mut self, index: usize) -> Result<(), Error>;
+    /// Stores the record of the current cache's key of the ordinal modulo
+    /// the prime.
+    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Error>;
+    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Error>;
+    /// Removes every key record.
+    fn clear_records(&mut self) -> Result<(), Error>;
 }
 
 /// Classification codes in the target: 0 absent, 1 invalid, 2 accepted and
@@ -153,12 +160,26 @@ impl ClassifiedClosedInventory {
                     .map_err(|_| Error::Arithmetic)
             })
             .transpose()?;
-        // The instance grows once to what the evaluation plans to hold, and
-        // each helper reserves what it will hold.
+        // The instance and each helper grow once to what the evaluation plans
+        // them to hold beside their live allocations.
         if let Some(engine) = &engine {
             #[cfg(target_arch = "wasm32")]
             crate::scalar_allocator::plan_linear_memory(engine.planned_memory_bytes());
-            engine.reserve_helpers();
+            let helpers = parallel_work::helpers();
+            let tickets: Vec<_> = (0..helpers)
+                .map(|helper| {
+                    let bytes = engine.helper_planned_bytes(helper, helpers) as u64;
+                    parallel_work::submit(
+                        &crate::PLAN,
+                        Some(helper),
+                        &[parallel_work::Part::Bytes(&bytes.to_le_bytes())],
+                        0,
+                    )
+                })
+                .collect();
+            for ticket in tickets {
+                assert!(ticket.wait().is_empty());
+            }
         }
         Ok(EvaluationSession {
             inventory: self,
@@ -200,6 +221,10 @@ impl ClassifiedClosedInventory {
             if let Some(cache) = required.cache {
                 let profile = engine.profile();
                 let width = engine.coefficient_bytes();
+                // A new cache replaces the earlier cache's records.
+                if engine.key_count() == 0 {
+                    store.clear_records()?;
+                }
                 while engine.key_count() < required.key_count {
                     let ordinal = engine.key_count();
                     let (common, index) = Engine::key_identity(profile, cache, ordinal)
@@ -233,6 +258,9 @@ impl ClassifiedClosedInventory {
                     engine
                         .load_key(ordinal, polynomial)
                         .map_err(|_| Error::Arithmetic)?;
+                    while let Some((prime, record)) = engine.take_record() {
+                        store.put_record(ordinal, prime, &record)?;
+                    }
                 }
             }
             if let Some(author) = required.input_position {
@@ -251,11 +279,28 @@ impl ClassifiedClosedInventory {
                     .load_input(author, value)
                     .map_err(|_| Error::Arithmetic)?;
             }
-            let retired = engine.execute().map_err(|_| Error::Arithmetic)?;
-            for index in retired {
-                store.remove(index)?;
+            loop {
+                match engine.execute() {
+                    Ok(Progress::Executed(retired)) => {
+                        for index in retired {
+                            store.remove(index)?;
+                        }
+                        break;
+                    }
+                    Ok(Progress::Records(request)) => {
+                        for ordinal in request.first..request.first + request.count {
+                            let record = store.get_record(ordinal, request.prime)?;
+                            engine
+                                .key_record(ordinal, request.prime, &record)
+                                .map_err(|_| Error::Storage)?;
+                        }
+                    }
+                    Err(Refusal::Identity) => return Err(Error::Storage),
+                    Err(_) => return Err(Error::Arithmetic),
+                }
             }
         }
+        store.clear_records()?;
         session.finish()
     }
 }

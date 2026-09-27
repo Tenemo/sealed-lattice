@@ -3,11 +3,12 @@
 //! request or, when more, a quarter of its held pages, so its growths stay
 //! few and it stays near what its allocations use. A growth in Chrome
 //! briefly commits about as much again as the region already holds, so an
-//! operation that knows what it will add plans it, and the next growth adds
-//! that at once. A helper instance lowers its bound, which its
-//! jobs set, before its first allocation. An allocation that finds no memory
-//! within the bound hands the call to the host, which ends it, so the host
-//! tells exhaustion apart from a trap.
+//! operation that knows what it will add plans it beside the bytes its live
+//! allocations hold, and the next growth reaches that total at once rather
+//! than adding it to memory that is already free. A helper instance lowers
+//! its bound, which its jobs set, before its first allocation. An allocation
+//! that finds no memory within the bound hands the call to the host, which
+//! ends it, so the host tells exhaustion apart from a trap.
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::wasm32,
@@ -27,8 +28,11 @@ const MINIMUM_GROWTH_PAGES: usize = 16;
 // first allocation starts the region.
 static LINEAR_MEMORY_BYTES: AtomicUsize = AtomicUsize::new(MAXIMUM_LINEAR_MEMORY_BYTES);
 static ACQUIRED: AtomicBool = AtomicBool::new(false);
-// The pages the next growth adds at least, which an operation's plan sets.
+// The pages a growth brings the region to at least, which an operation's
+// plan sets.
 static PLANNED_PAGES: AtomicUsize = AtomicUsize::new(0);
+// The bytes the instance's live allocations hold.
+static LIVE: AtomicUsize = AtomicUsize::new(0);
 // The highest address, exclusive, that any allocation has reached.
 static HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 
@@ -51,10 +55,12 @@ pub fn limit_linear_memory(bytes: usize) -> bool {
     true
 }
 
-/// Plans the instance's memory: its next growth adds at least the bytes,
-/// within its bound.
+/// Plans the instance's memory: a growth brings the region at least to the
+/// bytes its live allocations now hold and the planned bytes, within its
+/// bound.
 pub fn plan_linear_memory(bytes: usize) {
-    PLANNED_PAGES.store(bytes.div_ceil(PAGE_BYTES), Ordering::Relaxed);
+    let total = LIVE.load(Ordering::Relaxed).saturating_add(bytes);
+    PLANNED_PAGES.store(total.div_ceil(PAGE_BYTES), Ordering::Relaxed);
 }
 
 #[link(wasm_import_module = "allocator")]
@@ -99,12 +105,14 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
         if requested_pages > remaining_pages {
             return (ptr::null_mut(), 0, 0);
         }
-        let planned = PLANNED_PAGES.swap(0, Ordering::Relaxed);
-        let pages = requested_pages
-            .max(previous_pages / 4)
-            .max(MINIMUM_GROWTH_PAGES)
-            .max(planned)
-            .min(remaining_pages);
+        let planned = PLANNED_PAGES.load(Ordering::Relaxed);
+        let pages = if planned > previous_pages {
+            requested_pages.max(planned - previous_pages)
+        } else {
+            requested_pages.max(previous_pages / 4)
+        }
+        .max(MINIMUM_GROWTH_PAGES)
+        .min(remaining_pages);
         if wasm32::memory_grow(0, pages) != previous_pages {
             return (ptr::null_mut(), 0, 0);
         }
@@ -147,23 +155,31 @@ unsafe impl GlobalAlloc for ScalarAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Exclusive scalar access and the caller's valid allocation layout.
         let pointer = unsafe { (*self.0.get()).malloc(layout.size(), layout.align()) };
-        available(pointer, layout.size())
+        let pointer = available(pointer, layout.size());
+        LIVE.fetch_add(layout.size(), Ordering::Relaxed);
+        pointer
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Same exclusive access; calloc preserves required zero initialization.
         let pointer = unsafe { (*self.0.get()).calloc(layout.size(), layout.align()) };
-        available(pointer, layout.size())
+        let pointer = available(pointer, layout.size());
+        LIVE.fetch_add(layout.size(), Ordering::Relaxed);
+        pointer
     }
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
         // SAFETY: The caller supplies a live allocation and its original layout.
-        unsafe { (*self.0.get()).free(pointer, layout.size(), layout.align()) }
+        unsafe { (*self.0.get()).free(pointer, layout.size(), layout.align()) };
+        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
     }
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
         // SAFETY: The caller's original allocation and replacement size satisfy
         // GlobalAlloc; dlmalloc preserves the old allocation when it returns null.
         let moved =
             unsafe { (*self.0.get()).realloc(pointer, layout.size(), layout.align(), size) };
-        available(moved, size)
+        let moved = available(moved, size);
+        LIVE.fetch_add(size, Ordering::Relaxed);
+        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        moved
     }
 }
 

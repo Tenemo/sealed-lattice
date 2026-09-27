@@ -15,7 +15,9 @@ use registration_credentials::{
     roster_authentication::verify_roster_proposal,
     roster_input::RosterInputVerifier,
 };
-use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value, stored_value_bytes};
+use rns_arithmetic_probe::ranking::{
+    Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value, stored_value_bytes,
+};
 use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -197,6 +199,7 @@ impl PublicInputs for Operands<'_> {
 struct Spool {
     directory: PathBuf,
     indices: BTreeSet<usize>,
+    records: BTreeSet<(usize, usize)>,
     value_bytes: usize,
     work: Work,
 }
@@ -228,6 +231,36 @@ impl WorkingStore for Spool {
         if self.indices.remove(&index) {
             self.work
                 .remove(&self.directory.join(format!("{index}.bin")))
+                .map_err(|_| Error::Storage)?;
+        }
+        Ok(())
+    }
+    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Error> {
+        if !self.records.insert((ordinal, prime)) {
+            return Err(Error::Storage);
+        }
+        self.work
+            .save(
+                &self.directory.join(format!("key-{ordinal}-{prime}.bin")),
+                record,
+            )
+            .map_err(|_| Error::Storage)
+    }
+    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Error> {
+        if !self.records.contains(&(ordinal, prime)) {
+            return Err(Error::Storage);
+        }
+        bounded(
+            self.directory.join(format!("key-{ordinal}-{prime}.bin")),
+            KEY_RECORD_BYTES,
+            &mut self.work,
+        )
+        .map_err(|_| Error::Storage)
+    }
+    fn clear_records(&mut self) -> Result<(), Error> {
+        for (ordinal, prime) in std::mem::take(&mut self.records) {
+            self.work
+                .remove(&self.directory.join(format!("key-{ordinal}-{prime}.bin")))
                 .map_err(|_| Error::Storage)?;
         }
         Ok(())
@@ -636,6 +669,7 @@ fn main() -> io::Result<()> {
     let mut spool = Spool {
         directory: spool_directory,
         indices: BTreeSet::new(),
+        records: BTreeSet::new(),
         value_bytes: stored_value_bytes(profile),
         work: Work::default(),
     };
@@ -654,7 +688,7 @@ fn main() -> io::Result<()> {
     } else {
         0
     };
-    if !spool.indices.is_empty() {
+    if !spool.indices.is_empty() || !spool.records.is_empty() {
         return Err(refusal("unretired evaluation storage"));
     }
     let identity = target

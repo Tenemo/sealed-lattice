@@ -45,6 +45,7 @@ impl Slot {
 struct Message {
     job: &'static Job,
     input: Zeroizing<Vec<u8>>,
+    streamed: Option<Zeroizing<Vec<u8>>>,
     output_length: usize,
     slot: Arc<Slot>,
 }
@@ -70,7 +71,13 @@ fn run(queue: mpsc::Receiver<Message>) {
         let output = if trapped {
             None
         } else {
-            match catch_unwind(AssertUnwindSafe(|| (message.job.run)(&message.input))) {
+            match catch_unwind(AssertUnwindSafe(|| {
+                crate::run_streaming(
+                    message.job,
+                    &message.input,
+                    message.streamed.as_deref().map(Vec::as_slice),
+                )
+            })) {
                 Ok(output) => {
                     (output.len() == message.output_length).then(|| Zeroizing::new(output))
                 }
@@ -122,6 +129,7 @@ pub(crate) fn submit(
     job: &'static Job,
     pin: usize,
     input: Zeroizing<Vec<u8>>,
+    streamed: Option<Zeroizing<Vec<u8>>>,
     output_length: usize,
 ) -> Arc<Slot> {
     with(|simulator| {
@@ -142,6 +150,7 @@ pub(crate) fn submit(
             .send(Message {
                 job,
                 input,
+                streamed,
                 output_length,
                 slot: Arc::clone(&slot),
             })

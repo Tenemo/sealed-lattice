@@ -11,6 +11,7 @@
 mod simulated;
 mod stream;
 use std::{
+    cell::Cell,
     collections::VecDeque,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -38,34 +39,8 @@ pub fn session() -> u64 {
     SESSIONS.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Reserves memory for the helper's later jobs: it allocates the bytes its
-/// input names at once and frees them, so its memory grows once to hold
-/// what those jobs keep rather than in steps as they keep it.
-pub static RESERVE: Job = Job {
-    kind: 0x0401,
-    run: reserve,
-};
-fn reserve(input: &[u8]) -> Vec<u8> {
-    let bytes = u64::from_le_bytes(input.try_into().expect("Reserved length"));
-    let block: Vec<u8> = Vec::with_capacity(bytes as usize);
-    std::hint::black_box(&block);
-    Vec::new()
-}
-/// Has each helper reserve the bytes the function gives for its index.
-pub fn reserve_helpers(bytes: impl Fn(usize) -> usize) {
-    let tickets: Vec<Ticket> = (0..helpers())
-        .map(|helper| {
-            let length = (bytes(helper) as u64).to_le_bytes();
-            submit(&RESERVE, Some(helper), &[Part::Bytes(&length)], 0)
-        })
-        .collect();
-    for ticket in tickets {
-        assert!(ticket.wait().is_empty());
-    }
-}
-
 /// The jobs this crate defines.
-pub static JOBS: [&Job; 2] = [&stream::STREAM, &RESERVE];
+pub static JOBS: [&Job; 1] = [&stream::STREAM];
 
 /// The job of a kind among the listed ones.
 pub fn find(jobs: &[&'static Job], kind: u32) -> Option<&'static Job> {
@@ -94,6 +69,9 @@ mod host {
         pub fn take(ticket: u32, pointer: *mut u8) -> u32;
         /// Waits for the job and clears its output untaken.
         pub fn discard(ticket: u32);
+        /// Copies bytes of the running job's streamed part from a position;
+        /// only a helper's host serves it.
+        pub fn read(position: u32, pointer: *mut u8, length: u32);
     }
 }
 
@@ -114,6 +92,28 @@ pub struct Shared {
     length: usize,
     #[cfg(target_arch = "wasm32")]
     remote: u32,
+}
+
+/// Holds the words' little-endian bytes for later jobs; with helpers the
+/// host copies them without another copy here.
+pub fn share_words(words: &[u64]) -> Shared {
+    #[cfg(target_arch = "wasm32")]
+    if helpers() > 0 {
+        let length = 8 * words.len();
+        assert!(length <= MAXIMUM_JOB_BYTES, "Job input bound");
+        // WebAssembly memory is little-endian, so the words are their bytes.
+        let remote = unsafe { host::share(words.as_ptr().cast(), length as u32) };
+        return Shared {
+            local: Zeroizing::new(Vec::new()),
+            length,
+            remote,
+        };
+    }
+    let mut bytes = Zeroizing::new(Vec::with_capacity(8 * words.len()));
+    for word in words {
+        bytes.extend(word.to_le_bytes());
+    }
+    share(bytes)
 }
 
 /// Holds the bytes for later jobs.
@@ -146,11 +146,72 @@ impl Drop for Shared {
     }
 }
 
-/// A part of a job's input: bytes, or shared bytes.
+/// A part of a job's input: bytes, shared bytes, or shared bytes that the
+/// job reads in pieces through [`read`] where it runs instead of receiving
+/// them with the rest. A job streams at most one part.
 #[derive(Clone, Copy)]
 pub enum Part<'a> {
     Bytes(&'a [u8]),
     Shared(&'a Shared),
+    Streamed(&'a Shared),
+}
+
+/// The running job's streamed part: bytes here, or the length of the part
+/// that a helper's host holds.
+#[derive(Clone, Copy)]
+enum Streamed {
+    Absent,
+    Local(*const u8, usize),
+    #[cfg(target_arch = "wasm32")]
+    Remote(usize),
+}
+thread_local! {static STREAMED: Cell<Streamed> = const { Cell::new(Streamed::Absent) };}
+
+/// Runs the job with the streamed bytes as its streamed part, which the
+/// job forgets when it returns or panics.
+fn run_streaming(job: &Job, input: &[u8], streamed: Option<&[u8]>) -> Vec<u8> {
+    struct Restore(Streamed);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            STREAMED.with(|current| current.set(self.0));
+        }
+    }
+    let part = streamed.map_or(Streamed::Absent, |bytes| {
+        Streamed::Local(bytes.as_ptr(), bytes.len())
+    });
+    let _restore = Restore(STREAMED.with(|current| current.replace(part)));
+    (job.run)(input)
+}
+
+/// The length of the running job's streamed part.
+pub fn streamed_length() -> usize {
+    match STREAMED.with(Cell::get) {
+        Streamed::Absent => panic!("The job streams no part"),
+        Streamed::Local(_, length) => length,
+        #[cfg(target_arch = "wasm32")]
+        Streamed::Remote(length) => length,
+    }
+}
+
+/// Reads the running job's streamed part from the position into the output.
+pub fn read(position: usize, output: &mut [u8]) {
+    let length = streamed_length();
+    assert!(
+        position <= length && output.len() <= length - position,
+        "Streamed part bound"
+    );
+    match STREAMED.with(Cell::get) {
+        Streamed::Absent => unreachable!(),
+        // The submitter keeps the part alive until the job returns.
+        Streamed::Local(pointer, length) => output.copy_from_slice(
+            &unsafe { std::slice::from_raw_parts(pointer, length) }
+                [position..position + output.len()],
+        ),
+        #[cfg(target_arch = "wasm32")]
+        Streamed::Remote(_) => unsafe {
+            host::read(position as u32, output.as_mut_ptr(), output.len() as u32)
+        },
+    }
 }
 
 /// A submitted job, whose output its waiter takes.
@@ -173,7 +234,13 @@ pub fn submit(
     output_length: usize,
 ) -> Ticket {
     assert!(
-        parts.len() <= MAXIMUM_JOB_PARTS && output_length <= MAXIMUM_JOB_BYTES,
+        parts.len() <= MAXIMUM_JOB_PARTS
+            && output_length <= MAXIMUM_JOB_BYTES
+            && parts
+                .iter()
+                .filter(|part| matches!(part, Part::Streamed(_)))
+                .count()
+                <= 1,
         "Job bound"
     );
     #[cfg(target_arch = "wasm32")]
@@ -191,6 +258,10 @@ pub fn submit(
                     Part::Shared(shared) => {
                         input_length += shared.length;
                         [1, shared.remote, 0]
+                    }
+                    Part::Streamed(shared) => {
+                        input_length += shared.length;
+                        [2, shared.remote, 0]
                     }
                 })
                 .collect();
@@ -214,26 +285,32 @@ pub fn submit(
         }
     }
     let mut input = Zeroizing::new(Vec::new());
+    let mut streamed = None;
     for part in parts {
-        input.extend_from_slice(match part {
-            Part::Bytes(bytes) => bytes,
-            Part::Shared(shared) => &shared.local,
-        });
+        match part {
+            Part::Bytes(bytes) => input.extend_from_slice(bytes),
+            Part::Shared(shared) => input.extend_from_slice(&shared.local),
+            Part::Streamed(shared) => streamed = Some(&shared.local[..]),
+        }
     }
-    assert!(input.len() <= MAXIMUM_JOB_BYTES, "Job input bound");
+    assert!(
+        input.len() + streamed.map_or(0, <[u8]>::len) <= MAXIMUM_JOB_BYTES,
+        "Job input bound"
+    );
     #[cfg(not(target_arch = "wasm32"))]
     {
         let helpers = helpers();
         if helpers > 0 {
             let pin = shard.map_or(0, |shard| shard % helpers + 1);
+            let streamed = streamed.map(|bytes| Zeroizing::new(bytes.to_vec()));
             return Ticket {
                 output: None,
-                simulated: Some(simulated::submit(job, pin, input, output_length)),
+                simulated: Some(simulated::submit(job, pin, input, streamed, output_length)),
             };
         }
     }
     let _ = shard;
-    let output = Zeroizing::new((job.run)(&input));
+    let output = Zeroizing::new(run_streaming(job, &input, streamed));
     assert_eq!(output.len(), output_length, "Job output length");
     Ticket {
         output: Some(output),
@@ -315,6 +392,8 @@ impl Pipeline {
 /// A helper instance's buffers for the one job it runs at a time.
 pub mod helper {
     use super::{Job, MAXIMUM_JOB_BYTES, find};
+    #[cfg(target_arch = "wasm32")]
+    use super::{STREAMED, Streamed};
     use std::cell::RefCell;
     use zeroize::Zeroizing;
 
@@ -337,9 +416,20 @@ pub mod helper {
             buffers.input.as_mut_ptr() as usize
         })
     }
+    /// Names the length of the next job's streamed part, which the host
+    /// holds and serves as the job reads it; zero beyond the bound.
+    #[cfg(target_arch = "wasm32")]
+    pub fn streamed(length: usize) -> u32 {
+        if length > MAXIMUM_JOB_BYTES {
+            return 0;
+        }
+        STREAMED.with(|current| current.set(Streamed::Remote(length)));
+        1
+    }
     /// Runs the job of the kind among the registries' jobs on the input,
-    /// which it then releases. Returns zero on success and one for a kind
-    /// no listed job has; the host checks the output length.
+    /// which it then releases with any streamed part. Returns zero on
+    /// success and one for a kind no listed job has; the host checks the
+    /// output length.
     pub fn run(registries: &[&[&'static Job]], kind: u32) -> u32 {
         let Some(job) = registries.iter().find_map(|jobs| find(jobs, kind)) else {
             return 1;
@@ -350,6 +440,8 @@ pub mod helper {
             buffers.input = Zeroizing::new(Vec::new());
             buffers.output = output;
         });
+        #[cfg(target_arch = "wasm32")]
+        STREAMED.with(|current| current.set(Streamed::Absent));
         0
     }
     pub fn output_pointer() -> usize {
@@ -358,9 +450,11 @@ pub mod helper {
     pub fn output_length() -> usize {
         BUFFERS.with(|buffers| buffers.borrow().output.len())
     }
-    /// Clears and releases both buffers.
+    /// Clears and releases both buffers and forgets any streamed part.
     pub fn clear() {
         BUFFERS.with(|buffers| *buffers.borrow_mut() = Buffers::default());
+        #[cfg(target_arch = "wasm32")]
+        STREAMED.with(|current| current.set(Streamed::Absent));
     }
 }
 
@@ -392,6 +486,31 @@ mod tests {
         kind: 8,
         run: accumulate,
     };
+    // Each input byte, then every streamed byte read in pieces of three.
+    fn stream_back(input: &[u8]) -> Vec<u8> {
+        let mut output = input.to_vec();
+        let length = streamed_length();
+        for position in (0..length).step_by(3) {
+            let mut piece = vec![0; 3.min(length - position)];
+            read(position, &mut piece);
+            output.extend(piece);
+        }
+        output
+    }
+    static STREAM_BACK: Job = Job {
+        kind: 10,
+        run: stream_back,
+    };
+    // Reads one byte beyond the streamed part.
+    fn read_beyond(_: &[u8]) -> Vec<u8> {
+        let mut byte = [0];
+        read(streamed_length(), &mut byte);
+        byte.to_vec()
+    }
+    static READ_BEYOND: Job = Job {
+        kind: 11,
+        run: read_beyond,
+    };
     fn oversized(_: &[u8]) -> Vec<u8> {
         vec![0; MAXIMUM_JOB_BYTES + 1]
     }
@@ -421,6 +540,46 @@ mod tests {
             .map(|input| submit(&ACCUMULATE, Some(3), &[Part::Bytes(input)], 1).wait()[0])
             .collect();
         assert_eq!(totals, [3, 10]);
+    }
+
+    #[test]
+    fn streamed_parts_join_no_input_and_are_read_in_pieces_within_their_bound() {
+        let streamed = share_words(&[0x0807_0605_0403_0201, 0x0a09]);
+        let shared = share(Zeroizing::new(vec![20, 21]));
+        let output = submit(
+            &STREAM_BACK,
+            Some(2),
+            &[
+                Part::Bytes(&[30]),
+                Part::Streamed(&streamed),
+                Part::Shared(&shared),
+            ],
+            19,
+        )
+        .wait();
+        assert_eq!(
+            output.to_vec(),
+            [30, 20, 21, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0]
+        );
+        // A read beyond the part fails the job, and a job streams at most
+        // one part.
+        assert!(
+            std::panic::catch_unwind(
+                || submit(&READ_BEYOND, None, &[Part::Streamed(&shared)], 1).wait()
+            )
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| submit(
+                &STREAM_BACK,
+                None,
+                &[Part::Streamed(&shared), Part::Streamed(&shared)],
+                4
+            ))
+            .is_err()
+        );
+        // A job without a streamed part cannot read one.
+        assert!(std::panic::catch_unwind(|| submit(&READ_BEYOND, None, &[], 1).wait()).is_err());
     }
 
     #[test]

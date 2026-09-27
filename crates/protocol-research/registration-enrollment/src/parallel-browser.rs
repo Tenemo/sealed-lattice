@@ -4,9 +4,9 @@
 use parallel_work::helper;
 
 /// Bounds a helper instance's memory, before its first allocation, to what
-/// one of the helpers needs, with the evaluation's tables and kept keys when
-/// the operation evaluates, since only the worker's own instance holds the
-/// whole bound. Returns zero when the bound applies.
+/// one of the helpers needs, with the evaluation's tables and the
+/// polynomials its multiplications keep when the operation evaluates, since
+/// only the worker's own instance holds the whole bound. Returns zero when the bound applies.
 #[unsafe(no_mangle)]
 pub extern "C" fn parallel_reserve(helpers: usize, evaluation: u32) -> u32 {
     let evaluation_bytes = match evaluation {
@@ -25,6 +25,13 @@ pub extern "C" fn parallel_input(length: usize) -> usize {
     helper::input(length)
 }
 
+/// Names the length of the next job's streamed part, which the host serves
+/// as the job reads it; zero beyond the job bound.
+#[unsafe(no_mangle)]
+pub extern "C" fn parallel_streamed(length: usize) -> u32 {
+    helper::streamed(length)
+}
+
 /// Runs the job of the kind on the input; one for an unknown kind.
 #[unsafe(no_mangle)]
 pub extern "C" fn parallel_run(kind: u32) -> u32 {
@@ -36,6 +43,7 @@ pub extern "C" fn parallel_run(kind: u32) -> u32 {
             &setup_stream_kernel::JOBS,
             &setup_witness::JOBS,
             &rns_arithmetic_probe::JOBS,
+            &evaluation_target::JOBS,
         ],
         kind,
     )

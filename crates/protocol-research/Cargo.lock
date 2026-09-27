@@ -260,6 +260,7 @@ dependencies = [
  "fips204",
  "linked-release-proof",
  "num-bigint",
+ "parallel-work",
  "registration-credentials",
  "rns-arithmetic-probe",
  "setup-aggregate",
