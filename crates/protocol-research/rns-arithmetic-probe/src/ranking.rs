@@ -1,5 +1,5 @@
 use super::word_arithmetic::{MAXIMUM_WORDS, larger, words_of};
-use super::{Arithmetic, Polynomial, Transformed, shared, unpack};
+use super::{Arithmetic, Polynomial, ResidentKeys, prime_count_bounds, shared, unpack};
 use num_bigint::BigUint;
 use num_traits::Zero;
 use registration_credentials::{
@@ -25,6 +25,9 @@ const RUNTIME_RESERVE_BYTES: usize = 67_108_864;
 const TRANSFER_RESERVE_BYTES: usize = 2_097_152;
 /// Each transform owns four tables of a word per coefficient.
 const TRANSFORM_TABLES: usize = 4;
+/// Keys a multiplication uses for each gadget coordinate, more than a
+/// rotation's two.
+const MULTIPLICATION_KEYS: usize = 4;
 /// Every supported profile's ranking program is shorter.
 pub const MAXIMUM_INSTRUCTIONS: usize = 1024;
 /// The identity of a ranking program's complete bytecode.
@@ -80,7 +83,7 @@ pub struct Engine {
     stored: Vec<Option<[u8; 64]>>,
     step: usize,
     cache: Option<Cache>,
-    keys: Vec<Transformed>,
+    keys: ResidentKeys,
     input: Option<Ciphertext>,
     comparison_coefficients: Vec<i32>,
     ranking_coefficients: Vec<Vec<i32>>,
@@ -89,6 +92,28 @@ pub struct Engine {
 
 fn word(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().unwrap())
+}
+
+/// The memory a helper instance keeps for evaluation beside its jobs' own,
+/// one of `helpers` helpers that hold the primes in turn: the transform
+/// tables of the tensor primes it holds and a multiplication's kept keys
+/// modulo the external-product primes it holds, for the profile that needs
+/// the most. A helper computes it before its first allocation, so it
+/// allocates nothing.
+pub fn helper_memory_bytes(helpers: usize) -> usize {
+    let residue_bytes = DEGREE * 8;
+    let held = |count: usize| count.div_ceil(helpers.max(1));
+    Profile::all()
+        .map(|profile| {
+            let (tensor_primes, external_primes) = prime_count_bounds(profile, DEGREE);
+            held(tensor_primes) * TRANSFORM_TABLES * residue_bytes
+                + held(external_primes)
+                    * MULTIPLICATION_KEYS
+                    * profile.gadget_length()
+                    * residue_bytes
+        })
+        .max()
+        .unwrap()
 }
 
 /// Bytes of one stored working value of the profile: every coefficient word
@@ -246,9 +271,11 @@ impl Engine {
         remaining_uses[count - 1] = 1;
         let (comparison_coefficients, ranking_coefficients, input_offset) =
             plaintext::parameters(profile, top_count.unwrap_or(options));
+        let arithmetic = shared(profile, DEGREE);
         Ok(Self {
             profile,
-            arithmetic: shared(profile, DEGREE),
+            keys: ResidentKeys::new(&arithmetic),
+            arithmetic,
             program_hash: expected_hash,
             instructions,
             remaining_uses,
@@ -256,7 +283,6 @@ impl Engine {
             stored: vec![None; count],
             step: 0,
             cache: None,
-            keys: Vec::new(),
             input: None,
             comparison_coefficients,
             ranking_coefficients,
@@ -304,7 +330,7 @@ impl Engine {
         }
         let gadget_length = self.arithmetic.gadget_length;
         let key_count = match self.cache {
-            Some(Cache::Multiplication) => 4 * gadget_length,
+            Some(Cache::Multiplication) => MULTIPLICATION_KEYS * gadget_length,
             Some(Cache::Rotation) => 2 * gadget_length,
             None => 0,
         };
@@ -312,13 +338,15 @@ impl Engine {
         let polynomial_bytes = self.arithmetic.polynomial_words() * 8;
         let tensor_primes = self.arithmetic.tensor_primes();
         let external_primes = self.arithmetic.external_primes;
+        // The tables and kept keys count wherever the primes' jobs run.
         let table_bytes = tensor_primes * TRANSFORM_TABLES * residue_bytes;
         let key_bytes = key_count * external_primes * residue_bytes;
         // A multiplication holds its four transformed tensor sources and one
-        // product; a rotation holds its transformed digits and one product.
+        // product; a rotation holds its shifted component, that component's
+        // shared copy and both key groups' residues.
         let scratch = match instruction.operation {
             2 => 5 * tensor_primes * residue_bytes + 2 * polynomial_bytes,
-            6 => (gadget_length + 1) * external_primes * residue_bytes,
+            6 => 2 * external_primes * residue_bytes + 2 * polynomial_bytes,
             _ => 0,
         };
         let available = MEMORY_BYTES
@@ -432,10 +460,7 @@ impl Engine {
             return Err(Refusal::Phase);
         }
         self.validate_polynomial(&polynomial)?;
-        self.keys.push(
-            self.arithmetic
-                .transformed(&polynomial, self.arithmetic.external_primes),
-        );
+        self.arithmetic.keep(&mut self.keys, &polynomial);
         Ok(())
     }
 
@@ -689,8 +714,28 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use super::{Refusal, evictions};
+    use super::{
+        super::{prime_count_bounds, primes},
+        DEGREE, Profile, Refusal, evictions, helper_memory_bytes,
+    };
     use std::collections::BTreeSet;
+
+    // The prime counts the helper bound assumes cover every profile's
+    // primes, helpers that share the primes need less evaluation memory
+    // each, and every bound is whole pages, as a helper's memory bound must
+    // be.
+    #[test]
+    fn helper_evaluation_memory_covers_every_profile_in_whole_pages() {
+        for profile in Profile::all() {
+            let (primes, _, external_primes) = primes(profile, DEGREE);
+            let (tensor_bound, external_bound) = prime_count_bounds(profile, DEGREE);
+            assert!(primes.len() <= tensor_bound && external_primes <= external_bound);
+        }
+        let bounds: Vec<usize> = (1..=8).map(helper_memory_bytes).collect();
+        assert!(bounds.iter().all(|bytes| bytes.is_multiple_of(65_536)));
+        assert!(bounds.windows(2).all(|pair| pair[1] <= pair[0]));
+        assert!(bounds[7] < bounds[0]);
+    }
 
     #[test]
     fn a_reloaded_value_evicted_again_is_dropped_rather_than_written() {

@@ -17,6 +17,7 @@ pub mod ranking;
 mod word_arithmetic;
 
 pub use jobs::JOBS;
+use jobs::ResidentKeys;
 
 #[cfg(any(test, feature = "numerical-probes"))]
 use word_arithmetic::words_of;
@@ -75,6 +76,58 @@ fn digit_words(coefficient: &[u64], start: usize, bits: usize, output: &mut [u64
     }
 }
 
+fn ciphertext_modulus(profile: Profile) -> BigUint {
+    let ciphertext = profile.ciphertext_modulus();
+    (BigUint::from(ciphertext.odd_factor()) << ciphertext.exponent()) + 1u64
+}
+/// The primes whose product covers twice a ciphertext tensor's centered
+/// bound, and the least prefixes whose products cover twice the centered
+/// bounds of plaintext and secret products and of gadget external products.
+fn primes(profile: Profile, degree: usize) -> (Vec<u64>, usize, usize) {
+    let half_modulus = ciphertext_modulus(profile) >> 1usize;
+    let degree_factor = degree as u64;
+    // A plaintext coefficient is at most half the plaintext modulus and an
+    // aggregate secret's one-norm is at most one support per setup
+    // contributor.
+    let key_bound = 2u64
+        * (degree_factor * u64::from(PLAINTEXT_MODULUS / 2))
+            .max((profile.setup_contributors() * FHE_SECRET_SUPPORT) as u64)
+        * &half_modulus;
+    let external_bound = 2u64
+        * profile.gadget_length() as u64
+        * degree_factor
+        * ((BigUint::from(1u64) << Profile::gadget_base_bits()) - 1u64)
+        * &half_modulus;
+    let tensor_bound = 2u64 * degree_factor * &half_modulus * &half_modulus;
+    let mut primes = Vec::new();
+    let mut product = BigUint::from(1u64);
+    let mut limit = 1u64 << 58;
+    while !Lift::covers(&product, primes.len(), &tensor_bound) {
+        limit = super::proth_prime(58, limit);
+        primes.push(limit);
+        product *= limit;
+    }
+    let key_primes = prefix(&primes, &key_bound);
+    let external_primes = prefix(&primes, &external_bound);
+    assert!(key_primes <= external_primes);
+    (primes, key_primes, external_primes)
+}
+/// Upper bounds on the counts of tensor primes and external-product primes,
+/// without big integers: every prime has 58 bits, so a product of `k`
+/// primes is at least 2^(57 k), and a product at least twice a bound covers
+/// it.
+fn prime_count_bounds(profile: Profile, degree: usize) -> (usize, usize) {
+    // Half the modulus is below 2^(bits - 1) and the degree is a power of
+    // two.
+    let half_bits = profile.ciphertext_modulus().bits() - 1;
+    let degree_bits = degree.ilog2() as usize;
+    let gadget_bits = (usize::BITS - profile.gadget_length().leading_zeros()) as usize;
+    let tensor_bits = 1 + degree_bits + 2 * half_bits;
+    let external_bits = 1 + gadget_bits + degree_bits + Profile::gadget_base_bits() + half_bits;
+    let count = |bound_bits: usize| (bound_bits + 1).div_ceil(57);
+    (count(tensor_bits), count(external_bits))
+}
+
 struct Arithmetic {
     profile: Profile,
     degree: usize,
@@ -109,38 +162,12 @@ impl Arithmetic {
     /// each lift from the least prefix of the primes whose product covers
     /// twice their centered bound.
     fn new(profile: Profile, degree: usize) -> Self {
-        let ciphertext = profile.ciphertext_modulus();
-        let modulus = (BigUint::from(ciphertext.odd_factor()) << ciphertext.exponent()) + 1u64;
-        let words = ciphertext.bits().div_ceil(64);
+        let modulus = ciphertext_modulus(profile);
+        let words = profile.ciphertext_modulus().bits().div_ceil(64);
         assert!(words <= MAXIMUM_WORDS);
         let gadget_length = profile.gadget_length();
         assert!(Profile::gadget_base_bits().div_ceil(64) <= words);
-        let half_modulus = &modulus >> 1usize;
-        let degree_factor = degree as u64;
-        // A plaintext coefficient is at most half the plaintext modulus and
-        // an aggregate secret's one-norm is at most one support per setup
-        // contributor.
-        let key_bound = 2u64
-            * (degree_factor * u64::from(PLAINTEXT_MODULUS / 2))
-                .max((profile.setup_contributors() * FHE_SECRET_SUPPORT) as u64)
-            * &half_modulus;
-        let external_bound = 2u64
-            * gadget_length as u64
-            * degree_factor
-            * ((BigUint::from(1u64) << Profile::gadget_base_bits()) - 1u64)
-            * &half_modulus;
-        let tensor_bound = 2u64 * degree_factor * &half_modulus * &half_modulus;
-        let mut primes = Vec::new();
-        let mut product = BigUint::from(1u64);
-        let mut limit = 1u64 << 58;
-        while !Lift::covers(&product, primes.len(), &tensor_bound) {
-            limit = super::proth_prime(58, limit);
-            primes.push(limit);
-            product *= limit;
-        }
-        let key_primes = prefix(&primes, &key_bound);
-        let external_primes = prefix(&primes, &external_bound);
-        assert!(key_primes <= external_primes);
+        let (primes, key_primes, external_primes) = primes(profile, degree);
         let reductions: Vec<Modulus> = primes
             .iter()
             .map(|prime| Modulus::new(*prime).unwrap())
@@ -330,21 +357,18 @@ impl Arithmetic {
         &self,
         left: &[Polynomial; 2],
         right: &[Polynomial; 2],
-        keys: &[Transformed],
+        keys: &ResidentKeys,
     ) -> [Polynomial; 2] {
-        let group =
-            |index: usize| &keys[index * self.gadget_length..(index + 1) * self.gadget_length];
         let [mut constant, mut linear, other_linear, quadratic] = self.tensors(left, right);
         self.add(&mut linear, &other_linear);
         drop(other_linear);
-        let digits = self.digit_transforms(&quadratic);
-        let intermediate = self.external(&digits, group(0));
-        self.add(&mut linear, &self.external(&digits, group(1)));
-        drop(digits);
+        let [intermediate, quadratic_linear] = self.keyed(&quadratic, keys, 0);
         drop(quadratic);
-        let digits = self.digit_transforms(&intermediate);
-        self.add(&mut constant, &self.external(&digits, group(2)));
-        self.add(&mut linear, &self.external(&digits, group(3)));
+        self.add(&mut linear, &quadratic_linear);
+        drop(quadratic_linear);
+        let [constant_term, linear_term] = self.keyed(&intermediate, keys, 2);
+        self.add(&mut constant, &constant_term);
+        self.add(&mut linear, &linear_term);
         [constant, linear]
     }
     /// The automorphism X to X^5, which rotates the plaintext slots.
@@ -365,18 +389,11 @@ impl Arithmetic {
     /// A ciphertext under the automorphism, switched back to the secret with
     /// each gadget coordinate's automorphism key and then its common
     /// polynomial.
-    fn rotated(&self, value: &[Polynomial; 2], keys: &[Transformed]) -> [Polynomial; 2] {
+    fn rotated(&self, value: &[Polynomial; 2], keys: &ResidentKeys) -> [Polynomial; 2] {
         let mut constant = self.automorphism(&value[0]);
-        let shifted = self.automorphism(&value[1]);
-        let digits = self.digit_transforms(&shifted);
-        self.add(
-            &mut constant,
-            &self.external(&digits, &keys[..self.gadget_length]),
-        );
-        [
-            constant,
-            self.external(&digits, &keys[self.gadget_length..2 * self.gadget_length]),
-        ]
+        let [constant_term, linear] = self.keyed(&self.automorphism(&value[1]), keys, 0);
+        self.add(&mut constant, &constant_term);
+        [constant, linear]
     }
     fn add(&self, target: &mut Polynomial, other: &[u64]) {
         let mut sum = [0u64; MAXIMUM_WORDS];
@@ -664,8 +681,10 @@ mod tests {
         }
     }
 
+    // Each group's external product, alone or beside the next group's,
+    // equals the exact sum of the gadget digits' products with its keys.
     #[test]
-    fn external_products_match_exact_gadget_digit_sums() {
+    fn keyed_products_match_exact_gadget_digit_sums() {
         let bits = Profile::gadget_base_bits();
         for profile in profiles() {
             let arithmetic = Arithmetic::new(profile, TEST_DEGREE);
@@ -674,33 +693,40 @@ mod tests {
                 profile.ciphertext_modulus().bits().div_ceil(bits)
             );
             let value = arithmetic.uniform(3);
-            let keys: Vec<Polynomial> = (0..arithmetic.gadget_length)
-                .map(|digit| arithmetic.uniform(10 + digit as u64))
+            let groups: Vec<Vec<Polynomial>> = (0..3)
+                .map(|group| {
+                    (0..arithmetic.gadget_length)
+                        .map(|digit| arithmetic.uniform(10 + (8 * group + digit) as u64))
+                        .collect()
+                })
                 .collect();
-            let transformed: Vec<Transformed> = keys
-                .iter()
-                .map(|key| arithmetic.transformed(key, arithmetic.external_primes))
-                .collect();
-            let mask = (BigUint::from(1u32) << bits) - 1u32;
-            let mut exact = vec![BigInt::zero(); TEST_DEGREE];
-            for (digit, key) in keys.iter().enumerate() {
-                let digits: Vec<BigInt> = arithmetic
-                    .coefficients(&value)
-                    .map(|coefficient| {
-                        BigInt::from((unpack(coefficient) >> (bits * digit)) & &mask)
-                    })
-                    .collect();
-                for (sum, term) in exact
-                    .iter_mut()
-                    .zip(convolution(&digits, &centered(&arithmetic, key)))
-                {
-                    *sum += term;
-                }
+            let mut kept = ResidentKeys::new(&arithmetic);
+            for key in groups.iter().flatten() {
+                arithmetic.keep(&mut kept, key);
             }
-            assert_eq!(
-                arithmetic.external(&arithmetic.digit_transforms(&value), &transformed),
+            let mask = (BigUint::from(1u32) << bits) - 1u32;
+            let exact = |keys: &[Polynomial]| {
+                let mut exact = vec![BigInt::zero(); TEST_DEGREE];
+                for (digit, key) in keys.iter().enumerate() {
+                    let digits: Vec<BigInt> = arithmetic
+                        .coefficients(&value)
+                        .map(|coefficient| {
+                            BigInt::from((unpack(coefficient) >> (bits * digit)) & &mask)
+                        })
+                        .collect();
+                    for (sum, term) in exact
+                        .iter_mut()
+                        .zip(convolution(&digits, &centered(&arithmetic, key)))
+                    {
+                        *sum += term;
+                    }
+                }
                 canonical(&arithmetic, exact)
-            );
+            };
+            let [second, third] = arithmetic.keyed(&value, &kept, 1);
+            assert_eq!(second, exact(&groups[1]));
+            assert_eq!(third, exact(&groups[2]));
+            assert_eq!(arithmetic.keyed(&value, &kept, 0), [exact(&groups[0])]);
         }
     }
 
@@ -767,20 +793,20 @@ mod tests {
                 second_commons.push(second_common);
                 rotation_commons.push(rotation_common);
             }
-            let transform = |values: &[Polynomial]| -> Vec<Transformed> {
-                values
-                    .iter()
-                    .map(|value| arithmetic.transformed(value, arithmetic.external_primes))
-                    .collect()
+            let keep = |groups: &[&[Polynomial]]| {
+                let mut kept = ResidentKeys::new(&arithmetic);
+                for key in groups.iter().copied().flatten() {
+                    arithmetic.keep(&mut kept, key);
+                }
+                kept
             };
-            let multiplication_keys = [
-                transform(&encryption),
-                transform(&first_relinearization),
-                transform(&second_relinearization),
-                transform(&second_commons),
-            ]
-            .concat();
-            let rotation_keys = [transform(&rotation), transform(&rotation_commons)].concat();
+            let multiplication_keys = keep(&[
+                &encryption,
+                &first_relinearization,
+                &second_relinearization,
+                &second_commons,
+            ]);
+            let rotation_keys = keep(&[&rotation, &rotation_commons]);
             let delta =
                 BigInt::from((&arithmetic.modulus + PLAINTEXT_MODULUS / 2) / PLAINTEXT_MODULUS);
             let encrypt = |plain: &[i16], seed| {

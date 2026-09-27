@@ -822,6 +822,15 @@ const execute = async (
     };
 };
 
+// The operations that evaluate the ranking program, whose helpers keep the
+// evaluation's tables and keys.
+const evaluatingOperations: ReadonlySet<string> = new Set([
+    'target',
+    'release',
+    'result',
+    'archive',
+]);
+
 const run = async (
     command: WorkerCommand,
     helperPorts: readonly MessagePort[],
@@ -847,7 +856,11 @@ const run = async (
         if (hexadecimal(runtime) !== command.identity.runtime)
             return { status: 'refused' };
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
-        const started = startParallelHelpers(module, helperPorts);
+        const started = startParallelHelpers(
+            module,
+            helperPorts,
+            evaluatingOperations.has(command.operation),
+        );
         database = await openParticipantDatabase(command.namespace);
         helpers = await started;
         const opened = database;

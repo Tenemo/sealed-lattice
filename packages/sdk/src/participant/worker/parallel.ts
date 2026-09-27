@@ -68,6 +68,7 @@ type HelperStart = Readonly<{
     layout: ControlLayout;
     index: number;
     helpers: number;
+    evaluation: boolean;
 }>;
 
 /** The message with which the page starts a worker as a helper. */
@@ -91,7 +92,7 @@ const refuse = () => {
 // before unpinned ones until the worker stops it. A trapped instance fails
 // every later job.
 const runHelper = (port: MessagePort, helperStart: HelperStart) => {
-    const { module, layout, index, helpers } = helperStart;
+    const { module, layout, index, helpers, evaluation } = helperStart;
     const control = new Int32Array(helperStart.control);
     const arena = new Uint8Array(helperStart.arena);
     const imports: Record<string, Record<string, () => number>> = {};
@@ -111,7 +112,7 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
         (exports[name] as (...values: number[]) => number)(...values) >>> 0;
     const memory = () =>
         new Uint8Array((exports.memory as WebAssembly.Memory).buffer);
-    if (call('parallel_reserve', helpers) !== 0) {
+    if (call('parallel_reserve', helpers, evaluation ? 1 : 0) !== 0) {
         port.postMessage(false);
         self.close();
         return;
@@ -262,12 +263,14 @@ export const affordedHelpers = () => {
 };
 
 // Starts the helpers listening on the ports and waits until each has
-// instantiated the module. Without ports, beyond the helper bound, without
-// growable shared memory, or when a helper fails to start, the module runs
-// every job itself and every started helper stops.
+// instantiated the module, with room for the evaluation's tables and kept
+// keys when the operation evaluates. Without ports, beyond the helper
+// bound, without growable shared memory, or when a helper fails to start,
+// the module runs every job itself and every started helper stops.
 export const startParallelHelpers = async (
     module: WebAssembly.Module,
     ports: readonly MessagePort[],
+    evaluation: boolean,
 ): Promise<ParallelHelpers> => {
     const count = ports.length;
     const arena =
@@ -302,6 +305,7 @@ export const startParallelHelpers = async (
                         layout,
                         index,
                         helpers: count,
+                        evaluation,
                     };
                     port.postMessage(start);
                 }),

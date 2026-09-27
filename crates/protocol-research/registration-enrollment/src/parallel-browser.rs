@@ -4,12 +4,18 @@
 use parallel_work::helper;
 
 /// Bounds a helper instance's memory, before its first allocation, to what
-/// one of the helpers needs, since only the worker's own instance holds the
+/// one of the helpers needs, with the evaluation's tables and kept keys when
+/// the operation evaluates, since only the worker's own instance holds the
 /// whole bound. Returns zero when the bound applies.
 #[unsafe(no_mangle)]
-pub extern "C" fn parallel_reserve(helpers: usize) -> u32 {
+pub extern "C" fn parallel_reserve(helpers: usize, evaluation: u32) -> u32 {
+    let evaluation_bytes = match evaluation {
+        0 => 0,
+        1 => rns_arithmetic_probe::ranking::helper_memory_bytes(helpers),
+        _ => return 1,
+    };
     u32::from(!evaluation_target::limit_linear_memory(
-        registration_proof::rows::helper_memory_bytes(helpers),
+        registration_proof::rows::helper_memory_bytes(helpers) + evaluation_bytes,
     ))
 }
 
