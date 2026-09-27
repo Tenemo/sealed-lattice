@@ -2982,13 +2982,18 @@ await runWithLocalRunLog(
             if (noResult) {
                 // The certified target carries no result, so each remaining
                 // participant's release certifies it, archives its closure
-                // and creates nothing.
+                // and creates nothing. The corrupt client's page names no
+                // archive, so its release archives nothing.
                 for (const position of remaining) {
                     const details = await run(position, 'release');
                     assert.equal(details.generation, predecessor(position));
                     assert.equal(details.encrypted, false);
                     assert.equal(details.predecessor, undefined);
                     assert.equal(details.resumedFrom, undefined);
+                    if (position === corrupt?.position) {
+                        assert.equal(details.closure, undefined);
+                        continue;
+                    }
                     assert.ok(details.closure !== undefined);
                     closures.set(
                         position,
