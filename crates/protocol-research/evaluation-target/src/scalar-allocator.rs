@@ -93,12 +93,12 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
         if requested_pages > remaining_pages {
             return (ptr::null_mut(), 0, 0);
         }
-        // A growing region adds the request or, when more, half its held
-        // pages, so its growths stay few and it stays near what its
+        // A growing region adds the request or, when more, a quarter of its
+        // held pages, so its growths stay few and it stays near what its
         // allocations use. Otherwise the region takes every remaining page.
         let pages = if GROWS_ON_DEMAND.load(Ordering::Relaxed) {
             requested_pages
-                .max(previous_pages / 2)
+                .max(previous_pages / 4)
                 .max(MINIMUM_GROWTH_PAGES)
                 .min(remaining_pages)
         } else {
