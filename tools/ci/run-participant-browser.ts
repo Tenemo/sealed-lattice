@@ -1849,16 +1849,12 @@ await runWithLocalRunLog(
                             served > 0,
                             `The other roster has no ${family}.`,
                         );
-                        const expected =
-                            family === 'registrations'
-                                ? 'The published registrations are not the retained roster.'
-                                : reason;
                         for (const [name, bytes] of view)
                             views[member.origin].set(name, bytes);
                         try {
                             assert.deepEqual(
                                 await request(member.origin, 'result'),
-                                { status: 'pending', reason: expected },
+                                { status: 'pending', reason },
                             );
                         } finally {
                             views[member.origin].clear();
@@ -1868,7 +1864,7 @@ await runWithLocalRunLog(
                             family,
                             served,
                             hidden: view.size - served,
-                            reason: expected,
+                            reason,
                         });
                     }
                     assert.deepEqual(
@@ -3444,7 +3440,7 @@ await runWithLocalRunLog(
                             await probe(
                                 position,
                                 registrationForgeries,
-                                'The published registrations are not the retained roster.',
+                                'A registration header was refused.',
                             );
                             await probeForeignPoll(position);
                         }
