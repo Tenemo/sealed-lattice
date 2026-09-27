@@ -72,6 +72,7 @@ export const launchChromeParticipant = async (
     const pending = new Map<
         number,
         {
+            sessionId: string | undefined;
             resolve: (value: Record<string, unknown>) => void;
             reject: (error: Error) => void;
         }
@@ -79,6 +80,8 @@ export const launchChromeParticipant = async (
     let sequence = 0;
     let onLoad: (() => void) | undefined;
     let pageSession = '';
+    // A crashed page answers none of its requests, so each fails at once.
+    let pageCrashed = false;
     // The trace being recorded: its events so far, and what ends it.
     let tracing: { events: unknown[]; complete: () => void } | undefined;
     const send = (
@@ -91,8 +94,12 @@ export const launchChromeParticipant = async (
                 reject(new Error('Chrome is not connected.'));
                 return;
             }
+            if (pageCrashed && sessionId === pageSession) {
+                reject(new Error('The participant page crashed.'));
+                return;
+            }
             const id = ++sequence;
-            pending.set(id, { resolve, reject });
+            pending.set(id, { sessionId, resolve, reject });
             socket.send(
                 JSON.stringify({
                     id,
@@ -181,7 +188,19 @@ export const launchChromeParticipant = async (
                 message.sessionId === pageSession
             )
                 onLoad?.();
-            else if (message.method === 'Tracing.dataCollected')
+            else if (
+                message.method === 'Inspector.targetCrashed' &&
+                message.sessionId === pageSession
+            ) {
+                pageCrashed = true;
+                for (const [id, request] of pending)
+                    if (request.sessionId === pageSession) {
+                        pending.delete(id);
+                        request.reject(
+                            new Error('The participant page crashed.'),
+                        );
+                    }
+            } else if (message.method === 'Tracing.dataCollected')
                 tracing?.events.push(
                     ...((message.params?.value as unknown[] | undefined) ?? []),
                 );
