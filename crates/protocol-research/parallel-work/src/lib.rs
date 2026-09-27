@@ -59,9 +59,9 @@ mod host {
         /// bytes. A nonzero pin names the helper that must run the job.
         /// Returns the job's ticket.
         pub fn submit(kind: u32, pin: u32, parts: *const u32, count: u32, output: u32) -> u32;
-        /// Waits for the job. Returns zero when it returned its declared
-        /// length.
-        pub fn wait(ticket: u32) -> u32;
+        /// Waits for the job. The host ends the instance's call when the
+        /// job did not return its declared length.
+        pub fn wait(ticket: u32);
         /// Copies the waited job's output and clears the host's copy.
         pub fn take(ticket: u32, pointer: *mut u8) -> u32;
         /// Waits for the job and clears its output untaken.
@@ -208,7 +208,7 @@ impl Ticket {
         #[cfg(target_arch = "wasm32")]
         if self.remote != 0 {
             let remote = std::mem::take(&mut self.remote);
-            assert_eq!(unsafe { host::wait(remote) }, 0, "A helper failed");
+            unsafe { host::wait(remote) };
             let mut output = Zeroizing::new(vec![0; self.output_length]);
             assert_eq!(unsafe { host::take(remote, output.as_mut_ptr()) }, 0);
             return output;

@@ -867,9 +867,9 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         close: () => {
             handlers.random = undefined;
             handlers.contribution = undefined;
-            randomness.discard();
             for (const record of pending) record.bytes.fill(0);
             pending.length = 0;
+            randomness.discard();
         },
     };
 };
@@ -1227,10 +1227,10 @@ export const continueContribution = async (session: ContributionSession) => {
             throw new Error('The continued proof is incomplete.');
     } finally {
         buffer.fill(0);
-        run.close();
         // A record opened ahead that the prover never took is cleared too.
         if (opening !== undefined)
             (await opening.catch(() => undefined))?.fill(0);
+        run.close();
     }
     await commitContribution(session, {
         generation: 7,

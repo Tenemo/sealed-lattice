@@ -146,6 +146,11 @@ export type KernelHandlers = {
 // Randomness requests are bounded before any view of module memory exists.
 const maximumRandomRequest = 65_536;
 
+// A helper that failed, and an exhausted memory bound of the module instance
+// or of the shared arena, end the operation as pending. The instance is not
+// used again; a later visit starts a fresh one.
+export class ResourceFailure extends Error {}
+
 export type LoadedKernel = Readonly<{
     kernel: ParticipantKernel;
     // Handlers for the current operation; an absent handler refuses.
@@ -175,6 +180,15 @@ export const instantiateParticipantKernel = async (
             return 0;
         };
     const instance = await WebAssembly.instantiate(module, {
+        allocator: {
+            exhausted: (bytes: number) => {
+                throw new ResourceFailure(
+                    'The participant module exhausted its memory bound, ' +
+                        String(bytes >>> 0) +
+                        ' bytes requested.',
+                );
+            },
+        },
         parallel: helpers.imports(() => {
             if (instantiated.memory === undefined)
                 throw new Error('The participant module is not ready.');
@@ -223,10 +237,26 @@ export const instantiateParticipantKernel = async (
     if (!(exports.memory instanceof WebAssembly.Memory))
         throw new Error('The participant module has no memory.');
     instantiated.memory = exports.memory;
-    for (const name of kernelFunctions)
-        if (typeof exports[name] !== 'function')
+    // A call that ends without returning, by a trap or by a host function
+    // that failed, leaves the instance in an unknown state, so every later
+    // call ends with the same failure.
+    let ended: { error: unknown } | undefined;
+    const kernel: Record<string, unknown> = { memory: exports.memory };
+    for (const name of kernelFunctions) {
+        const call = exports[name];
+        if (typeof call !== 'function')
             throw new Error('The participant module lacks ' + name + '.');
-    return { kernel: exports as unknown as ParticipantKernel, handlers };
+        kernel[name] = (...values: number[]): number => {
+            if (ended !== undefined) throw ended.error;
+            try {
+                return (call as KernelFunction)(...values);
+            } catch (error) {
+                ended = { error };
+                throw error;
+            }
+        };
+    }
+    return { kernel: kernel as ParticipantKernel, handlers };
 };
 
 // The module may grow its memory during any call, so every access takes a

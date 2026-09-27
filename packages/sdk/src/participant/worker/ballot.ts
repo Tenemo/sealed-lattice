@@ -38,7 +38,12 @@ import type {
 } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
-import { operationSeedBytes, readKernel, seededRandomness } from './kernel.js';
+import {
+    operationSeedBytes,
+    readKernel,
+    ResourceFailure,
+    seededRandomness,
+} from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { publishChunk, publishRecord } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -390,7 +395,11 @@ const startBallotWork = async (session: BallotSession) => {
             });
             ballotCommand(context, 3);
         } catch (error) {
-            if (error instanceof PublicInputFailure) throw error;
+            if (
+                error instanceof PublicInputFailure ||
+                error instanceof ResourceFailure
+            )
+                throw error;
             throw new PublicInputFailure(
                 'A ballot key was refused: ' + describe(error),
             );
@@ -419,8 +428,8 @@ const createBallot = (session: BallotSession) => {
         session.proofRandomBytes = randomness.proofDrawn();
     } finally {
         context.handlers.random = undefined;
-        randomness.discard();
         input.fill(0);
+        randomness.discard();
     }
     return ballotCommand(context, 10);
 };

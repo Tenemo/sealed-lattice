@@ -2,7 +2,9 @@
 //! The worker's instance acquires its whole bound on its first allocation,
 //! because growing its large memory during an operation also slowed the
 //! operation's helpers. A helper instance, whose smaller bound its jobs set,
-//! grows its region in few geometric steps as its allocations need it.
+//! grows its region in few geometric steps as its allocations need it. An
+//! allocation that finds no memory within the bound hands the call to the
+//! host, which ends it, so the host tells exhaustion apart from a trap.
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::wasm32,
@@ -40,6 +42,24 @@ pub fn limit_linear_memory(bytes: usize) -> bool {
     GROWS_ON_DEMAND.store(true, Ordering::Relaxed);
     true
 }
+
+#[link(wasm_import_module = "allocator")]
+unsafe extern "C" {
+    /// Ends the instance's current call after an allocation of the bytes
+    /// found no memory within the bound. It never returns.
+    fn exhausted(bytes: usize);
+}
+
+// Returns an allocation, or ends the call when there was no memory for it.
+fn available(pointer: *mut u8, bytes: usize) -> *mut u8 {
+    if pointer.is_null() {
+        // SAFETY: The import takes one integer and never returns.
+        unsafe { exhausted(bytes) };
+        wasm32::unreachable();
+    }
+    pointer
+}
+
 struct SystemRegion;
 
 // SAFETY: A successful call returns only newly grown, zero-filled Wasm pages.
@@ -102,7 +122,8 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
 
 struct ScalarAllocator(UnsafeCell<dlmalloc::Dlmalloc<SystemRegion>>);
 // SAFETY: Atomics/shared-memory builds are rejected above. Allocator operations
-// neither yield nor call host imports, so the single worker cannot reenter them.
+// never yield, and the one import they call, once no memory is left, never
+// returns into the instance, so the single worker cannot reenter them.
 unsafe impl Sync for ScalarAllocator {}
 
 // SAFETY: Each operation forwards the GlobalAlloc layout and ownership contract
@@ -111,11 +132,13 @@ unsafe impl Sync for ScalarAllocator {}
 unsafe impl GlobalAlloc for ScalarAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Exclusive scalar access and the caller's valid allocation layout.
-        unsafe { (*self.0.get()).malloc(layout.size(), layout.align()) }
+        let pointer = unsafe { (*self.0.get()).malloc(layout.size(), layout.align()) };
+        available(pointer, layout.size())
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Same exclusive access; calloc preserves required zero initialization.
-        unsafe { (*self.0.get()).calloc(layout.size(), layout.align()) }
+        let pointer = unsafe { (*self.0.get()).calloc(layout.size(), layout.align()) };
+        available(pointer, layout.size())
     }
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
         // SAFETY: The caller supplies a live allocation and its original layout.
@@ -124,7 +147,9 @@ unsafe impl GlobalAlloc for ScalarAllocator {
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
         // SAFETY: The caller's original allocation and replacement size satisfy
         // GlobalAlloc; dlmalloc preserves the old allocation when it returns null.
-        unsafe { (*self.0.get()).realloc(pointer, layout.size(), layout.align(), size) }
+        let moved =
+            unsafe { (*self.0.get()).realloc(pointer, layout.size(), layout.align(), size) };
+        available(moved, size)
     }
 }
 

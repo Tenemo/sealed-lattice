@@ -18,6 +18,7 @@ const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';
 
 // The imports the participant module may declare, by module and name.
 const allowedImports = [
+    'allocator.exhausted',
     'ballot.fill_random',
     'contribution.public_chunk',
     'enrollment.fill_random',

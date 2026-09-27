@@ -44,7 +44,7 @@ import { openDelivery } from './delivery.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { participantRuntimeLabel } from './identity.js';
-import { instantiateParticipantKernel } from './kernel.js';
+import { instantiateParticipantKernel, ResourceFailure } from './kernel.js';
 import {
     helperRole,
     listenAsHelper,
@@ -878,10 +878,13 @@ const run = async (
                 } catch (error) {
                     // A local failure after authority started stops the
                     // participant before any other operation takes the lock.
+                    // A failed helper or an exhausted memory bound touches no
+                    // retained state and leaves the participant pending.
                     if (
                         !authorityStarted ||
                         error instanceof PublicInputFailure ||
-                        error instanceof StoragePending
+                        error instanceof StoragePending ||
+                        error instanceof ResourceFailure
                     )
                         throw error;
                     const stop = await stopParticipant(opened);
@@ -897,8 +900,8 @@ const run = async (
             },
         );
     } catch (error) {
-        // Public input, pending storage and failures before authority
-        // started leave the participant pending.
+        // Public input, pending storage, resource failures and failures
+        // before authority started leave the participant pending.
         return {
             status: 'pending',
             reason: error instanceof Error ? error.message : String(error),

@@ -11,7 +11,11 @@
 // state on a helper between jobs. After startup the worker and its helpers
 // exchange only shared memory. The helpers are the page's workers rather
 // than the worker's own, so the worker's end never waits for theirs, and the
-// page ends them all together.
+// page ends them all together. A helper that does not start in time leaves
+// the module to run every job itself; a failed job and an exhausted arena
+// end the operation as pending.
+
+import { ResourceFailure } from './kernel.js';
 
 // The module's job bounds, which the host enforces again.
 const maximumJobBytes = 8 << 20;
@@ -19,6 +23,12 @@ const maximumJobParts = 4;
 // The helpers an operation starts, whose bounded memories together stay
 // near the worker's own linear-memory bound.
 const maximumHelpers = 8;
+/**
+ * A helper that has not reported whether it started within this many
+ * milliseconds counts as not started, first when the page loads it and then
+ * when the worker starts it.
+ */
+export const helperStartMilliseconds = 10_000;
 // The jobs the module may hold tickets for at once, which also bounds each
 // queue.
 const maximumTickets = 4096;
@@ -28,10 +38,12 @@ const initialArenaBytes = 16 << 20;
 const maximumArenaBytes = 256 << 20;
 const blockAlignment = 64;
 
-// A job slot's state.
+// A job slot's state. An exhausted job's helper found no memory within its
+// bound.
 const queued = 0;
 const done = 1;
 const failed = 2;
+const exhausted = 3;
 
 // The shared control words: a stop flag, one wake word per helper, the
 // unpinned queue's head and tail, each helper's pinned queue head and tail,
@@ -57,6 +69,7 @@ const controlLayout = (helpers: number) => {
         queued,
         done,
         failed,
+        exhausted,
     } as const;
 };
 type ControlLayout = ReturnType<typeof controlLayout>;
@@ -86,37 +99,51 @@ export const helperFunctions = [
 const refuse = () => {
     throw new Error('A helper has no host functions.');
 };
+// What the allocator's import throws in a helper once no memory is left.
+const exhaustion = new Error('A helper exhausted its memory bound.');
 
-// A helper takes the module and the shared buffers, bounds its instance's
-// memory, reports on the port whether it started, and runs its pinned jobs
-// before unpinned ones until the worker stops it. A trapped instance fails
-// every later job.
-const runHelper = (port: MessagePort, helperStart: HelperStart) => {
-    const { module, layout, index, helpers, evaluation } = helperStart;
-    const control = new Int32Array(helperStart.control);
-    const arena = new Uint8Array(helperStart.arena);
+// Instantiates the module with every host function refused, the allocator's
+// exhaustion told apart, and bounds its memory; undefined when it cannot.
+const instantiateHelper = ({ module, helpers, evaluation }: HelperStart) => {
     const imports: Record<string, Record<string, () => number>> = {};
     for (const entry of WebAssembly.Module.imports(module))
         (imports[entry.module] ??= {})[entry.name] = refuse;
     // A helper has no helpers of its own.
     (imports.parallel ??= {}).helpers = () => 0;
-    let exports: Record<string, unknown>;
+    (imports.allocator ??= {}).exhausted = () => {
+        throw exhaustion;
+    };
     try {
-        exports = new WebAssembly.Instance(module, imports).exports;
+        const { exports } = new WebAssembly.Instance(module, imports);
+        const call = (name: string, ...values: number[]): number =>
+            (exports[name] as (...values: number[]) => number)(...values) >>> 0;
+        if (call('parallel_reserve', helpers, evaluation ? 1 : 0) !== 0)
+            return undefined;
+        return {
+            call,
+            memory: () =>
+                new Uint8Array((exports.memory as WebAssembly.Memory).buffer),
+        };
     } catch {
+        return undefined;
+    }
+};
+
+// A helper takes the module and the shared buffers, bounds its instance's
+// memory, reports on the port whether it started, and runs its pinned jobs
+// before unpinned ones until the worker stops it. A trapped instance ends
+// every later job as its trap ended the job that trapped.
+const runHelper = (port: MessagePort, helperStart: HelperStart) => {
+    const { layout, index } = helperStart;
+    const control = new Int32Array(helperStart.control);
+    const arena = new Uint8Array(helperStart.arena);
+    const instance = instantiateHelper(helperStart);
+    if (instance === undefined) {
         port.postMessage(false);
         self.close();
         return;
     }
-    const call = (name: string, ...values: number[]): number =>
-        (exports[name] as (...values: number[]) => number)(...values) >>> 0;
-    const memory = () =>
-        new Uint8Array((exports.memory as WebAssembly.Memory).buffer);
-    if (call('parallel_reserve', helpers, evaluation ? 1 : 0) !== 0) {
-        port.postMessage(false);
-        self.close();
-        return;
-    }
+    const { call, memory } = instance;
     port.postMessage(true);
     const mask = layout.queueEntries - 1;
     const wake = layout.wakeBase + index;
@@ -170,24 +197,25 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
             target.set(arena.subarray(offset, offset + partLength), at);
             at += partLength;
         }
-        try {
-            if (
-                call('parallel_run', kind) !== 0 ||
-                call('parallel_output_length') !== outputLength
-            )
-                return false;
+        // A call that ends without returning leaves the instance unusable,
+        // so only a job whose calls returned clears its buffers.
+        let completed = false;
+        if (
+            call('parallel_run', kind) === 0 &&
+            call('parallel_output_length') === outputLength
+        ) {
             target = memory();
             const output = call('parallel_output_pointer');
             arena.set(
                 target.subarray(output, output + outputLength),
                 outputOffset,
             );
-            return true;
-        } finally {
-            call('parallel_clear');
+            completed = true;
         }
+        call('parallel_clear');
+        return completed;
     };
-    let trapped = false;
+    let trapped: number | undefined;
     for (;;) {
         const seen = Atomics.load(control, wake);
         if (Atomics.load(control, layout.stopWord) !== 0) break;
@@ -196,12 +224,14 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
             Atomics.wait(control, wake, seen);
             continue;
         }
-        let state: number = layout.failed;
-        if (!trapped)
+        let state: number = trapped ?? layout.failed;
+        if (trapped === undefined)
             try {
                 if (run(slot)) state = layout.done;
-            } catch {
-                trapped = true;
+            } catch (error) {
+                trapped =
+                    error === exhaustion ? layout.exhausted : layout.failed;
+                state = trapped;
             }
         const stateWord = layout.slotBase + slot * layout.slotWords;
         Atomics.store(control, stateWord, state);
@@ -218,6 +248,10 @@ export const listenAsHelper = (port: MessagePort) => {
     port.onmessage = (event: MessageEvent<HelperStart>) => {
         port.onmessage = null;
         runHelper(port, event.data);
+    };
+    port.onmessageerror = () => {
+        port.postMessage(false);
+        self.close();
     };
 };
 
@@ -265,8 +299,9 @@ export const affordedHelpers = () => {
 // Starts the helpers listening on the ports and waits until each has
 // instantiated the module, with room for the evaluation's tables and kept
 // keys when the operation evaluates. Without ports, beyond the helper
-// bound, without growable shared memory, or when a helper fails to start,
-// the module runs every job itself and every started helper stops.
+// bound, without growable shared memory, or when a helper fails to start or
+// has not started in time, the module runs every job itself and every
+// started helper stops.
 export const startParallelHelpers = async (
     module: WebAssembly.Module,
     ports: readonly MessagePort[],
@@ -288,7 +323,13 @@ export const startParallelHelpers = async (
     }
     const layout = controlLayout(count);
     const control = new SharedArrayBuffer(4 * layout.words);
-    const started = await Promise.all(
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<readonly boolean[]>((resolve) => {
+        timer = setTimeout(() => {
+            resolve([false]);
+        }, helperStartMilliseconds);
+    });
+    const answers = Promise.all(
         ports.map(
             (port, index) =>
                 new Promise<boolean>((resolve) => {
@@ -311,6 +352,8 @@ export const startParallelHelpers = async (
                 }),
         ),
     );
+    const started = await Promise.race([answers, deadline]);
+    clearTimeout(timer);
     for (const port of ports) port.close();
     const host = createHost(count, new Int32Array(control), arena, layout);
     if (started.every(Boolean)) return host;
@@ -390,7 +433,11 @@ const createHost = (
             Math.max(2 * previous, previous + length),
         );
         if (next === previous) return false;
-        arenaBuffer.grow(next);
+        try {
+            arenaBuffer.grow(next);
+        } catch {
+            throw new ResourceFailure('The shared arena could not grow.');
+        }
         releaseBlock({ offset: previous, length: next - previous });
         return true;
     };
@@ -432,7 +479,9 @@ const createHost = (
                 // Only a discarded job still frees memory without the module.
                 const [ticket] = discarded;
                 if (ticket === undefined)
-                    throw new Error('The parallel arena bound is exceeded.');
+                    throw new ResourceFailure(
+                        'The shared arena bound is exhausted.',
+                    );
                 awaitEnd(tickets.get(ticket)!.slot);
                 sweep();
             }
@@ -577,7 +626,12 @@ const createHost = (
                 throw new Error('The parallel job is unknown.');
             const state = awaitEnd(running.slot);
             settle(running);
-            return state === done ? 0 : 1;
+            if (state === exhausted)
+                throw new ResourceFailure(
+                    'A participant helper exhausted its memory bound.',
+                );
+            if (state !== done)
+                throw new ResourceFailure('A participant helper failed.');
         },
         take: (ticket: number, pointer: number) => {
             const running = tickets.get(ticket);

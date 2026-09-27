@@ -1,0 +1,478 @@
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { MessageChannel, Worker } from 'node:worker_threads';
+
+import binaryen from 'binaryen';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+    custodyIdentity,
+    custodyPurpose,
+} from '#packages/sdk/src/participant/worker/identity.js';
+import {
+    instantiateParticipantKernel,
+    ResourceFailure,
+} from '#packages/sdk/src/participant/worker/kernel.js';
+import {
+    helperStartMilliseconds,
+    noParallelHelpers,
+    startParallelHelpers,
+} from '#packages/sdk/src/participant/worker/parallel.js';
+import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+
+// The packaged participant module and worker, whose helper role runs on
+// threads here as the page starts it beside an operation's worker in a
+// cross-origin isolated browser.
+const distribution = new URL('../../../packages/sdk/dist/', import.meta.url);
+const moduleBytes = await readFile(new URL('participant.wasm', distribution));
+const participantModule = await WebAssembly.compile(moduleBytes);
+const helperThread = `
+const { parentPort, workerData } = require('node:worker_threads');
+globalThis.self = globalThis;
+self.postMessage = (message) => parentPort.postMessage(message);
+self.close = () => process.exit(0);
+import(workerData.source).then(() =>
+    self.onmessage({ data: 'helper', ports: [workerData.port] }),
+);
+`;
+const threads: Worker[] = [];
+const silentPorts: { close: () => void }[] = [];
+// Starts one packaged helper per port and returns the worker's ends.
+const helperPorts = (count: number) =>
+    Array.from({ length: count }, () => {
+        const channel = new MessageChannel();
+        threads.push(
+            new Worker(helperThread, {
+                eval: true,
+                workerData: {
+                    source: new URL('participant-worker.js', distribution).href,
+                    port: channel.port2,
+                },
+                transferList: [channel.port2],
+            }),
+        );
+        return channel.port1 as unknown as MessagePort;
+    });
+
+beforeEach(() => {
+    vi.stubGlobal('crossOriginIsolated', true);
+});
+afterEach(async () => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    for (const port of silentPorts.splice(0)) port.close();
+    await Promise.all(threads.splice(0).map((thread) => thread.terminate()));
+});
+
+// A custody identity as the foundation framing defines it, encoded here: the
+// tuple header (schema 1, version 1, two items), the domain as an ASCII item
+// (type 2) and the payload as a raw-bytes item (type 1), each item's length
+// before its inner length, hashed with SHAKE256 to 64 bytes.
+const independentIdentity = (domain: string, payload: Uint8Array) => {
+    const label = Buffer.from(domain, 'ascii');
+    const framing = Buffer.alloc(28 + label.length);
+    let offset = framing.writeUInt16LE(1, 0);
+    offset = framing.writeUInt16LE(1, offset);
+    offset = framing.writeUInt32LE(2, offset);
+    offset = framing.writeUInt16LE(2, offset);
+    offset = framing.writeUInt32LE(4 + label.length, offset);
+    offset = framing.writeUInt32LE(label.length, offset);
+    offset += label.copy(framing, offset);
+    offset = framing.writeUInt16LE(1, offset);
+    offset = framing.writeUInt32LE(4 + payload.length, offset);
+    framing.writeUInt32LE(payload.length, offset);
+    return new Uint8Array(
+        createHash('shake256', { outputLength: 64 })
+            .update(framing)
+            .update(payload)
+            .digest(),
+    );
+};
+const rootDomain = 'sealed-lattice/participant-root/v1';
+const payload = (length: number) =>
+    length === 0
+        ? new Uint8Array()
+        : new Uint8Array(
+              createHash('shake256', { outputLength: length })
+                  .update(String(length))
+                  .digest(),
+          );
+// Lengths below, at and above the module's input buffer and a stream's
+// batch, and several whole sends.
+const payloadLengths = [
+    0,
+    1,
+    65_535,
+    65_536,
+    65_537,
+    1 << 20,
+    (3 << 20) + 5,
+] as const;
+
+// Starts helpers that settle the start only by their answers: the start's
+// deadline is held back, and a real-time guard fails the test rather than
+// letting it hang.
+const realTimeout = setTimeout;
+const realClearTimeout = clearTimeout;
+const answeredStart = async (
+    module: WebAssembly.Module,
+    ports: readonly MessagePort[],
+) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let guard: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            startParallelHelpers(module, ports, false),
+            new Promise<never>((_resolve, reject) => {
+                guard = realTimeout(() => {
+                    reject(new Error('No helper answered.'));
+                }, 60_000);
+            }),
+        ]);
+    } finally {
+        realClearTimeout(guard);
+        vi.useRealTimers();
+    }
+};
+
+// The failure a call ends with, or undefined when it returns.
+const failureOf = (call: () => unknown) => {
+    try {
+        call();
+    } catch (error) {
+        return error;
+    }
+    return undefined;
+};
+
+describe('participant helpers', () => {
+    it('encode the custody identity framing as its pinned independent vector', () => {
+        // SHAKE256 over the empty public-polynomial identity, computed outside
+        // the module.
+        expect(
+            Buffer.from(
+                independentIdentity(
+                    'sealed-lattice/public-polynomial/v1',
+                    new Uint8Array(),
+                ),
+            ).toString('hex'),
+        ).toBe(
+            'c43f773788c6d66f30eb39ee7230312ad8dda3e5cbb3205075377d824eaa781d54b6dd3661553cb3c64ece7bd15a6df92fdd901b2ba81ae35334879f69fdf8a4',
+        );
+    });
+
+    it('return the identities the worker computes alone, which the independent framing yields', async () => {
+        const expected = payloadLengths.map((length) =>
+            independentIdentity(rootDomain, payload(length)),
+        );
+        const alone = await instantiateParticipantKernel(
+            participantModule,
+            noParallelHelpers,
+        );
+        expect(
+            payloadLengths.map((length) =>
+                custodyIdentity(
+                    alone.kernel,
+                    custodyPurpose.root,
+                    payload(length),
+                ),
+            ),
+        ).toEqual(expected);
+        const helpers = await startParallelHelpers(
+            participantModule,
+            helperPorts(3),
+            true,
+        );
+        expect(helpers.count).toBe(3);
+        try {
+            const { kernel } = await instantiateParticipantKernel(
+                participantModule,
+                helpers,
+            );
+            expect(
+                payloadLengths.map((length) =>
+                    custodyIdentity(
+                        kernel,
+                        custodyPurpose.root,
+                        payload(length),
+                    ),
+                ),
+            ).toEqual(expected);
+        } finally {
+            helpers.stop();
+        }
+    });
+
+    it('end the call whose job failed, and its instance refuses every later call', async () => {
+        const helpers = await startParallelHelpers(
+            participantModule,
+            helperPorts(2),
+            false,
+        );
+        expect(helpers.count).toBe(2);
+        // Every job names a kind no helper runs.
+        const failing: ParallelHelpers = {
+            ...helpers,
+            imports: (memory) => {
+                const imports = helpers.imports(memory) as Record<
+                    string,
+                    (...values: number[]) => number
+                >;
+                return {
+                    ...imports,
+                    submit: (_kind: number, ...values: number[]) =>
+                        imports.submit(0xffff, ...values),
+                };
+            },
+        };
+        try {
+            const { kernel } = await instantiateParticipantKernel(
+                participantModule,
+                failing,
+            );
+            const failure = failureOf(() =>
+                custodyIdentity(kernel, custodyPurpose.root, payload(200_000)),
+            );
+            expect(failure).toBeInstanceOf(ResourceFailure);
+            expect((failure as Error).message).toBe(
+                'A participant helper failed.',
+            );
+            expect(
+                failureOf(() => kernel.custody_identity_input_capacity()),
+            ).toBe(failure);
+            expect(
+                failureOf(() =>
+                    kernel.custody_identity_begin(custodyPurpose.root, 0),
+                ),
+            ).toBe(failure);
+        } finally {
+            helpers.stop();
+        }
+        // A later operation starts fresh helpers and a fresh instance.
+        const fresh = await startParallelHelpers(
+            participantModule,
+            helperPorts(2),
+            false,
+        );
+        try {
+            const { kernel } = await instantiateParticipantKernel(
+                participantModule,
+                fresh,
+            );
+            expect(
+                custodyIdentity(kernel, custodyPurpose.root, payload(200_000)),
+            ).toEqual(independentIdentity(rootDomain, payload(200_000)));
+        } finally {
+            fresh.stop();
+        }
+    });
+});
+
+// A stand-in module whose jobs complete with eight bytes (kind 3), exhaust
+// the helper's memory through the allocator's import (kind 1), trap
+// (kind 2) or name no job (any other kind). As in the participant module,
+// a run that never returned leaves the job's buffers held, so clearing
+// them traps.
+const standIn = `(module
+  (import "allocator" "exhausted" (func $exhausted (param i32)))
+  (memory (export "memory") 1)
+  (global $running (mut i32) (i32.const 0))
+  (data (i32.const 2048) "complete")
+  (func (export "parallel_reserve") (param i32 i32) (result i32)
+    (i32.const 0))
+  (func (export "parallel_input") (param i32) (result i32)
+    (i32.const 1024))
+  (func (export "parallel_run") (param $kind i32) (result i32)
+    (global.set $running (i32.const 1))
+    (if (i32.eq (local.get $kind) (i32.const 1))
+      (then (call $exhausted (i32.const 65536))))
+    (if (i32.eq (local.get $kind) (i32.const 2))
+      (then (unreachable)))
+    (global.set $running (i32.const 0))
+    (i32.ne (local.get $kind) (i32.const 3)))
+  (func (export "parallel_output_length") (result i32)
+    (i32.const 8))
+  (func (export "parallel_output_pointer") (result i32)
+    (i32.const 2048))
+  (func (export "parallel_clear")
+    (if (global.get $running)
+      (then (unreachable)))))`;
+const compileText = (text: string) => {
+    const parsed = binaryen.parseText(text);
+    try {
+        if (!parsed.validate()) throw new Error('The stand-in is invalid.');
+        return WebAssembly.compile(new Uint8Array(parsed.emitBinary()));
+    } finally {
+        parsed.dispose();
+    }
+};
+type HostImports = Readonly<{
+    submit: (
+        kind: number,
+        pin: number,
+        parts: number,
+        count: number,
+        output: number,
+    ) => number;
+    wait: (ticket: number) => void;
+    take: (ticket: number, pointer: number) => number;
+}>;
+// The worker's side of the stand-in's jobs, each one sixteen-byte part.
+const standInHost = (helpers: ParallelHelpers) => {
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const host = helpers.imports(() => memory) as unknown as HostImports;
+    return {
+        memory,
+        host,
+        submit: (kind: number, pin: number, output = 8) => {
+            new Uint32Array(memory.buffer, 0, 3).set([0, 256, 16]);
+            return host.submit(kind, pin, 0, 1, output);
+        },
+    };
+};
+
+describe('parallel job host', () => {
+    it("reports a job's output, a helper's exhausted memory, a trap that ends its helper's later jobs, and an exhausted arena", async () => {
+        const module = await compileText(standIn);
+        const helpers = await startParallelHelpers(
+            module,
+            helperPorts(2),
+            false,
+        );
+        expect(helpers.count).toBe(2);
+        try {
+            const { memory, host, submit } = standInHost(helpers);
+            const completed = submit(3, 1);
+            host.wait(completed);
+            expect(host.take(completed, 512)).toBe(0);
+            expect(
+                Buffer.from(new Uint8Array(memory.buffer, 512, 8)).toString(),
+            ).toBe('complete');
+            const outcome = (kind: number, pin: number) => {
+                const failure = failureOf(() => host.wait(submit(kind, pin)));
+                expect(failure).toBeInstanceOf(ResourceFailure);
+                return (failure as Error).message;
+            };
+            expect(outcome(1, 1)).toBe(
+                'A participant helper exhausted its memory bound.',
+            );
+            expect(outcome(2, 2)).toBe('A participant helper failed.');
+            expect(outcome(3, 1)).toBe(
+                'A participant helper exhausted its memory bound.',
+            );
+            expect(outcome(3, 2)).toBe('A participant helper failed.');
+            expect(outcome(9, 0)).toMatch(/^A participant helper /u);
+        } finally {
+            helpers.stop();
+        }
+        const arenaHelpers = await startParallelHelpers(
+            module,
+            helperPorts(1),
+            false,
+        );
+        try {
+            const { submit } = standInHost(arenaHelpers);
+            // Outputs of the largest declared length stay held until their
+            // jobs are waited for, taken or discarded.
+            let accepted = 0;
+            const failure = failureOf(() => {
+                for (; accepted < 64; accepted += 1) submit(3, 1, 8 << 20);
+            });
+            expect(failure).toBeInstanceOf(ResourceFailure);
+            expect((failure as Error).message).toBe(
+                'The shared arena bound is exhausted.',
+            );
+            expect(accepted).toBeGreaterThan(0);
+        } finally {
+            arenaHelpers.stop();
+        }
+    });
+
+    it('runs every job in the worker when a helper refuses to start or has not started in time', async () => {
+        for (const text of [
+            '(module)',
+            `(module
+  (memory (export "memory") 1)
+  (func (export "parallel_reserve") (param i32 i32) (result i32)
+    (i32.const 1)))`,
+        ]) {
+            const helpers = await answeredStart(
+                await compileText(text),
+                helperPorts(2),
+            );
+            expect(helpers.count).toBe(0);
+        }
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const silent = new MessageChannel();
+        silentPorts.push(silent.port2);
+        let settled = false;
+        const starting = startParallelHelpers(
+            await compileText(standIn),
+            [...helperPorts(1), silent.port1 as unknown as MessagePort],
+            false,
+        ).then((helpers) => {
+            settled = true;
+            return helpers;
+        });
+        await vi.advanceTimersByTimeAsync(helperStartMilliseconds - 1);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(settled).toBe(true);
+        expect((await starting).count).toBe(0);
+    });
+});
+
+describe('participant module memory', () => {
+    it('ends the call that exhausts the linear-memory bound with a resource failure, and its instance refuses every later call', () => {
+        const parsed = binaryen.readBinary(moduleBytes);
+        const initialPages = parsed.getMemoryInfo().initial;
+        parsed.dispose();
+        const source = (name: string) =>
+            JSON.stringify(
+                pathToFileURL(
+                    fileURLToPath(
+                        new URL(
+                            `../../../packages/sdk/src/participant/worker/${name}`,
+                            import.meta.url,
+                        ),
+                    ),
+                ).href,
+            );
+        // The engine refuses every growth beyond one page, which the
+        // instance's first allocation needs.
+        const child = spawnSync(
+            process.execPath,
+            [
+                `--wasm-max-mem-pages=${String(initialPages + 1)}`,
+                '--import',
+                'tsx',
+                '--input-type=module',
+                '--eval',
+                [
+                    `const { instantiateParticipantKernel, ResourceFailure } = await import(${source('kernel.ts')});`,
+                    `const { noParallelHelpers } = await import(${source('parallel.ts')});`,
+                    `const bytes = await (await import('node:fs/promises')).readFile(${JSON.stringify(fileURLToPath(new URL('participant.wasm', distribution)))});`,
+                    'const { kernel } = await instantiateParticipantKernel(await WebAssembly.compile(bytes), noParallelHelpers);',
+                    'const failureOf = (call) => { try { call(); } catch (error) { return error; } };',
+                    'const first = failureOf(() => kernel.custody_identity_begin(0, 0));',
+                    'const later = failureOf(() => kernel.custody_identity_input_capacity());',
+                    'process.stdout.write(JSON.stringify({ resource: first instanceof ResourceFailure, message: first?.message, same: later === first }));',
+                ].join('\n'),
+            ],
+            { encoding: 'utf8' },
+        );
+        expect(child.status, child.stderr).toBe(0);
+        const outcome = JSON.parse(child.stdout) as {
+            resource: boolean;
+            message: string;
+            same: boolean;
+        };
+        expect(outcome.resource).toBe(true);
+        expect(outcome.message).toMatch(
+            /^The participant module exhausted its memory bound, \d+ bytes requested\.$/u,
+        );
+        expect(outcome.same).toBe(true);
+    });
+});

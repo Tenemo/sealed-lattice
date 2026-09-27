@@ -6,7 +6,11 @@ import {
 } from '../foundation-kernel.js';
 
 import { hexadecimal } from './worker/bytes.js';
-import { affordedHelpers, helperRole } from './worker/parallel.js';
+import {
+    affordedHelpers,
+    helperRole,
+    helperStartMilliseconds,
+} from './worker/parallel.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
 
@@ -145,8 +149,9 @@ export type ParticipantSummary = Readonly<{
 }>;
 
 /**
- * A refused request changed nothing; a pending one waits for public input or
- * storage; a stopped participant never acts again.
+ * A refused request changed nothing; a pending one waits for public input,
+ * storage or a device resource such as memory; a stopped participant never
+ * acts again.
  */
 export type ParticipantResult = Readonly<
     | {
@@ -168,39 +173,50 @@ export type Participant = Readonly<{
 
 // Starts the helpers this context affords from the worker source and waits
 // until each listens on its port, whose other ends the operation's worker
-// takes. A helper that fails to load leaves the worker without helpers.
+// takes. A helper that fails to load or does not listen in time leaves the
+// worker without helpers.
 const openHelpers = async (url: string) => {
     const count = affordedHelpers();
     if (count === 0) return { workers: [], ports: [] };
     const workers: Worker[] = [];
     const ports: MessagePort[] = [];
-    const listening = await Promise.all(
-        Array.from(
-            { length: count },
-            () =>
-                new Promise<boolean>((resolve) => {
-                    const worker = new Worker(url, { type: 'module' });
-                    const channel = new MessageChannel();
-                    workers.push(worker);
-                    ports.push(channel.port2);
-                    worker.onmessage = () => {
-                        resolve(true);
-                    };
-                    worker.onerror = () => {
-                        resolve(false);
-                    };
-                    worker.postMessage(helperRole, [channel.port1]);
-                }),
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<readonly boolean[]>((resolve) => {
+        timer = setTimeout(() => {
+            resolve([false]);
+        }, helperStartMilliseconds);
+    });
+    const listening = await Promise.race([
+        Promise.all(
+            Array.from(
+                { length: count },
+                () =>
+                    new Promise<boolean>((resolve) => {
+                        const worker = new Worker(url, { type: 'module' });
+                        const channel = new MessageChannel();
+                        workers.push(worker);
+                        ports.push(channel.port2);
+                        worker.onmessage = () => {
+                            resolve(true);
+                        };
+                        worker.onerror = () => {
+                            resolve(false);
+                        };
+                        worker.postMessage(helperRole, [channel.port1]);
+                    }),
+            ),
         ),
-    );
+        deadline,
+    ]);
+    clearTimeout(timer);
+    for (const worker of workers) {
+        worker.onmessage = null;
+        worker.onerror = null;
+    }
     if (!listening.every(Boolean)) {
         for (const worker of workers) worker.terminate();
         for (const port of ports) port.close();
         return { workers: [], ports: [] };
-    }
-    for (const worker of workers) {
-        worker.onmessage = null;
-        worker.onerror = null;
     }
     return { workers, ports };
 };
@@ -215,7 +231,10 @@ const runWorker = async (
     const helpers = await openHelpers(url);
     return new Promise<ParticipantResult>((resolve) => {
         const worker = new Worker(url, { type: 'module' });
+        let finished = false;
         const finish = (result: ParticipantResult) => {
+            if (finished) return;
+            finished = true;
             worker.terminate();
             for (const helper of helpers.workers) helper.terminate();
             URL.revokeObjectURL(url);
@@ -230,6 +249,15 @@ const runWorker = async (
                 reason: event.message || 'The participant worker failed.',
             });
         };
+        // The worker would wait for a failed helper's jobs, so the operation
+        // ends as pending, as when the browser closes.
+        for (const helper of helpers.workers)
+            helper.onerror = (event) => {
+                finish({
+                    status: 'pending',
+                    reason: event.message || 'A participant helper failed.',
+                });
+            };
         worker.postMessage(command, helpers.ports);
     });
 };
