@@ -14,7 +14,7 @@ use registration_enrollment::{
     finality_work::{FinalityWork, OwnBallotStatus},
     release_work::ReleaseWork,
 };
-use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value, stored_value_bytes};
+use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value_bytes};
 use std::{
     collections::BTreeSet,
     fs::{self, File},
@@ -61,13 +61,13 @@ impl WorkingStore for Spool {
         );
         Ok(())
     }
-    fn get(&mut self, index: usize) -> Result<Ciphertext, Error> {
+    fn get(&mut self, index: usize) -> Result<Vec<u8>, Error> {
         let bytes =
             fs::read(self.directory.join(format!("{index}.bin"))).map_err(|_| Error::Storage)?;
         if bytes.len() != self.value_bytes {
             return Err(Error::Storage);
         }
-        stored_value(&bytes).map_err(|_| Error::Storage)
+        Ok(bytes)
     }
     fn remove(&mut self, index: usize) -> Result<(), Error> {
         if self.indices.remove(&index) {

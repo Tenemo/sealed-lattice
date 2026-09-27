@@ -491,6 +491,27 @@ impl Arithmetic {
             }
         }
     }
+    /// Up to the count of the requests that follow the work's pending
+    /// request, in order: its keyed product's later ones and, in a product's
+    /// first keyed product, the second one's.
+    fn following(&self, work: &KeyedWork, count: usize) -> Vec<RecordRequest> {
+        let (keyed, second) = match work {
+            KeyedWork::Product { keyed, context, .. } => (
+                keyed,
+                (context.ordinal == keyed.first_ordinal())
+                    .then(|| context.ordinal + jobs::KEYED_GROUPS * self.gadget_length),
+            ),
+            KeyedWork::Rotation { keyed, .. } => (keyed, None),
+        };
+        self.keyed_requests_from(keyed.first_ordinal(), keyed.requested() + 1)
+            .chain(
+                second
+                    .into_iter()
+                    .flat_map(|ordinal| self.keyed_requests_from(ordinal, 0)),
+            )
+            .take(count)
+            .collect()
+    }
     /// Takes the next record that the work's pending request names; false
     /// when it is not that record.
     fn deliver(&self, work: &mut KeyedWork, ordinal: usize, prime: usize, record: &[u8]) -> bool {

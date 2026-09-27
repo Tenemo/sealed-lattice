@@ -87,7 +87,7 @@ import {
     participantNamespacePattern,
 } from './storage.js';
 import { targetPhase } from './target-state.js';
-import { publishTarget, signTarget } from './target.js';
+import { EvaluationRetained, publishTarget, signTarget } from './target.js';
 import {
     createTranscriptRecorder,
     discoverTranscripts,
@@ -101,7 +101,9 @@ import type { ArchivedTranscript, WorkerArchive } from './transcript.js';
 // recorded and, when the application configures one, the archive; the worker
 // fetches the module itself and recomputes the runtime identity that every
 // retained root binds. Every bound comes from the module and the retained
-// state, never from the page.
+// state, never from the page. When the page separates evaluation, a worker
+// that retains the target it evaluated before the operation's other work
+// ends there, and the page runs the operation again in a fresh worker.
 type WorkerCommand = Readonly<{
     operation: string;
     namespace: string;
@@ -115,8 +117,11 @@ type WorkerCommand = Readonly<{
         worker: string;
     }>;
     parameters: Readonly<Record<string, unknown>>;
+    separateEvaluation?: boolean;
 }>;
 
+// An evaluated result reports the memory of a worker that retained the
+// target it evaluated, and is never an operation's result.
 export type WorkerResult = Readonly<
     | { status: 'completed'; details: Readonly<Record<string, unknown>> }
     | { status: 'refused' }
@@ -126,6 +131,7 @@ export type WorkerResult = Readonly<
           reason: string;
           stopPersistence: 'confirmed' | 'unconfirmed';
       }
+    | { status: 'evaluated'; memory: OperationMemory }
 >;
 
 const maximumModuleBytes = 8_388_608;
@@ -205,7 +211,9 @@ const isWellFormed = (command: WorkerCommand) =>
     participantNamespacePattern.test(command.namespace) &&
     isBaseUrl(command.relay) &&
     httpUrl(command.module) !== undefined &&
-    isArchive(command.archive);
+    isArchive(command.archive) &&
+    (command.separateEvaluation === undefined ||
+        typeof command.separateEvaluation === 'boolean');
 
 const runtimeIdentity = async (command: WorkerCommand, module: Uint8Array) =>
     deliveryDigest(
@@ -824,6 +832,7 @@ const operationMemory = (
     helpers: helpers.count,
     ...helpers.memory(),
 });
+type OperationMemory = ReturnType<typeof operationMemory>;
 
 // The operations that evaluate the ranking program, whose helpers keep the
 // evaluation's tables and the polynomials its multiplications keep.
@@ -871,17 +880,23 @@ const run = async (
         return await navigator.locks.request(
             namespacedName('sealed-lattice-participant', command.namespace),
             async (): Promise<WorkerResult> => {
+                let kernel: ParticipantKernel | undefined;
                 try {
-                    const { kernel, handlers } =
-                        await instantiateParticipantKernel(module, parallel);
+                    const instance = await instantiateParticipantKernel(
+                        module,
+                        parallel,
+                    );
+                    kernel = instance.kernel;
                     const result = await execute(
                         {
                             namespace: command.namespace,
                             database: opened,
                             kernel,
-                            handlers,
+                            handlers: instance.handlers,
                             runtime,
                             limits: readParticipantLimits(kernel),
+                            separateEvaluation:
+                                command.separateEvaluation === true,
                         },
                         relay,
                         command,
@@ -899,6 +914,17 @@ const run = async (
                           }
                         : result;
                 } catch (error) {
+                    // The worker's memory, and its helpers', ends with them,
+                    // so the page runs the rest of an operation that
+                    // retained the target it evaluated in fresh ones.
+                    if (
+                        error instanceof EvaluationRetained &&
+                        kernel !== undefined
+                    )
+                        return {
+                            status: 'evaluated',
+                            memory: operationMemory(kernel, parallel),
+                        };
                     // A local failure after authority started stops the
                     // participant before any other operation takes the lock.
                     // A failed helper or an exhausted memory bound touches no

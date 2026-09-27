@@ -221,27 +221,25 @@ const openHelpers = async (url: string) => {
     return { workers, ports };
 };
 
-const runWorker = async (
-    source: string,
+// Runs the command in a worker of its own beside helpers of their own, and
+// ends them all once the worker answers.
+const runWorkerOnce = async (
+    url: string,
     command: Readonly<Record<string, unknown>>,
 ) => {
-    const url = URL.createObjectURL(
-        new Blob([source], { type: 'text/javascript' }),
-    );
     const helpers = await openHelpers(url);
-    return new Promise<ParticipantResult>((resolve) => {
+    return new Promise<WorkerResult>((resolve) => {
         const worker = new Worker(url, { type: 'module' });
         let finished = false;
-        const finish = (result: ParticipantResult) => {
+        const finish = (result: WorkerResult) => {
             if (finished) return;
             finished = true;
             worker.terminate();
             for (const helper of helpers.workers) helper.terminate();
-            URL.revokeObjectURL(url);
             resolve(result);
         };
         worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-            finish(event.data as ParticipantResult);
+            finish(event.data);
         };
         worker.onerror = (event) => {
             finish({
@@ -260,6 +258,49 @@ const runWorker = async (
             };
         worker.postMessage(command, helpers.ports);
     });
+};
+
+// Runs the request's command. An instance's memory never shrinks and ends
+// only with its worker, so a worker that retained the target it evaluated
+// before the operation's other work ends with its helpers, and fresh ones
+// run the operation again and restore the target; the result also reports
+// the evaluating worker's memory.
+const runWorker = async (
+    source: string,
+    command: Readonly<Record<string, unknown>>,
+) => {
+    const url = URL.createObjectURL(
+        new Blob([source], { type: 'text/javascript' }),
+    );
+    try {
+        const first = await runWorkerOnce(url, {
+            ...command,
+            separateEvaluation: true,
+        });
+        if (first.status !== 'evaluated') return first as ParticipantResult;
+        const result = await runWorkerOnce(url, {
+            ...command,
+            separateEvaluation: false,
+        });
+        if (result.status === 'evaluated')
+            return {
+                status: 'pending',
+                reason: 'The participant worker evaluated again.',
+            } as const;
+        return (
+            result.status === 'completed'
+                ? {
+                      status: 'completed',
+                      details: {
+                          ...result.details,
+                          evaluationMemory: first.memory,
+                      },
+                  }
+                : result
+        ) as ParticipantResult;
+    } finally {
+        URL.revokeObjectURL(url);
+    }
 };
 
 // A base URL is absolute HTTP or HTTPS without credentials, a query or a

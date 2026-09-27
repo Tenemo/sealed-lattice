@@ -16,7 +16,7 @@ use registration_credentials::{
     roster_input::RosterInputVerifier,
 };
 use rns_arithmetic_probe::ranking::{
-    Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value, stored_value_bytes,
+    Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value_bytes,
 };
 use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};
 use std::{
@@ -215,7 +215,7 @@ impl WorkingStore for Spool {
             )
             .map_err(|_| Error::Storage)
     }
-    fn get(&mut self, index: usize) -> Result<Ciphertext, Error> {
+    fn get(&mut self, index: usize) -> Result<Vec<u8>, Error> {
         let bytes = bounded(
             self.directory.join(format!("{index}.bin")),
             self.value_bytes,
@@ -225,7 +225,7 @@ impl WorkingStore for Spool {
         if bytes.len() != self.value_bytes {
             return Err(Error::Storage);
         }
-        stored_value(&bytes).map_err(|_| Error::Storage)
+        Ok(bytes)
     }
     fn remove(&mut self, index: usize) -> Result<(), Error> {
         if self.indices.remove(&index) {

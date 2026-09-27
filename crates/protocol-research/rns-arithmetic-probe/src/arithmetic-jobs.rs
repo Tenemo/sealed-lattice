@@ -417,6 +417,10 @@ impl KeyedProduct {
     pub(super) fn first_ordinal(&self) -> usize {
         self.context.ordinal
     }
+    /// The index of its pending request.
+    pub(super) fn requested(&self) -> usize {
+        self.requested
+    }
 }
 
 impl Arithmetic {
@@ -614,15 +618,26 @@ impl Arithmetic {
     }
     /// The records a keyed product's next job needs.
     fn keyed_request(&self, product: &KeyedProduct) -> RecordRequest {
-        let (prime, group) = (
-            product.requested / KEYED_GROUPS,
-            product.requested % KEYED_GROUPS,
-        );
+        self.keyed_request_at(product.context.ordinal, product.requested)
+    }
+    /// The records that the job of the index needs in a keyed product whose
+    /// first group's first key has the ordinal: each prime's jobs come in
+    /// group order.
+    fn keyed_request_at(&self, ordinal: usize, index: usize) -> RecordRequest {
         RecordRequest {
-            first: product.context.ordinal + group * self.gadget_length,
+            first: ordinal + (index % KEYED_GROUPS) * self.gadget_length,
             count: self.gadget_length,
-            prime,
+            prime: index / KEYED_GROUPS,
         }
+    }
+    /// The requests of such a keyed product from the job of the index on.
+    pub(super) fn keyed_requests_from(
+        &self,
+        ordinal: usize,
+        index: usize,
+    ) -> impl Iterator<Item = RecordRequest> + '_ {
+        (index..KEYED_GROUPS * self.external_primes)
+            .map(move |index| self.keyed_request_at(ordinal, index))
     }
     /// Takes the next record of the keyed product's pending request; false
     /// when it is not that record.

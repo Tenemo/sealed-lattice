@@ -1,6 +1,6 @@
 //! A bounded system region for the standard library's pinned dlmalloc version.
 //! The region grows as its allocations need it, each growth adding the
-//! request or, when more, a quarter of its held pages, so its growths stay
+//! request or, when more, an eighth of its held pages, so its growths stay
 //! few and it stays near what its allocations use. A growth in Chrome
 //! briefly commits about as much again as the region already holds, so an
 //! operation that knows what it will add plans it beside the bytes its live
@@ -109,7 +109,7 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
         let pages = if planned > previous_pages {
             requested_pages.max(planned - previous_pages)
         } else {
-            requested_pages.max(previous_pages / 4)
+            requested_pages.max(previous_pages / 8)
         }
         .max(MINIMUM_GROWTH_PAGES)
         .min(remaining_pages);

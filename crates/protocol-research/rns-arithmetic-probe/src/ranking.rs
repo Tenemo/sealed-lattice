@@ -54,6 +54,9 @@ pub type Ciphertext = [Polynomial; 2];
 /// Bytes of one key record: a key polynomial's transformed residues modulo
 /// one prime.
 pub const KEY_RECORD_BYTES: usize = 8 * DEGREE;
+/// The most key-record requests after the pending one that the engine names
+/// for the host to read ahead.
+pub const READ_AHEAD: usize = 3;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -286,20 +289,47 @@ fn evictions(
     }
     Ok((spills, drops))
 }
-/// Splits stored bytes into the two components' words. The engine checks a
-/// readback's shape and retained identity before it uses the value.
-pub fn stored_value(bytes: &[u8]) -> Result<Ciphertext, Refusal> {
-    if !bytes.len().is_multiple_of(16) {
-        return Err(Refusal::Shape);
+/// A polynomial decoded from its canonical coefficient bytes as they
+/// arrive: each coefficient a sign byte and its magnitude's little-endian
+/// bytes.
+pub struct PolynomialDecoder {
+    output: Polynomial,
+    decoded: usize,
+    /// The first bytes of a coefficient that the last piece split.
+    partial: Vec<u8>,
+}
+/// A stored working value that arrives in pieces of whole words: a spilled
+/// value's readback, whose bytes must have the identity of the value the
+/// engine holds, or a reload, whose words become the value again once they
+/// have the identity recorded when it was spilled.
+pub struct StoredValueRead {
+    index: usize,
+    hash: IdentityHasher,
+    length: usize,
+    received: usize,
+    kind: StoredKind,
+}
+enum StoredKind {
+    Readback([u8; 64]),
+    Reload(Ciphertext),
+}
+impl StoredValueRead {
+    /// Absorbs the next piece of the stored bytes, a whole number of words.
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
+        if !bytes.len().is_multiple_of(8) || bytes.len() > self.length - self.received {
+            return Err(Refusal::Shape);
+        }
+        self.hash.absorb(bytes).map_err(|_| Refusal::Identity)?;
+        if let StoredKind::Reload(value) = &mut self.kind {
+            let words = value[0].len();
+            for (position, word) in (self.received / 8..).zip(bytes.chunks_exact(8)) {
+                value[position / words][position % words] =
+                    u64::from_le_bytes(word.try_into().unwrap());
+            }
+        }
+        self.received += bytes.len();
+        Ok(())
     }
-    let (first, second) = bytes.split_at(bytes.len() / 2);
-    let words = |bytes: &[u8]| {
-        bytes
-            .chunks_exact(8)
-            .map(|word| u64::from_le_bytes(word.try_into().unwrap()))
-            .collect()
-    };
-    Ok([words(first), words(second)])
 }
 
 impl Engine {
@@ -573,36 +603,80 @@ impl Engine {
     }
 
     pub fn decode_polynomial(&self, bytes: &[u8]) -> Result<Polynomial, Refusal> {
+        let mut decoder = self.polynomial_decoder();
+        self.decode_into(&mut decoder, bytes)?;
+        self.finish_polynomial(decoder)
+    }
+    pub fn polynomial_decoder(&self) -> PolynomialDecoder {
+        PolynomialDecoder {
+            output: self.arithmetic.zero(),
+            decoded: 0,
+            partial: Vec::with_capacity(self.coefficient_bytes()),
+        }
+    }
+    /// Decodes the coefficients the next piece of bytes completes and keeps
+    /// the bytes of one it splits.
+    pub fn decode_into(
+        &self,
+        decoder: &mut PolynomialDecoder,
+        bytes: &[u8],
+    ) -> Result<(), Refusal> {
         let width = self.coefficient_bytes();
-        if bytes.len() != DEGREE * width {
+        let mut rest = bytes;
+        if !decoder.partial.is_empty() {
+            let taken = (width - decoder.partial.len()).min(rest.len());
+            decoder.partial.extend_from_slice(&rest[..taken]);
+            rest = &rest[taken..];
+            if decoder.partial.len() < width {
+                return Ok(());
+            }
+            let partial = std::mem::take(&mut decoder.partial);
+            self.decode_coefficient(decoder, &partial)?;
+            decoder.partial = partial;
+            decoder.partial.clear();
+        }
+        let whole = rest.len() - rest.len() % width;
+        for coefficient in rest[..whole].chunks_exact(width) {
+            self.decode_coefficient(decoder, coefficient)?;
+        }
+        decoder.partial.extend_from_slice(&rest[whole..]);
+        Ok(())
+    }
+    fn decode_coefficient(
+        &self,
+        decoder: &mut PolynomialDecoder,
+        bytes: &[u8],
+    ) -> Result<(), Refusal> {
+        if decoder.decoded == DEGREE {
             return Err(Refusal::Shape);
         }
         let words = self.arithmetic.words;
-        let mut output = self.arithmetic.zero();
         let mut magnitude = [0u64; MAXIMUM_WORDS];
         let magnitude = &mut magnitude[..words];
-        for (bytes, coefficient) in bytes
-            .chunks_exact(width)
-            .zip(output.chunks_exact_mut(words))
-        {
-            magnitude.fill(0);
-            for (index, byte) in bytes[1..].iter().enumerate() {
-                magnitude[index / 8] |= u64::from(*byte) << (8 * (index % 8));
-            }
-            let zero = magnitude.iter().all(|word| *word == 0);
-            if bytes[0] > 1
-                || larger(magnitude, &self.arithmetic.wide.half)
-                || (bytes[0] == 1 && zero)
-            {
-                return Err(Refusal::Coefficient);
-            }
-            if bytes[0] == 1 {
-                self.arithmetic.wide.negate(magnitude, coefficient);
-            } else {
-                coefficient.copy_from_slice(magnitude);
-            }
+        for (index, byte) in bytes[1..].iter().enumerate() {
+            magnitude[index / 8] |= u64::from(*byte) << (8 * (index % 8));
         }
-        Ok(output)
+        let zero = magnitude.iter().all(|word| *word == 0);
+        if bytes[0] > 1 || larger(magnitude, &self.arithmetic.wide.half) || (bytes[0] == 1 && zero)
+        {
+            return Err(Refusal::Coefficient);
+        }
+        let coefficient =
+            &mut decoder.output[decoder.decoded * words..(decoder.decoded + 1) * words];
+        if bytes[0] == 1 {
+            self.arithmetic.wide.negate(magnitude, coefficient);
+        } else {
+            coefficient.copy_from_slice(magnitude);
+        }
+        decoder.decoded += 1;
+        Ok(())
+    }
+    /// The decoded polynomial, once every coefficient arrived whole.
+    pub fn finish_polynomial(&self, decoder: PolynomialDecoder) -> Result<Polynomial, Refusal> {
+        if decoder.decoded != DEGREE || !decoder.partial.is_empty() {
+            return Err(Refusal::Shape);
+        }
+        Ok(decoder.output)
     }
 
     /// The records of the key of a cache and ordinal, for this program.
@@ -635,6 +709,13 @@ impl Engine {
     pub fn take_record(&mut self) -> Option<(usize, Vec<u8>)> {
         let prime = self.arithmetic.external_primes - self.pending.len();
         self.pending.pop_front().map(|record| (prime, record))
+    }
+    /// Up to [`READ_AHEAD`] key-record requests that the running instruction
+    /// makes after its pending request, in order.
+    pub fn following_requests(&self) -> Vec<RecordRequest> {
+        self.work
+            .as_ref()
+            .map_or_else(Vec::new, |work| self.arithmetic.following(work, READ_AHEAD))
     }
     /// Takes the next key record the running instruction's request names.
     pub fn key_record(
@@ -691,7 +772,7 @@ impl Engine {
     }
 
     /// Absorbs a stored value's bytes in order; see [`stored_bytes`].
-    pub fn value_hasher(&self, index: usize) -> Result<IdentityHasher, Refusal> {
+    fn value_hasher(&self, index: usize) -> Result<IdentityHasher, Refusal> {
         IdentityHasher::new(
             EVALUATION_VALUE_DOMAIN,
             &[
@@ -703,7 +784,7 @@ impl Engine {
         .map_err(|_| Refusal::Identity)
     }
 
-    pub fn value_identity(&self, index: usize, value: &Ciphertext) -> Result<[u8; 64], Refusal> {
+    fn value_identity(&self, index: usize, value: &Ciphertext) -> Result<[u8; 64], Refusal> {
         let mut hash = self.value_hasher(index)?;
         let mut buffer = [0_u8; 8192];
         for polynomial in value {
@@ -718,25 +799,61 @@ impl Engine {
         hash.finish().map_err(|_| Refusal::Identity)
     }
 
-    pub fn retire_to_storage(&mut self, index: usize, identity: [u8; 64]) -> Result<(), Refusal> {
-        if !self.requirements()?.spills.contains(&index)
-            || self.value_identity(index, self.value(index)?)? != identity
-        {
-            return Err(Refusal::Identity);
-        }
-        self.stored[index] = Some(identity);
-        self.values[index] = None;
-        Ok(())
+    /// Starts reading back a value that this step spills, whose identity
+    /// the read's bytes must have.
+    pub fn begin_readback(&self, index: usize) -> Result<StoredValueRead, Refusal> {
+        let expected = self.value_identity(index, self.value(index)?)?;
+        Ok(StoredValueRead {
+            index,
+            hash: self.value_hasher(index)?,
+            length: stored_value_bytes(self.profile),
+            received: 0,
+            kind: StoredKind::Readback(expected),
+        })
     }
-
-    pub fn reload(&mut self, index: usize, value: Ciphertext) -> Result<(), Refusal> {
-        self.validate_value(&value)?;
-        if !self.requirements()?.reloads.contains(&index)
-            || self.stored[index] != Some(self.value_identity(index, &value)?)
-        {
-            return Err(Refusal::Identity);
+    /// Starts reloading a stored value, whose words it decodes as they
+    /// arrive.
+    pub fn begin_reload(&self, index: usize) -> Result<StoredValueRead, Refusal> {
+        Ok(StoredValueRead {
+            index,
+            hash: self.value_hasher(index)?,
+            length: stored_value_bytes(self.profile),
+            received: 0,
+            kind: StoredKind::Reload([self.arithmetic.zero(), self.arithmetic.zero()]),
+        })
+    }
+    /// Retires a read-back value to storage, or makes a reloaded one
+    /// resident again, once the read's complete bytes have the identity the
+    /// value had when this step spilled it or when it was spilled earlier.
+    pub fn finish_read(&mut self, read: StoredValueRead) -> Result<(), Refusal> {
+        let StoredValueRead {
+            index,
+            hash,
+            length,
+            received,
+            kind,
+        } = read;
+        if received != length {
+            return Err(Refusal::Shape);
         }
-        self.values[index] = Some(value);
+        let identity = hash.finish().map_err(|_| Refusal::Identity)?;
+        let required = self.requirements()?;
+        match kind {
+            StoredKind::Readback(expected) => {
+                if !required.spills.contains(&index) || identity != expected {
+                    return Err(Refusal::Identity);
+                }
+                self.stored[index] = Some(identity);
+                self.values[index] = None;
+            }
+            StoredKind::Reload(value) => {
+                if !required.reloads.contains(&index) || self.stored[index] != Some(identity) {
+                    return Err(Refusal::Identity);
+                }
+                self.validate_value(&value)?;
+                self.values[index] = Some(value);
+            }
+        }
         Ok(())
     }
 

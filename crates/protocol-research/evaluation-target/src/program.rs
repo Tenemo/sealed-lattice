@@ -302,6 +302,61 @@ mod tests {
         }
     }
 
+    // A canonical polynomial of pseudorandom coefficients of both signs
+    // decodes the same whole and in pieces that split coefficients anywhere;
+    // a sign byte beyond one, a negative zero, a magnitude beyond half the
+    // modulus, a missing byte and an extra coefficient refuse. A stored
+    // value's pieces are whole words, no more than the value holds.
+    #[test]
+    fn a_polynomial_arriving_in_pieces_decodes_as_it_does_whole() {
+        let profile = Profile::new(3, 2).unwrap();
+        let program = RankingProgram::for_profile(profile, 1).unwrap();
+        let engine = Engine::new(profile, program.bytes(), *program.identity()).unwrap();
+        let width = engine.coefficient_bytes();
+        let mut bytes = vec![0; DEGREE * width];
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        for coefficient in bytes.chunks_exact_mut(width) {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let magnitude = (seed >> 11).to_le_bytes();
+            coefficient[1..9].copy_from_slice(&magnitude);
+            coefficient[0] = u8::from(seed & 1 == 1 && seed >> 11 != 0);
+        }
+        let whole = engine.decode_polynomial(&bytes).unwrap();
+        for piece in [1, 7, width - 1, width, width + 1, 4099, 1 << 20] {
+            let mut decoder = engine.polynomial_decoder();
+            for bytes in bytes.chunks(piece) {
+                engine.decode_into(&mut decoder, bytes).unwrap();
+            }
+            assert_eq!(engine.finish_polynomial(decoder).unwrap(), whole);
+        }
+        let refuses = |bytes: &[u8]| engine.decode_polynomial(bytes).is_err();
+        let mut changed = bytes.clone();
+        changed[5 * width] = 2;
+        assert!(refuses(&changed));
+        let mut changed = bytes.clone();
+        changed[7 * width..8 * width].fill(0);
+        changed[7 * width] = 1;
+        assert!(refuses(&changed));
+        let mut changed = bytes.clone();
+        changed[9 * width + 1..10 * width].fill(0xff);
+        assert!(refuses(&changed));
+        assert!(refuses(&bytes[..bytes.len() - 1]));
+        assert!(refuses(&[&bytes[..], &bytes[..width]].concat()));
+        let mut decoder = engine.polynomial_decoder();
+        engine
+            .decode_into(&mut decoder, &bytes[..bytes.len() - 1])
+            .unwrap();
+        assert!(engine.finish_polynomial(decoder).is_err());
+        let value_bytes = rns_arithmetic_probe::ranking::stored_value_bytes(profile);
+        let mut read = engine.begin_reload(0).unwrap();
+        assert!(read.push(&[0; 7]).is_err());
+        assert!(read.push(&vec![0; value_bytes + 8]).is_err());
+        read.push(&vec![0; value_bytes - 8]).unwrap();
+        assert!(read.push(&[0; 16]).is_err());
+    }
+
     #[test]
     fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
         let program = RankingProgram::for_profile(completion(), 3).unwrap();

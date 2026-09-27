@@ -385,13 +385,21 @@ const openEvaluationStorage = async (namespace: string) => {
     return request(opened);
 };
 
+// Writes the evaluation's public work in one transaction, which a write that
+// throws aborts.
 const writeEvaluationStorage = async (
     storage: IDBDatabase,
     write: (store: IDBObjectStore) => void,
 ) => {
     const transaction = storage.transaction(evaluationStore, 'readwrite');
     const done = completion(transaction);
-    write(transaction.objectStore(evaluationStore));
+    try {
+        write(transaction.objectStore(evaluationStore));
+    } catch (error) {
+        done.catch(() => undefined);
+        transaction.abort();
+        throw error;
+    }
     await done;
 };
 
@@ -476,26 +484,19 @@ const restoreEvaluation = async (context: ProfileContext) => {
     return restored;
 };
 
-const readStoredBlob = async (storage: IDBDatabase, key: IDBValidKey) => {
+// The stored blobs of the keys, in one transaction.
+const readStoredBlobs = async (
+    storage: IDBDatabase,
+    keys: readonly IDBValidKey[],
+) => {
     const transaction = storage.transaction(evaluationStore, 'readonly');
     const done = completion(transaction);
-    const value = await request<unknown>(
-        transaction.objectStore(evaluationStore).get(key),
+    const store = transaction.objectStore(evaluationStore);
+    const values = await Promise.all(
+        keys.map((key) => request<unknown>(store.get(key))),
     );
     await done;
-    return value instanceof Blob ? value : undefined;
-};
-
-const readStoredChunk = async (
-    storage: IDBDatabase,
-    node: number,
-    offset: number,
-    length: number,
-) => {
-    const value = await readStoredBlob(storage, [node, offset]);
-    if (value === undefined || value.size !== length)
-        throw new PublicInputFailure('A stored evaluation value is missing.');
-    return new Uint8Array(await value.arrayBuffer());
+    return values;
 };
 
 // A key's record modulo a prime sorts after every stored value's chunk.
@@ -509,15 +510,12 @@ const readStoredRecords = async (
     count: number,
     prime: number,
 ) => {
-    const transaction = storage.transaction(evaluationStore, 'readonly');
-    const done = completion(transaction);
-    const store = transaction.objectStore(evaluationStore);
-    const values = await Promise.all(
+    const values = await readStoredBlobs(
+        storage,
         Array.from({ length: count }, (_unused, index) =>
-            request<unknown>(store.get(keyRecord(first + index, prime))),
+            keyRecord(first + index, prime),
         ),
     );
-    await done;
     return Promise.all(
         values.map(async (value) => {
             if (!(value instanceof Blob) || 4 + value.size > moduleChunkBytes)
@@ -564,20 +562,29 @@ const evaluate = async (
     const storage = await openEvaluationStorage(context.namespace);
     try {
         await writeEvaluationStorage(storage, (store) => store.clear());
+        // Delivers a stored value's chunks, whose blobs one transaction
+        // finds, reading one chunk's bytes at a time.
         const deliverStored = (operation: number, node: number) => {
             evaluationCommand(context, operation, node);
             return deliverEvaluationInput(
                 context,
                 async (accept) => {
-                    for (const chunk of chunks(node))
-                        accept(
-                            await readStoredChunk(
-                                storage,
-                                chunk.node,
-                                chunk.offset,
-                                chunk.count * storedCoefficientBytes,
-                            ),
-                        );
+                    const valueChunks = chunks(node);
+                    const blobs = await readStoredBlobs(
+                        storage,
+                        valueChunks.map((chunk) => [chunk.node, chunk.offset]),
+                    );
+                    for (const [index, chunk] of valueChunks.entries()) {
+                        const blob = blobs[index];
+                        if (
+                            !(blob instanceof Blob) ||
+                            blob.size !== chunk.count * storedCoefficientBytes
+                        )
+                            throw new PublicInputFailure(
+                                'A stored evaluation value is missing.',
+                            );
+                        accept(new Uint8Array(await blob.arrayBuffer()));
+                    }
                 },
                 'A stored evaluation value changed.',
             );
@@ -600,6 +607,8 @@ const evaluate = async (
                     );
             });
         };
+        // The values spilled and not yet retired, whose chunks storage holds.
+        const spilled = new Set<number>();
         evaluationCommand(context, 2);
         while (
             kernel.evaluation_target_body_length() === 0 &&
@@ -611,25 +620,31 @@ const evaluate = async (
             if (required.length !== 7 + spillCount + reloadCount)
                 throw new Error('The evaluation requirements are malformed.');
             for (const node of required.slice(7, 7 + spillCount)) {
-                for (const chunk of chunks(node)) {
-                    const bytes = evaluationCommand(
-                        context,
-                        16,
-                        node,
-                        concatenate(
-                            unsigned32(chunk.offset),
-                            unsigned32(chunk.count),
-                        ),
-                    );
-                    if (bytes.length !== chunk.count * storedCoefficientBytes)
-                        throw new Error('An evaluation spill is incomplete.');
-                    await writeEvaluationStorage(storage, (store) =>
+                spilled.add(node);
+                await writeEvaluationStorage(storage, (store) => {
+                    for (const chunk of chunks(node)) {
+                        const bytes = evaluationCommand(
+                            context,
+                            16,
+                            node,
+                            concatenate(
+                                unsigned32(chunk.offset),
+                                unsigned32(chunk.count),
+                            ),
+                        );
+                        if (
+                            bytes.length !==
+                            chunk.count * storedCoefficientBytes
+                        )
+                            throw new Error(
+                                'An evaluation spill is incomplete.',
+                            );
                         store.put(new Blob([new Uint8Array(bytes)]), [
                             node,
                             chunk.offset,
-                        ]),
-                    );
-                }
+                        ]);
+                    }
+                });
                 await deliverStored(17, node);
             }
             for (const node of required.slice(7 + spillCount))
@@ -676,36 +691,64 @@ const evaluate = async (
                     );
             }
             // The step ends with the values whose last use it was, or asks
-            // for key records first.
+            // for key records first, naming the requests that follow, whose
+            // records are read while earlier ones are delivered.
+            const ahead = new Map<string, Promise<Uint8Array[]>>();
             for (;;) {
                 const [status, ...rest] = words(evaluationCommand(context, 15));
                 if (status === 0) {
-                    await writeEvaluationStorage(storage, (store) => {
-                        for (const node of rest)
-                            store.delete(
-                                IDBKeyRange.bound(
-                                    [node],
-                                    [node + 1],
-                                    false,
-                                    true,
-                                ),
-                            );
-                    });
+                    // Only a value spilled earlier leaves records to delete.
+                    const retired = rest.filter((node) => spilled.delete(node));
+                    if (retired.length > 0)
+                        await writeEvaluationStorage(storage, (store) => {
+                            for (const node of retired)
+                                store.delete(
+                                    IDBKeyRange.bound(
+                                        [node],
+                                        [node + 1],
+                                        false,
+                                        true,
+                                    ),
+                                );
+                        });
                     break;
                 }
                 if (status === 2)
                     throw new PublicInputFailure(
                         'A stored evaluation key changed.',
                     );
-                const [first, count, prime] = rest;
-                if (status !== 1 || rest.length !== 3)
+                if (status !== 1 || rest.length === 0 || rest.length % 3 !== 0)
                     throw new Error('The evaluation step is malformed.');
-                const records = await readStoredRecords(
-                    storage,
-                    first,
-                    count,
-                    prime,
+                const requests = Array.from(
+                    { length: rest.length / 3 },
+                    (_unused, index) => rest.slice(3 * index, 3 * index + 3),
                 );
+                const read = ([first, count, prime]: readonly number[]) => {
+                    const records = readStoredRecords(
+                        storage,
+                        first,
+                        count,
+                        prime,
+                    );
+                    // A read that no request takes fails silently.
+                    records.catch(() => undefined);
+                    return records;
+                };
+                const pending =
+                    ahead.get(requests[0].join()) ?? read(requests[0]);
+                const named = new Map(
+                    requests.slice(1).map((following) => {
+                        const key = following.join();
+                        return [
+                            key,
+                            ahead.get(key) ?? read(following),
+                        ] as const;
+                    }),
+                );
+                ahead.clear();
+                for (const [key, records] of named) ahead.set(key, records);
+                const [[first]] = requests;
+                const records = await pending;
                 for (const [index, record] of records.entries())
                     if (
                         tryEvaluationCommand(
@@ -819,10 +862,16 @@ const evaluateClosedTarget = async (
     };
 };
 
+// Ends a worker whose operation retained the target it evaluated before its
+// other work, so that a fresh worker restores it for the rest of the
+// operation.
+export class EvaluationRetained extends Error {}
+
 // The target this participant evaluated earlier, restored from its retained
 // copy, or else the target evaluated now from the public close records and
-// retained. The completed close and the verified setup must be restored in
-// this instance first. Returns the target body and whether it was restored.
+// retained, which ends a separately evaluating worker. The completed close
+// and the verified setup must be restored in this instance first. Returns
+// the target body and whether it was restored.
 export const restoreOrEvaluateTarget = async (
     context: ProfileContext,
     relay: PublicRelay,
@@ -840,6 +889,8 @@ export const restoreOrEvaluateTarget = async (
     }
     const { body } = await evaluateClosedTarget(context, relay);
     await retainEvaluation(context);
+    if (context.separateEvaluation)
+        throw new EvaluationRetained('The evaluated target is retained.');
     return { body, restored: false };
 };
 

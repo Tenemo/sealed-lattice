@@ -43,7 +43,8 @@ pub trait PublicInputs {
 /// retired or used again, and every key record before its product is used.
 pub trait WorkingStore {
     fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Error>;
-    fn get(&mut self, index: usize) -> Result<Ciphertext, Error>;
+    /// The stored bytes of the value of the index.
+    fn get(&mut self, index: usize) -> Result<Vec<u8>, Error>;
     fn remove(&mut self, index: usize) -> Result<(), Error>;
     /// Stores the record of the current cache's key of the ordinal modulo
     /// the prime.
@@ -199,24 +200,17 @@ impl ClassifiedClosedInventory {
         while !engine.finished() {
             let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
             for index in required.spills {
-                let value = engine.value(index).map_err(|_| Error::Arithmetic)?;
-                let expected = engine
-                    .value_identity(index, value)
+                let mut read = engine
+                    .begin_readback(index)
                     .map_err(|_| Error::Arithmetic)?;
-                store.put(index, value)?;
-                let restored = store.get(index)?;
-                if engine.validate_value(&restored).is_err()
-                    || engine.value_identity(index, &restored) != Ok(expected)
-                {
-                    return Err(Error::Storage);
-                }
-                engine
-                    .retire_to_storage(index, expected)
-                    .map_err(|_| Error::Storage)?;
+                store.put(index, engine.value(index).map_err(|_| Error::Arithmetic)?)?;
+                read.push(&store.get(index)?).map_err(|_| Error::Storage)?;
+                engine.finish_read(read).map_err(|_| Error::Storage)?;
             }
             for index in required.reloads {
-                let value = store.get(index)?;
-                engine.reload(index, value).map_err(|_| Error::Storage)?;
+                let mut read = engine.begin_reload(index).map_err(|_| Error::Storage)?;
+                read.push(&store.get(index)?).map_err(|_| Error::Storage)?;
+                engine.finish_read(read).map_err(|_| Error::Storage)?;
             }
             if let Some(cache) = required.cache {
                 let profile = engine.profile();

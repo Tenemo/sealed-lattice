@@ -298,10 +298,13 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
     );
 };
 
-// Runs the installed participant API against a stand-in worker, which checks
+// Runs the installed participant API against stand-in workers, which check
 // that the API starts the published worker's exact source and passes it the
 // runtime identity of the published files, the published module's URL, the
-// namespace and the normalized relay, then refuses the request.
+// namespace, the normalized relay and whether evaluation is separate. A
+// refused request ends its one worker. A worker that answers that it
+// evaluated ends, and a fresh one runs the same command without separating
+// evaluation, whose result also reports the evaluating worker's memory.
 const participantConsumer = [
     "import { resolveObjectURL } from 'node:buffer';",
     "import { readFile } from 'node:fs/promises';",
@@ -310,34 +313,58 @@ const participantConsumer = [
     "const entry = import.meta.resolve('sealed-lattice');",
     "const worker = await readFile(new URL('./participant-worker.js', entry), 'utf8');",
     'let started = 0;',
+    'let running = 0;',
+    'const commands = [];',
+    'const answers = [];',
     'globalThis.Worker = class {',
     '    constructor(url, options) {',
     '        started++;',
+    '        running++;',
+    "        if (running > 1) throw new Error('The participant API started a worker beside another.');",
     '        this.source = resolveObjectURL(url).text();',
     "        if (options?.type !== 'module') throw new Error('The participant worker is not a module.');",
     '    }',
     '    postMessage(command) {',
     '        void this.source.then((source) => {',
     "            if (source !== worker) throw new Error('The participant API started another worker.');",
-    '            const received = JSON.stringify(command);',
-    '            const wanted = JSON.stringify({',
-    "                operation: 'status',",
-    '                parameters: {},',
-    "                namespace: 'smoke-poll',",
-    "                relay: 'https://relay.example/polls/',",
-    "                module: new URL('./participant.wasm', entry).href,",
-    '                identity: expected,',
-    '            });',
-    "            if (received !== wanted) throw new Error('The participant API sent another command: ' + received);",
-    "            this.onmessage({ data: { status: 'refused' } });",
+    '            commands.push(JSON.stringify(command));',
+    '            this.onmessage({ data: answers.shift() });',
     '        });',
     '    }',
-    '    terminate() {}',
+    '    terminate() {',
+    '        running--;',
+    '    }',
     '};',
+    'const command = (operation, separateEvaluation) =>',
+    '    JSON.stringify({',
+    '        operation,',
+    '        parameters: {},',
+    "        namespace: 'smoke-poll',",
+    "        relay: 'https://relay.example/polls/',",
+    "        module: new URL('./participant.wasm', entry).href,",
+    '        identity: expected,',
+    '        separateEvaluation,',
+    '    });',
     "const { openParticipant } = await import('sealed-lattice');",
     "const participant = openParticipant({ namespace: 'smoke-poll', relay: 'https://relay.example/polls' });",
-    "const result = await participant.run({ operation: 'status' });",
-    "if (result.status !== 'refused' || started !== 1) throw new Error('The participant API did not return the worker result.');",
+    "answers.push({ status: 'refused' });",
+    "const refused = await participant.run({ operation: 'status' });",
+    "if (refused.status !== 'refused' || started !== 1 || running !== 0 || commands[0] !== command('status', true))",
+    "    throw new Error('The participant API did not return the worker result: ' + commands[0]);",
+    'answers.push(',
+    "    { status: 'evaluated', memory: { workerBytes: 2 } },",
+    "    { status: 'completed', details: { memory: { workerBytes: 1 } } },",
+    ');',
+    "const released = await participant.run({ operation: 'release' });",
+    'if (',
+    '    started !== 3 ||',
+    '    running !== 0 ||',
+    "    commands[1] !== command('release', true) ||",
+    "    commands[2] !== command('release', false) ||",
+    '    JSON.stringify(released) !==',
+    "        JSON.stringify({ status: 'completed', details: { memory: { workerBytes: 1 }, evaluationMemory: { workerBytes: 2 } } })",
+    ')',
+    "    throw new Error('The participant API did not run a separate evaluation: ' + JSON.stringify(released));",
     '',
 ].join('\n');
 
