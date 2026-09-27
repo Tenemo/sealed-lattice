@@ -1,5 +1,5 @@
 use num_bigint::{BigInt, Sign};
-use num_traits::{Signed, Zero};
+use num_traits::Zero;
 use parallel_work::{HashStream, Sponge};
 use registration_credentials::{
     registration::{KEY_BYTES, VerifiedRegistration},
@@ -96,7 +96,7 @@ impl PolynomialOutput for PublicOutput {
         let half = modulus >> 1usize;
         let mut encoded = vec![0u8; 1 + width];
         for value in values {
-            assert!(value.abs() <= half);
+            assert!(value.magnitude() <= half.magnitude());
             let (sign, magnitude) = value.to_bytes_le();
             assert!(magnitude.len() <= width);
             encoded.fill(0);

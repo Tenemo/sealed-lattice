@@ -11,8 +11,6 @@ pub enum Error {
 }
 pub struct Contribution {
     profile: Profile,
-    plan: Plan,
-    auxiliary_plan: Plan,
     modulus: BigInt,
     share_modulus: BigInt,
     auxiliary_modulus: BigInt,
@@ -174,8 +172,6 @@ impl Contribution {
         }
         Self {
             profile,
-            plan,
-            auxiliary_plan,
             modulus,
             share_modulus: integer(share_modulus()),
             auxiliary_modulus: integer(auxiliary_modulus()),
@@ -207,7 +203,6 @@ impl Contribution {
             return Err(Error::Phase);
         }
         let modulus = &self.modulus;
-        let plan = &self.plan;
         let secret = &self.secret;
         let auxiliary = &self.auxiliary;
         let witness = &mut self.witness;
@@ -215,76 +210,78 @@ impl Contribution {
         let width = profile.family_magnitude_bytes(Family::Fhe);
         let digit = BigInt::from(1) << (Profile::gadget_base_bits() * gadget);
 
-        let common = common_polynomial(profile, profile.fhe_polynomial(gadget, 0))?;
-        output.polynomial(&common, modulus, width);
+        // Each key's products start before the previous key's reduction, so
+        // the helpers compute them while this instance reduces.
+        let first = common_polynomial(profile, profile.fhe_polynomial(gadget, 0))?;
+        let encryption = KeyInput {
+            label: &format!("encryption-{gadget}"),
+            common: &first,
+            left: secret,
+            right: &auxiliary.values,
+            multiplier: BigInt::from(0),
+            automorphism: 1,
+            modulus,
+            limbs,
+            width,
+        };
+        let encryption_products = encryption.products();
+        let first_relinearization = KeyInput {
+            label: &format!("first-relinearization-{gadget}"),
+            common: &first,
+            left: auxiliary,
+            right: &secret.values,
+            multiplier: digit.clone(),
+            automorphism: 1,
+            modulus,
+            limbs,
+            width,
+        };
+        let first_relinearization_products = first_relinearization.products();
+        output.polynomial(&first, modulus, width);
+        key(witness, output, encryption, encryption_products);
+        let second = common_polynomial(profile, profile.fhe_polynomial(gadget, 3))?;
+        let second_relinearization = KeyInput {
+            label: &format!("second-relinearization-{gadget}"),
+            common: &second,
+            left: secret,
+            right: &auxiliary.values,
+            multiplier: -digit.clone(),
+            automorphism: 1,
+            modulus,
+            limbs,
+            width,
+        };
+        let second_relinearization_products = second_relinearization.products();
         key(
             witness,
             output,
-            plan,
-            KeyInput {
-                label: &format!("encryption-{gadget}"),
-                common: &common,
-                left: secret,
-                right: &auxiliary.values,
-                multiplier: BigInt::from(0),
-                automorphism: 1,
-                modulus,
-                limbs,
-                width,
-            },
+            first_relinearization,
+            first_relinearization_products,
         );
+        drop(first);
+        let third = common_polynomial(profile, profile.fhe_polynomial(gadget, 5))?;
+        let automorphism = KeyInput {
+            label: &format!("automorphism-{gadget}"),
+            common: &third,
+            left: secret,
+            right: &secret.values,
+            multiplier: digit,
+            automorphism: 5,
+            modulus,
+            limbs,
+            width,
+        };
+        let automorphism_products = automorphism.products();
+        output.polynomial(&second, modulus, width);
         key(
             witness,
             output,
-            plan,
-            KeyInput {
-                label: &format!("first-relinearization-{gadget}"),
-                common: &common,
-                left: auxiliary,
-                right: &secret.values,
-                multiplier: digit.clone(),
-                automorphism: 1,
-                modulus,
-                limbs,
-                width,
-            },
+            second_relinearization,
+            second_relinearization_products,
         );
-        let common = common_polynomial(profile, profile.fhe_polynomial(gadget, 3))?;
-        output.polynomial(&common, modulus, width);
-        key(
-            witness,
-            output,
-            plan,
-            KeyInput {
-                label: &format!("second-relinearization-{gadget}"),
-                common: &common,
-                left: secret,
-                right: &auxiliary.values,
-                multiplier: -digit.clone(),
-                automorphism: 1,
-                modulus,
-                limbs,
-                width,
-            },
-        );
-        let common = common_polynomial(profile, profile.fhe_polynomial(gadget, 5))?;
-        output.polynomial(&common, modulus, width);
-        key(
-            witness,
-            output,
-            plan,
-            KeyInput {
-                label: &format!("automorphism-{gadget}"),
-                common: &common,
-                left: secret,
-                right: &secret.values,
-                multiplier: digit,
-                automorphism: 5,
-                modulus,
-                limbs,
-                width,
-            },
-        );
+        drop(second);
+        output.polynomial(&third, modulus, width);
+        key(witness, output, automorphism, automorphism_products);
 
         self.next_gadget += 1;
         Ok(())
@@ -319,7 +316,6 @@ impl Contribution {
         let ciphertexts = share_ciphertexts(
             &mut self.witness,
             output,
-            &self.plan,
             ShareInput {
                 profile: self.profile,
                 recipient,
@@ -341,22 +337,19 @@ impl Contribution {
         let common = common_polynomial(self.profile, self.profile.auxiliary_common_polynomial())?;
         let width = auxiliary_modulus().len();
         output.polynomial(&common, &self.auxiliary_modulus, width);
-        key(
-            &mut self.witness,
-            output,
-            &self.auxiliary_plan,
-            KeyInput {
-                label: "auxiliary-key",
-                common: &common,
-                left: &self.auxiliary_secret,
-                right: &self.auxiliary_secret.values,
-                multiplier: BigInt::from(0),
-                automorphism: 1,
-                modulus: &self.auxiliary_modulus,
-                limbs: 1,
-                width,
-            },
-        );
+        let input = KeyInput {
+            label: "auxiliary-key",
+            common: &common,
+            left: &self.auxiliary_secret,
+            right: &self.auxiliary_secret.values,
+            multiplier: BigInt::from(0),
+            automorphism: 1,
+            modulus: &self.auxiliary_modulus,
+            limbs: 1,
+            width,
+        };
+        let products = input.products();
+        key(&mut self.witness, output, input, products);
         self.finished = true;
         Ok(())
     }

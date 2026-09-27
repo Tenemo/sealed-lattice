@@ -5,7 +5,7 @@
 mod field;
 use field::{MODULUS, add, multiply, power, subtract};
 use num_bigint::BigInt;
-use num_traits::{Signed, ToPrimitive};
+use num_traits::Signed;
 use zeroize::Zeroizing;
 
 // FHE, registration and auxiliary equations use 96-bit limbs; share
@@ -16,20 +16,28 @@ pub const RADIX: i128 = 1i128 << RADIX_BITS;
 pub fn digit(value: &BigInt, limb: usize) -> i128 {
     digit_in(value, limb, RADIX_BITS)
 }
+/// The limb's digit of the value's magnitude, with the value's sign. It
+/// reads the at most three magnitude words that hold the digit.
 pub fn digit_in(value: &BigInt, limb: usize, radix_bits: usize) -> i128 {
     assert!(radix_bits <= RADIX_BITS);
-    let magnitude: BigInt =
-        (value.abs() >> (radix_bits * limb)) & ((BigInt::from(1) << radix_bits) - 1);
-    let result = magnitude.to_i128().unwrap();
+    let start = radix_bits * limb;
+    let mut words = value.magnitude().iter_u64_digits().skip(start / 64);
+    let mut next = || u128::from(words.next().unwrap_or(0));
+    let shift = start % 64;
+    let mut magnitude = (next() | (next() << 64)) >> shift;
+    if shift + radix_bits > 128 {
+        magnitude |= next() << (128 - shift);
+    }
+    let result = (magnitude & ((1u128 << radix_bits) - 1)) as i128;
     if value.is_negative() { -result } else { result }
 }
 
 pub struct Plan {
     degree: usize,
-    forward: Vec<u128>,
-    inverse: Vec<u128>,
-    twist: Vec<u128>,
-    inverse_twist: Vec<u128>,
+    // The powers below the degree of a root of order twice the degree. Its
+    // square is the cyclic transform's root, and its power at the degree is
+    // minus one.
+    powers: Vec<u128>,
     inverse_degree: u128,
 }
 impl Plan {
@@ -38,24 +46,18 @@ impl Plan {
         let root = power(7, (MODULUS - 1) / (2 * degree) as u128);
         assert_eq!(power(root, degree as u128), MODULUS - 1);
         assert_eq!(power(root, (2 * degree) as u128), 1);
-        let inverse_root = power(root, MODULUS - 2);
-        let powers = |root, length| {
-            let mut values = vec![1; length];
-            for index in 1..length {
-                values[index] = multiply(values[index - 1], root);
-            }
-            values
-        };
+        let mut powers = vec![1; degree];
+        for index in 1..degree {
+            powers[index] = multiply(powers[index - 1], root);
+        }
         Self {
             degree,
-            forward: powers(multiply(root, root), degree / 2),
-            inverse: powers(multiply(inverse_root, inverse_root), degree / 2),
-            twist: powers(root, degree),
-            inverse_twist: powers(inverse_root, degree),
+            powers,
             inverse_degree: power(degree as u128, MODULUS - 2),
         }
     }
-    fn transform(&self, values: &mut [u128], inverse: bool) {
+    // The cyclic transform in natural order.
+    fn transform(&self, values: &mut [u128]) {
         assert_eq!(values.len(), self.degree);
         let logarithm = self.degree.ilog2();
         for index in 0..self.degree {
@@ -64,18 +66,15 @@ impl Plan {
                 values.swap(index, reversed);
             }
         }
-        let twiddles = if inverse {
-            &self.inverse
-        } else {
-            &self.forward
-        };
         let mut width = 2;
         while width <= self.degree {
-            let stride = self.degree / width;
+            // The cyclic root's power of the stride is the root's power of
+            // twice the stride.
+            let stride = 2 * self.degree / width;
             for block in values.chunks_exact_mut(width) {
                 let (left, right) = block.split_at_mut(width / 2);
                 for (index, (lower, upper)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
-                    let product = multiply(*upper, twiddles[index * stride]);
+                    let product = multiply(*upper, self.powers[index * stride]);
                     let original = *lower;
                     *lower = add(original, product);
                     *upper = subtract(original, product);
@@ -83,26 +82,70 @@ impl Plan {
             }
             width *= 2;
         }
-        if inverse {
-            for value in values {
-                *value = multiply(*value, self.inverse_degree);
-            }
-        }
     }
+    /// The transform of the twisted sparse values divided by the degree,
+    /// so that a product's inverse transform divides no further.
     pub fn sparse_transform(&self, sparse: &[i8]) -> Vec<u128> {
         assert_eq!(sparse.len(), self.degree);
         let mut values: Vec<u128> = sparse
             .iter()
-            .zip(&self.twist)
-            .map(|(value, twist)| match value {
-                -1 => subtract(0, *twist),
+            .zip(&self.powers)
+            .map(|(value, power)| match value {
+                -1 => subtract(0, multiply(*power, self.inverse_degree)),
                 0 => 0,
-                1 => *twist,
+                1 => multiply(*power, self.inverse_degree),
                 _ => panic!("nonternary coefficient"),
             })
             .collect();
-        self.transform(&mut values, false);
+        self.transform(&mut values);
         values
+    }
+    /// One limb's centered products with a sparse secret: the limb's
+    /// digits, twisted and transformed, times the secret's transform, then
+    /// transformed back and untwisted. The inverse transform reads the
+    /// forward one at the negated position, whose untwist is minus the
+    /// root's power at the degree less the position.
+    pub fn limb_products(
+        &self,
+        digits: impl Iterator<Item = i128>,
+        transformed: impl Iterator<Item = u128>,
+    ) -> Vec<i128> {
+        let mut values = Zeroizing::new(
+            digits
+                .zip(&self.powers)
+                .map(|(value, power)| {
+                    let residue = if value < 0 {
+                        MODULUS - value.unsigned_abs()
+                    } else {
+                        value as u128
+                    };
+                    multiply(residue, *power)
+                })
+                .collect::<Vec<u128>>(),
+        );
+        assert_eq!(values.len(), self.degree);
+        self.transform(&mut values);
+        let mut count = 0;
+        for (value, secret) in values.iter_mut().zip(transformed) {
+            *value = multiply(*value, secret);
+            count += 1;
+        }
+        assert_eq!(count, self.degree);
+        self.transform(&mut values);
+        let centered = |position: usize| {
+            let value = multiply(values[position], self.powers[position]);
+            if value > MODULUS / 2 {
+                -((MODULUS - value) as i128)
+            } else {
+                value as i128
+            }
+        };
+        (0..self.degree)
+            .map(|position| match position {
+                0 => centered(0),
+                _ => -centered(self.degree - position),
+            })
+            .collect()
     }
     pub fn digit_products(
         &self,
@@ -114,80 +157,61 @@ impl Plan {
     ) -> Vec<Vec<i128>> {
         assert_eq!(public.len(), self.degree);
         assert_eq!(transformed.len(), self.degree);
-        let support = sparse
-            .iter()
-            .map(|value| value.unsigned_abs() as u128)
-            .sum::<u128>();
-        assert!(support * ((1u128 << radix_bits) - 1) < MODULUS / 2);
+        check_support(sparse, radix_bits);
         let result: Vec<Vec<i128>> = (0..limbs)
             .map(|limb| {
-                let mut values = Zeroizing::new(
-                    public
-                        .iter()
-                        .zip(&self.twist)
-                        .map(|(value, twist)| {
-                            let value = digit_in(value, limb, radix_bits);
-                            let residue = if value < 0 {
-                                MODULUS - value.unsigned_abs()
-                            } else {
-                                value as u128
-                            };
-                            multiply(residue, *twist)
-                        })
-                        .collect::<Vec<u128>>(),
-                );
-                self.transform(&mut values, false);
-                for (value, secret) in values.iter_mut().zip(transformed) {
-                    *value = multiply(*value, *secret);
-                }
-                self.transform(&mut values, true);
-                values
-                    .iter()
-                    .copied()
-                    .zip(&self.inverse_twist)
-                    .map(|(value, twist)| {
-                        let value = multiply(value, *twist);
-                        if value > MODULUS / 2 {
-                            -((MODULUS - value) as i128)
-                        } else {
-                            value as i128
-                        }
-                    })
-                    .collect()
+                self.limb_products(
+                    public.iter().map(|value| digit_in(value, limb, radix_bits)),
+                    transformed.iter().copied(),
+                )
             })
             .collect();
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            // Exact ordinary sparse convolution is an independent full-degree
-            // check at fixed boundary and interior positions; small tests check all.
-            let positions = if self.degree <= 32 {
-                (0..self.degree).collect()
-            } else {
-                vec![
-                    0,
-                    1,
-                    self.degree / 8 - 1,
-                    self.degree / 8,
-                    self.degree / 2,
-                    self.degree - 2,
-                    self.degree - 1,
-                ]
-            };
-            for position in positions {
-                let mut expected = BigInt::from(0);
-                for (input, secret) in sparse.iter().enumerate().filter(|(_, value)| **value != 0) {
-                    let index = (position + self.degree - input) % self.degree;
-                    expected += &public[index]
-                        * BigInt::from(if position < input { -*secret } else { *secret });
-                }
-                assert_eq!(
-                    reconstruct_in(&result, position, radix_bits),
-                    expected,
-                    "ordinary product at {position}"
-                );
-            }
-        }
+        check_products(public, sparse, &result, radix_bits);
         result
+    }
+}
+
+/// Every centered product of a digit with the sparse secret stays within
+/// half the modulus.
+pub fn check_support(sparse: &[i8], radix_bits: usize) {
+    let support = sparse
+        .iter()
+        .map(|value| value.unsigned_abs() as u128)
+        .sum::<u128>();
+    assert!(support * ((1u128 << radix_bits) - 1) < MODULUS / 2);
+}
+
+/// Exact ordinary sparse convolution is an independent full-degree check
+/// at fixed boundary and interior positions; small tests check all.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn check_products(public: &[BigInt], sparse: &[i8], result: &[Vec<i128>], radix_bits: usize) {
+    let degree = public.len();
+    let positions = if degree <= 32 {
+        (0..degree).collect()
+    } else {
+        vec![
+            0,
+            1,
+            degree / 8 - 1,
+            degree / 8,
+            degree / 2,
+            degree - 2,
+            degree - 1,
+        ]
+    };
+    for position in positions {
+        let mut expected = BigInt::from(0);
+        for (input, secret) in sparse.iter().enumerate().filter(|(_, value)| **value != 0) {
+            let index = (position + degree - input) % degree;
+            expected +=
+                &public[index] * BigInt::from(if position < input { -*secret } else { *secret });
+        }
+        assert_eq!(
+            reconstruct_in(result, position, radix_bits),
+            expected,
+            "ordinary product at {position}"
+        );
     }
 }
 
@@ -201,6 +225,48 @@ pub fn reconstruct_in(digits: &[Vec<i128>], position: usize, radix_bits: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Each digit equals the one the integer's own shifts and masks give, at
+    // every limb of values of both signs, zero and a single set bit at the
+    // edges of the words that a digit spans.
+    #[test]
+    fn digits_match_the_shifted_and_masked_magnitude() {
+        use num_traits::ToPrimitive;
+        let mut values = vec![BigInt::from(0), BigInt::from(1), BigInt::from(-1)];
+        for bit in [
+            0usize, 31, 63, 64, 95, 96, 127, 128, 191, 192, 200, 255, 383, 900,
+        ] {
+            values.push(BigInt::from(1) << bit);
+            values.push(-(BigInt::from(1) << bit));
+            values.push((BigInt::from(1) << bit) - 1);
+        }
+        let mut state = 0x243f_6a88_85a3_08d3u64;
+        for words in [1usize, 2, 3, 5, 14] {
+            let mut value = BigInt::from(0);
+            for _ in 0..words {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                value = (value << 64usize) + BigInt::from(state);
+            }
+            values.push(-value.clone());
+            values.push(value);
+        }
+        for radix_bits in [17, 32, 63, 64, 65, 95, 96] {
+            for value in &values {
+                for limb in 0..(1000 / radix_bits + 2) {
+                    let magnitude: BigInt = (value.abs() >> (radix_bits * limb))
+                        & ((BigInt::from(1) << radix_bits) - 1);
+                    let expected = magnitude.to_i128().unwrap();
+                    let expected = if value.is_negative() {
+                        -expected
+                    } else {
+                        expected
+                    };
+                    assert_eq!(digit_in(value, limb, radix_bits), expected);
+                }
+            }
+        }
+    }
     #[test]
     fn signed_digit_products_match_every_ordinary_coefficient() {
         for degree in [2, 4, 8, 16, 32] {

@@ -42,22 +42,19 @@ impl RegistrationKey {
             &plan,
         );
         let mut output = KeyOutput { values: None };
-        key(
-            &mut witness,
-            &mut output,
-            &plan,
-            KeyInput {
-                label: "registration-key",
-                common: &common,
-                left: &secret,
-                right: &secret.values,
-                multiplier: BigInt::from(0),
-                automorphism: 1,
-                modulus: &modulus,
-                limbs: 2,
-                width: share_modulus().len(),
-            },
-        );
+        let input = KeyInput {
+            label: "registration-key",
+            common: &common,
+            left: &secret,
+            right: &secret.values,
+            multiplier: BigInt::from(0),
+            automorphism: 1,
+            modulus: &modulus,
+            limbs: 2,
+            width: share_modulus().len(),
+        };
+        let products = input.products();
+        key(&mut witness, &mut output, input, products);
         assert_eq!(witness.words.len(), 3);
         assert_eq!(witness.booleans.len(), 2);
         let proof_words = Zeroizing::new(std::mem::take(&mut witness.words));
