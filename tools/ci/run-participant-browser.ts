@@ -927,9 +927,13 @@ await runWithLocalRunLog(
                 `participant-${String(position)}`;
             const copyBrowser = (copy: string) => `copy-${copy}`;
             // A departed participant's browser and private state are gone.
+            // Its browser ends at once, as its device leaving would: the
+            // shutdown work Chrome does for a profile about to be deleted is
+            // no participant's, and after heavy storage churn it can outlast
+            // any fixed deadline.
             const departed = new Set<number>();
             const depart = async (position: number) => {
-                await browsers.close(participantBrowser(position));
+                await browsers.crash(participantBrowser(position));
                 departed.add(position);
                 await rm(profile(position), {
                     recursive: true,
@@ -2841,7 +2845,7 @@ await runWithLocalRunLog(
             assert.equal(targetIdentities.size, 1);
             // Every vote is published, so the certificate exists, and the
             // relay serves the omitted ballot again. The organizer then
-            // departs before any release exists: its browser closes and its
+            // departs before any release exists: its browser ends and its
             // private state is deleted.
             for (const view of views)
                 for (const name of omission) view.delete(name);
