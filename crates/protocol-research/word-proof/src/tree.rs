@@ -16,7 +16,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
 };
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 const LEAF_DOMAIN: &[u8] = b"bounded-proof/leaf";
 const SALT_DOMAIN: &[u8] = b"bounded-proof/salt";
@@ -293,8 +293,9 @@ impl Tree {
     /// The rows of the indices, from the function that gives the rows of
     /// their opening leaves in the leaves' order: the indices themselves, or
     /// every leaf of their blocks when the tree forgot its leaves, whose
-    /// digests the multiproof then holds again.
-    pub fn opened_rows<T: AsRef<[u8]>>(
+    /// digests the multiproof then holds again. The rows of those blocks'
+    /// other leaves, which the opening does not reveal, are zeroized.
+    pub fn opened_rows<T: AsRef<[u8]> + Zeroize>(
         &self,
         multiproof: &mut Multiproof,
         indices: &[usize],
@@ -308,10 +309,14 @@ impl Tree {
         }
         self.restore(multiproof, &leaves, &rows);
         let mut rows: Vec<Option<T>> = rows.into_iter().map(Some).collect();
-        indices
+        let opened = indices
             .iter()
             .map(|index| rows[leaves.binary_search(index).unwrap()].take().unwrap())
-            .collect()
+            .collect();
+        for row in rows.iter_mut().flatten() {
+            row.zeroize();
+        }
+        opened
     }
     /// The secret seed of the leaves' salts.
     pub fn seed(&self) -> &[u8; SALT_SEED_BYTES] {
@@ -541,7 +546,7 @@ impl Tree {
     }
     /// Writes the multiproof of the indices, whose opening leaves' rows the
     /// function gives, as [`Tree::opened_rows`] reads them.
-    pub fn write_multiproof<T: AsRef<[u8]>, W: Write>(
+    pub fn write_multiproof<T: AsRef<[u8]> + Zeroize, W: Write>(
         &self,
         indices: &[usize],
         rows: impl FnOnce(&[usize]) -> Vec<T>,
@@ -616,22 +621,33 @@ mod tests {
         Zeroizing::new(std::array::from_fn(|byte| value.wrapping_add(byte as u8)))
     }
 
+    // SHAKE256 over the salt domain, the seed and the index, each after its
+    // 32-bit little-endian length, computed outside this crate with
+    // Python's hashlib.
     #[test]
     fn salts_expand_the_seed_and_index_under_their_framing() {
         let seed = seed(3);
-        for index in [0, 1, 255, 256, 65_535, 262_143] {
-            let mut state = Shake256::default();
-            for bytes in [
-                b"bounded-proof/salt".as_slice(),
-                seed.as_slice(),
-                &(index as u32).to_le_bytes(),
-            ] {
-                Update::update(&mut state, &(bytes.len() as u32).to_le_bytes());
-                Update::update(&mut state, bytes);
-            }
-            let mut expected = [0; SALT_BYTES];
-            XofReader::read(&mut state.finalize_xof(), &mut expected);
-            assert_eq!(*salt(&seed, index), expected);
+        for (index, expected) in [
+            (
+                0,
+                "7cea4b47a8b4f246ae15498bb4e3eabf1213580a82271696031327c96936621e\
+                 588fa2e1c1a658595930ee094a45015f8c27436867f673dafb3742f6e448d5ff\
+                 e7e662083782077dfa36bdcdb65421810a74ece7e8a5965a3557e170c5095a0c\
+                 ea2bb3ef537a45e06adabfea34d966582d67f6405d1383687b3b898ee44e617d",
+            ),
+            (
+                262_143,
+                "b5c97c73405b9d0eaf7103b0a9a2633ebbe5abaadc3a080a66569e1cced2900c\
+                 bafa2db5b2da9457c90d236a6b4cd634c6f28f399ce99252fed90a4649f70dba\
+                 854d4af574a3662d1b822376197c674a374979f93eb891e12fa3f40a4c8225c5\
+                 e367dbf8bdc4af7f6dc7c2db283d348c028c3935f315cc23655a5aaaaaca2c3a",
+            ),
+        ] {
+            let hex: String = salt(&seed, index)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(hex, expected);
         }
         assert_ne!(*salt(&seed, 0), *salt(&seed, 1));
         assert_ne!(*salt(&seed, 7), *salt(&self::seed(4), 7));
@@ -685,10 +701,10 @@ mod tests {
     // levels.
     fn check_openings(tree: &Tree, nodes: &[[u8; 64]], rows: &[u8], indices: &[usize]) {
         let (length, width) = (tree.length, tree.width);
-        let rows_of = |leaves: &[usize]| -> Vec<&[u8]> {
+        let rows_of = |leaves: &[usize]| -> Vec<Vec<u8>> {
             leaves
                 .iter()
-                .map(|leaf| &rows[width * leaf..width * (leaf + 1)])
+                .map(|leaf| rows[width * leaf..width * (leaf + 1)].to_vec())
                 .collect()
         };
         for &index in indices {
@@ -840,13 +856,59 @@ mod tests {
         let mut opening = Vec::new();
         tree.write_multiproof(
             &[32],
-            |leaves| -> Vec<&[u8]> {
+            |leaves| -> Vec<Vec<u8>> {
                 leaves
                     .iter()
-                    .map(|leaf| &changed[width * leaf..width * (leaf + 1)])
+                    .map(|leaf| changed[width * leaf..width * (leaf + 1)].to_vec())
                     .collect()
             },
             &mut opening,
         );
+    }
+
+    // A row that counts its zeroizations.
+    struct CountedRow<'a>(Vec<u8>, &'a std::cell::Cell<usize>);
+    impl AsRef<[u8]> for CountedRow<'_> {
+        fn as_ref(&self) -> &[u8] {
+            &self.0
+        }
+    }
+    impl Zeroize for CountedRow<'_> {
+        fn zeroize(&mut self) {
+            self.0.zeroize();
+            self.1.set(self.1.get() + 1);
+        }
+    }
+
+    // An opening of a tree that forgot its leaves reads every row of the
+    // queried leaves' blocks, reveals the queried rows and zeroizes the
+    // others.
+    #[test]
+    fn forgotten_leaves_zeroize_the_rows_an_opening_does_not_reveal() {
+        let (length, width) = (256, 48);
+        let rows: Vec<u8> = (0..length * width)
+            .map(|index| (index * 3 % 251) as u8)
+            .collect();
+        let mut tree = Tree::with_seed(b"zeroized", 4, length, width, seed(7));
+        tree.hash_rows(rows_of(&rows, width));
+        tree.forget_leaves();
+        let indices = [3, 5, 200];
+        let span = tree.block_leaves();
+        let blocks: BTreeSet<usize> = indices.iter().map(|index| index / span).collect();
+        let zeroized = std::cell::Cell::new(0);
+        let mut read = 0;
+        let opened = tree.opened_rows(&mut Multiproof::default(), &indices, |leaves| {
+            read = leaves.len();
+            leaves
+                .iter()
+                .map(|leaf| CountedRow(rows[width * leaf..width * (leaf + 1)].to_vec(), &zeroized))
+                .collect()
+        });
+        assert_eq!(read, blocks.len() * span);
+        assert!(read > indices.len());
+        for (row, index) in opened.iter().zip(indices) {
+            assert_eq!(row.0, &rows[width * index..width * (index + 1)]);
+        }
+        assert_eq!(zeroized.get(), read - indices.len());
     }
 }

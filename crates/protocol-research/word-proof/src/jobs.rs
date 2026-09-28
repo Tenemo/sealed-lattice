@@ -94,10 +94,17 @@ fn element(bytes: &[u8]) -> Element {
     ]
 }
 
-/// A base column: its word width, mask and values.
+/// A base column: its word width, mask and values, in a buffer of their
+/// exact length, which no growth copies without zeroizing.
 pub fn base_column(values: BaseValues, mask: &[u128]) -> Zeroizing<Vec<u8>> {
     assert_eq!(mask.len(), MASKS);
-    let mut output = Zeroizing::new(Vec::new());
+    let width = match values {
+        BaseValues::Words(_) => 2,
+        BaseValues::Counts(_) => WORD_BYTES,
+    };
+    let mut output = Zeroizing::new(Vec::with_capacity(
+        1 + MASKS * WORD_BYTES + SYSTEMATIC * width,
+    ));
     match values {
         BaseValues::Words(values) => {
             assert_eq!(values.len(), SYSTEMATIC);
@@ -146,10 +153,14 @@ fn decode_base(input: &[u8]) -> (Zeroizing<Vec<u128>>, Zeroizing<Vec<u128>>, &[u
     (mask, coefficients, rest)
 }
 /// A second-oracle column: its mask and values, whose reciprocals the job
-/// streams from the reciprocal table.
+/// streams from the reciprocal table, in a buffer of their exact length.
 pub fn second_column(values: SecondValues, mask: &[Element]) -> Zeroizing<Vec<u8>> {
     assert_eq!(mask.len(), MASKS);
-    let mut output = Zeroizing::new(Vec::new());
+    let values_bytes = match values {
+        SecondValues::Lookup { .. } => WORD_BYTES + SYSTEMATIC * 2,
+        SecondValues::Counts(_) => SYSTEMATIC * WORD_BYTES,
+    };
+    let mut output = Zeroizing::new(Vec::with_capacity(1 + MASKS * ELEMENT_BYTES + values_bytes));
     output.push(u8::from(matches!(values, SecondValues::Counts(_))));
     for value in mask {
         output.extend(field::encode(*value));
@@ -341,11 +352,28 @@ fn second_coefficients(input: &[u8]) -> Vec<u8> {
     output
 }
 
-/// Decodes a job's base values, each 16 bytes.
-pub fn words(output: &[u8]) -> impl Iterator<Item = u128> + '_ {
-    output.chunks_exact(WORD_BYTES).map(word)
-}
-/// Decodes a job's extension values, each 48 bytes.
-pub fn elements(output: &[u8]) -> impl Iterator<Item = Element> + '_ {
-    output.chunks_exact(ELEMENT_BYTES).map(element)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn secret_column_inputs_have_their_exact_length() {
+        let words = vec![u16::MAX; SYSTEMATIC];
+        let counts = vec![u128::MAX; SYSTEMATIC];
+        let base_mask = vec![u128::MAX; MASKS];
+        let extension_mask = vec![[u128::MAX; 3]; MASKS];
+        for column in [
+            base_column(BaseValues::Words(&words), &base_mask),
+            base_column(BaseValues::Counts(&counts), &base_mask),
+            second_column(
+                SecondValues::Lookup {
+                    words: &words,
+                    factor: 512,
+                },
+                &extension_mask,
+            ),
+            second_column(SecondValues::Counts(&counts), &extension_mask),
+        ] {
+            assert_eq!(column.capacity(), column.len());
+        }
+    }
 }

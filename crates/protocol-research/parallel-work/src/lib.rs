@@ -431,7 +431,16 @@ pub fn submit(
             };
         }
     }
-    let mut input = Zeroizing::new(Vec::new());
+    // The input's exact length, which no growth copies without zeroizing.
+    let length = parts
+        .iter()
+        .map(|part| match part {
+            Part::Bytes(bytes) => bytes.len(),
+            Part::Shared(shared) => shared.local.len(),
+            Part::Streamed(_) => 0,
+        })
+        .sum();
+    let mut input = Zeroizing::new(Vec::with_capacity(length));
     let mut streamed = None;
     for part in parts {
         match part {

@@ -525,10 +525,11 @@ impl LinearOracle {
             lookup_weight,
         }
     }
-    /// The oracle's encoded values at the leaves, in their order.
+    /// The oracle's encoded values at the leaves, in their order. Only
+    /// the values an opening reveals leave it, so the values are zeroized.
     pub fn opened_rows(&self, indices: &[usize]) -> Vec<Vec<u8>> {
         let transform = Transform::cached(SYSTEMATIC);
-        let mut data = vec![ZERO; indices.len()];
+        let mut data = Zeroizing::new(vec![ZERO; indices.len()]);
         for coset in 0..4 {
             let selected: Vec<_> = indices
                 .iter()
@@ -540,18 +541,18 @@ impl LinearOracle {
             }
             let twist = base::multiply(7, base::power(field::root(DOMAIN), coset as u128));
             let positions: Vec<_> = selected.iter().map(|(_, index)| **index / 4).collect();
-            let values = crate::oracles::extension_values_selected(
+            let values = Zeroizing::new(crate::oracles::extension_values_selected(
                 &self.quotient,
                 twist,
                 transform,
                 &positions,
-            );
-            for ((output, _), value) in selected.into_iter().zip(values) {
-                data[output] = value;
+            ));
+            for ((output, _), value) in selected.into_iter().zip(values.iter()) {
+                data[output] = *value;
             }
         }
-        data.into_iter()
-            .map(|value| field::encode(value).to_vec())
+        data.iter()
+            .map(|value| field::encode(*value).to_vec())
             .collect()
     }
 }

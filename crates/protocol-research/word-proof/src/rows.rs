@@ -382,7 +382,8 @@ impl RowShards {
         bytes[12..].copy_from_slice(&(self.classes as u32).to_le_bytes());
         bytes
     }
-    // A job on a shard with its header and range before the other bytes.
+    // A job on a shard with its header and range before the other bytes,
+    // in an input of their exact length.
     fn range_job(
         &self,
         job: &'static Job,
@@ -391,7 +392,10 @@ impl RowShards {
         bytes: &[&[u8]],
         output: usize,
     ) -> Ticket {
-        let mut input = Zeroizing::new(self.header(shard).to_vec());
+        let mut input = Zeroizing::new(Vec::with_capacity(
+            HEADER_BYTES + 8 + bytes.iter().map(|part| part.len()).sum::<usize>(),
+        ));
+        input.extend(self.header(shard));
         input.extend((first as u32).to_le_bytes());
         input.extend((count as u32).to_le_bytes());
         for part in bytes {

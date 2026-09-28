@@ -65,11 +65,12 @@ fn convolve(input: &[u8]) -> Vec<u8> {
     output
 }
 /// The digit products of a public polynomial with a sparse secret, whose
-/// limbs' jobs run while the caller continues.
+/// limbs' jobs run while the caller continues. Native builds check the
+/// products against the public polynomial and a zeroized copy of the secret.
 struct Products {
     tickets: Vec<Ticket>,
     #[cfg(not(target_arch = "wasm32"))]
-    check: (Vec<BigInt>, Vec<i8>, usize),
+    check: (Vec<BigInt>, Zeroizing<Vec<i8>>, usize),
 }
 impl Products {
     fn start(public: &[BigInt], secret: &Sparse, limbs: usize, radix_bits: usize) -> Self {
@@ -103,7 +104,11 @@ impl Products {
         Self {
             tickets,
             #[cfg(not(target_arch = "wasm32"))]
-            check: (public.to_vec(), secret.values.to_vec(), radix_bits),
+            check: (
+                public.to_vec(),
+                Zeroizing::new(secret.values.to_vec()),
+                radix_bits,
+            ),
         }
     }
     fn wait(self) -> Zeroizing<Vec<Vec<i128>>> {

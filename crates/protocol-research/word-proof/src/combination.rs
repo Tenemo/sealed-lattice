@@ -307,64 +307,87 @@ fn components(relation: &Relation) -> Vec<Vec<usize>> {
 
 // A group of committed columns: each column's oracle, Boolean residual
 // oracle, mask, words and lookups, then the zero products inside it. Only
-// a group with lookups streams the reciprocal table.
+// a group with lookups streams the reciprocal table. The bytes are written
+// once to count them and once into a buffer of that exact length, which no
+// growth copies without zeroizing.
 fn encode_columns(
     witness: &Witness,
-    first: &FirstOracle,
-    second: &SecondOracle,
+    first_masks: &[Vec<u128>],
+    second_masks: &[Vec<Element>],
     group: &[usize],
 ) -> (Zeroizing<Vec<u8>>, bool) {
+    let mut length = 0;
+    write_columns(witness, first_masks, second_masks, group, &mut |part| {
+        length += part.len();
+    });
+    let mut bytes = Zeroizing::new(Vec::with_capacity(length));
+    let lookups = write_columns(witness, first_masks, second_masks, group, &mut |part| {
+        bytes.extend_from_slice(part);
+    });
+    (bytes, lookups)
+}
+// Writes a group's column input through the function, part by part, and
+// returns whether the group has lookups.
+fn write_columns(
+    witness: &Witness,
+    first_masks: &[Vec<u128>],
+    second_masks: &[Vec<Element>],
+    group: &[usize],
+    put: &mut dyn FnMut(&[u8]),
+) -> bool {
+    fn number(put: &mut dyn FnMut(&[u8]), value: usize) {
+        put(&(value as u32).to_le_bytes());
+    }
     let relation = &witness.relation;
     let words = relation.words();
     let original = relation.original_oracles();
-    let mut bytes = Zeroizing::new(Vec::new());
     let mut lookups = false;
-    push_number(&mut bytes, group.len());
+    number(put, group.len());
     for &column in group {
-        push_number(&mut bytes, column);
-        push_number(
-            &mut bytes,
+        number(put, column);
+        number(
+            put,
             if column < words {
                 UNWEIGHTED
             } else {
                 original + column - words
             },
         );
-        for mask in &first.masks[column] {
-            bytes.extend(mask.to_le_bytes());
+        for mask in &first_masks[column] {
+            put(&mask.to_le_bytes());
         }
         for value in &witness.columns[column] {
-            bytes.extend(value.to_le_bytes());
+            put(&value.to_le_bytes());
         }
         let indices: Vec<usize> = (0..relation.lookups())
             .filter(|index| column < words && relation.lookup(*index).0 == column)
             .collect();
-        push_number(&mut bytes, indices.len());
+        number(put, indices.len());
         for index in indices {
             lookups = true;
             let oracles = lookup_oracles(relation, index);
-            push_number(&mut bytes, oracles.inverse);
-            push_number(&mut bytes, oracles.residual);
-            bytes.extend(oracles.factor.to_le_bytes());
-            for mask in &second.masks[index] {
-                bytes.extend(field::encode(*mask));
+            number(put, oracles.inverse);
+            number(put, oracles.residual);
+            put(&oracles.factor.to_le_bytes());
+            for mask in &second_masks[index] {
+                put(&field::encode(*mask));
             }
         }
     }
     let pairs: Vec<_> = (0..relation.zero_products())
         .filter(|pair| group.contains(&relation.zero_product_columns(*pair).0))
         .collect();
-    push_number(&mut bytes, pairs.len());
+    number(put, pairs.len());
     for pair in pairs {
         let (left, right) = relation.zero_product_columns(pair);
         assert!(left < right);
         for column in [left, right] {
-            push_number(&mut bytes, group.binary_search(&column).unwrap());
+            number(put, group.binary_search(&column).unwrap());
         }
-        push_number(&mut bytes, original + relation.booleans() + pair);
+        number(put, original + relation.booleans() + pair);
     }
-    bytes.push(u8::from(lookups));
-    (bytes, lookups)
+    put(&[u8::from(lookups)]);
+    lookups
 }
 // A column's lookup: its oracles and word scale, and its reciprocal mask.
 struct Lookup<'a> {
@@ -545,12 +568,18 @@ fn add_columns(input: &[u8]) -> Vec<u8> {
 fn encode_counts(
     coset: usize,
     witness: &Witness,
-    first: &FirstOracle,
-    second: &SecondOracle,
+    first_masks: &[Vec<u128>],
+    second_masks: &[Vec<Element>],
 ) -> Zeroizing<Vec<u8>> {
     let relation = &witness.relation;
     let (columns, lookups) = (relation.columns(), relation.lookups());
-    let mut bytes = Zeroizing::new(Vec::new());
+    // The exact length, which no growth copies without zeroizing.
+    let mut bytes = Zeroizing::new(Vec::with_capacity(
+        4 * 4
+            + first_masks[columns].len() * WORD_BYTES
+            + second_masks[lookups].len() * ELEMENT_BYTES
+            + witness.counts.len() * WORD_BYTES,
+    ));
     for oracle in [
         coset,
         columns,
@@ -559,10 +588,10 @@ fn encode_counts(
     ] {
         push_number(&mut bytes, oracle);
     }
-    for mask in &first.masks[columns] {
+    for mask in &first_masks[columns] {
         bytes.extend(mask.to_le_bytes());
     }
-    for mask in &second.masks[lookups] {
+    for mask in &second_masks[lookups] {
         bytes.extend(field::encode(*mask));
     }
     for count in &witness.counts {
@@ -694,7 +723,7 @@ pub fn polynomial(
     let mut sums = Sums::new(2 * SYSTEMATIC);
     let header = sums.header();
     for group in components(relation) {
-        let (unit, lookups) = encode_columns(witness, first, second, &group);
+        let (unit, lookups) = encode_columns(witness, &first.masks, &second.masks, &group);
         let mut parts = vec![
             Part::Bytes(&header),
             Part::Shared(&common),
@@ -706,7 +735,7 @@ pub fn polynomial(
         sums.add(submit(&COLUMNS, None, &parts, 0));
     }
     for coset in 0..COSETS.len() {
-        let counts = encode_counts(coset, witness, first, second);
+        let counts = encode_counts(coset, witness, &first.masks, &second.masks);
         sums.add(submit(
             &COUNTS,
             None,
@@ -758,6 +787,43 @@ pub fn polynomial(
 mod tests {
     use super::*;
     use crate::field::ONE;
+    #[test]
+    fn secret_job_inputs_have_their_exact_length() {
+        // Groups with and without lookups and zero products.
+        let relation = Relation {
+            tag: b"combination-test",
+            proof_magic: b"TEST",
+            words: 3,
+            booleans: 4,
+            narrow: vec![(1, 512), (2, 8)],
+            zero_product_pairs: vec![(3, 4), (5, 6)],
+            supports: vec![(1, 512)],
+            message_bytes: 1,
+            statement_bytes: 1,
+            parameters: Vec::new(),
+        };
+        let witness = Witness {
+            columns: vec![vec![0; SYSTEMATIC]; relation.columns()],
+            counts: vec![0; SYSTEMATIC],
+            relation: relation.clone(),
+            statement: [0; 64],
+        };
+        let first_masks = vec![vec![0; MASKS]; relation.columns() + 1];
+        let second_masks = vec![vec![ZERO; MASKS]; relation.lookups() + 1];
+        let groups = components(&relation);
+        assert!(groups.iter().any(|group| group.len() > 1));
+        let mut with_lookups = 0;
+        for group in groups {
+            let (bytes, lookups) = encode_columns(&witness, &first_masks, &second_masks, &group);
+            assert_eq!(bytes.capacity(), bytes.len());
+            with_lookups += usize::from(lookups);
+        }
+        assert!(with_lookups > 0);
+        for coset in 0..COSETS.len() {
+            let bytes = encode_counts(coset, &witness, &first_masks, &second_masks);
+            assert_eq!(bytes.capacity(), bytes.len());
+        }
+    }
     #[test]
     fn collected_reciprocal_terms_equal_the_direct_constraint_for_every_lookup_scale() {
         let mut state = 0x935ac307125aec91u128;
