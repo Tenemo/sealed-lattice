@@ -167,8 +167,9 @@ fn residue_values<T: Folded>(
     let mut values = Zeroizing::new(Vec::with_capacity(block));
     let mut power = 1;
     for index in 0..block {
-        let mut sum = T::ZERO;
-        for fold in (0..classes).rev() {
+        // The highest fold starts the sum, which each lower fold scales.
+        let mut sum = wrapped(index + block * (classes - 1));
+        for fold in (0..classes - 1).rev() {
             sum = sum.scale(step).add(wrapped(index + block * fold));
         }
         values.push(sum.scale(power));

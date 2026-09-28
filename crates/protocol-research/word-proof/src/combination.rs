@@ -135,10 +135,10 @@ impl Weights {
             field::multiply(beta, residual_constant),
         );
         let challenge_shifted = field::multiply(beta, residual_shifted);
-        let word_constant = field::scale(residual_constant, factor);
-        let word_shifted = field::scale(residual_shifted, factor);
         // Collect both occurrences of the reciprocal before multiplying it.
         // The verifier still evaluates the original inverse and quotient rows.
+        // The scaled word's term is the residual weight times the word and
+        // its scale.
         for ((((sum, word), reciprocal), inverse_power), residual_power) in output
             .iter_mut()
             .zip(words)
@@ -146,6 +146,10 @@ impl Weights {
             .zip(self.powers(inverse_oracle))
             .zip(self.powers(residual_oracle))
         {
+            let residual = field::add(
+                residual_constant,
+                field::scale(residual_shifted, residual_power),
+            );
             let coefficient = field::subtract(
                 field::add(
                     constant,
@@ -154,20 +158,11 @@ impl Weights {
                         field::scale(challenge_shifted, residual_power),
                     ),
                 ),
-                field::scale(
-                    field::add(word_constant, field::scale(word_shifted, residual_power)),
-                    *word,
-                ),
+                field::scale(residual, base::multiply(*word, factor)),
             );
             *sum = field::add(
                 *sum,
-                field::subtract(
-                    field::multiply(coefficient, *reciprocal),
-                    field::add(
-                        residual_constant,
-                        field::scale(residual_shifted, residual_power),
-                    ),
-                ),
+                field::subtract(field::multiply(coefficient, *reciprocal), residual),
             );
         }
     }
