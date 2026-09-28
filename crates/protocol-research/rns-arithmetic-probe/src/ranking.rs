@@ -212,22 +212,36 @@ fn value_bytes(arithmetic: &Arithmetic) -> usize {
 /// beside a keyed product's sums and a delivered group's records; a
 /// plaintext product holds the plaintext beside one component's products; a
 /// rotation holds its automorphic components, and later one of them beside
-/// the same. Without helpers the instance also keeps what they would, since
-/// it runs each job as it starts: at most three transformed tensor sources,
-/// a plaintext product's copied component and its products' bytes, or a
-/// keyed product's polynomial and one prime's digits.
+/// the same. Each key a keyed instruction loads before it starts holds its
+/// polynomial beside its records. With helpers the instance also holds the
+/// data it moves for one job beside those. Without them it keeps what they
+/// would, since it runs each job as it starts: at most three transformed
+/// tensor sources, a plaintext product's copied component and its
+/// products' bytes, a keyed product's polynomial and one prime's digits, or
+/// a loaded key's copied polynomial.
 fn scratch_bytes(arithmetic: &Arithmetic, operation: u32, helpers: usize) -> usize {
     let residue_bytes = DEGREE * 8;
     let polynomial_bytes = arithmetic.polynomial_words() * 8;
     let kept = usize::from(helpers == 0);
+    let moved = |bytes: usize| usize::from(helpers > 0) * bytes;
     let tensor = 3 * polynomial_bytes
-        + (1 + kept * KEPT_SOURCES) * arithmetic.tensor_primes() * residue_bytes;
+        + (1 + kept * KEPT_SOURCES) * arithmetic.tensor_primes() * residue_bytes
+        + moved(arithmetic.transfer_bytes(arithmetic.tensor_primes(), false, helpers));
     let keyed = kept * polynomial_bytes
-        + (2 * arithmetic.external_primes + (1 + kept) * arithmetic.gadget_length) * residue_bytes;
+        + (2 * arithmetic.external_primes + (1 + kept) * arithmetic.gadget_length) * residue_bytes
+        + moved(arithmetic.transfer_bytes(arithmetic.external_primes, true, helpers));
+    let load = (1 + kept) * polynomial_bytes
+        + arithmetic.external_primes * residue_bytes
+        + moved(arithmetic.records_transfer_bytes(helpers));
     match operation {
-        2 => tensor.max(2 * polynomial_bytes + keyed),
-        4 => (1 + kept) * (polynomial_bytes + arithmetic.key_primes * residue_bytes),
-        6 => (2 * polynomial_bytes).max(polynomial_bytes + keyed),
+        2 => tensor.max(2 * polynomial_bytes + keyed).max(load),
+        4 => {
+            (1 + kept) * (polynomial_bytes + arithmetic.key_primes * residue_bytes)
+                + moved(arithmetic.transfer_bytes(arithmetic.key_primes, false, helpers))
+        }
+        6 => (2 * polynomial_bytes)
+            .max(polynomial_bytes + keyed)
+            .max(load),
         _ => 0,
     }
 }

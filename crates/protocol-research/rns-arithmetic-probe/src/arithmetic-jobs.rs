@@ -121,6 +121,11 @@ impl PrimeSet {
 fn set_primes(degree: usize) -> usize {
     MAXIMUM_JOB_BYTES / (IDENTITY_BYTES + 8 * degree)
 }
+/// The most of the count's first primes that one of their sets holds with
+/// the helpers.
+fn set_length(count: usize, degree: usize, helpers: usize) -> usize {
+    count.div_ceil(helpers.max(1)).min(set_primes(degree))
+}
 /// The sets that hold the first primes of the count with the helpers: each
 /// helper's primes, every helper-count-th from its first, or without
 /// helpers every prime, split into as few sets as hold at most a set's
@@ -529,7 +534,7 @@ impl Arithmetic {
     /// streamed polynomial.
     pub(super) fn job_bytes(&self, helpers: usize) -> usize {
         let residue_bytes = 8 * self.degree;
-        let held = |count: usize| count.div_ceil(helpers.max(1)).min(set_primes(self.degree));
+        let held = |count: usize| set_length(count, self.degree, helpers);
         let positions = LIFT_POSITIONS.min(self.degree);
         let jobs = [
             (held(self.tensor_primes()) + 1) * residue_bytes,
@@ -542,6 +547,29 @@ impl Arithmetic {
             + RecordContext::BYTES
             + 8 * self.words * STREAMED_COEFFICIENTS.min(self.degree)
             + jobs.into_iter().max().unwrap()
+    }
+    /// The most bytes that the instance submitting jobs to the helpers
+    /// holds at once to move one job's data beside the products or sums it
+    /// keeps: for a product modulo the count's first primes a set's
+    /// products, or for a keyed product one job's identities and sum,
+    /// copied out of the host, or a lift range's residues modulo the
+    /// count's primes, copied in, beside its coefficients, copied out and
+    /// decoded.
+    pub(super) fn transfer_bytes(&self, count: usize, keyed: bool, helpers: usize) -> usize {
+        let residue_bytes = 8 * self.degree;
+        let output = if keyed {
+            IDENTITY_BYTES * self.gadget_length + residue_bytes
+        } else {
+            set_length(count, self.degree, helpers) * residue_bytes
+        };
+        let positions = LIFT_POSITIONS.min(self.degree);
+        output.max(HEADER_BYTES + 4 + 8 * positions * (count + 2 * self.words))
+    }
+    /// The most bytes that the instance submitting a key's record jobs to
+    /// the helpers holds at once to copy a set's records and identities out
+    /// of the host.
+    pub(super) fn records_transfer_bytes(&self, helpers: usize) -> usize {
+        set_length(self.external_primes, self.degree, helpers) * (IDENTITY_BYTES + 8 * self.degree)
     }
     /// Sources modulo the first primes of the count.
     pub(super) fn sources(&self, count: usize) -> Sources {
@@ -883,6 +911,7 @@ impl Arithmetic {
         let mut pipeline = Pipeline::new(parallel_work::window());
         for first in (0..self.degree).step_by(positions) {
             let mut input = self.header(lifted as usize);
+            input.reserve_exact(4 + 8 * positions * residues.len());
             input.extend((positions as u32).to_le_bytes());
             for values in residues {
                 extend(&mut input, &values.as_ref()[first..first + positions]);
@@ -1212,6 +1241,36 @@ mod tests {
                     .map(|class| (class..count).step_by(stride).count().div_ceil(held))
                     .sum();
                 assert_eq!(sets.len(), expected);
+            }
+        }
+    }
+
+    // At the full degree every supported profile's job inputs stay within
+    // the job bound: a key's record job, its set's header and the record
+    // context beside the streamed key polynomial, which is the largest, a
+    // keyed job beside its streamed group of records, and a lift range's
+    // residues modulo every tensor prime. The record job of the profile
+    // with the longest coefficients runs.
+    #[test]
+    fn job_inputs_stay_within_the_job_bound_at_the_full_degree() {
+        let degree = supported_profile::DEGREE;
+        let longest = Profile::all()
+            .max_by_key(|profile| profile.ciphertext_modulus().bits())
+            .unwrap();
+        for profile in Profile::all() {
+            let arithmetic = Arithmetic::new(profile, degree);
+            let set = prime_sets(arithmetic.external_primes, degree, 0)[0];
+            let header = arithmetic.header(0).len();
+            let record = arithmetic.set_header(set).len()
+                + RecordContext::BYTES
+                + 8 * arithmetic.polynomial_words();
+            let keyed = header + 12 + RecordContext::BYTES + arithmetic.gadget_length * 8 * degree;
+            let lift = header + 4 + 8 * LIFT_POSITIONS * arithmetic.tensor_primes();
+            assert!(record.max(keyed).max(lift) <= MAXIMUM_JOB_BYTES);
+            if profile == longest {
+                let (_, records) = arithmetic.key_records(&arithmetic.uniform(1), context(0));
+                assert_eq!(records.len(), arithmetic.external_primes);
+                assert!(records.iter().all(|record| record.len() == 8 * degree));
             }
         }
     }
