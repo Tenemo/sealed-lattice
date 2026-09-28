@@ -27,7 +27,10 @@ import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
-import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import {
+    runArtifactDirectoryPath,
+    runWithLocalRunLog,
+} from '#tools/ci/local-run-log.js';
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { summarizeCpuTrace } from '#tools/ci/participant-cpu-profile.js';
 import type { CpuProfileSummary } from '#tools/ci/participant-cpu-profile.js';
@@ -608,7 +611,7 @@ type ForeignPoll = Readonly<{
 const identifierPattern = /^[0-9a-f]{128}$/u;
 
 // Reads another passed cohort of this profile: its result names its poll and
-// its roster's registrations, and its relay's records lie beside it.
+// its roster's registrations, and its relay's records lie among its artifacts.
 const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
     const directory = path.resolve(run);
     const result = JSON.parse(
@@ -641,7 +644,10 @@ const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
                 identifierPattern.test(leftOutDigest)),
         'The foreign poll names a malformed registrant left out of its roster.',
     );
-    const publicDirectory = path.join(directory, 'public');
+    const publicDirectory = path.join(
+        runArtifactDirectoryPath(directory),
+        'public',
+    );
     assert.ok(
         (await stat(publicDirectory)).isDirectory(),
         'The foreign poll has no public records.',
@@ -880,11 +886,19 @@ await runWithLocalRunLog(
                     eventType: 'participant-corrupt-client',
                     details: corruptClient,
                 });
-            const publicDirectory = path.join(log.runDirectoryPath, 'public');
-            await mkdir(publicDirectory);
+            // The relay stores every published record among the run's
+            // artifacts.
+            const publicDirectory = path.join(
+                log.artifactDirectoryPath,
+                'public',
+            );
+            await mkdir(publicDirectory, { recursive: true });
             const secondRosterDirectory =
                 mode === 'rosters'
-                    ? path.join(log.runDirectoryPath, 'second-roster-public')
+                    ? path.join(
+                          log.artifactDirectoryPath,
+                          'second-roster-public',
+                      )
                     : undefined;
             if (secondRosterDirectory !== undefined)
                 await mkdir(secondRosterDirectory);

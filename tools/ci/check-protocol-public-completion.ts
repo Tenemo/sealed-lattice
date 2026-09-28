@@ -14,7 +14,10 @@ import path from 'node:path';
 import { retrieveTranscript } from '#packages/sdk/src/transcript-archive.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
-import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import {
+    runArtifactDirectoryPath,
+    runWithLocalRunLog,
+} from '#tools/ci/local-run-log.js';
 import { layParticipantCeremony } from '#tools/ci/participant-public-ceremony.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import {
@@ -31,13 +34,12 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
 
-// A passed research run. Its ceremony directory holds the public setup,
-// close and completion records the reader verifies.
+// A passed research run. The ceremony directory among its artifacts holds
+// the public setup, close and completion records the reader verifies.
 type ResearchRun = {
     case: string;
     participantCount: number;
     optionCount: number;
-    output: string;
     result: { kind: 'result' | 'no-result'; identifiers?: string[] };
 };
 type TerminalResult = {
@@ -89,6 +91,7 @@ await runWithLocalRunLog(
             // takes them, and supply only the archived closure.
             let participantCeremony: string | undefined;
             let run: ResearchRun;
+            let ceremony: string;
             if (summary.scriptName === 'research:participant') {
                 assert.equal(
                     selected.name,
@@ -102,13 +105,14 @@ await runWithLocalRunLog(
                 );
                 const participant = await layParticipantCeremony(
                     source,
+                    path.join(runArtifactDirectoryPath(source), 'public'),
                     participantCeremony,
                 );
+                ceremony = participantCeremony;
                 run = {
                     case: 'browser-' + participant.result.kind,
                     participantCount: participant.participantCount,
                     optionCount: participant.optionCount,
-                    output: participantCeremony,
                     result:
                         participant.result.kind === 'result'
                             ? {
@@ -127,8 +131,11 @@ await runWithLocalRunLog(
                     run.case,
                     /^native-(?:result|empty|invalid-only)$/u,
                 );
+                ceremony = path.join(
+                    runArtifactDirectoryPath(source),
+                    'ceremony',
+                );
             }
-            const ceremony = run.output;
             assert.ok((await stat(path.join(ceremony, 'close'))).isDirectory());
             const scenario = deriveResearchScenario(
                 run.participantCount,
@@ -153,10 +160,10 @@ await runWithLocalRunLog(
                 assert.equal(run.case, 'native-result');
                 const original = path.join(ceremony, 'completion');
                 directory = path.join(
-                    log.runDirectoryPath,
+                    log.artifactDirectoryPath,
                     'available-completion',
                 );
-                await mkdir(directory);
+                await mkdir(directory, { recursive: true });
                 // The native certificate has exactly the honest votes, so
                 // every one is needed; the corrupt participants signed none.
                 assert.equal(
@@ -297,7 +304,10 @@ await runWithLocalRunLog(
                     'target/release/check-target' +
                         (process.platform === 'win32' ? '.exe' : ''),
                 ),
-                output = path.join(log.runDirectoryPath, 'verification');
+                output = path.join(log.artifactDirectoryPath, 'verification');
+            // The reader creates each output directory inside the artifact
+            // directory.
+            await mkdir(log.artifactDirectoryPath, { recursive: true });
             for (const file of [
                 'crates/protocol-research/evaluation-target/src/public-completion-check.rs',
                 'crates/protocol-research/evaluation-target/src/bin/check-target.rs',
@@ -726,7 +736,7 @@ await runWithLocalRunLog(
                     // depend on every one of them.
                     const reconstruction = await materialize('reconstruction');
                     const archivedOutput = path.join(
-                        log.runDirectoryPath,
+                        log.artifactDirectoryPath,
                         'verification-archived',
                     );
                     const archived = await verifyRecords(
@@ -787,7 +797,7 @@ await runWithLocalRunLog(
                                 path.join(omitted, 'ceremony'),
                                 path.join(omitted, 'completion'),
                                 path.join(
-                                    log.runDirectoryPath,
+                                    log.artifactDirectoryPath,
                                     'verification-omitted',
                                 ),
                                 scratch + '-omitted',

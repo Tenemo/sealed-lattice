@@ -486,13 +486,19 @@ await runWithLocalRunLog(
                 );
                 return;
             }
-            const runtimeFile = path.join(log.runDirectoryPath, 'runtime.bin');
+            // The runtime identity file and the executable's records are the
+            // run's artifacts.
+            await mkdir(log.artifactDirectoryPath, { recursive: true });
+            const runtimeFile = path.join(
+                log.artifactDirectoryPath,
+                'runtime.bin',
+            );
             await writeFile(runtimeFile, runtime, { flag: 'wx' });
             const scratch = prefixCase
                 ? undefined
                 : await mkdtemp(path.join(root, 'temp/protocol-research-'));
             const output = path.join(
-                log.runDirectoryPath,
+                log.artifactDirectoryPath,
                 prefixCase ? 'requested-output' : 'ceremony',
             );
             const controller = new AbortController();

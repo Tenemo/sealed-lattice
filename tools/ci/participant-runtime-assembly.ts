@@ -45,9 +45,9 @@ export type CorruptParticipantClient = Readonly<{
 
 // Takes the SDK entry, participant module, worker and source manifest the SDK
 // build packaged, copies every listed source into the run directory after
-// checking its digest, and computes the runtime identity the worker
-// recomputes. When requested, it also builds the invalid-ballot client from
-// the same sources.
+// checking its digest, keeps the runtime it serves among the run's artifacts,
+// and computes the runtime identity the worker recomputes. When requested, it
+// also builds the invalid-ballot client from the same sources.
 export const assembleParticipantRuntime = async (
     runLog: ActiveLocalRunLog,
     invalidBallot: boolean,
@@ -130,6 +130,7 @@ export const assembleParticipantRuntime = async (
                   );
                   return client;
               })();
+    await mkdir(runLog.artifactDirectoryPath, { recursive: true });
     for (const [name, bytes] of [
         ['index.js', sdk],
         ['sealed-lattice-kernel.wasm', kernel],
@@ -142,7 +143,7 @@ export const assembleParticipantRuntime = async (
                   ['invalid-ballot-worker.js', invalidBallotClient.worker],
               ] as const)),
     ] as const)
-        await writeFile(path.join(runLog.runDirectoryPath, name), bytes, {
+        await writeFile(path.join(runLog.artifactDirectoryPath, name), bytes, {
             flag: 'wx',
         });
     return {

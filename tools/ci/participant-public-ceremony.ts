@@ -70,20 +70,21 @@ const readParticipantRun = async (run: string): Promise<ParticipantRun> => {
     };
 };
 
-// Lays out a browser cohort's relayed records as the native public reader
-// takes them. The relay names each registration record by its body digest and
-// each ballot submission by its author and envelope identity; the reader takes
-// registrations in roster order and an index of submitted envelopes with their
-// bodies. Each body takes a short derived path, because an archive route that
-// named its envelope identity would exceed the route bound. The context holds
-// the poll and runtime identities the reader is given, and every other file is
-// relayed bytes. Only the owning verifiers accept any of them.
+// Lays out a browser cohort's relayed records, which its run keeps among its
+// artifacts, as the native public reader takes them. The relay names each
+// registration record by its body digest and each ballot submission by its
+// author and envelope identity; the reader takes registrations in roster
+// order and an index of submitted envelopes with their bodies. Each body
+// takes a short derived path, because an archive route that named its
+// envelope identity would exceed the route bound. The context holds the poll
+// and runtime identities the reader is given, and every other file is relayed
+// bytes. Only the owning verifiers accept any of them.
 export const layParticipantCeremony = async (
     run: string,
+    relay: string,
     ceremony: string,
 ): Promise<ParticipantRun> => {
     const participant = await readParticipantRun(run);
-    const relay = path.join(run, 'public');
     const copy = (from: string, to: string) =>
         cp(from, to, { recursive: true, errorOnExist: true, force: false });
     await mkdir(path.dirname(ceremony), { recursive: true });

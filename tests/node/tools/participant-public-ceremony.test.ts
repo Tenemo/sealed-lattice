@@ -63,8 +63,11 @@ describe('browser relay ceremony layout', () => {
     beforeEach(async () => {
         await mkdir(temporaryRoot, { recursive: true });
         root = await mkdtemp(path.join(temporaryRoot, 'relay-layout-test-'));
+        // The run's diagnostics and its relay's records lie apart, as the
+        // runner keeps them.
         run = path.join(root, 'run');
-        relay = path.join(run, 'public');
+        relay = path.join(root, 'artifacts', 'public');
+        await mkdir(run);
         await mkdir(relay, { recursive: true });
         await writeRun();
         for (const [position, id] of recordIds.entries())
@@ -108,7 +111,7 @@ describe('browser relay ceremony layout', () => {
 
     it('orders registrations by roster position and indexes each submission', async () => {
         const ceremony = path.join(root, 'view', 'ceremony');
-        const participant = await layParticipantCeremony(run, ceremony);
+        const participant = await layParticipantCeremony(run, relay, ceremony);
         expect(participant.recordIds).toEqual(recordIds);
         expect(participant.result).toEqual({
             kind: 'result',
@@ -204,6 +207,7 @@ describe('browser relay ceremony layout', () => {
         await writeRun({ result: { kind: 'no-result' } });
         const participant = await layParticipantCeremony(
             run,
+            relay,
             path.join(root, 'no-result'),
         );
         expect(participant.result).toEqual({ kind: 'no-result' });
@@ -211,7 +215,7 @@ describe('browser relay ceremony layout', () => {
 
     it('refuses a malformed run, a colliding name and missing records', async () => {
         const lay = (name: string) =>
-            layParticipantCeremony(run, path.join(root, name));
+            layParticipantCeremony(run, relay, path.join(root, name));
         for (const fields of [
             { poll: 'A'.repeat(128) },
             { runtimeIdentity: runtimeIdentity.slice(2) },

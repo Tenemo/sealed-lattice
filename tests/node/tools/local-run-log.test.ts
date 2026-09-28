@@ -1,12 +1,24 @@
 import { spawnSync } from 'node:child_process';
-import { access, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import {
+    access,
+    mkdir,
+    mkdtemp,
+    readFile,
+    readdir,
+    rm,
+    writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { createLocalRunLog, runWithLocalRunLog } from '#tools/ci/local-run-log';
+import {
+    createLocalRunLog,
+    runArtifactDirectoryPath,
+    runWithLocalRunLog,
+} from '#tools/ci/local-run-log';
 import {
     runCommandsInSeries,
     type CommandInvocation,
@@ -57,6 +69,32 @@ const readJsonLines = async (
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
+
+const writeFileAt = async (
+    directoryPath: string,
+    relativePath: string,
+    contents: string,
+): Promise<void> => {
+    const filePath = path.join(directoryPath, relativePath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, contents);
+};
+
+// A run log whose diagnostics and artifacts lie under separate temporary roots.
+const createArtifactSampleLog = (
+    temporaryDirectoryPath: string,
+    scriptName: string,
+) =>
+    createLocalRunLog({
+        artifactRootDirectoryPath: path.join(
+            temporaryDirectoryPath,
+            'run-artifacts',
+        ),
+        commandLineArguments: [],
+        lanes: ['sample'],
+        rootDirectoryPath: path.join(temporaryDirectoryPath, 'logs'),
+        scriptName,
+    });
 
 const findOnlyRunDirectory = async (
     rootDirectoryPath: string,
@@ -132,6 +170,8 @@ describe('local run logs', () => {
             expect(summary.repositoryTreeDirty).toBe(
                 expectedRepositoryTreeDirty,
             );
+            // A run that kept no artifacts names no artifact directory.
+            expect(summary).not.toHaveProperty('artifactDirectoryPath');
             const diagnostics = await readFile(
                 path.join(log.runDirectoryPath, 'diagnostics.txt'),
                 'utf8',
@@ -438,5 +478,213 @@ describe('local run logs', () => {
             await expect(
                 access(path.join(runDirectoryPath, 'summary.json')),
             ).rejects.toMatchObject({ code: 'ENOENT' });
+        }));
+
+    it('keeps binary artifacts under the run date and name beside its diagnostics', () =>
+        withTemporaryLogRoot(async (temporaryDirectoryPath) => {
+            const log = await createArtifactSampleLog(
+                temporaryDirectoryPath,
+                'artifact sample',
+            );
+            const artifactRootDirectoryPath = path.join(
+                temporaryDirectoryPath,
+                'run-artifacts',
+            );
+            expect(log.artifactDirectoryPath).toBe(
+                path.join(
+                    artifactRootDirectoryPath,
+                    path.relative(
+                        path.join(temporaryDirectoryPath, 'logs'),
+                        log.runDirectoryPath,
+                    ),
+                ),
+            );
+            // A reader finds another run's artifacts from its run directory.
+            expect(
+                runArtifactDirectoryPath(
+                    log.runDirectoryPath,
+                    artifactRootDirectoryPath,
+                ),
+            ).toBe(log.artifactDirectoryPath);
+            await writeFileAt(
+                log.artifactDirectoryPath,
+                'ceremony/proof.bin',
+                'proof',
+            );
+            // Snapshotted sources and framework attachments may be binary.
+            const diagnosticFiles = [
+                'sources/crates/supported-profile/profiles.bin',
+                'attachments/chromium-desktop/resource.wasm',
+            ];
+            for (const relativePath of diagnosticFiles)
+                await writeFileAt(log.runDirectoryPath, relativePath, 'kept');
+            await log.finish({ exitCode: 0 });
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.result).toBe('passed');
+            expect(summary.artifactDirectoryPath).toBe(
+                log.artifactDirectoryPath,
+            );
+            await expect(
+                readFile(
+                    path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                    'utf8',
+                ),
+            ).resolves.toContain(`Artifacts: ${log.artifactDirectoryPath}`);
+            for (const relativePath of diagnosticFiles)
+                await expect(
+                    readFile(
+                        path.join(log.runDirectoryPath, relativePath),
+                        'utf8',
+                    ),
+                ).resolves.toBe('kept');
+            await expect(
+                readFile(
+                    path.join(log.artifactDirectoryPath, 'ceremony/proof.bin'),
+                    'utf8',
+                ),
+            ).resolves.toBe('proof');
+        }));
+
+    it('moves binary artifacts out of the run directory and fails the run', () =>
+        withTemporaryLogRoot(async (temporaryDirectoryPath) => {
+            const originalExitCode = process.exitCode;
+            try {
+                process.exitCode = undefined;
+                const log = await createArtifactSampleLog(
+                    temporaryDirectoryPath,
+                    'misplaced artifact sample',
+                );
+                const misplaced = [
+                    'proof.bin',
+                    'ceremony/close/intent.bin',
+                    'runtime/participant.wasm',
+                ];
+                for (const relativePath of misplaced)
+                    await writeFileAt(
+                        log.runDirectoryPath,
+                        relativePath,
+                        relativePath,
+                    );
+                await writeFileAt(
+                    log.runDirectoryPath,
+                    'ceremony/close/submissions.txt',
+                    'index',
+                );
+                // An artifact that already exists is never replaced.
+                await writeFileAt(log.runDirectoryPath, 'kept.bin', 'late');
+                await writeFileAt(
+                    log.artifactDirectoryPath,
+                    'kept.bin',
+                    'first',
+                );
+                await log.finish({ exitCode: 0 });
+
+                expect(process.exitCode).toBe(1);
+                const summary = JSON.parse(
+                    await readFile(
+                        path.join(log.runDirectoryPath, 'summary.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                expect(summary).toMatchObject({
+                    exitCode: 1,
+                    result: 'runner-failure',
+                });
+                if (!isRecord(summary.error)) {
+                    throw new Error('Expected a runner failure.');
+                }
+                expect(summary.error.message).toContain(
+                    'The run directory held 4 binary artifacts',
+                );
+                expect(summary.error.message).toContain(
+                    `belong in ${log.artifactDirectoryPath}; 1 could not be moved.`,
+                );
+                for (const relativePath of misplaced) {
+                    await expect(
+                        readFile(
+                            path.join(log.artifactDirectoryPath, relativePath),
+                            'utf8',
+                        ),
+                    ).resolves.toBe(relativePath);
+                    await expect(
+                        access(path.join(log.runDirectoryPath, relativePath)),
+                    ).rejects.toMatchObject({ code: 'ENOENT' });
+                }
+                await expect(
+                    readFile(
+                        path.join(
+                            log.runDirectoryPath,
+                            'ceremony/close/submissions.txt',
+                        ),
+                        'utf8',
+                    ),
+                ).resolves.toBe('index');
+                await expect(
+                    readFile(
+                        path.join(log.runDirectoryPath, 'kept.bin'),
+                        'utf8',
+                    ),
+                ).resolves.toBe('late');
+                await expect(
+                    readFile(
+                        path.join(log.artifactDirectoryPath, 'kept.bin'),
+                        'utf8',
+                    ),
+                ).resolves.toBe('first');
+                const events = await readJsonLines(
+                    path.join(log.runDirectoryPath, 'events.jsonl'),
+                );
+                expect(
+                    events.find(
+                        (event) =>
+                            event.eventType === 'run-artifacts-misplaced',
+                    )?.details,
+                ).toMatchObject({ count: 4, unmoved: ['kept.bin'] });
+            } finally {
+                process.exitCode = originalExitCode;
+            }
+        }));
+
+    it('keeps the operative failure when a failed run also misplaced artifacts', () =>
+        withTemporaryLogRoot(async (temporaryDirectoryPath) => {
+            const log = await createArtifactSampleLog(
+                temporaryDirectoryPath,
+                'failed artifact sample',
+            );
+            await writeFileAt(log.runDirectoryPath, 'proof.bin', 'proof');
+            await log.finish({
+                error: new Error('Operative failure.'),
+                exitCode: 1,
+            });
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.error).toMatchObject({
+                message: 'Operative failure.',
+            });
+            await expect(
+                readFile(
+                    path.join(log.artifactDirectoryPath, 'proof.bin'),
+                    'utf8',
+                ),
+            ).resolves.toBe('proof');
+            const events = await readJsonLines(
+                path.join(log.runDirectoryPath, 'events.jsonl'),
+            );
+            expect(
+                events.find(
+                    (event) => event.eventType === 'run-artifacts-misplaced',
+                )?.details,
+            ).toMatchObject({ count: 1, paths: ['proof.bin'], unmoved: [] });
         }));
 });

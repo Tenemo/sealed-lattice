@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { closeSync, fsyncSync, openSync, writeSync } from 'node:fs';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -25,6 +25,7 @@ type LocalRunEventInput = {
 };
 
 export type ActiveLocalRunLog = {
+    readonly artifactDirectoryPath: string;
     readonly runDirectoryPath: string;
     createCommandLogFiles(input: {
         readonly description: string;
@@ -44,6 +45,7 @@ export type ActiveLocalRunLog = {
 };
 
 type LocalRunLogInput = {
+    readonly artifactRootDirectoryPath?: string;
     readonly commandLineArguments: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
     readonly lanes: readonly string[];
@@ -83,6 +85,72 @@ const repositoryRootDirectoryPath = path.resolve(
     '..',
 );
 const defaultResourceSampleIntervalMilliseconds = 15_000;
+
+// A run's binary artifacts, such as protocol records, proofs, relay state and
+// runtime modules, lie outside its diagnostics under the same date and run
+// name, so the run history keeps only what the run recorded about itself.
+export const runArtifactDirectoryPath = (
+    runDirectoryPath: string,
+    artifactRootDirectoryPath = path.join(
+        repositoryRootDirectoryPath,
+        'temp',
+        'run-artifacts',
+    ),
+): string =>
+    path.join(
+        artifactRootDirectoryPath,
+        path.basename(path.dirname(runDirectoryPath)),
+        path.basename(runDirectoryPath),
+    );
+
+// Binary files a run writes are artifacts, except in its snapshotted sources
+// and framework attachments.
+const binaryArtifactName = /\.(?:bin|wasm)$/u;
+const diagnosticDirectoryNames = new Set(['attachments', 'sources']);
+
+const listMisplacedArtifacts = async (
+    runDirectoryPath: string,
+    relativeDirectoryPath = '',
+): Promise<string[]> => {
+    const misplaced: string[] = [];
+    for (const entry of await readdir(
+        path.join(runDirectoryPath, relativeDirectoryPath),
+        { withFileTypes: true },
+    )) {
+        const relativePath = path.join(relativeDirectoryPath, entry.name);
+        if (entry.isDirectory()) {
+            if (
+                relativeDirectoryPath === '' &&
+                diagnosticDirectoryNames.has(entry.name)
+            )
+                continue;
+            misplaced.push(
+                ...(await listMisplacedArtifacts(
+                    runDirectoryPath,
+                    relativePath,
+                )),
+            );
+        } else if (binaryArtifactName.test(entry.name)) {
+            misplaced.push(relativePath);
+        }
+    }
+    return misplaced;
+};
+
+const pathExists = async (filePath: string): Promise<boolean> => {
+    try {
+        await stat(filePath);
+        return true;
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'ENOENT'
+        )
+            return false;
+        throw error;
+    }
+};
 
 const currentProcessExitCode = (): number =>
     typeof process.exitCode === 'number' ? process.exitCode : 0;
@@ -195,6 +263,7 @@ const escapeUnsafeLogControls = (value: string): string =>
         .join('');
 
 class LocalRunLog implements ActiveLocalRunLog {
+    readonly artifactDirectoryPath: string;
     readonly runDirectoryPath: string;
     readonly #activeCommandIds = new Set<string>();
     readonly #commandSlugCounts = new Map<string, number>();
@@ -220,6 +289,7 @@ class LocalRunLog implements ActiveLocalRunLog {
     #resourceSampleTimer: NodeJS.Timeout;
 
     constructor(input: {
+        readonly artifactDirectoryPath: string;
         readonly repositorySnapshot: RepositorySnapshot;
         readonly resourceSampleIntervalMilliseconds: number;
         readonly runDirectoryPath: string;
@@ -227,6 +297,7 @@ class LocalRunLog implements ActiveLocalRunLog {
         readonly startedAtIso: string;
         readonly startedAtMilliseconds: number;
     }) {
+        this.artifactDirectoryPath = input.artifactDirectoryPath;
         this.runDirectoryPath = input.runDirectoryPath;
         this.#eventsFileDescriptor = openSync(
             path.join(input.runDirectoryPath, 'events.jsonl'),
@@ -278,10 +349,16 @@ class LocalRunLog implements ActiveLocalRunLog {
         this.#writeResourceSample();
         this.#flushOutputRemainders();
 
+        const misplacedArtifacts = await this.#moveMisplacedArtifacts();
+        const failure =
+            input.error === undefined ? misplacedArtifacts : input.error;
         const error =
-            input.error === undefined
+            failure === undefined
                 ? undefined
-                : serializeErrorDiagnostic(input.error);
+                : serializeErrorDiagnostic(failure);
+        const artifactsRetained = await pathExists(
+            this.artifactDirectoryPath,
+        ).catch(() => false);
         const exitCode =
             input.exitCode === 0 && error !== undefined ? 1 : input.exitCode;
         if (exitCode !== input.exitCode) process.exitCode = exitCode;
@@ -289,6 +366,9 @@ class LocalRunLog implements ActiveLocalRunLog {
             performance.now() - this.#startedAtMilliseconds,
         );
         const summary = {
+            ...(artifactsRetained
+                ? { artifactDirectoryPath: this.artifactDirectoryPath }
+                : {}),
             ...(input.details === undefined ? {} : { details: input.details }),
             durationMilliseconds,
             ...(error === undefined ? {} : { error }),
@@ -344,6 +424,9 @@ class LocalRunLog implements ActiveLocalRunLog {
                     `Events: ${path.join(this.runDirectoryPath, 'events.jsonl')}`,
                     `Resources: ${path.join(this.runDirectoryPath, 'resources.jsonl')}`,
                     `Output: ${this.#outputPath}`,
+                    ...(artifactsRetained
+                        ? [`Artifacts: ${this.artifactDirectoryPath}`]
+                        : []),
                     '',
                 ].join('\n'),
                 'utf8',
@@ -430,6 +513,63 @@ class LocalRunLog implements ActiveLocalRunLog {
         );
         fsyncSync(this.#eventsFileDescriptor);
         fsyncSync(this.#outputFileDescriptor);
+    }
+
+    // Moves binary artifacts that a runner wrote into its run directory to the
+    // artifact directory under the same relative paths, and returns the
+    // failure they make of the run. A file whose destination exists stays.
+    async #moveMisplacedArtifacts(): Promise<Error | undefined> {
+        let misplaced: string[];
+        try {
+            misplaced = await listMisplacedArtifacts(this.runDirectoryPath);
+        } catch (error) {
+            return Object.assign(
+                new Error(
+                    'The run directory could not be checked for binary artifacts.',
+                ),
+                { cause: error },
+            );
+        }
+        if (misplaced.length === 0) return undefined;
+        const unmoved: string[] = [];
+        for (const relativePath of misplaced) {
+            const destinationPath = path.join(
+                this.artifactDirectoryPath,
+                relativePath,
+            );
+            try {
+                if (await pathExists(destinationPath)) {
+                    unmoved.push(relativePath);
+                    continue;
+                }
+                await mkdir(path.dirname(destinationPath), { recursive: true });
+                await rename(
+                    path.join(this.runDirectoryPath, relativePath),
+                    destinationPath,
+                );
+            } catch {
+                unmoved.push(relativePath);
+            }
+        }
+        const portable = (relativePath: string) =>
+            relativePath.split(path.sep).join('/');
+        this.writeEvent({
+            details: {
+                artifactDirectoryPath: this.artifactDirectoryPath,
+                count: misplaced.length,
+                paths: misplaced.slice(0, 20).map(portable),
+                unmoved: unmoved.slice(0, 20).map(portable),
+            },
+            eventType: 'run-artifacts-misplaced',
+        });
+        const listed = misplaced.slice(0, 5).map(portable).join(', ');
+        return new Error(
+            `The run directory held ${String(misplaced.length)} binary artifacts (${listed}${misplaced.length > 5 ? ', ...' : ''}), which belong in ${this.artifactDirectoryPath}; ${
+                unmoved.length === 0
+                    ? 'they were moved there.'
+                    : `${String(unmoved.length)} could not be moved.`
+            }`,
+        );
     }
 
     #flushOutputRemainders(commandId?: string): void {
@@ -547,6 +687,10 @@ export const createLocalRunLog = async (
     });
 
     return new LocalRunLog({
+        artifactDirectoryPath: runArtifactDirectoryPath(
+            runDirectoryPath,
+            input.artifactRootDirectoryPath,
+        ),
         repositorySnapshot,
         resourceSampleIntervalMilliseconds:
             input.resourceSampleIntervalMilliseconds ??
