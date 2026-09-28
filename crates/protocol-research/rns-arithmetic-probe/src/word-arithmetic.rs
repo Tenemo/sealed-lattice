@@ -459,11 +459,13 @@ impl Lift {
                 multiplier & LIMB_MASK,
                 (multiplier >> LIMB_BITS) & LIMB_MASK,
             );
+            // A column stays below 2^63 between carries, so no addition
+            // wraps.
             for (column, limb) in columns[..self.limbs].iter_mut().zip(row) {
-                *column += low * u64::from(*limb);
+                *column = column.wrapping_add(low * u64::from(*limb));
             }
             for (column, limb) in columns[1..=self.limbs].iter_mut().zip(row) {
-                *column += high * u64::from(*limb);
+                *column = column.wrapping_add(high * u64::from(*limb));
             }
         }
         carry(columns);

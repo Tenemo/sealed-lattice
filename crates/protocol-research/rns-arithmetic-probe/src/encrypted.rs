@@ -61,11 +61,14 @@ fn prefix(primes: &[u64], bound: &BigUint) -> usize {
 }
 /// The residue of little-endian words plus an initial residue: the sum of
 /// the words' lazy Shoup products with the prime's word powers, each below
-/// twice the prime, reduced by the Shoup quotient of one.
+/// twice the prime for any word, reduced by the Shoup quotient of one. At
+/// most sixteen products below 2^59 and an initial residue below 2^58 sum
+/// below 2^64, so no addition wraps.
 fn words_residue(prime: &Modulus, powers: &[(u64, u64)], words: &[u64], initial: u64) -> u64 {
+    debug_assert!(words.len() <= MAXIMUM_WORDS && **prime < 1 << 58);
     let mut sum = initial;
     for (word, (power, quotient)) in words.iter().zip(powers) {
-        sum += prime.lazy_mul_shoup(*word, *power, *quotient);
+        sum = sum.wrapping_add(prime.lazy_mul_shoup(*word, *power, *quotient));
     }
     prime.mul_shoup(sum, 1, powers[0].1)
 }
