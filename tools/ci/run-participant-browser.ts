@@ -3504,10 +3504,12 @@ await runWithLocalRunLog(
             // With ballots cast, a fourth set of views forges the vote
             // probe's own ballot, which the certified target counts: its
             // body altered or withheld, its submission replaced by another
-            // counted author's authentic one, or its signature altered.
-            // Every result visit verifies the close barrier again from the
-            // public records, so none of them withdraws or replaces the
-            // accepted ballot, and its participant stays pending.
+            // counted author's authentic one, or its signature altered. The
+            // refused votes of the first view discard the vote probe's
+            // evaluated target, so each of these visits evaluates the target
+            // again from the public close records and verifies the close
+            // barrier; none of them withdraws or replaces the accepted
+            // ballot, and its participant stays pending.
             const countedBallots = onTimeBallots.filter(
                 (position) =>
                     ![equivocator, omittedVoter, invalidAuthor].includes(
@@ -3656,19 +3658,15 @@ await runWithLocalRunLog(
                 run(combiningPosition, 'result'),
                 ...[...new Set([voteProbe, shareProbe])].map(
                     async (position) => {
-                        if (position === voteProbe)
+                        // The vote probe reads the forged ballots before any
+                        // share view, whose visit retains the target it
+                        // evaluates.
+                        if (position === voteProbe) {
                             await probe(
                                 position,
                                 voteForgeries,
                                 'The target votes are incomplete.',
                             );
-                        if (position === shareProbe && !noResult)
-                            await probe(
-                                position,
-                                shareForgeries,
-                                'The release shares are incomplete.',
-                            );
-                        if (position === voteProbe) {
                             for (const { forgeries, reason } of ballotForgeries)
                                 await probe(position, forgeries, reason);
                             await probe(
@@ -3676,8 +3674,15 @@ await runWithLocalRunLog(
                                 registrationForgeries,
                                 'A registration header was refused.',
                             );
-                            await probeForeignPoll(position);
                         }
+                        if (position === shareProbe && !noResult)
+                            await probe(
+                                position,
+                                shareForgeries,
+                                'The release shares are incomplete.',
+                            );
+                        if (position === voteProbe)
+                            await probeForeignPoll(position);
                     },
                 ),
             ]);
