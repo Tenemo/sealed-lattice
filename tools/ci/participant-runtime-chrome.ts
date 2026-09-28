@@ -6,9 +6,10 @@ import { killProcessTree } from '#tools/ci/run-command.js';
 
 // Drives an installed release Chrome over its DevTools socket with Runtime
 // and Page control, and records CPU samples only when a trace is requested.
-// Network inspection would retain payloads and change the storage workload,
-// so it is never enabled. Each participant has its own disk-backed profile
-// under the task workspace.
+// It attaches to the page's workers without enabling any of their domains,
+// so that it can read their JavaScript heaps. Network inspection would
+// retain payloads and change the storage workload, so it is never enabled.
+// Each participant has its own disk-backed profile under the task workspace.
 type DevToolsMessage = {
     id?: number;
     method?: string;
@@ -18,11 +19,29 @@ type DevToolsMessage = {
     error?: unknown;
 };
 
+// The JavaScript heaps that a page and its workers last reported, together:
+// the bytes their objects use and hold, and the bytes of their array
+// buffers' and external strings' storage; with the attached sessions, the
+// page's and its workers', and how many of them have reported.
+type JavaScriptHeaps = Readonly<{
+    usedBytes: number;
+    totalBytes: number;
+    backingBytes: number;
+    sessions: number;
+    reported: number;
+}>;
+
 export type ChromeParticipant = Readonly<{
     processIdentifier: number;
     version: string;
     launchArguments: readonly string[];
     evaluate(expression: string): Promise<unknown>;
+    // The JavaScript heaps that the page and its current workers last
+    // reported; each that has no request outstanding is asked again. A
+    // worker answers only between tasks, so one whose code runs without
+    // returning to its event loop keeps its last report meanwhile, and one
+    // that has not answered yet counts for nothing.
+    heaps(): JavaScriptHeaps;
     // Runs the action while the browser records the V8 CPU samples of its
     // page and worker threads, and returns the recorded trace events.
     trace<Result>(
@@ -44,9 +63,11 @@ const chromeExecutable = () =>
           ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
           : '/usr/bin/google-chrome';
 
+// Launches Chrome for a participant's page, passing V8 the flags when given.
 export const launchChromeParticipant = async (
     profileDirectory: string,
     origin: string,
+    javaScriptFlags?: string,
 ): Promise<ChromeParticipant> => {
     const executable = chromeExecutable();
     await access(executable);
@@ -62,6 +83,9 @@ export const launchChromeParticipant = async (
         '--disable-extensions',
         '--remote-debugging-port=0',
         '--user-data-dir=' + profile,
+        ...(javaScriptFlags === undefined
+            ? []
+            : ['--js-flags=' + javaScriptFlags]),
         'about:blank',
     ];
     const child = spawn(executable, launchArguments, {
@@ -80,6 +104,12 @@ export const launchChromeParticipant = async (
     let sequence = 0;
     let onLoad: (() => void) | undefined;
     let pageSession = '';
+    // The sessions of the page's workers that are still attached.
+    const workerSessions = new Set<string>();
+    // Each attached session's last reported heap usage, and the sessions
+    // whose request for it is outstanding.
+    const heapUsages = new Map<string, Record<string, unknown>>();
+    const heapRequests = new Set<string>();
     // A crashed page answers none of its requests, so each fails at once.
     let pageCrashed = false;
     // The trace being recorded: its events so far, and what ends it.
@@ -200,6 +230,28 @@ export const launchChromeParticipant = async (
                             new Error('The participant page crashed.'),
                         );
                     }
+            } else if (
+                message.method === 'Target.attachedToTarget' &&
+                message.sessionId === pageSession
+            ) {
+                const { sessionId, targetInfo } = message.params as {
+                    sessionId: string;
+                    targetInfo: { type: string };
+                };
+                if (targetInfo.type === 'worker') workerSessions.add(sessionId);
+            } else if (message.method === 'Target.detachedFromTarget') {
+                // A detached worker answers none of its requests.
+                const detached = String(
+                    (message.params as { sessionId?: string } | undefined)
+                        ?.sessionId,
+                );
+                workerSessions.delete(detached);
+                heapUsages.delete(detached);
+                for (const [id, request] of pending)
+                    if (request.sessionId === detached) {
+                        pending.delete(id);
+                        request.reject(new Error('The worker detached.'));
+                    }
             } else if (message.method === 'Tracing.dataCollected')
                 tracing?.events.push(
                     ...((message.params?.value as unknown[] | undefined) ?? []),
@@ -225,6 +277,11 @@ export const launchChromeParticipant = async (
         );
         await send('Page.enable', {}, pageSession);
         await send('Runtime.enable', {}, pageSession);
+        await send(
+            'Target.setAutoAttach',
+            { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+            pageSession,
+        );
         let timer: ReturnType<typeof setTimeout> | undefined;
         const loaded = new Promise<void>((resolve, reject) => {
             onLoad = resolve;
@@ -256,6 +313,38 @@ export const launchChromeParticipant = async (
             launchArguments,
             close,
             crash,
+            heaps: () => {
+                const sessions = [pageSession, ...workerSessions];
+                for (const session of sessions) {
+                    if (heapRequests.has(session)) continue;
+                    heapRequests.add(session);
+                    void send('Runtime.getHeapUsage', {}, session)
+                        .then(
+                            (usage) => {
+                                if (
+                                    session === pageSession ||
+                                    workerSessions.has(session)
+                                )
+                                    heapUsages.set(session, usage);
+                            },
+                            () => undefined,
+                        )
+                        .finally(() => heapRequests.delete(session));
+                }
+                const usages = [...heapUsages.values()];
+                const sum = (field: string) =>
+                    usages.reduce(
+                        (total, usage) => total + Number(usage[field] ?? 0),
+                        0,
+                    );
+                return {
+                    usedBytes: sum('usedSize'),
+                    totalBytes: sum('totalSize'),
+                    backingBytes: sum('backingStorageSize'),
+                    sessions: sessions.length,
+                    reported: usages.length,
+                };
+            },
             trace: async (action) => {
                 if (tracing !== undefined)
                     throw new Error('Chrome is already recording a trace.');

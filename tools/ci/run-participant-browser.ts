@@ -66,15 +66,21 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // of honest participants through each stage once, with no crash, forgery or
 // other roster. With --profile, Chrome records every operation's CPU samples,
 // and their summary lies beside the run. With --base-port, the origins start
-// at another port, so runs of other checkouts may run beside this one.
+// at another port, so runs of other checkouts may run beside this one. With
+// --memory-pressure, a plain run's second contributor first contributes in a
+// browser that caps each WebAssembly memory below what its contribution
+// needs, which must leave it pending rather than stopped, and its next visit
+// completes the contribution.
 const foreignOption = '--foreign-poll=';
 const profileOption = '--profile';
 const basePortOption = '--base-port=';
+const memoryPressureOption = '--memory-pressure';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
     .find((value) => value.startsWith(foreignOption))
     ?.slice(foreignOption.length);
 const profiling = allArguments.includes(profileOption);
+const memoryPressure = allArguments.includes(memoryPressureOption);
 const basePortArgument = allArguments
     .find((value) => value.startsWith(basePortOption))
     ?.slice(basePortOption.length);
@@ -82,6 +88,7 @@ const commandArguments = allArguments.filter(
     (value) =>
         !value.startsWith(foreignOption) &&
         value !== profileOption &&
+        value !== memoryPressureOption &&
         !value.startsWith(basePortOption),
 );
 const mode =
@@ -95,7 +102,11 @@ assert.ok(
     counts.length === 0 ||
         (counts.length === 2 &&
             counts.every((value) => /^[1-9]\d*$/u.test(value))),
-    'Optionally select the participant and option counts, then no-result, empty, rosters or plain, another poll with --foreign-poll=<run directory>, --profile and --base-port=<port>.',
+    'Optionally select the participant and option counts, then no-result, empty, rosters or plain, another poll with --foreign-poll=<run directory>, --profile, --memory-pressure and --base-port=<port>.',
+);
+assert.ok(
+    !memoryPressure || mode === 'plain',
+    'Only a plain run applies memory pressure.',
 );
 assert.ok(
     (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
@@ -124,6 +135,9 @@ const secondRosterCopy = 'second-roster';
 const secondRosterPath = '/second-roster/';
 // The host guard for each participant's Chrome process tree.
 const participantMemoryLimit = 3_221_225_472;
+// The WebAssembly pages each memory of a pressured browser may hold, fewer
+// than a contribution's worker needs.
+const pressurePages = 2048;
 // Each browser's page starts a helper per spare processor, up to eight,
 // beside the operation's worker, so the host runs as many browsers at once
 // as it has processors for all of their workers, and no operation's work
@@ -781,6 +795,17 @@ await runWithLocalRunLog(
         // Chrome profile at that participant's origin: the equivocator's, and
         // an honest participant's whose records are then lost.
         const copies = new Map<string, number>();
+        // The participants whose next browser caps its WebAssembly memories,
+        // and the operations that ran under that cap.
+        const pressured = new Set<number>();
+        const memoryPressures: Readonly<{
+            position: number;
+            operation: string;
+            pages: number;
+            before: number;
+            generation: number;
+            reason: string;
+        }>[] = [];
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
@@ -901,7 +926,11 @@ await runWithLocalRunLog(
                         sampled(bytes);
                         log.writeEvent({
                             eventType: 'participant-process-memory',
-                            details: { ...details, bytes },
+                            details: {
+                                ...details,
+                                bytes,
+                                heaps: browser.heaps(),
+                            },
                         });
                         if (bytes > participantMemoryLimit)
                             guardFailure ??= new Error(
@@ -983,6 +1012,9 @@ await runWithLocalRunLog(
                                 (copy === secondRosterCopy
                                     ? secondRosterPath
                                     : ''),
+                            copy === undefined && pressured.has(position)
+                                ? `--wasm-max-mem-pages=${String(pressurePages)}`
+                                : undefined,
                         );
                         browserDetails.set(key, details);
                         log.writeEvent({
@@ -1186,6 +1218,41 @@ await runWithLocalRunLog(
             // shutdown can outlast its deadline when other browsers write.
             const endBrowser = async (position: number) => {
                 await browsers.crash(participantBrowser(position));
+            };
+            // Runs a participant's operation in a browser that caps each
+            // WebAssembly memory at the pressure pages. Exhausting that bound
+            // leaves the participant pending, not stopped, whatever its
+            // operation retained; the capped browser then ends.
+            const pressure = async (position: number, operation: string) => {
+                await endBrowser(position);
+                pressured.add(position);
+                try {
+                    const before = await headGeneration(position);
+                    const result = await request(position, operation);
+                    assert.ok(
+                        result.status === 'pending' &&
+                            result.reason.includes(
+                                'exhausted its memory bound',
+                            ),
+                        `${operation} at position ${String(position)} under memory pressure: ${JSON.stringify(result)}`,
+                    );
+                    const details = {
+                        position,
+                        operation,
+                        pages: pressurePages,
+                        before,
+                        generation: await headGeneration(position),
+                        reason: result.reason,
+                    };
+                    memoryPressures.push(details);
+                    log.writeEvent({
+                        eventType: 'participant-memory-pressure',
+                        details,
+                    });
+                } finally {
+                    await endBrowser(position);
+                    pressured.delete(position);
+                }
             };
             // Copies a participant's private state into its own Chrome
             // profile at the participant's origin, whose browser opens when
@@ -1582,6 +1649,8 @@ await runWithLocalRunLog(
                 ))
                     assert.equal(details.generation, 3);
                 const contributing = members.slice(0, setupContributorCount);
+                if (memoryPressure)
+                    await pressure(contributing[1].origin, 'contribute');
                 await Promise.all([
                     ...contributing.map(async (member) => {
                         assert.equal(
@@ -1721,11 +1790,17 @@ await runWithLocalRunLog(
                             identifiers,
                             topCount,
                             profiled: profiling,
+                            memoryPressures,
                             scope: [
                                 'Browser registration, roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result of one roster of honest participants, each stage once with no crash, forgery or other roster, in the maintained participant runtime in external Chrome.',
                                 ...(profiling
                                     ? [
                                           'Chrome recorded the CPU samples of every operation, which slows it.',
+                                      ]
+                                    : []),
+                                ...(memoryPressure
+                                    ? [
+                                          'The second contributor first contributed in a browser that caps each WebAssembly memory below what its contribution needs, which left it pending, and its next visit completed the contribution.',
                                       ]
                                     : []),
                             ].join(' '),

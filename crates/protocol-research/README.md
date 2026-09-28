@@ -119,7 +119,9 @@ A plain run carries one roster of honest participants through each stage once, w
 pnpm run research:participant -- 3 2 plain
 ```
 
-With `--profile`, Chrome records the CPU samples of every participant operation, and the run directory keeps a summary for each operation of the functions that spent the most time at the top of a sampled stack and anywhere on it.
+With `--profile`, Chrome records the CPU samples of every participant operation, and the run directory keeps a summary for each operation of the functions that spent the most time at the top of a sampled stack and anywhere on it. With `--memory-pressure`, the second setup contributor first contributes in a browser that caps each WebAssembly memory below what its contribution needs; that visit ends pending with the worker's exhausted memory bound rather than stopping the participant, and the next visit completes the contribution.
+
+Every run records, with each sample of a participant's process memory, the JavaScript heap use that its page and each of its workers and helpers last reported; a worker busy in a module call reports only when it returns to its event loop.
 
 The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
