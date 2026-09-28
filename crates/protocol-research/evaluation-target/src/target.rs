@@ -285,6 +285,8 @@ impl ClassifiedClosedInventory {
                         }
                         break;
                     }
+                    // The job has not ended; executing again looks anew.
+                    Ok(Progress::Waiting(_)) => {}
                     Ok(Progress::Records(request)) => {
                         for ordinal in request.first..request.first + request.count {
                             let record = store.get_record(ordinal, request.prime)?;

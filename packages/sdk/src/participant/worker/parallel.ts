@@ -7,15 +7,17 @@
 // bounds its own instance to what the helpers leave. The module submits
 // deterministic jobs through a shared queue and later takes each output of the
 // length it declared, so every output equals the one it computes alone; without
-// helpers it runs every job itself. A job may stream one shared part, which its
-// helper reads in pieces as it runs instead of copying it with the rest of its
-// input. A job pinned to a helper runs there after that helper's earlier pinned
-// jobs, which lets the module keep state on a helper between jobs. After
-// startup the worker and its helpers exchange only shared memory. The helpers
-// are the page's workers rather than the worker's own, so the worker's end
-// never waits for theirs, and the page ends them all together. A helper that
-// does not start in time leaves the module to run every job itself; a failed
-// job and an exhausted arena end the operation as pending.
+// helpers it runs every job itself. The module waits for a job, or leaves the
+// worker to await its end while the worker's other tasks run. A job may stream
+// one shared part, which its helper reads in pieces as it runs instead of
+// copying it with the rest of its input. A job pinned to a helper runs there
+// after that helper's earlier pinned jobs, which lets the module keep state on
+// a helper between jobs. After startup the worker and its helpers exchange
+// only shared memory. The helpers are the page's workers rather than the
+// worker's own, so the worker's end never waits for theirs, and the page ends
+// them all together. A helper that does not start in time leaves the module to
+// run every job itself; a failed job and an exhausted arena end the operation
+// as pending.
 
 import { ResourceFailure } from './kernel.js';
 
@@ -349,6 +351,12 @@ export type ParallelHelpers = Readonly<{
         largestHelperBytes: number;
         arenaBytes: number;
     }>;
+    // Shares records the worker read, one after another, for the module to
+    // take by the returned handle; only helpers read shared bytes.
+    shareRecords: (records: readonly Uint8Array[]) => number;
+    // Resolves once the job of the ticket has ended, without blocking the
+    // worker.
+    whenEnded: (ticket: number) => Promise<void>;
     stop: () => void;
 }>;
 
@@ -366,9 +374,12 @@ export const noParallelHelpers: ParallelHelpers = {
         wait: noJobs,
         take: noJobs,
         discard: noJobs,
+        ended: noJobs,
         read: noJobs,
     }),
     memory: () => ({ helperBytes: 0, largestHelperBytes: 0, arenaBytes: 0 }),
+    shareRecords: noJobs,
+    whenEnded: noJobs,
     stop: () => undefined,
 };
 
@@ -618,6 +629,13 @@ const createHost = (
             }
         }
     };
+    // The running job of a ticket the module holds.
+    const heldJob = (ticket: number) => {
+        const running = tickets.get(ticket);
+        if (running === undefined || discarded.has(ticket))
+            throw new Error('The parallel job is unknown.');
+        return running;
+    };
     const awaitEnd = (slot: number) => {
         const word = stateWord(slot);
         for (;;) {
@@ -763,9 +781,7 @@ const createHost = (
             return ticket;
         },
         wait: (ticket: number) => {
-            const running = tickets.get(ticket);
-            if (running === undefined || discarded.has(ticket))
-                throw new Error('The parallel job is unknown.');
+            const running = heldJob(ticket);
             const state = awaitEnd(running.slot);
             settle(running);
             if (state === exhausted)
@@ -804,6 +820,10 @@ const createHost = (
             discarded.add(ticket);
             sweep();
         },
+        ended: (ticket: number) =>
+            Atomics.load(control, stateWord(heldJob(ticket).slot)) === queued
+                ? 0
+                : 1,
         read: () => {
             throw new Error('Only a helper serves a streamed part.');
         },
@@ -826,6 +846,33 @@ const createHost = (
                 largestHelperBytes,
                 arenaBytes: arenaBuffer.byteLength,
             };
+        },
+        shareRecords: (records: readonly Uint8Array[]) => {
+            const length = records.reduce(
+                (sum, record) => sum + record.length,
+                0,
+            );
+            if (length > maximumJobBytes)
+                throw new Error('A parallel input exceeds its bound.');
+            const block = allocate(length);
+            let offset = block.offset;
+            for (const record of records) {
+                arena.set(record, offset);
+                offset += record.length;
+            }
+            const handle = nextShare;
+            nextShare += 1;
+            shares.set(handle, { block, length, references: 1 });
+            return handle;
+        },
+        whenEnded: async (ticket: number) => {
+            const word = stateWord(heldJob(ticket).slot);
+            for (;;) {
+                const state = Atomics.load(control, word);
+                if (state !== queued) return;
+                const waited = Atomics.waitAsync(control, word, state);
+                if (waited.async) await waited.value;
+            }
         },
         // Each helper leaves its loop and closes; the page ends its worker.
         stop: () => {

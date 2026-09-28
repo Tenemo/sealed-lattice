@@ -449,6 +449,7 @@ impl Arithmetic {
                     context,
                 } => match self.advance_keyed(keyed, identities)? {
                     Keyed::Records(request) => return Ok(Step::Records(request)),
+                    Keyed::Waiting(number) => return Ok(Step::Waiting(number)),
                     // The first pair of groups' sums: the intermediate
                     // polynomial and the quadratic product's linear term.
                     Keyed::Done([intermediate, quadratic_linear])
@@ -478,6 +479,7 @@ impl Arithmetic {
                 KeyedWork::Rotation { constant, keyed } => {
                     return match self.advance_keyed(keyed, identities)? {
                         Keyed::Records(request) => Ok(Step::Records(request)),
+                        Keyed::Waiting(number) => Ok(Step::Waiting(number)),
                         Keyed::Done([constant_term, linear]) => {
                             self.add_lifted(constant, &constant_term, jobs::Lifted::External);
                             drop(constant_term);
@@ -517,6 +519,17 @@ impl Arithmetic {
     fn deliver(&self, work: &mut KeyedWork, ordinal: usize, prime: usize, record: &[u8]) -> bool {
         let (KeyedWork::Product { keyed, .. } | KeyedWork::Rotation { keyed, .. }) = work;
         self.deliver_record(keyed, ordinal, prime, record)
+    }
+    /// Takes the records of the work's pending request, which the host
+    /// shared itself; false when they are not those records.
+    fn deliver_shared(
+        &self,
+        work: &mut KeyedWork,
+        request: RecordRequest,
+        records: parallel_work::Shared,
+    ) -> bool {
+        let (KeyedWork::Product { keyed, .. } | KeyedWork::Rotation { keyed, .. }) = work;
+        self.deliver_shared_records(keyed, request, records)
     }
     fn add(&self, target: &mut [u64], other: &[u64]) {
         let mut sum = [0u64; MAXIMUM_WORDS];
@@ -577,9 +590,11 @@ enum KeyedWork {
         keyed: KeyedProduct,
     },
 }
-/// Keyed work's next need: the records of a request, or its ciphertext.
+/// Keyed work's next need: the records of a request, the end of a job the
+/// host awaits, or its ciphertext.
 enum Step {
     Records(RecordRequest),
+    Waiting(u32),
     Done([Polynomial; 2]),
 }
 
@@ -723,6 +738,7 @@ mod tests {
         loop {
             match arithmetic.advance(&mut work, identities).unwrap() {
                 Step::Done(value) => return value,
+                Step::Waiting(_) => {}
                 Step::Records(request) => {
                     for (ordinal, record) in records
                         .iter()

@@ -75,6 +75,8 @@ mod host {
         pub fn take(ticket: u32, pointer: *mut u8) -> u32;
         /// Waits for the job and clears its output untaken.
         pub fn discard(ticket: u32);
+        /// Whether the job has ended, without waiting for it.
+        pub fn ended(ticket: u32) -> u32;
         /// Copies bytes of the running job's streamed part from a position;
         /// only a helper's host serves it.
         pub fn read(position: u32, pointer: *mut u8, length: u32);
@@ -140,6 +142,34 @@ pub fn share(bytes: Zeroizing<Vec<u8>>) -> Shared {
         local: bytes,
         #[cfg(target_arch = "wasm32")]
         remote: 0,
+    }
+}
+
+/// Bytes that the host shared itself, such as records it read from
+/// storage, by their handle and length, which the host holds. Only a host
+/// with helpers shares bytes itself.
+#[cfg(target_arch = "wasm32")]
+pub fn adopt(remote: u32, length: usize) -> Shared {
+    assert!(
+        helpers() > 0 && remote != 0 && length <= MAXIMUM_JOB_BYTES,
+        "Adopted bytes"
+    );
+    Shared {
+        local: Zeroizing::new(Vec::new()),
+        length,
+        remote,
+    }
+}
+
+impl Shared {
+    /// The bytes' length.
+    pub fn length(&self) -> usize {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.length
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.local.len()
     }
 }
 
@@ -441,6 +471,16 @@ pub fn submit(
 }
 
 impl Ticket {
+    /// The host's number of a job that has not ended, which the host can
+    /// await without this instance waiting; none once it has ended, or when
+    /// only this instance waits for it.
+    pub fn pending(&self) -> Option<u32> {
+        #[cfg(target_arch = "wasm32")]
+        if self.remote != 0 && unsafe { host::ended(self.remote) } == 0 {
+            return Some(self.remote);
+        }
+        None
+    }
     /// The job's output.
     pub fn wait(mut self) -> Zeroizing<Vec<u8>> {
         #[cfg(target_arch = "wasm32")]

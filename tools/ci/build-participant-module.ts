@@ -24,6 +24,7 @@ const allowedImports = [
     'enrollment.fill_random',
     'enrollment.staged_chunk',
     'parallel.discard',
+    'parallel.ended',
     'parallel.helpers',
     'parallel.read',
     'parallel.release',

@@ -604,6 +604,7 @@ type HostImports = Readonly<{
     take: (ticket: number, pointer: number) => number;
     share: (pointer: number, length: number) => number;
     release: (handle: number) => void;
+    ended: (ticket: number) => number;
 }>;
 // The worker's side of the stand-in's jobs, each one sixteen-byte part.
 const standInHost = (helpers: ParallelHelpers) => {
@@ -792,6 +793,81 @@ describe('parallel job host', () => {
                 'A parallel job exceeds its bound.',
             );
             host.release(other);
+        } finally {
+            helpers.stop();
+        }
+    });
+
+    it('streams records the worker shares one after another as one part, up to the job bound', async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(streamingStandIn),
+            helperPorts(1),
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        try {
+            const memory = new WebAssembly.Memory({ initial: 1 });
+            const host = helpers.imports(
+                () => memory,
+            ) as unknown as HostImports;
+            const encoder = new TextEncoder();
+            const joined = helpers.shareRecords([
+                encoder.encode('str'),
+                encoder.encode('eam'),
+                encoder.encode('ed'),
+            ]);
+            new Uint32Array(memory.buffer, 0, 3).set([2, joined, 0]);
+            const ticket = host.submit(5, 1, 0, 1, 8);
+            host.release(joined);
+            host.wait(ticket);
+            expect(host.take(ticket, 512)).toBe(0);
+            expect(
+                Buffer.from(new Uint8Array(memory.buffer, 512, 8)).toString(),
+            ).toBe('streamed');
+            const half = new Uint8Array(4 << 20);
+            host.release(helpers.shareRecords([half, half]));
+            expect(() =>
+                helpers.shareRecords([half, half, new Uint8Array(1)]),
+            ).toThrow('A parallel input exceeds its bound.');
+        } finally {
+            helpers.stop();
+        }
+    });
+
+    it('lets the worker await a running job while its other tasks run, and tells whether the job has ended', async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(streamingStandIn),
+            helperPorts(1),
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        try {
+            const memory = new WebAssembly.Memory({ initial: 1 });
+            const host = helpers.imports(
+                () => memory,
+            ) as unknown as HostImports;
+            // The job computes far longer than a timer the worker starts
+            // before it awaits the job takes to fire.
+            const busy = host.submit(7, 1, 0, 0, 8);
+            expect(host.ended(busy)).toBe(0);
+            let fired = false;
+            setTimeout(() => {
+                fired = true;
+            }, 0);
+            await helpers.whenEnded(busy);
+            expect(fired).toBe(true);
+            expect(host.ended(busy)).toBe(1);
+            // A job that has ended resolves at once.
+            await helpers.whenEnded(busy);
+            host.wait(busy);
+            expect(host.take(busy, 256)).toBe(0);
+            // A taken job is no longer held.
+            expect(() => host.ended(busy)).toThrow(
+                'The parallel job is unknown.',
+            );
+            await expect(helpers.whenEnded(busy)).rejects.toThrow(
+                'The parallel job is unknown.',
+            );
         } finally {
             helpers.stop();
         }

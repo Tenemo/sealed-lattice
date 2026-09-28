@@ -503,7 +503,7 @@ const readStoredBlobs = async (
 const keyRecord = (ordinal: number, prime: number) => ['key', ordinal, prime];
 
 // The stored records modulo a prime of the keys from the first ordinal, in
-// one transaction, each after the prime, as the module takes it.
+// one transaction.
 const readStoredRecords = async (
     storage: IDBDatabase,
     first: number,
@@ -522,10 +522,7 @@ const readStoredRecords = async (
                 throw new PublicInputFailure(
                     'A stored evaluation key is missing.',
                 );
-            return concatenate(
-                unsigned32(prime),
-                new Uint8Array(await value.arrayBuffer()),
-            );
+            return new Uint8Array(await value.arrayBuffer());
         }),
     );
 };
@@ -692,7 +689,8 @@ const evaluate = async (
             }
             // The step ends with the values whose last use it was, or asks
             // for key records first, naming the requests that follow, whose
-            // records are read while earlier ones are delivered.
+            // records are read while earlier ones are delivered and while a
+            // helper's job the step awaits runs.
             const ahead = new Map<string, Promise<Uint8Array[]>>();
             for (;;) {
                 const [status, ...rest] = words(evaluationCommand(context, 15));
@@ -717,6 +715,12 @@ const evaluate = async (
                     throw new PublicInputFailure(
                         'A stored evaluation key changed.',
                     );
+                if (status === 3) {
+                    if (rest.length !== 1)
+                        throw new Error('The evaluation step is malformed.');
+                    await context.parallel.whenEnded(rest[0]);
+                    continue;
+                }
                 if (status !== 1 || rest.length === 0 || rest.length % 3 !== 0)
                     throw new Error('The evaluation step is malformed.');
                 const requests = Array.from(
@@ -747,20 +751,44 @@ const evaluate = async (
                 );
                 ahead.clear();
                 for (const [key, records] of named) ahead.set(key, records);
-                const [[first]] = requests;
+                const [[first, count, prime]] = requests;
                 const records = await pending;
-                for (const [index, record] of records.entries())
+                // With helpers, the records go to the helpers' shared memory
+                // at once rather than through the module's.
+                if (context.parallel.count > 0) {
+                    const length = records.reduce(
+                        (sum, record) => sum + record.length,
+                        0,
+                    );
+                    const handle = context.parallel.shareRecords(records);
                     if (
                         tryEvaluationCommand(
                             context,
-                            21,
-                            first + index,
-                            record,
+                            23,
+                            handle,
+                            concatenate(
+                                ...[first, count, prime, length].map((value) =>
+                                    unsigned32(value),
+                                ),
+                            ),
                         ) === undefined
                     )
                         throw new PublicInputFailure(
                             'A stored evaluation key changed.',
                         );
+                } else
+                    for (const [index, record] of records.entries())
+                        if (
+                            tryEvaluationCommand(
+                                context,
+                                21,
+                                first + index,
+                                concatenate(unsigned32(prime), record),
+                            ) === undefined
+                        )
+                            throw new PublicInputFailure(
+                                'A stored evaluation key changed.',
+                            );
             }
         }
         if (kernel.evaluation_target_body_length() === 0)

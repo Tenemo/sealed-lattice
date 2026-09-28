@@ -386,6 +386,19 @@ pub(super) struct Sources {
     started: Vec<Ticket>,
 }
 
+/// The prime and group of a keyed product's job of the index among the
+/// jobs of the primes' two groups. The jobs come in batches of as many
+/// primes as there are helpers, each batch's first group before its second,
+/// so that each helper, which holds one prime of a batch, has a job while
+/// the batch runs; without helpers each prime's groups come in turn.
+fn keyed_job(index: usize, primes: usize, helpers: usize) -> (usize, usize) {
+    let batch = helpers.max(1);
+    let first = index / (KEYED_GROUPS * batch) * batch;
+    let held = batch.min(primes - first);
+    let within = index - KEYED_GROUPS * first;
+    (first + within % held, within / held)
+}
+
 /// The key records a keyed product needs next: one group's keys from the
 /// first ordinal, modulo one prime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -397,9 +410,10 @@ pub struct RecordRequest {
 
 /// A keyed product in progress: the sums of a polynomial's gadget digits
 /// times each gadget coordinate's key of two groups, one job for each prime
-/// and group in that order, each over the records of its group's keys
-/// modulo its prime, which the caller delivers. Each prime's digits are
-/// kept from just before its first group's job to its last group's.
+/// and group in the order of [`keyed_job`], each over the records of its
+/// group's keys modulo its prime, which the caller delivers. Each prime's
+/// digits are kept from just before its first group's job to its last
+/// group's.
 pub(super) struct KeyedProduct {
     session: u64,
     context: RecordContext,
@@ -408,13 +422,17 @@ pub(super) struct KeyedProduct {
     started: Vec<Ticket>,
     requested: usize,
     delivered: Vec<u8>,
+    // The pending request's records when the host shared them itself.
+    shared: Option<Shared>,
     running: VecDeque<(usize, Ticket)>,
     sums: [Vec<Vec<u64>>; KEYED_GROUPS],
 }
-/// A keyed product's next need: the records of a request, or both groups'
-/// sums modulo each prime, which the caller lifts.
+/// A keyed product's next need: the records of a request, the end of a
+/// job the host awaits, by the host's number, or both groups' sums modulo
+/// each prime, which the caller lifts.
 pub(super) enum Keyed {
     Records(RecordRequest),
+    Waiting(u32),
     Done([Vec<Vec<u64>>; KEYED_GROUPS]),
 }
 
@@ -618,6 +636,7 @@ impl Arithmetic {
             started: Vec::new(),
             requested: 0,
             delivered: Vec::new(),
+            shared: None,
             running: VecDeque::new(),
             sums: std::array::from_fn(|_| vec![Vec::new(); self.external_primes]),
         }
@@ -627,13 +646,13 @@ impl Arithmetic {
         self.keyed_request_at(product.context.ordinal, product.requested)
     }
     /// The records that the job of the index needs in a keyed product whose
-    /// first group's first key has the ordinal: each prime's jobs come in
-    /// group order.
+    /// first group's first key has the ordinal.
     fn keyed_request_at(&self, ordinal: usize, index: usize) -> RecordRequest {
+        let (prime, group) = keyed_job(index, self.external_primes, parallel_work::helpers());
         RecordRequest {
-            first: ordinal + (index % KEYED_GROUPS) * self.gadget_length,
+            first: ordinal + group * self.gadget_length,
             count: self.gadget_length,
-            prime: index / KEYED_GROUPS,
+            prime,
         }
     }
     /// The requests of such a keyed product from the job of the index on.
@@ -658,6 +677,7 @@ impl Arithmetic {
         let request = self.keyed_request(product);
         let received = product.delivered.len() / record_bytes;
         if product.requested == KEYED_GROUPS * self.external_primes
+            || product.shared.is_some()
             || prime != request.prime
             || received == request.count
             || ordinal != request.first + received
@@ -673,10 +693,31 @@ impl Arithmetic {
         product.delivered.extend_from_slice(record);
         true
     }
+    /// Takes the pending request's records, which the host shared itself
+    /// one after another; false when they are not that whole request's
+    /// records or a record of it was delivered.
+    pub(super) fn deliver_shared_records(
+        &self,
+        product: &mut KeyedProduct,
+        request: RecordRequest,
+        records: Shared,
+    ) -> bool {
+        if product.requested == KEYED_GROUPS * self.external_primes
+            || request != self.keyed_request(product)
+            || !product.delivered.is_empty()
+            || product.shared.is_some()
+            || records.length() != request.count * 8 * self.degree
+        {
+            return false;
+        }
+        product.shared = Some(records);
+        true
+    }
     /// Starts the job of a complete delivery and takes the outputs beyond
-    /// the window. Returns the next request, or both groups' lifted sums
-    /// once every job has ended. Fails when a job's records are not those
-    /// whose identities the caller holds, by ordinal and prime.
+    /// the window. Returns the next request, the oldest such job while it
+    /// runs when the host can await it, or both groups' sums once every job
+    /// has ended. Fails when a job's records are not those whose identities
+    /// the caller holds, by ordinal and prime.
     pub(super) fn advance_keyed(
         &self,
         product: &mut KeyedProduct,
@@ -684,10 +725,16 @@ impl Arithmetic {
     ) -> Result<Keyed, ()> {
         let total = KEYED_GROUPS * self.external_primes;
         let record_bytes = 8 * self.degree;
-        if product.requested < total && product.delivered.len() == self.gadget_length * record_bytes
+        if product.requested < total
+            && (product.shared.is_some()
+                || product.delivered.len() == self.gadget_length * record_bytes)
         {
             let request = self.keyed_request(product);
-            let group = product.requested % KEYED_GROUPS;
+            let (_, group) = keyed_job(
+                product.requested,
+                self.external_primes,
+                parallel_work::helpers(),
+            );
             if group == 0
                 && let Some(polynomial) = &product.polynomial
             {
@@ -713,7 +760,10 @@ impl Arithmetic {
                 ..product.context
             }
             .write(&mut input);
-            let records = share(Zeroizing::new(std::mem::take(&mut product.delivered)));
+            let records = product
+                .shared
+                .take()
+                .unwrap_or_else(|| share(Zeroizing::new(std::mem::take(&mut product.delivered))));
             let ticket = submit(
                 &KEYED,
                 Some(request.prime),
@@ -733,9 +783,12 @@ impl Arithmetic {
             window()
         };
         while product.running.len() > window {
+            if let Some(number) = product.running[0].1.pending() {
+                return Ok(Keyed::Waiting(number));
+            }
             let (index, ticket) = product.running.pop_front().unwrap();
             let output = ticket.wait();
-            let (prime, group) = (index / KEYED_GROUPS, index % KEYED_GROUPS);
+            let (prime, group) = keyed_job(index, self.external_primes, parallel_work::helpers());
             let first = product.context.ordinal + group * self.gadget_length;
             let (held, sum) = output.split_at(IDENTITY_BYTES * self.gadget_length);
             for (digit, identity) in held.chunks_exact(IDENTITY_BYTES).enumerate() {
@@ -838,6 +891,8 @@ impl Arithmetic {
                 Keyed::Done(sums) => {
                     return Ok(sums.map(|sums| self.lifted(&sums, Lifted::External)));
                 }
+                // The job has not ended; advancing again looks anew.
+                Keyed::Waiting(_) => {}
                 Keyed::Records(request) => {
                     for (ordinal, record) in records
                         .iter()
@@ -927,6 +982,141 @@ mod tests {
         arithmetic.tensors(&square, &square);
         arithmetic.tensors(&square, &[arithmetic.uniform(4), arithmetic.uniform(5)]);
         KEPT.with(|kept| assert!(kept.borrow().is_empty()));
+    }
+
+    // A request's records that the host shared itself give the delivered
+    // records' sums. Only the pending request's whole records are taken,
+    // never beside a record delivered one at a time, and a changed record
+    // among them differs from the held identity.
+    #[test]
+    fn shared_records_give_the_delivered_records_sums() {
+        let profile = Profile::new(3, 2).unwrap();
+        let arithmetic = Arithmetic::new(profile, TEST_DEGREE);
+        let gadget_length = arithmetic.gadget_length;
+        let value = arithmetic.uniform(1);
+        let keys: Vec<Polynomial> = (0..KEYED_GROUPS * gadget_length)
+            .map(|ordinal| arithmetic.uniform(100 + ordinal as u64))
+            .collect();
+        let held = arithmetic.held_records(&keys.iter().collect::<Vec<_>>(), context(0));
+        let expected = arithmetic
+            .run_keyed(arithmetic.keyed_product(&value, context(0)), &held)
+            .unwrap();
+        let (identities, records) = &held;
+        let joined = |request: RecordRequest| -> Vec<u8> {
+            records[request.first..request.first + request.count]
+                .iter()
+                .flat_map(|record| record[request.prime].iter().copied())
+                .collect()
+        };
+        let run = |changed: Option<usize>| -> Result<[Polynomial; KEYED_GROUPS], ()> {
+            let mut product = arithmetic.keyed_product(&value, context(0));
+            let mut index = 0;
+            loop {
+                match arithmetic.advance_keyed(&mut product, identities)? {
+                    Keyed::Done(sums) => {
+                        return Ok(sums.map(|sums| arithmetic.lifted(&sums, Lifted::External)));
+                    }
+                    Keyed::Waiting(_) => {}
+                    Keyed::Records(request) => {
+                        let mut bytes = joined(request);
+                        if changed == Some(index) {
+                            bytes[8 * TEST_DEGREE + 3] ^= 1;
+                        }
+                        assert!(arithmetic.deliver_shared_records(
+                            &mut product,
+                            request,
+                            share(Zeroizing::new(bytes))
+                        ));
+                        index += 1;
+                    }
+                }
+            }
+        };
+        assert_eq!(run(None).unwrap(), expected);
+        assert!(run(Some(3)).is_err());
+        let mut product = arithmetic.keyed_product(&value, context(0));
+        let Keyed::Records(request) = arithmetic.advance_keyed(&mut product, identities).unwrap()
+        else {
+            panic!("A keyed product needs records first.");
+        };
+        let other = RecordRequest {
+            prime: request.prime + 1,
+            ..request
+        };
+        assert!(!arithmetic.deliver_shared_records(
+            &mut product,
+            other,
+            share(Zeroizing::new(joined(other)))
+        ));
+        let mut short = joined(request);
+        short.pop();
+        assert!(!arithmetic.deliver_shared_records(
+            &mut product,
+            request,
+            share(Zeroizing::new(short))
+        ));
+        let mut long = joined(request);
+        long.push(0);
+        assert!(!arithmetic.deliver_shared_records(
+            &mut product,
+            request,
+            share(Zeroizing::new(long))
+        ));
+        assert!(arithmetic.deliver_record(
+            &mut product,
+            request.first,
+            request.prime,
+            &records[request.first][request.prime]
+        ));
+        assert!(!arithmetic.deliver_shared_records(
+            &mut product,
+            request,
+            share(Zeroizing::new(joined(request)))
+        ));
+        drop(product);
+        KEPT.with(|kept| kept.borrow_mut().clear());
+    }
+
+    // A keyed product's jobs name every prime's two groups once, each
+    // prime's first group before its second, and any run of as many jobs
+    // as there are helpers within a batch's group runs on that many
+    // helpers, where each prime's groups in turn would leave most idle.
+    #[test]
+    fn keyed_jobs_name_each_group_once_and_occupy_every_helper() {
+        for helpers in 0..=parallel_work::MAXIMUM_HELPERS {
+            let stride = helpers.max(1);
+            for primes in 1..=40 {
+                let jobs: Vec<_> = (0..KEYED_GROUPS * primes)
+                    .map(|index| keyed_job(index, primes, helpers))
+                    .collect();
+                let mut seen = vec![[None; KEYED_GROUPS]; primes];
+                for (index, &(prime, group)) in jobs.iter().enumerate() {
+                    assert!(prime < primes && group < KEYED_GROUPS);
+                    assert!(seen[prime][group].replace(index).is_none());
+                }
+                assert!(seen.iter().all(|groups| groups[0] < groups[1]));
+                for first in (0..primes).step_by(stride) {
+                    let held = stride.min(primes - first);
+                    for group in 0..KEYED_GROUPS {
+                        let start = KEYED_GROUPS * first + group * held;
+                        let mut helpers_used: Vec<_> = jobs[start..start + held]
+                            .iter()
+                            .map(|(prime, _)| prime % stride)
+                            .collect();
+                        helpers_used.sort_unstable();
+                        helpers_used.dedup();
+                        assert_eq!(helpers_used.len(), held);
+                    }
+                }
+                if helpers <= 1 {
+                    assert!(
+                        jobs.iter().enumerate().all(
+                            |(index, &job)| job == (index / KEYED_GROUPS, index % KEYED_GROUPS)
+                        )
+                    );
+                }
+            }
+        }
     }
 
     // At the full degree each set job's output stays within the job bound,

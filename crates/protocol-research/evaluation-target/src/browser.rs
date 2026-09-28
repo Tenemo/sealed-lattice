@@ -8,8 +8,8 @@ use registration_credentials::{
     poll::VerifiedPoll,
 };
 use rns_arithmetic_probe::ranking::{
-    DEGREE, Engine, KEY_RECORD_BYTES, PolynomialDecoder, Progress, Refusal, StoredValueRead,
-    stored_value_bytes,
+    DEGREE, Engine, KEY_RECORD_BYTES, PolynomialDecoder, Progress, RecordRequest, Refusal,
+    StoredValueRead, stored_value_bytes,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{cell::RefCell, sync::Arc};
@@ -370,8 +370,10 @@ impl State {
                 }
                 // Executed: the values whose last use it was. Records: the
                 // request the host delivers next and those that follow it,
-                // whose records the host may read ahead. A delivered key
-                // record that is not the stored one ends the evaluation.
+                // whose records the host may read ahead. Waiting: the job
+                // whose end the host awaits before it asks again. A
+                // delivered key record that is not the stored one ends the
+                // evaluation.
                 match self.engine()?.execute() {
                     Ok(Progress::Executed(retired)) => {
                         self.word(0);
@@ -388,6 +390,10 @@ impl State {
                                 self.word(value);
                             }
                         }
+                    }
+                    Ok(Progress::Waiting(number)) => {
+                        self.word(3);
+                        self.word(number as usize);
                     }
                     Err(Refusal::Identity) => {
                         self.session = None;
@@ -463,6 +469,32 @@ impl State {
                     .and_then(|session| session.engine.as_mut())
                     .ok_or(Error::Arithmetic)?
                     .key_record(argument, prime, record)
+                    .map_err(|_| Error::Storage)
+            }
+            23 => {
+                // The request's key records, which the host shared itself
+                // one after another: their handle, and the request's first
+                // ordinal, count and prime and the records' length.
+                if length != 16 {
+                    return Err(Error::Encoding);
+                }
+                let [first, count, prime, bytes] = std::array::from_fn(|index| {
+                    u32::from_le_bytes(self.input[4 * index..4 * (index + 1)].try_into().unwrap())
+                        as usize
+                });
+                let records = parallel_work::adopt(argument as u32, bytes);
+                self.session
+                    .as_mut()
+                    .and_then(|session| session.engine.as_mut())
+                    .ok_or(Error::Arithmetic)?
+                    .shared_key_records(
+                        RecordRequest {
+                            first,
+                            count,
+                            prime,
+                        },
+                        records,
+                    )
                     .map_err(|_| Error::Storage)
             }
             22 => {

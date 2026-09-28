@@ -907,6 +907,7 @@ const run = async (
                             database: opened,
                             kernel,
                             handlers: instance.handlers,
+                            parallel,
                             runtime,
                             limits: readParticipantLimits(kernel),
                             separateEvaluation:

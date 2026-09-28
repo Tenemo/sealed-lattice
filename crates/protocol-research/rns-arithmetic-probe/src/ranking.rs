@@ -84,12 +84,14 @@ impl Cache {
 }
 
 /// What an instruction's execution reached: its completion, with the
-/// values whose last use it was, or the key records it needs before it
-/// continues.
+/// values whose last use it was, the key records it needs before it
+/// continues, or a helper's job, by the host's number, whose end the host
+/// awaits before it executes again.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Progress {
     Executed(Vec<usize>),
     Records(RecordRequest),
+    Waiting(u32),
 }
 
 #[derive(Clone, Debug)]
@@ -779,6 +781,20 @@ impl Engine {
         Ok(())
     }
 
+    /// Takes the key records of the running instruction's pending request,
+    /// which the host shared itself.
+    pub fn shared_key_records(
+        &mut self,
+        request: RecordRequest,
+        records: parallel_work::Shared,
+    ) -> Result<(), Refusal> {
+        let work = self.work.as_mut().ok_or(Refusal::Phase)?;
+        if !self.arithmetic.deliver_shared(work, request, records) {
+            return Err(Refusal::Phase);
+        }
+        Ok(())
+    }
+
     fn validate_polynomial(&self, polynomial: &[u64]) -> Result<(), Refusal> {
         if polynomial.len() != self.arithmetic.polynomial_words()
             || !self
@@ -943,9 +959,9 @@ impl Engine {
     }
 
     /// Executes the next instruction, or continues its keyed work: its
-    /// completion, or the key records it needs next. Refuses records whose
-    /// identities differ from the loaded keys'; a refusal ends the
-    /// evaluation.
+    /// completion, the key records it needs next, or a job to await.
+    /// Refuses records whose identities differ from the loaded keys'; a
+    /// refusal ends the evaluation.
     pub fn execute(&mut self) -> Result<Progress, Refusal> {
         let output = match self.work.as_mut() {
             Some(work) => match self
@@ -954,6 +970,7 @@ impl Engine {
                 .map_err(|()| Refusal::Identity)?
             {
                 Step::Records(request) => return Ok(Progress::Records(request)),
+                Step::Waiting(number) => return Ok(Progress::Waiting(number)),
                 Step::Done(output) => {
                     self.work = None;
                     output
