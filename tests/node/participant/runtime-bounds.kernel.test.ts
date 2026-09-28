@@ -114,6 +114,15 @@ describe('participant memory plan', () => {
         expect(kernel.worker_memory_bound(1, 2) >>> 0).toBe(0);
     });
 
+    it("admits the worker's first allocations within its share of every plan", async () => {
+        for (const evaluation of [0, 1])
+            for (let helpers = 1; helpers <= 8; helpers++) {
+                const fresh = await instantiate();
+                expect(fresh.worker_reserve(helpers, evaluation) >>> 0).toBe(0);
+                expect(readParticipantLimits(fresh)).toEqual(limits);
+            }
+    });
+
     it("bounds the worker's instance only before its first allocation and only within a plan", async () => {
         const fresh = await instantiate();
         expect(fresh.worker_reserve(9, 0) >>> 0).toBe(1);

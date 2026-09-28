@@ -71,6 +71,36 @@ const helperPorts = (count: number) =>
         return channel.port1 as unknown as MessagePort;
     });
 
+// Helper ports whose start messages the test reads, so that it sees the
+// shared control words and arena the worker hands its helpers.
+type ObservedStart = Readonly<{
+    control: SharedArrayBuffer;
+    arena: SharedArrayBuffer;
+    layout: Readonly<{ copiedWord: number }>;
+}>;
+const observedHelperPorts = (count: number) => {
+    const starts: ObservedStart[] = [];
+    const ports = helperPorts(count).map((port) => {
+        const post = port.postMessage.bind(port);
+        port.postMessage = (message: unknown) => {
+            starts.push(message as ObservedStart);
+            post(message);
+        };
+        return port;
+    });
+    return {
+        ports,
+        start: () => {
+            const [{ control, arena, layout }] = starts;
+            return {
+                control: new Int32Array(control),
+                arena: new Uint8Array(arena),
+                layout,
+            };
+        },
+    };
+};
+
 beforeEach(() => {
     vi.stubGlobal('crossOriginIsolated', true);
 });
@@ -548,12 +578,13 @@ const standIn = `(module
       (then (unreachable)))))`;
 // A stand-in whose job of kind 5 outputs the first eight bytes of its
 // streamed part, of kind 6 reads one byte beyond that part, and of kind 7
-// completes after a long computation.
+// runs until the first byte of its streamed part is no longer zero, a gate
+// the test opens in the arena, and then outputs the part's first eight
+// bytes.
 const streamingStandIn = `(module
   (import "parallel" "read" (func $read (param i32 i32 i32)))
   (memory (export "memory") 2)
   (global $streamed (mut i32) (i32.const 0))
-  (global $steps (mut i32) (i32.const 0))
   (func (export "parallel_reserve") (param i32 i32) (result i32)
     (i32.const 0))
   (func (export "parallel_input") (param i32) (result i32)
@@ -572,10 +603,10 @@ const streamingStandIn = `(module
         (return (i32.const 0))))
     (if (i32.eq (local.get $kind) (i32.const 7))
       (then
-        (global.set $steps (i32.const 0))
-        (loop $compute
-          (global.set $steps (i32.add (global.get $steps) (i32.const 1)))
-          (br_if $compute (i32.lt_u (global.get $steps) (i32.const 100000000))))
+        (loop $closed
+          (call $read (i32.const 0) (i32.const 2048) (i32.const 1))
+          (br_if $closed (i32.eqz (i32.load8_u (i32.const 2048)))))
+        (call $read (i32.const 0) (i32.const 2048) (i32.const 8))
         (return (i32.const 0))))
     (i32.const 1))
   (func (export "parallel_output_length") (result i32)
@@ -604,8 +635,33 @@ type HostImports = Readonly<{
     take: (ticket: number, pointer: number) => number;
     share: (pointer: number, length: number) => number;
     release: (handle: number) => void;
+    discard: (ticket: number) => void;
     ended: (ticket: number) => number;
 }>;
+// A gated job of the streaming stand-in, whose streamed part is the gate
+// byte and seven bytes it outputs, and which opens once the test sets that
+// byte in the arena.
+const gatedJob = (
+    host: HostImports,
+    memory: WebAssembly.Memory,
+    arena: Uint8Array,
+    output: string,
+) => {
+    const bytes = new TextEncoder().encode('\0' + output);
+    new Uint8Array(memory.buffer).set(bytes, 1024);
+    const gate = host.share(1024, bytes.length);
+    new Uint32Array(memory.buffer, 0, 3).set([2, gate, 0]);
+    const ticket = host.submit(7, 1, 0, 1, 8);
+    host.release(gate);
+    const at = Buffer.from(arena.buffer).indexOf(bytes);
+    expect(at).toBeGreaterThanOrEqual(0);
+    return {
+        ticket,
+        open: () => {
+            arena[at] = 1;
+        },
+    };
+};
 // The worker's side of the stand-in's jobs, each one sixteen-byte part.
 const standInHost = (helpers: ParallelHelpers) => {
     const memory = new WebAssembly.Memory({ initial: 1 });
@@ -725,12 +781,16 @@ describe('parallel job host', () => {
             ) as unknown as HostImports;
             new Uint32Array(memory.buffer, 0, 3).set([0, 65_536, 16]);
             // The helper traps only after the worker waits for arena space
-            // that the later jobs' inputs hold beyond the soft bound.
+            // that the later jobs' inputs hold beyond the soft bound, which
+            // it does before it submits them all.
             const trapping = host.submit(4, 1, 0, 1, 8);
             new Uint32Array(memory.buffer, 0, 3).set([0, 65_536, 8 << 20]);
+            const waits = vi.spyOn(Atomics, 'wait');
             const tickets = Array.from({ length: 8 }, () =>
                 host.submit(3, 1, 0, 1, 8),
             );
+            expect(waits).toHaveBeenCalled();
+            waits.mockRestore();
             for (const ticket of [trapping, ...tickets]) {
                 const failure = failureOf(() => host.wait(ticket));
                 expect(failure).toBeInstanceOf(ResourceFailure);
@@ -744,9 +804,10 @@ describe('parallel job host', () => {
     });
 
     it('serves a streamed part to its job until the job ends, and fails a job that reads beyond it', async () => {
+        const observed = observedHelperPorts(1);
         const helpers = await startParallelHelpers(
             await compileText(streamingStandIn),
-            helperPorts(1),
+            observed.ports,
             false,
         );
         expect(helpers.count).toBe(1);
@@ -760,7 +821,12 @@ describe('parallel job host', () => {
                 Buffer.from(bytes.subarray(offset, offset + 8)).toString();
             // The helper is still busy when the worker releases the part and
             // shares other bytes, which must not take the part's range.
-            const busy = host.submit(7, 1, 0, 0, 8);
+            const busy = gatedJob(
+                host,
+                memory,
+                observed.start().arena,
+                'waiting',
+            );
             bytes.set(new TextEncoder().encode('streamed'), 1024);
             const streamed = host.share(1024, 8);
             new Uint32Array(memory.buffer, 0, 3).set([2, streamed, 0]);
@@ -768,8 +834,12 @@ describe('parallel job host', () => {
             host.release(streamed);
             bytes.set(new TextEncoder().encode('replaced'), 1024);
             const other = host.share(1024, 8);
-            host.wait(busy);
-            expect(host.take(busy, 256)).toBe(0);
+            expect(host.ended(busy.ticket)).toBe(0);
+            expect(host.ended(ticket)).toBe(0);
+            busy.open();
+            host.wait(busy.ticket);
+            expect(host.take(busy.ticket, 256)).toBe(0);
+            expect(text(256)).toBe('\u0001waiting');
             host.wait(ticket);
             expect(host.take(ticket, 512)).toBe(0);
             expect(text(512)).toBe('streamed');
@@ -835,9 +905,10 @@ describe('parallel job host', () => {
     });
 
     it('lets the worker await a running job while its other tasks run, and tells whether the job has ended', async () => {
+        const observed = observedHelperPorts(1);
         const helpers = await startParallelHelpers(
             await compileText(streamingStandIn),
-            helperPorts(1),
+            observed.ports,
             false,
         );
         expect(helpers.count).toBe(1);
@@ -846,13 +917,20 @@ describe('parallel job host', () => {
             const host = helpers.imports(
                 () => memory,
             ) as unknown as HostImports;
-            // The job computes far longer than a timer the worker starts
-            // before it awaits the job takes to fire.
-            const busy = host.submit(7, 1, 0, 0, 8);
+            // The job runs until a timer the worker starts before it awaits
+            // the job opens its gate.
+            const gated = gatedJob(
+                host,
+                memory,
+                observed.start().arena,
+                'waiting',
+            );
+            const busy = gated.ticket;
             expect(host.ended(busy)).toBe(0);
             let fired = false;
             setTimeout(() => {
                 fired = true;
+                gated.open();
             }, 0);
             await helpers.whenEnded(busy);
             expect(fired).toBe(true);
@@ -868,6 +946,119 @@ describe('parallel job host', () => {
             await expect(helpers.whenEnded(busy)).rejects.toThrow(
                 'The parallel job is unknown.',
             );
+        } finally {
+            helpers.stop();
+        }
+    });
+
+    it('clears the arena once no helper writes into it, so a job that ends after the worker stops leaves nothing there', async () => {
+        const observed = observedHelperPorts(1);
+        const helpers = await startParallelHelpers(
+            await compileText(streamingStandIn),
+            observed.ports,
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        const { control, arena, layout } = observed.start();
+        const memory = new WebAssembly.Memory({ initial: 1 });
+        const host = helpers.imports(() => memory) as unknown as HostImports;
+        const gated = gatedJob(host, memory, arena, 'written');
+        // The helper runs the job once it has copied the job's input.
+        while (Atomics.load(control, layout.copiedWord) === 0)
+            expect(
+                Atomics.wait(control, layout.copiedWord, 0, 60_000),
+            ).not.toBe('timed-out');
+        helpers.stop();
+        expect(arena.every((byte) => byte === 0)).toBe(true);
+        gated.open();
+        await helpers.whenEnded(gated.ticket);
+        expect(arena.filter((byte) => byte !== 0)).toEqual(new Uint8Array([1]));
+    });
+
+    it('refuses shares, jobs and held tickets one unit beyond their bounds, and unknown or released handles', async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(standIn),
+            helperPorts(2),
+            false,
+        );
+        expect(helpers.count).toBe(2);
+        try {
+            const jobBytes = 8 << 20;
+            const memory = new WebAssembly.Memory({ initial: 130 });
+            const host = helpers.imports(
+                () => memory,
+            ) as unknown as HostImports;
+            const exceeds = 'A parallel job exceeds its bound.';
+            // Each part is its tag, its pointer or handle, and its length.
+            const parts = (...values: number[]) => {
+                new Uint32Array(memory.buffer, 0, values.length).set(values);
+            };
+            const copied = (length: number) => [0, 65_536, length];
+            // Ends an accepted job, whatever its outcome, and frees its
+            // ticket.
+            const settle = (ticket: number) => {
+                failureOf(() => {
+                    host.wait(ticket);
+                });
+                host.discard(ticket);
+            };
+            host.release(host.share(65_536, jobBytes));
+            expect(() => host.share(65_536, jobBytes + 1)).toThrow(
+                'A parallel input exceeds its bound.',
+            );
+            const handle = host.share(65_536, 8);
+            host.release(handle);
+            expect(() => {
+                host.release(handle);
+            }).toThrow('The shared input is unknown.');
+            parts(1, handle, 0);
+            expect(() => host.submit(3, 1, 0, 1, 8)).toThrow(
+                'The shared input is unknown.',
+            );
+            parts(3, 0, 0);
+            expect(() => host.submit(3, 1, 0, 1, 8)).toThrow(
+                'A parallel job part is malformed.',
+            );
+            parts(...[1, 2, 3, 4, 5].flatMap(() => copied(16)));
+            settle(host.submit(3, 1, 0, 4, 8));
+            expect(() => host.submit(3, 1, 0, 5, 8)).toThrow(exceeds);
+            parts(...copied(16));
+            settle(host.submit(3, 2, 0, 1, 8));
+            expect(() => host.submit(3, 3, 0, 1, 8)).toThrow(exceeds);
+            settle(host.submit(3, 1, 0, 1, jobBytes));
+            expect(() => host.submit(3, 1, 0, 1, jobBytes + 1)).toThrow(
+                exceeds,
+            );
+            parts(...copied(jobBytes - 16), ...copied(16));
+            settle(host.submit(3, 1, 0, 2, 8));
+            parts(...copied(jobBytes - 16), ...copied(17));
+            expect(() => host.submit(3, 1, 0, 2, 8)).toThrow(exceeds);
+            // A job's output is taken only after the worker waited for it,
+            // and a discarded or unknown job's never.
+            parts(...copied(16));
+            const taken = host.submit(3, 1, 0, 1, 8);
+            expect(host.take(taken, 512)).toBe(1);
+            host.wait(taken);
+            expect(host.take(taken, 512)).toBe(0);
+            expect(host.take(taken, 512)).toBe(1);
+            const discarded = host.submit(3, 1, 0, 1, 8);
+            host.wait(discarded);
+            host.discard(discarded);
+            expect(host.take(discarded, 512)).toBe(1);
+            expect(() => {
+                host.wait(discarded);
+            }).toThrow('The parallel job is unknown.');
+            // The module holds at most 4096 tickets; a discarded one that
+            // has ended frees its slot for the next job.
+            const held = Array.from({ length: 4096 }, () =>
+                host.submit(3, 0, 0, 0, 8),
+            );
+            expect(() => host.submit(3, 0, 0, 0, 8)).toThrow(
+                'Too many parallel jobs are held.',
+            );
+            host.wait(held[0]);
+            host.discard(held[0]);
+            settle(host.submit(3, 0, 0, 0, 8));
         } finally {
             helpers.stop();
         }

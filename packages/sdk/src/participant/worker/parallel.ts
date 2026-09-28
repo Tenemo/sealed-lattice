@@ -55,8 +55,9 @@ const exhausted = 3;
 
 // The shared control words: a stop flag, one wake word per helper, the
 // unpinned queue's head and tail, each helper's pinned queue head and tail,
-// the queues' entries, the job slots, each helper's linear-memory pages and
-// the count of inputs the helpers have copied. A slot holds its state, kind,
+// the queues' entries, the job slots, each helper's linear-memory pages, the
+// count of inputs the helpers have copied and the count of helpers writing
+// an output into the arena. A slot holds its state, kind,
 // output offset and length, part count, each part's offset and length,
 // whether its helper has copied its input, and one more than the index of
 // its streamed part, or zero.
@@ -83,8 +84,9 @@ const controlLayout = (helpers: number) => {
         streamedOffset,
         memoryBase,
         copiedWord: memoryBase + helpers,
+        writingWord: memoryBase + helpers + 1,
         queueEntries: maximumTickets,
-        words: memoryBase + helpers + 1,
+        words: memoryBase + helpers + 2,
         queued,
         done,
         failed,
@@ -277,13 +279,24 @@ const runHelper = (port: MessagePort, helperStart: HelperStart) => {
             call('parallel_run', kind) === 0 &&
             call('parallel_output_length') === outputLength
         ) {
-            target = memory();
             const output = call('parallel_output_pointer');
-            arena.set(
-                target.subarray(output, output + outputLength),
-                outputOffset,
-            );
-            completed = true;
+            target = memory();
+            // The worker clears the arena when it stops, once no helper
+            // writes into it, so a helper writes its output only while it
+            // counts itself as writing and the worker has not stopped.
+            Atomics.add(control, layout.writingWord, 1);
+            try {
+                if (Atomics.load(control, layout.stopWord) === 0) {
+                    arena.set(
+                        target.subarray(output, output + outputLength),
+                        outputOffset,
+                    );
+                    completed = true;
+                }
+            } finally {
+                Atomics.sub(control, layout.writingWord, 1);
+                Atomics.notify(control, layout.writingWord);
+            }
         }
         call('parallel_clear');
         return completed;
@@ -502,9 +515,9 @@ const createHost = (
     let nextTicket = 1;
     const stateWord = (slot: number) => layout.slotBase + slot * slotWords;
 
-    // The arena is cleared once when the helpers stop; until then a returned
-    // range holds only the operation's own bytes, which the worker and its
-    // helpers already share.
+    // The arena is cleared once when the worker stops its helpers; until
+    // then a returned range holds only the operation's own bytes, which the
+    // worker and its helpers already share.
     const releaseBlock = (block: Block) => {
         if (block.length === 0) return;
         let index = free.findIndex((range) => range.offset > block.offset);
@@ -875,10 +888,18 @@ const createHost = (
             }
         },
         // Each helper leaves its loop and closes; the page ends its worker.
+        // The arena is cleared once no helper writes an output into it: a
+        // helper that counts itself as writing only after the stop writes
+        // nothing, and a running job's later output is dropped.
         stop: () => {
             Atomics.store(control, layout.stopWord, 1);
             for (let helper = 0; helper < helpers; helper += 1)
                 wakeHelper(helper);
+            for (;;) {
+                const writing = Atomics.load(control, layout.writingWord);
+                if (writing === 0) break;
+                Atomics.wait(control, layout.writingWord, writing);
+            }
             arena.fill(0);
         },
     };
