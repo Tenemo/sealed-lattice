@@ -5,6 +5,7 @@ import {
     mkdtemp,
     readFile,
     readdir,
+    rm,
     stat,
     writeFile,
 } from 'node:fs/promises';
@@ -624,6 +625,14 @@ await runWithLocalRunLog(
             } finally {
                 active = false;
                 await monitor;
+                // The ceremony's working values and key records in its
+                // scratch directory outlive no run, whether it passed or not.
+                if (scratch !== undefined)
+                    await rm(scratch, {
+                        recursive: true,
+                        maxRetries: 10,
+                        retryDelay: 500,
+                    });
             }
             assert.equal(
                 controller.signal.aborted,
