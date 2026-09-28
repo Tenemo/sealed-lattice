@@ -209,6 +209,7 @@ impl RankingProgram {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_bigint::BigUint;
     use rns_arithmetic_probe::ranking::{Engine, MAXIMUM_INSTRUCTIONS};
 
     fn completion() -> Profile {
@@ -344,6 +345,52 @@ mod tests {
         assert!(refuses(&changed));
         assert!(refuses(&bytes[..bytes.len() - 1]));
         assert!(refuses(&[&bytes[..], &bytes[..width]].concat()));
+        // Half the modulus rounded down, several words long, decodes with
+        // either sign and one more refuses with either; a negative
+        // coefficient decodes to the modulus minus its magnitude, here from
+        // the modulus's own odd factor and exponent.
+        let modulus = profile.ciphertext_modulus();
+        let q = (BigUint::from(modulus.odd_factor()) << modulus.exponent()) + 1u32;
+        let half = (&q - 1u32) >> 1u32;
+        let words = whole.len() / DEGREE;
+        assert!(words > 1 && half.bits() > 64);
+        let encoded = |negative: bool, magnitude: &BigUint| {
+            let mut coefficient = vec![0; width];
+            coefficient[0] = u8::from(negative);
+            let digits = magnitude.to_bytes_le();
+            coefficient[1..1 + digits.len()].copy_from_slice(&digits);
+            coefficient
+        };
+        let word_values = |value: BigUint| {
+            let mut values = value.to_u64_digits();
+            values.resize(words, 0);
+            values
+        };
+        let above_word = BigUint::from(1u32) << 64u32;
+        let cases = [
+            (false, half.clone(), half.clone()),
+            (true, half.clone(), &q - &half),
+            (true, BigUint::from(1u32), &q - 1u32),
+            (false, above_word.clone(), above_word.clone()),
+            (true, above_word.clone(), &q - &above_word),
+        ];
+        let mut boundary = bytes.clone();
+        for (index, (negative, magnitude, _)) in cases.iter().enumerate() {
+            boundary[index * width..(index + 1) * width]
+                .copy_from_slice(&encoded(*negative, magnitude));
+        }
+        let decoded = engine.decode_polynomial(&boundary).unwrap();
+        for (index, (_, _, expected)) in cases.into_iter().enumerate() {
+            assert_eq!(
+                decoded[index * words..(index + 1) * words],
+                word_values(expected)[..]
+            );
+        }
+        for negative in [false, true] {
+            let mut beyond = bytes.clone();
+            beyond[..width].copy_from_slice(&encoded(negative, &(&half + 1u32)));
+            assert!(refuses(&beyond));
+        }
         let mut decoder = engine.polynomial_decoder();
         engine
             .decode_into(&mut decoder, &bytes[..bytes.len() - 1])
