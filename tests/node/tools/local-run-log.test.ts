@@ -46,16 +46,17 @@ const runGitCommand = (commandArguments: readonly string[]): string => {
     return result.stdout;
 };
 
+// The log root of a temporary checkout, which also holds each run's artifacts.
 const withTemporaryLogRoot = async <Result>(
     action: (rootDirectoryPath: string) => Promise<Result>,
 ): Promise<Result> => {
-    const rootDirectoryPath = await mkdtemp(
+    const checkoutDirectoryPath = await mkdtemp(
         path.join(os.tmpdir(), 'sealed-lattice-local-run-log-'),
     );
     try {
-        return await action(rootDirectoryPath);
+        return await action(path.join(checkoutDirectoryPath, 'logs'));
     } finally {
-        await rm(rootDirectoryPath, { force: true, recursive: true });
+        await rm(checkoutDirectoryPath, { force: true, recursive: true });
     }
 };
 
@@ -79,22 +80,6 @@ const writeFileAt = async (
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, contents);
 };
-
-// A run log whose diagnostics and artifacts lie under separate temporary roots.
-const createArtifactSampleLog = (
-    temporaryDirectoryPath: string,
-    scriptName: string,
-) =>
-    createLocalRunLog({
-        artifactRootDirectoryPath: path.join(
-            temporaryDirectoryPath,
-            'run-artifacts',
-        ),
-        commandLineArguments: [],
-        lanes: ['sample'],
-        rootDirectoryPath: path.join(temporaryDirectoryPath, 'logs'),
-        scriptName,
-    });
 
 const findOnlyRunDirectory = async (
     rootDirectoryPath: string,
@@ -481,31 +466,49 @@ describe('local run logs', () => {
         }));
 
     it('keeps binary artifacts under the run date and name beside its diagnostics', () =>
-        withTemporaryLogRoot(async (temporaryDirectoryPath) => {
-            const log = await createArtifactSampleLog(
-                temporaryDirectoryPath,
-                'artifact sample',
-            );
-            const artifactRootDirectoryPath = path.join(
-                temporaryDirectoryPath,
-                'run-artifacts',
-            );
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sample'],
+                rootDirectoryPath,
+                scriptName: 'artifact sample',
+            });
+            const checkoutDirectoryPath = path.dirname(rootDirectoryPath);
             expect(log.artifactDirectoryPath).toBe(
                 path.join(
-                    artifactRootDirectoryPath,
-                    path.relative(
-                        path.join(temporaryDirectoryPath, 'logs'),
-                        log.runDirectoryPath,
-                    ),
+                    checkoutDirectoryPath,
+                    'temp',
+                    'run-artifacts',
+                    path.relative(rootDirectoryPath, log.runDirectoryPath),
                 ),
             );
-            // A reader finds another run's artifacts from its run directory.
+            // A reader finds any run's artifacts from its run directory, in
+            // the checkout that holds the run.
+            expect(runArtifactDirectoryPath(log.runDirectoryPath)).toBe(
+                log.artifactDirectoryPath,
+            );
+            const otherCheckoutDirectoryPath = path.join(
+                checkoutDirectoryPath,
+                'other-checkout',
+            );
             expect(
                 runArtifactDirectoryPath(
-                    log.runDirectoryPath,
-                    artifactRootDirectoryPath,
+                    path.join(
+                        otherCheckoutDirectoryPath,
+                        'logs',
+                        '2026-09-26',
+                        '2026-09-26T12-28-12.441Z-research-participant',
+                    ),
                 ),
-            ).toBe(log.artifactDirectoryPath);
+            ).toBe(
+                path.join(
+                    otherCheckoutDirectoryPath,
+                    'temp',
+                    'run-artifacts',
+                    '2026-09-26',
+                    '2026-09-26T12-28-12.441Z-research-participant',
+                ),
+            );
             await writeFileAt(
                 log.artifactDirectoryPath,
                 'ceremony/proof.bin',
@@ -552,14 +555,16 @@ describe('local run logs', () => {
         }));
 
     it('moves binary artifacts out of the run directory and fails the run', () =>
-        withTemporaryLogRoot(async (temporaryDirectoryPath) => {
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
             const originalExitCode = process.exitCode;
             try {
                 process.exitCode = undefined;
-                const log = await createArtifactSampleLog(
-                    temporaryDirectoryPath,
-                    'misplaced artifact sample',
-                );
+                const log = await createLocalRunLog({
+                    commandLineArguments: [],
+                    lanes: ['sample'],
+                    rootDirectoryPath,
+                    scriptName: 'misplaced artifact sample',
+                });
                 const misplaced = [
                     'proof.bin',
                     'ceremony/close/intent.bin',
@@ -652,11 +657,13 @@ describe('local run logs', () => {
         }));
 
     it('keeps the operative failure when a failed run also misplaced artifacts', () =>
-        withTemporaryLogRoot(async (temporaryDirectoryPath) => {
-            const log = await createArtifactSampleLog(
-                temporaryDirectoryPath,
-                'failed artifact sample',
-            );
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sample'],
+                rootDirectoryPath,
+                scriptName: 'failed artifact sample',
+            });
             await writeFileAt(log.runDirectoryPath, 'proof.bin', 'proof');
             await log.finish({
                 error: new Error('Operative failure.'),

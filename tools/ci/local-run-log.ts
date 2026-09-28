@@ -45,7 +45,6 @@ export type ActiveLocalRunLog = {
 };
 
 type LocalRunLogInput = {
-    readonly artifactRootDirectoryPath?: string;
     readonly commandLineArguments: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
     readonly lanes: readonly string[];
@@ -87,21 +86,21 @@ const repositoryRootDirectoryPath = path.resolve(
 const defaultResourceSampleIntervalMilliseconds = 15_000;
 
 // A run's binary artifacts, such as protocol records, proofs, relay state and
-// runtime modules, lie outside its diagnostics under the same date and run
-// name, so the run history keeps only what the run recorded about itself.
-export const runArtifactDirectoryPath = (
-    runDirectoryPath: string,
-    artifactRootDirectoryPath = path.join(
-        repositoryRootDirectoryPath,
+// runtime modules, lie outside its diagnostics, under `temp/run-artifacts/`
+// beside the log root that holds the run and under the same date and run
+// name, so the run history keeps only what the run recorded about itself. A
+// run in another checkout keeps its artifacts in that checkout.
+export const runArtifactDirectoryPath = (runDirectoryPath: string): string => {
+    const resolvedRunDirectoryPath = path.resolve(runDirectoryPath);
+    const dateDirectoryPath = path.dirname(resolvedRunDirectoryPath);
+    return path.join(
+        path.dirname(path.dirname(dateDirectoryPath)),
         'temp',
         'run-artifacts',
-    ),
-): string =>
-    path.join(
-        artifactRootDirectoryPath,
-        path.basename(path.dirname(runDirectoryPath)),
-        path.basename(runDirectoryPath),
+        path.basename(dateDirectoryPath),
+        path.basename(resolvedRunDirectoryPath),
     );
+};
 
 // Binary files a run writes are artifacts, except in its snapshotted sources
 // and framework attachments.
@@ -687,10 +686,7 @@ export const createLocalRunLog = async (
     });
 
     return new LocalRunLog({
-        artifactDirectoryPath: runArtifactDirectoryPath(
-            runDirectoryPath,
-            input.artifactRootDirectoryPath,
-        ),
+        artifactDirectoryPath: runArtifactDirectoryPath(runDirectoryPath),
         repositorySnapshot,
         resourceSampleIntervalMilliseconds:
             input.resourceSampleIntervalMilliseconds ??
