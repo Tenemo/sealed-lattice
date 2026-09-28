@@ -182,14 +182,16 @@ pub(crate) fn proth_public_records(
 ) -> Vec<u8> {
     let reduction = ProthReduction::new(modulus, sample_bits);
     let width = modulus.byte_length();
+    // Each magnitude's words pass through a buffer, so the records never
+    // outgrow their exact length.
     let mut records = Vec::with_capacity(degree * (1 + width));
+    let mut bytes = vec![0u8; 8 * reduction.words()];
     reduction.sample(label, degree, |negative, magnitude| {
-        records.push(u8::from(negative));
-        let start = records.len();
-        for word in magnitude {
-            records.extend(word.to_le_bytes());
+        for (chunk, word) in bytes.chunks_exact_mut(8).zip(magnitude) {
+            chunk.copy_from_slice(&word.to_le_bytes());
         }
-        records.truncate(start + width);
+        records.push(u8::from(negative));
+        records.extend_from_slice(&bytes[..width]);
     });
     records
 }
@@ -288,7 +290,8 @@ mod tests {
     }
 
     // Every supported profile's common polynomial samples and records equal
-    // those of division.
+    // those of division, and the records hold no more memory than their
+    // length.
     #[test]
     fn polynomials_and_records_equal_division() {
         let degree = 256;
@@ -300,10 +303,9 @@ mod tests {
                     proth_public_polynomial(label, degree, modulus, sample_bits),
                     public_polynomial(label, degree, &value, sample_bits)
                 );
-                assert_eq!(
-                    proth_public_records(label, degree, modulus, sample_bits),
-                    public_records(label, degree, &bytes, sample_bits)
-                );
+                let records = proth_public_records(label, degree, modulus, sample_bits);
+                assert_eq!(records.capacity(), records.len());
+                assert_eq!(records, public_records(label, degree, &bytes, sample_bits));
             }
         }
     }
