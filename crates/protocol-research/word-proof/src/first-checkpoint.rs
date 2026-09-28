@@ -149,12 +149,12 @@ fn record_layout(relation: &Relation, mut record: usize) -> Option<(usize, usize
     None
 }
 
+// The row states' records are sealed from the rows as each is sealed,
+// and each opened record's states are restored into the rows at once.
 pub struct Export {
     relation: Relation,
     header: Header,
     next: usize,
-    // Every row's hash state, in row order.
-    states: Zeroizing<Vec<[u8; 201]>>,
 }
 impl Export {
     pub fn begin_with_inputs(
@@ -179,7 +179,7 @@ impl Export {
         {
             return Err(Error::Operation);
         }
-        let states = first.rows.as_mut().ok_or(())?.export();
+        first.rows.as_ref().ok_or(())?;
         Ok(Self {
             relation: prover.relation.clone(),
             header: Header {
@@ -192,7 +192,6 @@ impl Export {
                 input_hashes: input_hashes.to_vec(),
             },
             next: 0,
-            states,
         })
     }
     pub fn header(&self) -> Vec<u8> {
@@ -201,7 +200,7 @@ impl Export {
     pub fn complete(&self) -> bool {
         self.next == record_count(&self.relation)
     }
-    pub fn seal(&mut self, prover: &Prover, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+    pub fn seal(&mut self, prover: &mut Prover, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
         let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if prover.profile != self.header.profile
             || prover.phase != Phase::FirstColumn(self.header.column)
@@ -215,18 +214,23 @@ impl Export {
         {
             return Err(Error::Operation);
         }
-        let witness = prover.witness.as_ref().ok_or(())?;
-        let first = prover.first.as_ref().ok_or(())?;
         let mut bytes = Zeroizing::new(Vec::with_capacity(count * width + TAG_BYTES));
-        for index in start..start + count {
-            match field {
-                0 => bytes
-                    .extend(witness.columns[index / SYSTEMATIC][index % SYSTEMATIC].to_le_bytes()),
-                1 => bytes.extend(first.masks[index / MASKS][index % MASKS].to_le_bytes()),
-                2 => bytes.extend(field::encode(first.degree_mask[index])),
-                3 => bytes.extend(first.tree.seed()),
-                4 => bytes.extend(self.states[index]),
-                _ => unreachable!(),
+        if field == 4 {
+            let rows = prover.first.as_mut().ok_or(())?.rows.as_mut().ok_or(())?;
+            bytes.extend_from_slice(&rows.export(start, count));
+        } else {
+            let witness = prover.witness.as_ref().ok_or(())?;
+            let first = prover.first.as_ref().ok_or(())?;
+            for index in start..start + count {
+                match field {
+                    0 => bytes.extend(
+                        witness.columns[index / SYSTEMATIC][index % SYSTEMATIC].to_le_bytes(),
+                    ),
+                    1 => bytes.extend(first.masks[index / MASKS][index % MASKS].to_le_bytes()),
+                    2 => bytes.extend(field::encode(first.degree_mask[index])),
+                    3 => bytes.extend(first.tree.seed()),
+                    _ => unreachable!(),
+                }
             }
         }
         let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| ())?;
@@ -251,7 +255,7 @@ pub struct Import {
     masks: Zeroizing<Vec<Vec<u128>>>,
     degree_mask: Zeroizing<Vec<Element>>,
     seed: Zeroizing<[u8; SALT_SEED_BYTES]>,
-    hashers: Vec<Sha3_512>,
+    rows: Option<RowShards>,
 }
 impl Import {
     pub fn profile(&self) -> Profile {
@@ -277,7 +281,7 @@ impl Import {
             masks: Zeroizing::new(Vec::new()),
             degree_mask: Zeroizing::new(Vec::new()),
             seed: Zeroizing::new([0; SALT_SEED_BYTES]),
-            hashers: Vec::new(),
+            rows: None,
         })
     }
     pub fn complete(&self) -> bool {
@@ -294,7 +298,7 @@ impl Import {
         result
     }
     fn open_record(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Error> {
-        let (field, _, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
+        let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if bytes.len() != count * width + TAG_BYTES {
             return Err(Error::Operation);
         }
@@ -350,11 +354,15 @@ impl Import {
                         return Err(Error::Operation);
                     }
                     let encoded: &SerializedState<Sha3_512> = bytes.try_into().map_err(|_| ())?;
-                    self.hashers
-                        .push(Sha3_512::deserialize(encoded).map_err(|_| ())?);
+                    Sha3_512::deserialize(encoded).map_err(|_| ())?;
                 }
                 _ => unreachable!(),
             }
+        }
+        if field == 4 {
+            self.rows
+                .get_or_insert_with(RowShards::importing)
+                .import(start, &plaintext);
         }
         self.next += 1;
         Ok(())
@@ -389,10 +397,91 @@ impl Import {
                 self.relation.first_width(),
                 self.seed,
             ),
-            rows: Some(RowShards::import(&self.hashers)),
+            rows: Some(self.rows.take().ok_or(())?),
             prefetched: Default::default(),
         });
         prover.phase = Phase::FirstColumn(self.header.column);
         Ok(prover)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A setup witness of the relation: zero words, and each sparse
+    // support's least positions of its stride.
+    fn columns(relation: &Relation) -> Vec<Vec<u16>> {
+        let mut columns = vec![vec![0; SYSTEMATIC]; relation.columns()];
+        for pair in 0..relation.support_pairs() {
+            let (positive, negative) = relation.zero_product_columns(pair);
+            let (stride, half) = relation.support(pair);
+            let half = half as usize;
+            for position in 0..half {
+                columns[positive][stride * position] = 1;
+                columns[negative][stride * (half + position)] = 1;
+            }
+        }
+        columns
+    }
+    fn step(prover: &mut Prover) {
+        prover.advance(7, 0, &[], &mut Vec::new()).unwrap();
+    }
+    // The first oracle's root once the prover commits its remaining columns.
+    fn first_root(mut prover: Prover) -> [u8; 64] {
+        while prover.phase != Phase::SecondInitialize {
+            step(&mut prover);
+        }
+        prover.first.as_ref().unwrap().tree.root()
+    }
+
+    // A prover restored from the checkpoint of another that committed some
+    // first-oracle columns, each record sealed from the rows and opened into
+    // the restored rows in turn, commits the remaining columns to the same
+    // first oracle. A record that another record's position or an altered
+    // byte names fails the import for good.
+    #[test]
+    fn restored_checkpoints_commit_the_same_first_oracle() {
+        let profile = Profile::new(3, 2).unwrap();
+        let relation = setup_relation(profile);
+        let mut prover = Prover::from_generated(
+            profile,
+            b"checkpoint-test",
+            [7; 64],
+            [9; 64],
+            profile.setup_statement_header(),
+            columns(&relation),
+        )
+        .unwrap();
+        for _ in 0..4 {
+            step(&mut prover);
+        }
+        assert!(prover.phase == Phase::FirstColumn(3));
+        let key = [5; 32];
+        let mut export = Export::begin_with_inputs(&mut prover, &[]).unwrap();
+        let header = export.header();
+        let mut import = Import::begin(&header).unwrap();
+        let lengths = record_lengths(&relation);
+        let mut records = Vec::new();
+        while !export.complete() {
+            let record = export.seal(&mut prover, &key).unwrap();
+            assert_eq!(record.len(), lengths[records.len()]);
+            import.open(&key, &record).unwrap();
+            records.push(record);
+        }
+        assert_eq!(records.len(), record_count(&relation));
+        assert!(import.complete());
+        let restored = import.finish().unwrap();
+        assert_eq!(first_root(restored), first_root(prover));
+        for hostile in [records[1].clone(), {
+            let mut altered = records[0].clone();
+            altered[0] ^= 1;
+            altered
+        }] {
+            let mut import = Import::begin(&header).unwrap();
+            assert!(import.open(&key, &hostile).is_err());
+            assert!(import.open(&key, &records[0]).is_err());
+            assert!(!import.complete());
+        }
     }
 }

@@ -428,6 +428,15 @@ impl RowShards {
         self.running.push_back(tickets);
         self
     }
+    // Records a step's jobs, waiting for the oldest step's once enough run.
+    fn started(&mut self, tickets: Vec<Ticket>) {
+        self.running.push_back(tickets);
+        while self.running.len() > POLYNOMIALS_RUNNING {
+            for ticket in self.running.pop_front().unwrap() {
+                ticket.wait();
+            }
+        }
+    }
     // Starts every shard's job on the coefficients, which each streams,
     // after waiting for the oldest polynomial's jobs once enough run.
     fn absorb(&mut self, job: &'static Job, coefficients: Zeroizing<Vec<u8>>) {
@@ -445,12 +454,7 @@ impl RowShards {
                 )
             })
             .collect();
-        self.running.push_back(tickets);
-        while self.running.len() > POLYNOMIALS_RUNNING {
-            for ticket in self.running.pop_front().unwrap() {
-                ticket.wait();
-            }
-        }
+        self.started(tickets);
     }
     /// Absorbs the values of a base polynomial of the coefficients.
     pub fn absorb_base(&mut self, coefficients: &[u128]) {
@@ -508,45 +512,66 @@ impl RowShards {
         tree.finish_from(subtrees);
         self.closed = true;
     }
-    /// Every row's hash state, in row order.
-    pub fn export(&mut self) -> Zeroizing<Vec<[u8; STATE_BYTES]>> {
+    // Each shard's jobs over its rows among the rows from the first, one
+    // job for at most the job bound of the shard's consecutive rows: the
+    // shard, its first row and their count.
+    fn ranges(&self, first: usize, count: usize) -> Vec<(usize, usize, usize)> {
+        assert!(first + count <= DOMAIN);
+        let shards = self.shards();
+        let mut ranges = Vec::new();
+        for shard in 0..shards {
+            let start = first.saturating_sub(shard).div_ceil(shards);
+            let end = (first + count).saturating_sub(shard).div_ceil(shards);
+            for row in (start..end).step_by(ROWS_PER_JOB) {
+                ranges.push((shard, row, ROWS_PER_JOB.min(end - row)));
+            }
+        }
+        ranges
+    }
+    /// The hash states of the rows from the first, in row order.
+    pub fn export(&mut self, first: usize, count: usize) -> Zeroizing<Vec<u8>> {
         self.settle();
-        let mut states = Zeroizing::new(vec![[0; STATE_BYTES]; DOMAIN]);
-        for shard in 0..self.shards() {
-            for first in (0..self.rows()).step_by(ROWS_PER_JOB) {
-                let count = ROWS_PER_JOB.min(self.rows() - first);
-                let output = self
-                    .range_job(&EXPORT, shard, (first, count), &[], STATE_BYTES * count)
-                    .wait();
-                for (offset, state) in output.chunks_exact(STATE_BYTES).enumerate() {
-                    states[shard + self.shards() * (first + offset)].copy_from_slice(state);
-                }
+        let shards = self.shards();
+        let tickets: Vec<_> = self
+            .ranges(first, count)
+            .into_iter()
+            .map(|(shard, row, rows)| {
+                let ticket = self.range_job(&EXPORT, shard, (row, rows), &[], STATE_BYTES * rows);
+                (shard, row, ticket)
+            })
+            .collect();
+        let mut states = Zeroizing::new(vec![0; STATE_BYTES * count]);
+        for (shard, row, ticket) in tickets {
+            for (offset, state) in ticket.wait().chunks_exact(STATE_BYTES).enumerate() {
+                let index = shard + shards * (row + offset) - first;
+                states[STATE_BYTES * index..STATE_BYTES * (index + 1)].copy_from_slice(state);
             }
         }
         states
     }
-    /// Shards holding the rows' hash states, in row order.
-    pub fn import(states: &[Sha3_512]) -> Self {
-        Self::new().imported(states)
+    /// Shards whose rows' hash states are restored in row order.
+    pub fn importing() -> Self {
+        Self::new()
     }
-    fn imported(mut self, states: &[Sha3_512]) -> Self {
-        assert_eq!(states.len(), DOMAIN);
-        let shards = &self;
-        let mut tickets = Vec::new();
-        for shard in 0..shards.shards() {
-            for first in (0..shards.rows()).step_by(ROWS_PER_JOB) {
-                let count = ROWS_PER_JOB.min(shards.rows() - first);
-                let mut bytes = Zeroizing::new(Vec::with_capacity(STATE_BYTES * count));
-                for q in first..first + count {
-                    bytes.extend(<[u8; STATE_BYTES]>::from(
-                        states[shard + shards.shards() * q].serialize(),
-                    ));
+    /// Restores the hash states of the rows from the first, in row order,
+    /// after those of every earlier row.
+    pub fn import(&mut self, first: usize, states: &[u8]) {
+        assert!(states.len().is_multiple_of(STATE_BYTES));
+        let shards = self.shards();
+        let tickets = self
+            .ranges(first, states.len() / STATE_BYTES)
+            .into_iter()
+            .map(|(shard, row, rows)| {
+                let mut bytes = Zeroizing::new(Vec::with_capacity(STATE_BYTES * rows));
+                for q in row..row + rows {
+                    let index = shard + shards * q - first;
+                    bytes
+                        .extend_from_slice(&states[STATE_BYTES * index..STATE_BYTES * (index + 1)]);
                 }
-                tickets.push(shards.range_job(&IMPORT, shard, (first, count), &[&bytes], 0));
-            }
-        }
-        self.running.push_back(tickets);
-        self
+                self.range_job(&IMPORT, shard, (row, rows), &[&bytes], 0)
+            })
+            .collect();
+        self.started(tickets);
     }
 }
 
@@ -672,19 +697,38 @@ mod tests {
             assert!(!resident(session));
             assert!(tree.root() == expected.root(), "{classes} classes");
         }
-        // Rows exported after a polynomial continue where they stopped.
+        // Rows exported after a polynomial, in ranges that split the
+        // shards' rows unevenly, continue where they stopped once imported
+        // in other ranges into other classes.
         let mut tree = unfinished(&expected);
         let mut shards = RowShards::with_classes(2).opened(&tree);
         absorb(&mut shards, &polynomials[0]);
-        let states = shards.export();
+        let states = shards.export(0, DOMAIN);
+        let mut first = 0;
+        for count in [1, 7, 5_216, 20_000, 1] {
+            assert_eq!(
+                *shards.export(first, count),
+                states[STATE_BYTES * first..STATE_BYTES * (first + count)]
+            );
+            first += count;
+        }
+        assert_eq!(
+            *shards.export(DOMAIN - 3, 3),
+            states[STATE_BYTES * (DOMAIN - 3)..]
+        );
         let abandoned = shards.session;
         drop(shards);
         assert!(!resident(abandoned));
-        let states: Vec<Sha3_512> = states
-            .iter()
-            .map(|bytes| Sha3_512::deserialize(bytes.into()).unwrap())
-            .collect();
-        let mut shards = RowShards::with_classes(4).imported(&states);
+        let mut shards = RowShards::with_classes(4);
+        let mut first = 0;
+        while first < DOMAIN {
+            let count = 5_216.min(DOMAIN - first);
+            shards.import(
+                first,
+                &states[STATE_BYTES * first..STATE_BYTES * (first + count)],
+            );
+            first += count;
+        }
         for polynomial in &polynomials[1..] {
             absorb(&mut shards, polynomial);
         }

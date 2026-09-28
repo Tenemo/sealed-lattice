@@ -391,8 +391,8 @@ pub fn checkpoint_command(operation: u32, position: usize, length: usize) -> u32
                 2 if length == 32 => {
                     let key = zeroize::Zeroizing::new(<[u8; 32]>::try_from(bytes).unwrap());
                     let proof = work
-                        .as_ref()
-                        .and_then(|work| work.proof.as_ref())
+                        .as_mut()
+                        .and_then(|work| work.proof.as_mut())
                         .ok_or(())?;
                     *output = checkpoint_export
                         .as_mut()
