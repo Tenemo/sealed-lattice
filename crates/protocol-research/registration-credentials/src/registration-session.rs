@@ -307,6 +307,25 @@ pub(crate) mod tests {
     };
     use supported_profile::relation::PROOF_HEADER_BYTES;
 
+    // The sessions open where the job runs.
+    static SESSION_COUNT: Job = Job {
+        kind: 0x06ff,
+        run: session_count,
+    };
+    fn session_count(_: &[u8]) -> Vec<u8> {
+        SESSIONS.with(|sessions| (sessions.borrow().len() as u32).to_le_bytes().to_vec())
+    }
+    // The sessions open where each helper, or without helpers this thread,
+    // runs its jobs, after the jobs submitted before.
+    fn open_sessions() -> usize {
+        (0..parallel_work::helpers().max(1))
+            .map(|helper| {
+                let output = submit(&SESSION_COUNT, Some(helper), &[], 4).wait();
+                u32::from_le_bytes(output[..].try_into().unwrap()) as usize
+            })
+            .sum()
+    }
+
     /// A signed poll, its runtime, and the header of a registration of it
     /// with the runtime whose key and proof nothing produced.
     pub(crate) fn unproved_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
@@ -367,7 +386,7 @@ pub(crate) mod tests {
         let mut session = RegistrationSession::open(&poll, 0, &header, &signature).unwrap();
         assert!(matches!(session.push_proof(&[0]), Err(Error::Shape)));
         drop(session);
-        SESSIONS.with(|sessions| assert!(sessions.borrow().is_empty()));
+        assert_eq!(open_sessions(), 0);
         let mut session = RegistrationSession::open(&poll, 0, &header, &signature).unwrap();
         assert!(matches!(
             session.push_key(&vec![0; CHUNK_LIMIT + 1]),
@@ -397,7 +416,7 @@ pub(crate) mod tests {
         }
         session.finish_key().unwrap();
         let pending = session.finish().unwrap();
-        SESSIONS.with(|sessions| assert!(sessions.borrow().is_empty()));
+        assert_eq!(open_sessions(), 0);
         assert!(matches!(pending.wait(), Err(Error::Shape)));
     }
 }
