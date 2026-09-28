@@ -22,6 +22,9 @@ const MAXIMUM_COLUMNS: usize = (64 * MAXIMUM_WORDS).div_ceil(LIMB_BITS) + 3;
 const TERMS_PER_CARRY: usize = 16;
 /// Fractional bits of each residue's share of a lift's rounding sum.
 const FRACTION_BITS: u32 = 57;
+/// Fractional bits of each remainder's share of the ciphertext modulus in a
+/// tensor's rounded quotient: two words.
+const QUOTIENT_FRACTION_BITS: usize = 128;
 
 /// The low and high words of the product of two words. WebAssembly has no
 /// widening multiplication and forms a 128-bit product in a library routine,
@@ -275,6 +278,13 @@ fn pack(columns: &[u64], output: &mut [u64]) {
     }
 }
 
+/// The whole part of a fixed-point sum's three words, of which the first
+/// two are its 128 fractional bits, when every addition of less than 2^64
+/// units leaves it unchanged: unless the second word is all ones.
+fn decided(words: [u64; 3]) -> Option<u64> {
+    (words[1] != u64::MAX).then_some(words[2])
+}
+
 /// Constants that reconstruct a centered integer from its residues modulo a
 /// prefix of the primes whose product P exceeds twice the integer's
 /// magnitude by the rounding margin, and determine the integer modulo the
@@ -301,6 +311,11 @@ pub(super) struct Lift {
     rows: Vec<u32>,
     /// For a tensor, limbs of B_i and then of q - D.
     remainders: Vec<u32>,
+    /// For a tensor, the low and high words of floor(2^128 B_i / q) and then
+    /// of floor(2^128 (q - D) / q).
+    quotient_fractions: Vec<[u64; 2]>,
+    /// floor(2^128 floor(q / 2) / q), which rounds a tensor's quotient.
+    half_fraction: u128,
 }
 
 impl Lift {
@@ -330,11 +345,16 @@ impl Lift {
                 (0..limbs).map(|limb| (extract(&words, limb * LIMB_BITS) & LIMB_MASK) as u32),
             );
         };
+        let fraction = |value: &BigUint| {
+            let words = words_of(&((value << QUOTIENT_FRACTION_BITS) / modulus), 2);
+            [words[0], words[1]]
+        };
         let product: BigUint = primes.iter().map(|prime| BigUint::from(*prime)).product();
         let mut inverses = Vec::with_capacity(count);
         let mut fractions = Vec::with_capacity(count);
         let mut rows = Vec::with_capacity((count + 1) * limbs);
         let mut remainders = Vec::new();
+        let mut quotient_fractions = Vec::new();
         for (prime, reduction) in primes.iter().zip(reductions) {
             assert!((1 << FRACTION_BITS) < *prime && *prime < 1 << (2 * LIMB_BITS));
             let cofactor = &product / *prime;
@@ -346,7 +366,9 @@ impl Lift {
             if tensor {
                 let scaled = cofactor * plaintext;
                 push_limbs(&mut rows, &(&scaled / modulus % modulus));
-                push_limbs(&mut remainders, &(scaled % modulus));
+                let remainder = scaled % modulus;
+                push_limbs(&mut remainders, &remainder);
+                quotient_fractions.push(fraction(&remainder));
             } else {
                 push_limbs(&mut rows, &(cofactor % modulus));
             }
@@ -354,10 +376,13 @@ impl Lift {
         if tensor {
             let scaled = &product * plaintext;
             push_limbs(&mut rows, &(modulus - 1u32 - &scaled / modulus % modulus));
-            push_limbs(&mut remainders, &(modulus - scaled % modulus));
+            let remainder = modulus - scaled % modulus;
+            push_limbs(&mut remainders, &remainder);
+            quotient_fractions.push(fraction(&remainder));
         } else {
             push_limbs(&mut rows, &(modulus - &product % modulus));
         }
+        let [low, high] = fraction(&(modulus >> 1usize));
         Self {
             count,
             tensor,
@@ -366,7 +391,53 @@ impl Lift {
             fractions,
             rows,
             remainders,
+            quotient_fractions,
+            half_fraction: (u128::from(high) << 64) | u128::from(low),
         }
+    }
+
+    /// A tensor's rounded quotient floor((S + floor(q / 2)) / q), where S
+    /// sums the multipliers times the remainders, from the multipliers
+    /// times the remainders' fractions of q and the half's fraction, or
+    /// none when that fixed-point sum cannot decide it. Each fraction falls
+    /// short of its share by less than one unit of 2^-128 per multiplier
+    /// unit, so the sum falls short of 2^128 times the exact quotient by
+    /// less than one unit more than the multipliers' sum, below 2^64: its
+    /// whole part is the quotient unless its fractional part lies within
+    /// 2^64 units of a whole number.
+    fn rounded_quotient(&self, multipliers: &[u64]) -> Option<u64> {
+        // Each product of a multiplier below 2^58 and a fraction word is
+        // below 2^122, so at most 49 of them sum below 2^128: the low
+        // words' products at word zero, the high words' at word one.
+        let (mut low, mut high) = (0u128, 0u128);
+        for (multiplier, [fraction_low, fraction_high]) in
+            multipliers.iter().zip(&self.quotient_fractions)
+        {
+            let (first, second) = widening_multiply(*multiplier, *fraction_low);
+            low += (u128::from(second) << 64) | u128::from(first);
+            let (first, second) = widening_multiply(*multiplier, *fraction_high);
+            high += (u128::from(second) << 64) | u128::from(first);
+        }
+        let (low, carry) = low.overflowing_add(self.half_fraction);
+        let middle = (low >> 64) + (high & u128::from(u64::MAX));
+        decided([
+            low as u64,
+            middle as u64,
+            (middle >> 64) as u64 + (high >> 64) as u64 + u64::from(carry),
+        ])
+    }
+    /// The same rounded quotient from the exact sum, below 2^64 times the
+    /// modulus, in the wide words, with the remainder as scratch.
+    fn exact_rounded_quotient(
+        &self,
+        multipliers: &[u64],
+        modulus: &WideModulus,
+        wide: &mut [u64],
+        remainder: &mut [u64],
+    ) -> u64 {
+        self.accumulate(multipliers, &self.remainders, wide);
+        add_in_place(wide, &modulus.half);
+        modulus.divide(wide, remainder)
     }
 
     /// The sum of the multipliers times the rows, below 2^64 times the
@@ -425,9 +496,9 @@ impl Lift {
         let mut wide = [0u64; MAXIMUM_WORDS + 1];
         let wide = &mut wide[..=modulus.words];
         if self.tensor {
-            self.accumulate(multipliers, &self.remainders, wide);
-            add_in_place(wide, &modulus.half);
-            let rounded = modulus.divide(wide, output);
+            let rounded = self
+                .rounded_quotient(multipliers)
+                .unwrap_or_else(|| self.exact_rounded_quotient(multipliers, modulus, wide, output));
             self.accumulate(multipliers, &self.rows, wide);
             add_in_place(wide, &[rounded]);
         } else {
@@ -609,6 +680,83 @@ mod tests {
         } else {
             reduced
         }
+    }
+
+    // A tensor's rounded quotient floor((S + floor(q / 2)) / q), with S the
+    // multipliers times each prime's remainder t P / p_i mod q and then
+    // q - (t P mod q), computed here from the primes and the modulus:
+    // the fixed-point fractions decide it for multipliers at zero, at
+    // their largest and at random, and the exact path agrees. A fraction
+    // within 2^64 units below a whole number is left to the exact path.
+    #[test]
+    fn rounded_quotients_match_exact_quotients() {
+        let mut primes = Vec::new();
+        let mut limit = 1u64 << 58;
+        while primes.len() < 36 {
+            limit = super::super::super::proth_prime(58, limit);
+            primes.push(limit);
+        }
+        let reductions: Vec<Modulus> = primes
+            .iter()
+            .map(|prime| Modulus::new(*prime).unwrap())
+            .collect();
+        for modulus in moduli() {
+            let wide = WideModulus::new(&modulus);
+            let half = &modulus >> 1usize;
+            let bound = 2u32 * BigUint::from(65_536u32) * &half * &half;
+            let mut count = 0;
+            let mut product = BigUint::from(1u32);
+            while !Lift::covers(&product, count, &bound) {
+                product *= primes[count];
+                count += 1;
+            }
+            let lift = Lift::new(
+                &primes[..count],
+                &reductions[..count],
+                &modulus,
+                65_537,
+                true,
+            );
+            let mut remainders: Vec<BigUint> = primes[..count]
+                .iter()
+                .map(|prime| &product / *prime * 65_537u32 % &modulus)
+                .collect();
+            remainders.push(&modulus - &product * 65_537u32 % &modulus);
+            let mut state = 0x7a11 ^ count as u64;
+            let mut cases = vec![
+                vec![0; count + 1],
+                primes[..count]
+                    .iter()
+                    .map(|prime| prime - 1)
+                    .chain([count as u64])
+                    .collect::<Vec<_>>(),
+            ];
+            for _ in 0..400 {
+                let mut multipliers: Vec<u64> = primes[..count]
+                    .iter()
+                    .map(|prime| next(&mut state) % prime)
+                    .collect();
+                multipliers.push(next(&mut state) % (count as u64 + 1));
+                cases.push(multipliers);
+            }
+            let mut buffer = vec![0; wide.words + 1];
+            let mut remainder = vec![0; wide.words];
+            for multipliers in cases {
+                let sum = multipliers
+                    .iter()
+                    .zip(&remainders)
+                    .map(|(multiplier, remainder)| remainder * *multiplier)
+                    .sum::<BigUint>();
+                let expected = ((sum + &half) / &modulus).to_u64().unwrap();
+                assert_eq!(lift.rounded_quotient(&multipliers), Some(expected));
+                assert_eq!(
+                    lift.exact_rounded_quotient(&multipliers, &wide, &mut buffer, &mut remainder),
+                    expected
+                );
+            }
+        }
+        assert_eq!(decided([u64::MAX, u64::MAX - 1, 7]), Some(7));
+        assert_eq!(decided([0, u64::MAX, 7]), None);
     }
 
     #[test]
