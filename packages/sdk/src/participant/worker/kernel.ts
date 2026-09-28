@@ -11,6 +11,13 @@ export const kernelFunctions = [
     'participant_profile_bounds',
     // The highest linear-memory address any allocation has reached.
     'linear_memory_high_water',
+    // The bounds of the memory plan of an operation with a helper count,
+    // which evaluates the ranking program when the flag is one; zero
+    // without a plan. Reserve lowers the instance's bound to the worker's
+    // share before its first allocation.
+    'helper_memory_bound',
+    'worker_memory_bound',
+    'worker_reserve',
     'input_pointer',
     'input_capacity',
     'poll_identity_pointer',

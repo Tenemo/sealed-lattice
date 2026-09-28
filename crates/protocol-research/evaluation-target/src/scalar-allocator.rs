@@ -5,10 +5,12 @@
 //! briefly commits about as much again as the region already holds, so an
 //! operation that knows what it will add plans it beside the bytes its live
 //! allocations hold, and the next growth reaches that total at once rather
-//! than adding it to memory that is already free. A helper instance lowers
-//! its bound, which its jobs set, before its first allocation. An allocation
-//! that finds no memory within the bound hands the call to the host, which
-//! ends it, so the host tells exhaustion apart from a trap.
+//! than adding it to memory that is already free. Each instance lowers its
+//! bound to its share of the operation's memory plan before its first
+//! allocation. An allocation that finds no memory within the bound hands the
+//! call to the host, which ends it, so the host tells exhaustion apart from
+//! a trap.
+use crate::MAXIMUM_LINEAR_MEMORY_BYTES;
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::wasm32,
@@ -20,12 +22,11 @@ use core::{
 #[cfg(target_feature = "atomics")]
 compile_error!("The evaluation allocator requires an unshared scalar Wasm instance.");
 
-pub const MAXIMUM_LINEAR_MEMORY_BYTES: usize = 671_088_640;
 const PAGE_BYTES: usize = 65_536;
 /// The fewest pages a growing region adds at once.
 const MINIMUM_GROWTH_PAGES: usize = 16;
-// The instance's memory bound, which a helper instance lowers before its
-// first allocation starts the region.
+// The instance's memory bound, which the instance lowers before its first
+// allocation starts the region.
 static LINEAR_MEMORY_BYTES: AtomicUsize = AtomicUsize::new(MAXIMUM_LINEAR_MEMORY_BYTES);
 static ACQUIRED: AtomicBool = AtomicBool::new(false);
 // The pages a growth brings the region to at least, which an operation's
@@ -40,6 +41,11 @@ static HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 /// instance has reached: how much of its region the instance has used.
 pub fn linear_memory_high_water() -> usize {
     HIGH_WATER.load(Ordering::Relaxed)
+}
+
+/// The instance's memory bound.
+pub fn linear_memory_bound() -> usize {
+    LINEAR_MEMORY_BYTES.load(Ordering::Relaxed)
 }
 
 /// Lowers the instance's memory bound to whole pages before its first

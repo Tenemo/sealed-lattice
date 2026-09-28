@@ -7,7 +7,7 @@
 //! job pinned to a helper runs there after that helper's earlier jobs, and
 //! a helper whose job panicked fails every later job, as a trapped instance
 //! does.
-use crate::Job;
+use crate::{Job, MAXIMUM_HELPERS};
 use std::{
     cell::{Cell, OnceCell},
     panic::{AssertUnwindSafe, catch_unwind},
@@ -17,8 +17,6 @@ use std::{
 use zeroize::Zeroizing;
 
 const VARIABLE: &str = "SEALED_LATTICE_SIMULATED_HELPERS";
-/// The most helpers a worker starts, as in the browser.
-const MAXIMUM_HELPERS: usize = 8;
 
 /// A submitted job's end: its output of the declared length, or a failure.
 pub(crate) struct Slot {

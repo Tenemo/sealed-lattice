@@ -3,20 +3,17 @@
 //! registration proof's jobs serve every proof kind.
 use parallel_work::helper;
 
-/// Bounds a helper instance's memory, before its first allocation, to what
-/// one of the helpers needs, with the evaluation's tables and the
-/// polynomials its multiplications keep when the operation evaluates, since
-/// only the worker's own instance holds the whole bound. Returns zero when the bound applies.
+/// Bounds a helper instance's memory, before its first allocation, to its
+/// share of the memory plan of an operation with the helpers, which
+/// evaluates the ranking program when `evaluation` is one. Returns zero
+/// when the bound applies.
 #[unsafe(no_mangle)]
 pub extern "C" fn parallel_reserve(helpers: usize, evaluation: u32) -> u32 {
-    let evaluation_bytes = match evaluation {
-        0 => 0,
-        1 => rns_arithmetic_probe::ranking::helper_memory_bytes(helpers),
-        _ => return 1,
+    let bytes = match evaluation {
+        0 | 1 => crate::memory_plan::helper_memory_bytes(helpers, evaluation == 1),
+        _ => None,
     };
-    u32::from(!evaluation_target::limit_linear_memory(
-        registration_proof::rows::helper_memory_bytes(helpers) + evaluation_bytes,
-    ))
+    u32::from(!bytes.is_some_and(evaluation_target::limit_linear_memory))
 }
 
 /// A zeroed input buffer of the length, or zero beyond the job bound.

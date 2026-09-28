@@ -32,6 +32,10 @@ pub use scalar_allocator::{limit_linear_memory, linear_memory_high_water};
 pub mod target;
 pub mod terminal;
 
+/// The absolute bound on the linear memory of an operation's instances
+/// together, which bounds a lone instance too.
+pub const MAXIMUM_LINEAR_MEMORY_BYTES: usize = 671_088_640;
+
 /// Plans a helper instance's memory for the evaluation's jobs: a growth
 /// brings it to the bytes its live allocations hold and the bytes its input
 /// names, so its memory grows once to what those jobs hold rather than

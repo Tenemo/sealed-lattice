@@ -822,14 +822,19 @@ const execute = async (
 
 // The WebAssembly memory a completed operation held: the worker instance's
 // linear memory and how far its allocations reached, and its helpers' and
-// the shared arena's.
+// the shared arena's, beside the bounds of the operation's memory plan.
 const operationMemory = (
     kernel: ParticipantKernel,
     helpers: ParallelHelpers,
+    evaluation: boolean,
 ) => ({
     workerBytes: kernel.memory.buffer.byteLength,
     workerUsedBytes: kernel.linear_memory_high_water() >>> 0,
+    workerBoundBytes:
+        kernel.worker_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
     helpers: helpers.count,
+    helperBoundBytes:
+        kernel.helper_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
     ...helpers.memory(),
 });
 type OperationMemory = ReturnType<typeof operationMemory>;
@@ -868,11 +873,8 @@ const run = async (
         if (hexadecimal(runtime) !== command.identity.runtime)
             return { status: 'refused' };
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
-        const started = startParallelHelpers(
-            module,
-            helperPorts,
-            evaluatingOperations.has(command.operation),
-        );
+        const evaluation = evaluatingOperations.has(command.operation);
+        const started = startParallelHelpers(module, helperPorts, evaluation);
         database = await openParticipantDatabase(command.namespace);
         helpers = await started;
         const opened = database;
@@ -887,6 +889,18 @@ const run = async (
                         parallel,
                     );
                     kernel = instance.kernel;
+                    // The worker's share of the operation's memory plan,
+                    // whose other shares the started helpers hold, bounds
+                    // its instance before the first allocation.
+                    if (
+                        kernel.worker_reserve(
+                            parallel.count,
+                            evaluation ? 1 : 0,
+                        ) !== 0
+                    )
+                        throw new Error(
+                            'The participant module refused its memory plan.',
+                        );
                     const result = await execute(
                         {
                             namespace: command.namespace,
@@ -909,7 +923,11 @@ const run = async (
                               status: 'completed',
                               details: {
                                   ...result.details,
-                                  memory: operationMemory(kernel, parallel),
+                                  memory: operationMemory(
+                                      kernel,
+                                      parallel,
+                                      evaluation,
+                                  ),
                               },
                           }
                         : result;
@@ -923,7 +941,11 @@ const run = async (
                     )
                         return {
                             status: 'evaluated',
-                            memory: operationMemory(kernel, parallel),
+                            memory: operationMemory(
+                                kernel,
+                                parallel,
+                                evaluation,
+                            ),
                         };
                     // A local failure after authority started stops the
                     // participant before any other operation takes the lock.

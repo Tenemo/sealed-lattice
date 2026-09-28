@@ -115,6 +115,9 @@ pub struct Engine {
     instructions: Vec<Instruction>,
     remaining_uses: Vec<usize>,
     peak_values: usize,
+    /// The linear-memory bound of the instance that runs the evaluation,
+    /// which caps what its capacity lets that instance hold.
+    instance_bound: usize,
     values: Vec<Option<Ciphertext>>,
     stored: Vec<Option<[u8; 64]>>,
     step: usize,
@@ -147,10 +150,10 @@ fn helper_kept_bytes(tensor_primes: usize, external_primes: usize, gadget_length
     tensor_primes * TRANSFORM_TABLES * residue_bytes
         + (KEPT_SOURCES * tensor_primes).max(gadget_length * external_primes.min(1)) * residue_bytes
 }
-/// The memory a helper instance keeps for evaluation beside its jobs' own,
-/// one of `helpers` helpers that hold the primes in turn, for the profile
-/// that needs the most. A helper computes it before its first allocation,
-/// so it allocates nothing.
+/// The memory a helper instance keeps for evaluation beside its running
+/// job's, one of `helpers` helpers that hold the primes in turn, for the
+/// profile that needs the most. An instance computes it before its first
+/// allocation, so it allocates nothing.
 pub fn helper_memory_bytes(helpers: usize) -> usize {
     let held = |count: usize| count.div_ceil(helpers.max(1));
     Profile::all()
@@ -174,6 +177,27 @@ fn helper_reserved_bytes(arithmetic: &Arithmetic, helper: usize, helpers: usize)
         held(arithmetic.external_primes),
         arithmetic.gadget_length,
     ) + arithmetic.job_bytes(helpers)
+}
+/// What the helpers' instances hold for the evaluation: each one's
+/// reservation beside the reserve for its own state.
+fn helpers_reserved_bytes(arithmetic: &Arithmetic, helpers: usize) -> usize {
+    (0..helpers)
+        .map(|helper| HELPER_RESERVE_BYTES + helper_reserved_bytes(arithmetic, helper, helpers))
+        .sum()
+}
+/// The fewest resident values that any kind of instruction of the profile's
+/// evaluation allows an instance of the bound beside the helpers.
+pub fn fewest_resident_values(
+    profile: Profile,
+    helpers: usize,
+    bound: usize,
+) -> Result<usize, Refusal> {
+    let arithmetic = shared(profile, DEGREE);
+    [1, 2, 4, 6]
+        .into_iter()
+        .try_fold(usize::MAX, |fewest, operation| {
+            Ok(fewest.min(capacity(&arithmetic, operation, helpers, bound)?))
+        })
 }
 
 /// Bytes of one resident working value.
@@ -206,22 +230,33 @@ fn scratch_bytes(arithmetic: &Arithmetic, operation: u32, helpers: usize) -> usi
     }
 }
 /// The resident values an instruction of the operation allows within the
-/// planning target. Without helpers the instance also holds the transform
-/// tables and one job; with them each helper holds its reservation at every
-/// instruction, since an instance's memory never shrinks.
-fn capacity(arithmetic: &Arithmetic, operation: u32, helpers: usize) -> Result<usize, Refusal> {
-    let held = if helpers == 0 {
-        arithmetic.tensor_primes() * TRANSFORM_TABLES * DEGREE * 8 + arithmetic.job_bytes(0)
+/// planning target and the bound of the instance that runs it. Without
+/// helpers the instance also holds the transform tables and one job; with
+/// them each helper holds its reservation at every instruction, since an
+/// instance's memory never shrinks, and the instance keeps what they leave
+/// of the target.
+fn capacity(
+    arithmetic: &Arithmetic,
+    operation: u32,
+    helpers: usize,
+    bound: usize,
+) -> Result<usize, Refusal> {
+    let (helpers_hold, instance_holds) = if helpers == 0 {
+        (
+            0,
+            arithmetic.tensor_primes() * TRANSFORM_TABLES * DEGREE * 8 + arithmetic.job_bytes(0),
+        )
     } else {
-        (0..helpers)
-            .map(|helper| HELPER_RESERVE_BYTES + helper_reserved_bytes(arithmetic, helper, helpers))
-            .sum()
+        (helpers_reserved_bytes(arithmetic, helpers), 0)
     };
     let available = MEMORY_BYTES
+        .checked_sub(helpers_hold)
+        .ok_or(Refusal::Allocation)?
+        .min(bound)
         .checked_sub(
             RUNTIME_RESERVE_BYTES
                 + TRANSFER_RESERVE_BYTES
-                + held
+                + instance_holds
                 + scratch_bytes(arithmetic, operation, helpers),
         )
         .ok_or(Refusal::Allocation)?;
@@ -433,6 +468,7 @@ impl Engine {
             arithmetic,
             program_hash: expected_hash,
             peak_values: peak_values(&instructions, remaining_uses.clone()),
+            instance_bound: usize::MAX,
             instructions,
             remaining_uses,
             values: (0..count).map(|_| None).collect(),
@@ -551,18 +587,30 @@ impl Engine {
         value_bytes(&self.arithmetic)
     }
     fn capacity(&self, operation: u32) -> Result<usize, Refusal> {
-        capacity(&self.arithmetic, operation, parallel_work::helpers())
+        capacity(
+            &self.arithmetic,
+            operation,
+            parallel_work::helpers(),
+            self.instance_bound,
+        )
+    }
+    /// Caps what the evaluation lets its instance hold at the instance's
+    /// linear-memory bound, which the operation's memory plan set.
+    pub fn bound_instance(&mut self, bytes: usize) {
+        self.instance_bound = bytes;
     }
     /// The linear memory the evaluation's instance plans to add for it.
-    /// Without helpers it runs every job itself and plans the whole target
-    /// but the reserves. With them it plans, at the kind of instruction
-    /// that needs the most, that instruction's scratch and the resident
-    /// values its capacity allows, never more than the program holds at
-    /// once.
+    /// Without helpers it runs every job itself and plans the whole target,
+    /// or its instance's bound when that is lower, but the reserves. With
+    /// them it plans, at the kind of instruction that needs the most, that
+    /// instruction's scratch and the resident values its capacity allows,
+    /// never more than the program holds at once.
     pub fn planned_memory_bytes(&self) -> usize {
         let helpers = parallel_work::helpers();
         if helpers == 0 {
-            return MEMORY_BYTES - RUNTIME_RESERVE_BYTES - TRANSFER_RESERVE_BYTES;
+            return MEMORY_BYTES
+                .min(self.instance_bound)
+                .saturating_sub(RUNTIME_RESERVE_BYTES + TRANSFER_RESERVE_BYTES);
         }
         let held = |operation: u32| {
             self.capacity(operation).map_or(0, |capacity| {
@@ -1049,9 +1097,10 @@ impl Engine {
 mod tests {
     use super::{
         super::{prime_count_bounds, primes, shared},
-        DEGREE, Instruction, Profile, Refusal, capacity, evictions, helper_memory_bytes,
-        peak_values,
+        DEGREE, Instruction, MEMORY_BYTES, Profile, Refusal, capacity, evictions,
+        helper_memory_bytes, helpers_reserved_bytes, peak_values, value_bytes,
     };
+    use parallel_work::JOB_MEMORY_BYTES;
     use std::collections::BTreeSet;
 
     // The peak counts the values alive at each instruction: those defined
@@ -1156,14 +1205,52 @@ mod tests {
 
     // With up to eight helpers, each representative profile keeps room for
     // an instruction's two inputs and its output at every kind of
-    // instruction.
+    // instruction, and each evaluation job a helper runs fits one job's
+    // memory.
     #[test]
     fn every_profile_keeps_room_for_an_instruction_with_eight_helpers() {
         for (participants, options) in [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)] {
             let arithmetic = shared(Profile::new(participants, options).unwrap(), DEGREE);
             for helpers in 0..=8 {
                 for operation in [1, 2, 4, 6] {
-                    assert!(capacity(&arithmetic, operation, helpers).unwrap() >= 3);
+                    assert!(capacity(&arithmetic, operation, helpers, usize::MAX).unwrap() >= 3);
+                }
+                assert!(helpers == 0 || arithmetic.job_bytes(helpers) <= JOB_MEMORY_BYTES);
+            }
+        }
+    }
+
+    // An instance bound below what the helpers leave of the planning target
+    // caps the resident values of every kind of instruction: the smallest
+    // bound that allows three values allows two a byte lower, each further
+    // value takes one value's bytes more, a bound that holds only the
+    // reserves allows none and one a byte lower is refused, and a bound at
+    // what the helpers leave changes nothing.
+    #[test]
+    fn the_instance_bound_caps_the_resident_values() {
+        for (participants, options) in [(3, 2), (10, 10), (20, 20)] {
+            let arithmetic = shared(Profile::new(participants, options).unwrap(), DEGREE);
+            let value = value_bytes(&arithmetic);
+            for helpers in [0, 3, 8] {
+                let left = MEMORY_BYTES - helpers_reserved_bytes(&arithmetic, helpers);
+                for operation in [1, 2, 4, 6] {
+                    let at = |bound| capacity(&arithmetic, operation, helpers, bound);
+                    assert_eq!(at(left), at(usize::MAX));
+                    let (mut low, mut high) = (0, left);
+                    while low < high {
+                        let middle = (low + high) / 2;
+                        if at(middle).is_ok_and(|values| values >= 3) {
+                            high = middle;
+                        } else {
+                            low = middle + 1;
+                        }
+                    }
+                    assert_eq!(at(low), Ok(3));
+                    assert_eq!(at(low - 1), Ok(2));
+                    assert_eq!(at(low + value), Ok(4));
+                    assert_eq!(at(low + value - 1), Ok(3));
+                    assert_eq!(at(low - 3 * value), Ok(0));
+                    assert_eq!(at(low - 3 * value - 1), Err(Refusal::Allocation));
                 }
             }
         }

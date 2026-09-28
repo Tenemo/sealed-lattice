@@ -17,6 +17,8 @@ pub mod contribution_signing;
 pub mod custody_identity;
 #[path = "finality-work.rs"]
 pub mod finality_work;
+#[path = "memory-plan.rs"]
+pub mod memory_plan;
 #[cfg(any(target_arch = "wasm32", test))]
 #[path = "operation-random.rs"]
 mod operation_random;

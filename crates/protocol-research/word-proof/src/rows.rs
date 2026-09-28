@@ -66,24 +66,18 @@ const ROWS_PER_JOB: usize = 16_384;
 const POLYNOMIALS_RUNNING: usize = 4;
 const HEADER_BYTES: usize = 16;
 const STATE_BYTES: usize = 201;
-/// The linear memory any one job needs beside the shards' rows: its input
-/// and output buffers, its decoded coefficients and values, and the cached
-/// transform tables.
-const JOB_MEMORY_BYTES: usize = 48 << 20;
-const PAGE_BYTES: usize = 65_536;
 
 /// The residue classes per coset for a helper count: the most for which
 /// every shard has a helper of its own, and one without enough helpers.
 pub fn classes(helpers: usize) -> usize {
     (1 << (helpers / 4).max(1).ilog2()).min(SYSTEMATIC / 2)
 }
-/// The linear memory a helper instance needs: the rows of the shards it
-/// holds beside one job's memory.
-pub fn helper_memory_bytes(helpers: usize) -> usize {
+/// The linear memory the rows of the shards that one of the helpers holds
+/// take.
+pub fn helper_rows_bytes(helpers: usize) -> usize {
     let classes = classes(helpers);
     let shards = (4 * classes).div_ceil(helpers.max(1));
-    let rows = shards * (SYSTEMATIC / classes) * size_of::<Sha3_512>();
-    (rows + JOB_MEMORY_BYTES).next_multiple_of(PAGE_BYTES)
+    shards * (SYSTEMATIC / classes) * size_of::<Sha3_512>()
 }
 
 struct Shard {
@@ -694,8 +688,10 @@ mod tests {
         assert!(tree.root() == expected.root());
     }
 
+    // The helpers' rows together cover every shard's, since the helpers
+    // hold the shards in turn.
     #[test]
-    fn helper_memory_holds_each_helpers_shards() {
+    fn helper_rows_hold_each_helpers_shards() {
         for (helpers, classes) in [
             (0, 1),
             (1, 1),
@@ -707,11 +703,11 @@ mod tests {
             (32, 8),
         ] {
             assert_eq!(super::classes(helpers), classes);
-            let shards = (4 * classes).div_ceil(helpers.max(1));
-            let rows = shards * (SYSTEMATIC / classes) * size_of::<Sha3_512>();
-            let bytes = helper_memory_bytes(helpers);
-            assert!(bytes.is_multiple_of(PAGE_BYTES) && bytes >= rows + JOB_MEMORY_BYTES);
-            assert!(bytes < rows + JOB_MEMORY_BYTES + PAGE_BYTES);
+            let shard = (SYSTEMATIC / classes) * size_of::<Sha3_512>();
+            let rows = helper_rows_bytes(helpers);
+            assert!(rows.is_multiple_of(shard));
+            assert!(helpers.max(1) * rows >= 4 * classes * shard);
+            assert!(helpers.max(1) * rows < 4 * classes * shard + helpers.max(1) * shard);
         }
     }
 

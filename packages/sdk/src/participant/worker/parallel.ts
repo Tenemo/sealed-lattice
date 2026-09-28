@@ -1,29 +1,30 @@
 // Optional helper instances of the participant module. In a cross-origin
-// isolated context the page starts one dedicated helper per spare core
-// beside each operation's worker, from the same packaged worker source, and
-// hands the worker one port to each. The worker sends every helper the same
-// compiled module, which the helper instantiates with every host function
-// refused and memory bounded to what one helper needs. The module submits
-// deterministic jobs through a shared queue and later takes each output of
-// the length it declared, so every output equals the one it computes alone;
-// without helpers it runs every job itself. A job may stream one shared
-// part, which its helper reads in pieces as it runs instead of copying it
-// with the rest of its input. A job pinned to a helper runs
-// there after that helper's earlier pinned jobs, which lets the module keep
-// state on a helper between jobs. After startup the worker and its helpers
-// exchange only shared memory. The helpers are the page's workers rather
-// than the worker's own, so the worker's end never waits for theirs, and the
-// page ends them all together. A helper that does not start in time leaves
-// the module to run every job itself; a failed job and an exhausted arena
-// end the operation as pending.
+// isolated context the page starts one dedicated helper per spare core beside
+// each operation's worker, from the same packaged worker source, and hands the
+// worker one port to each. The worker sends every helper the same compiled
+// module, which the helper instantiates with every host function refused and
+// memory bounded to its share of the operation's memory plan, as the worker
+// bounds its own instance to what the helpers leave. The module submits
+// deterministic jobs through a shared queue and later takes each output of the
+// length it declared, so every output equals the one it computes alone; without
+// helpers it runs every job itself. A job may stream one shared part, which its
+// helper reads in pieces as it runs instead of copying it with the rest of its
+// input. A job pinned to a helper runs there after that helper's earlier pinned
+// jobs, which lets the module keep state on a helper between jobs. After
+// startup the worker and its helpers exchange only shared memory. The helpers
+// are the page's workers rather than the worker's own, so the worker's end
+// never waits for theirs, and the page ends them all together. A helper that
+// does not start in time leaves the module to run every job itself; a failed
+// job and an exhausted arena end the operation as pending.
 
 import { ResourceFailure } from './kernel.js';
 
 // The module's job bounds, which the host enforces again.
 const maximumJobBytes = 8 << 20;
 const maximumJobParts = 4;
-// The helpers an operation starts, whose bounded memories together stay
-// near the worker's own linear-memory bound.
+// The helpers an operation starts, as many as the module's memory plan
+// covers: it divides the absolute linear-memory bound between them and the
+// worker.
 const maximumHelpers = 8;
 /**
  * A helper that has not reported whether it started within this many

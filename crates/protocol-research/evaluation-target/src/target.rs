@@ -154,7 +154,7 @@ impl ClassifiedClosedInventory {
                 .map_err(|_| Error::UnsupportedProfile)?,
             )
         };
-        let engine = program
+        let mut engine = program
             .as_ref()
             .map(|program| {
                 Engine::new(self.setup.profile(), program.bytes(), *program.identity())
@@ -162,10 +162,14 @@ impl ClassifiedClosedInventory {
             })
             .transpose()?;
         // The instance and each helper grow once to what the evaluation plans
-        // them to hold beside their live allocations.
-        if let Some(engine) = &engine {
+        // them to hold beside their live allocations, within the instance's
+        // bound.
+        if let Some(engine) = &mut engine {
             #[cfg(target_arch = "wasm32")]
-            crate::scalar_allocator::plan_linear_memory(engine.planned_memory_bytes());
+            {
+                engine.bound_instance(crate::scalar_allocator::linear_memory_bound());
+                crate::scalar_allocator::plan_linear_memory(engine.planned_memory_bytes());
+            }
             let helpers = parallel_work::helpers();
             let tickets: Vec<_> = (0..helpers)
                 .map(|helper| {

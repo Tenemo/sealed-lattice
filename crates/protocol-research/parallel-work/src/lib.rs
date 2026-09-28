@@ -23,6 +23,12 @@ use zeroize::Zeroizing;
 pub const MAXIMUM_JOB_BYTES: usize = 8 << 20;
 /// The most parts one job's input joins.
 pub const MAXIMUM_JOB_PARTS: usize = 4;
+/// The linear memory a helper instance keeps for its running job beside the
+/// state its jobs share: the job's input and output, each at most one
+/// copied buffer, what it computes, and the transform tables jobs cache.
+pub const JOB_MEMORY_BYTES: usize = 32 << 20;
+/// The most helpers an operation's worker starts.
+pub const MAXIMUM_HELPERS: usize = 8;
 
 /// A job. A helper instance runs the function its kind names.
 pub struct Job {
