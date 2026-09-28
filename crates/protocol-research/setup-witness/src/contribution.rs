@@ -68,20 +68,25 @@ fn common_source(profile: Profile, index: usize) -> Result<(String, usize, Vec<u
         Err(Error::Phase)
     }
 }
+/// A common polynomial. An FHE one reduces its samples modulo the
+/// ciphertext modulus, a Proth prime, without dividing.
 pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, Error> {
     let (label, degree, modulus, sample_bits) = common_source(profile, index)?;
-    Ok(public_polynomial(
-        &label,
-        degree,
-        &integer(&modulus),
-        sample_bits,
-    ))
+    Ok(if profile.fhe_polynomial_position(index).is_some() {
+        proth_public_polynomial(&label, degree, profile.ciphertext_modulus(), sample_bits)
+    } else {
+        public_polynomial(&label, degree, &integer(&modulus), sample_bits)
+    })
 }
 /// The canonical records of a common polynomial: each coefficient's sign
 /// byte and its magnitude in the family's magnitude bytes.
 pub fn common_records(profile: Profile, index: usize) -> Result<Vec<u8>, Error> {
     let (label, degree, modulus, sample_bits) = common_source(profile, index)?;
-    Ok(public_records(&label, degree, &modulus, sample_bits))
+    Ok(if profile.fhe_polynomial_position(index).is_some() {
+        proth_public_records(&label, degree, profile.ciphertext_modulus(), sample_bits)
+    } else {
+        public_records(&label, degree, &modulus, sample_bits)
+    })
 }
 /// A common polynomial's canonical records, which helper instances of the
 /// participant module compute. Its input is the profile's participant and

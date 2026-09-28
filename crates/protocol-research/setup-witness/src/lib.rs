@@ -12,6 +12,9 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 #[path = "common-polynomial.rs"]
 mod common_polynomial;
 use common_polynomial::{public_polynomial, public_records};
+#[path = "proth-common-polynomial.rs"]
+mod proth_common_polynomial;
+use proth_common_polynomial::{proth_public_polynomial, proth_public_records};
 pub use supported_profile::Profile;
 use supported_profile::{
     AUXILIARY_DEGREE, DEGREE, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS,
