@@ -37,7 +37,7 @@ import {
     rosterBegin,
     streamRegistrations,
 } from './roster.js';
-import { awaitLater, namespacedName } from './storage.js';
+import { awaitLater, namespacedName, setupCacheName } from './storage.js';
 
 // Verifies the complete setup from public records in the participant's own
 // module: the poll again, the roster the participant verified, restored from
@@ -50,9 +50,11 @@ import { awaitLater, namespacedName } from './storage.js';
 // origin-local cache between contributions, and the module checks every
 // chunk it reads back. Only the complete verified setup lets the module emit
 // the retained setup reference, and a later visit restores the verified
-// setup from that reference while the cache holds the final aggregate.
+// setup from that reference while the cache holds the final aggregate. A
+// visit that records its reads for an archived transcript verifies every
+// registration and the complete setup again instead, so that the transcript
+// holds their records.
 
-const cacheName = 'sealed-lattice-setup';
 const cacheStore = 'aggregate';
 
 const cacheRequest = <Value>(request: IDBRequest<Value>) =>
@@ -75,7 +77,7 @@ const cacheCompletion = (transaction: IDBTransaction) =>
 // The aggregate cache holds only public bytes; a cache failure leaves the
 // participant pending, like any other public input.
 const openSetupCache = async (namespace: string) => {
-    const opened = indexedDB.open(namespacedName(cacheName, namespace), 1);
+    const opened = indexedDB.open(namespacedName(setupCacheName, namespace), 1);
     opened.onupgradeneeded = () => opened.result.createObjectStore(cacheStore);
     try {
         return await cacheRequest(opened);
@@ -457,13 +459,26 @@ const verifySetupInventory = async (
         await readDataKind(context, manifest, dataKind.pollSignature),
         recordIds.length,
     );
-    const input = concatenate(
-        begin,
-        await readDataKind(context, manifest, dataKind.retainedRoster),
-    );
-    sessionInput(context, input);
-    if (kernel.setup_roster_begin_retained(begin.length, input.length) !== 0)
-        throw new Error('The setup verifier refused the retained roster.');
+    // A visit that records its reads verifies every registration again, its
+    // signature and proof too, so that its transcript holds them; any other
+    // visit restores the verified registrations from the retained roster
+    // and the published headers and keys.
+    const recording = relay.recorder !== undefined;
+    if (recording) {
+        writeSetupInput(kernel, begin);
+        if (kernel.setup_roster_begin(begin.length) !== 0)
+            throw new Error('The setup verifier refused the retained poll.');
+    } else {
+        const input = concatenate(
+            begin,
+            await readDataKind(context, manifest, dataKind.retainedRoster),
+        );
+        sessionInput(context, input);
+        if (
+            kernel.setup_roster_begin_retained(begin.length, input.length) !== 0
+        )
+            throw new Error('The setup verifier refused the retained roster.');
+    }
     await streamRegistrations(
         relay,
         recordIds,
@@ -479,7 +494,7 @@ const verifySetupInventory = async (
                 ) === 0
             );
         },
-        true,
+        !recording,
     );
     const proposalSignature = await readDataKind(
         context,
@@ -599,10 +614,11 @@ export const verifySetup = async (
 };
 
 // Makes sure the cache holds the final aggregate that work after the setup
-// reads. When it does not, the complete setup is verified again from the
-// retained confirmation inventory, which rewrites the cache and must
-// reproduce the retained setup reference; the verified setup is then live in
-// this instance. Returns whether it verified the setup.
+// reads. When it does not, or when the visit records its reads, so that its
+// transcript holds every setup record, the complete setup is verified again
+// from the retained confirmation inventory, which rewrites the cache and
+// must reproduce the retained setup reference; the verified setup is then
+// live in this instance. Returns whether it verified the setup.
 export const ensureFinalAggregate = async (
     session: ParticipantSession,
     relay: PublicRelay,
@@ -610,7 +626,8 @@ export const ensureFinalAggregate = async (
     if (session.root.head.generation < 12)
         throw new Error('No setup reference is retained.');
     const { context, root } = session;
-    if (await holdsFinalAggregate(context)) return false;
+    if (relay.recorder === undefined && (await holdsFinalAggregate(context)))
+        return false;
     const reference = await verifyCompleteSetup(session, relay, {
         bytes: await readDataKind(
             context,

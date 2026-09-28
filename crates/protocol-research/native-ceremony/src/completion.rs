@@ -251,6 +251,8 @@ pub fn run(
         )
     );
     assert!(target.classified().is_none());
+    // The restored target names the barrier it was evaluated from.
+    assert!(target.names_barrier(evaluated.classified().unwrap().barrier()));
     assert!(target.retain(&enrollments[0].credential).is_err());
     assert!(restore(&enrollments[1].credential, &retained).is_err());
     for position in [0, 4, 8, retained.len() / 2, retained.len() - 1] {

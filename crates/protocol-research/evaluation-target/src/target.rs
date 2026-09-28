@@ -471,6 +471,16 @@ impl VerifiedEvaluationTarget {
         bytes.extend(tag);
         Ok(bytes)
     }
+    /// Whether the close barrier is the one this target was evaluated from:
+    /// the barrier of its poll and setup whose close proposal its body
+    /// names.
+    pub fn names_barrier(&self, barrier: &VerifiedCloseBarrier) -> bool {
+        TargetMessage::parse(&self.body, self.setup.profile().participants()).is_ok_and(|message| {
+            message.poll() == &barrier.poll().identity()
+                && message.inventory() == &barrier.setup().inventory().identity()
+                && message.proposal() == barrier.proposal().identity()
+        })
+    }
     /// Restores the target this participant evaluated from the copy its
     /// credential keyed, for the verified poll and setup of this instance:
     /// the body must name both, and the ciphertext must be the one it names,

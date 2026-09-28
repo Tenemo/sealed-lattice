@@ -25,7 +25,7 @@ import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
-import { namespacedName } from './storage.js';
+import { evaluatedTargetName, namespacedName } from './storage.js';
 import {
     decodeTargetState,
     encodeTargetState,
@@ -52,7 +52,6 @@ const unusedWord = 0xff_ff_ff_ff;
 export const completionDirectory = 'completion/';
 const evaluationDatabase = 'sealed-lattice-public-evaluation';
 const evaluationStore = 'values';
-const evaluatedTargetDatabase = 'sealed-lattice-evaluated-target';
 const evaluatedTargetStore = 'target';
 
 // The own ballot's status in the target, by the finality work's code.
@@ -410,7 +409,7 @@ const evaluatedTargetRequest = async <Value>(
     run: (store: IDBObjectStore) => IDBRequest<Value>,
 ) => {
     const opened = indexedDB.open(
-        namespacedName(evaluatedTargetDatabase, namespace),
+        namespacedName(evaluatedTargetName, namespace),
         1,
     );
     opened.onupgradeneeded = () =>
@@ -897,14 +896,24 @@ export class EvaluationRetained extends Error {}
 
 // The target this participant evaluated earlier, restored from its retained
 // copy, or else the target evaluated now from the public close records and
-// retained, which ends a separately evaluating worker. The completed close
-// and the verified setup must be restored in this instance first. Returns
-// the target body and whether it was restored.
+// retained, which ends a separately evaluating worker. A visit that records
+// its reads verifies the close barrier again beside a restored target, which
+// must name that barrier, so that its transcript holds the close records and
+// usable bodies the target was evaluated from. The completed close and the
+// verified setup must be restored in this instance first. Returns the target
+// body and whether it was restored.
 export const restoreOrEvaluateTarget = async (
     context: ProfileContext,
     relay: PublicRelay,
 ) => {
     if (await restoreEvaluation(context)) {
+        if (relay.recorder !== undefined) {
+            await verifyCloseBarrier(context, relay);
+            if (tryEvaluationCommand(context, 24) === undefined)
+                throw new PublicInputFailure(
+                    'The public close records name another target.',
+                );
+        }
         const { kernel } = context;
         return {
             body: readKernel(

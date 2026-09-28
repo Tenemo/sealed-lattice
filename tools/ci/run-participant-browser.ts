@@ -19,9 +19,20 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
-import { participantDatabaseName } from '#packages/sdk/src/participant/worker/storage.js';
+import { registrationFile } from '#packages/sdk/src/participant/worker/roster.js';
+import {
+    evaluatedTargetName,
+    namespacedName,
+    participantDatabaseName,
+    setupCacheName,
+} from '#packages/sdk/src/participant/worker/storage.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
+import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
+import {
+    readTranscript,
+    retrieveTranscript,
+} from '#packages/sdk/src/transcript-archive.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
@@ -1228,6 +1239,23 @@ await runWithLocalRunLog(
 })`),
                     ),
                 );
+            // Deletes a participant's public caches from its own page: the
+            // verified setup's aggregate and the target it evaluated, which
+            // hold no authority. Its next visit rebuilds them by verifying
+            // the setup and evaluating the target again from whatever public
+            // records it reads.
+            const discardPublicCaches = async (position: number) => {
+                const names = [setupCacheName, evaluatedTargetName].map(
+                    (name) => namespacedName(name, participantNamespace),
+                );
+                await inBrowser(position, undefined, (chrome) =>
+                    chrome.evaluate(`Promise.all(${JSON.stringify(names)}.map((name) => new Promise((resolve, reject) => {
+    const deleting = indexedDB.deleteDatabase(name);
+    deleting.onsuccess = () => resolve(undefined);
+    deleting.onerror = () => reject(deleting.error);
+})))`),
+                );
+            };
             // Ends a participant's browser as a crash would. Its committed
             // state is what the next launch finds, while Chrome's own
             // shutdown can outlast its deadline when other browsers write.
@@ -3043,6 +3071,81 @@ await runWithLocalRunLog(
                 records: number;
                 byteLength: number;
             }>;
+            // The routes of an archived transcript, which the runner
+            // retrieves from the replicas that still run.
+            const transcriptRoutes = async (
+                index: ArchivedTranscript['transcript'],
+            ) => {
+                const archive = openPublicArchive(archiveRuntime, {
+                    context: archiveContext,
+                    faultBound: archivePolicy.faultBound,
+                    replicas: replicas.map((replica, replicaPosition) => ({
+                        baseUrl: replica.baseUrl,
+                        verificationKey:
+                            archivePolicy.verificationKeys[replicaPosition],
+                    })),
+                    maximumRecords: 65_536,
+                    maximumTotalBytes: 4_294_967_291,
+                });
+                const records = new Map<string, Uint8Array>();
+                const store = {
+                    get: (identity: string) =>
+                        Promise.resolve(records.get(identity)),
+                    put: (identity: string, bytes: Uint8Array) => {
+                        records.set(identity, bytes);
+                        return Promise.resolve();
+                    },
+                };
+                await retrieveTranscript(archive, index, store);
+                const { routes } = await readTranscript(
+                    archive,
+                    index,
+                    store,
+                    () =>
+                        Promise.resolve({
+                            write: () => Promise.resolve(),
+                            close: () => Promise.resolve(),
+                        }),
+                );
+                return new Set(routes);
+            };
+            // A participant archives, with the target closure and with its
+            // outcome's transcript, every record a fresh reader verifies the
+            // setup and the close from, whatever its own retained state
+            // lets it skip: each roster registration's header, signature,
+            // public key and proof, each setup contributor's opening, body
+            // and proof, and the close intent and proposal.
+            const assertClosureRoutes = async (
+                index: ArchivedTranscript['transcript'],
+            ) => {
+                const routes = await transcriptRoutes(index);
+                const expected = [
+                    ...recordIds.flatMap((id) =>
+                        Object.values(registrationFile).map(
+                            (file) => `registration/${id}/${file}`,
+                        ),
+                    ),
+                    'close/intent.bin',
+                    'close/proposal.bin',
+                ];
+                for (
+                    let contributor = 0;
+                    contributor < setupContributorCount;
+                    contributor++
+                ) {
+                    const directory = `contribution-${String(contributor)}`;
+                    for (const file of await readdir(
+                        path.join(publicDirectory, directory),
+                    ))
+                        if (!file.startsWith('confirmation'))
+                            expected.push(directory + '/' + file);
+                }
+                for (const route of expected)
+                    assert.ok(
+                        routes.has(route),
+                        'The archived transcript lacks ' + route + '.',
+                    );
+            };
             // The certified target closures the first release visits
             // archived, by the position that archived each.
             const closures = new Map<number, ArchivedTranscript>();
@@ -3100,6 +3203,8 @@ await runWithLocalRunLog(
                         details.closure as ArchivedTranscript,
                     );
                 }
+                for (const archived of closures.values())
+                    await assertClosureRoutes(archived.transcript);
             } else {
                 // Every remaining participant certifies the target from the
                 // published votes, archives the certified target closure it
@@ -3174,12 +3279,17 @@ await runWithLocalRunLog(
                         }),
                 ]);
                 interruption = { position: interruptedPosition, resumedFrom };
+                for (const archived of closures.values())
+                    await assertClosureRoutes(archived.transcript);
                 // The combining participant, which the relay then serves no
-                // public record, finds the archived closures among the
-                // archive's hints and releases from the replicas alone. It
-                // halts at every generation after its target lock, the last
-                // with its signed release before delivery, which its next
-                // visit only delivers.
+                // public record and which has lost its public caches, finds
+                // the archived closures among the archive's hints and
+                // releases from the replicas alone, verifying the setup and
+                // evaluating the target again from a closure. It halts at
+                // every generation after its target lock, the last with its
+                // signed release before delivery, which its next visit only
+                // delivers.
+                await discardPublicCaches(combiningPosition);
                 let hint: Readonly<{ identity: string; byteLength: number }>;
                 relay.withheld.add(combiningPosition);
                 try {
@@ -3599,11 +3709,15 @@ await runWithLocalRunLog(
                 identity: string;
                 byteLength: number;
             }>;
+            await assertClosureRoutes(transcript);
             let listed:
                 | readonly Readonly<{ identity: string; byteLength: number }>[]
                 | undefined;
             await replicas[0].close();
             relay.withheld.add(voteProbe);
+            // The voter probe has lost its public caches too, so it verifies
+            // the setup and evaluates the target again from the transcript.
+            await discardPublicCaches(voteProbe);
             try {
                 await expectStatus(voteProbe, 'result', 'pending');
                 listed = (await run(voteProbe, 'transcripts'))

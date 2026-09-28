@@ -38,6 +38,13 @@ export const namespacedName = (name: string, namespace: string) =>
 export const participantDatabaseName = (namespace: string) =>
     namespacedName('sealed-lattice-participant', namespace);
 
+// The public caches beside the participant's database, which hold no
+// authority and which a visit rebuilds from public records when they are
+// lost: the verified setup's aggregate and the target the participant
+// evaluated.
+export const setupCacheName = 'sealed-lattice-setup';
+export const evaluatedTargetName = 'sealed-lattice-evaluated-target';
+
 const requestResult = <Value>(request: IDBRequest<Value>) =>
     new Promise<Value>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);

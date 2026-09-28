@@ -33,6 +33,7 @@ pub struct TargetMessage {
     body: Vec<u8>,
     poll: [u8; 64],
     inventory: [u8; 64],
+    proposal: [u8; 64],
     identity: [u8; 64],
     participants: usize,
     encrypted: bool,
@@ -122,6 +123,10 @@ impl TargetMessage {
                 .canonical_bytes()
                 .try_into()
                 .map_err(|_| Error::Shape)?,
+            proposal: items[3]
+                .canonical_bytes()
+                .try_into()
+                .map_err(|_| Error::Shape)?,
             identity,
             participants,
             encrypted: branch == 1,
@@ -135,6 +140,11 @@ impl TargetMessage {
     }
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
+    }
+    /// The identity of the close proposal whose barrier the target was
+    /// evaluated from.
+    pub fn proposal(&self) -> &[u8; 64] {
+        &self.proposal
     }
     pub fn inventory(&self) -> &[u8; 64] {
         &self.inventory
