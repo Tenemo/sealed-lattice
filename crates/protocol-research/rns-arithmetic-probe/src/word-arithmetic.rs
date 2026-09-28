@@ -29,20 +29,27 @@ const FRACTION_BITS: u32 = 57;
 #[inline(always)]
 pub(super) fn widening_multiply(left: u64, right: u64) -> (u64, u64) {
     if cfg!(target_arch = "wasm32") {
-        let (left_low, left_high) = (left & 0xffff_ffff, left >> 32);
-        let (right_low, right_high) = (right & 0xffff_ffff, right >> 32);
-        let low = left_low * right_low;
-        let first = left_high * right_low;
-        let second = left_low * right_high;
-        let middle = (low >> 32) + (first & 0xffff_ffff) + (second & 0xffff_ffff);
-        (
-            (low & 0xffff_ffff) | (middle << 32),
-            left_high * right_high + (first >> 32) + (second >> 32) + (middle >> 32),
-        )
+        partial_products(left, right)
     } else {
         let product = u128::from(left) * u128::from(right);
         (product as u64, (product >> 64) as u64)
     }
+}
+/// The low and high words of the product of two words from four 32-bit
+/// partial products, which every target compiles so that native tests check
+/// the WebAssembly path.
+#[inline(always)]
+fn partial_products(left: u64, right: u64) -> (u64, u64) {
+    let (left_low, left_high) = (left & 0xffff_ffff, left >> 32);
+    let (right_low, right_high) = (right & 0xffff_ffff, right >> 32);
+    let low = left_low * right_low;
+    let first = left_high * right_low;
+    let second = left_low * right_high;
+    let middle = (low >> 32) + (first & 0xffff_ffff) + (second & 0xffff_ffff);
+    (
+        (low & 0xffff_ffff) | (middle << 32),
+        left_high * right_high + (first >> 32) + (second >> 32) + (middle >> 32),
+    )
 }
 
 /// The value's little-endian words, zero-extended to the count.
@@ -476,10 +483,9 @@ mod tests {
         for left in &values {
             for right in &values {
                 let product = u128::from(*left) * u128::from(*right);
-                assert_eq!(
-                    widening_multiply(*left, *right),
-                    (product as u64, (product >> 64) as u64)
-                );
+                let expected = (product as u64, (product >> 64) as u64);
+                assert_eq!(widening_multiply(*left, *right), expected);
+                assert_eq!(partial_products(*left, *right), expected);
             }
         }
     }

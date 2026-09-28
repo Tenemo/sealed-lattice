@@ -75,6 +75,16 @@ const memoryLimit = 1_073_741_824;
 const simulatedHelpersVariable = 'SEALED_LATTICE_SIMULATED_HELPERS';
 // The unit tests run alone and then with this many simulated helpers.
 const unitSimulatedHelpers = 3;
+// The proof crates' unit tests also run with this many, whose proof rows
+// hold two residue classes of each coset, which fewer helpers never reach.
+const proofSimulatedHelpers = 8;
+const proofCrates = [
+    'word-proof',
+    'registration-proof',
+    'ballot-proof',
+    'linked-release-proof',
+    'contribution-prover',
+];
 // A native ceremony generates and proves one contribution per participant,
 // which dominates its duration.
 const executionTimeout = prefixCase
@@ -433,6 +443,35 @@ await runWithLocalRunLog(
                 unitTests,
                 'unit-verification-simulated-helpers',
                 withSimulatedHelpers(unitSimulatedHelpers),
+            );
+            await execute(
+                'cargo',
+                [
+                    ...unitTests.filter(
+                        (argument) => argument !== '--workspace',
+                    ),
+                    ...proofCrates.flatMap((name) => ['-p', name]),
+                ],
+                'unit-verification-proof-helpers',
+                withSimulatedHelpers(proofSimulatedHelpers),
+            );
+            // The workspace excludes the vendored arithmetic crate, whose own
+            // tests check its 32-bit partial products, which only
+            // WebAssembly builds use, and its transforms natively.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'test',
+                    '--offline',
+                    '--locked',
+                    '--manifest-path',
+                    'vendor/fhe-rs/Cargo.toml',
+                    '-p',
+                    'fhe-math',
+                    '--lib',
+                ],
+                'vendored-arithmetic',
             );
             await execute(
                 'cargo',

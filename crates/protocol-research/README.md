@@ -38,7 +38,7 @@ The browser participant's worker may hand independent jobs to helper workers, an
 pnpm run research:protocol -- native-invalid-only 3 2 --simulated-helpers 3
 ```
 
-Every case runs the unit tests alone and then with three simulated helpers.
+Every case runs the unit tests alone and then with three simulated helpers, the proof crates' also with eight, whose proof rows hold two residue classes of each coset, and the vendored arithmetic crate's own tests, which check its WebAssembly word products natively.
 
 The runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
 
