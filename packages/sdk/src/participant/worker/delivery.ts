@@ -19,7 +19,8 @@ import type { ParticipantHead, ParticipantStore } from './storage.js';
 // many records as when the delivery began. A failed inspection ends the
 // delivery before any further read or transfer and takes precedence over the
 // transfer's own failure. A plaintext copy read for a transfer is cleared
-// before the inspection that follows it.
+// before the inspection that follows it, and each inspection clears the
+// root plaintext it opened.
 
 export type RetainedAuthority = Readonly<{
     head: ParticipantHead;
@@ -60,7 +61,11 @@ export const inspectRetainedAuthority = async (
     } catch {
         throw changed();
     }
-    if (!equalBytes(plaintext, expected.plaintext)) throw changed();
+    try {
+        if (!equalBytes(plaintext, expected.plaintext)) throw changed();
+    } finally {
+        plaintext.fill(0);
+    }
 };
 
 export type Delivery = Readonly<{
