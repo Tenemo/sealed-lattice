@@ -2,12 +2,15 @@
 //! that helper instances of the participant module run on their own. A job
 //! names the profile, the ring degree and a set of primes, one prime or a
 //! lift, so any instance rebuilds the same arithmetic from public
-//! parameters. A set holds every helper-count-th prime from its first, and
-//! its jobs, like those of each of its primes, run on the one helper that
-//! holds its transform tables and the transformed polynomials its sessions
-//! keep there; without helpers one set holds every prime.
+//! parameters. A set holds every helper-count-th prime from its first, or
+//! without helpers consecutive primes, as many as keep its job within the
+//! job bound, and its jobs, like those of each of its primes, run on the one
+//! helper that holds its transform tables and the transformed polynomials
+//! its sessions keep there.
 use super::{Arithmetic, Polynomial, shared};
-use parallel_work::{Job, Part, Pipeline, Shared, Ticket, session, share, share_words, submit};
+use parallel_work::{
+    Job, MAXIMUM_JOB_BYTES, Part, Pipeline, Shared, Ticket, session, share, share_words, submit,
+};
 use registration_credentials::{foundation::CanonicalItem, identity::IdentityHasher};
 use std::{
     cell::RefCell,
@@ -107,22 +110,25 @@ impl PrimeSet {
         self.primes().len()
     }
 }
-/// The sets that hold the first primes of the count: one for each helper
-/// that holds any of them, or one without helpers.
-fn prime_sets(count: usize) -> Vec<PrimeSet> {
-    let helpers = parallel_work::helpers();
-    if helpers == 0 {
-        return vec![PrimeSet {
-            first: 0,
-            stride: 1,
-            count,
-        }];
-    }
-    (0..helpers.min(count))
-        .map(|first| PrimeSet {
-            first,
-            stride: helpers,
-            count,
+/// The most primes one set holds: a set job's output holds at most a key
+/// record and its identity for each prime, within the job bound.
+fn set_primes(degree: usize) -> usize {
+    MAXIMUM_JOB_BYTES / (IDENTITY_BYTES + 8 * degree)
+}
+/// The sets that hold the first primes of the count with the helpers: each
+/// helper's primes, every helper-count-th from its first, or without
+/// helpers every prime, split into as few sets as hold at most a set's
+/// primes. A set's jobs run on the helper of its first prime.
+fn prime_sets(count: usize, degree: usize, helpers: usize) -> Vec<PrimeSet> {
+    let stride = helpers.max(1);
+    let span = set_primes(degree) * stride;
+    (0..stride.min(count))
+        .flat_map(|class| {
+            (class..count).step_by(span).map(move |first| PrimeSet {
+                first,
+                stride,
+                count: (first + span).min(count),
+            })
         })
         .collect()
 }
@@ -474,7 +480,7 @@ impl Arithmetic {
     /// streamed polynomial.
     pub(super) fn job_bytes(&self, helpers: usize) -> usize {
         let residue_bytes = 8 * self.degree;
-        let held = |count: usize| count.div_ceil(helpers.max(1));
+        let held = |count: usize| count.div_ceil(helpers.max(1)).min(set_primes(self.degree));
         let positions = LIFT_POSITIONS.min(self.degree);
         let jobs = [
             (held(self.tensor_primes()) + 1) * residue_bytes,
@@ -499,7 +505,7 @@ impl Arithmetic {
     /// Keeps the polynomial's transformed residues as the sources' slot.
     pub(super) fn keep_source(&self, sources: &mut Sources, slot: usize, polynomial: &[u64]) {
         let shared = self.shared_polynomial(polynomial);
-        for set in prime_sets(sources.count) {
+        for set in prime_sets(sources.count, self.degree, parallel_work::helpers()) {
             let mut input = self.set_header(set);
             input.extend(sources.session.to_le_bytes());
             input.extend((slot as u32).to_le_bytes());
@@ -524,7 +530,7 @@ impl Arithmetic {
         for ticket in sources.started.drain(..) {
             assert!(ticket.wait().is_empty());
         }
-        let sets = prime_sets(sources.count);
+        let sets = prime_sets(sources.count, self.degree, parallel_work::helpers());
         let tickets: Vec<Ticket> = sets
             .iter()
             .map(|set| {
@@ -572,7 +578,7 @@ impl Arithmetic {
         context: RecordContext,
     ) -> (Vec<[u8; 64]>, Vec<Vec<u8>>) {
         let shared = self.shared_polynomial(key);
-        let sets = prime_sets(self.external_primes);
+        let sets = prime_sets(self.external_primes, self.degree, parallel_work::helpers());
         let record_bytes = 8 * self.degree;
         let tickets: Vec<Ticket> = sets
             .iter()
@@ -921,5 +927,43 @@ mod tests {
         arithmetic.tensors(&square, &square);
         arithmetic.tensors(&square, &[arithmetic.uniform(4), arithmetic.uniform(5)]);
         KEPT.with(|kept| assert!(kept.borrow().is_empty()));
+    }
+
+    // At the full degree each set job's output stays within the job bound,
+    // which one more prime in a set would exceed, for every supported
+    // profile's prime counts and every helper count. Every prime lies in one
+    // set, on its helper, and a helper's primes split only beyond a set's.
+    #[test]
+    fn prime_sets_keep_each_set_job_within_the_job_bound() {
+        let degree = supported_profile::DEGREE;
+        let held = set_primes(degree);
+        let record = IDENTITY_BYTES + 8 * degree;
+        assert!(held * record <= MAXIMUM_JOB_BYTES && (held + 1) * record > MAXIMUM_JOB_BYTES);
+        let most = Profile::all()
+            .map(|profile| {
+                let (tensor, external) = super::super::prime_count_bounds(profile, degree);
+                tensor.max(external)
+            })
+            .max()
+            .unwrap();
+        for helpers in 0..=parallel_work::MAXIMUM_HELPERS {
+            let stride = helpers.max(1);
+            for count in 1..=most.max(3 * held) {
+                let sets = prime_sets(count, degree, helpers);
+                let mut seen = vec![false; count];
+                for set in &sets {
+                    assert!((1..=held).contains(&set.len()));
+                    for prime in set.primes() {
+                        assert!(!std::mem::replace(&mut seen[prime], true));
+                        assert_eq!(prime % stride, set.first % stride);
+                    }
+                }
+                assert!(seen.into_iter().all(|seen| seen));
+                let expected: usize = (0..stride.min(count))
+                    .map(|class| (class..count).step_by(stride).count().div_ceil(held))
+                    .sum();
+                assert_eq!(sets.len(), expected);
+            }
+        }
     }
 }
