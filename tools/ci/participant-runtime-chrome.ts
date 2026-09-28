@@ -130,15 +130,23 @@ export const launchChromeParticipant = async (
     let storageFailure: string | undefined;
     // A crashed page answers none of its requests, so each fails at once.
     let pageCrashed = false;
-    // The trace being recorded: its events so far, and what ends it.
-    let tracing: { events: unknown[]; complete: () => void } | undefined;
+    // The trace being recorded: its events so far, what ends it, and what
+    // ends it unfinished when the connection closes first.
+    let tracing:
+        | {
+              events: unknown[];
+              complete: () => void;
+              fail: (error: Error) => void;
+          }
+        | undefined;
     const send = (
         method: string,
         params: Record<string, unknown> = {},
         sessionId?: string,
     ) =>
         new Promise<Record<string, unknown>>((resolve, reject) => {
-            if (socket === undefined) {
+            // A closing socket drops what it is sent, so nothing would answer.
+            if (socket === undefined || socket.readyState !== WebSocket.OPEN) {
                 reject(new Error('Chrome is not connected.'));
                 return;
             }
@@ -281,6 +289,7 @@ export const launchChromeParticipant = async (
             for (const request of pending.values())
                 request.reject(new Error('The Chrome connection closed.'));
             pending.clear();
+            tracing?.fail(new Error('The Chrome connection closed.'));
         };
         const target = await send('Target.createTarget', {
             url: 'about:blank',
@@ -407,9 +416,11 @@ export const launchChromeParticipant = async (
                 if (tracing !== undefined)
                     throw new Error('Chrome is already recording a trace.');
                 const events: unknown[] = [];
-                const completed = new Promise<void>((resolve) => {
-                    tracing = { events, complete: resolve };
+                const completed = new Promise<void>((resolve, reject) => {
+                    tracing = { events, complete: resolve, fail: reject };
                 });
+                // The connection may close before anything awaits the end.
+                void completed.catch(() => undefined);
                 try {
                     await send('Tracing.start', {
                         transferMode: 'ReportEvents',
@@ -424,10 +435,16 @@ export const launchChromeParticipant = async (
                     let result: Awaited<ReturnType<typeof action>>;
                     try {
                         result = await action();
-                    } finally {
-                        await send('Tracing.end');
-                        await completed;
+                    } catch (error) {
+                        // The action's failure stands, whether or not its
+                        // trace can still end.
+                        await send('Tracing.end')
+                            .then(() => completed)
+                            .catch(() => undefined);
+                        throw error;
                     }
+                    await send('Tracing.end');
+                    await completed;
                     return { result, events };
                 } finally {
                     tracing = undefined;

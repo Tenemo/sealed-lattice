@@ -128,6 +128,12 @@ assert.ok(
 );
 const [participantCount, optionCount] =
     counts.length === 0 ? [3, 2] : counts.map(Number);
+assert.ok(
+    mode !== 'rosters' ||
+        deriveSupportedProfile(participantCount, optionCount)
+            .maximumCorruptParticipantCount >= 1,
+    'Two rosters need a profile that tolerates the corrupt organizer.',
+);
 const root = path.resolve('.');
 const basePort =
     basePortArgument === undefined ? 43_600 : Number(basePortArgument);
@@ -978,7 +984,12 @@ await runWithLocalRunLog(
                     }
                     await delay(2000);
                 }
-            })();
+            })().catch((error: unknown) => {
+                // Unsampled browsers leave the guard unenforced, so the run
+                // fails once its running operations end.
+                guardFailure ??=
+                    error instanceof Error ? error : new Error(String(error));
+            });
             const origin = (position: number) =>
                 `http://127.0.0.1:${String(basePort + position)}`;
             const profile = (position: number) =>
@@ -1819,6 +1830,10 @@ await runWithLocalRunLog(
                     plainRecordIds,
                     positions.map(ballotScores),
                 );
+                // Before its signed opening no contributor published anything
+                // derived from its contribution body but the committed
+                // confirmation.
+                assert.deepEqual(relay.earlyContributionRecords, []);
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),
                     JSON.stringify(
@@ -1999,6 +2014,10 @@ await runWithLocalRunLog(
                         identifiers,
                     );
                 }
+                // Before its signed opening no contributor of either roster
+                // published anything derived from its contribution body but
+                // the committed confirmation.
+                assert.deepEqual(relay.earlyContributionRecords, []);
                 const rostersScope = [
                     "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
                     `Relay views that serve one roster's ${prose(foreignFamilies.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome; its ${prose(foreignFamilies.filter(({ reason }) => reason === undefined).map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that member its roster's outcome.`,

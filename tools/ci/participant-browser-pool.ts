@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 // guard and as much again for the host. Without room, the least recently used idle browser ends
 // first, as a crash would, or the opening waits until a browser is idle. A
 // browser ends completely before another opens under its key, since both
-// would use one profile.
+// would use one profile. Once every browser closes at the run's end, the
+// pool opens no other, not even for a use that was waiting for room.
 type PooledBrowser = Readonly<{
     close(): Promise<void>;
     crash(): Promise<void>;
@@ -36,6 +37,7 @@ export const createBrowserPool = <Browser extends PooledBrowser>(
     }>,
 ) => {
     const open = new Map<string, OpenBrowser<Browser>>();
+    let closed = false;
     let waiting: (() => void)[] = [];
     let actionsEnded = 0;
     const wake = () => {
@@ -68,6 +70,7 @@ export const createBrowserPool = <Browser extends PooledBrowser>(
     };
     const acquire = async (key: string, launch: () => Promise<Browser>) => {
         for (;;) {
+            if (closed) throw new Error('The browser pool is closed.');
             const entry = open.get(key);
             if (entry?.ending !== undefined) {
                 await entry.ending.catch(() => undefined);
@@ -142,6 +145,7 @@ export const createBrowserPool = <Browser extends PooledBrowser>(
         close: (key: string) => end(key, (browser) => browser.close()),
         // Closes every browser, ignoring failures, when the run ends.
         closeAll: async () => {
+            closed = true;
             for (const key of [...open.keys()])
                 await end(key, (browser) => browser.close()).catch(
                     () => undefined,

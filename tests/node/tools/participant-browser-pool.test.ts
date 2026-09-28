@@ -256,6 +256,30 @@ describe('participant browser pool', () => {
         ]);
     });
 
+    it('opens no browser once every browser closes, even for a waiting use', async () => {
+        const { pool, events, use, visit } = fakePool({
+            browsers: 1,
+            freeMemory: plentifulMemory,
+        });
+        const started = deferred();
+        const finish = deferred();
+        const busy = use('a', async () => {
+            started.resolve();
+            await finish.promise;
+        });
+        await started.promise;
+        const waiting = visit('b');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const closing = pool.closeAll();
+        finish.resolve();
+        await busy;
+        await closing;
+        await expect(waiting).rejects.toThrow('The browser pool is closed.');
+        await expect(visit('a')).rejects.toThrow('The browser pool is closed.');
+        expect(events).toEqual(['launch a', 'close a']);
+        expect(pool.launched()).toEqual([]);
+    });
+
     it('closes every open browser at the end despite a failing close', async () => {
         const { pool, events, visit } = fakePool({
             browsers: 4,
