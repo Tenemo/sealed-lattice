@@ -117,10 +117,6 @@ pub(crate) fn validate_indices_in(indices: &[u32], domain_size: usize) -> Result
     Ok(())
 }
 
-pub fn evaluate(values: Vec<Element>, indices: &[u32]) -> Result<Vec<Element>, Error> {
-    evaluate_in(values, indices, SYSTEMATIC_SIZE)
-}
-
 /// The refusals of an evaluation of that many values at the indices.
 pub(crate) fn check_in(
     degree: usize,

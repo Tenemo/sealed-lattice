@@ -19,6 +19,13 @@ fn lookup(index: usize) -> (usize, u128) {
 fn degrees() -> Vec<usize> {
     registration_relation().degrees()
 }
+// The masked values on a coset of the base polynomial that takes the values
+// on the systematic domain.
+fn masked_base(values: &[u128], mask: &[u128], coset: u128, transform: &Transform) -> Vec<u128> {
+    let mut coefficients = values.to_vec();
+    transform.base(&mut coefficients, true);
+    oracles::masked_base_coefficients(coefficients, mask, coset, transform, None)
+}
 
 struct Weights {
     coefficients: Vec<Element>,
@@ -270,7 +277,7 @@ pub fn polynomial(
         weights.add_base(output, COLUMNS, &multiplicity);
         let table_inverse = oracles::extension_values(&coefficients, coset, &transform);
         weights.add_extension(output, COLUMNS + 1 + LOOKUPS, &table_inverse);
-        let table = oracles::masked_base(
+        let table = masked_base(
             &(0..SYSTEMATIC)
                 .map(|value| value as u128)
                 .collect::<Vec<_>>(),

@@ -375,16 +375,6 @@ fn query_groups(indices: &[usize]) -> [Vec<(usize, usize)>; 4] {
     }
     groups
 }
-pub fn masked_base(
-    values: &[u128],
-    mask: &[u128],
-    coset: u128,
-    transform: &Transform,
-) -> Vec<u128> {
-    let mut coefficients = values.to_vec();
-    transform.base(&mut coefficients, true);
-    masked_base_coefficients(coefficients, mask, coset, transform, None)
-}
 pub(crate) fn masked_base_coefficients(
     coefficients: Vec<u128>,
     mask: &[u128],

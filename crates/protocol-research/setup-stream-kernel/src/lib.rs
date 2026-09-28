@@ -15,12 +15,8 @@ pub type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
 pub const CHUNK_LIMIT: usize = 1 << 20;
-pub fn evaluate_public_values(
-    values: Vec<Element>,
-    indices: &[u32],
-) -> Result<Vec<Element>, Error> {
-    query::evaluate(values, indices)
-}
+// The most products one column sum of the arithmetic holds.
+const MAXIMUM_PRODUCTS: usize = 4_096;
 fn plus(left: Element, right: Element) -> Element {
     std::array::from_fn(|index| add(left[index], right[index]))
 }
@@ -104,7 +100,9 @@ fn canonical(record: &[u8], half_modulus: &[u8]) -> bool {
             .is_le()
         && !(record[0] == 1 && magnitude.iter().all(|byte| *byte == 0))
 }
-// The refusals of a polynomial's parameters.
+// The refusals of a polynomial's parameters. A coefficient's fingerprint
+// sums one product for each limb of the modulus's length, within the
+// column sums' bound.
 fn check_parameters(
     modulus: &[u8],
     degree: usize,
@@ -116,6 +114,7 @@ fn check_parameters(
         || modulus.is_empty()
         || modulus[0] & 1 == 0
         || !(17..=96).contains(&radix_bits)
+        || (8 * modulus.len()).div_ceil(radix_bits) > MAXIMUM_PRODUCTS
         || alpha.iter().any(|value| *value >= MODULUS)
     {
         return Err(Error::Parameters);
@@ -409,6 +408,35 @@ mod tests {
             );
         }
         assert_eq!(limb_value(&[0xff; 20], 1, 95), (1 << 65) - 1);
+    }
+
+    // A modulus whose limbs reach the column sums' bound of products is
+    // accepted at the least and the greatest radix, and one byte more is
+    // refused. At that bound, with every limb and power coordinate at its
+    // largest, the fingerprint equals the sum of its reduced products.
+    #[test]
+    fn refuses_moduli_whose_limbs_exceed_the_column_sum_bound() {
+        for (radix_bits, bytes) in [(17, 8_704), (96, 49_152)] {
+            let mut modulus = vec![0xff; bytes];
+            assert_eq!((8 * bytes).div_ceil(radix_bits), MAXIMUM_PRODUCTS);
+            assert_eq!(check_parameters(&modulus, 2, radix_bits, ZERO), Ok(()));
+            modulus.push(0);
+            assert_eq!(
+                check_parameters(&modulus, 2, radix_bits, ZERO),
+                Err(Error::Parameters)
+            );
+        }
+        let magnitude = vec![0xff; 8_704];
+        let powers = vec![[MODULUS - 1; 3]; MAXIMUM_PRODUCTS];
+        let mut expected = ZERO;
+        for (limb, power) in powers.iter().enumerate() {
+            let value = limb_value(&magnitude, limb, 17);
+            assert_eq!(value, (1 << 17) - 1);
+            for (sum, coordinate) in expected.iter_mut().zip(power) {
+                *sum = add(*sum, multiply(value, *coordinate));
+            }
+        }
+        assert_eq!(fingerprint_with(&magnitude, 17, &powers), expected);
     }
 
     #[test]
