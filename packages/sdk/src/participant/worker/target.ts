@@ -462,23 +462,29 @@ const restoreEvaluation = async (context: ProfileContext) => {
         (store) => store.get(0),
     );
     if (!(value instanceof Blob)) return false;
-    const bytes = await value.arrayBuffer().then(
-        (buffer) => new Uint8Array(buffer),
-        () => undefined,
-    );
+    // The module bounds the copy's length before any of it is read, and its
+    // last step ends the copy it began whether or not the copy restores.
     const { kernel } = context;
-    let restored =
-        bytes !== undefined && kernel.restore_evaluation(0, bytes.length) === 0;
-    for (
-        let offset = 0;
-        restored && bytes !== undefined && offset < bytes.length;
-        offset += moduleChunkBytes
-    ) {
-        const chunk = bytes.subarray(offset, offset + moduleChunkBytes);
-        sessionInput(context, chunk);
-        restored = kernel.restore_evaluation(1, chunk.length) === 0;
+    let restored = kernel.restore_evaluation(0, value.size) === 0;
+    if (restored) {
+        const bytes = await value.arrayBuffer().then(
+            (buffer) => new Uint8Array(buffer),
+            () => undefined,
+        );
+        for (
+            let offset = 0;
+            restored && bytes !== undefined && offset < bytes.length;
+            offset += moduleChunkBytes
+        ) {
+            const chunk = bytes.subarray(offset, offset + moduleChunkBytes);
+            sessionInput(context, chunk);
+            restored = kernel.restore_evaluation(1, chunk.length) === 0;
+        }
+        restored =
+            kernel.restore_evaluation(2, 0) === 0 &&
+            restored &&
+            bytes !== undefined;
     }
-    restored &&= kernel.restore_evaluation(2, 0) === 0;
     if (!restored) await discardEvaluation(context);
     return restored;
 };
