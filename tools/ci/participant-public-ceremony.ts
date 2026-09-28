@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import {
+    cp,
+    mkdir,
+    readFile,
+    readdir,
+    stat,
+    writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 // A passed browser participant run: the poll and runtime identities a reader
@@ -144,10 +151,18 @@ export const layParticipantCeremony = async (
                 { flag: 'wx' },
             );
             const body = directory + '/' + String(ordinal) + '/body.bin';
-            await copy(
-                path.join(submission, 'body.bin'),
-                path.join(ceremony, body),
+            // Conflicting slots need only their authenticated envelopes.
+            // Preserve a missing body: the owning close verifier still
+            // requires one for every usable slot, never for a conflict.
+            const sourceBody = path.join(submission, 'body.bin');
+            const hasBody = await stat(sourceBody).then(
+                () => true,
+                (error: NodeJS.ErrnoException) => {
+                    if (error.code === 'ENOENT') return false;
+                    throw error;
+                },
             );
+            if (hasBody) await copy(sourceBody, path.join(ceremony, body));
             lines.push(name + ' ' + body + '\n');
         }
     }

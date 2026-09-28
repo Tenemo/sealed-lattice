@@ -17,6 +17,9 @@ describe('guarded protocol research entry', () => {
             ['available-records'],
             ['available-records', ''],
             ['unknown', 'fixture'],
+            ['participant-closure'],
+            ['participant-transcript', ''],
+            ['participant-transcript', 'fixture', 'extra'],
             ['certificate-records', 'fixture'],
             ['release-records', 'fixture'],
             ['release-records', 'fixture', ''],
@@ -47,6 +50,16 @@ describe('guarded protocol research entry', () => {
                 completionDirectory: 'records',
             });
         }
+        for (const [name, stage] of [
+            ['participant-closure', 'certificate'],
+            ['participant-transcript', 'terminal'],
+        ])
+            expect(selectPublicCompletionCase([name, 'fixture'])).toEqual({
+                name,
+                stage,
+                source: 'fixture',
+                completionDirectory: undefined,
+            });
     });
     it('refuses empty, unknown and ambiguous case selectors', () => {
         for (const values of [

@@ -140,6 +140,19 @@ export const readPublic = async (
     return concatenate(...parts);
 };
 
+// Public bytes an owning verifier consumed from authenticated local custody
+// or produced itself still belong in the archive's public dependency closure.
+export const recordPublic = async (
+    relay: PublicRelay,
+    name: string,
+    bytes: Uint8Array,
+) => {
+    const record = relay.recorder?.open(name);
+    if (record === undefined) return;
+    await record.write(bytes);
+    await record.finish();
+};
+
 // Publishes bytes of one record at an offset. The relay keeps the first
 // bytes at each offset and accepts only an identical retransmission.
 export const publishChunk = async (

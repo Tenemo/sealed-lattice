@@ -8,7 +8,11 @@ import {
     stat,
     unlink,
 } from 'node:fs/promises';
-import { createServer, type IncomingMessage } from 'node:http';
+import {
+    createServer,
+    type IncomingMessage,
+    type ServerResponse,
+} from 'node:http';
 import path from 'node:path';
 
 import type {
@@ -65,6 +69,10 @@ export const startPublicArchiveReplica = async (
         maximumTotalBytes: number;
         maximumStoredRecords: number;
         maximumStoredBytes: number;
+        observeRequest?: (
+            request: IncomingMessage,
+            response: ServerResponse,
+        ) => void;
     }>,
 ) => {
     const directory = path.resolve(input.directory);
@@ -188,6 +196,7 @@ export const startPublicArchiveReplica = async (
     };
     let serial = Promise.resolve();
     const server = createServer((request, response) => {
+        input.observeRequest?.(request, response);
         const work = async (): Promise<void> => {
             try {
                 // Browser participants store and read records from other

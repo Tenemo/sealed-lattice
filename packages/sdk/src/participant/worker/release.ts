@@ -24,6 +24,7 @@ import {
     publishChunk,
     publishRecord,
     readPublic,
+    recordPublic,
     streamPublic,
 } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -246,6 +247,21 @@ const certifyTarget = async (
     if (certified === undefined) {
         if (restored && refused) await discardEvaluation(context);
         throw new PublicInputFailure('The target votes are incomplete.');
+    }
+    // The evaluator supplies these exact certified bytes even when this
+    // visit restored its local target and never fetched the relay's copy.
+    // A fresh public reader checks them against its own recomputation.
+    if (relay.recorder !== undefined) {
+        const { kernel } = context;
+        await recordPublic(
+            relay,
+            completionDirectory + 'target.bin',
+            readKernel(
+                kernel,
+                kernel.evaluation_target_body_pointer(),
+                kernel.evaluation_target_body_length(),
+            ),
+        );
     }
     return words(certified)[0] === 1;
 };

@@ -203,6 +203,45 @@ describe('browser relay ceremony layout', () => {
             );
     });
 
+    it('preserves absent bodies for the owning close verifier to require only usable slots', async () => {
+        for (const submission of [submissions[0], submissions[1]])
+            await rm(
+                path.join(
+                    relay,
+                    submissionDirectory(submission.author, submission.identity),
+                    'body.bin',
+                ),
+            );
+        const ceremony = path.join(root, 'partial', 'ceremony');
+        await layParticipantCeremony(run, relay, ceremony);
+        const lines = (
+            await readFile(path.join(ceremony, 'close/submissions.txt'), 'utf8')
+        )
+            .trimEnd()
+            .split('\n');
+        expect(lines).toHaveLength(3);
+        for (const body of ['ballot-0/0/body.bin', 'ballot-2/1/body.bin'])
+            await expect(
+                readFile(path.join(ceremony, body)),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(
+            await readFile(path.join(ceremony, 'ballot-2/0/body.bin'), 'utf8'),
+        ).toBe('body 5');
+        // The envelopes remain present, including the absent usable body's
+        // envelope: transport does not classify or silently omit a slot.
+        for (let position = 0; position < 3; position++)
+            expect(
+                (
+                    await readFile(
+                        path.join(
+                            ceremony,
+                            `close/submission-${String(position)}.bin`,
+                        ),
+                    )
+                ).length,
+            ).toBe(214 + 3309);
+    });
+
     it('carries a certified no-result terminal', async () => {
         await writeRun({ result: { kind: 'no-result' } });
         const participant = await layParticipantCeremony(

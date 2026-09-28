@@ -79,6 +79,15 @@ All three modes recompute setup, the close barrier from the archived intent, res
 
 The public reader retains the accepted target-vote packets in its output's `certificate-records/` directory, using each authenticated author's position. The run report identifies that directory for archive construction. Candidate file positions are transport labels and need not match the author encoded in a vote; archive extraction must use the retained packets. Retrieval still requires the owning certificate verifier.
 
+The browser cohort also retains the actual participant-published certified closure and terminal transcript, retrieved from the replicas after one replica is lost. These cases authenticate those archived records, lay out only their public files and run a fresh native verifier with no participant verification cache or source-relay fallback:
+
+```text
+pnpm run research:protocol:public -- participant-closure <participant-run>
+pnpm run research:protocol:public -- participant-transcript <participant-run>
+```
+
+The closure case verifies the complete setup, close, recomputed target and certificate without requiring release shares. The transcript case additionally verifies the terminal. Their input must be a passed cohort that retained these archives; an older cohort's relay files do not substitute for them. The layout preserves missing ballot bodies so the owning close verifier requires bodies only for usable slots and still rejects a missing usable body.
+
 The maintained participant runtime runs registration, roster agreement, setup contribution, setup verification, signed ballots, close responses, target votes, release shares and the result in external desktop Chrome:
 
 ```text
@@ -113,13 +122,16 @@ pnpm run research:participant -- 4 2 rosters
 
 The organizer's private state is copied after its registration, before it proposes a roster, and the copy proposes a second roster of the same poll to other registrants. The copy acts under its own path of the organizer's origin, and the relay serves each roster only its own records, showing the second roster the poll definition and the organizer's registration. The profile must tolerate a corrupt participant, so the organizer is each roster's only corrupt member. Both rosters then complete roster agreement, setup, ballots, the close, target votes, releases and their results in parallel. A relay view then serves a member of each roster the other roster's registrations, contributions, close records, target votes or release shares, one family at a time, under its own roster's names: each view leaves it pending, the other roster's valid registrations of the same poll refused only as a roster, and with the relay's own records it reaches its roster's outcome.
 
-A plain run carries one roster of honest participants through each stage once, with no crash, forgery, archive or other roster:
+A plain run carries one roster of honest participants through each stage once, including certified-target archiving before release and final transcript publication, with no crash, forgery or other roster:
 
 ```text
 pnpm run research:participant -- 3 2 plain
+pnpm run research:participant -- 10 10 plain --sequential
 ```
 
-With `--profile`, Chrome records the CPU samples of every participant operation, and the run directory keeps a summary for each operation of the functions that spent the most time at the top of a sampled stack and anywhere on it. With `--memory-pressure`, the second setup contributor first contributes in a browser that caps each WebAssembly memory below what its contribution needs; that visit ends pending with the worker's exhausted memory bound rather than stopping the participant, and the next visit completes the contribution.
+With `--sequential`, only one participant's browser runs at a time; the ordinary workflow report rejects overlapping operations and records actual sequential wall time separately from summed active work. Its stage totals charge every operation, including both kinds of archiving, and its combined memory includes the worker, helpers and shared arena. Payload counters cover the relay and archive exchanges without browser network-body capture; HTTP headers and link overhead are not measured, and incomplete exchanges or unknown upload lengths remain explicit. Runs without this flag do not report sequential completion time.
+
+With `--profile`, Chrome records the CPU samples of every participant operation, and the run directory keeps a summary for each operation of the functions that spent the most time at the top of a sampled stack and anywhere on it. With `--memory-pressure`, the second setup contributor first contributes in a browser that caps each WebAssembly memory below what its contribution needs; that visit ends pending with the worker's exhausted memory bound rather than stopping the participant, and the next visit completes the contribution. This fault run does not supply an ordinary-workflow total. Failed runs retain their private browser checkpoints in place, bound to the archived runtime and original origins; they never import them into another action or build.
 
 Every run records, with each sample of a participant's process memory, the JavaScript heap use that its page and each of its workers and helpers last reported; a worker busy in a module call reports only when it returns to its event loop.
 

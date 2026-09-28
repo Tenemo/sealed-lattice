@@ -37,19 +37,32 @@ const allowedImports = [
 ];
 
 // The sources the participant module and worker are built from, beside the
-// Rust workspace: the worker's own sources, the archive client, transcript
-// format and foundation runtime the worker bundles, and the scripts that
-// build both.
+// Rust workspace and its shared foundation sources, the complete SDK
+// (including the page that owns worker lifetimes), the foundation bridge,
+// and the build inputs. A source outside the worker can still change the
+// participant's behavior and must invalidate a stale packaged manifest.
 const sourceDirectories = [
     'crates/protocol-research',
-    'packages/sdk/src/participant/worker',
-    'packages/sdk/src/public-archive.ts',
-    'packages/sdk/src/transcript-archive.ts',
+    'crates/sealed-lattice-kernel',
+    'packages/sdk/src',
     'packages/wasm/src',
 ];
 const buildScripts = [
+    'Cargo.toml',
+    'Cargo.lock',
+    'rust-toolchain.toml',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    'packages/sdk/package.json',
+    'packages/sdk/tsconfig.json',
+    'packages/wasm/package.json',
+    'packages/wasm/tsconfig.json',
+    'tsconfig.base.json',
     'tools/ci/build-participant-module.ts',
     'tools/ci/build-sdk-package.ts',
+    'tools/ci/build-wasm-kernel.ts',
+    'tools/ci/sdk-package-tsdown.config.ts',
 ];
 
 export type ParticipantModuleBuild = Readonly<{

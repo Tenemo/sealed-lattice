@@ -11,6 +11,7 @@ import {
 import { freemem } from 'node:os';
 import path from 'node:path';
 
+import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
 import { retrieveTranscript } from '#packages/sdk/src/transcript-archive.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
@@ -64,6 +65,9 @@ type ReleaseResult = {
 
 const selected = selectPublicCompletionCase(process.argv.slice(2)),
     source = path.resolve(selected.source);
+const participantArchive =
+    selected.name === 'participant-closure' ||
+    selected.name === 'participant-transcript';
 await runWithLocalRunLog(
     {
         commandLineArguments: [
@@ -90,12 +94,12 @@ await runWithLocalRunLog(
             // A browser cohort's relayed records are laid out as the reader
             // takes them, and supply only the archived closure.
             let participantCeremony: string | undefined;
+            let archivedPublic: string | undefined;
             let run: ResearchRun;
             let ceremony: string;
             if (summary.scriptName === 'research:participant') {
-                assert.equal(
-                    selected.name,
-                    'archived-records',
+                assert.ok(
+                    selected.name === 'archived-records' || participantArchive,
                     'A browser participant run supplies only its archived records.',
                 );
                 participantCeremony = path.resolve(
@@ -103,9 +107,83 @@ await runWithLocalRunLog(
                     'participant-ceremony-' +
                         path.basename(log.runDirectoryPath),
                 );
+                let publicDirectory = path.join(
+                    runArtifactDirectoryPath(source),
+                    'public',
+                );
+                if (participantArchive) {
+                    const saved = JSON.parse(
+                        await readFile(
+                            path.join(source, 'result.json'),
+                            'utf8',
+                        ),
+                    ) as {
+                        poll: string;
+                        archive: {
+                            transcript: {
+                                identity: string;
+                                byteLength: number;
+                            };
+                            independentClosure: {
+                                identity: string;
+                                byteLength: number;
+                            };
+                            verificationKeys: string[];
+                        };
+                    };
+                    const stage =
+                        selected.stage === 'certificate'
+                            ? 'closure'
+                            : 'terminal';
+                    const index =
+                        stage === 'closure'
+                            ? saved.archive.independentClosure
+                            : saved.archive.transcript;
+                    const kernel = new URL(
+                        '../../packages/wasm/dist/sealed-lattice-kernel.wasm',
+                        import.meta.url,
+                    );
+                    const runtime = await createFoundationCeremonyRuntimeLoader(
+                        kernel,
+                        {
+                            expectedKernelSha256Hex: createHash('sha256')
+                                .update(await readFile(kernel))
+                                .digest('hex'),
+                        },
+                    )();
+                    const archive = openPublicArchive(runtime, {
+                        context: saved.poll,
+                        faultBound: 1,
+                        replicas: saved.archive.verificationKeys.map(
+                            (key, position) => ({
+                                baseUrl: `http://127.0.0.1:9/retained-${String(position)}/`,
+                                verificationKey: Buffer.from(key, 'hex'),
+                            }),
+                        ),
+                        maximumRecords: 65_536,
+                        maximumTotalBytes: 4_294_967_291,
+                    });
+                    archivedPublic = participantCeremony + '-public';
+                    const materialized = await materializeArchiveRoutes(
+                        archive,
+                        index,
+                        await directoryArchiveStore(
+                            path.join(
+                                runArtifactDirectoryPath(source),
+                                'archived-' + stage,
+                            ),
+                        ),
+                        archivedPublic,
+                    );
+                    assert.equal(materialized.targetBody.length, 0);
+                    assert.ok(
+                        materialized.routes.includes('completion/target.bin'),
+                    );
+                    publicDirectory = archivedPublic;
+                }
                 const participant = await layParticipantCeremony(
                     source,
-                    path.join(runArtifactDirectoryPath(source), 'public'),
+                    publicDirectory,
                     participantCeremony,
                 );
                 ceremony = participantCeremony;
@@ -124,6 +202,11 @@ await runWithLocalRunLog(
                             : { kind: 'no-result' },
                 };
             } else {
+                assert.equal(
+                    participantArchive,
+                    false,
+                    'This case requires a browser participant archive.',
+                );
                 run = JSON.parse(
                     await readFile(path.join(source, 'result.json'), 'utf8'),
                 ) as ResearchRun;
@@ -226,7 +309,10 @@ await runWithLocalRunLog(
                         flag: 'wx',
                     },
                 );
-            } else if (selected.name === 'archived-records') {
+            } else if (
+                selected.name === 'archived-records' ||
+                participantArchive
+            ) {
                 // Every record the owning verifiers depend on is archived
                 // from the source run, then retrieved by a fresh reader.
                 directory = path.join(ceremony, 'completion');
@@ -855,22 +941,23 @@ await runWithLocalRunLog(
                         executableSha512: createHash('sha512')
                             .update(await readFile(executable))
                             .digest('hex'),
-                        scope:
-                            selected.name === 'available-records'
-                                ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
-                                : selected.name === 'archived-records'
-                                  ? (participantCeremony === undefined
-                                        ? ''
-                                        : "A browser cohort's relayed records are laid out as the native reader takes them in a scratch directory. ") +
-                                    'The records the owning verifiers depend on are published through the maintained public archive to three local replicas as consecutive parts under one index, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader ' +
-                                    (participantCeremony === undefined
-                                        ? 'or departure chronology is exercised.'
-                                        : "is exercised; only the source cohort's own departures precede the archive.")
-                                  : selected.stage === 'certificate'
-                                    ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
-                                    : selected.stage === 'release'
-                                      ? 'One supplied release message passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct a terminal. This is component evidence, not terminal availability or a complete security argument.'
-                                      : 'Public setup, close barrier, usable-slot classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
+                        scope: participantArchive
+                            ? 'Only the participant-published archive records retrieved after replica loss supply this reader. Their content identities and routes are decoded again, then a fresh native process verifies setup, close, classification, target and certificate, and the terminal case also verifies release. No source relay, participant state or retained verification result is available to this reader.'
+                            : selected.name === 'available-records'
+                              ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
+                              : selected.name === 'archived-records'
+                                ? (participantCeremony === undefined
+                                      ? ''
+                                      : "A browser cohort's relayed records are laid out as the native reader takes them in a scratch directory. ") +
+                                  'The records the owning verifiers depend on are published through the maintained public archive to three local replicas as consecutive parts under one index, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader ' +
+                                  (participantCeremony === undefined
+                                      ? 'or departure chronology is exercised.'
+                                      : "is exercised; only the source cohort's own departures precede the archive.")
+                                : selected.stage === 'certificate'
+                                  ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
+                                  : selected.stage === 'release'
+                                    ? 'One supplied release message passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct a terminal. This is component evidence, not terminal availability or a complete security argument.'
+                                    : 'Public setup, close barrier, usable-slot classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
                         result: report,
                     },
                     null,
@@ -880,6 +967,8 @@ await runWithLocalRunLog(
             );
             if (participantCeremony !== undefined)
                 await rm(participantCeremony, { recursive: true });
+            if (archivedPublic !== undefined)
+                await rm(archivedPublic, { recursive: true });
             process.stdout.write(log.runDirectoryPath + '\n');
         } finally {
             await releaseLock();

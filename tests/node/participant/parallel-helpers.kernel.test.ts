@@ -466,7 +466,9 @@ describe('participant helpers with registration work', () => {
         // coefficient changed and a signature changed.
         for (const [candidate, accepted] of [
             [registrations, true],
+            [changed(registrations, 1, dataKind.proof, 0), false],
             [changed(registrations, 1, dataKind.proof, proofBytes >> 1), false],
+            [changed(registrations, 1, dataKind.proof, proofBytes - 1), false],
             [changed(registrations, 2, dataKind.publicKey, 1000), false],
             [changed(registrations, 0, dataKind.signature, 7), false],
         ] as const) {

@@ -21,7 +21,7 @@ import {
 } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { readKernel, ResourceFailure, writeSetupInput } from './kernel.js';
-import { readPublic, streamPublic } from './public.js';
+import { readPublic, recordPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
     addedReferences,
@@ -449,14 +449,23 @@ const verifySetupInventory = async (
     const { context } = session;
     const { kernel, profile } = context;
     const { manifest } = session.root;
-    const recordIds = proposalRecordIds(
-        await readDataKind(context, manifest, dataKind.proposal),
+    const proposal = await readDataKind(context, manifest, dataKind.proposal);
+    const definition = await readDataKind(
+        context,
+        manifest,
+        dataKind.pollDefinition,
     );
+    const pollSignature = await readDataKind(
+        context,
+        manifest,
+        dataKind.pollSignature,
+    );
+    const recordIds = proposalRecordIds(proposal);
     const begin = rosterBegin(
         context,
         session.root,
-        await readDataKind(context, manifest, dataKind.pollDefinition),
-        await readDataKind(context, manifest, dataKind.pollSignature),
+        definition,
+        pollSignature,
         recordIds.length,
     );
     // A visit that records its reads verifies every registration again, its
@@ -528,9 +537,28 @@ const verifySetupInventory = async (
         writeSetupInput(kernel, confirmation);
         if (kernel.setup_confirmation(confirmation.length) !== 0)
             throw refuse('The setup verifier refused a confirmation.');
+        const directory = contributionDirectory(position);
+        const bodyEnd = 4 + profile.contribution.confirmationBodyBytes;
+        await recordPublic(
+            relay,
+            directory + 'confirmation.bin',
+            confirmation.subarray(4, bodyEnd),
+        );
+        await recordPublic(
+            relay,
+            directory + 'confirmation-signature.bin',
+            confirmation.subarray(bodyEnd),
+        );
     }
     if (kernel.setup_inventory_finish() !== 1)
         throw refuse('The setup verifier refused the inventory.');
+    for (const [name, bytes] of [
+        ['poll-definition.bin', definition],
+        ['poll-signature.bin', pollSignature],
+        ['proposal.bin', proposal],
+        ['proposal-signature.bin', proposalSignature],
+    ] as const)
+        await recordPublic(relay, name, bytes);
 };
 
 // Verifies the complete setup behind the given confirmations and has the

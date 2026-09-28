@@ -93,17 +93,22 @@ export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
     if (
         values.length !== 2 ||
         (values[0] !== 'available-records' &&
-            values[0] !== 'archived-records') ||
+            values[0] !== 'archived-records' &&
+            values[0] !== 'participant-closure' &&
+            values[0] !== 'participant-transcript') ||
         !values[1]?.trim()
     ) {
         throw new Error(
-            'Select available-records with a passed native result run, archived-records with a passed native or browser participant run, or certificate-records/release-records/terminal-records with a passed native run and a public-record directory.',
+            'Select available-records with a passed native result run, archived-records with a passed native or browser participant run, participant-closure/participant-transcript with a passed browser participant run, or certificate-records/release-records/terminal-records with a passed native run and a public-record directory.',
         );
     }
     return {
         name: values[0],
         source: values[1],
         completionDirectory: undefined,
-        stage: 'terminal' as const,
+        stage:
+            values[0] === 'participant-closure'
+                ? ('certificate' as const)
+                : ('terminal' as const),
     };
 };
