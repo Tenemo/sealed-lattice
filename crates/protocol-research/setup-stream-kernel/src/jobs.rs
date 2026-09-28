@@ -251,12 +251,20 @@ pub(crate) fn decode_geometry(output: &[u8]) -> (Element, Vec<Element>) {
 }
 
 /// Each column's masked interpolant at the indices, in column order, with
-/// the refusals of evaluating each column directly.
+/// the refusals of evaluating each column directly. Without helpers, as in a
+/// helper's own session, each column evaluates in place, as its job would
+/// evaluate the column's decoded copy.
 pub fn evaluate_public_columns(
     columns: Vec<Vec<Element>>,
     indices: &[u32],
 ) -> Result<Vec<Element>, Error> {
     let mut output = Vec::with_capacity(columns.len() * indices.len());
+    if parallel_work::helpers() == 0 {
+        for column in columns {
+            output.extend(query::evaluate_in(column, indices, query::SYSTEMATIC_SIZE)?);
+        }
+        return Ok(output);
+    }
     let mut pipeline = Pipeline::new(parallel_work::window());
     for (index, column) in columns.into_iter().enumerate() {
         let ticket = queries_job(&column, indices, query::SYSTEMATIC_SIZE)?;
