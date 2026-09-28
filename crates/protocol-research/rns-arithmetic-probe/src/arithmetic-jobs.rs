@@ -59,7 +59,13 @@ pub static LIFT: Job = Job {
     kind: 0x0304,
     run: lift,
 };
-pub static JOBS: [&Job; 6] = [&SOURCES, &TENSOR, &RECORDS, &DIGITS, &KEYED, &LIFT];
+/// Drops a session's digits modulo a prime, which a keyed product that ends
+/// before its last job of that prime leaves kept.
+pub static FORGET: Job = Job {
+    kind: 0x030b,
+    run: forget,
+};
+pub static JOBS: [&Job; 7] = [&SOURCES, &TENSOR, &RECORDS, &DIGITS, &KEYED, &LIFT, &FORGET];
 
 const HEADER_BYTES: usize = 16;
 const SET_BYTES: usize = 8;
@@ -355,6 +361,16 @@ fn keyed(input: &[u8]) -> Vec<u8> {
     extend(&mut output, &sum);
     output
 }
+fn forget(input: &[u8]) -> Vec<u8> {
+    let (session, prime) = (session_number(input), number(&input[8..]));
+    KEPT.with(|kept| {
+        kept.borrow_mut()
+            .retain(|(kept_session, kept_prime, _), _| {
+                (*kept_session, *kept_prime) != (session, prime)
+            });
+    });
+    Vec::new()
+}
 fn lift(input: &[u8]) -> Vec<u8> {
     let (arithmetic, lifted, rest) = read(input);
     let lift = arithmetic.lift(lifted);
@@ -426,6 +442,21 @@ pub(super) struct KeyedProduct {
     shared: Option<Shared>,
     running: VecDeque<(usize, Ticket)>,
     sums: [Vec<Vec<u64>>; KEYED_GROUPS],
+    // The primes whose digits have started and whose last group's job has
+    // not.
+    kept: Vec<usize>,
+}
+impl Drop for KeyedProduct {
+    // A product that ends before its last group's job of a prime, as after
+    // a refusal, drops that prime's digits where they are kept, after its
+    // jobs there.
+    fn drop(&mut self) {
+        for prime in self.kept.drain(..) {
+            let mut input = self.session.to_le_bytes().to_vec();
+            input.extend((prime as u32).to_le_bytes());
+            submit(&FORGET, Some(prime), &[Part::Bytes(&input)], 0);
+        }
+    }
 }
 /// A keyed product's next need: the records of a request, the end of a
 /// job the host awaits, by the host's number, or both groups' sums modulo
@@ -639,6 +670,7 @@ impl Arithmetic {
             shared: None,
             running: VecDeque::new(),
             sums: std::array::from_fn(|_| vec![Vec::new(); self.external_primes]),
+            kept: Vec::new(),
         }
     }
     /// The records a keyed product's next job needs.
@@ -751,6 +783,10 @@ impl Arithmetic {
                     &[Part::Bytes(&input), Part::Streamed(polynomial)],
                     0,
                 ));
+                product.kept.push(request.prime);
+            }
+            if group + 1 == KEYED_GROUPS {
+                product.kept.retain(|prime| *prime != request.prime);
             }
             let mut input = self.header(request.prime);
             input.extend(product.session.to_le_bytes());
@@ -919,6 +955,25 @@ mod tests {
 
     const TEST_DEGREE: usize = 16;
 
+    // The polynomials kept for any session where the job runs.
+    static KEPT_COUNT: Job = Job {
+        kind: 0x03ff,
+        run: kept_count,
+    };
+    fn kept_count(_: &[u8]) -> Vec<u8> {
+        KEPT.with(|kept| (kept.borrow().len() as u32).to_le_bytes().to_vec())
+    }
+    // The polynomials kept where each helper, or without helpers this
+    // thread, runs its jobs, after the jobs submitted before.
+    fn kept_everywhere() -> usize {
+        (0..parallel_work::helpers().max(1))
+            .map(|helper| {
+                let output = submit(&KEPT_COUNT, Some(helper), &[], 4).wait();
+                u32::from_le_bytes(output[..].try_into().unwrap()) as usize
+            })
+            .sum()
+    }
+
     fn context(ordinal: usize) -> RecordContext {
         RecordContext {
             program: [7; 64],
@@ -928,8 +983,9 @@ mod tests {
     }
     // A keyed product takes exactly the records it requests, in order, and
     // refuses records whose identities differ from the held ones: a changed
-    // record, and a record of another prime or key. Its digits and a
-    // product's sources are dropped after their last use.
+    // record of either group, and a record of another prime or key. Its
+    // digits and a product's sources are dropped after their last use, and a
+    // refused product's digits where they are kept.
     #[test]
     fn keyed_products_take_only_the_held_records_and_keep_nothing() {
         let profile = Profile::new(3, 2).unwrap();
@@ -975,13 +1031,16 @@ mod tests {
         let mut changed = held.clone();
         changed.1.swap(2, 3);
         assert!(run(&changed).is_err());
-        KEPT.with(|kept| kept.borrow_mut().clear());
+        let mut changed = held.clone();
+        changed.1[gadget_length][1][5] ^= 1;
+        assert!(run(&changed).is_err());
+        assert_eq!(kept_everywhere(), 0);
         assert_eq!(run(&held).unwrap(), expected);
         arithmetic.multiply(&value, &arithmetic.uniform(2), true);
         let square = [value.clone(), arithmetic.uniform(3)];
         arithmetic.tensors(&square, &square);
         arithmetic.tensors(&square, &[arithmetic.uniform(4), arithmetic.uniform(5)]);
-        KEPT.with(|kept| assert!(kept.borrow().is_empty()));
+        assert_eq!(kept_everywhere(), 0);
     }
 
     // A request's records that the host shared itself give the delivered
@@ -1074,7 +1133,7 @@ mod tests {
             share(Zeroizing::new(joined(request)))
         ));
         drop(product);
-        KEPT.with(|kept| kept.borrow_mut().clear());
+        assert_eq!(kept_everywhere(), 0);
     }
 
     // A keyed product's jobs name every prime's two groups once, each
