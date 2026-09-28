@@ -31,6 +31,16 @@ type JavaScriptHeaps = Readonly<{
     reported: number;
 }>;
 
+// The bytes the page's origin last reported storing, all together and in
+// its IndexedDB databases, whether it has reported, and why the last request
+// failed, if it did.
+type OriginStorage = Readonly<{
+    usageBytes: number;
+    indexedDatabaseBytes: number;
+    reported: boolean;
+    failure?: string;
+}>;
+
 export type ChromeParticipant = Readonly<{
     processIdentifier: number;
     version: string;
@@ -42,6 +52,9 @@ export type ChromeParticipant = Readonly<{
     // returning to its event loop keeps its last report meanwhile, and one
     // that has not answered yet counts for nothing.
     heaps(): JavaScriptHeaps;
+    // The storage the page's origin last reported; the browser is asked
+    // again when no request is outstanding.
+    storage(): OriginStorage;
     // Runs the action while the browser records the V8 CPU samples of its
     // page and worker threads, and returns the recorded trace events.
     trace<Result>(
@@ -110,6 +123,11 @@ export const launchChromeParticipant = async (
     // whose request for it is outstanding.
     const heapUsages = new Map<string, Record<string, unknown>>();
     const heapRequests = new Set<string>();
+    // The origin's last reported storage usage, whether a request for it is
+    // outstanding, and why the last request failed.
+    let storageUsage: Record<string, unknown> | undefined;
+    let storageRequested = false;
+    let storageFailure: string | undefined;
     // A crashed page answers none of its requests, so each fails at once.
     let pageCrashed = false;
     // The trace being recorded: its events so far, and what ends it.
@@ -343,6 +361,46 @@ export const launchChromeParticipant = async (
                     backingBytes: sum('backingStorageSize'),
                     sessions: sessions.length,
                     reported: usages.length,
+                };
+            },
+            storage: () => {
+                if (!storageRequested) {
+                    storageRequested = true;
+                    // Only the page's session serves its origin's storage.
+                    void send(
+                        'Storage.getUsageAndQuota',
+                        { origin },
+                        pageSession,
+                    )
+                        .then(
+                            (usage) => {
+                                storageUsage = usage;
+                                storageFailure = undefined;
+                            },
+                            (error: unknown) => {
+                                storageFailure =
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error);
+                            },
+                        )
+                        .finally(() => {
+                            storageRequested = false;
+                        });
+                }
+                const breakdown =
+                    (storageUsage?.usageBreakdown as
+                        | readonly { storageType: string; usage: number }[]
+                        | undefined) ?? [];
+                return {
+                    usageBytes: Number(storageUsage?.usage ?? 0),
+                    indexedDatabaseBytes: breakdown
+                        .filter((entry) => entry.storageType === 'indexeddb')
+                        .reduce((total, entry) => total + entry.usage, 0),
+                    reported: storageUsage !== undefined,
+                    ...(storageFailure === undefined
+                        ? {}
+                        : { failure: storageFailure }),
                 };
             },
             trace: async (action) => {

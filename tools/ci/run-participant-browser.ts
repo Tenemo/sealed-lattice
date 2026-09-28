@@ -944,6 +944,7 @@ await runWithLocalRunLog(
                                 ...details,
                                 bytes,
                                 heaps: browser.heaps(),
+                                storage: browser.storage(),
                             },
                         });
                         if (bytes > participantMemoryLimit)
