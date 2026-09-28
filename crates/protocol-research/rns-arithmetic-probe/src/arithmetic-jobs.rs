@@ -7,7 +7,7 @@
 //! job bound, and its jobs, like those of each of its primes, run on the one
 //! helper that holds its transform tables and the transformed polynomials
 //! its sessions keep there.
-use super::{Arithmetic, Polynomial, shared};
+use super::{Arithmetic, Polynomial, shared, word_arithmetic::widening_multiply};
 use parallel_work::{
     Job, MAXIMUM_JOB_BYTES, Part, Pipeline, Shared, Ticket, session, share, share_words, submit,
 };
@@ -73,6 +73,12 @@ const SET_BYTES: usize = 8;
 const LIFT_POSITIONS: usize = 2048;
 /// The coefficients a job reads of a streamed polynomial at once.
 const STREAMED_COEFFICIENTS: usize = 1024;
+/// The positions whose key words a keyed product's job reads and multiplies
+/// at once; tests take a few blocks of their small degree.
+#[cfg(not(test))]
+const KEYED_POSITIONS: usize = 4096;
+#[cfg(test)]
+const KEYED_POSITIONS: usize = 4;
 /// The identity of one key record: a key polynomial's transformed residues
 /// modulo one prime, which the evaluation's working storage holds.
 const EVALUATION_KEY_DOMAIN: &str = "sealed-lattice/evaluation-key-work/v1";
@@ -167,15 +173,15 @@ impl RecordContext {
         }
     }
 }
-/// A key record's identity: its bytes under the program, the cache, the
-/// key's ordinal and the prime.
-fn record_identity(
+/// The hasher of a key record's identity: its bytes of the length under
+/// the program, the cache, the key's ordinal and the prime.
+fn record_hasher(
     context: &RecordContext,
     ordinal: usize,
     prime: usize,
-    record: &[u8],
-) -> [u8; 64] {
-    let mut hasher = IdentityHasher::local(
+    length: usize,
+) -> IdentityHasher {
+    IdentityHasher::local(
         EVALUATION_KEY_DOMAIN,
         &[
             CanonicalItem::hash512(context.program),
@@ -183,9 +189,18 @@ fn record_identity(
             CanonicalItem::unsigned64(ordinal as u64),
             CanonicalItem::unsigned64(prime as u64),
         ],
-        record.len(),
+        length,
     )
-    .expect("Record identity");
+    .expect("Record identity")
+}
+/// A key record's identity.
+fn record_identity(
+    context: &RecordContext,
+    ordinal: usize,
+    prime: usize,
+    record: &[u8],
+) -> [u8; 64] {
+    let mut hasher = record_hasher(context, ordinal, prime, record.len());
     hasher.absorb(record).expect("Record identity");
     hasher.finish().expect("Record identity")
 }
@@ -338,22 +353,37 @@ fn keyed(input: &[u8]) -> Vec<u8> {
         record_bytes * gadget_length
     );
     let reduction = &arithmetic.reductions[prime];
-    let mut output = Vec::with_capacity(IDENTITY_BYTES * gadget_length + 8 * degree);
+    // Each record's identity absorbs its words as the job reads them.
+    let mut hashers: Vec<IdentityHasher> = (0..gadget_length)
+        .map(|digit| record_hasher(&context, context.ordinal + digit, prime, record_bytes))
+        .collect();
     let mut sum = vec![0u64; degree];
-    let mut record = vec![0u8; record_bytes];
+    // A position's products of a digit, below a prime below 2^58, and a
+    // key word, below 2^64 even in a changed record, are below 2^122, so at
+    // most 64 of them sum below 2^128 and each position reduces once. A
+    // changed record then fails only its identity.
+    assert!(gadget_length <= 64);
+    let mut products = vec![0u128; KEYED_POSITIONS.min(degree)];
+    let mut words = vec![0u8; 8 * products.len()];
     KEPT.with(|kept| {
         let mut kept = kept.borrow_mut();
-        for digit in 0..gadget_length {
-            parallel_work::read(digit * record_bytes, &mut record);
-            output.extend(record_identity(
-                &context,
-                context.ordinal + digit,
-                prime,
-                &record,
-            ));
-            let digits = &kept[&(session, prime, digit)];
-            for ((sum, digit), key) in sum.iter_mut().zip(digits).zip(record.chunks_exact(8)) {
-                *sum = reduction.add(*sum, reduction.mul(*digit, word(key)));
+        for first in (0..degree).step_by(products.len()) {
+            let count = products.len().min(degree - first);
+            products.fill(0);
+            for (digit, hasher) in hashers.iter_mut().enumerate() {
+                let words = &mut words[..8 * count];
+                parallel_work::read(digit * record_bytes + 8 * first, words);
+                hasher.absorb(words).expect("Record identity");
+                let digits = &kept[&(session, prime, digit)][first..first + count];
+                for ((product, digit), key) in
+                    products.iter_mut().zip(digits).zip(words.chunks_exact(8))
+                {
+                    let (low, high) = widening_multiply(*digit, word(key));
+                    *product += (u128::from(high) << 64) | u128::from(low);
+                }
+            }
+            for (value, product) in sum[first..first + count].iter_mut().zip(&products) {
+                *value = reduction.reduce_u128(*product);
             }
         }
         if last {
@@ -362,6 +392,11 @@ fn keyed(input: &[u8]) -> Vec<u8> {
             }
         }
     });
+    drop((products, words));
+    let mut output = Vec::with_capacity(IDENTITY_BYTES * gadget_length + 8 * degree);
+    for hasher in hashers {
+        output.extend(hasher.finish().expect("Record identity"));
+    }
     arithmetic.transform(prime).backward(&mut sum);
     extend(&mut output, &sum);
     output
@@ -529,9 +564,9 @@ impl Arithmetic {
     }
     /// The most memory one job holds beside the polynomials it keeps, with
     /// the helpers: a set's products and a product being formed, a set's
-    /// residues beside its records, a key record with its sum and output,
-    /// or a lift's residues and coefficients, each beside one run of a
-    /// streamed polynomial.
+    /// residues beside its records, a keyed product's sum and output beside
+    /// one block of its key words and their products, or a lift's residues
+    /// and coefficients, each beside one run of a streamed polynomial.
     pub(super) fn job_bytes(&self, helpers: usize) -> usize {
         let residue_bytes = 8 * self.degree;
         let held = |count: usize| set_length(count, self.degree, helpers);
@@ -539,7 +574,9 @@ impl Arithmetic {
         let jobs = [
             (held(self.tensor_primes()) + 1) * residue_bytes,
             held(self.external_primes) * (2 * residue_bytes + IDENTITY_BYTES),
-            3 * residue_bytes + self.gadget_length * IDENTITY_BYTES,
+            2 * residue_bytes
+                + self.gadget_length * IDENTITY_BYTES
+                + 24 * KEYED_POSITIONS.min(self.degree),
             2 * 8 * positions * (self.tensor_primes() + self.words),
         ];
         HEADER_BYTES
@@ -1062,6 +1099,14 @@ mod tests {
         assert!(run(&changed).is_err());
         let mut changed = held.clone();
         changed.1[gadget_length][1][5] ^= 1;
+        assert!(run(&changed).is_err());
+        // Records of the largest words, which no transformed residue has,
+        // at every digit of one prime still sum without overflow and differ
+        // from their identities.
+        let mut changed = held.clone();
+        for records in changed.1.iter_mut().take(gadget_length) {
+            records[0].fill(u8::MAX);
+        }
         assert!(run(&changed).is_err());
         assert_eq!(kept_everywhere(), 0);
         assert_eq!(run(&held).unwrap(), expected);
