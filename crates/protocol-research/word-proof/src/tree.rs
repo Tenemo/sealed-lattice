@@ -102,10 +102,11 @@ fn append_nodes(
     let mut level = 1;
     while digests.len() > 1 {
         let prefix = node_prefix(role, stage, level);
-        digests = digests
-            .chunks_exact(2)
-            .map(|pair| node(&prefix, &pair[0], &pair[1]))
-            .collect();
+        let parents = digests.len() / 2;
+        for index in 0..parents {
+            digests[index] = node(&prefix, &digests[2 * index], &digests[2 * index + 1]);
+        }
+        digests.truncate(parents);
         if level > omitted {
             for digest in &digests {
                 output.extend(digest);

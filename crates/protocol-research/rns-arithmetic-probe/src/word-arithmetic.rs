@@ -461,12 +461,15 @@ impl Lift {
             );
             // A column stays below 2^63 between carries, so no addition
             // wraps.
+            let mut previous_high_product = 0;
             for (column, limb) in columns[..self.limbs].iter_mut().zip(row) {
-                *column = column.wrapping_add(low * u64::from(*limb));
+                let limb = u64::from(*limb);
+                *column = column
+                    .wrapping_add(low * limb)
+                    .wrapping_add(previous_high_product);
+                previous_high_product = high * limb;
             }
-            for (column, limb) in columns[1..=self.limbs].iter_mut().zip(row) {
-                *column = column.wrapping_add(high * u64::from(*limb));
-            }
+            columns[self.limbs] = columns[self.limbs].wrapping_add(previous_high_product);
         }
         carry(columns);
         pack(columns, output);
