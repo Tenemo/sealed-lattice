@@ -1,3 +1,5 @@
+import type { ArchiveReference } from '@sealed-lattice/wasm';
+
 import { concatenate } from './bytes.js';
 import { describe, PublicInputFailure } from './context.js';
 
@@ -21,6 +23,7 @@ export type PublicRelay = Readonly<{
     }>;
     // Receives the bytes of every record the visit reads to its end.
     recorder?: Readonly<{
+        reuse(index: ArchiveReference): Promise<void>;
         open(name: string): Readonly<{
             write(bytes: Uint8Array): Promise<void>;
             finish(): Promise<void>;

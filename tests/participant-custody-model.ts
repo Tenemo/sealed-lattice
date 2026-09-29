@@ -66,10 +66,10 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
             : maximumCompletedMetadataBytes;
     // The setup reference and the confirmation inventory the setup was
     // verified against join the enrollment records, each in one record.
-    const maximumRootRecords = enrollment.maximumRecords + 2n;
+    const maximumRootRecords = enrollment.maximumRecords + 3n;
     const ballot = compileParticipantBallotCustody(profile);
     // Marker, inventory identity, one digest per aggregate polynomial, and the
-    // credential-keyed SHA3-512 tag that the ballot step checks before parsing.
+    // credential-keyed protocol digest that the ballot step checks before parsing.
     const setupReferenceBytes =
         4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
     // The count and every participant's confirmation packet.
@@ -77,6 +77,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         4n +
         BigInt(authentication.participants) *
             authentication.confirmationPacketBytes;
+    const setupArchiveBytes = 64n + 8n;
     // The close suffix collects deliveries alongside every ballot phase.
     const close = compileParticipantCloseCustody(profile);
     const maximumWithBallot =
@@ -131,6 +132,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumRootBytes +
         setupReferenceBytes +
         setupInventoryBytes +
+        setupArchiveBytes +
         maximumPublicBodyCiphertextBytes +
         checkpoint.ciphertextBytes +
         maximumSigningPlaintextBytes +
@@ -147,6 +149,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumRootRecords,
         setupReferenceBytes,
         setupInventoryBytes,
+        setupArchiveBytes,
         maximumRootBytes,
         maximumCloseStateBytes: close.maximumStateBytes,
         maximumTargetSigningStateBytes: targetSigning.maximumStateBytes,

@@ -30,6 +30,7 @@ import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.j
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
 import {
+    createTranscriptFileEncoder,
     readTranscript,
     retrieveTranscript,
 } from '#packages/sdk/src/transcript-archive.js';
@@ -100,6 +101,7 @@ const profileOption = '--profile';
 const basePortOption = '--base-port=';
 const memoryPressureOption = '--memory-pressure';
 const sequentialOption = '--sequential';
+const prepopulateOption = '--prepopulate-archive';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
     .find((value) => value.startsWith(foreignOption))
@@ -107,6 +109,7 @@ const foreignPoll = allArguments
 const profiling = allArguments.includes(profileOption);
 const memoryPressure = allArguments.includes(memoryPressureOption);
 const sequential = allArguments.includes(sequentialOption);
+const prepopulateArchive = allArguments.includes(prepopulateOption);
 const basePortArgument = allArguments
     .find((value) => value.startsWith(basePortOption))
     ?.slice(basePortOption.length);
@@ -116,6 +119,7 @@ const commandArguments = allArguments.filter(
         value !== profileOption &&
         value !== memoryPressureOption &&
         value !== sequentialOption &&
+        value !== prepopulateOption &&
         !value.startsWith(basePortOption),
 );
 const mode =
@@ -138,6 +142,10 @@ assert.ok(
 assert.ok(
     !sequential || mode === 'plain',
     'Only an ordinary plain run selects sequential execution.',
+);
+assert.ok(
+    !prepopulateArchive || mode !== 'rosters',
+    'Archive prepopulation selects one roster.',
 );
 assert.ok(
     (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
@@ -213,6 +221,8 @@ type Relay = Readonly<{
     withheld: Set<number>;
     // The public records the relay delivered to each position, by name.
     delivered: Set<string>[];
+    // Successfully served public payloads, by exact route, for cost accounting.
+    reads: Map<string, Readonly<{ requests: number; bytes: number }>>[];
 }>;
 
 // Records a participant may publish from its contribution before its signed
@@ -399,6 +409,10 @@ const startRelay = async (
         { length: originCount },
         () => new Set<string>(),
     );
+    const reads: Relay['reads'] = Array.from(
+        { length: originCount },
+        () => new Map<string, Readonly<{ requests: number; bytes: number }>>(),
+    );
     const assets = (position: number) => {
         const client =
             corrupt?.position === position ? corrupt.client : undefined;
@@ -505,6 +519,13 @@ const startRelay = async (
                     });
                     response.end(bytes);
                     delivering.add(name);
+                    const recordsRead =
+                        reads[Number(new URL(origin).port) - basePort];
+                    const previous = recordsRead.get(name);
+                    recordsRead.set(name, {
+                        requests: (previous?.requests ?? 0) + 1,
+                        bytes: (previous?.bytes ?? 0) + bytes.length,
+                    });
                     return;
                 }
             }
@@ -634,6 +655,7 @@ const startRelay = async (
         archive,
         withheld,
         delivered,
+        reads,
     };
 };
 
@@ -863,7 +885,7 @@ await runWithLocalRunLog(
         // continuation; a completed run may retire its test profiles.
         let profiles: string | undefined;
         let guardFailure: Error | undefined;
-        // The local archive replicas, which run from the release phase on.
+        // The local archive replicas, available from setup verification on.
         const archiveServers: { close(): Promise<void> }[] = [];
         let completed = false;
         const ordinaryOperations: ParticipantOperationMeasurement[] = [];
@@ -1162,6 +1184,26 @@ await runWithLocalRunLog(
             ) =>
                 inBrowser(position, copy, async (chrome) => {
                     const started = performance.now();
+                    const beforeReads = new Map(relay?.reads[position]);
+                    const publicRecordReads = () =>
+                        [...(relay?.reads[position] ?? [])].flatMap(
+                            ([route, value]) => {
+                                const before = beforeReads.get(route);
+                                const requests =
+                                    value.requests - (before?.requests ?? 0);
+                                return requests === 0
+                                    ? []
+                                    : [
+                                          {
+                                              route,
+                                              requests,
+                                              bytes:
+                                                  value.bytes -
+                                                  (before?.bytes ?? 0),
+                                          },
+                                      ];
+                            },
+                        );
                     const recovery =
                         copy === undefined && recoveryOperations.has(position);
                     const interruptedOperation = recovery
@@ -1207,6 +1249,7 @@ await runWithLocalRunLog(
                                 recovery,
                                 interruptedOperation,
                                 originTransfer: { ...transfers[position] },
+                                publicRecordReads: publicRecordReads(),
                             },
                         });
                         throw guardFailure ?? error;
@@ -1222,6 +1265,16 @@ await runWithLocalRunLog(
                     )
                         recoveryOperations.delete(position);
                     if (mode === 'plain' && result.status === 'completed') {
+                        if (operation === 'release' || operation === 'archive')
+                            assert.deepEqual(
+                                publicRecordReads().filter(({ route }) =>
+                                    /^contribution-\d+\/(?:polynomial-\d+|proof)\.bin$/u.test(
+                                        route,
+                                    ),
+                                ),
+                                [],
+                                'A healthy recording visit must reuse its authenticated setup archive.',
+                            );
                         const details = result.details as unknown as Pick<
                             ParticipantOperationMeasurement,
                             'generation' | 'memory' | 'evaluationMemory'
@@ -1259,6 +1312,7 @@ await runWithLocalRunLog(
                             recovery,
                             interruptedOperation,
                             originTransfer: { ...transfers[position] },
+                            publicRecordReads: publicRecordReads(),
                             result,
                         },
                     });
@@ -1806,7 +1860,9 @@ await runWithLocalRunLog(
             // Every member casts a counted ballot, the organizer closes
             // at the current time after every ballot, the first quorum of
             // members vote on the target, and every member releases.
-            const startArchives = async () => {
+            const servicePrepopulation: Readonly<Record<string, unknown>>[] =
+                [];
+            const createArchives = async () => {
                 assert.ok(relay);
                 const archiveKeys = Array.from(
                     { length: mode === 'plain' ? 3 : 4 },
@@ -1861,6 +1917,7 @@ await runWithLocalRunLog(
                 const replicas: Awaited<
                     ReturnType<typeof startPublicArchiveReplica>
                 >[] = [];
+                let serviceTransfer: ParticipantTransfer | undefined;
                 for (const [replicaPosition, privateKey] of archiveKeys
                     .slice(0, 3)
                     .entries()) {
@@ -1891,6 +1948,12 @@ await runWithLocalRunLog(
                                     response,
                                     transfers[position],
                                 );
+                            else if (serviceTransfer !== undefined)
+                                observeParticipantTransfer(
+                                    incoming,
+                                    response,
+                                    serviceTransfer,
+                                );
                         },
                     });
                     archiveServers.push(replica);
@@ -1909,13 +1972,119 @@ await runWithLocalRunLog(
                             ].toString('hex'),
                     })),
                 });
+                const populated = new Set<string>();
+                const prepopulate = async () => {
+                    if (!prepopulateArchive) return;
+                    // Only copy public relay bytes. Participants still encode
+                    // the bytes their verifiers consume, check the resulting
+                    // identities, and require complete-closure acknowledgements.
+                    const files = (
+                        await readdir(publicDirectory, {
+                            recursive: true,
+                            withFileTypes: true,
+                        })
+                    )
+                        .filter((entry) => entry.isFile())
+                        .map((entry) =>
+                            path
+                                .relative(
+                                    publicDirectory,
+                                    path.join(entry.parentPath, entry.name),
+                                )
+                                .split(path.sep)
+                                .join('/'),
+                        )
+                        .filter((name) => !populated.has(name))
+                        .sort();
+                    let bytes = 0;
+                    for (const name of files) {
+                        assert.match(name, publicPath);
+                        bytes += (await stat(path.join(publicDirectory, name)))
+                            .size;
+                    }
+                    if (files.length === 0) return;
+                    assert.ok(bytes <= 4_294_967_291);
+                    const clients = replicas.map((replica, position) =>
+                        openPublicArchive(archiveRuntime, {
+                            context: archiveContext,
+                            faultBound: 0,
+                            replicas: [
+                                {
+                                    baseUrl: replica.baseUrl,
+                                    verificationKey:
+                                        archivePolicy.verificationKeys[
+                                            position
+                                        ],
+                                },
+                            ],
+                            maximumRecords: 65_536,
+                            maximumTotalBytes: 4_294_967_291,
+                        }),
+                    );
+                    const started = performance.now();
+                    serviceTransfer = emptyParticipantTransfer();
+                    try {
+                        for (const name of files) {
+                            const encoder = createTranscriptFileEncoder(
+                                clients[0],
+                                name,
+                                async (record) => {
+                                    await Promise.all(
+                                        clients.map((client) =>
+                                            client.store(
+                                                record,
+                                                AbortSignal.timeout(60_000),
+                                            ),
+                                        ),
+                                    );
+                                },
+                            );
+                            const file = await open(
+                                path.join(publicDirectory, name),
+                                'r',
+                            );
+                            try {
+                                const chunk = Buffer.alloc(1 << 20);
+                                for (;;) {
+                                    const { bytesRead } =
+                                        await file.read(chunk);
+                                    if (bytesRead === 0) break;
+                                    await encoder.write(
+                                        chunk.subarray(0, bytesRead),
+                                    );
+                                }
+                                await encoder.finish();
+                                populated.add(name);
+                            } finally {
+                                await file.close();
+                            }
+                        }
+                        const measurement = {
+                            files: files.length,
+                            sourceDiskReadBytes: bytes,
+                            milliseconds: performance.now() - started,
+                            transfers: serviceTransfer,
+                        };
+                        servicePrepopulation.push(measurement);
+                        log.writeEvent({
+                            eventType: 'service-archive-prepopulation',
+                            details: measurement,
+                        });
+                    } finally {
+                        serviceTransfer = undefined;
+                    }
+                };
+                await prepopulate();
                 return {
                     archiveContext,
                     archivePolicy,
                     archiveRuntime,
                     replicas,
+                    prepopulate,
                 };
             };
+            let startedArchives: ReturnType<typeof createArchives> | undefined;
+            const startArchives = () => (startedArchives ??= createArchives());
             let ordinaryArchive: Record<string, unknown> | undefined;
             const completeRoster = async (
                 members: readonly Member[],
@@ -1966,6 +2135,7 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
+                if (mode === 'plain') await startArchives();
                 await Promise.all(
                     members.map(async (member) => {
                         const verified = await act(member, 'verify-setup');
@@ -2030,7 +2200,9 @@ await runWithLocalRunLog(
                             assert.equal(voted.validBallots, participantCount);
                         }),
                 );
-                if (mode === 'plain') await startArchives();
+                const archiveStorage =
+                    mode === 'plain' ? await startArchives() : undefined;
+                await archiveStorage?.prepopulate();
                 for (const details of await Promise.all(
                     members.map((member) => act(member, 'release')),
                 )) {
@@ -2047,6 +2219,7 @@ await runWithLocalRunLog(
                     rankedIdentifiers(scores),
                 );
                 if (mode === 'plain') {
+                    await archiveStorage?.prepopulate();
                     ordinaryArchive = await act(
                         members[members.length - 1],
                         'archive',
@@ -2086,6 +2259,7 @@ await runWithLocalRunLog(
                             optionCount,
                             mode,
                             sequential,
+                            servicePrepopulation,
                             poll: organizer.poll,
                             recordIds: plainRecordIds,
                             runtimeIdentity: runtime.identity.runtime,
@@ -2536,6 +2710,7 @@ await runWithLocalRunLog(
                 ...[...contributors].reverse(),
             ].find((position) => honest(position) && position !== lateSetup);
             assert.ok(verificationReplay !== undefined);
+            await startArchives();
             await Promise.all(
                 positions
                     .filter((position) => position !== lateSetup)
@@ -3269,6 +3444,7 @@ await runWithLocalRunLog(
             // randomness.
             const { archiveContext, archivePolicy, archiveRuntime, replicas } =
                 await startArchives();
+            await (await startArchives()).prepopulate();
             type ArchivedTranscript = Readonly<{
                 transcript: Readonly<{ identity: string; byteLength: number }>;
                 parts: number;
@@ -3520,7 +3696,25 @@ await runWithLocalRunLog(
                             ),
                         );
                     assert.ok(hints.length > 0);
-                    hint = hints[0];
+                    const certifiedHints = new Set(
+                        [...closures.values()].map(
+                            (closure) => closure.transcript.identity,
+                        ),
+                    );
+                    for (const index of hints.filter(
+                        (candidate) => !certifiedHints.has(candidate.identity),
+                    ))
+                        await expectStatus(
+                            combiningPosition,
+                            'release',
+                            'pending',
+                            { transcript: index },
+                        );
+                    const candidate = hints.find((index) =>
+                        certifiedHints.has(index.identity),
+                    );
+                    assert.ok(candidate !== undefined);
+                    hint = candidate;
                     for (const generation of [26, 27, 28, 29])
                         await interrupt(
                             combiningPosition,

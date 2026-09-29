@@ -462,7 +462,11 @@ export const openTranscript = async (
     );
     const files = new Map<
         string,
-        Readonly<{ length: bigint; chunks: readonly ArchiveReference[] }>
+        Readonly<{
+            length: bigint;
+            chunks: readonly ArchiveReference[];
+            reference: ArchiveReference;
+        }>
     >();
     let previous: string | undefined;
     for (const [position, reference] of parts.entries()) {
@@ -476,11 +480,28 @@ export const openTranscript = async (
                     'Transcript routes are not in ascending order.',
                 );
             previous = route;
-            files.set(route, { length, chunks: file.dependencies });
+            files.set(route, {
+                length,
+                chunks: file.dependencies,
+                reference: fileReference,
+            });
         }
     }
     return {
         targetBody,
+        // Content references only. Their reuse requires the caller's own
+        // authenticated binding to an earlier verified input transcript.
+        files: (): readonly TranscriptFile[] =>
+            [...files].map(([route, file]) => ({
+                route,
+                reference: file.reference,
+                records: new Map(
+                    [file.reference, ...file.chunks].map((reference) => [
+                        reference.identity,
+                        reference.byteLength,
+                    ]),
+                ),
+            })),
         /** The length a file declares, or nothing when no file has the route. */
         length: (route: string) => files.get(route)?.length,
         /** Passes one file's chunks in order and returns its length. */

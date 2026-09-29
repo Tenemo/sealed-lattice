@@ -4616,6 +4616,10 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(participantCustody.setupReferenceBytes),
                 ],
                 [
+                    'Retained setup archive index bytes',
+                    formatCount(participantCustody.setupArchiveBytes),
+                ],
+                [
                     'Maximum public body ciphertext bytes',
                     formatCount(
                         participantCustody.maximumPublicBodyCiphertextBytes,

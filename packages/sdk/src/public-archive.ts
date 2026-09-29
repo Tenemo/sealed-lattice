@@ -71,24 +71,57 @@ export type PublicArchive = Readonly<{
 }>;
 
 const maximumRecordBytes = 1_572_864;
+// A responsive replica normally finishes one bounded record before another
+// starts. A silent or slow replica cannot prevent the others from being tried.
+const replicaHedgeMilliseconds = 250;
 const firstSuccessful = <Value>(
-    operations: readonly Promise<Value>[],
+    count: number,
+    operation: (position: number) => Promise<Value>,
+    signal: AbortSignal,
 ): Promise<Value> =>
     new Promise((resolve, reject) => {
-        let remaining = operations.length;
-        if (remaining === 0)
-            reject(new Error('No archive replica is configured.'));
-        for (const operation of operations) {
-            void operation.then(resolve, (error: unknown) => {
-                remaining--;
-                if (remaining === 0)
-                    reject(
-                        error instanceof Error
-                            ? error
-                            : new Error('Archive retrieval failed.'),
-                    );
-            });
-        }
+        let next = 0;
+        let active = 0;
+        let settled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = (result: { value: Value } | { error: unknown }) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            signal.removeEventListener('abort', aborted);
+            if ('value' in result) resolve(result.value);
+            else
+                reject(
+                    result.error instanceof Error
+                        ? result.error
+                        : new Error('Archive retrieval failed.'),
+                );
+        };
+        const aborted = () => finish({ error: signal.reason });
+        const start = () => {
+            if (settled || next === count) return;
+            const position = next++;
+            active++;
+            clearTimeout(timer);
+            if (next < count)
+                timer = setTimeout(start, replicaHedgeMilliseconds);
+            void operation(position).then(
+                (value) => finish({ value }),
+                (error: unknown) => {
+                    active--;
+                    if (settled) return;
+                    // An invalid response starts the next attempt immediately;
+                    // only silence waits for the hedge.
+                    if (next < count) start();
+                    else if (active === 0) finish({ error });
+                },
+            );
+        };
+        signal.addEventListener('abort', aborted, { once: true });
+        if (signal.aborted) aborted();
+        else if (count === 0)
+            finish({ error: new Error('No archive replica is configured.') });
+        else start();
     });
 const isReference = (value: unknown): value is ArchiveReference => {
     if (value === null || typeof value !== 'object') return false;
@@ -304,6 +337,7 @@ export const openPublicArchive = (
             }
         }).finally(() => controller.abort());
     };
+    let preferredReplica = 0;
     const fetchRecord = async (
         reference: ArchiveReference,
         signal?: AbortSignal,
@@ -314,8 +348,11 @@ export const openPublicArchive = (
                 ? controller.signal
                 : AbortSignal.any([signal, controller.signal]);
         try {
+            const first = preferredReplica;
             return await firstSuccessful(
-                replicas.map(async (_replica, position) => {
+                replicas.length,
+                async (attempt) => {
+                    const position = (first + attempt) % replicas.length;
                     const response = await fetch(
                         endpoint(position, 'records/' + reference.identity),
                         {
@@ -328,8 +365,11 @@ export const openPublicArchive = (
                         response,
                         reference.byteLength,
                     );
-                    return { bytes, record: checked(reference, bytes) };
-                }),
+                    const record = checked(reference, bytes);
+                    preferredReplica = position;
+                    return { bytes, record };
+                },
+                combined,
             );
         } finally {
             controller.abort();

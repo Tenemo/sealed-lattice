@@ -15,15 +15,16 @@ describe('shared participant custody', () => {
     it('retains every contribution polynomial once and omits fixed statement framing', () => {
         const value = compileParticipantCustodyCensus(completionProfile());
         const body = compileContributionBodyCensus(completionProfile());
-        // The setup reference and the confirmation inventory the setup was
-        // verified against each add one root record.
+        // The setup reference, its confirmation inventory and its retained
+        // archive index each add one authenticated root record.
         expect(value.maximumRootRecords).toBe(
-            compileRegistrationEnrollmentCensus().maximumRecords + 2n,
+            compileRegistrationEnrollmentCensus().maximumRecords + 3n,
         );
         // The marker, inventory identity, and public-polynomial identities of
-        // the 45 aggregate polynomials, followed by a 64-byte SHA3-512 tag.
+        // the 45 aggregate polynomials, followed by a 64-byte protocol tag.
         expect(body.polynomials).toHaveLength(45);
         expect(value.setupReferenceBytes).toBe(4n + 64n + 45n * 64n + 64n);
+        expect(value.setupArchiveBytes).toBe(512n / 8n + 64n / 8n);
         expect(value.publicRecords.some((record) => record.object === 0)).toBe(
             false,
         );

@@ -13,6 +13,7 @@ import {
     openArchive,
     openTranscriptSource,
 } from '#packages/sdk/src/participant/worker/transcript.js';
+import { transcriptChunkPurpose } from '#packages/sdk/src/transcript-archive.js';
 import {
     createFoundationCeremonyRuntimeLoader,
     type FoundationCeremonyRuntime,
@@ -109,6 +110,46 @@ afterAll(async () => {
 });
 
 describe('participant transcript through the real scalar kernel and local replicas', () => {
+    it('cancels an extra silent storage attempt once the complete candidate set holds every record', async () => {
+        const opened = await openArchive(configuration(), poll);
+        let cancelled = 0;
+        const recorder = createTranscriptRecorder({
+            ...opened,
+            replicas: [
+                ...opened.replicas,
+                {
+                    ...opened.replicas[0],
+                    store: (_record, signal) =>
+                        new Promise((_resolve, reject) => {
+                            signal?.addEventListener(
+                                'abort',
+                                () => {
+                                    cancelled++;
+                                    reject(
+                                        new Error(
+                                            'The extra attempt was cancelled.',
+                                        ),
+                                    );
+                                },
+                                { once: true },
+                            );
+                        }),
+                },
+            ],
+        });
+        const file = recorder.open('bounded.bin');
+        await file.write(Uint8Array.of(1, 2, 3));
+        await file.finish();
+        expect(cancelled).toBe(1);
+        const archived = await recorder.archive();
+        const reader = await openTranscriptSource(opened, archived.transcript);
+        const chunks: Uint8Array[] = [];
+        await reader.read('bounded.bin', 3, (bytes) => {
+            chunks.push(bytes);
+        });
+        expect(Buffer.concat(chunks)).toEqual(Buffer.from([1, 2, 3]));
+    }, 5_000);
+
     it('archives what a visit reads and serves it back by name from the replicas', async () => {
         // The third replica is down while the visit reads, so it is sent
         // nothing after its first refusal.
@@ -132,6 +173,50 @@ describe('participant transcript through the real scalar kernel and local replic
         expect(encoded.parts).toBe(1);
         // Four files, four chunks, one part and the index.
         expect(encoded.records).toBe(10);
+        const fetchedPurposes: string[] = [];
+        const retained = createTranscriptRecorder({
+            ...archive,
+            archive: {
+                ...archive.archive,
+                fetch: async (reference, signal) => {
+                    const fetched = await archive.archive.fetch(
+                        reference,
+                        signal,
+                    );
+                    fetchedPurposes.push(fetched.record.purpose);
+                    return fetched;
+                },
+            },
+        });
+        await retained.reuse(encoded.transcript);
+        const repeated = await retained.archive();
+        expect(repeated).toEqual(encoded);
+        // Index, part and file metadata suffice to retain the same closure;
+        // the service still checks every transitive record before signing.
+        expect(fetchedPurposes).toHaveLength(6);
+        expect(fetchedPurposes).not.toContain(transcriptChunkPurpose);
+        const chunk = archive.archive.encodeRecord(
+            transcriptChunkPurpose,
+            [],
+            Buffer.from('intent'),
+        );
+        await rm(
+            path.join(directory, '1', 'records', chunk.reference.identity),
+        );
+        await expect(retained.archive()).rejects.toThrow(PublicInputFailure);
+        await archive.replicas[1].store(chunk);
+        expect(await retained.archive()).toEqual(encoded);
+        const changed = retained.open('close/intent.bin');
+        await changed.write(Buffer.from('different'));
+        await expect(changed.finish()).rejects.toThrow(
+            'changed during the visit',
+        );
+        await expect(
+            retained.reuse({
+                ...encoded.transcript,
+                identity: 'ff'.repeat(64),
+            }),
+        ).rejects.toThrow(PublicInputFailure);
         // Another replica is gone; the remaining one serves every record.
         await hosts[0].close();
         const reader = await openArchive(configuration(), poll);

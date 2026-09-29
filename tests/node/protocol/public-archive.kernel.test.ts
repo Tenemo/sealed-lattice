@@ -18,9 +18,10 @@ import {
 import { createServer } from 'node:http';
 import path from 'node:path';
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createPublicArchive } from '#packages/sdk/dist/index.js';
+import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
 import type { PublicArchiveStore } from '#packages/sdk/src/public-archive.js';
 import {
     createFoundationCeremonyRuntimeLoader,
@@ -79,6 +80,116 @@ beforeAll(async () => {
 });
 
 describe('public archive through the real scalar kernel and local storage hosts', () => {
+    it('hedges unavailable replicas, remembers only checked successes and cancels every remaining attempt', async () => {
+        vi.useFakeTimers();
+        const archive = openPublicArchive(runtime, {
+            context,
+            faultBound: 1,
+            replicas: policy.verificationKeys.map(
+                (verificationKey, position) => ({
+                    baseUrl: `https://replica-${String(position)}.invalid/`,
+                    verificationKey,
+                }),
+            ),
+            maximumRecords: 8,
+            maximumTotalBytes: 8 << 20,
+        });
+        const record = archive.encodeRecord(
+            'payload',
+            [],
+            Uint8Array.of(1, 2, 3),
+        );
+        const damaged = record.bytes.slice();
+        damaged[damaged.length - 1] ^= 1;
+        const requested: number[] = [];
+        const cancelled: number[] = [];
+        let behavior: ('valid' | 'damaged' | 'silent')[] = [
+            'valid',
+            'valid',
+            'valid',
+        ];
+        const mock = vi
+            .spyOn(globalThis, 'fetch')
+            .mockImplementation(async (input, init) => {
+                const position = Number(
+                    (typeof input === 'string'
+                        ? input
+                        : input instanceof URL
+                          ? input.href
+                          : input.url
+                    ).match(/replica-(\d)/u)?.[1],
+                );
+                requested.push(position);
+                if (behavior[position] === 'silent')
+                    return new Promise<Response>((_resolve, reject) => {
+                        init?.signal?.addEventListener(
+                            'abort',
+                            () => {
+                                cancelled.push(position);
+                                reject(new Error('Cancelled replica request.'));
+                            },
+                            { once: true },
+                        );
+                    });
+                return new Response(
+                    new Uint8Array(
+                        behavior[position] === 'valid' ? record.bytes : damaged,
+                    ),
+                );
+            });
+        try {
+            expect((await archive.fetch(record.reference)).bytes).toEqual(
+                record.bytes,
+            );
+            expect(requested.splice(0)).toEqual([0]);
+            expect(vi.getTimerCount()).toBe(0);
+            // A served but wrong-hash record cannot be preferred or accepted.
+            behavior = ['damaged', 'valid', 'valid'];
+            expect((await archive.fetch(record.reference)).bytes).toEqual(
+                record.bytes,
+            );
+            expect(requested.splice(0)).toEqual([0, 1]);
+            expect((await archive.fetch(record.reference)).bytes).toEqual(
+                record.bytes,
+            );
+            expect(requested.splice(0)).toEqual([1]);
+            // The previously responsive source can disappear or never finish.
+            behavior = ['damaged', 'silent', 'valid'];
+            const pending = archive.fetch(record.reference);
+            await vi.advanceTimersByTimeAsync(250);
+            expect((await pending).bytes).toEqual(record.bytes);
+            expect(requested.splice(0)).toEqual([1, 2]);
+            expect(cancelled.splice(0)).toEqual([1]);
+            expect(vi.getTimerCount()).toBe(0);
+            behavior = ['damaged', 'damaged', 'damaged'];
+            await expect(archive.fetch(record.reference)).rejects.toThrow();
+            expect(requested.splice(0)).toEqual([2, 0, 1]);
+            expect(vi.getTimerCount()).toBe(0);
+            behavior = ['silent', 'silent', 'silent'];
+            const controller = new AbortController();
+            const interrupted = archive.fetch(
+                record.reference,
+                controller.signal,
+            );
+            const refusal = (async () => {
+                await expect(interrupted).rejects.toThrow('Stopped retrieval.');
+            })();
+            controller.abort(new Error('Stopped retrieval.'));
+            await refusal;
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(requested.splice(0)).toEqual([2]);
+            expect(cancelled.splice(0)).toEqual([2]);
+            expect(vi.getTimerCount()).toBe(0);
+            await expect(
+                archive.fetch(record.reference, controller.signal),
+            ).rejects.toThrow('Stopped retrieval.');
+            expect(requested).toEqual([]);
+        } finally {
+            mock.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
     it('keeps replica cursors separate and stops replayed discovery pages', async () => {
         const first = '01'.repeat(64),
             second = '02'.repeat(64),

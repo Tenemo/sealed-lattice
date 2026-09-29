@@ -273,10 +273,18 @@ export const startPublicArchiveReplica = async (
                     // sends only what it lacks; retention checks it again.
                     const length = storedLengths.get(recordMatch[1]);
                     if (length === undefined) response.writeHead(404).end();
-                    else
+                    else {
+                        // The inventory can outlive a damaged or lost file.
+                        // Do not suppress an exact-byte repair with a stale
+                        // presence claim; retention still checks the closure.
+                        await readRecord({
+                            identity: recordMatch[1],
+                            byteLength: length,
+                        });
                         response
                             .writeHead(200, { 'Content-Length': length })
                             .end();
+                    }
                 } else if (url === '/retain' && request.method === 'POST') {
                     const value: unknown = JSON.parse(
                         new TextDecoder('utf-8', { fatal: true }).decode(

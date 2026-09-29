@@ -14,6 +14,8 @@ const chunkBytes = 1 << 20;
 const tagBytes = 16;
 const keyBytes = 32;
 const identityBytes = 64;
+// The archive index's content identity and unsigned 64-bit encoded length.
+export const setupArchiveReferenceBytes = identityBytes + 8;
 const coinBytes = 32;
 const chunks = (bytes: number) => Math.ceil(bytes / chunkBytes);
 const maximum = (...values: number[]) => Math.max(...values);
@@ -308,6 +310,7 @@ const dataKindMaximums = (
     setupInventoryBytes,
     retainedRosterBytes,
     registration.retainedRegistrationBytes,
+    setupReferenceBytes === 0 ? 0 : setupArchiveReferenceBytes,
 ];
 
 // The largest enrollment root: every record but the setup reference and
@@ -636,6 +639,7 @@ const profileBounds = (
                 maximumRootBytes +
                 setupReference +
                 setupInventory +
+                setupArchiveReferenceBytes +
                 publicCiphertextBytes +
                 checkpointCiphertextBytes +
                 signingBytes,

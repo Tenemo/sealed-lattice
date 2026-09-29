@@ -1,4 +1,7 @@
-import { participantDataKindMaximums } from './bounds.js';
+import {
+    participantDataKindMaximums,
+    setupArchiveReferenceBytes,
+} from './bounds.js';
 import type { ParticipantLimits } from './bounds.js';
 import {
     concatenate,
@@ -74,6 +77,9 @@ export const dataKind = {
     // This participant's verification of its own registration, keyed to its
     // credential.
     retainedRegistration: 13,
+    // The public input archive recorded by this participant's successful
+    // setup verification. It conveys no verification capability.
+    setupArchive: 14,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -198,7 +204,10 @@ const checkReferences = (
             generation >= 3 ? registration.signatureBytes : 0,
         ) ||
         generation >= 12 !== lengths[dataKind.setupReference] > 0 ||
-        generation >= 12 !== lengths[dataKind.setupInventory] > 0
+        generation >= 12 !== lengths[dataKind.setupInventory] > 0 ||
+        (lengths[dataKind.setupArchive] !== 0 &&
+            (generation < 12 ||
+                !exact(dataKind.setupArchive, setupArchiveReferenceBytes)))
     )
         throw new Error('Participant records do not match the generation.');
 };

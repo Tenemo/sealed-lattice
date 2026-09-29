@@ -1,7 +1,13 @@
+import type { ArchiveReference } from '@sealed-lattice/wasm';
+
 import {
     concatenate,
     equalBytes,
     readUnsigned32,
+    readUnsigned64,
+    fromHexadecimal,
+    hexadecimal,
+    unsigned64,
     unsigned32,
 } from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
@@ -51,9 +57,9 @@ import { awaitLater, namespacedName, setupCacheName } from './storage.js';
 // chunk it reads back. Only the complete verified setup lets the module emit
 // the retained setup reference, and a later visit restores the verified
 // setup from that reference while the cache holds the final aggregate. A
-// visit that records its reads for an archived transcript verifies every
-// registration and the complete setup again instead, so that the transcript
-// holds their records.
+// recording visit may reuse the input archive bound into the same root when
+// setup first verified. Without that binding it records a complete fresh
+// verification, including every registration proof.
 
 const cacheStore = 'aggregate';
 
@@ -642,11 +648,11 @@ export const verifySetup = async (
 };
 
 // Makes sure the cache holds the final aggregate that work after the setup
-// reads. When it does not, or when the visit records its reads, so that its
-// transcript holds every setup record, the complete setup is verified again
-// from the retained confirmation inventory, which rewrites the cache and
-// must reproduce the retained setup reference; the verified setup is then
-// live in this instance. Returns whether it verified the setup.
+// reads. A recording visit imports the setup input archive from the private
+// root when available. A missing aggregate, or a recording visit without
+// that binding, verifies the complete setup again, which rewrites the cache
+// and must reproduce the retained setup reference. Returns whether this
+// instance performed the complete verification.
 export const ensureFinalAggregate = async (
     session: ParticipantSession,
     relay: PublicRelay,
@@ -654,8 +660,21 @@ export const ensureFinalAggregate = async (
     if (session.root.head.generation < 12)
         throw new Error('No setup reference is retained.');
     const { context, root } = session;
-    if (relay.recorder === undefined && (await holdsFinalAggregate(context)))
-        return false;
+    if (await holdsFinalAggregate(context)) {
+        if (relay.recorder === undefined) return false;
+        const index = await readDataKind(
+            context,
+            root.manifest,
+            dataKind.setupArchive,
+        );
+        if (index.length !== 0) {
+            await relay.recorder.reuse({
+                identity: hexadecimal(index.subarray(0, 64)),
+                byteLength: Number(readUnsigned64(index, 64)),
+            });
+            return false;
+        }
+    }
     const reference = await verifyCompleteSetup(session, relay, {
         bytes: await readDataKind(
             context,
@@ -684,14 +703,22 @@ export const restoreSetup = async (
 ) => {
     if (await ensureFinalAggregate(session, relay)) return;
     const { context, root } = session;
-    await verifySetupInventory(session, relay, {
-        bytes: await readDataKind(
-            context,
-            root.manifest,
-            dataKind.setupInventory,
-        ),
-        retained: true,
-    });
+    // ensureFinalAggregate either recorded a fresh complete verification or
+    // imported this participant's authenticated setup archive. These reads
+    // still validate the retained roster and confirmations; their bytes are
+    // already present in that archive under the exact original identities.
+    await verifySetupInventory(
+        session,
+        { ...relay, recorder: undefined },
+        {
+            bytes: await readDataKind(
+                context,
+                root.manifest,
+                dataKind.setupInventory,
+            ),
+            retained: true,
+        },
+    );
     const reference = await readDataKind(
         context,
         root.manifest,
@@ -718,11 +745,23 @@ export const retainedSetupInventory = async (session: ParticipantSession) =>
 export const retainSetup = async (
     session: ParticipantSession,
     verified: VerifiedSetup,
+    archive?: ArchiveReference,
 ): Promise<AuthenticatedRoot> => {
     const { context, root } = session;
     const added = [
         { kind: dataKind.setupReference, bytes: verified.reference },
         { kind: dataKind.setupInventory, bytes: verified.inventory },
+        ...(archive === undefined
+            ? []
+            : [
+                  {
+                      kind: dataKind.setupArchive,
+                      bytes: concatenate(
+                          fromHexadecimal(archive.identity),
+                          unsigned64(BigInt(archive.byteLength)),
+                      ),
+                  },
+              ]),
     ];
     return commitRoot(context, root, {
         generation: 12,

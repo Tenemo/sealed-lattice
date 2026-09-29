@@ -515,9 +515,26 @@ const execute = async (
             )
                 return { status: 'refused' };
             const session = await resumeParticipant(profiled, root);
+            const recorder =
+                command.archive === undefined
+                    ? undefined
+                    : createTranscriptRecorder(
+                          await openArchive(
+                              command.archive,
+                              hexadecimal(root.manifest.poll),
+                          ),
+                      );
+            const verified = await verifySetup(
+                session,
+                recorder === undefined ? relay : { ...relay, recorder },
+            );
+            // The index is retained only after the owning verifier accepted
+            // every recorded input and the replicas retained the closure.
+            const setupArchive = await recorder?.archive();
             root = await retainSetup(
                 session,
-                await verifySetup(session, relay),
+                verified,
+                setupArchive?.transcript,
             );
             // A participant that finds the organizer's close intent once its
             // setup is retained learned that ballot submission closed before

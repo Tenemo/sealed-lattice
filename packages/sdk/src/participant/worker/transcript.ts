@@ -131,17 +131,43 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
     const sink: TranscriptSink = (record) =>
         publicly(async () => {
             if (sent.has(record.reference.identity)) return;
-            const failed = await Promise.all(
-                [...holding].map((position) =>
-                    opened.replicas[position]
-                        .store(record, AbortSignal.timeout(networkMilliseconds))
-                        .then(
-                            () => [],
-                            () => [position],
-                        ),
-                ),
-            );
-            for (const position of failed.flat()) holding.delete(position);
+            const controller = new AbortController();
+            const signal = AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(networkMilliseconds),
+            ]);
+            // Keep enough complete candidates that even b lying holders can
+            // withhold their acknowledgement without blocking b+1 honest
+            // ones. Extra slow replicas need not delay every recording visit.
+            const desired = Math.min(holding.size, 2 * opened.faultBound + 1);
+            const held = new Set<number>();
+            let settled = 0;
+            try {
+                await new Promise<void>((resolve) => {
+                    for (const position of holding) {
+                        void opened.replicas[position]
+                            .store(record, signal)
+                            .then(
+                                () => {
+                                    held.add(position);
+                                },
+                                () => undefined,
+                            )
+                            .finally(() => {
+                                settled++;
+                                if (
+                                    held.size >= desired ||
+                                    settled === holding.size
+                                )
+                                    resolve();
+                            });
+                    }
+                });
+            } finally {
+                controller.abort();
+            }
+            for (const position of holding)
+                if (!held.has(position)) holding.delete(position);
             if (holding.size <= opened.faultBound)
                 throw new PublicInputFailure(
                     'Too few archive replicas hold the transcript.',
@@ -149,7 +175,26 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
             sent.add(record.reference.identity);
         });
     const files = new Map<string, TranscriptFile>();
+    const remember = (file: TranscriptFile) => {
+        const previous = files.get(file.route);
+        if (
+            previous !== undefined &&
+            previous.reference.identity !== file.reference.identity
+        )
+            throw new PublicInputFailure(
+                'A public record changed during the visit.',
+            );
+        files.set(file.route, file);
+    };
     return {
+        // The caller obtains this index only from its authenticated root,
+        // retained after successful setup verification over recorded bytes.
+        // No chunk payload or protocol verdict is taken from an archive hint.
+        reuse: (index: ArchiveReference) =>
+            publicly(async () => {
+                const transcript = await openTranscript(opened.archive, index);
+                for (const file of transcript.files()) remember(file);
+            }),
         // Archiving never stops the participant, so every failure to encode
         // or send a record is public input.
         open: (name: string) => {
@@ -171,16 +216,7 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
                 finish: () =>
                     publicly(async () => {
                         const file = await encoder.finish();
-                        const previous = files.get(name);
-                        if (
-                            previous !== undefined &&
-                            previous.reference.identity !==
-                                file.reference.identity
-                        )
-                            throw new PublicInputFailure(
-                                'A public record changed during the visit.',
-                            );
-                        files.set(name, file);
+                        remember(file);
                     }),
             };
         },
