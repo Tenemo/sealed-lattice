@@ -3611,15 +3611,21 @@ await runWithLocalRunLog(
                     for (;;) {
                         const outcome = await Promise.race([
                             interrupted.then(
-                                () => 'settled',
-                                () => 'settled',
+                                (result) => ({ result }),
+                                (error: unknown) => ({
+                                    error:
+                                        error instanceof Error
+                                            ? error.message
+                                            : String(error),
+                                }),
                             ),
                             delay(1000, 'waiting'),
                         ]);
                         assert.equal(
                             outcome,
                             'waiting',
-                            'The release ended before its interruption.',
+                            'The release ended before its interruption: ' +
+                                JSON.stringify(outcome),
                         );
                         if ((await headGeneration(interruptedPosition)) === 26)
                             break;

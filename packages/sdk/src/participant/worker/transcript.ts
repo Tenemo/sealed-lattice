@@ -125,55 +125,66 @@ export type ArchivedTranscript = Readonly<{
  * record the visit reads twice must have the same bytes both times.
  */
 export const createTranscriptRecorder = (opened: OpenedArchive) => {
-    const started = performance.now();
     const holding = new Set(opened.replicas.keys());
     const sent = new Set<string>();
-    const sink: TranscriptSink = (record) =>
-        publicly(async () => {
-            if (sent.has(record.reference.identity)) return;
-            const controller = new AbortController();
-            const signal = AbortSignal.any([
-                controller.signal,
-                AbortSignal.timeout(networkMilliseconds),
-            ]);
-            // Keep enough complete candidates that even b lying holders can
-            // withhold their acknowledgement without blocking b+1 honest
-            // ones. Extra slow replicas need not delay every recording visit.
-            const desired = Math.min(holding.size, 2 * opened.faultBound + 1);
-            const held = new Set<number>();
-            let settled = 0;
-            try {
-                await new Promise<void>((resolve) => {
-                    for (const position of holding) {
-                        void opened.replicas[position]
-                            .store(record, signal)
-                            .then(
-                                () => {
-                                    held.add(position);
-                                },
-                                () => undefined,
-                            )
-                            .finally(() => {
-                                settled++;
-                                if (
-                                    held.size >= desired ||
-                                    settled === holding.size
-                                )
-                                    resolve();
-                            });
-                    }
-                });
-            } finally {
-                controller.abort();
-            }
-            for (const position of holding)
-                if (!held.has(position)) holding.delete(position);
-            if (holding.size <= opened.faultBound)
-                throw new PublicInputFailure(
-                    'Too few archive replicas hold the transcript.',
+    // Different registration streams may finish chunks concurrently. Select
+    // one complete holder set at a time, so another record cannot shrink a
+    // pending attempt's population or select a different incomplete subset.
+    let storing = Promise.resolve();
+    const sink: TranscriptSink = (record) => {
+        storing = storing.then(() =>
+            publicly(async () => {
+                if (sent.has(record.reference.identity)) return;
+                const controller = new AbortController();
+                const signal = AbortSignal.any([
+                    controller.signal,
+                    AbortSignal.timeout(networkMilliseconds),
+                ]);
+                // Keep enough complete candidates that even b lying holders can
+                // withhold their acknowledgement without blocking b+1 honest
+                // ones. Extra slow replicas need not delay every recording visit.
+                const candidates = [...holding];
+                const desired = Math.min(
+                    candidates.length,
+                    2 * opened.faultBound + 1,
                 );
-            sent.add(record.reference.identity);
-        });
+                const held = new Set<number>();
+                let settled = 0;
+                try {
+                    await new Promise<void>((resolve) => {
+                        for (const position of candidates) {
+                            void opened.replicas[position]
+                                .store(record, signal)
+                                .then(
+                                    () => {
+                                        held.add(position);
+                                    },
+                                    () => undefined,
+                                )
+                                .finally(() => {
+                                    settled++;
+                                    if (
+                                        held.size >= desired ||
+                                        settled === candidates.length
+                                    )
+                                        resolve();
+                                });
+                        }
+                    });
+                } finally {
+                    controller.abort();
+                }
+                for (const position of holding)
+                    if (!held.has(position)) holding.delete(position);
+                if (holding.size <= opened.faultBound)
+                    throw new PublicInputFailure(
+                        'Too few archive replicas hold the transcript.',
+                    );
+                sent.add(record.reference.identity);
+            }),
+        );
+        return storing;
+    };
     const files = new Map<string, TranscriptFile>();
     const remember = (file: TranscriptFile) => {
         const previous = files.get(file.route);
@@ -220,9 +231,11 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
                     }),
             };
         },
-        // Each part is acknowledged before the index that lists it. A replica
-        // may take as long to check a closure as this visit took to read and
-        // verify the whole transcript.
+        // Each part is acknowledged before its index. The replica checks the
+        // entire retained closure even when this visit imported only metadata.
+        // Budget that work at eight MiB and one hundred records per second,
+        // in addition to the record-network allowance. This is a bounded
+        // waiting policy, not a throughput or availability assertion.
         archive: () =>
             publicly(async (): Promise<ArchivedTranscript> => {
                 const encoded = await encodeTranscriptIndex(
@@ -232,18 +245,23 @@ export const createTranscriptRecorder = (opened: OpenedArchive) => {
                     retrievalLimits,
                     sink,
                 );
-                const deadline = Math.max(
-                    networkMilliseconds,
-                    performance.now() - started,
-                );
-                for (const root of [
-                    ...encoded.parts.map((part) => part.root),
-                    encoded.index,
-                ])
+                for (const closure of [
+                    ...encoded.parts,
+                    {
+                        root: encoded.index,
+                        records: 1,
+                        byteLength: encoded.index.byteLength,
+                    },
+                ]) {
+                    const deadline =
+                        networkMilliseconds +
+                        Math.ceil(closure.byteLength / (8 << 20)) * 1000 +
+                        closure.records * 10;
                     await opened.archive.retain(
-                        root,
+                        closure.root,
                         AbortSignal.timeout(deadline),
                     );
+                }
                 return {
                     transcript: encoded.index,
                     parts: encoded.parts.length,

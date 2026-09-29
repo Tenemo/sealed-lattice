@@ -110,6 +110,95 @@ afterAll(async () => {
 });
 
 describe('participant transcript through the real scalar kernel and local replicas', () => {
+    it('keeps both healthy holders while files are recorded concurrently', async () => {
+        const opened = await openArchive(configuration(), poll);
+        const firstChunk = opened.archive.encodeRecord(
+            transcriptChunkPurpose,
+            [],
+            Uint8Array.of(7),
+        );
+        const secondChunk = opened.archive.encodeRecord(
+            transcriptChunkPurpose,
+            [],
+            Uint8Array.of(8),
+        );
+        const gate = () => {
+            let resolve!: () => void;
+            const promise = new Promise<void>((ready) => {
+                resolve = ready;
+            });
+            return { promise, resolve };
+        };
+        const first = gate();
+        const second = [gate(), gate()];
+        const firstStored = [gate(), gate()];
+        const secondStored = gate();
+        const recorder = createTranscriptRecorder({
+            ...opened,
+            replicas: opened.replicas.map((replica, position) => ({
+                ...replica,
+                store: async (record, signal) => {
+                    if (position === 0)
+                        throw new Error('One unavailable replica.');
+                    if (
+                        record.reference.identity ===
+                        firstChunk.reference.identity
+                    )
+                        await first.promise;
+                    if (
+                        record.reference.identity ===
+                        secondChunk.reference.identity
+                    )
+                        await second[position - 1].promise;
+                    const result = await replica.store(record, signal);
+                    if (
+                        record.reference.identity ===
+                        firstChunk.reference.identity
+                    )
+                        firstStored[position - 1].resolve();
+                    if (
+                        record.reference.identity ===
+                            secondChunk.reference.identity &&
+                        position === 1
+                    )
+                        secondStored.resolve();
+                    return result;
+                },
+            })),
+        });
+        const firstFile = recorder.open('concurrent-a.bin');
+        const secondFile = recorder.open('concurrent-b.bin');
+        await firstFile.write(Uint8Array.of(7));
+        await secondFile.write(Uint8Array.of(8));
+        const finishing = Promise.all([
+            firstFile.finish(),
+            secondFile.finish(),
+        ]).then(
+            () => ({ error: undefined }),
+            (error: unknown) => ({ error }),
+        );
+        first.resolve();
+        await Promise.all(firstStored.map((value) => value.promise));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        second[0].resolve();
+        await secondStored.promise;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        second[1].resolve();
+        expect((await finishing).error).toBeUndefined();
+        const archived = await recorder.archive();
+        const reader = await openTranscriptSource(opened, archived.transcript);
+        for (const [route, expected] of [
+            ['concurrent-a.bin', 7],
+            ['concurrent-b.bin', 8],
+        ] as const) {
+            const chunks: Uint8Array[] = [];
+            await reader.read(route, 1, (bytes) => {
+                chunks.push(bytes);
+            });
+            expect(Buffer.concat(chunks)).toEqual(Buffer.from([expected]));
+        }
+    }, 10_000);
+
     it('cancels an extra silent storage attempt once the complete candidate set holds every record', async () => {
         const opened = await openArchive(configuration(), poll);
         let cancelled = 0;

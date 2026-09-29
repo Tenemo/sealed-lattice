@@ -9,7 +9,11 @@ import {
     openTranscriptSource,
 } from '#packages/sdk/src/participant/worker/transcript.js';
 import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
-import { createTranscriptFileEncoder } from '#packages/sdk/src/transcript-archive.js';
+import {
+    createTranscriptFileEncoder,
+    encodeTranscriptIndex,
+    type TranscriptFile,
+} from '#packages/sdk/src/transcript-archive.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import {
@@ -25,16 +29,24 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 
 // A storage-only experiment over complete public files from a passed cohort.
 // It does not restore private authority or assert protocol verification. The
-// same recorder, encodings, acknowledgements and cold reader run in both modes.
+// Final publication always obtains complete-closure acknowledgements; only
+// defer-retention omits them from the preceding storage-only preparation.
 const [mode, sourceArgument, ...extra] = process.argv.slice(2);
 assert.ok(
-    (mode === 'upload' || mode === 'prepopulate' || mode === 'reuse') &&
+    (mode === 'upload' ||
+        mode === 'prepopulate' ||
+        mode === 'reuse' ||
+        mode === 'defer-retention' ||
+        mode === 'concurrent-reuse') &&
         sourceArgument?.trim() &&
         extra.length === 0,
-    'Select upload, prepopulate or reuse and a passed participant run.',
+    'Select upload, prepopulate, reuse, defer-retention or concurrent-reuse and a passed participant run.',
 );
 const source = path.resolve(sourceArgument);
-const limits = { maximumRecords: 4096, maximumTotalBytes: 256 << 20 };
+const limits =
+    mode === 'concurrent-reuse'
+        ? { maximumRecords: 65_536, maximumTotalBytes: 4_294_967_291 }
+        : { maximumRecords: 4096, maximumTotalBytes: 256 << 20 };
 const memoryLimit = 1_073_741_824;
 const sha512 = (bytes: Uint8Array) =>
     createHash('sha512').update(bytes).digest('hex');
@@ -137,6 +149,27 @@ await runWithLocalRunLog(
                 }
             };
             for (const directory of directories) await visit(directory);
+            if (mode === 'concurrent-reuse') {
+                routes.length = 0;
+                routes.push(
+                    ...(
+                        await readdir(publicDirectory, {
+                            recursive: true,
+                            withFileTypes: true,
+                        })
+                    )
+                        .filter((entry) => entry.isFile())
+                        .map((entry) =>
+                            path
+                                .relative(
+                                    publicDirectory,
+                                    path.join(entry.parentPath, entry.name),
+                                )
+                                .split(path.sep)
+                                .join('/'),
+                        ),
+                );
+            }
             routes.sort();
             let sourceBytes = 0;
             for (const route of routes)
@@ -269,9 +302,9 @@ await runWithLocalRunLog(
                 transfers: activeTransfer,
             };
             activeTransfer = emptyParticipantTransfer();
-            let priorPublication: Readonly<Record<string, unknown>> | undefined;
+            let initialStage: Readonly<Record<string, unknown>> | undefined;
             let priorIndex;
-            if (mode === 'reuse') {
+            if (mode === 'reuse' || mode === 'concurrent-reuse') {
                 const priorStart = performance.now();
                 const prior = createTranscriptRecorder(opened);
                 for (const route of routes) {
@@ -281,10 +314,49 @@ await runWithLocalRunLog(
                 }
                 const archived = await prior.archive();
                 priorIndex = archived.transcript;
-                priorPublication = {
+                initialStage = {
                     milliseconds: performance.now() - priorStart,
                     transfers: activeTransfer,
                     ...archived,
+                };
+                activeTransfer = emptyParticipantTransfer();
+            }
+            if (mode === 'defer-retention') {
+                const priorStart = performance.now();
+                const files: TranscriptFile[] = [];
+                const sink: Parameters<
+                    typeof createTranscriptFileEncoder
+                >[2] = async (record) => {
+                    await Promise.all(
+                        opened.replicas.map((replica) =>
+                            replica.store(record, controller.signal),
+                        ),
+                    );
+                };
+                for (const route of routes) {
+                    const file = createTranscriptFileEncoder(
+                        opened.archive,
+                        route,
+                        sink,
+                    );
+                    await stream(route, file.write);
+                    files.push(await file.finish());
+                }
+                const encoded = await encodeTranscriptIndex(
+                    opened.archive,
+                    files,
+                    new Uint8Array(),
+                    limits,
+                    sink,
+                );
+                priorIndex = encoded.index;
+                initialStage = {
+                    milliseconds: performance.now() - priorStart,
+                    transfers: activeTransfer,
+                    transcript: priorIndex,
+                    parts: encoded.parts.length,
+                    records: encoded.records,
+                    byteLength: encoded.byteLength,
                 };
                 activeTransfer = emptyParticipantTransfer();
             }
@@ -298,7 +370,58 @@ await runWithLocalRunLog(
                     await file.finish();
                 }
             }
-            const archived = await recorder.archive();
+            const concurrent =
+                mode === 'concurrent-reuse'
+                    ? createTranscriptRecorder(opened)
+                    : undefined;
+            if (concurrent !== undefined) {
+                assert.ok(priorIndex !== undefined);
+                await concurrent.reuse(priorIndex);
+            }
+            const attempts = await Promise.allSettled(
+                [
+                    recorder,
+                    ...(concurrent === undefined ? [] : [concurrent]),
+                ].map(async (publisher, index) => {
+                    const began = performance.now();
+                    try {
+                        const result = await publisher.archive();
+                        log.writeEvent({
+                            eventType: 'retention-completed',
+                            details: {
+                                index,
+                                milliseconds: performance.now() - began,
+                                records: result.records,
+                                bytes: result.byteLength,
+                            },
+                        });
+                        return result;
+                    } catch (error) {
+                        log.writeEvent({
+                            eventType: 'retention-failed',
+                            details: {
+                                index,
+                                milliseconds: performance.now() - began,
+                                reason:
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error),
+                            },
+                        });
+                        throw error;
+                    }
+                }),
+            );
+            assert.ok(
+                attempts.every((attempt) => attempt.status === 'fulfilled'),
+                'A complete public closure failed retention.',
+            );
+            const archived = attempts[0].value;
+            for (const attempt of attempts)
+                if (attempt.status === 'fulfilled')
+                    assert.deepEqual(attempt.value, archived);
+            if (priorIndex !== undefined)
+                assert.deepEqual(archived.transcript, priorIndex);
             const publication = {
                 milliseconds: performance.now() - start,
                 transfers: activeTransfer,
@@ -365,7 +488,7 @@ await runWithLocalRunLog(
                 })),
                 sourceBytes,
                 service,
-                priorPublication,
+                initialStage,
                 publication,
                 retrieval,
                 recovery,
