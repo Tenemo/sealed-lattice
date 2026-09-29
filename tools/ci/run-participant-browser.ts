@@ -3437,9 +3437,9 @@ await runWithLocalRunLog(
             for (const view of views)
                 for (const name of omission) view.delete(name);
             await depart(0);
-            // From here on three local archive replicas and a fourth that
-            // never answers run, with fault bound one, and every honest page
-            // configures them. A participant's first release visit archives
+            // The three local archive replicas and a fourth that never answers
+            // have run since setup verification, with fault bound one. Every
+            // honest page configures them. A participant's first release archives
             // the certified target closure it read before it draws release
             // randomness.
             const { archiveContext, archivePolicy, archiveRuntime, replicas } =
@@ -4381,7 +4381,7 @@ await runWithLocalRunLog(
                     : [
                           `Relay views that serve another poll's ${prose(foreignProbes.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
                       ]),
-                `Three local archive replicas and a fourth that never answers run with fault bound one from the release phase on. Each remaining participant's first release visit archives the certified target closure it read before any release randomness${noResult ? '' : ', and the last remaining participant, served no public record by the relay, finds a closure among the archive hints and releases from the replicas alone'}. The last remaining participant then archives the transcript of its verified outcome; after one of the three replicas stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Local replicas on one host are not independent fault domains.`,
+                `Three local archive replicas and a fourth that never answers run with fault bound one from setup verification on. Successful setup verification archives its complete public inputs and binds that index into the participant's authenticated root. Each remaining participant's first release visit archives the certified target closure before any release randomness, reusing those authenticated setup dependencies${noResult ? '' : ', and the last remaining participant, served no public record by the relay, finds a closure among the archive hints and releases from the replicas alone'}. The last remaining participant then archives the transcript of its verified outcome; after one of the three replicas stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Local replicas on one host are not independent fault domains.`,
             ].join(' ');
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
