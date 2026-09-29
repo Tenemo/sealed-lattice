@@ -80,6 +80,71 @@ beforeAll(async () => {
 });
 
 describe('public archive through the real scalar kernel and local storage hosts', () => {
+    it('retains identical concurrent publications without losing a staged file', async () => {
+        const directory = await mkdtemp(
+            path.resolve('temp/public-archive-concurrent-'),
+        );
+        const workspace = await realpath(process.cwd());
+        const resolved = await realpath(directory);
+        if (!resolved.startsWith(path.join(workspace, 'temp') + path.sep))
+            throw new Error('Archive fixture escaped the workspace.');
+        const hosts = await Promise.all(
+            keys.map((privateKey, replicaPosition) =>
+                startPublicArchiveReplica({
+                    directory: path.join(directory, String(replicaPosition)),
+                    context,
+                    policy,
+                    replicaPosition,
+                    privateKey,
+                    runtime,
+                    maximumRecords: 4,
+                    maximumTotalBytes: 4 << 20,
+                    maximumStoredRecords: 4,
+                    maximumStoredBytes: 4 << 20,
+                }),
+            ),
+        );
+        try {
+            const archive = openPublicArchive(runtime, {
+                context,
+                faultBound: 1,
+                replicas: hosts.map((host, index) => ({
+                    baseUrl: host.baseUrl,
+                    verificationKey: policy.verificationKeys[index],
+                })),
+                maximumRecords: 4,
+                maximumTotalBytes: 4 << 20,
+            });
+            const record = archive.encodeRecord(
+                'shared-public-bytes',
+                [],
+                new Uint8Array(1 << 20),
+            );
+            const source = store();
+            await source.storage.put(record.reference.identity, record.bytes);
+            const publications = await Promise.all(
+                Array.from({ length: 6 }, () =>
+                    archive.publish(
+                        record.reference,
+                        source.storage,
+                        AbortSignal.timeout(10_000),
+                    ),
+                ),
+            );
+            expect(
+                publications.every(
+                    (positions) => positions.length > policy.faultBound,
+                ),
+            ).toBe(true);
+            expect((await archive.fetch(record.reference)).bytes).toEqual(
+                record.bytes,
+            );
+        } finally {
+            for (const host of hosts) await host.close();
+            await rm(resolved, { recursive: true });
+        }
+    });
+
     it('hedges unavailable replicas, remembers only checked successes and cancels every remaining attempt', async () => {
         vi.useFakeTimers();
         const archive = openPublicArchive(runtime, {

@@ -48,9 +48,9 @@ const arguments_ = process.argv.slice(2).filter((value) => value !== '--');
 const [mode, sourceArgument] = arguments_;
 assert.ok(
     arguments_.length === 2 &&
-        (mode === 'inspect' || mode === 'release') &&
+        (mode === 'inspect' || mode === 'release' || mode === 'archive') &&
         sourceArgument?.trim(),
-    'Select inspect or release and one preserved participant run.',
+    'Select inspect, release or archive and one preserved participant run.',
 );
 const source = path.resolve(sourceArgument);
 const root = path.resolve('.');
@@ -82,26 +82,27 @@ await runWithLocalRunLog(
         let peakMemory = 0;
         const monitor = (async () => {
             while (monitoring) {
-                if (browser !== undefined) {
+                const observed = browser;
+                if (observed !== undefined) {
                     const bytes = await readProtocolProcessTree(
-                        browser.processIdentifier,
+                        observed.processIdentifier,
                     );
-                    if (bytes !== undefined) {
+                    if (browser === observed && bytes !== undefined) {
                         peakMemory = Math.max(peakMemory, bytes);
                         log.writeEvent({
                             eventType: 'recovery-browser-memory',
                             details: {
                                 bytes,
                                 limit: memoryLimit,
-                                heaps: browser.heaps(),
-                                storage: browser.storage(),
+                                heaps: observed.heaps(),
+                                storage: observed.storage(),
                             },
                         });
                         if (bytes > memoryLimit) {
                             memoryFailure = new Error(
                                 'Recovery browser memory guard exceeded.',
                             );
-                            await browser.crash();
+                            await observed.crash();
                         }
                     }
                 }
@@ -121,6 +122,9 @@ await runWithLocalRunLog(
             ) as { commandLineArguments: string[] };
             const [participantCount, optionCount] =
                 metadata.commandLineArguments.slice(0, 2).map(Number);
+            const noResult = metadata.commandLineArguments.some(
+                (value) => value === 'no-result' || value === 'empty',
+            );
             assert.ok(
                 Number.isInteger(participantCount) &&
                     participantCount >= 3 &&
@@ -297,6 +301,9 @@ await runWithLocalRunLog(
                 })),
             };
             const withheld = new Set<number>();
+            let forgedPosition: number | undefined;
+            const substituted = new Map<string, string>();
+            const delivered = new Set<string>();
             const page = `<!doctype html><meta charset="utf-8"><script type="module">
 import {openParticipant} from '/sdk/index.js';
 const archive = ${JSON.stringify(archive)};
@@ -346,13 +353,18 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                             response.writeHead(404).end();
                             return;
                         }
-                        const file = path.join(publicDirectory, name);
+                        const file =
+                            (reading && position === forgedPosition
+                                ? substituted.get(name)
+                                : undefined) ??
+                            path.join(publicDirectory, name);
                         if (
                             reading &&
                             request.method === 'GET' &&
                             !withheld.has(position)
                         ) {
                             const info = await stat(file);
+                            delivered.add(name);
                             response.writeHead(200, {
                                 'Content-Type': 'application/octet-stream',
                                 'Content-Length': info.size,
@@ -453,7 +465,7 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                 });
                 servers.push(server);
             }
-            const run = async (
+            const request = async (
                 position: number,
                 operation: string,
                 parameters = {},
@@ -486,6 +498,14 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                         result,
                     },
                 });
+                return result;
+            };
+            const run = async (
+                position: number,
+                operation: string,
+                parameters = {},
+            ) => {
+                const result = await request(position, operation, parameters);
                 assert.equal(
                     result.status,
                     'completed',
@@ -511,6 +531,22 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
             const restored: Record<string, unknown> = {};
             let independentClosure:
                 { identity: string; byteLength: number } | undefined;
+            for (const event of events) {
+                const result = event.details?.result as
+                    | {
+                          details?: {
+                              closure?: {
+                                  transcript?: typeof independentClosure;
+                              };
+                          };
+                      }
+                    | undefined;
+                const index = result?.details?.closure?.transcript;
+                if (index !== undefined) {
+                    independentClosure = index;
+                    break;
+                }
+            }
             for (const position of survivors)
                 await inBrowser(position, async () => {
                     const state = await run(position, 'status');
@@ -539,7 +575,8 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                             independentClosure = hints[0];
                         }
                         const released = await run(position, 'release');
-                        assert.equal(released.generation, 29);
+                        assert.equal(released.encrypted, !noResult);
+                        if (!noResult) assert.equal(released.generation, 29);
                     }
                 });
             if (mode === 'inspect') {
@@ -555,6 +592,100 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                 return;
             }
             const combining = survivors[survivors.length - 1];
+            const probes: Record<string, unknown>[] = [];
+            if (mode === 'archive') {
+                const foreign = metadata.commandLineArguments
+                    .find((value) => value.startsWith('--foreign-poll='))
+                    ?.slice('--foreign-poll='.length);
+                assert.ok(
+                    foreign !== undefined,
+                    'The archive probe needs the original foreign public fixture.',
+                );
+                const opening = 'contribution-0/opening.bin';
+                const foreignOpening = path.join(
+                    runArtifactDirectoryPath(path.resolve(foreign)),
+                    'public',
+                    opening,
+                );
+                assert.notEqual(
+                    sha512(await readFile(foreignOpening)),
+                    sha512(await readFile(path.join(publicDirectory, opening))),
+                );
+                const proofRoute = `registration/${recordIds[0]}/proof.bin`;
+                const changedProof = await readFile(
+                    path.join(publicDirectory, proofRoute),
+                );
+                changedProof[0] ^= 1;
+                const alteredProof = path.join(
+                    log.artifactDirectoryPath,
+                    'altered-registration-proof.bin',
+                );
+                await writeFile(alteredProof, changedProof, { flag: 'wx' });
+                for (const [route, replacement, reason] of [
+                    [opening, foreignOpening, 'An opening was refused.'],
+                    [
+                        proofRoute,
+                        alteredProof,
+                        'The published registrations are not the retained roster.',
+                    ],
+                ] as const)
+                    await inBrowser(combining, async () => {
+                        const before = await run(combining, 'result');
+                        const state = await run(combining, 'status');
+                        forgedPosition = combining;
+                        substituted.set(route, replacement);
+                        try {
+                            delivered.clear();
+                            const cached = await run(combining, 'archive');
+                            assert.deepEqual(
+                                cached.identifiers,
+                                before.identifiers,
+                            );
+                            assert.equal(
+                                delivered.has(route),
+                                false,
+                                'The cached archive read the replaced input.',
+                            );
+                            const names = [
+                                setupCacheName,
+                                evaluatedTargetName,
+                            ].map((name) => namespacedName(name, namespace));
+                            await browser!.evaluate(
+                                `Promise.all(${JSON.stringify(names)}.map((name)=>new Promise((resolve,reject)=>{const deletion=indexedDB.deleteDatabase(name);deletion.onsuccess=()=>resolve(undefined);deletion.onerror=()=>reject(deletion.error);deletion.onblocked=()=>reject(new Error('Public cache deletion was blocked.'));})))`,
+                            );
+                            delivered.clear();
+                            const consumed = await request(
+                                combining,
+                                'archive',
+                            );
+                            assert.deepEqual(consumed, {
+                                status: 'pending',
+                                reason,
+                            });
+                            assert.ok(
+                                delivered.has(route),
+                                'The refusal did not consume the forged input.',
+                            );
+                            const after = await run(combining, 'status');
+                            assert.equal(after.rootHash, state.rootHash);
+                            assert.equal(after.generation, state.generation);
+                            probes.push({
+                                route,
+                                cached: 'completed without reading the replacement',
+                                consumed,
+                                beforeRoot: state.rootHash,
+                                afterRoot: after.rootHash,
+                            });
+                        } finally {
+                            substituted.clear();
+                            forgedPosition = undefined;
+                        }
+                        assert.deepEqual(
+                            (await run(combining, 'result')).identifiers,
+                            before.identifiers,
+                        );
+                    });
+            }
             let result!: Record<string, unknown>;
             let archived!: Record<string, unknown>;
             await inBrowser(combining, async () => {
@@ -566,7 +697,7 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                 identity: string;
                 byteLength: number;
             };
-            assert.equal(result.encrypted, true);
+            assert.equal(result.encrypted, !noResult);
             assert.ok(independentClosure !== undefined);
             await replicas[0].close();
             const reader = survivors[0];
@@ -621,11 +752,14 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                         recordIds,
                         runtimeIdentity: identity.runtime,
                         restored,
+                        probes,
                         peakProcessTreeBytes: peakMemory,
-                        result: {
-                            kind: 'result',
-                            identifiers: result.identifiers,
-                        },
+                        result: noResult
+                            ? { kind: 'no-result' }
+                            : {
+                                  kind: 'result',
+                                  identifiers: result.identifiers,
+                              },
                         archive: {
                             transcript,
                             independentClosure,
@@ -635,7 +769,7 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                             unavailableReplica: 0,
                             sourceServiceUnavailable: true,
                         },
-                        scope: 'The original surviving participant profiles resumed their release suffix under the identical archived runtime. No participant was created or private authority moved. The published target predates this run. The terminal archive is retrieved after source shutdown and one replica loss; the reader first lost its public caches. Earlier cohort faults retain their own scope and diagnostic run.',
+                        scope: 'The original surviving participant profiles resumed under the identical archived runtime. No participant was created or private authority moved. The published target predates this run. Archive mode separately checks cached reuse, a wrong-context opening and an altered registration proof actually consumed after public-cache removal, retaining the original rejections and private roots. The terminal archive is retrieved after source shutdown and one replica loss; the reader first lost its public caches. Earlier cohort faults retain their own scope and diagnostic run.',
                     },
                     null,
                     2,

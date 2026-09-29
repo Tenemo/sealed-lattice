@@ -4030,6 +4030,9 @@ await runWithLocalRunLog(
                                 : 'The close intent was refused.',
                             'archive',
                         );
+                        // Restore the cache from genuine inputs before testing
+                        // another family's cached-result behavior.
+                        await run(position, 'result');
                     } else await probe(position, view, reason);
                     foreignProbes.push({
                         family,
@@ -4045,6 +4048,8 @@ await runWithLocalRunLog(
                 reason: string,
                 operation: 'result' | 'archive' = 'result',
             ) => {
+                if (operation === 'archive')
+                    await discardPublicCaches(position);
                 deliveredRecords[position].clear();
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
@@ -4173,8 +4178,9 @@ await runWithLocalRunLog(
                 eventType: 'participant-damaged-target-recomputed',
                 details: { position: voteProbe },
             });
-            // A retained roster need not read an old proof, whereas an
-            // archive visit must consume and verify it for a fresh reader.
+            // A retained roster need not read an old proof. The archive
+            // probe clears public caches to force owning verification of
+            // the newly consumed proof instead of authenticated reuse.
             const changedProofName = `registration/${recordIds[0]}/${registrationFile.proof}`;
             const changedProof = await readFile(
                 path.join(publicDirectory, changedProofName),
