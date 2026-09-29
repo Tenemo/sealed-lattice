@@ -522,6 +522,20 @@ await runWithLocalRunLog(
                 'verification',
             );
             assert.equal(exitCode, 0);
+            if (participantArchive) {
+                // This is an expected-value comparison after verification,
+                // never a source-service fallback for a missing input.
+                assert.deepEqual(
+                    await readFile(path.join(output, 'target.bin')),
+                    await readFile(
+                        path.join(
+                            runArtifactDirectoryPath(source),
+                            'public/completion/target.bin',
+                        ),
+                    ),
+                    'The archived target differs from the originally published target.',
+                );
+            }
             const verified = JSON.parse(
                 await readFile(
                     path.join(output, selected.stage + '.json'),

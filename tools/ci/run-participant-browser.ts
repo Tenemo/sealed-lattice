@@ -859,7 +859,8 @@ await runWithLocalRunLog(
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
-        // The participants' private state lives only as long as the run.
+        // Failed runs retain their original profiles for same-runtime
+        // continuation; a completed run may retire its test profiles.
         let profiles: string | undefined;
         let guardFailure: Error | undefined;
         // The local archive replicas, which run from the release phase on.
@@ -1011,10 +1012,12 @@ await runWithLocalRunLog(
                                 storage,
                             },
                         });
-                        if (bytes > participantMemoryLimit)
+                        if (bytes > participantMemoryLimit) {
                             guardFailure ??= new Error(
                                 'Participant process-tree memory guard exceeded.',
                             );
+                            await browsers.crash(key);
+                        }
                         if (details.copy === undefined) {
                             const resources =
                                 sampledResources[details.position];
@@ -1112,6 +1115,7 @@ await runWithLocalRunLog(
                 return browsers.use(
                     key,
                     async () => {
+                        const launching = performance.now();
                         const chrome = await launchChromeParticipant(
                             copy === undefined
                                 ? profile(position)
@@ -1129,6 +1133,7 @@ await runWithLocalRunLog(
                             eventType: 'participant-browser',
                             details: {
                                 ...details,
+                                milliseconds: performance.now() - launching,
                                 version: chrome.version,
                                 launchArguments: chrome.launchArguments,
                             },
@@ -1146,6 +1151,7 @@ await runWithLocalRunLog(
             if (cpuProfileDirectory !== undefined)
                 await mkdir(cpuProfileDirectory);
             let profiledOperations = 0;
+            const recoveryOperations = new Map<number, string>();
             // Runs one operation in a participant's page, or in a copy of its
             // private state.
             const request = async (
@@ -1156,6 +1162,11 @@ await runWithLocalRunLog(
             ) =>
                 inBrowser(position, copy, async (chrome) => {
                     const started = performance.now();
+                    const recovery =
+                        copy === undefined && recoveryOperations.has(position);
+                    const interruptedOperation = recovery
+                        ? recoveryOperations.get(position)
+                        : undefined;
                     // The deadline ends with its operation so that no timer
                     // outlives the run.
                     const deadline = new AbortController();
@@ -1185,11 +1196,31 @@ await runWithLocalRunLog(
                                 cpuProfileEntries,
                             );
                         }
+                    } catch (error) {
+                        log.writeEvent({
+                            eventType: 'participant-interrupted-operation',
+                            details: {
+                                position,
+                                operation,
+                                ...(copy === undefined ? {} : { copy }),
+                                milliseconds: performance.now() - started,
+                                recovery,
+                                interruptedOperation,
+                                originTransfer: { ...transfers[position] },
+                            },
+                        });
+                        throw guardFailure ?? error;
                     } finally {
                         deadline.abort();
                     }
                     if (guardFailure !== undefined) throw guardFailure;
                     const milliseconds = performance.now() - started;
+                    if (
+                        recovery &&
+                        result.status === 'completed' &&
+                        !['status', 'transcripts'].includes(operation)
+                    )
+                        recoveryOperations.delete(position);
                     if (mode === 'plain' && result.status === 'completed') {
                         const details = result.details as unknown as Pick<
                             ParticipantOperationMeasurement,
@@ -1200,7 +1231,9 @@ await runWithLocalRunLog(
                             operation,
                             started,
                             finished: started + milliseconds,
-                            ...details,
+                            generation: details.generation,
+                            memory: details.memory,
+                            evaluationMemory: details.evaluationMemory,
                         });
                     }
                     // A ballot or release generated in this visit drew the
@@ -1223,6 +1256,9 @@ await runWithLocalRunLog(
                             ...(copy === undefined ? {} : { copy }),
                             operation,
                             milliseconds,
+                            recovery,
+                            interruptedOperation,
+                            originTransfer: { ...transfers[position] },
                             result,
                         },
                     });
@@ -1552,6 +1588,7 @@ await runWithLocalRunLog(
                 } finally {
                     halting.delete(position);
                 }
+                recoveryOperations.set(position, operation);
                 interruptions.push({ position, operation, generation });
                 log.writeEvent({
                     eventType: 'participant-interruption',
@@ -1604,6 +1641,7 @@ await runWithLocalRunLog(
                     generation,
                     ...(await point()),
                 };
+                recoveryOperations.set(position, operation);
                 interruptions.push(details);
                 log.writeEvent({
                     eventType: 'participant-interruption',
@@ -2060,7 +2098,9 @@ await runWithLocalRunLog(
                             transfers,
                             sampledResources,
                             unmeasured: [
+                                'Exact productive-visit coalescence; stage groups are not visits, and a participant total is a conservative active-work upper bound for one visit',
                                 'Exact transient browser and JavaScript memory peaks between samples',
+                                'Archive foundation-kernel linear memory separately from participant-module reports; browser-process samples include it',
                                 'HTTP headers and link-layer transfer overhead',
                                 'Human delays between visits',
                                 'Physical-device performance and power use',
@@ -3408,10 +3448,9 @@ await runWithLocalRunLog(
                         if ((await headGeneration(interruptedPosition)) === 26)
                             break;
                     }
-                    await browsers.close(
-                        participantBrowser(interruptedPosition),
-                    );
+                    await endBrowser(interruptedPosition);
                     await assert.rejects(interrupted);
+                    recoveryOperations.set(interruptedPosition, 'release');
                     const details = await run(interruptedPosition, 'release');
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
@@ -4268,6 +4307,10 @@ await runWithLocalRunLog(
             for (const server of archiveServers) await server.close();
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));
+            log.writeEvent({
+                eventType: 'participant-transfer-summary',
+                details: { participants: transfers },
+            });
             if (profiles !== undefined && completed)
                 await rm(profiles, { recursive: true, force: true });
             else if (profiles !== undefined)

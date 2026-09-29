@@ -20,8 +20,8 @@ export type ParticipantOperationMeasurement = Readonly<{
 
 // Charge refetches and separate API calls to the productive stage they
 // serve. The organizer's proposal and target signature share a stage.
-// These stage totals bound a visit's work; they do not count API calls as
-// extra visits or claim that the harness reproduced human return timing.
+// These are accounting groups, not a measured visit partition: adjacent
+// stages can coalesce when their dependencies are already available.
 const stage = ({ operation, generation }: ParticipantOperationMeasurement) => {
     if (operation === 'create' || (operation === 'publish' && generation === 1))
         return 'registration';
@@ -148,6 +148,6 @@ export const summarizeParticipantWorkflow = (
             combinedWorkerHelperArenaBytes:
                 participant.combinedWorkerHelperArenaBytes ?? null,
         })),
-        scope: 'Successful ordinary operations, including certified closure and terminal transcript archiving. Stage totals group productive work; they are not API-call visit counts. Browser launch and human delays are not part of active operation time. Memory is the largest reported combined worker, helpers and arena, including a separate evaluation worker before its termination; sampled process memory is reported separately.',
+        scope: 'Successful ordinary operations, including certified closure and terminal transcript archiving. Stage totals are accounting groups, not a measured visit partition: adjacent stages can coalesce, so the maximum stage is not the maximum visit. Browser launch and human delays are not part of active operation time. Combined memory covers participant-module linear memory in the worker and helpers plus their arena, including a separate evaluation worker before termination. The archive foundation kernel is not separately reported in this total; sampled browser-process memory includes every instance.',
     };
 };
