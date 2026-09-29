@@ -564,7 +564,7 @@ export const advanceRelease = async (
     await restoreCompletedClose(close);
     if (session.signed !== undefined)
         restoreSignedTarget(context, session.signed);
-    const evaluated = await restoreOrEvaluateTarget(context, relay);
+    const evaluated = await restoreOrEvaluateTarget(close, relay);
     if (
         session.target !== undefined &&
         !equalBytes(evaluated.body, session.target.body)
@@ -644,7 +644,7 @@ export const computeResult = async (
     const { profile } = context;
     const bounds = profile.release;
     await restoreCompletedClose(close);
-    const { restored } = await restoreOrEvaluateTarget(context, relay);
+    const { restored } = await restoreOrEvaluateTarget(close, relay);
     const encrypted = await certifyTarget(context, relay, restored);
     let result = encrypted ? undefined : tryCompletionCommand(context, 10);
     for (

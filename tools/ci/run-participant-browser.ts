@@ -102,6 +102,7 @@ const basePortOption = '--base-port=';
 const memoryPressureOption = '--memory-pressure';
 const sequentialOption = '--sequential';
 const prepopulateOption = '--prepopulate-archive';
+const preserveProfilesOption = '--preserve-profiles';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
     .find((value) => value.startsWith(foreignOption))
@@ -110,6 +111,7 @@ const profiling = allArguments.includes(profileOption);
 const memoryPressure = allArguments.includes(memoryPressureOption);
 const sequential = allArguments.includes(sequentialOption);
 const prepopulateArchive = allArguments.includes(prepopulateOption);
+const preserveProfiles = allArguments.includes(preserveProfilesOption);
 const basePortArgument = allArguments
     .find((value) => value.startsWith(basePortOption))
     ?.slice(basePortOption.length);
@@ -120,6 +122,7 @@ const commandArguments = allArguments.filter(
         value !== memoryPressureOption &&
         value !== sequentialOption &&
         value !== prepopulateOption &&
+        value !== preserveProfilesOption &&
         !value.startsWith(basePortOption),
 );
 const mode =
@@ -142,6 +145,10 @@ assert.ok(
 assert.ok(
     !sequential || mode === 'plain',
     'Only an ordinary plain run selects sequential execution.',
+);
+assert.ok(
+    !preserveProfiles || mode === 'plain',
+    'Only an ordinary run preserves completed profiles for a subsequent exact-build comparison.',
 );
 assert.ok(
     !prepopulateArchive || mode !== 'rosters',
@@ -818,6 +825,8 @@ await runWithLocalRunLog(
             ...(foreignPoll === undefined ? [] : [foreignOption + foreignPoll]),
             ...(profiling ? [profileOption] : []),
             ...(sequential ? [sequentialOption] : []),
+            ...(prepopulateArchive ? [prepopulateOption] : []),
+            ...(preserveProfiles ? [preserveProfilesOption] : []),
             ...(memoryPressure ? [memoryPressureOption] : []),
             ...(basePortArgument === undefined
                 ? []
@@ -934,6 +943,16 @@ await runWithLocalRunLog(
             // models derive it.
             const proofDraws = compileOperationProofDraws(
                 deriveSupportedProfile(participantCount, optionCount),
+            );
+            const runnerSnapshot = path.join(
+                log.runDirectoryPath,
+                'sources/tools/ci/run-participant-browser.ts',
+            );
+            await mkdir(path.dirname(runnerSnapshot), { recursive: true });
+            await writeFile(
+                runnerSnapshot,
+                await readFile(import.meta.filename),
+                { flag: 'wx' },
             );
             const { runtime, invalidBallotClient } =
                 await assembleParticipantRuntime(
@@ -1258,6 +1277,29 @@ await runWithLocalRunLog(
                     }
                     if (guardFailure !== undefined) throw guardFailure;
                     const milliseconds = performance.now() - started;
+                    if (result.status === 'completed') {
+                        const { archiveBytes } = result.details.memory as {
+                            archiveBytes: number;
+                        };
+                        assert.ok(
+                            Number.isSafeInteger(archiveBytes) &&
+                                archiveBytes >= 0,
+                        );
+                        if (
+                            ['verify-setup', 'archive', 'transcripts'].includes(
+                                operation,
+                            )
+                        )
+                            assert.equal(
+                                archiveBytes > 0,
+                                corrupt?.position !== position,
+                                'Archive memory must match the configured client at position ' +
+                                    String(position) +
+                                    ' during ' +
+                                    operation +
+                                    '.',
+                            );
+                    }
                     if (
                         recovery &&
                         result.status === 'completed' &&
@@ -2274,7 +2316,6 @@ await runWithLocalRunLog(
                             unmeasured: [
                                 'Exact productive-visit coalescence; stage groups are not visits, and a participant total is a conservative active-work upper bound for one visit',
                                 'Exact transient browser and JavaScript memory peaks between samples',
-                                'Archive foundation-kernel linear memory separately from participant-module reports; browser-process samples include it',
                                 'HTTP headers and link-layer transfer overhead',
                                 'Human delays between visits',
                                 'Physical-device performance and power use',
@@ -3027,6 +3068,18 @@ await runWithLocalRunLog(
             const beforeClose = mode === 'empty' ? 12 : 17;
             const submissions = (kind: string, authors: readonly number[]) =>
                 authors.map((position) => ({ kind, position }));
+            // One honest verifier learns the other envelopes without their
+            // bodies. Its later target checks must consume those bodies from
+            // the public source even when other participants reuse custody.
+            const publicBodyProbe =
+                mode === 'empty'
+                    ? undefined
+                    : positions.find(
+                          (position) =>
+                              position !== 0 &&
+                              honest(position) &&
+                              !departed.has(position),
+                      );
             // The relay serves every other participant none of the omitted
             // ballot's records until the target votes are published.
             const omission: string[] = [];
@@ -3069,17 +3122,25 @@ await runWithLocalRunLog(
                             position !== lateSetup && !departed.has(position),
                     )
                     .map(async (position) => {
-                        const delivered = shown(
+                        const announced = shown(
                             position,
                             cast(others(position)),
                         );
+                        const delivered =
+                            position === publicBodyProbe ? [] : announced;
                         const details = await run(position, 'close', {
                             deliver: delivered,
+                            announce:
+                                position === publicBodyProbe ? announced : [],
                         });
                         assert.equal(details.generation, beforeClose);
                         assert.deepEqual(details.closeEvents, [
                             ...submissions('own', cast([position])),
                             ...submissions('held', delivered),
+                            ...submissions(
+                                'known',
+                                position === publicBodyProbe ? announced : [],
+                            ),
                         ]);
                     }),
             );
@@ -3195,7 +3256,10 @@ await runWithLocalRunLog(
                     assert.equal(details.generation, 21);
                     assert.deepEqual(details.closeEvents, [
                         ...submissions('own', [position].filter(onTime)),
-                        ...submissions('held', heldOnTime(position)),
+                        ...submissions(
+                            position === publicBodyProbe ? 'known' : 'held',
+                            heldOnTime(position),
+                        ),
                         { kind: 'lock' },
                     ]);
                 }),
@@ -3283,8 +3347,13 @@ await runWithLocalRunLog(
                     listed.push(response.readUInt16LE(offset));
                 assert.deepEqual(
                     listed,
-                    shown(position, positions.filter(onTime)).flatMap(
-                        (author) =>
+                    shown(position, positions.filter(onTime))
+                        .filter(
+                            (author) =>
+                                position !== publicBodyProbe ||
+                                author === position,
+                        )
+                        .flatMap((author) =>
                             author !== equivocator
                                 ? [author]
                                 : position === 0
@@ -3292,7 +3361,7 @@ await runWithLocalRunLog(
                                   : position === lastPosition
                                     ? []
                                     : [author],
-                    ),
+                        ),
                 );
             }
             // The proposal names the organizer's response and the first other
@@ -3914,7 +3983,7 @@ await runWithLocalRunLog(
                         ),
                     );
             // With ballots cast, a fourth set of views forges the vote
-            // probe's own ballot, which the certified target counts: its
+            // probe's nonlocal ballot input, which the certified target counts: its
             // body altered or withheld, its submission replaced by another
             // counted author's authentic one, or its signature altered. The
             // refused votes of the first view discard the vote probe's
@@ -3933,15 +4002,20 @@ await runWithLocalRunLog(
                 forgeries: ReadonlyMap<string, ViewedRecord>;
                 reason: string;
             }[] = [];
-            const replacingAuthor = countedBallots.find(
+            const forgedAuthor = countedBallots.find(
                 (position) => position !== voteProbe,
             );
+            const replacingAuthor = countedBallots.find(
+                (position) => position !== forgedAuthor,
+            );
             if (mode !== 'empty') {
+                assert.equal(voteProbe, publicBodyProbe);
                 assert.ok(
                     countedBallots.includes(voteProbe) &&
+                        forgedAuthor !== undefined &&
                         replacingAuthor !== undefined,
                 );
-                const directory = await submissionDirectory(voteProbe);
+                const directory = await submissionDirectory(forgedAuthor);
                 const replacing = await submissionDirectory(replacingAuthor);
                 const ballotName = (file: string) =>
                     path
@@ -4083,12 +4157,13 @@ await runWithLocalRunLog(
             const probeUnread = async (
                 position: number,
                 forgeries: ReadonlyMap<string, ViewedRecord>,
+                operation: 'result' | 'archive' = 'result',
             ) => {
                 deliveredRecords[position].clear();
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
                 try {
-                    const result = await run(position, 'result');
+                    const result = await run(position, operation);
                     assert.ok(
                         [...forgeries.keys()].every(
                             (name) => !deliveredRecords[position].has(name),
@@ -4137,6 +4212,18 @@ await runWithLocalRunLog(
                 result.identifiers,
                 noResult ? [] : expectedResult,
             );
+            // The archive path actually streams the held body through the
+            // barrier verifier and recorder despite these wire substitutions.
+            // The other probe above consumes the altered body and refuses it.
+            for (const { forgeries } of ballotForgeries.slice(0, 2)) {
+                const reused = await probeUnread(
+                    combiningPosition,
+                    forgeries,
+                    'archive',
+                );
+                assert.equal(reused.encrypted, result.encrypted);
+                assert.deepEqual(reused.identifiers, result.identifiers);
+            }
             for (const { family, encrypted, identifiers } of unreadOutcomes) {
                 assert.equal(encrypted, result.encrypted, family);
                 assert.deepEqual(identifiers, result.identifiers, family);
@@ -4517,12 +4604,16 @@ await runWithLocalRunLog(
                 eventType: 'participant-transfer-summary',
                 details: { participants: transfers },
             });
-            if (profiles !== undefined && completed)
+            if (profiles !== undefined && completed && !preserveProfiles)
                 await rm(profiles, { recursive: true, force: true });
             else if (profiles !== undefined)
                 log.writeEvent({
                     eventType: 'participant-checkpoint-preserved',
-                    details: { directory: profiles, runtimeBound: true },
+                    details: {
+                        directory: profiles,
+                        runtimeBound: true,
+                        completed,
+                    },
                 });
             await releaseLock();
         }

@@ -65,6 +65,49 @@ describe('complete participant workflow measurements', () => {
         expect(measured.cohortWallMilliseconds).toBe(6);
         expect(measured.activeMilliseconds).toBe(96);
     });
+    it('includes archive memory within each worker lifetime and leaves incomplete historical totals unknown', () => {
+        const operations = ordinary().map((operation) => ({
+            ...operation,
+            memory: {
+                workerBytes: 10,
+                helperBytes: 1,
+                arenaBytes: 1,
+                ...operation.memory,
+                archiveBytes: operation.operation === 'archive' ? 80 : 0,
+            },
+            ...(operation.evaluationMemory === undefined
+                ? {}
+                : {
+                      evaluationMemory: {
+                          ...operation.evaluationMemory,
+                          archiveBytes: 12,
+                      },
+                  }),
+        }));
+        const measured = summarizeParticipantWorkflow(operations, 3, true);
+        expect(
+            measured.participants.map(
+                (participant) => participant.completeKernelHelperArenaBytes,
+            ),
+        ).toEqual([12, 12, 280]);
+        expect(measured.participants[2].combinedWorkerHelperArenaBytes).toBe(
+            240,
+        );
+        expect(
+            summarizeParticipantWorkflow(ordinary(), 3, true).participants[2]
+                .completeKernelHelperArenaBytes,
+        ).toBeNull();
+        expect(() =>
+            summarizeParticipantWorkflow(
+                operations.map((operation) => ({
+                    ...operation,
+                    memory: { ...operation.memory, archiveBytes: -1 },
+                })),
+                3,
+                true,
+            ),
+        ).toThrow();
+    });
     it('refuses omitted archiving, missing participant work and invalid intervals', () => {
         expect(() =>
             summarizeParticipantWorkflow(ordinary().slice(0, -1), 3, true),

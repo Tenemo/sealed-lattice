@@ -12,6 +12,7 @@ import {
     closeDirectory,
     completedCloseRecords,
     envelopeIdentity,
+    heldBallotBody,
     readPublishedSubmission,
     restoreCompletedClose,
 } from './close.js';
@@ -69,19 +70,30 @@ const words = (bytes: Uint8Array) => {
 // addresses its body.
 type UsableSlot = Readonly<{ submission: Uint8Array; identity: Uint8Array }>;
 
-const streamBody = (
-    context: ProfileContext,
+const streamBody = async (
+    session: CloseSession,
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
     accept: (bytes: Uint8Array) => void | Promise<void>,
-) =>
-    streamPublic(
-        relay,
-        submissionDirectory(author, identity) + 'body.bin',
-        context.profile.ballot.maximumBodyBytes,
-        accept,
-    );
+) => {
+    const name = submissionDirectory(author, identity) + 'body.bin';
+    const held = await heldBallotBody(session, author, identity);
+    if (held === undefined)
+        return streamPublic(
+            relay,
+            name,
+            session.participant.context.profile.ballot.maximumBodyBytes,
+            accept,
+        );
+    const record = relay.recorder?.open(name);
+    const length = await held(async (bytes) => {
+        await record?.write(bytes);
+        await accept(bytes);
+    });
+    await record?.finish();
+    return length;
+};
 
 const barrierCommand = (
     context: ProfileContext,
@@ -107,9 +119,10 @@ const requireBarrier = (
 // intent, the proposal's named responses with every envelope they list, and
 // the body of each usable slot. Returns each usable slot by its author.
 const verifyCloseBarrier = async (
-    context: ProfileContext,
+    session: CloseSession,
     relay: PublicRelay,
 ) => {
+    const { context } = session.participant;
     const { profile, kernel } = context;
     const { close, registration } = profile;
     const { signatureBytes } = registration;
@@ -209,7 +222,7 @@ const verifyCloseBarrier = async (
         if (slot === undefined)
             throw new Error('The close verifier needs an unlisted body.');
         requireBarrier(context, 4, identity, 'A usable body was refused.');
-        await streamBody(context, relay, slot.author, identity, (bytes) => {
+        await streamBody(session, relay, slot.author, identity, (bytes) => {
             requireBarrier(context, 5, bytes, 'A usable body was refused.');
         });
         requireBarrier(
@@ -277,15 +290,16 @@ const beginClassification = async (
 // Classifies one usable ballot as valid or invalid. The body must be the one
 // the barrier authenticated, or the classifier refuses it.
 const classifyBallot = async (
-    context: ProfileContext,
+    session: CloseSession,
     relay: PublicRelay,
     author: number,
     { submission, identity }: UsableSlot,
 ) => {
+    const { context } = session.participant;
     const { kernel, profile } = context;
     const { headerBytes } = profile.ballot;
     let header: Uint8Array = new Uint8Array();
-    await streamBody(context, relay, author, identity, async (bytes) => {
+    await streamBody(session, relay, author, identity, async (bytes) => {
         let rest = bytes;
         if (header.length < headerBytes) {
             const taken = rest.subarray(0, headerBytes - header.length);
@@ -539,10 +553,11 @@ const readStoredRecords = async (
 // loaded key leaves its records in storage, and a product or rotation
 // requests them back one key group and prime at a time.
 const evaluate = async (
-    context: ProfileContext,
+    session: CloseSession,
     relay: PublicRelay,
     usable: ReadonlyMap<number, UsableSlot>,
 ) => {
+    const { context } = session.participant;
     const { kernel, profile } = context;
     const { polynomialDegree, storedCoefficientBytes } = profile.evaluation;
     const coefficients = 2 * polynomialDegree;
@@ -683,7 +698,7 @@ const evaluate = async (
                         context,
                         (accept) =>
                             streamBody(
-                                context,
+                                session,
                                 relay,
                                 author,
                                 slot.identity,
@@ -872,24 +887,25 @@ const commitTarget = async (
 // restored first, after the owning setup verifier verified the complete setup
 // in this instance.
 const evaluateClosedTarget = async (
-    context: ProfileContext,
+    session: CloseSession,
     relay: PublicRelay,
 ) => {
-    const usable = await verifyCloseBarrier(context, relay);
+    const { context } = session.participant;
+    const usable = await verifyCloseBarrier(session, relay);
     evaluationCommand(context, 0);
     let validBallots = 0;
     for (let author = 0; author < context.profile.participantCount; author++) {
         const slot = usable.get(author);
         if (
             slot !== undefined &&
-            (await classifyBallot(context, relay, author, slot))
+            (await classifyBallot(session, relay, author, slot))
         )
             validBallots++;
         // Each slot takes the classification just made, or none.
         evaluationCommand(context, 1);
     }
     return {
-        body: await evaluate(context, relay, usable),
+        body: await evaluate(session, relay, usable),
         usableBallots: usable.size,
         validBallots,
     };
@@ -909,12 +925,13 @@ export class EvaluationRetained extends Error {}
 // verified setup must be restored in this instance first. Returns the target
 // body and whether it was restored.
 export const restoreOrEvaluateTarget = async (
-    context: ProfileContext,
+    close: CloseSession,
     relay: PublicRelay,
 ) => {
+    const { context } = close.participant;
     if (await restoreEvaluation(context)) {
         if (relay.recorder !== undefined) {
-            await verifyCloseBarrier(context, relay);
+            await verifyCloseBarrier(close, relay);
             if (tryEvaluationCommand(context, 24) === undefined)
                 throw new PublicInputFailure(
                     'The public close records name another target.',
@@ -930,7 +947,7 @@ export const restoreOrEvaluateTarget = async (
             restored: true,
         };
     }
-    const { body } = await evaluateClosedTarget(context, relay);
+    const { body } = await evaluateClosedTarget(close, relay);
     await retainEvaluation(context);
     if (context.separateEvaluation)
         throw new EvaluationRetained('The evaluated target is retained.');
@@ -947,7 +964,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const { context } = participant;
     await restoreCompletedClose(close);
     const { body, usableBallots, validBallots } = await evaluateClosedTarget(
-        context,
+        close,
         relay,
     );
     await retainEvaluation(context);

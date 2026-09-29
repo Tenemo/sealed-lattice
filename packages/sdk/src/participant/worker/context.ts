@@ -19,6 +19,7 @@ export type ParticipantContext = Readonly<{
     runtime: Uint8Array;
     limits: ParticipantLimits;
     separateEvaluation: boolean;
+    observeArchiveResources?: (measureBytes: () => number) => void;
     profile?: ParticipantProfile;
 }>;
 

@@ -76,6 +76,7 @@ export type FoundationActionContextVerification = VerificationResult<{
 
 export type FoundationCeremonyRuntime = PublicArchiveRuntime &
     Readonly<{
+        measureResources: FoundationKernelCommandRuntime['measureResources'];
         encodeActionDefinition(input: {
             readonly topCount: number;
         }): CanonicalFoundationActionDefinition;
@@ -390,6 +391,7 @@ const canonicalInputCommand = (
 export const openFoundationCeremonyRuntime = (
     kernel: FoundationKernelCommandRuntime,
 ): FoundationCeremonyRuntime => ({
+    measureResources: kernel.measureResources,
     encodeArchiveRecord: (record) => {
         if (
             record.dependencies.length > 4096 ||

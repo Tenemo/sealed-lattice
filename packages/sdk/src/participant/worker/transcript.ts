@@ -67,7 +67,11 @@ type OpenedArchive = Readonly<{
     replicas: readonly PublicArchive[];
 }>;
 
-export const openArchive = (configuration: WorkerArchive, poll: string) =>
+export const openArchive = (
+    configuration: WorkerArchive,
+    poll: string,
+    observeResources?: (measureBytes: () => number) => void,
+) =>
     publicly(async (): Promise<OpenedArchive> => {
         const runtime = await openPinnedFoundationCeremonyRuntime(
             new Uint8Array(
@@ -77,6 +81,9 @@ export const openArchive = (configuration: WorkerArchive, poll: string) =>
                 ),
             ).buffer,
             configuration.kernelSha256,
+        );
+        observeResources?.(
+            () => runtime.measureResources().wasmMemoryByteLength,
         );
         const replicas = configuration.replicas.map((replica) => ({
             baseUrl: replica.baseUrl,

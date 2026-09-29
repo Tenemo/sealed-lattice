@@ -522,6 +522,7 @@ const execute = async (
                           await openArchive(
                               command.archive,
                               hexadecimal(root.manifest.poll),
+                              context.observeArchiveResources,
                           ),
                       );
             const verified = await verifySetup(
@@ -677,6 +678,7 @@ const execute = async (
                     : await openArchive(
                           command.archive,
                           hexadecimal(root.manifest.poll),
+                          context.observeArchiveResources,
                       );
             const recorder =
                 archive === undefined || !archiving
@@ -765,6 +767,7 @@ const execute = async (
                     : await openArchive(
                           command.archive,
                           hexadecimal(root.manifest.poll),
+                          context.observeArchiveResources,
                       );
             const recorder =
                 archive === undefined || command.operation !== 'archive'
@@ -812,6 +815,7 @@ const execute = async (
                         await openArchive(
                             command.archive,
                             hexadecimal(root.manifest.poll),
+                            context.observeArchiveResources,
                         ),
                     ),
                 },
@@ -844,7 +848,9 @@ const operationMemory = (
     kernel: ParticipantKernel,
     helpers: ParallelHelpers,
     evaluation: boolean,
+    archiveBytes: number,
 ) => ({
+    archiveBytes,
     workerBytes: kernel.memory.buffer.byteLength,
     workerUsedBytes: kernel.linear_memory_high_water() >>> 0,
     workerBoundBytes:
@@ -881,6 +887,9 @@ const run = async (
     let database: IDBDatabase | undefined;
     let helpers: ParallelHelpers | undefined;
     let authorityStarted = false;
+    const archiveMeasurements: (() => number)[] = [];
+    const archiveBytes = () =>
+        archiveMeasurements.reduce((total, measure) => total + measure(), 0);
     try {
         const moduleBytes = await fetchModule(
             command.module,
@@ -929,6 +938,9 @@ const run = async (
                             limits: readParticipantLimits(kernel),
                             separateEvaluation:
                                 command.separateEvaluation === true,
+                            observeArchiveResources: (measure) => {
+                                archiveMeasurements.push(measure);
+                            },
                         },
                         relay,
                         command,
@@ -945,6 +957,7 @@ const run = async (
                                       kernel,
                                       parallel,
                                       evaluation,
+                                      archiveBytes(),
                                   ),
                               },
                           }
@@ -963,6 +976,7 @@ const run = async (
                                 kernel,
                                 parallel,
                                 evaluation,
+                                archiveBytes(),
                             ),
                         };
                     // A local failure after authority started stops the

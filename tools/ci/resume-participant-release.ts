@@ -16,6 +16,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { proposalRecordIds } from '#packages/sdk/src/participant/worker/roster.js';
 import {
     evaluatedTargetName,
@@ -25,6 +26,7 @@ import {
 import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
 import { retrieveTranscript } from '#packages/sdk/src/transcript-archive.js';
 import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
+import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import {
@@ -48,9 +50,12 @@ const arguments_ = process.argv.slice(2).filter((value) => value !== '--');
 const [mode, sourceArgument] = arguments_;
 assert.ok(
     arguments_.length === 2 &&
-        (mode === 'inspect' || mode === 'release' || mode === 'archive') &&
+        (mode === 'inspect' ||
+            mode === 'release' ||
+            mode === 'archive' ||
+            mode === 'certify-no-result') &&
         sourceArgument?.trim(),
-    'Select inspect, release or archive and one preserved participant run.',
+    'Select inspect, release, archive or certify-no-result and one preserved participant run.',
 );
 const source = path.resolve(sourceArgument);
 const root = path.resolve('.');
@@ -113,6 +118,14 @@ await runWithLocalRunLog(
                 error instanceof Error ? error : new Error(String(error));
         });
         try {
+            await writeFile(
+                path.join(
+                    log.runDirectoryPath,
+                    'resume-participant-release.ts',
+                ),
+                await readFile(import.meta.filename),
+                { flag: 'wx' },
+            );
             assert.ok(
                 freemem() >= 3 * memoryLimit,
                 'Insufficient host memory for bounded recovery.',
@@ -232,7 +245,19 @@ await runWithLocalRunLog(
             )?.details?.result as { details: { poll: string } };
             const poll = created.details.poll;
             assert.match(poll, /^[0-9a-f]{128}$/u);
-            const survivors = (await readdir(profiles))
+            const excluded = events.find(
+                (event) =>
+                    event.eventType === 'participant-operation' &&
+                    event.details?.operation === 'create' &&
+                    event.details.position === participantCount,
+            )?.details?.result as
+                { details?: { bodyDigest?: string } } | undefined;
+            const leftOutDigest = excluded?.details?.bodyDigest;
+            if (leftOutDigest !== undefined) {
+                assert.match(leftOutDigest, /^[0-9a-f]{128}$/u);
+                assert.ok(!recordIds.includes(leftOutDigest));
+            }
+            let survivors = (await readdir(profiles))
                 .filter((name) => /^participant-\d+$/u.test(name))
                 .map((name) => Number(name.slice('participant-'.length)))
                 .filter((position) => position < participantCount)
@@ -556,6 +581,21 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                         'The profile belongs to another action.',
                     );
                     restored[position] = state;
+                    if (
+                        mode === 'inspect' &&
+                        'archiveBytes' in (state.memory as object)
+                    ) {
+                        const observed = await run(position, 'transcripts');
+                        assert.ok(
+                            (observed.memory as { archiveBytes: number })
+                                .archiveBytes > 0,
+                        );
+                        assert.equal(
+                            observed.rootHash,
+                            state.rootHash,
+                            'Read-only archive discovery changed private authority.',
+                        );
+                    }
                     if (mode === 'release') {
                         assert.ok(
                             typeof state.generation === 'number' &&
@@ -591,9 +631,146 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                 );
                 return;
             }
+            if (mode === 'certify-no-result') {
+                assert.ok(
+                    noResult,
+                    'This continuation only certifies a no-result action.',
+                );
+                const profile = deriveSupportedProfile(
+                    participantCount,
+                    optionCount,
+                );
+                const signers = survivors.filter(
+                    (position) =>
+                        position === 0 ||
+                        position > profile.maximumCorruptParticipantCount,
+                );
+                assert.ok(
+                    signers.includes(0) &&
+                        signers.length >= profile.inventoryCertificateThreshold,
+                    'The original honest signers cannot complete this certificate.',
+                );
+                for (const position of signers) {
+                    const state = restored[position] as { generation: number };
+                    assert.ok(
+                        state.generation >=
+                            completedClosePhase(position === 0) &&
+                            state.generation <= 24,
+                        'The original participant has no resumable completed close.',
+                    );
+                }
+                for (const position of signers)
+                    await inBrowser(position, async () => {
+                        assert.equal(
+                            (await run(position, 'target')).generation,
+                            24,
+                        );
+                    });
+                const targets = await Promise.all(
+                    signers.map(async (position) => {
+                        const bytes = await readFile(
+                            path.join(
+                                publicDirectory,
+                                'completion',
+                                `target-vote-${String(position)}.bin`,
+                            ),
+                        );
+                        assert.equal(bytes.readUInt16LE(0), position);
+                        return bytes.subarray(2, 66).toString('hex');
+                    }),
+                );
+                assert.equal(new Set(targets).size, 1);
+                assert.ok(
+                    (
+                        await readdir(path.join(publicDirectory, 'completion'))
+                    ).every((file) => !file.startsWith('release-')),
+                );
+                // The organizer's browser has ended, and it takes no further
+                // part. Its preserved private profile is not erased here.
+                survivors = survivors.filter((position) => position !== 0);
+                log.writeEvent({
+                    eventType: 'organizer-disconnected-after-target-votes',
+                    details: {
+                        position: 0,
+                        signers,
+                        target: targets[0],
+                        privateStatePreserved: true,
+                    },
+                });
+                for (const position of survivors)
+                    await inBrowser(position, async () => {
+                        const released = await run(position, 'release');
+                        assert.equal(released.encrypted, false);
+                        const closure = released.closure as {
+                            transcript: NonNullable<typeof independentClosure>;
+                        };
+                        independentClosure ??= closure.transcript;
+                    });
+            }
             const combining = survivors[survivors.length - 1];
             const probes: Record<string, unknown>[] = [];
-            if (mode === 'archive') {
+            if (mode === 'certify-no-result') {
+                const profile = deriveSupportedProfile(
+                    participantCount,
+                    optionCount,
+                );
+                const reader = survivors.find(
+                    (position) =>
+                        position > profile.maximumCorruptParticipantCount &&
+                        position !== combining,
+                );
+                assert.ok(reader !== undefined);
+                const directory = path.join(publicDirectory, 'ballot-0');
+                const envelope = (await readdir(directory)).find((name) =>
+                    /^[a-f0-9]{128}$/u.test(name),
+                );
+                assert.ok(envelope !== undefined);
+                const route = `ballot-0/${envelope}/body.bin`;
+                const changed = await readFile(
+                    path.join(publicDirectory, route),
+                );
+                changed[changed.length - 1] ^= 1;
+                const file = path.join(
+                    log.artifactDirectoryPath,
+                    'altered-held-ballot.bin',
+                );
+                await writeFile(file, changed, { flag: 'wx' });
+                for (const position of [combining, reader])
+                    await inBrowser(position, async () => {
+                        const state = await run(position, 'status');
+                        forgedPosition = position;
+                        substituted.set(route, file);
+                        delivered.clear();
+                        try {
+                            const outcome = await request(position, 'archive');
+                            if (position === combining) {
+                                assert.equal(outcome.status, 'completed');
+                                assert.equal(delivered.has(route), false);
+                            } else {
+                                assert.deepEqual(outcome, {
+                                    status: 'pending',
+                                    reason: 'A usable body was refused.',
+                                });
+                                assert.equal(delivered.has(route), true);
+                            }
+                            assert.equal(
+                                (await run(position, 'status')).rootHash,
+                                state.rootHash,
+                            );
+                            probes.push({
+                                position,
+                                route,
+                                consumed: delivered.has(route),
+                                outcome,
+                                rootUnchanged: true,
+                            });
+                        } finally {
+                            substituted.clear();
+                            forgedPosition = undefined;
+                        }
+                    });
+            }
+            if (mode === 'archive' || mode === 'certify-no-result') {
                 const foreign = metadata.commandLineArguments
                     .find((value) => value.startsWith('--foreign-poll='))
                     ?.slice('--foreign-poll='.length);
@@ -750,6 +927,9 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                         optionCount,
                         poll,
                         recordIds,
+                        ...(leftOutDigest === undefined
+                            ? {}
+                            : { leftOut: { bodyDigest: leftOutDigest } }),
                         runtimeIdentity: identity.runtime,
                         restored,
                         probes,
@@ -769,7 +949,11 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                             unavailableReplica: 0,
                             sourceServiceUnavailable: true,
                         },
-                        scope: 'The original surviving participant profiles resumed under the identical archived runtime. No participant was created or private authority moved. The published target predates this run. Archive mode separately checks cached reuse, a wrong-context opening and an altered registration proof actually consumed after public-cache removal, retaining the original rejections and private roots. The terminal archive is retrieved after source shutdown and one replica loss; the reader first lost its public caches. Earlier cohort faults retain their own scope and diagnostic run.',
+                        scope:
+                            (mode === 'certify-no-result'
+                                ? 'The original completed closes were certified in this continuation; the organizer disconnected after its target vote, with its private profile preserved and no state-erasure claim. The continuation tests a held body separately from a forged body consumed by a reader that never held it. '
+                                : 'The published target predates this continuation. ') +
+                            'The original surviving participant profiles resumed under the identical archived runtime. No participant was created or private authority moved. Archive and no-result certification modes separately check cached reuse, a wrong-context opening and an altered registration proof actually consumed after public-cache removal, retaining the original rejections and private roots. The terminal archive is retrieved after source shutdown and one replica loss; the reader first lost its public caches. Earlier cohort faults retain their own scope and diagnostic run.',
                     },
                     null,
                     2,

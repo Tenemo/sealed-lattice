@@ -348,6 +348,57 @@ const namesEnvelope = (
     return value !== undefined && equalBytes(value, identity);
 };
 
+// Supplies only a body named by this root's authenticated custody. The
+// caller still runs its owning public verifiers and records every consumed
+// byte for archival. A missing listed record is state loss, never a reason
+// to fetch a replacement from the relay.
+export const heldBallotBody = async (
+    session: CloseSession,
+    author: number,
+    identity: Uint8Array,
+) => {
+    const { context } = session.participant;
+    const { ballot } = session;
+    if (
+        ballot !== undefined &&
+        author === context.position &&
+        namesEnvelope(context, ballot.state.envelope, identity)
+    )
+        return async (consume: (bytes: Uint8Array) => void | Promise<void>) => {
+            await readBallotBody(ballot, consume);
+            return ballot.state.bodyLength;
+        };
+    for (const event of session.state.events) {
+        if (event.kind !== closeEventKind.held) continue;
+        const submission = await openCloseRecord(session, event, 0);
+        const matches =
+            readUnsigned16(submission, envelopeAuthorOffset) === author &&
+            namesEnvelope(context, submission, identity);
+        if (
+            readUnsigned64(submission, envelopeLengthOffset) !==
+            BigInt(event.length)
+        )
+            throw new Error('A held body changed its length.');
+        if (!matches) continue;
+        return async (consume: (bytes: Uint8Array) => void | Promise<void>) => {
+            let length = 0;
+            for (let index = 1; index < event.keys.length; index++) {
+                const bytes = await openCloseRecord(session, event, index);
+                try {
+                    await consume(bytes);
+                    length += bytes.length;
+                } finally {
+                    bytes.fill(0);
+                }
+            }
+            if (length !== event.length)
+                throw new Error('The held ballot body is incomplete.');
+            return length;
+        };
+    }
+    return undefined;
+};
+
 const learnSubmission = (
     session: CloseSession,
     serial: number,
