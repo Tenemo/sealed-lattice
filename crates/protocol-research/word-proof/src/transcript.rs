@@ -2,19 +2,19 @@ use crate::{
     field::{Element, MODULUS, ZERO},
     parameters::*,
 };
+use parallel_work::{Digest, ProtocolHash};
 use parallel_work::{HashStream, Sponge};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use stateful_sha3::{Digest, Sha3_512};
 
-pub fn part(state: &mut Sha3_512, bytes: &[u8]) {
+pub fn part(state: &mut ProtocolHash, bytes: &[u8]) {
     Digest::update(state, (bytes.len() as u32).to_le_bytes());
     Digest::update(state, bytes);
 }
 pub fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
-    let mut state = Sha3_512::new();
+    let mut state = ProtocolHash::new();
     part(&mut state, domain);
     for value in parts {
         part(&mut state, value);
@@ -49,15 +49,15 @@ pub fn parameters(relation: &Relation) -> Vec<u8> {
 }
 /// The statement context before the statement bytes, which the caller
 /// appends.
-pub fn context_hasher(relation: &Relation, role: &[u8]) -> Sha3_512 {
-    let mut state = Sha3_512::new();
+pub fn context_hasher(relation: &Relation, role: &[u8]) -> ProtocolHash {
+    let mut state = ProtocolHash::new();
     context_prefix(relation, role, |bytes| Digest::update(&mut state, bytes));
     state
 }
 /// The same context as a stream, which a helper hashes when there are
 /// helpers.
 pub fn context_stream(relation: &Relation, role: &[u8]) -> HashStream {
-    let mut stream = HashStream::new(Sponge::Sha3_512);
+    let mut stream = HashStream::new(Sponge::ProtocolHash);
     context_prefix(relation, role, |bytes| stream.update(bytes));
     stream
 }

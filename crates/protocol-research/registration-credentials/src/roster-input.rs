@@ -9,8 +9,9 @@ use crate::{
     retained_roster::{RetainedRecord, RetainedRoster, header_digest},
     roster::RosterProposal,
 };
+use parallel_work::{Digest, ProtocolHash};
 use registration_verifier::CHUNK_LIMIT;
-use sha3::{Digest, Sha3_512};
+
 use std::sync::Arc;
 
 /// The records a roster verification keeps open at once: one for each
@@ -175,7 +176,8 @@ impl RosterInputVerifier {
                 ..
             }) if !*key_finished
                 && key.len() == KEY_BYTES
-                && <[u8; 64]>::from(Sha3_512::digest(&key[..])) == header.recipient_key_hash =>
+                && <[u8; 64]>::from(ProtocolHash::digest(&key[..]))
+                    == header.recipient_key_hash =>
             {
                 *key_finished = true;
                 Ok(())

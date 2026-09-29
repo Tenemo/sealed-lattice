@@ -1,10 +1,11 @@
+use parallel_work::{Digest, ProtocolHash};
 use registration_credentials::{
     BodyHasher, Credential,
     foundation::{RegistrationHeader, normalize_username},
 };
 use registration_proof::{proof::RegistrationProof, statement};
 use setup_witness::registration::RegistrationKey;
-use sha3::{Digest, Sha3_512};
+
 use std::io::{self, Write};
 use zeroize::Zeroizing;
 
@@ -67,7 +68,7 @@ struct RecordWriter<'a, F: FnMut(u32, usize, &[u8])> {
     kind: u32,
     offset: usize,
     buffer: Vec<u8>,
-    hash: Sha3_512,
+    hash: ProtocolHash,
     output: &'a mut F,
 }
 impl<'a, F: FnMut(u32, usize, &[u8])> RecordWriter<'a, F> {
@@ -76,7 +77,7 @@ impl<'a, F: FnMut(u32, usize, &[u8])> RecordWriter<'a, F> {
             kind,
             offset: 0,
             buffer: Vec::with_capacity(1 << 20),
-            hash: Sha3_512::new(),
+            hash: ProtocolHash::new(),
             output,
         }
     }
@@ -109,7 +110,7 @@ impl<F: FnMut(u32, usize, &[u8])> Write for RecordWriter<'_, F> {
 }
 struct BodyWriter {
     body: BodyHasher,
-    hash: Sha3_512,
+    hash: ProtocolHash,
     length: usize,
 }
 impl Write for BodyWriter {
@@ -217,7 +218,7 @@ impl Enrollment {
         let proof = RegistrationProof::create(&role, false, false);
         proof.check_retained_key().map_err(|_| Error::State)?;
         let public = proof.public_key_bytes();
-        let key_hash = Sha3_512::digest(&public).into();
+        let key_hash = ProtocolHash::digest(&public).into();
         let mut key_output = RecordWriter::new(0, &mut output);
         key_output.write_all(&public).unwrap();
         key_output.flush().unwrap();
@@ -246,7 +247,7 @@ impl Enrollment {
         }
         let mut body_output = BodyWriter {
             body,
-            hash: Sha3_512::new(),
+            hash: ProtocolHash::new(),
             length: 0,
         };
         proof.write(&mut body_output);
@@ -294,7 +295,7 @@ impl Enrollment {
     ) -> Result<Self, Error> {
         use num_bigint::{BigInt, Sign};
         if public_bytes.len() != 65536 * 21
-            || <[u8; 64]>::from(Sha3_512::digest(public_bytes)) != header.recipient_key_hash
+            || <[u8; 64]>::from(ProtocolHash::digest(public_bytes)) != header.recipient_key_hash
         {
             return Err(Error::Shape);
         }

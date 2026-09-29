@@ -14,7 +14,6 @@ proof-lookup-table = { path = "../proof-lookup-table" }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha3 = "=0.10.9"
-stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
 zeroize = "=1.8.2"
 parallel-work = { path = "../parallel-work" }
 setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }

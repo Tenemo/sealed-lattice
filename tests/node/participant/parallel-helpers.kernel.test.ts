@@ -679,6 +679,47 @@ const standInHost = (helpers: ParallelHelpers) => {
 };
 
 describe('parallel job host', () => {
+    it('hashes protocol frames in the packaged WebAssembly helper exactly as independent SHAKE256', async () => {
+        const helpers = await startParallelHelpers(
+            participantModule,
+            helperPorts(2),
+            false,
+        );
+        expect(helpers.count).toBe(2);
+        try {
+            const { memory, host } = standInHost(helpers);
+            const prefix = Buffer.alloc(64);
+            prefix.write('sealed-lattice/fixed-hash/v1', 'ascii');
+            for (const length of [0, 1, 71, 72, 73, 135, 136, 137, 4097]) {
+                const input = payload(length);
+                const job = new Uint8Array(10 + input.length);
+                job[0] = 1; // Finish a fresh stream.
+                job[1] = 0; // The domain-separated protocol digest.
+                new DataView(job.buffer).setBigUint64(
+                    2,
+                    BigInt(length + 1),
+                    true,
+                );
+                job.set(input, 10);
+                new Uint8Array(memory.buffer).set(job, 256);
+                new Uint32Array(memory.buffer, 0, 3).set([0, 256, job.length]);
+                const ticket = host.submit(0x0400, 1, 0, 1, 64);
+                host.wait(ticket);
+                expect(host.take(ticket, 64)).toBe(0);
+                expect(
+                    Buffer.from(new Uint8Array(memory.buffer, 64, 64)),
+                ).toEqual(
+                    createHash('shake256', { outputLength: 64 })
+                        .update(prefix)
+                        .update(input)
+                        .digest(),
+                );
+            }
+        } finally {
+            helpers.stop();
+        }
+    });
+
     it("reports a job's output, a helper's exhausted memory, a trap that ends its helper's later jobs, and an exhausted arena", async () => {
         const module = await compileText(standIn);
         const helpers = await startParallelHelpers(

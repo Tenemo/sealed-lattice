@@ -7,6 +7,7 @@ autobins = false
 
 
 [dependencies]
+parallel-work = { path = "../parallel-work" }
 registration-enrollment = { path = "../registration-enrollment" }
 registration-credentials = { path = "../registration-credentials", default-features = false }
 setup-witness = { path = "../setup-witness" }
@@ -21,7 +22,6 @@ supported-profile = { path = "../supported-profile" }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha3 = "=0.10.9"
-stateful-sha3 = { package = "sha3", version = "=0.12.0", default-features = false, features = ["zeroize"] }
 getrandom = "=0.3.3"
 zeroize = "=1.8.2"
 

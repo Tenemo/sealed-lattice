@@ -3,9 +3,10 @@ use crate::arithmetic::{
     subtract as subtract_base,
 };
 use crate::statement::StatementOutput;
+use parallel_work::{Digest, ProtocolHash};
 use parallel_work::{HashStream, Sponge};
 use sha3::{
-    Digest, Sha3_512, Shake256,
+    Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 use std::{collections::BTreeMap, sync::OnceLock};
@@ -120,21 +121,21 @@ pub(crate) fn context_parameters(relation: &Relation) -> Vec<u8> {
     bytes
 }
 fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
-    let mut hash = Sha3_512::new();
+    let mut hash = ProtocolHash::new();
     part(&mut hash, domain);
     for value in parts {
         part(&mut hash, value);
     }
     hash.finalize().into()
 }
-fn part(hash: &mut Sha3_512, bytes: &[u8]) {
+fn part(hash: &mut ProtocolHash, bytes: &[u8]) {
     Digest::update(hash, (bytes.len() as u32).to_le_bytes());
     Digest::update(hash, bytes);
 }
 /// The sponge of a hash that has absorbed its domain and first parts, which
 /// every hash with that prefix continues.
-fn prefix(domain: &[u8], parts: &[&[u8]]) -> Sha3_512 {
-    let mut hash = Sha3_512::new();
+fn prefix(domain: &[u8], parts: &[&[u8]]) -> ProtocolHash {
+    let mut hash = ProtocolHash::new();
     part(&mut hash, domain);
     for value in parts {
         part(&mut hash, value);
@@ -142,7 +143,7 @@ fn prefix(domain: &[u8], parts: &[&[u8]]) -> Sha3_512 {
     hash
 }
 /// The hash of the prefix's domain and parts followed by these parts.
-fn hash_after(prefix: &Sha3_512, parts: &[&[u8]]) -> [u8; 64] {
+fn hash_after(prefix: &ProtocolHash, parts: &[&[u8]]) -> [u8; 64] {
     let mut hash = prefix.clone();
     for value in parts {
         part(&mut hash, value);
@@ -551,8 +552,8 @@ pub struct Verifier<S> {
     authenticated_nodes: BTreeMap<usize, [u8; 64]>,
     // The current stage's leaf and node hashes after their domain, the
     // role and the stage.
-    leaf_prefix: Sha3_512,
-    node_prefix: Sha3_512,
+    leaf_prefix: ProtocolHash,
+    node_prefix: ProtocolHash,
     failed: bool,
     complete: bool,
 }
@@ -579,7 +580,7 @@ impl<S: Statement> Verifier<S> {
         let indices = requested(&challenges.queries, D);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
         let statement = open_statement(challenges.alpha, &selected).ok_or(Refusal::Context)?;
-        let mut context_hash = HashStream::new(Sponge::Sha3_512);
+        let mut context_hash = HashStream::new(Sponge::ProtocolHash);
         stream_part(&mut context_hash, b"bounded-proof/statement");
         for value in [
             role,

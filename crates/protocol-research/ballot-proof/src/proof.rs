@@ -6,7 +6,7 @@ use crate::{
     statement::PublicStatement,
     transcript::{self, Transcript},
 };
-use stateful_sha3::Digest;
+use parallel_work::Digest;
 use std::io::Write;
 
 pub struct BallotProof {

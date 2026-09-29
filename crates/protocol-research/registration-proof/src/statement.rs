@@ -4,8 +4,9 @@ use crate::{
     parameters::*,
 };
 use num_bigint::{BigInt, Sign};
+use parallel_work::{Digest, ProtocolHash};
 use setup_stream_kernel::{PolynomialStream, SetupStatementOutput};
-use sha3::{Digest, Sha3_512};
+
 use std::sync::OnceLock;
 
 #[derive(Debug)]
@@ -62,7 +63,7 @@ pub fn common_bytes() -> &'static [u8] {
     })
 }
 pub fn digest(common: &[u8], public_key: &[u8]) -> [u8; 64] {
-    let mut hash = Sha3_512::new();
+    let mut hash = ProtocolHash::new();
     hash.update(header());
     hash.update(common);
     hash.update(public_key);
@@ -153,7 +154,7 @@ pub struct StatementStream {
     expected: [u8; 64],
     alpha: Element,
     queries: Vec<u32>,
-    hash: Sha3_512,
+    hash: ProtocolHash,
     prefix: Vec<u8>,
     consumed: usize,
     parser: Option<PolynomialStream>,
@@ -176,7 +177,7 @@ impl StatementStream {
             expected,
             alpha,
             queries: queries.to_vec(),
-            hash: Sha3_512::new(),
+            hash: ProtocolHash::new(),
             prefix: Vec::new(),
             consumed: 0,
             parser: None,
@@ -315,7 +316,7 @@ mod tests {
         let key = vec![0u8; SYSTEMATIC * 21];
         let mut wrong_header = header();
         wrong_header[4] ^= 1;
-        let mut hash = Sha3_512::new();
+        let mut hash = ProtocolHash::new();
         hash.update(&wrong_header);
         hash.update(common);
         hash.update(&key);
@@ -325,7 +326,7 @@ mod tests {
         assert!(decoder.finish().is_err());
         let mut changed = common.to_vec();
         changed[1] ^= 1;
-        let mut hash = Sha3_512::new();
+        let mut hash = ProtocolHash::new();
         hash.update(header());
         hash.update(&changed);
         hash.update(&key);

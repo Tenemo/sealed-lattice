@@ -93,8 +93,9 @@ mod tests {
         poll::{PollDraft, verify_poll},
         registration::KEY_BYTES,
     };
+    use parallel_work::{Digest, ProtocolHash};
     use registration_verifier::CHUNK_LIMIT;
-    use sha3::{Digest, Sha3_512};
+
     use supported_profile::relation::PROOF_HEADER_BYTES;
 
     struct Registration {
@@ -134,7 +135,7 @@ mod tests {
             runtime,
             signing_public: *credential.signing_public(),
             mailbox_public: *credential.mailbox_public(),
-            recipient_key_hash: Sha3_512::digest(&key).into(),
+            recipient_key_hash: ProtocolHash::digest(&key).into(),
             proof_length: PROOF_HEADER_BYTES + 1,
         };
         Registration {

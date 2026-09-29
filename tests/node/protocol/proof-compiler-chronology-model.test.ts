@@ -154,13 +154,15 @@ describe('proof compiler chronology', () => {
         for (const role of chronology.roles) {
             // A leaf input has a four-byte length before each of its role,
             // position, index, salt and data parts, after its framed domain.
-            const shortest = framedProofHashBytes('bounded-proof/leaf', [
-                1n,
-                4n,
-                4n,
-                saltBytes,
-                1n,
-            ]);
+            const shortest =
+                64n +
+                framedProofHashBytes('bounded-proof/leaf', [
+                    1n,
+                    4n,
+                    4n,
+                    saltBytes,
+                    1n,
+                ]);
             expect(role.widestNonSaltInputBits).toBeGreaterThan(
                 8n * (shortest - saltBytes),
             );

@@ -6,8 +6,8 @@ use crate::{
     statement,
     transcript::{self, Transcript},
 };
+use parallel_work::Digest;
 use setup_witness::registration::RegistrationKey;
-use stateful_sha3::Digest;
 use std::io::Write;
 
 pub struct RegistrationProof {

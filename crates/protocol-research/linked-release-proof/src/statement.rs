@@ -4,8 +4,9 @@ use crate::{
     parameters::*,
 };
 use num_bigint::{BigInt, Sign};
+use parallel_work::{Digest, ProtocolHash};
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
-use sha3::{Digest, Sha3_512};
+
 use supported_profile::{
     Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
 };
@@ -499,7 +500,7 @@ impl Builder {
 }
 impl PublicStatement {
     pub fn digest(&self) -> [u8; 64] {
-        let mut hash = Sha3_512::new();
+        let mut hash = ProtocolHash::new();
         hash.update(&self.header);
         for polynomial in &self.polynomials {
             hash.update(polynomial);
@@ -530,7 +531,7 @@ pub struct StatementStream {
     expected: [u8; 64],
     alpha: Element,
     queries: Vec<u32>,
-    hash: Sha3_512,
+    hash: ProtocolHash,
     header: Vec<u8>,
     builder: Option<Builder>,
     parser: Option<Polynomial>,
@@ -560,7 +561,7 @@ impl StatementStream {
             expected,
             alpha,
             queries: queries.to_vec(),
-            hash: Sha3_512::new(),
+            hash: ProtocolHash::new(),
             header: Vec::new(),
             builder: None,
             parser: None,

@@ -2,9 +2,9 @@ use crate::{
     BodyHasher, Error, foundation::RegistrationHeader, poll::VerifiedPoll, registration_proof_role,
     verify_registration_signature,
 };
+use parallel_work::{Digest, ProtocolHash};
 use registration_proof::statement;
 use registration_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
-use sha3::{Digest, Sha3_512};
 
 #[path = "retained-registration.rs"]
 mod retained;
@@ -70,7 +70,7 @@ pub struct RegistrationVerifier {
     key: Vec<u8>,
     proof_prefix: Vec<u8>,
     proof: Option<Verifier>,
-    proof_hash: Sha3_512,
+    proof_hash: ProtocolHash,
     key_finished: bool,
     failed: bool,
 }
@@ -98,7 +98,7 @@ impl RegistrationVerifier {
             key: Vec::with_capacity(KEY_BYTES),
             proof_prefix: Vec::with_capacity(HEADER_LENGTH),
             proof: None,
-            proof_hash: Sha3_512::new(),
+            proof_hash: ProtocolHash::new(),
             key_finished: false,
             failed: false,
         })
@@ -119,7 +119,7 @@ impl RegistrationVerifier {
         if self.failed
             || self.key_finished
             || self.key.len() != KEY_BYTES
-            || <[u8; 64]>::from(Sha3_512::digest(&self.key)) != self.header.recipient_key_hash
+            || <[u8; 64]>::from(ProtocolHash::digest(&self.key)) != self.header.recipient_key_hash
         {
             self.failed = true;
             return Err(Error::Shape);

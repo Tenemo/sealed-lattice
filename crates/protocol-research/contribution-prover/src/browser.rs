@@ -1,5 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
+use parallel_work::{Digest, ProtocolHash};
 use parallel_work::{HashStream, Sponge};
 use registration_credentials::{
     registration::{KEY_BYTES, VerifiedRegistration},
@@ -9,7 +10,7 @@ use setup_witness::{
     PolynomialOutput,
     contribution::{Contribution, common_records},
 };
-use stateful_sha3::{Digest, Sha3_512};
+
 use std::{cell::RefCell, sync::Arc};
 use supported_profile::{DEGREE, Profile, relation::setup_relation, share_modulus};
 use word_proof::{
@@ -38,7 +39,7 @@ impl PublicOutput {
     fn new(profile: Profile, role: &[u8]) -> Self {
         let mut output = Self {
             profile,
-            hash: HashStream::new(Sponge::Sha3_512),
+            hash: HashStream::new(Sponge::ProtocolHash),
             context: context_stream(&setup_relation(profile), role),
             next: 0,
             total: 0,
@@ -224,7 +225,7 @@ impl Work {
         if !self.shares_started || self.proof.is_some() {
             return Err(());
         }
-        if <[u8; 64]>::from(Sha3_512::digest(key)) != record.header().recipient_key_hash {
+        if <[u8; 64]>::from(ProtocolHash::digest(key)) != record.header().recipient_key_hash {
             return Err(());
         }
         let half = BigInt::from_bytes_le(Sign::Plus, share_modulus()) >> 1usize;
@@ -541,7 +542,7 @@ pub fn checkpoint_key(position: usize, length: usize) -> u32 {
         let Some(bytes) = state.input.get(..length) else {
             return 1;
         };
-        if <[u8; 64]>::from(Sha3_512::digest(bytes)) != *expected {
+        if <[u8; 64]>::from(ProtocolHash::digest(bytes)) != *expected {
             return 1;
         }
         let key = bytes.to_vec();

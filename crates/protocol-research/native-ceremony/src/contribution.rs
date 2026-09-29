@@ -1,5 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
+use parallel_work::{Digest, ProtocolHash};
 use registration_credentials::{
     contribution_commitment::{
         ComputedContributionCommitment, ContributionCommitmentHasher, body_header,
@@ -11,7 +12,7 @@ use setup_witness::{
     PolynomialOutput,
     contribution::{Contribution, common_polynomial},
 };
-use stateful_sha3::{Digest, Sha3_512};
+
 use std::{
     fs::File,
     io::{Read, Write},
@@ -24,8 +25,8 @@ struct PublicOutput {
     profile: Profile,
     directory: PathBuf,
     next: usize,
-    hash: Sha3_512,
-    context: Sha3_512,
+    hash: ProtocolHash,
+    context: ProtocolHash,
 }
 impl PolynomialOutput for PublicOutput {
     fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize) {
@@ -123,7 +124,7 @@ pub fn generate(
         profile,
         directory: directory.to_owned(),
         next: 0,
-        hash: Sha3_512::new(),
+        hash: ProtocolHash::new(),
         context: transcript::context_hasher(&setup_relation(profile), &role),
     };
     output.hash.update(&header);

@@ -13,11 +13,9 @@ use crate::{
     parameters::*,
     tree::{self, Tree},
 };
+use parallel_work::{Digest, ProtocolHash};
 use parallel_work::{Job, Part, StreamedRecords, Ticket, share, submit};
-use stateful_sha3::{
-    Digest, Sha3_512,
-    digest::common::hazmat::{SerializableState, SerializedState},
-};
+use parallel_work::{SerializableState, SerializedState};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, VecDeque},
@@ -77,11 +75,11 @@ pub fn classes(helpers: usize) -> usize {
 pub fn helper_rows_bytes(helpers: usize) -> usize {
     let classes = classes(helpers);
     let shards = (4 * classes).div_ceil(helpers.max(1));
-    shards * (SYSTEMATIC / classes) * size_of::<Sha3_512>()
+    shards * (SYSTEMATIC / classes) * size_of::<ProtocolHash>()
 }
 
 struct Shard {
-    hashers: Vec<Sha3_512>,
+    hashers: Vec<ProtocolHash>,
 }
 thread_local! {
     static SHARDS: RefCell<BTreeMap<(u64, u32), Shard>> = RefCell::default();
@@ -260,7 +258,7 @@ fn extend(
     shard: u32,
     classes: usize,
     first: usize,
-    hashers: impl Iterator<Item = Sha3_512>,
+    hashers: impl Iterator<Item = ProtocolHash>,
 ) {
     SHARDS.with(|shards| {
         let mut shards = shards.borrow_mut();
@@ -342,8 +340,8 @@ fn import(input: &[u8]) -> Vec<u8> {
     let states = &rest[8..];
     assert!(states.len() == STATE_BYTES * count && first + count <= SYSTEMATIC / classes);
     let hashers = states.chunks_exact(STATE_BYTES).map(|bytes| {
-        let serialized: &SerializedState<Sha3_512> = bytes.try_into().unwrap();
-        Sha3_512::deserialize(serialized).unwrap()
+        let serialized: &SerializedState<ProtocolHash> = bytes.try_into().unwrap();
+        ProtocolHash::deserialize(serialized).unwrap()
     });
     extend(session, shard, classes, first, hashers);
     Vec::new()
@@ -752,7 +750,7 @@ mod tests {
             (32, 8),
         ] {
             assert_eq!(super::classes(helpers), classes);
-            let shard = (SYSTEMATIC / classes) * size_of::<Sha3_512>();
+            let shard = (SYSTEMATIC / classes) * size_of::<ProtocolHash>();
             let rows = helper_rows_bytes(helpers);
             assert!(rows.is_multiple_of(shard));
             assert!(helpers.max(1) * rows >= 4 * classes * shard);

@@ -8,10 +8,11 @@ use ballot_encryption::{
     packing::PackingMatrix,
 };
 use num_bigint::{BigInt, Sign};
+use parallel_work::{Digest, ProtocolHash};
 use parallel_work::{HashStream, Sponge};
 use setup_stream_kernel::PolynomialStream;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
-use sha3::{Digest, Sha3_512};
+
 use std::collections::BTreeMap;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, FHE_LIMB_BITS, Family, PLAINTEXT_MODULUS,
@@ -158,7 +159,7 @@ impl PublicStatement {
         })
     }
     pub fn digest(&self) -> [u8; 64] {
-        let mut hash = Sha3_512::new();
+        let mut hash = ProtocolHash::new();
         hash.update(&self.header);
         for polynomial in &self.polynomials {
             hash.update(polynomial);
@@ -533,7 +534,7 @@ impl StatementStream {
             alpha,
             queries: queries.to_vec(),
             statement_bytes: ballot_relation(profile).statement_bytes(),
-            hash: HashStream::new(Sponge::Sha3_512),
+            hash: HashStream::new(Sponge::ProtocolHash),
             header: Vec::new(),
             builder: None,
             parser: None,

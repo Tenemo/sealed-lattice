@@ -3,12 +3,13 @@ use crate::{
     admission::{BallotRelationVerifier, VerifiedBallotRelation},
     statement::{coefficient_bytes, encode_polynomial, setup_inputs},
 };
+use parallel_work::{Digest, ProtocolHash};
 use registration_credentials::{
     ballot_body::{self, BallotBodyHasher},
     poll::VerifiedPoll,
 };
 use setup_aggregate::{AggregatePolynomialReader, verified::VerifiedSetupAggregate};
-use sha3::{Digest, Sha3_512};
+
 use std::sync::Arc;
 use supported_profile::Profile;
 
@@ -218,7 +219,7 @@ impl BallotBodyRelationVerifier {
             polynomials.push(std::mem::take(&mut self.ciphertexts[2 * slot]));
             polynomials.push(std::mem::take(&mut self.ciphertexts[2 * slot + 1]));
         }
-        let mut hash = Sha3_512::new();
+        let mut hash = ProtocolHash::new();
         hash.update(&self.context);
         for polynomial in &polynomials {
             hash.update(polynomial);

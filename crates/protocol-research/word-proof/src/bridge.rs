@@ -8,8 +8,9 @@ use crate::{
     transcript::{self, Transcript},
     tree::Multiproof,
 };
+use parallel_work::{Digest, ProtocolHash};
 use setup_stream_kernel::{PolynomialStream, setup_polynomial_stream};
-use stateful_sha3::{Digest, Sha3_512};
+
 use std::collections::VecDeque;
 use supported_profile::Profile;
 use zeroize::Zeroizing;
@@ -44,7 +45,7 @@ pub struct Prover {
     inverses: Vec<Element>,
     polynomial: Option<PolynomialStream>,
     affine: Option<AffineSum>,
-    second_pass_hash: Sha3_512,
+    second_pass_hash: ProtocolHash,
     linear: Option<LinearOracle>,
     folding: Option<Fri>,
     output_stage: usize,
@@ -118,7 +119,7 @@ impl Prover {
         .map_err(|_| Error::Operation)
     }
     fn new(profile: Profile, role: &[u8], expected: [u8; 64]) -> Self {
-        assert!(std::mem::size_of::<Sha3_512>() <= 512);
+        assert!(std::mem::size_of::<ProtocolHash>() <= 512);
         Self {
             profile,
             relation: setup_relation(profile),
@@ -133,7 +134,7 @@ impl Prover {
             inverses: Vec::new(),
             polynomial: None,
             affine: None,
-            second_pass_hash: Sha3_512::new(),
+            second_pass_hash: ProtocolHash::new(),
             linear: None,
             folding: None,
             output_stage: 0,

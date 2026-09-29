@@ -82,8 +82,81 @@ describe('proof hash work', () => {
             );
             expect(
                 compileProofHashWork(completionProfile(), profile, 1024n)
-                    .proverCore.permutations,
-            ).toBeGreaterThan(costs.proverCore.permutations);
+                    .proverCoreWithoutPrefixReuse.permutations,
+            ).toBeGreaterThan(costs.proverCoreWithoutPrefixReuse.permutations);
+        }
+    });
+
+    it('counts cached SHAKE blocks from explicit framed messages at different prefix alignments', () => {
+        const frame = (bytes: Uint8Array) => {
+            const size = Buffer.alloc(4);
+            size.writeUInt32LE(bytes.length);
+            return Buffer.concat([size, bytes]);
+        };
+        const blocks = (length: number) => {
+            let position = 0,
+                permutations = 0;
+            for (let byte = 0; byte < length; byte++) {
+                if (++position === 136) {
+                    position = 0;
+                    permutations++;
+                }
+            }
+            return { position, permutations };
+        };
+        const finish = (position: number, bytes: Uint8Array) => {
+            const padded = Array<number>(position + bytes.length).fill(0);
+            padded.push(0x1f);
+            while (padded.length % 136 !== 0) padded.push(0);
+            padded[padded.length - 1] |= 0x80;
+            return padded.length / 136;
+        };
+        const exponents = [
+            18,
+            18,
+            18,
+            ...Array.from({ length: 16 }, (_value, index) => 17 - index),
+        ];
+        const profile = proofHashProfiles(completionProfile())[0];
+        for (const roleBytes of [64, 72, 136, 282, 341, 1024]) {
+            const prefix = (domain: string, level: boolean) =>
+                Buffer.concat([
+                    Buffer.alloc(64),
+                    frame(Buffer.from(domain)),
+                    frame(Buffer.alloc(roleBytes)),
+                    frame(Buffer.alloc(4)),
+                    ...(level ? [frame(Buffer.alloc(4))] : []),
+                ]);
+            const leaf = blocks(prefix('bounded-proof/leaf', false).length);
+            const node = blocks(prefix('bounded-proof/node', true).length);
+            const measured = compileProofHashWork(
+                completionProfile(),
+                profile,
+                BigInt(roleBytes),
+            );
+            for (const [index, exponent] of exponents.entries()) {
+                const width = index === 0 ? 144 : index === 1 ? 288 : 48;
+                const leafTail = Buffer.concat([
+                    frame(Buffer.alloc(4)),
+                    frame(Buffer.alloc(128)),
+                    frame(Buffer.alloc(width)),
+                ]);
+                const nodeTail = Buffer.concat([
+                    frame(Buffer.alloc(64)),
+                    frame(Buffer.alloc(64)),
+                ]);
+                const length = 2 ** exponent;
+                // Longer prefixes need not cost more after caching: their
+                // remainder can save a block in every leaf or node.
+                const expected =
+                    leaf.permutations +
+                    length * finish(leaf.position, leafTail) +
+                    exponent * node.permutations +
+                    (length - 1) * finish(node.position, nodeTail);
+                expect(measured.groups[index].prover.permutations).toBe(
+                    BigInt(expected),
+                );
+            }
         }
     });
 
@@ -131,7 +204,7 @@ describe('proof hash work', () => {
                     value.proverCore.permutations,
             ),
         ).toEqual(
-            [4n, 4n, 4n, 5n].map(
+            [2n, 2n, 2n, 3n].map(
                 (prefixBlocks) => reusedPrefixes * prefixBlocks,
             ),
         );
@@ -165,8 +238,8 @@ describe('proof hash work', () => {
             compileProofHashWork(completionProfile(), profile),
         );
         // Every leaf and node hash of a group but the first of each reuses
-        // the prefix blocks of its domain, role and stage: four blocks for
-        // roles of 266, 272 and 282 bytes and five for 341 bytes.
+        // the prefix blocks, including the fixed 64-byte digest domain: two blocks for
+        // roles of 266, 272 and 282 bytes and three for 341 bytes at SHAKE256's rate.
         const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
             (sum, group) =>
                 sum +
@@ -181,7 +254,7 @@ describe('proof hash work', () => {
                     value.verifierCore.permutations,
             ),
         ).toEqual(
-            [4n, 4n, 4n, 5n].map(
+            [2n, 2n, 2n, 3n].map(
                 (prefixBlocks) => reusedPrefixes * prefixBlocks,
             ),
         );

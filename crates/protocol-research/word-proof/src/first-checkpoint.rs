@@ -8,10 +8,8 @@ use crate::{
     tree::{SALT_SEED_BYTES, Tree},
 };
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
-use stateful_sha3::{
-    Digest, Sha3_512,
-    digest::common::hazmat::{SerializableState, SerializedState},
-};
+use parallel_work::{Digest, ProtocolHash};
+use parallel_work::{SerializableState, SerializedState};
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
@@ -95,7 +93,7 @@ impl Header {
     }
     fn associated(&self, record: usize) -> Vec<u8> {
         let mut bytes = Vec::from(b"first-oracle-checkpoint/1".as_slice());
-        bytes.extend(Sha3_512::digest(self.encode()));
+        bytes.extend(ProtocolHash::digest(self.encode()));
         bytes.extend((record as u32).to_le_bytes());
         bytes
     }
@@ -347,14 +345,16 @@ impl Import {
                 }
                 3 => self.seed.copy_from_slice(bytes),
                 4 => {
-                    let expected_cursor = (crate::tree::leaf_prefix_bytes(self.header.role.len())
-                        + 16 * self.header.column)
-                        % 72;
+                    let expected_cursor = ProtocolHash::absorption_cursor_after(
+                        crate::tree::leaf_message_prefix_bytes(self.header.role.len())
+                            + 16 * self.header.column,
+                    );
                     if usize::from(bytes[200]) != expected_cursor {
                         return Err(Error::Operation);
                     }
-                    let encoded: &SerializedState<Sha3_512> = bytes.try_into().map_err(|_| ())?;
-                    Sha3_512::deserialize(encoded).map_err(|_| ())?;
+                    let encoded: &SerializedState<ProtocolHash> =
+                        bytes.try_into().map_err(|_| ())?;
+                    ProtocolHash::deserialize(encoded).map_err(|_| ())?;
                 }
                 _ => unreachable!(),
             }

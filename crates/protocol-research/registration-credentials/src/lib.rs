@@ -38,8 +38,9 @@ use foundation::{
     CanonicalItem, RegistrationHeader, hash::StreamingFoundationTupleHash512,
     participant_identity::derive_participant_identity,
 };
+use parallel_work::{Digest, ProtocolHash};
 use poll::VerifiedPoll;
-use stateful_sha3::{Digest as _, Sha3_512};
+
 use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
 use zeroize::Zeroizing;
 
@@ -169,7 +170,7 @@ impl Credential {
         poll: &VerifiedPoll,
         bytes: &[u8],
     ) -> [u8; RETAINED_TAG_BYTES] {
-        let mut hash = Sha3_512::new();
+        let mut hash = ProtocolHash::new();
         hash.update((label.len() as u64).to_le_bytes());
         hash.update(label);
         hash.update(self.signing_seed.as_slice());

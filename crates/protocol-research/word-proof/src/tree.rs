@@ -6,12 +6,13 @@
 //! digests once committed; an opening then hashes the leaves of each block
 //! below a queried leaf's lowest kept node again from their rows.
 use crate::transcript::part;
+use parallel_work::{Digest, ProtocolHash};
 use parallel_work::{Job, Part, Pipeline, submit, window};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use stateful_sha3::{Digest, Sha3_512};
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
@@ -43,15 +44,15 @@ pub static LEAVES: Job = Job {
 pub(crate) const SUBTREE_LEAVES: usize = 1 << 14;
 
 /// The public start of every inner node hash of a level.
-fn node_prefix(role: &[u8], stage: usize, level: usize) -> Sha3_512 {
-    let mut prefix = Sha3_512::new();
+fn node_prefix(role: &[u8], stage: usize, level: usize) -> ProtocolHash {
+    let mut prefix = ProtocolHash::new();
     part(&mut prefix, b"bounded-proof/node");
     part(&mut prefix, role);
     part(&mut prefix, &(stage as u32).to_le_bytes());
     part(&mut prefix, &(level as u32).to_le_bytes());
     prefix
 }
-fn node(prefix: &Sha3_512, left: &[u8], right: &[u8]) -> [u8; 64] {
+fn node(prefix: &ProtocolHash, left: &[u8], right: &[u8]) -> [u8; 64] {
     let mut hash = prefix.clone();
     part(&mut hash, left);
     part(&mut hash, right);
@@ -150,13 +151,13 @@ fn subtree_leaves(input: &[u8]) -> Vec<u8> {
     output
 }
 
-pub fn leaf_prefix_bytes(role_bytes: usize) -> usize {
+pub fn leaf_message_prefix_bytes(role_bytes: usize) -> usize {
     4 + LEAF_DOMAIN.len() + 4 + role_bytes + 2 * (4 + 4) + 4 + SALT_BYTES + 4
 }
 
 /// The public start of every leaf hash of a role and stage.
-pub fn leaf_prefix(role: &[u8], stage: usize) -> Sha3_512 {
-    let mut hash = Sha3_512::new();
+pub fn leaf_prefix(role: &[u8], stage: usize) -> ProtocolHash {
+    let mut hash = ProtocolHash::new();
     part(&mut hash, LEAF_DOMAIN);
     part(&mut hash, role);
     part(&mut hash, &(stage as u32).to_le_bytes());
@@ -164,11 +165,11 @@ pub fn leaf_prefix(role: &[u8], stage: usize) -> Sha3_512 {
 }
 /// A leaf's hash before its row: the prefix, its index, salt and row width.
 pub fn leaf_start(
-    prefix: &Sha3_512,
+    prefix: &ProtocolHash,
     index: usize,
     salt: &[u8; SALT_BYTES],
     width: usize,
-) -> Sha3_512 {
+) -> ProtocolHash {
     let mut hash = prefix.clone();
     part(&mut hash, &(index as u32).to_le_bytes());
     part(&mut hash, salt);
@@ -328,16 +329,16 @@ impl Tree {
         salt(&self.seed, index)
     }
     #[cfg(test)]
-    pub fn leaf_hash_prefix(&self) -> Sha3_512 {
+    pub fn leaf_hash_prefix(&self) -> ProtocolHash {
         leaf_prefix(&self.role, self.stage)
     }
     // The caller retains this public prefix only while role and stage remain fixed.
     #[cfg(test)]
-    pub fn leaf_hasher(&self, index: usize, prefix: &Sha3_512) -> Sha3_512 {
+    pub fn leaf_hasher(&self, index: usize, prefix: &ProtocolHash) -> ProtocolHash {
         leaf_start(prefix, index, &self.salt(index), self.width)
     }
     #[cfg(test)]
-    pub fn leaf(&mut self, index: usize, hasher: Sha3_512) {
+    pub fn leaf(&mut self, index: usize, hasher: ProtocolHash) {
         self.leaves[index] = hasher.finalize().into();
     }
     fn subtree_leaves(&self) -> usize {
@@ -582,7 +583,7 @@ pub struct Multiproof {
 mod tests {
     use super::*;
     use crate::transcript::hash;
-    use stateful_sha3::digest::common::hazmat::SerializableState;
+    use parallel_work::SerializableState;
 
     // Every node of a tree of the leaves, in heap order, hashed directly.
     fn reference(role: &[u8], stage: u32, leaves: &[[u8; 64]]) -> Vec<[u8; 64]> {
@@ -670,7 +671,7 @@ mod tests {
                         let salt = tree.salt(index);
                         leaves.push(leaf(&role, stage as u32, index, salt.as_slice(), &data));
                         let mut cached = tree.leaf_hasher(index, &prefix);
-                        let mut direct = Sha3_512::new();
+                        let mut direct = ProtocolHash::new();
                         for part_bytes in [
                             LEAF_DOMAIN,
                             &tree.role,

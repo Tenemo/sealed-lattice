@@ -4,9 +4,10 @@
 //! for a caller that needs the digest at once, the sponge stays here. Either
 //! way the digest equals the one this instance computes alone, however the
 //! bytes are divided.
+use crate::{Digest, ProtocolHash};
 use crate::{Job, Part, Ticket, helpers, session, submit};
 use sha3::{
-    Digest, Sha3_512, Shake256,
+    Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 use std::{
@@ -17,31 +18,31 @@ use std::{
 /// The sponges a stream computes, each with a 64-byte digest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sponge {
-    Sha3_512,
+    ProtocolHash,
     /// The first 64 bytes of SHAKE256's output.
     Shake256,
 }
 
 enum Local {
-    Sha3_512(Sha3_512),
+    ProtocolHash(ProtocolHash),
     Shake256(Shake256),
 }
 impl Local {
     fn new(sponge: Sponge) -> Self {
         match sponge {
-            Sponge::Sha3_512 => Self::Sha3_512(Sha3_512::new()),
+            Sponge::ProtocolHash => Self::ProtocolHash(ProtocolHash::new()),
             Sponge::Shake256 => Self::Shake256(Shake256::default()),
         }
     }
     fn update(&mut self, bytes: &[u8]) {
         match self {
-            Self::Sha3_512(hash) => Digest::update(hash, bytes),
+            Self::ProtocolHash(hash) => Digest::update(hash, bytes),
             Self::Shake256(hash) => Update::update(hash, bytes),
         }
     }
     fn finish(self) -> [u8; 64] {
         match self {
-            Self::Sha3_512(hash) => hash.finalize().into(),
+            Self::ProtocolHash(hash) => hash.finalize().into(),
             Self::Shake256(hash) => {
                 let mut digest = [0; 64];
                 hash.finalize_xof().read(&mut digest);
@@ -66,7 +67,7 @@ thread_local! {static STREAMS: RefCell<HashMap<u64, Local>> = RefCell::default()
 
 fn stream(input: &[u8]) -> Vec<u8> {
     let sponge = match input[1] {
-        0 => Sponge::Sha3_512,
+        0 => Sponge::ProtocolHash,
         1 => Sponge::Shake256,
         _ => panic!("Unknown sponge"),
     };
@@ -195,7 +196,7 @@ fn send(sponge: Sponge, session: u64, operation: u8, bytes: &[u8], output: usize
     let mut header = [0; HEADER_BYTES];
     header[0] = operation;
     header[1] = match sponge {
-        Sponge::Sha3_512 => 0,
+        Sponge::ProtocolHash => 0,
         Sponge::Shake256 => 1,
     };
     header[2..].copy_from_slice(&session.to_le_bytes());
@@ -234,7 +235,7 @@ mod tests {
     #[test]
     fn digests_match_the_direct_hash_for_every_division() {
         let input = bytes(5 * BATCH_BYTES + 77);
-        for sponge in [Sponge::Sha3_512, Sponge::Shake256] {
+        for sponge in [Sponge::ProtocolHash, Sponge::Shake256] {
             for remote in [false, true] {
                 for division in [1, 71, BATCH_BYTES - 1, BATCH_BYTES, 3 * BATCH_BYTES + 5] {
                     let mut stream = HashStream::held(sponge, remote);
@@ -263,7 +264,7 @@ mod tests {
         }
     }
 
-    // Independent SHA3-512 and SHAKE256 vectors of "abc".
+    // Independent prefixed and direct SHAKE256 vectors of "abc".
     #[test]
     fn digests_match_independent_vectors() {
         let hexadecimal = |digest: [u8; 64]| {
@@ -273,11 +274,11 @@ mod tests {
                 .collect::<String>()
         };
         for remote in [false, true] {
-            let mut sha3 = HashStream::held(Sponge::Sha3_512, remote);
-            sha3.update(b"abc");
+            let mut protocol = HashStream::held(Sponge::ProtocolHash, remote);
+            protocol.update(b"abc");
             assert_eq!(
-                hexadecimal(sha3.finish()),
-                "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"
+                hexadecimal(protocol.finish()),
+                "a8df42eb0a2bad96d4d5fde4a7896c5f31287bf651801f3335038cd92aaf3b7f35c81fc12490ef51cd4efb534428f6abc938956e876ea85dd5c669bf484d86fc"
             );
             let mut shake = HashStream::held(Sponge::Shake256, remote);
             shake.update(b"abc");
@@ -294,9 +295,9 @@ mod tests {
     fn interleaved_and_dropped_streams_stay_separate() {
         let first = bytes(3 * BATCH_BYTES);
         let second = bytes(BATCH_BYTES + 9);
-        let mut one = HashStream::held(Sponge::Sha3_512, true);
+        let mut one = HashStream::held(Sponge::ProtocolHash, true);
         let mut two = HashStream::held(Sponge::Shake256, true);
-        let mut abandoned = HashStream::held(Sponge::Sha3_512, true);
+        let mut abandoned = HashStream::held(Sponge::ProtocolHash, true);
         // Three parts of each, the last of the second only nine bytes.
         for (left, right) in first
             .chunks(BATCH_BYTES)
@@ -307,7 +308,7 @@ mod tests {
             two.update(right);
         }
         drop(abandoned);
-        assert_eq!(one.finish(), direct(Sponge::Sha3_512, &first));
+        assert_eq!(one.finish(), direct(Sponge::ProtocolHash, &first));
         assert_eq!(two.finish(), direct(Sponge::Shake256, &second));
         STREAMS.with(|streams| assert!(streams.borrow().is_empty()));
     }

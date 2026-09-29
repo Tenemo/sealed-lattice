@@ -78,8 +78,7 @@ dependencies = [
  "setup-aggregate",
  "setup-stream-kernel",
  "setup-witness",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "zeroize",
 ]
@@ -152,8 +151,7 @@ dependencies = [
  "parallel-work",
  "registration-credentials",
  "setup-witness",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "word-proof",
  "zeroize",
@@ -312,7 +310,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8bdb6454f692ca2a2b45cd554c6828c639d7f9c968cf83a678899ec4443a280"
 dependencies = [
  "rand_core 0.6.4",
- "sha3 0.10.9",
+ "sha3",
  "subtle",
  "zeroize",
 ]
@@ -325,7 +323,7 @@ checksum = "c9fb5a367b9846933e271a3c2a992930743f82ae5e8cb7faa780715a80fa0b15"
 dependencies = [
  "rand_core 0.6.4",
  "sha2 0.10.9",
- "sha3 0.10.9",
+ "sha3",
  "zeroize",
 ]
 
@@ -448,8 +446,7 @@ dependencies = [
  "parallel-work",
  "proof-lookup-table",
  "setup-stream-kernel",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "zeroize",
 ]
@@ -475,13 +472,13 @@ dependencies = [
  "linked-release-proof",
  "num-bigint",
  "num-traits",
+ "parallel-work",
  "registration-credentials",
  "registration-enrollment",
  "rns-arithmetic-probe",
  "setup-aggregate",
  "setup-witness",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "word-proof",
  "zeroize",
@@ -594,7 +591,10 @@ dependencies = [
 name = "parallel-work"
 version = "0.0.0"
 dependencies = [
- "sha3 0.10.9",
+ "digest 0.11.3",
+ "keccak 0.2.2",
+ "sha3",
+ "sponge-cursor",
  "zeroize",
 ]
 
@@ -818,8 +818,7 @@ dependencies = [
  "parallel-work",
  "registration-proof",
  "registration-verifier",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "unicode-normalization",
  "zeroize",
@@ -844,7 +843,7 @@ dependencies = [
  "setup-aggregate",
  "setup-stream-kernel",
  "setup-witness",
- "sha3 0.10.9",
+ "sha3",
  "supported-profile",
  "zeroize",
 ]
@@ -858,8 +857,7 @@ dependencies = [
  "parallel-work",
  "setup-stream-kernel",
  "setup-witness",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "zeroize",
 ]
@@ -872,7 +870,7 @@ dependencies = [
  "proof-lookup-table",
  "registration-proof",
  "setup-stream-kernel",
- "sha3 0.10.9",
+ "sha3",
  "supported-profile",
 ]
 
@@ -935,7 +933,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "sha3 0.10.9",
+ "sha3",
  "supported-profile",
 ]
 
@@ -950,7 +948,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "sha3 0.10.9",
+ "sha3",
  "supported-profile",
  "zeroize",
 ]
@@ -986,17 +984,6 @@ dependencies = [
  "digest 0.10.7",
  "keccak 0.1.6",
  "zeroize",
-]
-
-[[package]]
-name = "sha3"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc9bad02c26382724b2d2692c6f179285e4b54eeecd7968f52a50059c3c11759"
-dependencies = [
- "digest 0.11.3",
- "keccak 0.2.2",
- "sponge-cursor",
 ]
 
 [[package]]
@@ -1234,8 +1221,7 @@ dependencies = [
  "getrandom 0.3.3",
  "parallel-work",
  "setup-stream-kernel",
- "sha3 0.10.9",
- "sha3 0.12.0",
+ "sha3",
  "supported-profile",
  "zeroize",
 ]
@@ -1247,7 +1233,7 @@ dependencies = [
  "parallel-work",
  "proof-lookup-table",
  "setup-stream-kernel",
- "sha3 0.10.9",
+ "sha3",
  "supported-profile",
  "word-proof",
 ]

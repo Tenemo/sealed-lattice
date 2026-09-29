@@ -54,6 +54,12 @@ export const framedProofHashBytes = (
     );
 };
 
+// The protocol digest's fixed ASCII domain, zero-padded to this width,
+// precedes the existing proof framing. It adds no salt entropy.
+const protocolHashPrefixBytes = 64n;
+const fixedHashInputBytes = (domain: string, parts: readonly bigint[]) =>
+    protocolHashPrefixBytes + framedProofHashBytes(domain, parts);
+
 // Every salted proof-hash input shape of one role: a leaf of each opened
 // group, in verifier order, and the three message-root shapes.
 export const saltedProofHashInputs = (
@@ -76,7 +82,7 @@ export const saltedProofHashInputs = (
         saltBytes: salt,
         widths,
         leaves: widths.map((width) =>
-            framedProofHashBytes('bounded-proof/leaf', [
+            fixedHashInputBytes('bounded-proof/leaf', [
                 roleBytes,
                 4n,
                 4n,
@@ -85,14 +91,14 @@ export const saltedProofHashInputs = (
             ]),
         ),
         messageRoots: [
-            framedProofHashBytes('bounded-proof/message-root', [
+            fixedHashInputBytes('bounded-proof/message-root', [
                 roleBytes,
                 tag,
                 4n,
                 salt,
                 tag,
             ]),
-            framedProofHashBytes('bounded-proof/message-root', [
+            fixedHashInputBytes('bounded-proof/message-root', [
                 roleBytes,
                 tag,
                 4n,
@@ -100,7 +106,7 @@ export const saltedProofHashInputs = (
                 tag,
                 extension,
             ]),
-            framedProofHashBytes('bounded-proof/message-root', [
+            fixedHashInputBytes('bounded-proof/message-root', [
                 roleBytes,
                 tag,
                 4n,
@@ -239,7 +245,7 @@ export const compileProofHashWork = (
     const compiler = compileWideChallengeCompilerCensus(supportedProfile);
     const tag = compiler.tagBits / 8n;
     const message = BigInt(compiler.challengeBytes);
-    const nodeInput = framedProofHashBytes('bounded-proof/node', [
+    const nodeInput = fixedHashInputBytes('bounded-proof/node', [
         roleBytes,
         4n,
         4n,
@@ -251,25 +257,25 @@ export const compileProofHashWork = (
         const width = salted.widths[index];
         const leafInput = salted.leaves[index];
         const leafPrefixPermutations =
-            framedProofHashBytes('bounded-proof/leaf', [roleBytes, 4n]) / 72n;
+            fixedHashInputBytes('bounded-proof/leaf', [roleBytes, 4n]) / 136n;
         const nodePrefixPermutations =
-            framedProofHashBytes('bounded-proof/node', [roleBytes, 4n, 4n]) /
-            72n;
+            fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n, 4n]) /
+            136n;
         // The verifier keeps one leaf and one node prefix per group, whose
         // node prefix ends before the level.
         const verifierNodePrefixPermutations =
-            framedProofHashBytes('bounded-proof/node', [roleBytes, 4n]) / 72n;
+            fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n]) / 136n;
         const levels = BigInt(Math.log2(group.length));
         const savedPermutations =
             BigInt(group.length - 1) * leafPrefixPermutations +
             (BigInt(group.length - 1) - levels) * nodePrefixPermutations;
         const proverWithoutPrefixReuse = total([
-            work(BigInt(group.length), leafInput, tag, 72n),
-            work(BigInt(group.length - 1), nodeInput, tag, 72n),
+            work(BigInt(group.length), leafInput, tag, 136n),
+            work(BigInt(group.length - 1), nodeInput, tag, 136n),
         ]);
         const verifierWithoutPrefixReuse = total([
-            work(BigInt(group.maximumLeafQueries), leafInput, tag, 72n),
-            work(BigInt(group.maximumNodeQueries), nodeInput, tag, 72n),
+            work(BigInt(group.maximumLeafQueries), leafInput, tag, 136n),
+            work(BigInt(group.maximumNodeQueries), nodeInput, tag, 136n),
         ]);
         return {
             length: group.length,
@@ -297,7 +303,7 @@ export const compileProofHashWork = (
             verifierWithoutPrefixReuse,
         };
     });
-    const contextInput = framedProofHashBytes('bounded-proof/statement', [
+    const contextInput = fixedHashInputBytes('bounded-proof/statement', [
         roleBytes,
         BigInt(Buffer.byteLength(profile.relationTag)),
         16n,
@@ -334,11 +340,11 @@ export const compileProofHashWork = (
             BigInt(query.messageRootQueries - 2),
             salted.messageRoots[0],
             tag,
-            72n,
+            136n,
         ),
-        work(1n, salted.messageRoots[1], tag, 72n),
-        work(1n, salted.messageRoots[2], tag, 72n),
-        work(1n, contextInput, tag, 72n),
+        work(1n, salted.messageRoots[1], tag, 136n),
+        work(1n, salted.messageRoots[2], tag, 136n),
+        work(1n, contextInput, tag, 136n),
     ]);
     return {
         role: profile.role,
@@ -361,6 +367,11 @@ export const compileProofHashWork = (
         // A separate operand for callers' plain statement-identity passes.
         // Multiplicity, common-matrix generation and outer envelopes are not
         // hidden in the proof-core totals.
-        statementDigestPass: work(1n, profile.statementBytes, tag, 72n),
+        statementDigestPass: work(
+            1n,
+            protocolHashPrefixBytes + profile.statementBytes,
+            tag,
+            136n,
+        ),
     };
 };
