@@ -138,15 +138,17 @@ export const startPublicArchiveReplica = async (
         if (name.endsWith('.staged') && isProtocolHash(name.slice(0, -7)))
             await unlink(path.join(directory, 'discovery', context, name));
     }
-    const readRecord = async (
-        reference: ArchiveReference,
-    ): Promise<Uint8Array> => {
+    const readRecord = async (reference: ArchiveReference) => {
         const file = path.join(directory, 'records', reference.identity);
         if ((await stat(file)).size !== reference.byteLength)
             throw new Error('Stored archive length does not match.');
         const bytes = await readFile(file);
-        input.runtime.readArchiveRecord(context, reference, bytes);
-        return bytes;
+        const record = input.runtime.readArchiveRecord(
+            context,
+            reference,
+            bytes,
+        );
+        return { bytes, record };
     };
     // No acknowledgement can precede successful flush and readback. A partial
     // write remains unacknowledged and can be replaced by the identical record.
@@ -186,11 +188,7 @@ export const startPublicArchiveReplica = async (
         add(root);
         for (let index = 0; index < pending.length; index++) {
             const reference = pending[index];
-            const record = input.runtime.readArchiveRecord(
-                context,
-                reference,
-                await readRecord(reference),
-            );
+            const { record } = await readRecord(reference);
             for (const dependency of record.dependencies) add(dependency);
         }
     };
@@ -258,7 +256,7 @@ export const startPublicArchiveReplica = async (
                         throw new RangeError(
                             'Stored record exceeds its bound.',
                         );
-                    const bytes = await readRecord({
+                    const { bytes } = await readRecord({
                         identity: recordMatch[1],
                         byteLength: length,
                     });
