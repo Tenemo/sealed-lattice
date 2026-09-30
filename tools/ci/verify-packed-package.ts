@@ -265,10 +265,17 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
     const parsed = JSON.parse(manifest) as unknown;
     const record = requireRecord(parsed, 'Participant source manifest');
     const files = record.files;
+    const tools = requireRecord(record.tools, 'Participant build tools');
     if (
         typeof record.compiler !== 'string' ||
         !Array.isArray(record.flags) ||
         !record.flags.every((value) => typeof value === 'string') ||
+        Object.keys(tools).join(',') !==
+            'binaryen,rolldown,tsdown,typescript' ||
+        !Object.values(tools).every(
+            (version) =>
+                typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version),
+        ) ||
         !Array.isArray(files) ||
         files.length === 0 ||
         !files.every((value, index) => {

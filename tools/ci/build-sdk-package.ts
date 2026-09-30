@@ -17,8 +17,10 @@ import {
     participantSourceManifest,
 } from './build-participant-module.js';
 import { buildWasmKernel } from './build-wasm-kernel.js';
+import { recordBundleSources } from './compiled-inputs.js';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
+import { sdkPackageOptions } from './sdk-package-tsdown.config.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const kernelStagingPath = path.join(
@@ -32,6 +34,11 @@ const workerStagingPath = path.join(
     'target',
     'public-sdk-participant-worker',
 );
+const entryStagingPath = path.join(
+    repositoryRoot,
+    'target',
+    'public-sdk-entry-sources',
+);
 const sdkOutputDirectoryPath = path.join(
     repositoryRoot,
     'packages',
@@ -43,8 +50,12 @@ const kernelOutputPath = path.join(
     'sealed-lattice-kernel.wasm',
 );
 
-// Bundles the participant worker into one unminified browser module.
-const buildParticipantWorker = async (): Promise<Buffer> => {
+// Bundles the participant worker into one unminified browser module, and
+// reports the repository sources the bundle read.
+const buildParticipantWorker = async (): Promise<
+    Readonly<{ worker: Buffer; sources: readonly string[] }>
+> => {
+    const recorded = recordBundleSources();
     await rm(workerStagingPath, { recursive: true, force: true });
     await build({
         config: false,
@@ -69,25 +80,56 @@ const buildParticipantWorker = async (): Promise<Buffer> => {
         target: 'es2022',
         treeshake: true,
         tsconfig: path.join(repositoryRoot, 'packages/sdk/tsconfig.json'),
+        plugins: [recorded.plugin],
     });
     const outputs = (await readdir(workerStagingPath)).filter((name) =>
         /\.m?js$/u.test(name),
     );
     if (outputs.length !== 1)
         throw new Error('The participant worker bundle is not one file.');
-    return readFile(path.join(workerStagingPath, outputs[0]));
+    return {
+        worker: await readFile(path.join(workerStagingPath, outputs[0])),
+        sources: recorded.sources,
+    };
+};
+
+// The repository sources the SDK entry's bundle reads. The entry embeds the
+// runtime identity, which covers these sources, so they are read from a
+// bundle with the same options and placeholder values before the entry is
+// built.
+const sdkEntrySources = async (): Promise<readonly string[]> => {
+    const recorded = recordBundleSources();
+    await rm(entryStagingPath, { recursive: true, force: true });
+    try {
+        await build({
+            ...sdkPackageOptions('0'.repeat(64), null),
+            config: false,
+            dts: false,
+            logLevel: 'warn',
+            outDir: entryStagingPath,
+            sourcemap: false,
+            plugins: [recorded.plugin],
+        });
+    } finally {
+        await rm(entryStagingPath, { recursive: true, force: true });
+    }
+    return recorded.sources;
 };
 
 export const buildSdkPackage = async (): Promise<void> => {
-    const { hash: kernelHash } = await buildWasmKernel({
+    const { hash: kernelHash, sources: kernelSources } = await buildWasmKernel({
         outputFilePath: kernelStagingPath,
     });
     const kernelBytes = await readFile(kernelStagingPath);
     const participant = await buildParticipantModule();
+    const { worker, sources: workerSources } = await buildParticipantWorker();
     const sourceManifest = Buffer.from(
-        await participantSourceManifest(participant),
+        await participantSourceManifest(participant, [
+            ...kernelSources,
+            ...workerSources,
+            ...(await sdkEntrySources()),
+        ]),
     );
-    const worker = await buildParticipantWorker();
     // The SDK carries the worker's source and passes this identity to it,
     // and the worker recomputes the identity from the module it fetches.
     const participantRuntime = {

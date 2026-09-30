@@ -1,11 +1,18 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import binaryen from 'binaryen';
+
+import {
+    compiledRustSources,
+    requireCheckoutBytes,
+} from './compiled-inputs.js';
 
 import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/identity.js';
 
@@ -36,34 +43,29 @@ const allowedImports = [
     'word_proof.fill_random',
 ];
 
-// The sources the participant module and worker are built from, beside the
-// Rust workspace and its shared foundation sources, the complete SDK
-// (including the page that owns worker lifetimes), the foundation bridge,
-// and the build inputs. A source outside the worker can still change the
-// participant's behavior and must invalidate a stale packaged manifest.
-const sourceDirectories = [
-    'crates/protocol-research',
-    'crates/sealed-lattice-kernel',
-    'packages/sdk/src',
-    'packages/wasm/src',
-];
-const buildScripts = [
-    'Cargo.toml',
+// The build definitions beside the compiled sources: the lockfiles and the
+// toolchain file the Rust builds resolve, the package manifests and
+// TypeScript configurations the bundler and the foundation bridge's compiler
+// read, and the build scripts. Every Cargo manifest above a compiled Rust
+// source joins them.
+const buildDefinitions = [
     'Cargo.lock',
-    'rust-toolchain.toml',
-    'package.json',
-    'pnpm-lock.yaml',
-    'pnpm-workspace.yaml',
+    'crates/protocol-research/Cargo.lock',
     'packages/sdk/package.json',
     'packages/sdk/tsconfig.json',
     'packages/wasm/package.json',
     'packages/wasm/tsconfig.json',
-    'tsconfig.base.json',
+    'rust-toolchain.toml',
     'tools/ci/build-participant-module.ts',
     'tools/ci/build-sdk-package.ts',
     'tools/ci/build-wasm-kernel.ts',
+    'tools/ci/compiled-inputs.ts',
     'tools/ci/sdk-package-tsdown.config.ts',
+    'tsconfig.base.json',
 ];
+// The packages whose installed versions compile the foundation bridge,
+// bundle the worker and the SDK entry, and optimize the foundation kernel.
+const buildTools = ['binaryen', 'rolldown', 'tsdown', 'typescript'];
 
 export type ParticipantModuleBuild = Readonly<{
     module: Buffer;
@@ -72,6 +74,8 @@ export type ParticipantModuleBuild = Readonly<{
     // depends on the machine that built the module.
     compiler: string;
     flags: readonly string[];
+    // The repository files the compiler read for the module.
+    sources: readonly string[];
 }>;
 
 const run = (
@@ -202,56 +206,90 @@ export const buildParticipantModule = async (
         },
         false,
     );
+    const releaseDirectory = path.join(
+        targetDirectory,
+        'wasm32-unknown-unknown',
+        'release',
+    );
     const module = await readFile(
-        path.join(
-            targetDirectory,
-            'wasm32-unknown-unknown',
-            'release',
-            'registration_enrollment.wasm',
-        ),
+        path.join(releaseDirectory, 'registration_enrollment.wasm'),
     );
     await checkParticipantModule(module);
     return {
         module,
         compiler,
         flags: flag('<repository>', '<cargo-home>'),
+        sources: await compiledRustSources(
+            path.join(releaseDirectory, 'registration_enrollment.d'),
+        ),
     };
 };
 
-// Lists every tracked or unignored file of a directory, relative to the
-// repository root with forward slashes.
-const listedFiles = (directory: string): string[] => {
-    const result = spawnSync(
-        'git',
-        [
-            'ls-files',
-            '--cached',
-            '--others',
-            '--exclude-standard',
-            '-z',
-            '--',
-            directory,
-        ],
-        { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true },
-    );
-    if (result.error !== undefined) throw result.error;
-    if (result.status !== 0)
-        throw new Error('The participant sources could not be listed.');
-    return result.stdout.split('\0').filter((file) => file.length > 0);
+// Every Cargo manifest in the directories above the compiled Rust sources,
+// up to the repository root, where package and workspace definitions live.
+const cargoManifests = (sources: readonly string[]): string[] => {
+    const directories = new Set<string>();
+    for (const source of sources) {
+        if (!source.startsWith('crates/')) continue;
+        for (
+            let directory = path.posix.dirname(source);
+            directory !== '.';
+            directory = path.posix.dirname(directory)
+        )
+            directories.add(directory);
+        directories.add('.');
+    }
+    return [...directories]
+        .map((directory) => path.posix.join(directory, 'Cargo.toml'))
+        .filter((file) => existsSync(path.join(repositoryRoot, file)));
 };
 
-// The canonical source manifest: the compiler, its flags and the digest and
-// length of every source file, in path order. Its digest is the source
-// component of the runtime identity.
+// The installed version of each build tool, by package name.
+const toolVersions = (): Record<string, string> => {
+    const resolveFromRoot = createRequire(
+        path.join(repositoryRoot, 'package.json'),
+    );
+    const resolveFromBundler = createRequire(
+        resolveFromRoot.resolve('tsdown/package.json'),
+    );
+    return Object.fromEntries(
+        buildTools.map((name) => {
+            const manifest = JSON.parse(
+                readFileSync(
+                    (name === 'rolldown'
+                        ? resolveFromBundler
+                        : resolveFromRoot
+                    ).resolve(name + '/package.json'),
+                    'utf8',
+                ),
+            ) as { version?: unknown };
+            if (typeof manifest.version !== 'string')
+                throw new Error('A build tool reports no version: ' + name);
+            return [name, manifest.version];
+        }),
+    );
+};
+
+// The canonical source manifest: the compiler, its flags, the build tools'
+// versions and the digest and length of every compiled source and build
+// definition, in path order. The compiled sources are every repository file
+// the compilers and the bundler read for the packaged module, foundation
+// kernel, worker and SDK entry, so documentation, tests and crates outside
+// those builds leave it unchanged. Its digest is the source component of the
+// runtime identity.
 export const participantSourceManifest = async (
     build: ParticipantModuleBuild,
+    compiled: readonly string[],
 ): Promise<string> => {
     const names = [
         ...new Set([
-            ...sourceDirectories.flatMap(listedFiles),
-            ...buildScripts,
+            ...build.sources,
+            ...compiled,
+            ...cargoManifests([...build.sources, ...compiled]),
+            ...buildDefinitions,
         ]),
     ].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    requireCheckoutBytes(names);
     const files = [];
     for (const file of names) {
         const bytes = await readFile(path.join(repositoryRoot, file));
@@ -265,6 +303,7 @@ export const participantSourceManifest = async (
         JSON.stringify({
             compiler: build.compiler,
             flags: build.flags,
+            tools: toolVersions(),
             files,
         }) + '\n'
     );

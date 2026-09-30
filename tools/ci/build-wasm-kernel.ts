@@ -12,6 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { compiledRustSources } from './compiled-inputs.js';
+
 import { maximumFoundationWasmMemoryByteLength } from '#packages/wasm/src/foundation-contract.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -86,9 +88,17 @@ export type WasmKernelBuildOptions = Readonly<{
     outputFilePath?: string;
 }>;
 
+// Builds the foundation kernel and reports its digest, its path and the
+// repository files the compiler read for it.
 export const buildWasmKernel = async (
     options: WasmKernelBuildOptions = {},
-): Promise<Readonly<{ hash: string; outputFilePath: string }>> => {
+): Promise<
+    Readonly<{
+        hash: string;
+        outputFilePath: string;
+        sources: readonly string[];
+    }>
+> => {
     const outputFilePath = options.outputFilePath ?? defaultOutputFilePath;
     const cargoTargetDirectory = path.join(
         repositoryRoot,
@@ -128,13 +138,16 @@ export const buildWasmKernel = async (
             ],
             cargoEnvironment(cargoTargetDirectory),
         );
+        const releaseDirectory = path.join(
+            cargoTargetDirectory,
+            'wasm32-unknown-unknown',
+            'release',
+        );
+        const sources = await compiledRustSources(
+            path.join(releaseDirectory, 'sealed_lattice_kernel.d'),
+        );
         await copyFile(
-            path.join(
-                cargoTargetDirectory,
-                'wasm32-unknown-unknown',
-                'release',
-                'sealed_lattice_kernel.wasm',
-            ),
+            path.join(releaseDirectory, 'sealed_lattice_kernel.wasm'),
             unoptimizedFilePath,
         );
         run(process.execPath, [
@@ -151,7 +164,7 @@ export const buildWasmKernel = async (
         process.stdout.write(
             `Foundation kernel built at ${path.relative(repositoryRoot, outputFilePath)} (${hash}); deterministic WASM stack ${String(stackByteLength)} bytes.\n`,
         );
-        return { hash, outputFilePath };
+        return { hash, outputFilePath, sources };
     } finally {
         await rm(scratchDirectory, { recursive: true, force: true });
     }
