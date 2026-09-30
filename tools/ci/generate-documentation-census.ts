@@ -17,7 +17,6 @@ import {
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
-import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
 import {
@@ -25,7 +24,6 @@ import {
     compileContributionGenerationResources,
 } from '#tests/browser-word-prover-resource-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
-import { compileCertificationReleaseThresholdCensus } from '#tests/certification-release-threshold-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import {
@@ -68,8 +66,6 @@ import {
     fullXofPrefixControl,
 } from '#tests/excluded-prefix-stream-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
-import { compileFixedPublicationWitnessCensus } from '#tests/fixed-publication-witness-model.js';
-import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
 import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
@@ -88,11 +84,6 @@ import {
     labelledKeyedXofViews,
 } from '#tests/labelled-keyed-xof-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
-import {
-    mlDsa65Parameters,
-    publishedDilithiumComparison,
-    screenSelfTargetReduction,
-} from '#tests/ml-dsa-theorem-screen-model.js';
 import {
     multiKeyTargetBound,
     multiKeyTargetStateControl,
@@ -117,7 +108,6 @@ import {
     compileParticipantVaultKeyClasses,
 } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
-import { compileParticipantVisitDependencyCensus } from '#tests/participant-visit-dependency-model.js';
 import {
     createFalseBinaryRelationTable,
     enumerateRandomizedEncodingViews,
@@ -131,7 +121,6 @@ import {
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compilePublicArchiveResourceCensus } from '#tests/public-archive-resource-model.js';
-import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
@@ -222,14 +211,9 @@ export const renderDocumentationCensus = (): string => {
         changedEnvelopes: 0n,
         changedProofBodies: 0n,
     });
-    const releaseSimulation = compileFixedWitnessReleaseSimulationCensus();
-    const closeRace = runPublicationCloseRaceModel(10, false);
     const closeResponses = compileCloseResponseCensus();
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
-    const participantVisits = compileParticipantVisitDependencyCensus();
-    const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
-    const certificationRelease = compileCertificationReleaseThresholdCensus();
     const participantCustody = compileParticipantCustodyCensus(completion);
     const participantBallotCustody =
         compileParticipantBallotCustody(completion);
@@ -239,7 +223,6 @@ export const renderDocumentationCensus = (): string => {
     );
     const participantReleaseCustody =
         compileParticipantReleaseCustody(completion);
-    const batchedPublicationVisits = compileBatchedPublicationVisitCensus();
     const commonMatrixSampling = compileCommonMatrixSamplingCensus(completion);
     const fixedSpongeInitialization =
         compileFixedSpongeInitializationCensus(completion);
@@ -2034,40 +2017,6 @@ export const renderDocumentationCensus = (): string => {
         ),
         '',
         'Wrapping-key recovery reduces to a fresh equal-length AEAD challenge with factor two and an unused-message collision term. The candidate key and target must be fixed before both independent challenge messages. Fresh nonce availability, actual key populations and the complete AEAD bound remain obligations; a tag under a replacement key does not establish original provenance.',
-        '',
-        '## ML-DSA theorem parameter screen',
-        '',
-        'JMW24 Theorem 2, equations (38) and (41): the auxiliary MLWE error parameter must be a positive integer with 2*zeta*n*(k+l+1)*etaPrime < floor(q/32). The comparison uses the independently published middle parameter set from equation (48) and Table 2. Passing this numerical condition is not a complete theorem mapping or security level. Failure for ML-DSA-65 excludes this particular SelfTargetMSIS-to-MLWE reduction; it is not an attack on the primitive.',
-        '',
-        table(
-            [
-                'Parameters',
-                'Modulus',
-                'Degree',
-                'Signature vector bound',
-                'Error coefficient',
-                'Strict upper bound',
-                'Largest auxiliary error',
-            ],
-            [
-                { name: 'ML-DSA-65', parameters: mlDsa65Parameters },
-                {
-                    name: 'Published comparison',
-                    parameters: publishedDilithiumComparison,
-                },
-            ].map(({ name, parameters }) => {
-                const result = screenSelfTargetReduction(parameters);
-                return [
-                    name,
-                    formatCount(parameters.modulus),
-                    formatCount(parameters.polynomialDegree),
-                    formatCount(result.signatureVectorBound),
-                    formatCount(result.errorCoefficient),
-                    formatCount(result.strictUpperBound),
-                    formatCount(result.maximumAuxiliaryError),
-                ];
-            }),
-        ),
         '',
         '## Proof hash byte and permutation work',
         '',
@@ -5203,58 +5152,6 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Fixed-witness release simulation census',
-        '',
-        'This scalar counterexample applies the KLLPS simulation equation with three fixed corrupt coordinates and one honest release. Using the actual ciphertext plaintext satisfies the expanded noise relation; substituting another output decodes that output but violates the relation to the fixed honest setup witness. It rejects that simulator chronology, not threshold FHE as a family.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Same-plaintext noise checks passed',
-                    formatCount(
-                        releaseSimulation.samePlaintextNoiseChecksPassed,
-                    ),
-                ],
-                [
-                    'Changed-plaintext noise checks refused',
-                    formatCount(
-                        releaseSimulation.changedPlaintextNoiseChecksRefused,
-                    ),
-                ],
-            ],
-        ),
-        '',
-        '## Publication and close local-view census',
-        '',
-        'The rejected close rule can strand an honest READY sender when other honest parties close before receiving its complete ECHO evidence. Every honest message is eventually delivered, while corrupt parties remain silent. Neither publication nor close obtains its quorum. This is a pre-certification liveness counterexample and does not invalidate the post-certification threshold arithmetic.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Continuing honest participants in the close race',
-                    formatCount(closeRace.honestParticipants),
-                ],
-                [
-                    'READY signers after complete delayed delivery',
-                    formatCount(closeRace.readySigners),
-                ],
-                [
-                    'Close signers after complete delayed delivery',
-                    formatCount(closeRace.closeSigners),
-                ],
-                [
-                    'Delivered honest messages',
-                    formatCount(closeRace.deliveredMessages),
-                ],
-                [
-                    'Unresolved honest READY waiters',
-                    formatCount(closeRace.unresolvedReadyWaiters),
-                ],
-            ],
-        ),
-        '',
         '## Close-response census',
         '',
         "Each roster uses the close quorum `q = n - f`, guarantees inclusion of an on-time envelope that `f + 1` honest participants received before responding, and omits at most `f` honest ballots. A response lists at most two envelopes per slot. With every honest participant voting, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots. The stage bound adds three preparation visits to the ballot, close response, target signature, release share and verification; the organizer's close intent and proposal replace its response and signature. Prioritized message-level executions attain every stage bound.",
@@ -5554,55 +5451,6 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Combining target certification and ordinary release shares',
-        '',
-        'This comparison attaches ordinary threshold-decryption shares to target votes. Corrupt participants keep their own shares and withhold all their public responses. The table counts the honest public responses sufficient for private reconstruction. It does not model encrypted release capsules, an additional activation primitive, or the existing certificate-gated release path.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Participant count',
-                    formatCount(certificationRelease.participantCount),
-                ],
-                [
-                    'Corrupt private shares',
-                    formatCount(certificationRelease.corruptCount),
-                ],
-                [
-                    'Public certificate threshold',
-                    formatCount(certificationRelease.certificateThreshold),
-                ],
-                [
-                    'Minimum share threshold delaying this trace until the public certificate',
-                    formatCount(
-                        certificationRelease.minimumThresholdDelayingThisTrace,
-                    ),
-                ],
-                [
-                    'Maximum share threshold for every continuing group',
-                    formatCount(
-                        certificationRelease.maximumThresholdForEveryContinuingSet,
-                    ),
-                ],
-            ],
-        ),
-        '',
-        table(
-            [
-                'Share threshold',
-                'Honest public responses before reconstruction',
-                'Public certificate available',
-                'Every continuing group can reconstruct',
-            ],
-            certificationRelease.cases.map((value) => [
-                formatCount(value.threshold),
-                formatCount(value.honestPublicShares),
-                value.publicCertificateAvailable ? 'yes' : 'no',
-                value.everyContinuingSetCanDecrypt ? 'yes' : 'no',
-            ]),
-        ),
-        '',
         '## Close wire census',
         '',
         'Exact canonical lengths of the signed close messages and bounds on the archived closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. Delivery adds a new envelope to a slot only while fewer than two are known, and the lock also discards late envelopes. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Only the organizer takes responses; it retains the first of each responder with exactly the listed envelopes it did not know. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares, archive framing and storage-engine overhead.',
@@ -5668,103 +5516,6 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.maximumOrganizerKnownEnvelopes),
                 ];
             }),
-        ),
-        '',
-        '## Fixed publication witness visit screen',
-        '',
-        'The cyclic fixed witness sets have the smallest size that guarantees an honest member under every allowed static corruption set. The trace grants instant durable publication, one witness message per ballot, and an ideal nonselective close. It retains the current preparation and post-close evidence, target certification, release and local retrieval dependencies. All participants cooperate and all enabled work coalesces. This is a completing counterexample to this composition, not a protocol implementation or a universal asynchronous lower bound.',
-        '',
-        table(
-            [
-                'Participant',
-                'Assigned publication witnesses',
-                'Productive visits',
-            ],
-            fixedPublicationWitnesses.participantVisits.map(
-                (visits, position) => [
-                    formatCount(position),
-                    formatCount(
-                        fixedPublicationWitnesses.assignments[position],
-                    ),
-                    formatCount(visits),
-                ],
-            ),
-        ),
-        '',
-        table(
-            ['First participant visit', 'Newly enabled work'],
-            fixedPublicationWitnesses.firstParticipantActions.map(
-                (actions, index) => [
-                    formatCount(index + 1),
-                    actions.join(', '),
-                ],
-            ),
-        ),
-        '',
-        '## Participant visit dependency census',
-        '',
-        'The preparation prefix counts joining, roster confirmation and seed commitment, seed opening, verified share-encryption keys, setup contributions, all-roster receipts, and an optional ballot attempt. The completing witness then executes the freeze-and-union publication model with immediate delivery, all enabled work coalesced, and corrupt participants refusing after valid preparation. Publication, close, target certification, release, and terminal retrieval exceed the ceiling. An additional setup-proof commitment wave is not charged, so it cannot rescue this rejected composition. These are witnessed costs, not worst-case upper bounds.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Participants in the sequential witness',
-                    formatCount(participantVisits.participantCount),
-                ],
-                [
-                    'First participant preparation visits including joining',
-                    formatCount(participantVisits.preparationWitnessVisitCount),
-                ],
-                [
-                    'First ballot author visits through its attempt',
-                    formatCount(
-                        participantVisits.ballotAuthorWitnessVisitCount,
-                    ),
-                ],
-                [
-                    'Remaining productive visits within the mandatory ceiling',
-                    formatCount(participantVisits.remainingVisitBudget),
-                ],
-                [
-                    'First participant visits in the completing witness',
-                    formatCount(participantVisits.completionWitnessVisitCount),
-                ],
-                [
-                    'Completing witness visits above the mandatory ceiling',
-                    formatCount(participantVisits.completionWitnessExcess),
-                ],
-                [
-                    'Fixed-suite preparation with eager publication, favorable witness',
-                    formatCount(
-                        participantVisits.commonMatrixCompletionWitnessVisitCount,
-                    ),
-                ],
-                [
-                    'Fixed-suite preparation with eager publication, interleaved ballots',
-                    formatCount(
-                        participantVisits.interleavedCommonMatrixWitnessVisitCount,
-                    ),
-                ],
-                [
-                    'Rejected batched close, result-stage count',
-                    formatCount(
-                        batchedPublicationVisits.maximumParticipantStages,
-                    ),
-                ],
-                [
-                    'Rejected batched close, no-result-stage count',
-                    formatCount(batchedPublicationVisits.maximumNoResultStages),
-                ],
-                [
-                    'Preferred visit count',
-                    formatCount(participantVisits.preferredVisitCount),
-                ],
-                [
-                    'Mandatory visit ceiling',
-                    formatCount(participantVisits.maximumPermittedVisitCount),
-                ],
-            ],
         ),
     ].join('\n')}\n`;
 };

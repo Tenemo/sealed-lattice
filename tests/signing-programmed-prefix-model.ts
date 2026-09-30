@@ -3,7 +3,7 @@ import {
     compileCurrentSignatureSamplingBounds,
     compileSignatureCounterBoundary,
 } from '#tests/authentication-work-model.js';
-import { mlDsa65Parameters } from '#tests/ml-dsa-theorem-screen-model.js';
+import { mlDsa65Parameters } from '#tests/ml-dsa-65-parameters.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
 
 // Fresh output-prefix programming invalidates an earlier all-input sampler

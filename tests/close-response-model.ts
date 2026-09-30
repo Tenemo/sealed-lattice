@@ -1,4 +1,3 @@
-import { traceCommonMatrixPreparationVisits } from '#tests/participant-visit-dependency-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 // Close responses under the owner's bounded-omission contract. The organizer
@@ -2123,20 +2122,57 @@ export type CloseVisitCensus = Readonly<{
     maximumVisits: number;
 }>;
 
+// The participants of each productive visit of a permitted sequential
+// preparation schedule, not a maximum over asynchronous deliveries. Each
+// stage consumes every participant's preceding publication, the first
+// participant returns before the others complete each stage, and every
+// visit performs all work the shared transcript enables.
+const commonMatrixPreparationStages = [
+    'registration-and-recipient-key',
+    'roster-confirmation-and-setup-commitment',
+    'setup-opening',
+] as const;
+const traceCommonMatrixPreparationVisits = (
+    participantCount: number,
+): readonly number[] => {
+    const published = commonMatrixPreparationStages.map(
+        () => new Set<number>(),
+    );
+    const visits: number[] = [];
+    const visit = (participant: number): void => {
+        let productive = false;
+        for (const [stage, completed] of published.entries()) {
+            if (completed.has(participant)) continue;
+            if (stage > 0 && published[stage - 1].size !== participantCount)
+                break;
+            completed.add(participant);
+            productive = true;
+        }
+        if (productive) visits.push(participant);
+    };
+    for (const completed of published) {
+        for (
+            let participant = 0;
+            participant < participantCount;
+            participant += 1
+        )
+            if (!completed.has(participant)) visit(participant);
+        if (completed.size !== participantCount)
+            throw new Error('A preparation stage is incomplete.');
+    }
+    return visits;
+};
+
 export const compileCloseVisitCensus = (
     participantCount: number,
 ): CloseVisitCensus => {
     const profile = deriveCloseProfile(participantCount);
-    const preparation = traceCommonMatrixPreparationVisits(
-        participantCount,
-        [],
-    );
+    const preparation = traceCommonMatrixPreparationVisits(participantCount);
     const preparationVisits = Math.max(
         ...Array.from(
             { length: participantCount },
             (_unused, participant) =>
-                preparation.filter((visit) => visit.participant === participant)
-                    .length,
+                preparation.filter((visitor) => visitor === participant).length,
         ),
     );
     const everyone = (1 << participantCount) - 1;

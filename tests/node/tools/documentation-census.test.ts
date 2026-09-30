@@ -33,10 +33,7 @@ describe('documentation census generator', () => {
             '## Linked ballot encryption census',
             '## Sponge-path extraction census',
             '## Wide sharing and release lifting census',
-            '## Fixed-witness release simulation census',
-            '## Publication and close local-view census',
             '## Threshold release flooding bound',
-            '## Participant visit dependency census',
         ]) {
             expect(rendered).toContain(`\n${heading}\n`);
         }
@@ -54,12 +51,6 @@ describe('documentation census generator', () => {
         );
         expect(rendered).toContain(
             '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
-        );
-        expect(rendered).toContain(
-            '| First ballot author visits through its attempt | `7` |',
-        );
-        expect(rendered).toContain(
-            '| First participant visits in the completing witness | `13` |',
         );
         expect(rendered).not.toMatch(/\d{4}-\d{2}-\d{2}T/u);
         expect(rendered.endsWith('\n')).toBe(true);

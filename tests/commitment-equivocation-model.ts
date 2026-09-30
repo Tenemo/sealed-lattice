@@ -2,7 +2,7 @@ import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-b
 import {
     mlDsa65KeySeedBytes,
     mlDsa65PublicMatrixSeedBytes,
-} from '#tests/ml-dsa-theorem-screen-model.js';
+} from '#tests/ml-dsa-65-parameters.js';
 
 export const commitmentSaltBits = 512n;
 

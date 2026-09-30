@@ -3,7 +3,7 @@ import {
     mlDsa65ChallengeSeedBytes,
     mlDsa65MaskNonceBytes,
     mlDsa65Parameters,
-} from '#tests/ml-dsa-theorem-screen-model.js';
+} from '#tests/ml-dsa-65-parameters.js';
 import { participantReleaseEnvelopeBytes } from '#tests/participant-release-custody-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';

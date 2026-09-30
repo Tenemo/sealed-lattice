@@ -4,7 +4,7 @@ import {
     compileCurrentSignatureSamplingBounds,
     compileSignatureCounterBoundary,
 } from '#tests/authentication-work-model.js';
-import { mlDsa65Parameters } from '#tests/ml-dsa-theorem-screen-model.js';
+import { mlDsa65Parameters } from '#tests/ml-dsa-65-parameters.js';
 import { compileProgrammedSignatureSamplerBounds } from '#tests/signing-programmed-prefix-model.js';
 
 describe('sampling after fresh signature-prefix programming', () => {
