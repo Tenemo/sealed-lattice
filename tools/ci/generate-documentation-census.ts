@@ -5237,7 +5237,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        "The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action. In the targeted executions the corrupt participants sign no response, fill the two body slots of an honest organizer with late envelopes and give every other honest participant a different on-time envelope. In the organizer-only executions the relay shows corrupt ballots and responses to the organizer alone. Every participant holds at most two bodies for one slot and discards late ones at its intent lock; the organizer requests bodies from the listing responder and the author. A signer verifies a proposal once its named responses, listed envelopes and usable bodies reached it, which the organizer's closure supplies.",
+        "The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action. In the targeted executions the corrupt participants sign no response, fill the two body slots of an honest organizer with late envelopes and give every other honest participant a different on-time envelope. In the organizer-only executions the relay shows corrupt ballots and responses to the organizer alone. In the hidden executions corrupt authors give their ballots to every honest participant but the organizer before the close and sign no response. Every participant holds at most two bodies for one slot and discards late ones at its intent lock. With its response, each other responder forwards the body of every other slot it lists alone that the organizer did not hold at its intent lock, and the organizer reads a body it lacks from its author or from such a copy. A signer verifies a proposal once its named responses, listed envelopes and usable bodies reached it, which the organizer's closure supplies.",
         '',
         table(
             ['Property', 'Value'],
@@ -5277,6 +5277,23 @@ export const renderDocumentationCensus = (): string => {
                     `${formatCount(closeResponses.execution.organizerOnlyCertifiedExecutions)} of ${formatCount(closeResponses.execution.organizerOnlyExecutions)}`,
                 ],
                 [
+                    'Certified hidden executions',
+                    `${formatCount(closeResponses.execution.hiddenCertifiedExecutions)} of ${formatCount(closeResponses.execution.hiddenExecutions)}`,
+                ],
+                [
+                    'Most bodies one responder forwards',
+                    formatCount(
+                        closeResponses.execution.maximumForwardedPerResponder,
+                    ),
+                ],
+                [
+                    'Most bodies one responder forwards to an honest organizer',
+                    formatCount(
+                        closeResponses.execution
+                            .maximumForwardedToHonestOrganizer,
+                    ),
+                ],
+                [
                     'Most bodies held at once for one slot',
                     formatCount(closeResponses.execution.maximumHeldPerSlot),
                 ],
@@ -5308,7 +5325,7 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'Each review obligation fails under its variant and holds under the maintained rule. The support-rule row replays the rejected organizer-selected union, and the author-route row replays signers that read records only from their authors and responders.',
+        'Each review obligation fails under its variant and holds under the maintained rule. The support-rule row replays the rejected organizer-selected union, the author-route row replays signers that read records only from their authors and responders, and the author-body row replays an organizer that reads bodies only from their authors.',
         '',
         table(
             ['Variant', 'Outcome'],
@@ -5367,6 +5384,21 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Signers read only authors and responders; a corrupt author and responder show theirs to the organizer alone',
                     `${formatCount(closeResponses.counterexamples.authorRouteCertifiedTargets)} certified targets, findings: ${closeResponses.counterexamples.authorRouteFindings.join(', ')}`,
+                ],
+                [
+                    'The organizer reads bodies only from their authors; a corrupt author hides its ballot from the organizer alone',
+                    `${formatCount(closeResponses.counterexamples.authorBodyCertifiedTargets)} certified targets, findings: ${closeResponses.counterexamples.authorBodyFindings.join(', ')}`,
+                ],
+                [
+                    'Responders forward the bodies the organizer did not hold at its lock',
+                    `${formatCount(closeResponses.counterexamples.forwardingCertifiedTargets)} certified target, findings: ${
+                        closeResponses.counterexamples.forwardingFindings
+                            .length === 0
+                            ? 'none'
+                            : closeResponses.counterexamples.forwardingFindings.join(
+                                  ', ',
+                              )
+                    }`,
                 ],
                 [
                     'The organizer publishes its closure before its proposal',
@@ -5533,6 +5565,33 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.maximumReceivedBodies),
                     formatCount(value.maximumKnownEnvelopes),
                     formatCount(value.maximumOrganizerKnownEnvelopes),
+                ];
+            }),
+        ),
+        '',
+        "The organizer publishes with its intent the identities of the bodies it held at its intent lock. With its response, each other responder publishes a copy of every envelope it lists, in listing order, and forwards the body of each other slot it lists alone that this held list lacks, or every such body when the list is missing or malformed. The organizer reads a body it lacks from its author or from such a copy, and a listed envelope from its author or the responder's copies.",
+        '',
+        table(
+            [
+                'Participants',
+                'Organizer held list bytes',
+                'Listed envelope copy bytes',
+                'Most forwarded bodies',
+                'Most forwarded body bytes',
+            ],
+            thresholdProfiles.map(({ participantCount }) => {
+                const value = compileCloseWireCensus(
+                    deriveSupportedProfile(
+                        participantCount,
+                        completionProfileCounts.optionCount,
+                    ),
+                );
+                return [
+                    formatCount(participantCount),
+                    formatCount(value.maximumOrganizerHeldListBytes),
+                    formatCount(value.maximumListedCopyBytes),
+                    formatCount(value.maximumForwardedBodies),
+                    formatCount(value.maximumForwardedBodyBytes),
                 ];
             }),
         ),

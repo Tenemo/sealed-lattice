@@ -378,6 +378,17 @@ describe('close response model', () => {
         expect(census.organizerOnlyCertifiedExecutions).toBe(
             census.organizerOnlyExecutions,
         );
+        // Every honest organizer closes when corrupt authors hide their
+        // ballots from it alone, because responders forward the bodies.
+        expect(census.hiddenExecutions).toBeGreaterThan(0);
+        expect(census.hiddenCertifiedExecutions).toBe(census.hiddenExecutions);
+        // A responder forwards at most the bodies of the other slots it lists
+        // alone, all of them when the organizer's held list is unknown.
+        expect(census.maximumForwardedPerResponder).toBe(participantCount - 1);
+        expect(census.maximumForwardedToHonestOrganizer).toBeGreaterThan(0);
+        expect(census.maximumForwardedToHonestOrganizer).toBeLessThanOrEqual(
+            census.maximumForwardedPerResponder,
+        );
         expect(census.maximumHeldPerSlot).toBe(2);
         expect(census.maximumReceivedPerHonestSlot).toBe(1);
         expect(census.maximumReceivedPerCorruptSlot).toBeLessThanOrEqual(4);
@@ -480,6 +491,12 @@ describe('close response model', () => {
         expect(census.authorRouteCertifiedTargets).toBe(0);
         expect(census.closureFindings).toEqual([]);
         expect(census.closureCertifiedTargets).toBe(1);
+        // An organizer that reads bodies only from their authors never holds
+        // a ballot hidden from it that every response it needs lists alone.
+        expect(census.authorBodyFindings).toEqual(['close-liveness']);
+        expect(census.authorBodyCertifiedTargets).toBe(0);
+        expect(census.forwardingFindings).toEqual([]);
+        expect(census.forwardingCertifiedTargets).toBe(1);
     });
 
     it('attains but never exceeds the eight-visit stage bound for every roster', () => {

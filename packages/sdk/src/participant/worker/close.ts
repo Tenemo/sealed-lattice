@@ -12,6 +12,7 @@ import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
+    fromHexadecimal,
     hexadecimal,
     readUnsigned16,
     readUnsigned32,
@@ -59,7 +60,8 @@ import { snapshotParticipant } from './storage.js';
 // participant where it was.
 
 const coinBytes = 32;
-const listedEntryBytes = 2 + 64;
+const identityBytes = 64;
+const listedEntryBytes = 2 + identityBytes;
 // The envelope's author position, ballot time and body length.
 const envelopeAuthorOffset = 132;
 const envelopeTimeOffset = 134;
@@ -78,6 +80,25 @@ export const closureSubmissionRoute = (identity: Uint8Array) =>
     closureDirectory + 'submission-' + hexadecimal(identity) + '.bin';
 export const closureBodyRoute = (identity: Uint8Array) =>
     closureDirectory + 'body-' + hexadecimal(identity) + '.bin';
+// The identities of the bodies the organizer held when it locked its intent,
+// published with the intent, and each responder's copies of the envelopes
+// its response lists and of the bodies it forwards to the organizer.
+const organizerHeldRoute = closeDirectory + 'held.bin';
+const listedCopiesRoute = (position: number) =>
+    closeDirectory + 'response-' + String(position) + '-submissions.bin';
+const forwardedBodyRoute = (position: number, identity: Uint8Array) =>
+    closeDirectory +
+    'response-' +
+    String(position) +
+    '-body-' +
+    hexadecimal(identity) +
+    '.bin';
+
+// The most entries a response lists, two envelopes for each slot, which also
+// bounds the bodies the organizer can hold.
+const maximumListedEntries = ({ close }: ParticipantProfile) =>
+    (close.maximumResponseBodyBytes - close.minimumResponseBodyBytes) /
+    listedEntryBytes;
 
 export type CloseRequest = Readonly<{
     // Published ballots to deliver with their bodies, by author.
@@ -830,33 +851,18 @@ const readAnnouncedSubmission = async (
         : undefined;
 };
 
-// Delivers a published ballot with its body, sealing each body record as it
-// passes the module. An expected identity restricts delivery to that
-// envelope; otherwise the author's pointer names it. A refused, late or
-// incomplete submission changes nothing.
-const deliverBallot = async (
+// Delivers a submission with its body from a route, sealing each body
+// record as it passes the module. A refused, late or incomplete submission
+// changes nothing. Returns whether the module accepted the body.
+const deliverBody = async (
     session: CloseSession,
     relay: PublicRelay,
-    author: number,
-    expected?: Uint8Array,
+    submission: Uint8Array,
+    route: string,
 ) => {
     const { context } = session.participant;
     const { profile } = context;
-    const submission =
-        expected === undefined
-            ? await readAnnouncedSubmission(context, relay, author)
-            : await readPublishedSubmission(profile, relay, author, expected);
-    const identity =
-        submission === undefined
-            ? undefined
-            : envelopeIdentity(context, submission);
-    if (
-        submission === undefined ||
-        identity === undefined ||
-        (expected !== undefined && !equalBytes(identity, expected)) ||
-        tryCloseCommand(context, 3, 0, submission) === undefined
-    )
-        return;
+    if (tryCloseCommand(context, 3, 0, submission) === undefined) return false;
     const length = Number(readUnsigned64(submission, envelopeLengthOffset));
     const { recordBytes, minimumBodyBytes, maximumBodyBytes } = profile.ballot;
     const event = {
@@ -883,23 +889,18 @@ const deliverBallot = async (
     };
     try {
         if (accepted)
-            await streamPublic(
-                relay,
-                submissionDirectory(author, identity) + 'body.bin',
-                length,
-                async (bytes) => {
-                    for (let start = 0; start < bytes.length && accepted;) {
-                        const count = Math.min(
-                            bytes.length - start,
-                            recordBytes - used,
-                        );
-                        pending.set(bytes.subarray(start, start + count), used);
-                        start += count;
-                        used += count;
-                        if (used === recordBytes) await flush();
-                    }
-                },
-            );
+            await streamPublic(relay, route, length, async (bytes) => {
+                for (let start = 0; start < bytes.length && accepted;) {
+                    const count = Math.min(
+                        bytes.length - start,
+                        recordBytes - used,
+                    );
+                    pending.set(bytes.subarray(start, start + count), used);
+                    start += count;
+                    used += count;
+                    if (used === recordBytes) await flush();
+                }
+            });
         if (used > 0 && accepted) await flush();
     } catch (error) {
         if (!(error instanceof PublicInputFailure)) throw error;
@@ -908,13 +909,51 @@ const deliverBallot = async (
         pending.fill(0);
     }
     // Finishing also clears a refused or incomplete body's authentication.
-    if (tryCloseCommand(context, 5) === undefined || !accepted) return;
+    if (tryCloseCommand(context, 5) === undefined || !accepted) return false;
     await appendEvent(
         session,
         { ...event, length, keys: added.map((record) => record.key) },
         added,
     );
     learnSubmission(session, event.serial, submission);
+    return true;
+};
+
+// Delivers a published ballot with its body from its author's route. An
+// expected identity restricts delivery to that envelope; otherwise the
+// author's pointer names it.
+const deliverBallot = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    author: number,
+    expected?: Uint8Array,
+) => {
+    const { context } = session.participant;
+    const submission =
+        expected === undefined
+            ? await readAnnouncedSubmission(context, relay, author)
+            : await readPublishedSubmission(
+                  context.profile,
+                  relay,
+                  author,
+                  expected,
+              );
+    const identity =
+        submission === undefined
+            ? undefined
+            : envelopeIdentity(context, submission);
+    if (
+        submission === undefined ||
+        identity === undefined ||
+        (expected !== undefined && !equalBytes(identity, expected))
+    )
+        return;
+    await deliverBody(
+        session,
+        relay,
+        submission,
+        submissionDirectory(author, identity) + 'body.bin',
+    );
 };
 
 // Delivers a published envelope without its body.
@@ -1014,9 +1053,29 @@ const lockIntent = async (session: CloseSession, intentPacket: Uint8Array) => {
     }
 };
 
+// A responder's copies of the envelopes its response lists, or none when
+// the relay lacks them.
+const readListedCopies = async (
+    profile: ParticipantProfile,
+    relay: PublicRelay,
+    responder: number,
+) => {
+    try {
+        return await readPublic(
+            relay,
+            listedCopiesRoute(responder),
+            maximumListedEntries(profile) * profile.close.submissionBytes,
+        );
+    } catch (error) {
+        if (error instanceof PublicInputFailure) return new Uint8Array();
+        throw error;
+    }
+};
+
 // Takes each other published response not yet taken, with the listed
-// envelopes the module does not know. A response the module refuses, or one
-// whose envelopes the relay lacks, waits for a later visit.
+// envelopes the module does not know, each from its author's route or else
+// from the responder's copies. A response the module refuses, or one whose
+// envelopes the relay lacks, waits for a later visit.
 const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
     const { context } = session.participant;
     const { profile } = context;
@@ -1046,11 +1105,13 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
         )
             continue;
         const supplied: Uint8Array[] = [];
+        let copies: Uint8Array | undefined;
         for (
-            let offset = 4 + close.minimumResponseBodyBytes;
+            let offset = 4 + close.minimumResponseBodyBytes, index = 0;
             offset + listedEntryBytes <= 4 + length;
-            offset += listedEntryBytes
+            offset += listedEntryBytes, index++
         ) {
+            const author = readUnsigned16(response, offset);
             const identity = response.subarray(
                 offset + 2,
                 offset + listedEntryBytes,
@@ -1062,16 +1123,23 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 )
             )
                 continue;
-            const submission = await readPublishedSubmission(
+            let submission = await readPublishedSubmission(
                 profile,
                 relay,
-                readUnsigned16(response, offset),
+                author,
                 identity,
             );
             if (
-                submission !== undefined &&
-                namesEnvelope(context, submission, identity)
-            )
+                submission === undefined ||
+                !isListedSubmission(context, submission, author, identity)
+            ) {
+                copies ??= await readListedCopies(profile, relay, responder);
+                submission = copies.subarray(
+                    index * close.submissionBytes,
+                    (index + 1) * close.submissionBytes,
+                );
+            }
+            if (isListedSubmission(context, submission, author, identity))
                 supplied.push(submission);
         }
         const record = concatenate(response, ...supplied);
@@ -1094,19 +1162,43 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
     }
 };
 
-// Delivers the bodies the taken responses need and the organizer lacks.
+// Delivers the bodies the taken responses need and the organizer lacks,
+// each from its author's route or else from the copy a responder that lists
+// it forwarded. The envelope comes from this root's custody, where a taken
+// response delivered it, or from its author's route.
 const deliverWantedBodies = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    const wanted = closeCommand(session.participant.context, 13);
-    for (let offset = 0; offset < wanted.length; offset += listedEntryBytes)
-        await deliverBallot(
-            session,
-            relay,
-            readUnsigned16(wanted, offset),
-            wanted.slice(offset + 2, offset + listedEntryBytes),
-        );
+    const { context } = session.participant;
+    const { profile } = context;
+    const wanted = closeCommand(context, 13);
+    if (wanted.length === 0) return;
+    const submissions = await heldSubmissions(session);
+    const responses = await heldResponses(session);
+    for (let offset = 0; offset < wanted.length; offset += listedEntryBytes) {
+        const author = readUnsigned16(wanted, offset);
+        const identity = wanted.slice(offset + 2, offset + listedEntryBytes);
+        const submission =
+            submissions.get(hexadecimal(identity)) ??
+            (await readPublishedSubmission(profile, relay, author, identity));
+        if (
+            submission === undefined ||
+            !isListedSubmission(context, submission, author, identity)
+        )
+            continue;
+        const routes = [submissionDirectory(author, identity) + 'body.bin'];
+        for (const [responder, response] of responses)
+            if (
+                responder !== session.records.position &&
+                responseListing(profile, response).some((entry) =>
+                    equalBytes(entry.identity, identity),
+                )
+            )
+                routes.push(forwardedBodyRoute(responder, identity));
+        for (const route of routes)
+            if (await deliverBody(session, relay, submission, route)) break;
+    }
 };
 
 // This participant's one response. Its body and fresh coins enter the root
@@ -1350,30 +1442,145 @@ const publishClosure = async (
     }
 };
 
+// The identities of the bodies the organizer held when it locked its
+// intent, in ascending order: its own ballot's and each held body retained
+// before the lock event, whose transaction retired the late ones. Replay
+// yields the same list, so every delivery publishes the same bytes.
+const organizerHeldList = (session: CloseSession) => {
+    const held: string[] = [];
+    for (const event of session.state.events) {
+        if (event.kind === closeEventKind.lock) break;
+        if (
+            event.kind !== closeEventKind.own &&
+            event.kind !== closeEventKind.held
+        )
+            continue;
+        const submission = session.submissions.get(event.serial);
+        if (submission === undefined)
+            throw new Error('A held body has no identity.');
+        held.push(hexadecimal(submission.identity));
+    }
+    return concatenate(...held.sort().map(fromHexadecimal));
+};
+
+// The organizer's held list as a responder reads it; empty when the relay
+// lacks it or serves a malformed one, so the responder then forwards every
+// body it lists alone.
+const readOrganizerHeld = async (
+    profile: ParticipantProfile,
+    relay: PublicRelay,
+) => {
+    const held = new Set<string>();
+    let bytes: Uint8Array;
+    try {
+        bytes = await readPublic(
+            relay,
+            organizerHeldRoute,
+            maximumListedEntries(profile) * identityBytes,
+        );
+    } catch (error) {
+        if (error instanceof PublicInputFailure) return held;
+        throw error;
+    }
+    if (bytes.length % identityBytes !== 0) return held;
+    for (let offset = 0; offset < bytes.length; offset += identityBytes)
+        held.add(hexadecimal(bytes.subarray(offset, offset + identityBytes)));
+    return held;
+};
+
+// A copy of every envelope this participant's response lists, with its
+// signature, in listing order, from this root's custody.
+const listedCopies = async (session: CloseSession) => {
+    const { profile } = session.participant.context;
+    const held = await heldSubmissions(session);
+    return concatenate(
+        ...responseListing(profile, session.state.responsePacket).map(
+            ({ identity }) => {
+                const submission = held.get(hexadecimal(identity));
+                if (submission === undefined)
+                    throw new Error('The response lists an envelope not held.');
+                return submission;
+            },
+        ),
+    );
+};
+
+// Forwards the body of each slot this participant's response lists one
+// envelope for, other than its own ballot's, that the organizer's held list
+// lacks, so an organizer the relay shows no copy of that ballot still
+// obtains it from a responder that lists it. Each body comes from this
+// root's custody.
+const forwardListedBodies = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    delivery: Delivery,
+) => {
+    const { profile } = session.participant.context;
+    const { position } = session.records;
+    const organizerHeld = await readOrganizerHeld(profile, relay);
+    const listing = responseListing(profile, session.state.responsePacket);
+    for (const { author, identity } of listing) {
+        if (
+            author === position ||
+            organizerHeld.has(hexadecimal(identity)) ||
+            listing.filter((entry) => entry.author === author).length !== 1
+        )
+            continue;
+        const held = await heldBallotBody(session, author, identity);
+        if (held === undefined)
+            throw new Error('The response lists a body not held.');
+        let offset = 0;
+        await held(async (bytes) => {
+            await delivery.transfer(
+                () =>
+                    publishChunk(
+                        relay,
+                        forwardedBodyRoute(position, identity),
+                        offset,
+                        bytes,
+                    ),
+                bytes,
+            );
+            offset += bytes.length;
+        });
+    }
+};
+
 // Retransmits the retained signed close messages, inspecting the retained
-// authority around every transfer. The organizer's proposal follows the
-// closure it depends on.
+// authority around every transfer. The organizer's held list precedes its
+// intent, and its proposal follows the closure it depends on. Another
+// responder's response follows its copies of the envelopes it lists and
+// precedes the bodies it forwards.
 export const publishClose = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
     const generation = generationOf(session);
     const { state } = session;
+    const { position } = session.records;
+    const responder = !session.organizer && generation >= closePhase.responded;
     const messages: [string, Uint8Array][] = [];
     if (session.organizer && generation >= closePhase.locked)
-        messages.push(['intent.bin', state.intentPacket]);
+        messages.push(
+            [organizerHeldRoute, organizerHeldList(session)],
+            [closeDirectory + 'intent.bin', state.intentPacket],
+        );
+    if (responder)
+        messages.push([
+            listedCopiesRoute(position),
+            await listedCopies(session),
+        ]);
     if (generation >= closePhase.responded)
         messages.push([
-            'response-' + String(session.records.position) + '.bin',
+            closeDirectory + 'response-' + String(position) + '.bin',
             state.responsePacket,
         ]);
     if (messages.length === 0) return;
     const { context, root } = session.participant;
     const delivery = await openDelivery(context, root);
-    for (const [name, message] of messages)
-        await delivery.transfer(() =>
-            publishRecord(relay, closeDirectory + name, message),
-        );
+    for (const [route, message] of messages)
+        await delivery.transfer(() => publishRecord(relay, route, message));
+    if (responder) await forwardListedBodies(session, relay, delivery);
     if (generation === closePhase.proposed) {
         await publishClosure(session, relay, delivery);
         await delivery.transfer(() =>
