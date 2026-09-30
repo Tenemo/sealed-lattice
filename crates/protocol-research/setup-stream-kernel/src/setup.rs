@@ -553,28 +553,41 @@ impl Accumulator {
         }) = message
         {
             self.put(secret, key, scale(self.weight, SHARE_SCALE as u128))?;
-            let mut offsets = vec![0i128; degree];
+            // Each ring position's offset is a whole number of units between
+            // minus and plus the sharing coefficients' count. A planning pass
+            // records only the geometries.
+            let mut units = (!self.planning).then(|| vec![0i128; degree]);
             for (index, (low, high)) in sharing.iter().enumerate() {
                 let shift = point * (index + 1);
                 let key = GeometryKey::shifted(degree, shift);
                 self.put(low, key, scale(self.weight, SHARE_SCALE as u128))?;
                 self.put(high, key, scale(times(self.weight, z), SHARE_SCALE as u128))?;
-                for input in 0..degree {
-                    let exponent = (input + shift) % (2 * degree);
-                    let offset = SHARE_SCALE * (radix / 2);
-                    offsets[exponent % degree] += if exponent < degree { offset } else { -offset };
+                if let Some(units) = &mut units {
+                    for input in 0..degree {
+                        let exponent = (input + shift) % (2 * degree);
+                        units[exponent % degree] += if exponent < degree { 1 } else { -1 };
+                    }
                 }
             }
-            let mut current = ONE;
-            let mut sum = ZERO;
-            for offset in offsets {
-                sum = plus(
-                    sum,
-                    times(current, signed_fingerprint(offset, limb_bits, z)),
-                );
-                current = times(current, self.alpha);
+            if let Some(units) = units {
+                // The powers of alpha at the positions of each unit count,
+                // weighted once by that offset's fingerprint.
+                let bound = sharing.len() as i128;
+                let mut powers = vec![ZERO; 2 * sharing.len() + 1];
+                let mut current = ONE;
+                for count in units {
+                    let slot = &mut powers[(count + bound) as usize];
+                    *slot = plus(*slot, current);
+                    current = times(current, self.alpha);
+                }
+                let unit = SHARE_SCALE * (radix / 2);
+                let mut sum = ZERO;
+                for (slot, powers) in powers.into_iter().enumerate() {
+                    let offset = (slot as i128 - bound) * unit;
+                    sum = plus(sum, times(powers, signed_fingerprint(offset, limb_bits, z)));
+                }
+                self.target = minus(self.target, times(self.weight, sum));
             }
-            self.target = minus(self.target, times(self.weight, sum));
         }
         let modulus = fingerprint_in(share_modulus(), limb_bits, z);
         self.put(&quotient, key, minus(ZERO, times(self.weight, modulus)))?;
