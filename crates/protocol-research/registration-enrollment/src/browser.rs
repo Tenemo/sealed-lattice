@@ -494,6 +494,29 @@ pub extern "C" fn roster_body_length() -> usize {
             .map_or(0, |p| p.body().len())
     })
 }
+/// Emits the usernames of the proposal this instance's roster verifier
+/// built, in roster order, each as its four-byte length and its bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn roster_usernames() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let Session {
+            proposal,
+            contribution_output,
+            ..
+        } = &mut *state;
+        contribution_output.clear();
+        let Some(proposal) = proposal.as_ref() else {
+            return 1;
+        };
+        for record in proposal.records() {
+            let username = record.header().username.as_str().as_bytes();
+            contribution_output.extend((username.len() as u32).to_le_bytes());
+            contribution_output.extend(username);
+        }
+        0
+    })
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn roster_identity_pointer() -> usize {
     SESSION.with(|state| {

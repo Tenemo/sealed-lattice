@@ -14,6 +14,7 @@ import type { ParticipantContext, ProfileContext } from './context.js';
 import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { readKernel } from './kernel.js';
+import type { ParticipantKernel } from './kernel.js';
 import { readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
@@ -191,8 +192,33 @@ export type VerifiedProposal = Readonly<{
     body: Uint8Array;
     identity: Uint8Array;
     recordIds: readonly string[];
+    // The verified registrations' usernames in roster order.
+    usernames: readonly string[];
     position: number;
 }>;
+
+// The usernames of the proposal the module's roster verifier built, in
+// roster order.
+export const verifiedRosterUsernames = (kernel: ParticipantKernel) => {
+    if (kernel.roster_usernames() !== 0)
+        throw new Error('The roster verifier holds no proposal.');
+    const bytes = readKernel(
+        kernel,
+        kernel.contribution_output_pointer(),
+        kernel.contribution_output_length(),
+    );
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const usernames: string[] = [];
+    for (let offset = 0; offset < bytes.length;) {
+        const start = offset + 4;
+        const end = start + readUnsigned32(bytes, offset);
+        if (end > bytes.length)
+            throw new Error('The roster usernames are truncated.');
+        usernames.push(decoder.decode(bytes.subarray(start, end)));
+        offset = end;
+    }
+    return usernames;
+};
 
 // A roster verifier's begin input: the retained poll, its definition and
 // signature, and the record count.
@@ -252,10 +278,14 @@ const finishProposal = async (
     const position = recordIds.indexOf(hexadecimal(enrollment.bodyDigest));
     if (position < 0)
         throw new PublicInputFailure('The proposal omits this participant.');
+    const usernames = verifiedRosterUsernames(kernel);
+    if (usernames.length !== recordIds.length)
+        throw new Error('The roster verifier named another roster.');
     return {
         body,
         identity: readKernel(kernel, kernel.roster_identity_pointer(), 64),
         recordIds,
+        usernames,
         position,
     };
 };
@@ -305,6 +335,13 @@ const verifySignature = (
     return context.kernel.verify_roster_signature(signature.length) === 1;
 };
 
+// A roster this participant verified and retained, with its verified
+// usernames in roster order.
+export type RetainedRoster = Readonly<{
+    root: AuthenticatedRoot;
+    usernames: readonly string[];
+}>;
+
 // The organizer locks the verified proposal and its signing coins before the
 // signature exists, then signs. A restored intent signs the same proposal
 // with the retained coins after verifying its records again.
@@ -314,7 +351,7 @@ export const proposeRoster = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
-): Promise<AuthenticatedRoot | undefined> => {
+): Promise<RetainedRoster | undefined> => {
     if (!enrollment.isOrganizer || root.head.generation !== 1) return undefined;
     const proposal = await verifyProposalInputs(
         context,
@@ -347,7 +384,10 @@ export const proposeRoster = async (
         predecessorRecords: dataRecordInventory(root.manifest),
         addedData: added,
     });
-    return signRoster(context, locked, proposal);
+    return {
+        root: await signRoster(context, locked, proposal),
+        usernames: proposal.usernames,
+    };
 };
 
 export const signRoster = async (
@@ -398,7 +438,7 @@ export const acceptRoster = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
-): Promise<AuthenticatedRoot | undefined> => {
+): Promise<RetainedRoster | undefined> => {
     if (enrollment.isOrganizer || root.head.generation !== 1) return undefined;
     const proposal = await verifyProposalInputs(
         context,
@@ -425,19 +465,22 @@ export const acceptRoster = async (
             bytes: retainRegistration(context),
         },
     ];
-    return commitRoot(context, root, {
-        generation: 3,
-        manifest: {
-            ...root.manifest,
-            references: addedReferences(
-                context,
-                root.manifest.references,
-                added,
-            ),
-        },
-        predecessorRecords: dataRecordInventory(root.manifest),
-        addedData: added,
-    });
+    return {
+        root: await commitRoot(context, root, {
+            generation: 3,
+            manifest: {
+                ...root.manifest,
+                references: addedReferences(
+                    context,
+                    root.manifest.references,
+                    added,
+                ),
+            },
+            predecessorRecords: dataRecordInventory(root.manifest),
+            addedData: added,
+        }),
+        usernames: proposal.usernames,
+    };
 };
 
 // Restores this participant's roster verification from the retained roster

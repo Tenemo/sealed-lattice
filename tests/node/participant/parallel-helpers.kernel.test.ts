@@ -35,6 +35,7 @@ import {
     registrationFile,
     registrationPath,
     streamRegistrations,
+    verifiedRosterUsernames,
 } from '#packages/sdk/src/participant/worker/roster.js';
 
 // The packaged participant module and worker, whose helper role runs on
@@ -394,11 +395,14 @@ const verifyRoster = async (
         return undefined;
     }
     return kernel.roster_finish() === 1
-        ? readKernel(
-              kernel,
-              kernel.roster_body_pointer(),
-              kernel.roster_body_length(),
-          )
+        ? {
+              body: readKernel(
+                  kernel,
+                  kernel.roster_body_pointer(),
+                  kernel.roster_body_length(),
+              ),
+              usernames: verifiedRosterUsernames(kernel),
+          }
         : undefined;
 };
 // Runs an operation with three fresh helpers, as each operation's worker
@@ -478,6 +482,13 @@ describe('participant helpers with registration work', () => {
                 candidate,
             );
             expect(verdictAlone !== undefined).toBe(accepted);
+            // The verified roster names its registrations' usernames in
+            // roster order.
+            expect(verdictAlone?.usernames).toEqual(
+                accepted
+                    ? ['Organizer', 'First voter', 'Second voter']
+                    : undefined,
+            );
             expect(
                 await withHelpers((helpers) =>
                     verifyRoster(helpers, poll, candidate),

@@ -48,6 +48,9 @@ export const kernelFunctions = [
     'roster_body_pointer',
     'roster_body_length',
     'roster_identity_pointer',
+    // Writes the verified proposal's usernames in roster order to the
+    // contribution output, each as its four-byte length and its bytes.
+    'roster_usernames',
     'validate_roster_signer',
     'sign_roster_proposal',
     'roster_signature_pointer',

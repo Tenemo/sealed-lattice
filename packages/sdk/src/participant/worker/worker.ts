@@ -456,6 +456,7 @@ const execute = async (
                 if (proposal.recordIds.join(',') !== recordIds.join(','))
                     return refused('invalid request');
                 root = await signRoster(context, root, proposal);
+                reported = { rosterUsernames: proposal.usernames };
             } else {
                 const proposed = await proposeRoster(
                     context,
@@ -465,7 +466,8 @@ const execute = async (
                     recordIds,
                 );
                 if (proposed === undefined) return refused('unavailable');
-                root = proposed;
+                root = proposed.root;
+                reported = { rosterUsernames: proposed.usernames };
             }
             break;
         }
@@ -478,7 +480,8 @@ const execute = async (
                 parseRecordIds(parameters.recordIds),
             );
             if (accepted === undefined) return refused('unavailable');
-            root = accepted;
+            root = accepted.root;
+            reported = { rosterUsernames: accepted.usernames };
             break;
         }
         case 'contribute': {
