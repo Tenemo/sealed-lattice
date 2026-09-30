@@ -5,16 +5,17 @@
 
 use crate::Error;
 use registration_credentials::{
-    ballot_authentication::ENVELOPE_IDENTITY_DOMAIN, identity::IdentityHasher,
-    target_signing::TARGET_IDENTITY_DOMAIN,
+    ballot_authentication::ENVELOPE_IDENTITY_DOMAIN, close_signing::ClosePurpose,
+    identity::IdentityHasher, target_signing::TARGET_IDENTITY_DOMAIN,
 };
 
 /// The bytes one absorb call reads from the host.
 pub const INPUT_BYTES: usize = 1 << 16;
 
 /// The closed set of purposes the host may request, each under its own
-/// domain. The target and envelope purposes yield the certified target's and
-/// a ballot envelope's own identities.
+/// domain. The target, envelope and close-response purposes yield the
+/// certified target's, a ballot envelope's and a close response body's own
+/// identities.
 fn domain(purpose: u32) -> Option<&'static str> {
     Some(match purpose {
         0 => "sealed-lattice/participant-root/v1",
@@ -22,6 +23,7 @@ fn domain(purpose: u32) -> Option<&'static str> {
         2 => "sealed-lattice/enrollment-input/v1",
         3 => TARGET_IDENTITY_DOMAIN,
         4 => ENVELOPE_IDENTITY_DOMAIN,
+        5 => ClosePurpose::Response.context(),
         _ => return None,
     })
 }
@@ -113,6 +115,7 @@ mod tests {
     use super::*;
     use registration_credentials::{
         ballot_authentication::ENVELOPE_BYTES,
+        close_signing::close_message_identity,
         foundation::{CanonicalItem, hash_foundation_tuple_512},
     };
 
@@ -128,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn separates_purposes_and_matches_the_target_and_envelope_identities() {
+    fn separates_purposes_and_matches_the_target_envelope_and_response_identities() {
         let body: Vec<u8> = (0..INPUT_BYTES + 91)
             .map(|index| (index % 253) as u8)
             .collect();
@@ -150,15 +153,17 @@ mod tests {
             identity(&mut state, 4, &body[..ENVELOPE_BYTES], 50),
             envelope
         );
-        let identities: Vec<_> = (0..5)
+        let response = close_message_identity(ClosePurpose::Response, &body[..5000]).unwrap();
+        assert_eq!(identity(&mut state, 5, &body[..5000], 333), response);
+        let identities: Vec<_> = (0..6)
             .map(|purpose| identity(&mut state, purpose, &body, INPUT_BYTES))
             .collect();
-        for purpose in 0..5 {
+        for purpose in 0..6 {
             assert_eq!(
                 identity(&mut state, purpose as u32, &body, 7_000),
                 identities[purpose]
             );
-            for other in purpose + 1..5 {
+            for other in purpose + 1..6 {
                 assert_ne!(identities[purpose], identities[other]);
             }
         }
@@ -167,7 +172,7 @@ mod tests {
     #[test]
     fn refuses_unknown_purposes_and_wrong_lengths() {
         let mut state = State::default();
-        assert!(state.begin(5, 1).is_err());
+        assert!(state.begin(6, 1).is_err());
         assert!(state.absorb(1).is_err());
         assert!(state.finish().is_err());
         state.begin(1, 2).unwrap();

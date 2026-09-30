@@ -372,6 +372,12 @@ describe('close response model', () => {
         expect(census.targetedCertifiedExecutions).toBe(
             census.targetedExecutions,
         );
+        // Every honest organizer closes when the relay shows corrupt ballots
+        // and responses to it alone, because its closure carries them.
+        expect(census.organizerOnlyExecutions).toBeGreaterThan(0);
+        expect(census.organizerOnlyCertifiedExecutions).toBe(
+            census.organizerOnlyExecutions,
+        );
         expect(census.maximumHeldPerSlot).toBe(2);
         expect(census.maximumReceivedPerHonestSlot).toBe(1);
         expect(census.maximumReceivedPerCorruptSlot).toBeLessThanOrEqual(4);
@@ -468,6 +474,12 @@ describe('close response model', () => {
         ]);
         expect(census.supportRuleIncludesEnvelope).toBe(false);
         expect(census.unionRuleIncludesEnvelope).toBe(true);
+        // Signers that read only from authors and responders never see what
+        // a corrupt author and responder showed the organizer alone.
+        expect(census.authorRouteFindings).toEqual(['close-liveness']);
+        expect(census.authorRouteCertifiedTargets).toBe(0);
+        expect(census.closureFindings).toEqual([]);
+        expect(census.closureCertifiedTargets).toBe(1);
     });
 
     it('attains but never exceeds the eight-visit stage bound for every roster', () => {

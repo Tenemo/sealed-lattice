@@ -224,6 +224,25 @@ describe('participant custody identities', () => {
             ),
         );
     });
+
+    it('name the target, envelope and close response by their own domains', async () => {
+        const { kernel } = await instantiateParticipantKernel(
+            participantModule,
+            noParallelHelpers,
+        );
+        // The domains of the identities a certified target, a ballot
+        // submission and a proposal's named response are addressed by.
+        const domains = [
+            [custodyPurpose.target, 'sealed-lattice/evaluation-target-id/v1'],
+            [custodyPurpose.envelope, 'sealed-lattice/ballot-envelope-id/v1'],
+            [custodyPurpose.closeResponse, 'sealed-lattice/close-response/v1'],
+        ] as const;
+        for (const [purpose, domain] of domains)
+            for (const length of [0, 1, 65_537])
+                expect(
+                    custodyIdentity(kernel, purpose, payload(length)),
+                ).toEqual(independentIdentity(domain, payload(length)));
+    });
 });
 
 // Enrollment inputs as the worker frames them. Every randomness request is

@@ -3,17 +3,25 @@ import {
     concatenate,
     equalBytes,
     hexadecimal,
-    readUnsigned16,
     readUnsigned32,
     unsigned32,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
 import {
     closeDirectory,
+    closureBodyRoute,
+    closureResponseRoute,
+    closureSubmissionRoute,
     completedCloseRecords,
-    envelopeIdentity,
     heldBallotBody,
+    heldResponses,
+    heldSubmissions,
+    isListedSubmission,
+    isResponsePacket,
+    proposalResponses,
     readPublishedSubmission,
+    responseIdentity,
+    responseListing,
     restoreCompletedClose,
 } from './close.js';
 import type { CloseSession } from './close.js';
@@ -27,7 +35,12 @@ import {
     readKernel,
     writeChunkInput,
 } from './kernel.js';
-import { publishRecord, readPublic, streamPublic } from './public.js';
+import {
+    publishRecord,
+    readPublic,
+    recordPublic,
+    streamPublic,
+} from './public.js';
 import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
@@ -55,7 +68,6 @@ import type { TargetState } from './target-state.js';
 // evaluating again.
 
 const coinBytes = 32;
-const listedEntryBytes = 2 + 64;
 const unusedWord = 0xff_ff_ff_ff;
 export const completionDirectory = 'completion/';
 const evaluationDatabase = 'sealed-lattice-public-evaluation';
@@ -71,30 +83,78 @@ const words = (bytes: Uint8Array) => {
 };
 
 // A usable slot's authenticated submission and its envelope identity, which
-// addresses its body.
-type UsableSlot = Readonly<{ submission: Uint8Array; identity: Uint8Array }>;
+// addresses its body, and the route of the body copy the barrier accepted,
+// or none for this root's custody.
+type UsableSlot = Readonly<{
+    submission: Uint8Array;
+    identity: Uint8Array;
+    route?: string;
+}>;
 
-const streamBody = async (
+// Reads a public record without recording it, or undefined when the relay
+// lacks it.
+const readCandidate = async (
+    relay: PublicRelay,
+    route: string,
+    maximum: number,
+) => {
+    try {
+        return await readPublic(
+            { ...relay, recorder: undefined },
+            route,
+            maximum,
+        );
+    } catch (error) {
+        if (error instanceof PublicInputFailure) return undefined;
+        throw error;
+    }
+};
+
+// Reads a usable body from this root's custody, or from a route without
+// recording it.
+const readBody = async (
     session: CloseSession,
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
+    route: string | undefined,
+    consume: (bytes: Uint8Array) => void | Promise<void>,
+) => {
+    if (route !== undefined)
+        return streamPublic(
+            { ...relay, recorder: undefined },
+            route,
+            session.participant.context.profile.ballot.maximumBodyBytes,
+            consume,
+        );
+    const held = await heldBallotBody(session, author, identity);
+    if (held === undefined) throw new Error('The held ballot body is gone.');
+    return held(consume);
+};
+
+// Streams a usable body from the copy the barrier accepted, recording its
+// bytes under the author's route, by which the transcript names them.
+const streamBody = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    author: number,
+    { identity, route }: UsableSlot,
     accept: (bytes: Uint8Array) => void | Promise<void>,
 ) => {
-    const name = submissionDirectory(author, identity) + 'body.bin';
-    const held = await heldBallotBody(session, author, identity);
-    if (held === undefined)
-        return streamPublic(
-            relay,
-            name,
-            session.participant.context.profile.ballot.maximumBodyBytes,
-            accept,
-        );
-    const record = relay.recorder?.open(name);
-    const length = await held(async (bytes) => {
-        await record?.write(bytes);
-        await accept(bytes);
-    });
+    const record = relay.recorder?.open(
+        submissionDirectory(author, identity) + 'body.bin',
+    );
+    const length = await readBody(
+        session,
+        relay,
+        author,
+        identity,
+        route,
+        async (bytes) => {
+            await record?.write(bytes);
+            await accept(bytes);
+        },
+    );
     await record?.finish();
     return length;
 };
@@ -119,9 +179,145 @@ const requireBarrier = (
         throw new PublicInputFailure(reason);
 };
 
-// Verifies the organizer's close barrier from the public close records: the
-// intent, the proposal's named responses with every envelope they list, and
-// the body of each usable slot. Returns each usable slot by its author.
+// The response a proposal names: from this root's custody, the organizer's
+// closure or the responder's own route, the first copy whose body has the
+// named identity, recorded under the responder's route.
+const namedResponse = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    held: ReadonlyMap<number, Uint8Array>,
+    responder: number,
+    identity: Uint8Array,
+) => {
+    const { context } = session.participant;
+    const { profile } = context;
+    const route = closeDirectory + 'response-' + String(responder) + '.bin';
+    const maximum =
+        4 +
+        profile.close.maximumResponseBodyBytes +
+        profile.registration.signatureBytes;
+    for (const candidate of [
+        () => Promise.resolve(held.get(responder)),
+        () => readCandidate(relay, closureResponseRoute(identity), maximum),
+        () => readCandidate(relay, route, maximum),
+    ]) {
+        const response = await candidate();
+        if (
+            response !== undefined &&
+            isResponsePacket(profile, response) &&
+            equalBytes(responseIdentity(context, response), identity)
+        ) {
+            await recordPublic(relay, route, response);
+            return response;
+        }
+    }
+    throw new PublicInputFailure('A named close response is unavailable.');
+};
+
+// An envelope a named response lists, with its signature: from this root's
+// custody, the organizer's closure or the author's own route, the first copy
+// of that author's envelope with the listed identity, recorded under the
+// author's route.
+const listedSubmission = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    held: ReadonlyMap<string, Uint8Array>,
+    author: number,
+    identity: Uint8Array,
+) => {
+    const { context } = session.participant;
+    const { profile } = context;
+    for (const candidate of [
+        () => Promise.resolve(held.get(hexadecimal(identity))),
+        () =>
+            readCandidate(
+                relay,
+                closureSubmissionRoute(identity),
+                profile.close.submissionBytes,
+            ),
+        () =>
+            readPublishedSubmission(
+                profile,
+                { ...relay, recorder: undefined },
+                author,
+                identity,
+            ),
+    ]) {
+        const submission = await candidate();
+        if (
+            submission !== undefined &&
+            isListedSubmission(context, submission, author, identity)
+        ) {
+            const directory = submissionDirectory(author, identity);
+            const { envelopeBytes } = profile.ballot;
+            await recordPublic(
+                relay,
+                directory + 'envelope.bin',
+                submission.subarray(0, envelopeBytes),
+            );
+            await recordPublic(
+                relay,
+                directory + 'signature.bin',
+                submission.subarray(envelopeBytes),
+            );
+            return submission;
+        }
+    }
+    throw new PublicInputFailure('A listed envelope is unavailable.');
+};
+
+// Authenticates a usable slot's body from this root's custody, the
+// organizer's closure or the author's own route, restarting the body
+// verifier after a refused or interrupted copy. Its bytes are recorded under
+// the author's route once the verifier accepts them. Returns the accepted
+// copy's route, or none for custody.
+const verifyUsableBody = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    author: number,
+    identity: Uint8Array,
+) => {
+    const { context } = session.participant;
+    const route = submissionDirectory(author, identity) + 'body.bin';
+    const sources: (string | undefined)[] = [closureBodyRoute(identity), route];
+    if ((await heldBallotBody(session, author, identity)) !== undefined)
+        sources.unshift(undefined);
+    for (const source of sources) {
+        requireBarrier(context, 4, identity, 'A usable body was refused.');
+        const record = relay.recorder?.open(route);
+        try {
+            await readBody(
+                session,
+                relay,
+                author,
+                identity,
+                source,
+                async (bytes) => {
+                    await record?.write(bytes);
+                    requireBarrier(
+                        context,
+                        5,
+                        bytes,
+                        'A usable body was refused.',
+                    );
+                },
+            );
+            if (barrierCommand(context, 6)) {
+                await record?.finish();
+                return source;
+            }
+        } catch (error) {
+            if (!(error instanceof PublicInputFailure)) throw error;
+        }
+        barrierCommand(context, 10);
+    }
+    throw new PublicInputFailure('A usable body was refused.');
+};
+
+// Verifies the organizer's close barrier from the close records: the intent,
+// the proposal's named responses with every envelope they list, and the body
+// of each usable slot, each record from this root's custody, the organizer's
+// closure or its author's route. Returns each usable slot by its author.
 const verifyCloseBarrier = async (
     session: CloseSession,
     relay: PublicRelay,
@@ -149,65 +345,40 @@ const verifyCloseBarrier = async (
     );
     if (proposal.length !== 4 + close.proposalBodyBytes + signatureBytes)
         throw new PublicInputFailure('The close proposal is incomplete.');
-    // The proposal ends with its named responders and their responses.
+    const responses = await heldResponses(session);
+    const submissions = await heldSubmissions(session);
     const listed = new Map<
         string,
         { author: number; submission: Uint8Array }
     >();
-    for (let index = 0; index < close.quorum; index++) {
-        const responder = readUnsigned16(
-            proposal,
-            4 +
-                close.proposalBodyBytes -
-                (close.quorum - index) * listedEntryBytes,
-        );
-        const response = await readPublic(
+    for (const { responder, identity } of proposalResponses(
+        profile,
+        proposal,
+    )) {
+        const response = await namedResponse(
+            session,
             relay,
-            closeDirectory + 'response-' + String(responder) + '.bin',
-            4 + close.maximumResponseBodyBytes + signatureBytes,
+            responses,
+            responder,
+            identity,
         );
-        const length = response.length < 4 ? 0 : readUnsigned32(response, 0);
-        if (
-            length < close.minimumResponseBodyBytes ||
-            response.length !== 4 + length + signatureBytes
-        )
-            throw new PublicInputFailure('A close response is malformed.');
-        for (
-            let offset = 4 + close.minimumResponseBodyBytes;
-            offset + listedEntryBytes <= 4 + length;
-            offset += listedEntryBytes
-        ) {
-            const identity = response.subarray(
-                offset + 2,
-                offset + listedEntryBytes,
-            );
-            if (listed.has(hexadecimal(identity))) continue;
-            const author = readUnsigned16(response, offset);
-            const submission = await readPublishedSubmission(
-                profile,
+        for (const entry of responseListing(profile, response)) {
+            const key = hexadecimal(entry.identity);
+            if (listed.has(key)) continue;
+            const submission = await listedSubmission(
+                session,
                 relay,
-                author,
-                identity,
+                submissions,
+                entry.author,
+                entry.identity,
             );
-            const reported =
-                submission === undefined
-                    ? undefined
-                    : envelopeIdentity(context, submission);
-            if (
-                submission === undefined ||
-                reported === undefined ||
-                !equalBytes(reported, identity)
-            )
-                throw new PublicInputFailure(
-                    'A listed envelope is unavailable.',
-                );
             requireBarrier(
                 context,
                 3,
                 submission,
                 'A listed envelope was refused.',
             );
-            listed.set(hexadecimal(identity), { author, submission });
+            listed.set(key, { author: entry.author, submission });
         }
         requireBarrier(context, 7, response, 'A close response was refused.');
     }
@@ -225,19 +396,15 @@ const verifyCloseBarrier = async (
         const slot = listed.get(hexadecimal(identity));
         if (slot === undefined)
             throw new Error('The close verifier needs an unlisted body.');
-        requireBarrier(context, 4, identity, 'A usable body was refused.');
-        await streamBody(session, relay, slot.author, identity, (bytes) => {
-            requireBarrier(context, 5, bytes, 'A usable body was refused.');
-        });
-        requireBarrier(
-            context,
-            6,
-            new Uint8Array(),
-            'A usable body was refused.',
-        );
         usable.set(slot.author, {
             submission: slot.submission,
             identity: identity.slice(),
+            route: await verifyUsableBody(
+                session,
+                relay,
+                slot.author,
+                identity,
+            ),
         });
     }
     requireBarrier(context, 9, proposal, 'The close barrier was refused.');
@@ -297,20 +464,20 @@ const classifyBallot = async (
     session: CloseSession,
     relay: PublicRelay,
     author: number,
-    { submission, identity }: UsableSlot,
+    slot: UsableSlot,
 ) => {
     const { context } = session.participant;
     const { kernel, profile } = context;
     const { headerBytes } = profile.ballot;
     let header: Uint8Array = new Uint8Array();
-    await streamBody(session, relay, author, identity, async (bytes) => {
+    await streamBody(session, relay, author, slot, async (bytes) => {
         let rest = bytes;
         if (header.length < headerBytes) {
             const taken = rest.subarray(0, headerBytes - header.length);
             header = concatenate(header, taken);
             rest = rest.subarray(taken.length);
             if (header.length < headerBytes) return;
-            await beginClassification(context, submission, header);
+            await beginClassification(context, slot.submission, header);
         }
         if (
             rest.length > 0 &&
@@ -711,13 +878,7 @@ const evaluate = async (
                     await deliverEvaluationInput(
                         context,
                         (accept) =>
-                            streamBody(
-                                session,
-                                relay,
-                                author,
-                                slot.identity,
-                                accept,
-                            ),
+                            streamBody(session, relay, author, slot, accept),
                         'An accepted ballot changed.',
                     );
             }

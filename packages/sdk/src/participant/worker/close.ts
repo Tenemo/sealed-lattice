@@ -36,8 +36,15 @@ import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
+import type { Delivery } from './delivery.js';
+import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel } from './kernel.js';
-import { publishRecord, readPublic, streamPublic } from './public.js';
+import {
+    publishChunk,
+    publishRecord,
+    readPublic,
+    streamPublic,
+} from './public.js';
 import type { PublicRelay } from './public.js';
 import { openRecord, recordContext, sealRecord } from './records.js';
 import type { RecordContext } from './records.js';
@@ -62,6 +69,15 @@ const envelopeLengthOffset = 142;
 // header bytes and a four-byte inner length before the entries.
 const responderFromListing = 6 + 4 + 2;
 export const closeDirectory = 'close/';
+// The organizer's copies of the close records its proposal depends on, each
+// under its own identity.
+const closureDirectory = closeDirectory + 'closure/';
+export const closureResponseRoute = (identity: Uint8Array) =>
+    closureDirectory + 'response-' + hexadecimal(identity) + '.bin';
+export const closureSubmissionRoute = (identity: Uint8Array) =>
+    closureDirectory + 'submission-' + hexadecimal(identity) + '.bin';
+export const closureBodyRoute = (identity: Uint8Array) =>
+    closureDirectory + 'body-' + hexadecimal(identity) + '.bin';
 
 export type CloseRequest = Readonly<{
     // Published ballots to deliver with their bodies, by author.
@@ -338,10 +354,7 @@ const commitClose = async (
 
 // The submission identity the module reports for an envelope, which
 // listings and wanted bodies name; undefined for bytes that are not one.
-export const envelopeIdentity = (
-    context: ProfileContext,
-    submission: Uint8Array,
-) =>
+const envelopeIdentity = (context: ProfileContext, submission: Uint8Array) =>
     tryCloseCommand(
         context,
         14,
@@ -358,6 +371,92 @@ const namesEnvelope = (
     return value !== undefined && equalBytes(value, identity);
 };
 
+// Whether a submission is the listed author's envelope with the listed
+// identity, followed by a signature.
+export const isListedSubmission = (
+    context: ProfileContext,
+    submission: Uint8Array,
+    author: number,
+    identity: Uint8Array,
+) =>
+    submission.length === context.profile.close.submissionBytes &&
+    readUnsigned16(submission, envelopeAuthorOffset) === author &&
+    namesEnvelope(context, submission, identity);
+
+// The identity of the envelope a retained submission begins with, derived
+// without the close module, so that a visit that restores no setup can name
+// what its custody holds.
+const custodyEnvelopeIdentity = (
+    context: ProfileContext,
+    submission: Uint8Array,
+) =>
+    custodyIdentity(
+        context.kernel,
+        custodyPurpose.envelope,
+        submission.subarray(0, context.profile.ballot.envelopeBytes),
+    );
+
+// Whether bytes frame one response packet of the profile.
+export const isResponsePacket = (
+    profile: ParticipantProfile,
+    bytes: Uint8Array,
+) => {
+    if (bytes.length < 4) return false;
+    const length = readUnsigned32(bytes, 0);
+    return (
+        length >= profile.close.minimumResponseBodyBytes &&
+        length <= profile.close.maximumResponseBodyBytes &&
+        bytes.length === 4 + length + profile.registration.signatureBytes
+    );
+};
+
+// A response packet's identity, by which a proposal names it: the identity
+// of its signed body.
+export const responseIdentity = (
+    context: ProfileContext,
+    response: Uint8Array,
+) =>
+    custodyIdentity(
+        context.kernel,
+        custodyPurpose.closeResponse,
+        response.subarray(4, 4 + readUnsigned32(response, 0)),
+    );
+
+// The author and envelope identity of each entry a response packet lists.
+export const responseListing = (
+    profile: ParticipantProfile,
+    response: Uint8Array,
+) => {
+    const end = 4 + readUnsigned32(response, 0);
+    const entries: { author: number; identity: Uint8Array }[] = [];
+    for (
+        let offset = 4 + profile.close.minimumResponseBodyBytes;
+        offset + listedEntryBytes <= end;
+        offset += listedEntryBytes
+    )
+        entries.push({
+            author: readUnsigned16(response, offset),
+            identity: response.slice(offset + 2, offset + listedEntryBytes),
+        });
+    return entries;
+};
+
+// The responders and response identities that end a proposal packet's body.
+export const proposalResponses = (
+    profile: ParticipantProfile,
+    proposal: Uint8Array,
+) => {
+    const { proposalBodyBytes, quorum } = profile.close;
+    return Array.from({ length: quorum }, (_unused, index) => {
+        const offset =
+            4 + proposalBodyBytes - (quorum - index) * listedEntryBytes;
+        return {
+            responder: readUnsigned16(proposal, offset),
+            identity: proposal.slice(offset + 2, offset + listedEntryBytes),
+        };
+    });
+};
+
 // Supplies only a body named by this root's authenticated custody. The
 // caller still runs its owning public verifiers and records every consumed
 // byte for archival. A missing listed record is state loss, never a reason
@@ -372,7 +471,10 @@ export const heldBallotBody = async (
     if (
         ballot !== undefined &&
         author === context.position &&
-        namesEnvelope(context, ballot.state.envelope, identity)
+        equalBytes(
+            custodyEnvelopeIdentity(context, ballot.state.envelope),
+            identity,
+        )
     )
         return async (consume: (bytes: Uint8Array) => void | Promise<void>) => {
             await readBallotBody(ballot, consume);
@@ -383,7 +485,7 @@ export const heldBallotBody = async (
         const submission = await openCloseRecord(session, event, 0);
         const matches =
             readUnsigned16(submission, envelopeAuthorOffset) === author &&
-            namesEnvelope(context, submission, identity);
+            equalBytes(custodyEnvelopeIdentity(context, submission), identity);
         if (
             readUnsigned64(submission, envelopeLengthOffset) !==
             BigInt(event.length)
@@ -456,6 +558,66 @@ const learnResponse = (
 
 const ownSubmission = (ballot: BallotSession) =>
     concatenate(ballot.state.envelope, ballot.state.signature);
+
+// Every submission this root's custody holds, by envelope identity: the own
+// signed ballot, each known or held envelope and each envelope delivered with
+// a taken response.
+export const heldSubmissions = async (session: CloseSession) => {
+    const { context } = session.participant;
+    const { close, registration } = context.profile;
+    const held = new Map<string, Uint8Array>();
+    const hold = (submission: Uint8Array) =>
+        held.set(
+            hexadecimal(custodyEnvelopeIdentity(context, submission)),
+            submission,
+        );
+    if (session.ballot !== undefined) hold(ownSubmission(session.ballot));
+    for (const event of session.state.events)
+        if (
+            event.kind === closeEventKind.known ||
+            event.kind === closeEventKind.held
+        )
+            hold(await openCloseRecord(session, event, 0));
+        else if (event.kind === closeEventKind.response) {
+            const record = await openCloseRecord(session, event, 0);
+            for (
+                let offset =
+                    4 + readUnsigned32(record, 0) + registration.signatureBytes;
+                offset < record.length;
+                offset += close.submissionBytes
+            )
+                hold(record.slice(offset, offset + close.submissionBytes));
+        }
+    return held;
+};
+
+// Every response packet this root's custody holds, by responder: the own
+// signed response and, for the organizer, each response it took.
+export const heldResponses = async (session: CloseSession) => {
+    const { profile } = session.participant.context;
+    const held = new Map<number, Uint8Array>();
+    if (generationOf(session) >= closePhase.responded)
+        held.set(session.records.position, session.state.responsePacket);
+    for (const event of session.state.events) {
+        if (event.kind !== closeEventKind.response) continue;
+        const record = await openCloseRecord(session, event, 0);
+        held.set(
+            readUnsigned16(
+                record,
+                4 +
+                    profile.close.minimumResponseBodyBytes -
+                    responderFromListing,
+            ),
+            record.slice(
+                0,
+                4 +
+                    readUnsigned32(record, 0) +
+                    profile.registration.signatureBytes,
+            ),
+        );
+    }
+    return held;
+};
 
 // Replays one retained event. It was accepted on arrival, so a refusal means
 // the retained state changed.
@@ -1115,8 +1277,82 @@ export const advanceClose = async (
         await propose(session, prepared);
 };
 
+// Delivers the organizer's copy of every close record its proposal depends
+// on, each under its own identity: the named responses, every envelope they
+// list and the body of each slot they list one envelope for, but the
+// organizer's own, which its ballot delivers. A participant whom the relay
+// shows none of an author's or a responder's own records still finds them.
+// Every copy comes from this root's custody, where the module accepted it
+// before the proposal was prepared.
+const publishClosure = async (
+    session: CloseSession,
+    relay: PublicRelay,
+    delivery: Delivery,
+) => {
+    const { context } = session.participant;
+    const { profile } = context;
+    const responses = await heldResponses(session);
+    const submissions = await heldSubmissions(session);
+    // The distinct envelopes the named responses list for each slot.
+    const slots = Array.from(
+        { length: profile.participantCount },
+        () => new Map<string, Uint8Array>(),
+    );
+    for (const { responder, identity } of proposalResponses(
+        profile,
+        session.state.proposalPacket,
+    )) {
+        const response = responses.get(responder);
+        if (
+            response === undefined ||
+            !equalBytes(responseIdentity(context, response), identity)
+        )
+            throw new Error('The proposal names a response not held.');
+        await delivery.transfer(() =>
+            publishRecord(relay, closureResponseRoute(identity), response),
+        );
+        for (const entry of responseListing(profile, response)) {
+            const key = hexadecimal(entry.identity);
+            if (slots[entry.author].has(key)) continue;
+            const submission = submissions.get(key);
+            if (submission === undefined)
+                throw new Error('The proposal lists an envelope not held.');
+            slots[entry.author].set(key, entry.identity);
+            await delivery.transfer(() =>
+                publishRecord(
+                    relay,
+                    closureSubmissionRoute(entry.identity),
+                    submission,
+                ),
+            );
+        }
+    }
+    for (const [author, listed] of slots.entries()) {
+        if (author === session.records.position || listed.size !== 1) continue;
+        const [identity] = listed.values();
+        const held = await heldBallotBody(session, author, identity);
+        if (held === undefined)
+            throw new Error('The proposal needs a body not held.');
+        let offset = 0;
+        await held(async (bytes) => {
+            await delivery.transfer(
+                () =>
+                    publishChunk(
+                        relay,
+                        closureBodyRoute(identity),
+                        offset,
+                        bytes,
+                    ),
+                bytes,
+            );
+            offset += bytes.length;
+        });
+    }
+};
+
 // Retransmits the retained signed close messages, inspecting the retained
-// authority around every transfer.
+// authority around every transfer. The organizer's proposal follows the
+// closure it depends on.
 export const publishClose = async (
     session: CloseSession,
     relay: PublicRelay,
@@ -1131,8 +1367,6 @@ export const publishClose = async (
             'response-' + String(session.records.position) + '.bin',
             state.responsePacket,
         ]);
-    if (generation === closePhase.proposed)
-        messages.push(['proposal.bin', state.proposalPacket]);
     if (messages.length === 0) return;
     const { context, root } = session.participant;
     const delivery = await openDelivery(context, root);
@@ -1140,6 +1374,16 @@ export const publishClose = async (
         await delivery.transfer(() =>
             publishRecord(relay, closeDirectory + name, message),
         );
+    if (generation === closePhase.proposed) {
+        await publishClosure(session, relay, delivery);
+        await delivery.transfer(() =>
+            publishRecord(
+                relay,
+                closeDirectory + 'proposal.bin',
+                state.proposalPacket,
+            ),
+        );
+    }
 };
 
 const kindNames = ['own', 'known', 'held', 'lock', 'response'];

@@ -890,17 +890,21 @@ export const bruteForceListerSets = (
 };
 
 // Deterministic message-level executions with a malicious relay. Honest
-// handlers other than the organizer never wait for another participant: a
-// response follows the first authenticated intent, a target signature the
-// first valid proposal, a release share the certificate, and verification d
-// shares or a no-result certificate. The organizer locks its own intent and
-// answers once q - 1 other responses are ready, then proposes. A participant
-// holds at most two bodies for one slot, discards late bodies at its intent
-// lock and refuses late ones afterwards; the organizer requests the one known
-// envelope's body of a slot a response lists. The relay reorders, duplicates,
-// replays another action's messages, withholds an isolated participant's
-// messages until certification, and otherwise delivers every message among
-// cooperating participants.
+// handlers other than the organizer act on the first message that enables
+// them: a response follows the first authenticated intent, a target signature
+// the first valid proposal whose records reached the signer, a release share
+// the certificate, and verification d shares or a no-result certificate. The
+// organizer locks its own intent and answers once q - 1 other responses are
+// ready, then publishes its closure and proposes. The closure copies every
+// named response, every envelope they list and every usable slot's body, so
+// a signer needs nothing a corrupt author or responder showed the organizer
+// alone. A participant holds at most two bodies for one slot, discards late
+// bodies at its intent lock and refuses late ones afterwards; the organizer
+// requests the one known envelope's body of a slot a response lists. The
+// relay reorders, duplicates, replays another action's messages, withholds an
+// isolated participant's messages until certification, may show corrupt
+// participants' messages to the organizer alone, and otherwise delivers every
+// message among cooperating participants.
 
 const createRandom = (seed: number) => {
     let state = seed >>> 0 || 1;
@@ -920,6 +924,9 @@ type Message =
     | Readonly<{ kind: 'intent'; intent: CloseIntent }>
     | Readonly<{ kind: 'response'; response: CloseResponse }>
     | Readonly<{ kind: 'proposal'; proposal: CloseProposal }>
+    // The honest organizer's copies of every named response, every envelope
+    // they list and every usable slot's body.
+    | Readonly<{ kind: 'closure'; proposal: CloseProposal }>
     | Readonly<{
           kind: 'signature';
           signer: number;
@@ -941,6 +948,13 @@ type HonestParticipant = {
     // The envelopes known with or without a body, and the bodies held.
     readonly known: Map<string, CloseEnvelope>;
     readonly held: Map<string, CloseEnvelope>;
+    // What reached this participant for a close barrier: every body it could
+    // read, every response and the proposals whose closure it received.
+    readonly readable: Set<string>;
+    readonly seen: Set<CloseResponse>;
+    readonly closures: Set<CloseProposal>;
+    // Proposals it has yet to verify.
+    readonly waiting: CloseProposal[];
     // Bodies ever received for each slot.
     readonly received: Map<number, number>;
     // Bodies the organizer requested.
@@ -990,6 +1004,12 @@ export type CloseExecutionOptions = Readonly<{
     // The relay delivers this participant's messages before any other, so
     // each of its stages is enabled in a separate delivery.
     priorityRecipient?: number;
+    // The relay shows corrupt ballots and responses only to the organizer.
+    corruptShowsOnlyOrganizer?: boolean;
+    // The rejected author-route reads: an honest organizer publishes no
+    // closure, so a signer verifies only what authors and responders showed
+    // it.
+    withoutClosure?: boolean;
 }>;
 
 export type CloseExecutionResult = Readonly<{
@@ -1031,6 +1051,10 @@ export const runCloseExecution = (
             ownEnvelope: undefined,
             known: new Map(),
             held: new Map(),
+            readable: new Set(),
+            seen: new Set(),
+            closures: new Set(),
+            waiting: [],
             received: new Map(),
             requested: new Set(),
             heldAtResponse: new Set(),
@@ -1101,6 +1125,14 @@ export const runCloseExecution = (
             else pending.push(delivery);
         }
     };
+    // A corrupt participant's message, which the relay may show only to the
+    // organizer.
+    const sendCorrupt = (message: Message): void => {
+        if (options.corruptShowsOnlyOrganizer !== true)
+            send(message, undefined);
+        else if (participants.has(organizer))
+            pending.push({ recipient: organizer, message, action });
+    };
     const work = (participant: HonestParticipant): void => {
         participant.visitSteps.add(step);
     };
@@ -1112,6 +1144,7 @@ export const runCloseExecution = (
     ): boolean => {
         const identity = identityOf(envelope);
         participant.known.set(identity, envelope);
+        if (envelope.bodyAvailable) participant.readable.add(identity);
         const inSlot = [...participant.held.values()].filter(
             ({ author }) => author === envelope.author,
         ).length;
@@ -1167,9 +1200,29 @@ export const runCloseExecution = (
         );
         allResponses.push(response);
         participant.responses.set(participant.position, response);
+        participant.seen.add(response);
         work(participant);
         send({ kind: 'response', response }, participant.position);
     };
+    // Whether a participant can verify a proposal's barrier: it received the
+    // organizer's closure, or every named response, every envelope they list
+    // and every usable slot's body reached it from their responders and
+    // authors.
+    const barrierReady = (
+        participant: HonestParticipant,
+        proposal: CloseProposal,
+    ): boolean =>
+        participant.closures.has(proposal) ||
+        (proposal.responses.every(
+            (response) =>
+                participant.seen.has(response) &&
+                response.listed.every((identity) =>
+                    participant.known.has(identity),
+                ),
+        ) &&
+            usableEnvelopes(proposal.responses, envelopes).every((envelope) =>
+                participant.readable.has(identityOf(envelope)),
+            ));
     const recordSignature = (
         participant: HonestParticipant,
         signer: number,
@@ -1250,6 +1303,11 @@ export const runCloseExecution = (
             const intent = intents.get(proposal.intent)!;
             lock(participant, intent);
             respond(participant, intent);
+        }
+        if (!barrierReady(participant, proposal)) {
+            if (!participant.waiting.includes(proposal))
+                participant.waiting.push(proposal);
+            return;
         }
         const own = participant.ownEnvelope;
         if (
@@ -1374,8 +1432,17 @@ export const runCloseExecution = (
             ),
         };
         participant.proposed = true;
+        // The organizer holds its own closure, which precedes its proposal.
+        participant.closures.add(proposal);
+        if (options.withoutClosure !== true)
+            send({ kind: 'closure', proposal }, organizer);
         send({ kind: 'proposal', proposal }, organizer);
         signTarget(participant, proposal);
+    };
+    // Verifies the proposals whose barrier a new delivery may complete.
+    const retry = (participant: HonestParticipant): void => {
+        for (const proposal of participant.waiting.splice(0))
+            signTarget(participant, proposal);
     };
     const receive = (participant: HonestParticipant, delivery: Delivery) => {
         if (participant.departed) return;
@@ -1393,6 +1460,7 @@ export const runCloseExecution = (
                 if (!holdBody(participant, message.envelope) && known)
                     ignoredMessages += 1;
                 tryPropose(participant);
+                retry(participant);
                 return;
             }
             case 'intent': {
@@ -1406,6 +1474,8 @@ export const runCloseExecution = (
             }
             case 'response': {
                 const { response } = message;
+                participant.seen.add(response);
+                retry(participant);
                 if (
                     !responseValid(response) ||
                     participant.responses.has(response.signer)
@@ -1425,6 +1495,10 @@ export const runCloseExecution = (
             }
             case 'proposal':
                 signTarget(participant, message.proposal);
+                return;
+            case 'closure':
+                participant.closures.add(message.proposal);
+                retry(participant);
                 return;
             case 'signature':
                 if (participant.targetLock === undefined)
@@ -1489,7 +1563,7 @@ export const runCloseExecution = (
                     validProof: variant % 2 === 0,
                 };
                 envelopes.set(identityOf(envelope), envelope);
-                send({ kind: 'envelope', envelope }, author);
+                sendCorrupt({ kind: 'envelope', envelope });
             }
     // Replays from another action are ignored.
     for (const recipient of participants.keys())
@@ -1611,7 +1685,7 @@ export const runCloseExecution = (
                     ),
                 };
                 allResponses.push(response);
-                send({ kind: 'response', response }, undefined);
+                sendCorrupt({ kind: 'response', response });
             }
     const corruptProposals = new Set<number>();
     let rounds = 0;
@@ -1650,13 +1724,22 @@ export const runCloseExecution = (
                     (left, right) => left.signer - right.signer,
                 ),
             };
+            // A corrupt organizer publishes its closure with each proposal,
+            // which lets honest participants sign whatever it proposes.
             for (const recipient of participants.keys())
                 if (random(2) === 0)
-                    pending.push({
-                        recipient,
-                        message: { kind: 'proposal', proposal },
-                        action,
-                    });
+                    pending.push(
+                        {
+                            recipient,
+                            message: { kind: 'closure', proposal },
+                            action,
+                        },
+                        {
+                            recipient,
+                            message: { kind: 'proposal', proposal },
+                            action,
+                        },
+                    );
         }
     }
 
@@ -1771,6 +1854,8 @@ export type CompletionProfileExecutionCensus = Readonly<{
     maximumListedEntries: number;
     targetedExecutions: number;
     targetedCertifiedExecutions: number;
+    organizerOnlyExecutions: number;
+    organizerOnlyCertifiedExecutions: number;
     maximumHeldPerSlot: number;
     maximumReceivedPerHonestSlot: number;
     maximumReceivedPerCorruptSlot: number;
@@ -1783,8 +1868,8 @@ export type CompletionProfileExecutionCensus = Readonly<{
 // certification, isolation of f honest voters, and corrupt equivocation,
 // backdating, withheld bodies listed by corrupt responders, abstention,
 // withheld responses with late bodies filling the organizer's slots and a
-// different envelope for every other honest participant, and refused
-// signatures.
+// different envelope for every other honest participant, corrupt ballots and
+// responses the relay shows only to the organizer, and refused signatures.
 export const exploreCompletionProfileExecutions = (
     participantCount = 10,
 ): CompletionProfileExecutionCensus => {
@@ -1799,6 +1884,8 @@ export const exploreCompletionProfileExecutions = (
     let maximumListedEntries = 0;
     let targetedExecutions = 0;
     let targetedCertifiedExecutions = 0;
+    let organizerOnlyExecutions = 0;
+    let organizerOnlyCertifiedExecutions = 0;
     let maximumHeldPerSlot = 0;
     let maximumReceivedPerHonestSlot = 0;
     let maximumReceivedPerCorruptSlot = 0;
@@ -1827,6 +1914,13 @@ export const exploreCompletionProfileExecutions = (
                 voters: honest,
                 targeted: true,
             },
+            {
+                isolated: 0,
+                before: 0,
+                after: 0,
+                voters: honest,
+                organizerOnly: true,
+            },
         ];
         for (const [index, value] of cases.entries()) {
             const seed = corrupt * 97 + index * 13 + 5;
@@ -1838,7 +1932,7 @@ export const exploreCompletionProfileExecutions = (
                 departedAfterCertification: value.after,
                 isolated: value.isolated,
                 seed,
-                corruptVotes: index % 2 === 0,
+                corruptVotes: index % 2 === 0 || value.organizerOnly === true,
                 corruptEquivocation: (corrupt + index) % 3,
                 corruptBackdating: index === 2,
                 corruptWithholdsBody: index === 3,
@@ -1848,6 +1942,7 @@ export const exploreCompletionProfileExecutions = (
                 refuseAfterOwnOmission: false,
                 corruptTargetsOrganizer: value.targeted === true,
                 corruptWithholdsResponses: value.targeted === true,
+                corruptShowsOnlyOrganizer: value.organizerOnly === true,
             });
             executions += 1;
             if (result.certifiedTargets > 0) certifiedExecutions += 1;
@@ -1855,6 +1950,14 @@ export const exploreCompletionProfileExecutions = (
                 targetedExecutions += 1;
                 if (result.certifiedTargets > 0)
                     targetedCertifiedExecutions += 1;
+            }
+            if (
+                value.organizerOnly === true &&
+                (corrupt & bit(organizer)) === 0
+            ) {
+                organizerOnlyExecutions += 1;
+                if (result.certifiedTargets > 0)
+                    organizerOnlyCertifiedExecutions += 1;
             }
             maximumHeldPerSlot = Math.max(
                 maximumHeldPerSlot,
@@ -1899,6 +2002,8 @@ export const exploreCompletionProfileExecutions = (
         maximumListedEntries,
         targetedExecutions,
         targetedCertifiedExecutions,
+        organizerOnlyExecutions,
+        organizerOnlyCertifiedExecutions,
         maximumHeldPerSlot,
         maximumReceivedPerHonestSlot,
         maximumReceivedPerCorruptSlot,
@@ -1907,9 +2012,9 @@ export const exploreCompletionProfileExecutions = (
     };
 };
 
-// Counterexamples for the four obligations found in review and the rejected
-// support rule. Each shows the violation under the variant and confirms the
-// maintained rule avoids it.
+// Counterexamples for the four obligations found in review, the rejected
+// support rule and the rejected author-route reads. Each shows the violation
+// under the variant and confirms the maintained rule avoids it.
 export const compileCloseObligationCounterexamples = () => {
     const four = deriveCloseProfile(4);
     const ballot: CloseEnvelope = {
@@ -2061,6 +2166,36 @@ export const compileCloseObligationCounterexamples = () => {
         listed.includes(identityOf(ballot)),
     ).length;
 
+    // Reads from authors and responders alone: of four, corrupt 3 casts a
+    // ballot and responds, and the relay shows both only to the honest
+    // organizer, whose own response lists the ballot. Every other signer
+    // lacks the ballot and whatever the proposal names of 3, until the
+    // organizer's closure delivers them.
+    const organizerOnlyOptions: CloseExecutionOptions = {
+        participantCount: 4,
+        corrupt: bit(3),
+        voters: 0b0111,
+        departedBeforeClose: 0,
+        departedAfterCertification: 0,
+        isolated: 0,
+        seed: 29,
+        corruptVotes: true,
+        corruptEquivocation: 0,
+        corruptBackdating: false,
+        corruptWithholdsBody: false,
+        corruptSignTargets: false,
+        corruptOmitsIsolated: false,
+        refuseAfterOwnOmission: false,
+        corruptShowsOnlyOrganizer: true,
+        // The organizer takes the ballot before anyone answers its intent.
+        priorityRecipient: organizer,
+    };
+    const authorRoutes = runCloseExecution({
+        ...organizerOnlyOptions,
+        withoutClosure: true,
+    });
+    const organizerClosure = runCloseExecution(organizerOnlyOptions);
+
     return {
         volatileRetentionFindings,
         durableRetentionFindings,
@@ -2086,6 +2221,10 @@ export const compileCloseObligationCounterexamples = () => {
         earlyOrganizerSelection: organizerSelection(earlyOwnListing),
         lateOrganizerSelection: organizerSelection(lateOwnListing),
         lateOwnListing,
+        authorRouteFindings: authorRoutes.findings,
+        authorRouteCertifiedTargets: authorRoutes.certifiedTargets,
+        closureFindings: organizerClosure.findings,
+        closureCertifiedTargets: organizerClosure.certifiedTargets,
         supportRuleIncludesEnvelope: supportCount >= four.quorum,
         unionRuleIncludesEnvelope: closeInventory(
             { intent: 0, responses: supportResponses },

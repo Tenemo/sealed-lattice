@@ -5237,7 +5237,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action. In the targeted executions the corrupt participants sign no response, fill the two body slots of an honest organizer with late envelopes and give every other honest participant a different on-time envelope. Every participant holds at most two bodies for one slot and discards late ones at its intent lock; the organizer requests bodies from the listing responder and the author.',
+        "The message-level executions cover every completion-profile corruption set with an honest or corrupt organizer, full and partial honest turnout, departures before the close and after certification, relay isolation of `f` honest voters, and corrupt equivocation, backdating, withheld bodies, abstention, refused signatures and replayed messages of another action. In the targeted executions the corrupt participants sign no response, fill the two body slots of an honest organizer with late envelopes and give every other honest participant a different on-time envelope. In the organizer-only executions the relay shows corrupt ballots and responses to the organizer alone. Every participant holds at most two bodies for one slot and discards late ones at its intent lock; the organizer requests bodies from the listing responder and the author. A signer verifies a proposal once its named responses, listed envelopes and usable bodies reached it, which the organizer's closure supplies.",
         '',
         table(
             ['Property', 'Value'],
@@ -5273,6 +5273,10 @@ export const renderDocumentationCensus = (): string => {
                     `${formatCount(closeResponses.execution.targetedCertifiedExecutions)} of ${formatCount(closeResponses.execution.targetedExecutions)}`,
                 ],
                 [
+                    'Certified organizer-only executions',
+                    `${formatCount(closeResponses.execution.organizerOnlyCertifiedExecutions)} of ${formatCount(closeResponses.execution.organizerOnlyExecutions)}`,
+                ],
+                [
                     'Most bodies held at once for one slot',
                     formatCount(closeResponses.execution.maximumHeldPerSlot),
                 ],
@@ -5304,7 +5308,7 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'Each review obligation fails under its variant and holds under the maintained rule. The support-rule row replays the rejected organizer-selected union.',
+        'Each review obligation fails under its variant and holds under the maintained rule. The support-rule row replays the rejected organizer-selected union, and the author-route row replays signers that read records only from their authors and responders.',
         '',
         table(
             ['Variant', 'Outcome'],
@@ -5359,6 +5363,21 @@ export const renderDocumentationCensus = (): string => {
                     closeResponses.counterexamples.unionRuleIncludesEnvelope
                         ? 'yes'
                         : 'no',
+                ],
+                [
+                    'Signers read only authors and responders; a corrupt author and responder show theirs to the organizer alone',
+                    `${formatCount(closeResponses.counterexamples.authorRouteCertifiedTargets)} certified targets, findings: ${closeResponses.counterexamples.authorRouteFindings.join(', ')}`,
+                ],
+                [
+                    'The organizer publishes its closure before its proposal',
+                    `${formatCount(closeResponses.counterexamples.closureCertifiedTargets)} certified target, findings: ${
+                        closeResponses.counterexamples.closureFindings
+                            .length === 0
+                            ? 'none'
+                            : closeResponses.counterexamples.closureFindings.join(
+                                  ', ',
+                              )
+                    }`,
                 ],
             ],
         ),

@@ -509,15 +509,23 @@ fn main() -> io::Result<()> {
         CloseProposalMessage::parse(proposal_body, count, close.organizer()).map_err(refusal)?;
     let mut response_packets = Vec::new();
     let mut needed = BTreeSet::new();
-    for (responder, _) in named.responses() {
-        work.depend(&records.join(format!("response-{responder}.bin")))?;
-        let bytes = close_packet(
-            &records,
-            &format!("response-{responder}.bin"),
-            ClosePurpose::Response,
-            count,
-            &mut work,
-        )?;
+    for (responder, identity) in named.responses() {
+        // The organizer's copy under the named identity, when the records
+        // hold it, or else the responder's own.
+        let closure = format!(
+            "closure/response-{}.bin",
+            identity
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        let name = if records.join(&closure).is_file() {
+            closure
+        } else {
+            format!("response-{responder}.bin")
+        };
+        work.depend(&records.join(&name))?;
+        let bytes = close_packet(&records, &name, ClosePurpose::Response, count, &mut work)?;
         let (body, _) = packet(
             &bytes,
             maximum_close_message_bytes(ClosePurpose::Response, count),

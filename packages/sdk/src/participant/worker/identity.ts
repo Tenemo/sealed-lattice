@@ -6,14 +6,16 @@ import type { ParticipantIdentities } from './predecessor.js';
 export const participantRuntimeLabel = 'participant-runtime/8';
 
 // The purposes whose identities the participant module derives, each under
-// its own domain. The target and envelope purposes yield the certified
-// target's and a ballot envelope's own identities.
+// its own domain. The target, envelope and close-response purposes yield the
+// certified target's, a ballot envelope's and a close response body's own
+// identities.
 export const custodyPurpose = {
     root: 0,
     record: 1,
     enrollmentInput: 2,
     target: 3,
     envelope: 4,
+    closeResponse: 5,
 } as const;
 type CustodyPurpose = (typeof custodyPurpose)[keyof typeof custodyPurpose];
 
