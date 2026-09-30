@@ -1,4 +1,4 @@
-import { evaluateReferenceRanking } from '#tests/exact-ranking-model.js';
+import { evaluateReferenceRanking } from '#tests/reference-ranking-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 // Release subsets and departure sets the ceremony checks after share

@@ -18,15 +18,12 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileBatchedPublicationVisitCensus } from '#tests/batched-publication-model.js';
-import { compileBoundedIntegerSharingPrivacyCensus } from '#tests/bounded-integer-sharing-privacy-model.js';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 import { compileBoundedLookupCensus } from '#tests/bounded-lookup-model.js';
 import {
     compileBrowserWordProverResources,
     compileContributionGenerationResources,
 } from '#tests/browser-word-prover-resource-model.js';
-import { compileByteCarryLiftingCensus } from '#tests/byte-carry-lifting-model.js';
-import { compileCandidateSetupProofFieldCensus } from '#tests/candidate-setup-proof-field-model.js';
 import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
 import { compileCertificationReleaseThresholdCensus } from '#tests/certification-release-threshold-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
@@ -67,15 +64,9 @@ import {
     noPublicQuerySliceCoupling,
 } from '#tests/delayed-point-disclosure-model.js';
 import {
-    exactRankingModelConstants,
-    compilePackedRankingEvaluationGraph,
-    verifyExactRankingModel,
-} from '#tests/exact-ranking-model.js';
-import {
     excludedPrefixStreamControl,
     fullXofPrefixControl,
 } from '#tests/excluded-prefix-stream-model.js';
-import { compileFheKeyIntegerEmbeddingBounds } from '#tests/fhe-key-integer-embedding-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { compileFixedPublicationWitnessCensus } from '#tests/fixed-publication-witness-model.js';
 import { compileFixedWitnessReleaseSimulationCensus } from '#tests/fixed-witness-release-simulation-model.js';
@@ -84,7 +75,6 @@ import {
     compileFullWordProofLayout,
     compileLinkedReleaseWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
-import { compileGenericCommitAndOpenProofResourceCensus } from '#tests/generic-commit-and-open-proof-resource-model.js';
 import { hashGraphCollisionBound } from '#tests/hash-graph-model.js';
 import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import {
@@ -141,8 +131,6 @@ import {
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compilePublicArchiveResourceCensus } from '#tests/public-archive-resource-model.js';
-import { verifyPublicEncryptedSharingModel } from '#tests/public-encrypted-sharing-model.js';
-import { compilePublicEncryptedSharingProofResourceCensus } from '#tests/public-encrypted-sharing-proof-resource-model.js';
 import { runPublicationCloseRaceModel } from '#tests/publication-close-race-model.js';
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
@@ -163,7 +151,6 @@ import {
     compileSetupRandomnessCensus,
     setupGaussianParameters,
 } from '#tests/setup-randomness-model.js';
-import { compileShareEncryptionCrossModulusCensus } from '#tests/share-encryption-cross-modulus-model.js';
 import {
     compileSigningKeyRecoveryWork,
     keyRecoveryChallengeControl,
@@ -196,7 +183,6 @@ import {
 } from '#tests/supported-profile-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
-import { compileThresholdKeyAggregationResourceLowerBound } from '#tests/threshold-key-aggregation-resource-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 import {
     unrevealedPointQueryBound,
@@ -225,13 +211,10 @@ const table = (
 export const renderDocumentationCensus = (): string => {
     const completion = completionProfile();
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
-    const boundedIntegerSharing = compileBoundedIntegerSharingPrivacyCensus();
     const boundedLinearProof = compileBoundedLinearPolynomialProofCensus();
     const boundedLookup = compileBoundedLookupCensus();
-    const byteCarryLifting = compileByteCarryLiftingCensus();
     const smallLimbProofField = compileSmallLimbProofFieldCensus();
     const proofFieldReduction = compileProofFieldReductionCensus();
-    const candidateSetupProofField = compileCandidateSetupProofFieldCensus();
     const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
     const proofVerifierQueries = compileProofVerifierQueryCensus();
     const releaseVerification = compileReleaseVerificationWorkload({
@@ -243,8 +226,6 @@ export const renderDocumentationCensus = (): string => {
     const closeRace = runPublicationCloseRaceModel(10, false);
     const closeResponses = compileCloseResponseCensus();
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
-    const thresholdKeyResources =
-        compileThresholdKeyAggregationResourceLowerBound();
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
     const participantVisits = compileParticipantVisitDependencyCensus();
     const fixedPublicationWitnesses = compileFixedPublicationWitnessCensus();
@@ -311,12 +292,6 @@ export const renderDocumentationCensus = (): string => {
     const linkedReleaseProof = compileLinkedReleaseWordProofLayout(completion);
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const spongePaths = compileSpongePathExtractionCensus();
-    const publicEncryptedSharing = verifyPublicEncryptedSharingModel();
-    const publicEncryptedSharingProof =
-        compilePublicEncryptedSharingProofResourceCensus();
-    const shareEncryptionCrossModulus =
-        compileShareEncryptionCrossModulusCensus();
-    const fheKeyEmbedding = compileFheKeyIntegerEmbeddingBounds();
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
     const contributionBodies = supportedProfiles.profiles.map((row) =>
@@ -389,8 +364,6 @@ export const renderDocumentationCensus = (): string => {
     const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
     const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
     const falseRelation = createFalseBinaryRelationTable();
-    const genericProofResources =
-        compileGenericCommitAndOpenProofResourceCensus();
     if (
         thresholdKeyAggregation.maximumScaledReconstructionCoefficientOneNorm !==
             thresholdReleaseNoise.exactMaximumScaledReconstructionCoefficientOneNorm ||
@@ -401,9 +374,6 @@ export const renderDocumentationCensus = (): string => {
             'Independent modular and rational interpolation models disagree.',
         );
     }
-    const rankingCensus = verifyExactRankingModel();
-    const completionGraph = compilePackedRankingEvaluationGraph(10, 10, 10);
-    const maximumGraph = compilePackedRankingEvaluationGraph(20, 20, 20);
 
     return `${[
         '# Documentation census',
@@ -511,753 +481,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Experiment gadget length',
                     formatCount(thresholdKeyAggregation.gadgetLength),
-                ],
-            ],
-        ),
-        '',
-        '## Public encrypted-sharing structural census',
-        '',
-        'This independent finite-ring model generates one additive share-encryption key per recipient, encrypts every contributor-recipient evaluation of a degree-three Shamir polynomial, adds ciphertexts by recipient, decrypts each aggregate, and reconstructs the common secret from every four-position subset. Its production bound assumes ternary key and ciphertext witnesses and derives a zero-failure coefficient scale from exact convolution bounds. It does not establish Ring-LWE security, public-key witness uniqueness, proof soundness or zero knowledge, the production ring mapping, or browser feasibility.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Toy ring degree',
-                    formatCount(publicEncryptedSharing.toyRingDegree),
-                ],
-                [
-                    'Contributor-recipient ciphertexts checked',
-                    formatCount(
-                        publicEncryptedSharing.contributorRecipientCiphertextsChecked,
-                    ),
-                ],
-                [
-                    'Aggregate ciphertexts checked',
-                    formatCount(
-                        publicEncryptedSharing.aggregateCiphertextsChecked,
-                    ),
-                ],
-                [
-                    'Authorized reconstruction subsets checked',
-                    formatCount(
-                        publicEncryptedSharing.authorizedReconstructionSubsetsChecked,
-                    ),
-                ],
-                [
-                    'Tampered ciphertext changed aggregate share',
-                    publicEncryptedSharing.tamperedCiphertextChangedShare
-                        ? 'yes'
-                        : 'no',
-                ],
-                [
-                    'Production single-ciphertext noise coefficient bound',
-                    formatCount(
-                        publicEncryptedSharing.productionSingleCiphertextNoiseCoefficientBound,
-                    ),
-                ],
-                [
-                    'Production aggregate noise coefficient bound',
-                    formatCount(
-                        publicEncryptedSharing.productionAggregateNoiseCoefficientBound,
-                    ),
-                ],
-                [
-                    'Production share-encoding scale',
-                    formatCount(
-                        publicEncryptedSharing.productionShareEncodingScale,
-                    ),
-                ],
-            ],
-        ),
-        '',
-        '## Bounded-integer sharing privacy census',
-        '',
-        'For every corrupt three-position set, this exact reduced-ring model constructs the integral degree-three basis polynomial that equals one at the secret point and zero at the corrupt evaluation points. It exhausts every extreme secret-difference block, lifts the maximum translation across the production ring and ten hybrid steps, and chooses the smallest power-of-two coefficient bound meeting the stated uniform-cube statistical-distance inequality. It then searches a deterministic Proth sequence for a prime above the centered aggregate-share span and verifies the exact Proth witness and transform congruence. The resulting plaintext and share-encryption moduli are arithmetic bounds, not a complete privacy proof, Ring-LWE parameter approval, or implementation.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Corrupt subsets checked',
-                    formatCount(boundedIntegerSharing.corruptSubsetsChecked),
-                ],
-                [
-                    'Reduced-ring blocks',
-                    formatCount(boundedIntegerSharing.reducedRingBlockCount),
-                ],
-                [
-                    'Production interpolation-point exponent stride',
-                    formatCount(
-                        boundedIntegerSharing.productionInterpolationPointExponentStride,
-                    ),
-                ],
-                [
-                    'Maximum nonconstant basis one-norm',
-                    formatCount(
-                        boundedIntegerSharing.maximumBasisNonconstantOneNorm,
-                    ),
-                ],
-                [
-                    'Maximum translation one-norm per reduced block',
-                    formatCount(
-                        boundedIntegerSharing.maximumBlockTranslationOneNorm,
-                    ),
-                ],
-                [
-                    'Maximum production translation per contribution',
-                    formatCount(
-                        boundedIntegerSharing.maximumProductionTranslationOneNormPerContribution,
-                    ),
-                ],
-                [
-                    'Maximum ten-hybrid translation',
-                    formatCount(
-                        boundedIntegerSharing.maximumHybridTranslationOneNorm,
-                    ),
-                ],
-                [
-                    'Statistical privacy bits',
-                    formatCount(
-                        boundedIntegerSharing.statisticalPrivacyBitLength,
-                    ),
-                ],
-                [
-                    'Sharing-coefficient sampling bound',
-                    formatCount(boundedIntegerSharing.coefficientSamplingBound),
-                ],
-                [
-                    'Aggregate share coefficient bound',
-                    formatCount(
-                        boundedIntegerSharing.aggregateShareCoefficientBound,
-                    ),
-                ],
-                [
-                    'Share plaintext-span bits',
-                    formatCount(
-                        boundedIntegerSharing.sharePlaintextSpanBitLength,
-                    ),
-                ],
-                [
-                    'Share plaintext prime',
-                    formatCount(boundedIntegerSharing.sharePlaintextModulus),
-                ],
-                [
-                    'Share plaintext prime bits',
-                    formatCount(
-                        boundedIntegerSharing.sharePlaintextModulusBitLength,
-                    ),
-                ],
-                [
-                    'Share plaintext prime Proth multiplier',
-                    formatCount(
-                        boundedIntegerSharing.sharePlaintextPrimeMultiplier,
-                    ),
-                ],
-                [
-                    'Share plaintext prime Proth exponent',
-                    formatCount(
-                        boundedIntegerSharing.sharePlaintextTransformExponent,
-                    ),
-                ],
-                [
-                    'Share plaintext prime Proth witness',
-                    formatCount(
-                        boundedIntegerSharing.sharePlaintextPrimeWitness,
-                    ),
-                ],
-                [
-                    'Proth candidates checked',
-                    formatCount(
-                        boundedIntegerSharing.sharePlaintextPrimeCandidateCount,
-                    ),
-                ],
-                [
-                    'Share-encryption modulus bits',
-                    formatCount(
-                        boundedIntegerSharing.shareEncryptionModulusBitLength,
-                    ),
-                ],
-            ],
-        ),
-        '',
-        '## Threshold key-aggregation resource floor',
-        '',
-        'This lower bound screens a depth-sized BGV layout at polynomial modulus degree 32,768. It retains three approximately 55-bit primes after the qualification graph, assigns one approximately 34-bit prime to each consumed multiplication level, and accounts separately for two approximately 60-bit auxiliary evaluation-key primes. The rejected private-opening representation commits to each of four sharing coefficients separately with the smallest computationally hiding BDLOP18 layout and sends one evaluation plus its three-element opening to each remote recipient. The replacement public encrypted-sharing floor uses the certified bounded-integer plaintext prime and model-derived 21-bit zero-failure encoding scale, one common-matrix public-key ring element per recipient, and two ciphertext ring elements for every contributor-recipient pair. It counts the exact KLSW (b,d,v,h) contribution: encryption reuses b[0] and one automorphism uses one h vector. Common vectors are regenerated and their runtime work is omitted. It assumes compact bit-packed transfer elements, and omits every proof, framing byte, scratch allocation, and JavaScript/WebAssembly copy. The tuple is a resource falsifier informed by native development and attack-estimator probes, not a security parameter approval or browser result.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Candidate ciphertext-modulus bits',
-                    formatCount(
-                        thresholdKeyResources.candidateCiphertextModulusBitLength,
-                    ),
-                ],
-                [
-                    'Candidate auxiliary-modulus bits',
-                    formatCount(
-                        thresholdKeyResources.auxiliaryModulusBitLength,
-                    ),
-                ],
-                [
-                    'Candidate combined-modulus bits',
-                    formatCount(
-                        thresholdKeyResources.candidateCombinedModulusBitLength,
-                    ),
-                ],
-                [
-                    'Ciphertext RNS limbs',
-                    formatCount(
-                        thresholdKeyResources.ciphertextModulusLimbCount,
-                    ),
-                ],
-                [
-                    'Serialized ring element',
-                    formatCount(
-                        thresholdKeyResources.oneSerializedRingElementByteLength,
-                    ),
-                ],
-                [
-                    'Ring elements in one public-key contribution',
-                    formatCount(
-                        thresholdKeyResources.publicKeyContributionRingElementCount,
-                    ),
-                ],
-                [
-                    'One public-key contribution',
-                    formatCount(
-                        thresholdKeyResources.onePublicKeyContributionByteLength,
-                    ),
-                ],
-                [
-                    'Ten public-key contributions',
-                    formatCount(
-                        thresholdKeyResources.publicKeyContributionCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Ring elements in four coefficient commitments per contributor',
-                    formatCount(
-                        thresholdKeyResources.coefficientCommitmentRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Four coefficient commitments per contributor',
-                    formatCount(
-                        thresholdKeyResources.coefficientCommitmentByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Ten coefficient commitments',
-                    formatCount(
-                        thresholdKeyResources.coefficientCommitmentCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Ring elements in one remote private carrier',
-                    formatCount(
-                        thresholdKeyResources.minimumPrivateCarrierRingElementCount,
-                    ),
-                ],
-                [
-                    'Remote raw-share payload floor',
-                    formatCount(
-                        thresholdKeyResources.minimumRemoteSharePayloadByteLength,
-                    ),
-                ],
-                [
-                    'Private-opening overhead',
-                    formatCount(
-                        thresholdKeyResources.privateOpeningOverheadByteLength,
-                    ),
-                ],
-                [
-                    'Remote private-sharing payload floor',
-                    formatCount(
-                        thresholdKeyResources.minimumRemotePrivateSharingPayloadByteLength,
-                    ),
-                ],
-                [
-                    'Compact-opening proof budget before the variance ceiling',
-                    formatCount(
-                        thresholdKeyResources.availableCompactOpeningProofCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Compact-opening proof budget per remote carrier',
-                    formatCount(
-                        thresholdKeyResources.availableCompactOpeningProofPerCarrierByteLength,
-                    ),
-                ],
-                [
-                    'Share-encryption aggregate noise coefficient bound',
-                    formatCount(
-                        thresholdKeyResources.shareEncryptionAggregateNoiseCoefficientBound,
-                    ),
-                ],
-                [
-                    'Share-encoding scale',
-                    formatCount(thresholdKeyResources.shareEncodingScale),
-                ],
-                [
-                    'Share-encryption modulus bits',
-                    formatCount(
-                        thresholdKeyResources.shareEncryptionModulusBitLength,
-                    ),
-                ],
-                [
-                    'Serialized share-encryption ring element',
-                    formatCount(
-                        thresholdKeyResources.oneSerializedShareEncryptionRingElementByteLength,
-                    ),
-                ],
-                [
-                    'Ten share-encryption public keys',
-                    formatCount(
-                        thresholdKeyResources.shareEncryptionPublicKeyCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Ring elements in one optimistic public encrypted share',
-                    formatCount(
-                        thresholdKeyResources.minimumPublicEncryptedShareCiphertextRingElementCount,
-                    ),
-                ],
-                [
-                    'Public encrypted-share corpus floor',
-                    formatCount(
-                        thresholdKeyResources.minimumPublicEncryptedShareCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Public encrypted-sharing setup floor before proofs',
-                    formatCount(
-                        thresholdKeyResources.minimumPublicEncryptedSharingSetupCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Public encrypted-sharing proof budget before the variance ceiling',
-                    formatCount(
-                        thresholdKeyResources.availablePublicEncryptedSharingProofBudgetByteLength,
-                    ),
-                ],
-                [
-                    'Public encrypted-sharing proof budget per contributor',
-                    formatCount(
-                        thresholdKeyResources.availablePublicEncryptedSharingProofPerContributorByteLength,
-                    ),
-                ],
-                [
-                    'Setup transfer corpus floor',
-                    formatCount(
-                        thresholdKeyResources.minimumSetupTransferCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Setup transfer variance ceiling',
-                    formatCount(
-                        thresholdKeyResources.setupTransferVarianceCeilingByteLength,
-                    ),
-                ],
-                [
-                    'Above setup-transfer variance ceiling',
-                    thresholdKeyResources.exceedsSetupTransferVarianceCeiling
-                        ? 'yes'
-                        : 'no',
-                ],
-                [
-                    'Completion evaluation data live set',
-                    formatCount(
-                        thresholdKeyResources.completionEvaluationDataLiveByteLength,
-                    ),
-                ],
-                [
-                    'Aggregate relinearization key live set',
-                    formatCount(
-                        thresholdKeyResources.aggregateRelinearizationKeyLiveByteLength,
-                    ),
-                ],
-                [
-                    'Evaluation plus relinearization floor',
-                    formatCount(
-                        thresholdKeyResources.minimumEvaluationLiveByteLengthWithRelinearizationKey,
-                    ),
-                ],
-                [
-                    'One aggregate unit-rotation key',
-                    formatCount(
-                        thresholdKeyResources.aggregateUnitRotationKeyLiveByteLength,
-                    ),
-                ],
-                [
-                    'Evaluation plus all required evaluation keys floor',
-                    formatCount(
-                        thresholdKeyResources.minimumEvaluationLiveByteLengthWithAllEvaluationKeys,
-                    ),
-                ],
-                [
-                    'Ciphertexts plus current streamed evaluation-key floor',
-                    formatCount(
-                        thresholdKeyResources.scheduledPeakCiphertextAndCurrentEvaluationKeyByteLength,
-                    ),
-                ],
-                [
-                    'Streaming headroom before scratch and copies',
-                    formatCount(
-                        thresholdKeyResources.streamingMemoryHeadroomBeforeScratchByteLength,
-                    ),
-                ],
-                [
-                    'One-key-pass-per-operation local reads',
-                    formatCount(
-                        thresholdKeyResources.oneKeyPassPerOperationReadByteLength,
-                    ),
-                ],
-                [
-                    'WebAssembly absolute memory bound',
-                    formatCount(
-                        thresholdKeyResources.webAssemblyAbsoluteMemoryBoundByteLength,
-                    ),
-                ],
-                [
-                    'Fully resident evaluation plus relinearization above the absolute bound',
-                    thresholdKeyResources.exceedsWebAssemblyAbsoluteMemoryBound
-                        ? 'yes'
-                        : 'no',
-                ],
-                [
-                    'Fully resident evaluation plus all keys above the absolute bound',
-                    thresholdKeyResources.exceedsWebAssemblyAbsoluteMemoryBoundWithAllEvaluationKeys
-                        ? 'yes'
-                        : 'no',
-                ],
-            ],
-        ),
-        '',
-        '## Public encrypted-sharing proof screen',
-        '',
-        "This optimistic direct-Ligero screen counts two multiplication constraints for each ternary coefficient, one binary constraint for every shifted-encoding bit, the exact upper-endpoint constraint, and one constraint for each linear ring-coordinate equation. It then searches the discrete power-of-two code dimensions in the exact AHIV22 Section 5.3 communication expression, including Merkle authentication paths. The soundness and random-oracle exponents compensate the CMS19 quadratic and cubic losses for an assumed quantum-query bound plus a component margin, but omit the theorem's asymptotic constant. The screen also omits complete modulus conversion, proof framing and roots, a fixed-hash instantiation, release proofs, and every implementation allocation. Expanded witness and encoded-oracle bytes are proof-field representations, not measured live sets.",
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Ternary ring elements per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.ternaryRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Sharing-coefficient decomposition bits',
-                    formatCount(
-                        publicEncryptedSharingProof.sharingCoefficientDecompositionBitLength,
-                    ),
-                ],
-                [
-                    'Binary-decomposition ring elements per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.binaryDecompositionRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Bounded ring elements per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.boundedRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Bounded coefficients per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.boundedCoefficientCountPerContributor,
-                    ),
-                ],
-                [
-                    'Ternary constraints per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.ternaryConstraintCountPerContributor,
-                    ),
-                ],
-                [
-                    'Binary-decomposition constraints per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.binaryDecompositionConstraintCountPerContributor,
-                    ),
-                ],
-                [
-                    'Binary endpoint constraints per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.binaryEndpointConstraintCountPerContributor,
-                    ),
-                ],
-                [
-                    'Linear constraints per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.linearConstraintCountPerContributor,
-                    ),
-                ],
-                [
-                    'Optimistic circuit constraints per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.optimisticCircuitConstraintCountPerContributor,
-                    ),
-                ],
-                [
-                    'Proof field-element bits',
-                    formatCount(
-                        publicEncryptedSharingProof.proofFieldElementBitLength,
-                    ),
-                ],
-                [
-                    'Interactive soundness bits after query-loss compensation',
-                    formatCount(
-                        publicEncryptedSharingProof.interactiveSoundnessBitLength,
-                    ),
-                ],
-                [
-                    'Random-oracle output bits after query-loss compensation',
-                    formatCount(
-                        publicEncryptedSharingProof.randomOracleOutputBitLength,
-                    ),
-                ],
-                [
-                    'Ligero query count',
-                    formatCount(publicEncryptedSharingProof.ligeroQueryCount),
-                ],
-                [
-                    'Ligero repetition count',
-                    formatCount(
-                        publicEncryptedSharingProof.ligeroRepetitionCount,
-                    ),
-                ],
-                [
-                    'Ligero message block length',
-                    formatCount(
-                        publicEncryptedSharingProof.ligeroMessageBlockLength,
-                    ),
-                ],
-                [
-                    'Ligero code dimension',
-                    formatCount(
-                        publicEncryptedSharingProof.ligeroCodeDimension,
-                    ),
-                ],
-                [
-                    'Ligero code length',
-                    formatCount(publicEncryptedSharingProof.ligeroCodeLength),
-                ],
-                [
-                    'Ligero witness rows',
-                    formatCount(
-                        publicEncryptedSharingProof.ligeroWitnessRowCount,
-                    ),
-                ],
-                [
-                    'Optimistic Ligero proof per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.optimisticLigeroProofByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Optimistic ten-proof corpus',
-                    formatCount(
-                        publicEncryptedSharingProof.optimisticTenProofCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Proof budget remaining per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.proofBudgetRemainingByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Fits setup proof budget before fixed hash and lifting constant',
-                    publicEncryptedSharingProof.fitsSetupProofBudgetBeforeFixedHashAndLiftingConstant
-                        ? 'yes'
-                        : 'no',
-                ],
-                [
-                    'Expanded bounded witness per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.expandedBoundedWitnessByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Public input per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.publicInputByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Public input plus expanded witness per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.publicInputPlusExpandedWitnessByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Encoded proof-oracle field elements per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.encodedProofOracleFieldElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Encoded proof oracle per contributor',
-                    formatCount(
-                        publicEncryptedSharingProof.encodedProofOracleByteLengthPerContributor,
-                    ),
-                ],
-                [
-                    'Encoded proof oracle above setup-storage variance ceiling',
-                    publicEncryptedSharingProof.exceedsSetupStorageVarianceCeiling
-                        ? 'yes'
-                        : 'no',
-                ],
-            ],
-        ),
-        '',
-        '## Candidate setup-proof field census',
-        '',
-        "This arithmetic model verifies the exact power-form modulus, factors its base completely, checks one Pocklington witness for every distinct prime divisor of the factored modulus-minus-one, and verifies the production negacyclic-transform congruence. Pocklington's theorem therefore certifies the candidate as prime without relying on a probabilistic primality test. Its exact value also exceeds every bounded direct FHE key residual, including the quotient term. Packed transfer and uint64-limb storage are separate quantities. This selects a field for proof experiments only; it does not prove PIOP security, approve the FHE tuple, or establish browser feasibility.",
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Proof-field modulus',
-                    formatCount(candidateSetupProofField.modulus),
-                ],
-                [
-                    'Proof-field modulus bits',
-                    formatCount(candidateSetupProofField.modulusBitLength),
-                ],
-                [
-                    'Canonical field-element bytes',
-                    formatCount(candidateSetupProofField.modulusByteLength),
-                ],
-                [
-                    'Field element in uint64 limbs',
-                    formatCount(candidateSetupProofField.limbByteLength),
-                ],
-                [
-                    'Minimum field modulus for direct FHE key embedding',
-                    formatCount(fheKeyEmbedding.minimumProofFieldModulus),
-                ],
-                [
-                    'FHE key quotient ring elements per contributor',
-                    formatCount(
-                        fheKeyEmbedding.quotientRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'FHE key quotient magnitude bound',
-                    formatCount(fheKeyEmbedding.maximumQuotientMagnitude),
-                ],
-                ['Power base', formatCount(candidateSetupProofField.powerBase)],
-                [
-                    'Power exponent',
-                    formatCount(candidateSetupProofField.powerExponent),
-                ],
-                [
-                    'Base prime factors certified',
-                    formatCount(candidateSetupProofField.basePrimeFactorCount),
-                ],
-                [
-                    'Pocklington witnesses checked',
-                    formatCount(
-                        candidateSetupProofField.pocklingtonWitnessCount,
-                    ),
-                ],
-                [
-                    'Required transform order',
-                    formatCount(candidateSetupProofField.transformOrder),
-                ],
-            ],
-        ),
-        '',
-        '## Share-encryption cross-modulus census',
-        '',
-        'This exact arithmetic model embeds the composite share-encryption congruences into the much larger candidate setup-proof field. It derives centered numerator bounds, one integer quotient bound for the share-encryption public-key equation and each ciphertext component, and the minimum proof-field width that prevents a false field equality from wrapping. A separate reduced-ring execution constructs valid quotients and rejects a changed public residue. These results establish only the integer embedding and its witness floor; they do not prove the surrounding PIOP, Ring-LWE security, or browser feasibility.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Share-encryption modulus',
-                    formatCount(
-                        shareEncryptionCrossModulus.shareEncryptionModulus,
-                    ),
-                ],
-                [
-                    'Per-contribution share coefficient bound',
-                    formatCount(
-                        shareEncryptionCrossModulus.perContributionShareCoefficientBound,
-                    ),
-                ],
-                [
-                    'Public-key quotient bound',
-                    formatCount(
-                        shareEncryptionCrossModulus.shareEncryptionKeyQuotientBound,
-                    ),
-                ],
-                [
-                    'Ciphertext-first quotient bound',
-                    formatCount(
-                        shareEncryptionCrossModulus.ciphertextFirstQuotientBound,
-                    ),
-                ],
-                [
-                    'Ciphertext-second quotient bound',
-                    formatCount(
-                        shareEncryptionCrossModulus.ciphertextSecondQuotientBound,
-                    ),
-                ],
-                [
-                    'Quotient ring elements per contributor',
-                    formatCount(
-                        shareEncryptionCrossModulus.quotientRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Quotient norm decomposition length',
-                    formatCount(
-                        shareEncryptionCrossModulus.quotientNormDecompositionLength,
-                    ),
-                ],
-                [
-                    'Signed quotient storage bits per coefficient',
-                    formatCount(
-                        shareEncryptionCrossModulus.quotientSignedEncodingBitLength,
-                    ),
-                ],
-                [
-                    'Quotient norm digit ring elements',
-                    formatCount(
-                        shareEncryptionCrossModulus.quotientNormDigitRingElementCountPerContributor,
-                    ),
-                ],
-                [
-                    'Minimum no-wrap proof-field bits',
-                    formatCount(
-                        shareEncryptionCrossModulus.minimumProofFieldElementBitLength,
-                    ),
-                ],
-                [
-                    'Candidate proof-field bits',
-                    formatCount(
-                        shareEncryptionCrossModulus.candidateProofFieldElementBitLength,
-                    ),
-                ],
-                [
-                    'Reduced-ring coefficient equations checked',
-                    formatCount(
-                        shareEncryptionCrossModulus.toyCoefficientEquationCount,
-                    ),
-                ],
-                [
-                    'Changed residue rejected',
-                    shareEncryptionCrossModulus.toyTamperRejected
-                        ? 'yes'
-                        : 'no',
                 ],
             ],
         ),
@@ -1449,58 +672,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Invalid acceptances when the occurrence count wraps',
                     formatCount(boundedLookup.characteristicWrapAcceptances),
-                ],
-            ],
-        ),
-        '',
-        '## Byte and carry lifting census',
-        '',
-        'The scalar residual bound covers every accepted signed quotient and carry for the experimental FHE key equation. The finite ring checks positive integer rows and a false large-modulus equation that becomes an alias without the carry bound.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Finite experiment ring degree',
-                    formatCount(byteCarryLifting.degree),
-                ],
-                [
-                    'Public coefficient limb count',
-                    formatCount(byteCarryLifting.limbCount),
-                ],
-                ['Limb radix', formatCount(byteCarryLifting.radix)],
-                [
-                    'Signed quotient magnitude bound',
-                    formatCount(byteCarryLifting.quotientBound),
-                ],
-                [
-                    'Signed carry magnitude bound',
-                    formatCount(byteCarryLifting.carryBound),
-                ],
-                [
-                    'Maximum accepted per-limb residual bound',
-                    formatCount(byteCarryLifting.residualBound),
-                ],
-                ['Proof-field modulus', formatCount(byteCarryLifting.field)],
-                [
-                    'Positive integer equations checked',
-                    formatCount(byteCarryLifting.positiveIntegerEquations),
-                ],
-                [
-                    'Maximum carry in finite positive cases',
-                    formatCount(byteCarryLifting.maximumCarry),
-                ],
-                [
-                    'Maximum quotient in finite positive cases',
-                    formatCount(byteCarryLifting.maximumQuotient),
-                ],
-                [
-                    'Carry required by the field alias',
-                    formatCount(byteCarryLifting.largestCheatingCarry),
-                ],
-                [
-                    'Out-of-range alias carries',
-                    formatCount(byteCarryLifting.outOfRangeCarries),
                 ],
             ],
         ),
@@ -6383,64 +5554,6 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Generic commit-and-open setup-proof floor',
-        '',
-        'This optimistic subtotal applies the pinned 128-bit quantum ZKB++/Unruh repetition count and only the binary-multiplication term of its proof-size formula to the bounded coefficients in the depth-sized setup witness. It charges an unrealistically favorable one non-linear gate per bounded coefficient and omits all inputs, commitments, openings, linear work, encrypted sharing expansion, and proof framing. It rejects this direct generic compiler for setup, not commit-and-open proofs or lattice-native proofs as families.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Quantum-security parallel repetitions',
-                    formatCount(
-                        genericProofResources.quantumSecurityParallelRepetitionCount,
-                    ),
-                ],
-                [
-                    'Proof bits per binary multiplication gate',
-                    formatCount(
-                        genericProofResources.proofBitsPerBinaryMultiplicationGate,
-                    ),
-                ],
-                [
-                    'Bounded ring elements per setup witness',
-                    formatCount(
-                        genericProofResources.boundedRingElementCountPerSetupContribution,
-                    ),
-                ],
-                [
-                    'Bounded coefficients per setup witness',
-                    formatCount(
-                        genericProofResources.boundedCoefficientCountPerSetupContribution,
-                    ),
-                ],
-                [
-                    'Proof floor per setup contribution',
-                    formatCount(
-                        genericProofResources.minimumProofSizePerSetupContributionByteLength,
-                    ),
-                ],
-                [
-                    'Ten-proof corpus floor',
-                    formatCount(
-                        genericProofResources.minimumProofCorpusByteLength,
-                    ),
-                ],
-                [
-                    'Setup plus proof subtotal',
-                    formatCount(
-                        genericProofResources.combinedSetupAndProofSubtotalByteLength,
-                    ),
-                ],
-                [
-                    'Above setup-transfer variance ceiling',
-                    genericProofResources.exceedsSetupTransferVarianceCeiling
-                        ? 'yes'
-                        : 'no',
-                ],
-            ],
-        ),
-        '',
         '## Combining target certification and ordinary release shares',
         '',
         'This comparison attaches ordinary threshold-decryption shares to target votes. Corrupt participants keep their own shares and withhold all their public responses. The table counts the honest public responses sufficient for private reconstruction. It does not model encrypted release capsules, an additional activation primitive, or the existing certificate-gated release path.',
@@ -6650,149 +5763,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Mandatory visit ceiling',
                     formatCount(participantVisits.maximumPermittedVisitCount),
-                ],
-            ],
-        ),
-        '',
-        '## Exact ranking arithmetic census',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Plaintext modulus used by the arithmetic experiment',
-                    formatCount(exactRankingModelConstants.plaintextModulus),
-                ],
-                [
-                    'Maximum total difference magnitude',
-                    formatCount(exactRankingModelConstants.maximumDifference),
-                ],
-                [
-                    'Comparison interpolation points',
-                    formatCount(rankingCensus.exhaustiveComparisonPointCount),
-                ],
-                [
-                    'Comparison polynomial degree',
-                    formatCount(rankingCensus.comparisonPolynomialDegree),
-                ],
-                [
-                    'Nonzero comparison coefficients',
-                    formatCount(
-                        rankingCensus.comparisonPolynomialNonzeroCoefficientCount,
-                    ),
-                ],
-                [
-                    'Rank-equality domains checked',
-                    formatCount(rankingCensus.equalityDomainCount),
-                ],
-                [
-                    'Packed option/result-width layouts checked',
-                    formatCount(rankingCensus.packedLayoutCount),
-                ],
-                [
-                    'Participant/option profiles checked',
-                    formatCount(
-                        rankingCensus.testedParticipantOptionProfileCount,
-                    ),
-                ],
-                [
-                    'Adversarial and deterministic score matrices checked',
-                    formatCount(rankingCensus.testedMatrixCount),
-                ],
-                [
-                    'Result-width executions checked',
-                    formatCount(rankingCensus.testedTopCountExecutionCount),
-                ],
-            ],
-        ),
-        '',
-        'The comparison returns one when a lower canonical option position has a nonnegative total difference. This incorporates the lower-position tie rule. Rank-equality polynomials are independently interpolated and exhaustively checked on every rank domain from two through twenty options.',
-        '',
-        '## Packed ranking graph census',
-        '',
-        'The graph uses one packed ciphertext per accepted ballot. Each power-of-two option block reserves the requested-rank lanes, then carries every opponent-minus-current score difference. Slot-varying coefficients select strict or non-strict comparison according to the canonical tie order, so one block-size-24 Paterson-Stockmeyer evaluation computes every ordered-pair predicate. Repeated unit-direction rotations accumulate one encrypted rank per block and copy it backward across the requested-rank lanes; one slot-varying equality evaluation yields a one-hot encoding of exactly the requested identifiers. The terminal decoder checks and converts that leakage-equivalent encoding. The ciphertext-byte projection assumes a polynomial modulus degree of 32,768, 64-bit RNS limbs, and one remaining data prime per consumed multiplicative level; the release-capable resource screen separately retains its bottom-prime reserve. It counts scheduled data ciphertexts only; evaluation keys, scratch allocations, serialization copies, proof data, and the WebAssembly runtime are additional. This is not a selected parameter set.',
-        '',
-        table(
-            [
-                'Graph property',
-                'Ten participants/options',
-                'Twenty participants/options',
-            ],
-            [
-                [
-                    'Ordered pair-difference lanes',
-                    formatCount(completionGraph.orderedPairDifferenceLaneCount),
-                    formatCount(maximumGraph.orderedPairDifferenceLaneCount),
-                ],
-                [
-                    'Packed ballot lanes including block padding',
-                    formatCount(completionGraph.packedBallotLaneCount),
-                    formatCount(maximumGraph.packedBallotLaneCount),
-                ],
-                [
-                    'Multiplicative depth',
-                    formatCount(completionGraph.multiplicativeDepth),
-                    formatCount(maximumGraph.multiplicativeDepth),
-                ],
-                [
-                    'Ciphertext multiplications',
-                    formatCount(completionGraph.ciphertextMultiplicationCount),
-                    formatCount(maximumGraph.ciphertextMultiplicationCount),
-                ],
-                [
-                    'Relinearizations',
-                    formatCount(completionGraph.relinearizationCount),
-                    formatCount(maximumGraph.relinearizationCount),
-                ],
-                [
-                    'Relinearization-key ring-limb reads with one pass per operation',
-                    formatCount(
-                        completionGraph.relinearizationKeyRingLimbReadCount,
-                    ),
-                    formatCount(
-                        maximumGraph.relinearizationKeyRingLimbReadCount,
-                    ),
-                ],
-                [
-                    'Rotations',
-                    formatCount(completionGraph.rotationCount),
-                    formatCount(maximumGraph.rotationCount),
-                ],
-                [
-                    'Rotation-key ring-limb reads with one pass per operation',
-                    formatCount(completionGraph.rotationKeyRingLimbReadCount),
-                    formatCount(maximumGraph.rotationKeyRingLimbReadCount),
-                ],
-                [
-                    'Ciphertext additions',
-                    formatCount(completionGraph.ciphertextAdditionCount),
-                    formatCount(maximumGraph.ciphertextAdditionCount),
-                ],
-                [
-                    'Plaintext multiplications',
-                    formatCount(completionGraph.plaintextMultiplicationCount),
-                    formatCount(maximumGraph.plaintextMultiplicationCount),
-                ],
-                [
-                    'Scheduled peak live ciphertexts',
-                    formatCount(
-                        completionGraph.scheduledPeakLiveCiphertextCount,
-                    ),
-                    formatCount(maximumGraph.scheduledPeakLiveCiphertextCount),
-                ],
-                [
-                    'Projected scheduled peak ciphertext bytes',
-                    formatCount(
-                        completionGraph.scheduledPeakCiphertextByteLength,
-                    ),
-                    formatCount(maximumGraph.scheduledPeakCiphertextByteLength),
-                ],
-                [
-                    'Materialized graph nodes',
-                    formatCount(
-                        completionGraph.materializedCiphertextNodeCount,
-                    ),
-                    formatCount(maximumGraph.materializedCiphertextNodeCount),
                 ],
             ],
         ),

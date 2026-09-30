@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { candidateBgvParameterInputs } from '#tests/candidate-bgv-parameter-model.js';
+import { completionProfileCounts } from '#tests/supported-profile-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 
-const participantCount = candidateBgvParameterInputs.participantCount;
+const participantCount = completionProfileCounts.participantCount;
 // Release needs shares from at least f + 1 participants, for
 // f = floor((n - 1) / 3), and never fewer than 2.
 const releaseThreshold = Math.max(
