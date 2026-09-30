@@ -202,4 +202,28 @@ mod tests {
         proof.write(&mut bytes);
         assert!(!verify(profile, role, &statement, &bytes));
     }
+
+    // Statistical zero knowledge allows one published proof for each mask
+    // draw. A proof replayed from the same draw, as an operation's retained
+    // seed replays it, repeats its bytes, and another draw gives another
+    // proof.
+    #[test]
+    fn a_replayed_mask_draw_repeats_its_proof() {
+        let profile = Profile::new(3, 2).unwrap();
+        let role = b"ballot-proof-test";
+        let (statement, columns) = synthetic_ballot(profile);
+        let relation = ballot_relation(profile);
+        let prove = |seed| {
+            crate::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
+            let witness =
+                Witness::from_columns(&relation, statement.digest(), columns.clone()).unwrap();
+            let mut bytes = Vec::new();
+            BallotProof::create(role, &statement, witness, false).write(&mut bytes);
+            bytes
+        };
+        let first = prove(1);
+        assert!(verify(profile, role, &statement, &first));
+        assert_eq!(prove(1), first);
+        assert_ne!(prove(2), first);
+    }
 }

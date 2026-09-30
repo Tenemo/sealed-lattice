@@ -224,4 +224,28 @@ mod tests {
         proof.write(&mut bytes);
         assert!(!verify(profile, role, &prepared.statement, &bytes));
     }
+
+    // Statistical zero knowledge allows one published proof for each mask
+    // draw. A release replayed from the same draw, as its retained seed
+    // replays it, repeats its statement and proof bytes, and another draw
+    // gives another proof.
+    #[test]
+    fn a_replayed_mask_draw_repeats_its_release() {
+        let profile = Profile::new(3, 2).unwrap();
+        let role = b"release-proof-test";
+        let release = |seed| {
+            crate::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
+            let (prepared, _) = synthetic_release(profile);
+            let (statement, proof) = ReleaseRelationProof::from_prepared(role, prepared);
+            let mut bytes = Vec::new();
+            proof.write(&mut bytes);
+            (statement, bytes)
+        };
+        let (statement, first) = release(1);
+        assert!(verify(profile, role, &statement, &first));
+        let (replayed, again) = release(1);
+        assert_eq!(replayed.digest(), statement.digest());
+        assert_eq!(again, first);
+        assert_ne!(release(2).1, first);
+    }
 }
