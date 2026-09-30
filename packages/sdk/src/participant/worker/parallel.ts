@@ -45,6 +45,10 @@ const initialArenaBytes = 16 << 20;
 const softArenaBytes = 32 << 20;
 const maximumArenaBytes = 256 << 20;
 const blockAlignment = 64;
+// The arena grows by what an allocation lacks, in steps of this many bytes:
+// its buffer reserves the largest length when it is created, so growing
+// copies nothing, and a doubled length would hold memory nothing occupies.
+const arenaGrowthBytes = 4 << 20;
 
 // A job slot's state. An exhausted job's helper found no memory within its
 // bound.
@@ -547,12 +551,23 @@ const createHost = (
             };
         return { offset: range.offset, length };
     };
-    // Grows the arena by at least the length, up to its bound.
+    // Grows the arena by what a range of the length lacks beyond the free
+    // range that ends the arena, in whole steps, up to the soft bound from
+    // below it and otherwise up to the largest length.
     const grow = (length: number) => {
         const previous = arenaBuffer.byteLength;
+        const last = free.length === 0 ? undefined : free[free.length - 1];
+        const tail =
+            last !== undefined && last.offset + last.length === previous
+                ? last.length
+                : 0;
+        const steps = Math.max(
+            1,
+            Math.ceil((length - tail) / arenaGrowthBytes),
+        );
         const next = Math.min(
-            maximumArenaBytes,
-            Math.max(2 * previous, previous + length),
+            previous < softArenaBytes ? softArenaBytes : maximumArenaBytes,
+            previous + steps * arenaGrowthBytes,
         );
         if (next === previous) return false;
         try {

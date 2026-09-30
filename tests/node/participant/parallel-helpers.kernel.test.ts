@@ -810,6 +810,27 @@ describe('parallel job host', () => {
         }
     });
 
+    it('grows the arena by what its held outputs lack rather than doubling it', async () => {
+        const helpers = await startParallelHelpers(
+            await compileText(standIn),
+            helperPorts(1),
+            false,
+        );
+        expect(helpers.count).toBe(1);
+        try {
+            const { submit } = standInHost(helpers);
+            // Five held outputs of eight mebibytes occupy forty beside their
+            // small inputs, which a doubled arena would round up to
+            // sixty-four.
+            for (let job = 0; job < 5; job += 1) submit(3, 1, 8 << 20);
+            const { arenaBytes } = helpers.memory();
+            expect(arenaBytes).toBeGreaterThanOrEqual(40 << 20);
+            expect(arenaBytes).toBeLessThanOrEqual(48 << 20);
+        } finally {
+            helpers.stop();
+        }
+    });
+
     it('releases the inputs of jobs that a trapped helper ended without copying them', async () => {
         const helpers = await startParallelHelpers(
             await compileText(standIn),
