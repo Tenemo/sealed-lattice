@@ -44,6 +44,7 @@ export const inspectRetainedAuthority = async (
         !isParticipantHead(snapshot.head) ||
         snapshot.head.generation !== expected.head.generation ||
         snapshot.head.hash !== expected.head.hash ||
+        snapshot.head.runtime !== expected.head.runtime ||
         participantStores.some(
             (store) => snapshot.counts[store] !== expected.counts[store],
         ) ||

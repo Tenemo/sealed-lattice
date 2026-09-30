@@ -25,7 +25,14 @@ export const participantRecordStores = [
     'release',
 ] as const;
 
-export type ParticipantHead = Readonly<{ generation: number; hash: string }>;
+// The head names the committed root by generation and identity, and the
+// runtime whose worker committed it, in plaintext, so that another runtime
+// can refuse the participant before any authority starts.
+export type ParticipantHead = Readonly<{
+    generation: number;
+    hash: string;
+    runtime: string;
+}>;
 
 // One origin holds each participant under its own namespace, which names every
 // database and lock of that participant.
@@ -99,9 +106,16 @@ export const readParticipantValue = async (
     return value;
 };
 
+// A failed write that leaves the participant's retained authority as it
+// was, a transition whose exact predecessor still authenticates or staged
+// records the origin had no room for, leaves the participant pending; any
+// other failure is local state loss.
+export class StoragePending extends Error {}
+
 // Adds records that no root references yet in one strict transaction. Only
 // generated output is staged this way; the next root lists it and its
-// transition checks every staged record before it commits.
+// transition checks every staged record before it commits. A transaction the
+// origin's quota aborts adds nothing.
 export const addParticipantRecords = async (
     database: IDBDatabase,
     store: ParticipantStore,
@@ -115,7 +129,18 @@ export const addParticipantRecords = async (
         transaction
             .objectStore(store)
             .add(new Blob([new Uint8Array(record.bytes)]), record.key);
-    await done;
+    try {
+        await done;
+    } catch (error) {
+        if (
+            error instanceof DOMException &&
+            error.name === 'QuotaExceededError'
+        )
+            throw new StoragePending(
+                'The origin lacks room for staged participant records.',
+            );
+        throw error;
+    }
 };
 
 // Deletes staged records that no root references, in one strict
@@ -171,15 +196,48 @@ export const isEmptyParticipant = async (database: IDBDatabase) => {
     return participantStores.every((store) => counts[store] === 0);
 };
 
+const isDigest = (value: unknown) =>
+    typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
+
 export const isParticipantHead = (value: unknown): value is ParticipantHead =>
     typeof value === 'object' &&
     value !== null &&
     'generation' in value &&
     'hash' in value &&
-    Object.keys(value).length === 2 &&
+    'runtime' in value &&
+    Object.keys(value).length === 3 &&
     Number.isSafeInteger(value.generation) &&
-    typeof value.hash === 'string' &&
-    /^[0-9a-f]{128}$/u.test(value.hash);
+    isDigest(value.hash) &&
+    isDigest(value.runtime);
+
+// Which runtime created the namespace's participant, read before any
+// authority starts: none for an empty namespace, the runtime a head names, or
+// no named runtime for a head that runtimes before the head named its runtime
+// wrote. Any other state leaves the question to root authentication, which
+// stops a participant whose authority is damaged.
+export const storedRuntime = async (
+    database: IDBDatabase,
+): Promise<
+    | Readonly<{ status: 'empty' }>
+    | Readonly<{ status: 'named'; runtime: string | undefined }>
+    | Readonly<{ status: 'unnamed' }>
+> => {
+    const { head, counts } = await snapshotParticipant(database);
+    if (participantStores.every((store) => counts[store] === 0))
+        return { status: 'empty' };
+    if (counts.head !== 1) return { status: 'unnamed' };
+    if (isParticipantHead(head))
+        return { status: 'named', runtime: head.runtime };
+    return typeof head === 'object' &&
+        head !== null &&
+        'generation' in head &&
+        'hash' in head &&
+        Object.keys(head).length === 2 &&
+        Number.isSafeInteger(head.generation) &&
+        isDigest(head.hash)
+        ? { status: 'named', runtime: undefined }
+        : { status: 'unnamed' };
+};
 
 export const isRootKey = (value: unknown): value is CryptoKey =>
     value instanceof CryptoKey &&

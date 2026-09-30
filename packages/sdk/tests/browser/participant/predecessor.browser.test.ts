@@ -73,6 +73,7 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
         hash: Array.from(await rootIdentity(root), (byte) =>
             byte.toString(16).padStart(2, '0'),
         ).join(''),
+        runtime: 'a7'.repeat(64),
     };
     const rawKey = crypto.getRandomValues(new Uint8Array(32)),
         additionalData = Uint8Array.of(7, 19),
@@ -234,6 +235,8 @@ describe('required predecessor records', () => {
         'stopped',
         'wrong context',
         'changed manifest',
+        'head of another runtime',
+        'head without its runtime',
     ])(
         'refuses %s while preserving the preceding generation',
         async (fault) => {
@@ -259,6 +262,23 @@ describe('required predecessor records', () => {
             if (fault === 'wrong context')
                 value.expected.records[1].encryption!.additionalData[0] ^= 1;
             if (fault === 'changed manifest') value.expected.manifest[0] ^= 1;
+            if (fault === 'head of another runtime')
+                await value.mutate('head', (store) =>
+                    store.put(
+                        { ...value.expected.head, runtime: 'b8'.repeat(64) },
+                        0,
+                    ),
+                );
+            if (fault === 'head without its runtime')
+                await value.mutate('head', (store) =>
+                    store.put(
+                        {
+                            generation: value.expected.head.generation,
+                            hash: value.expected.head.hash,
+                        },
+                        0,
+                    ),
+                );
             await expect(value.commit()).rejects.toThrow();
             expect(await value.generation()).toBe(16);
         },

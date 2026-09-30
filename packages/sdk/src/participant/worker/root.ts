@@ -28,6 +28,7 @@ import {
     participantStores,
     readParticipantValue,
     snapshotParticipant,
+    StoragePending,
 } from './storage.js';
 import type { ParticipantHead } from './storage.js';
 
@@ -330,10 +331,6 @@ export const openRoot = async (
         ),
     );
 
-// A failed transition whose exact predecessor still authenticates leaves the
-// participant pending; any other failure is local state loss.
-export class StoragePending extends Error {}
-
 // Validation of a predecessor is bounded by the foreground visit limit.
 const validationMilliseconds = 15 * 60 * 1000;
 
@@ -361,6 +358,7 @@ export const authenticateRoot = async (
         !isParticipantHead(snapshot.head) ||
         snapshot.head.generation < 1 ||
         snapshot.head.generation > lastGeneration ||
+        snapshot.head.runtime !== hexadecimal(runtime) ||
         snapshot.root.length >
             provisionalRootBound(limits, snapshot.head.generation) ||
         snapshot.head.hash !==
@@ -508,6 +506,7 @@ export const commitRoot = async (
     const head: ParticipantHead = {
         generation: transition.generation,
         hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
+        runtime: hexadecimal(runtime),
     };
     const added = (transition.addedData ?? []).flatMap((record) => {
         const chunks = [];
@@ -571,6 +570,7 @@ export const commitRoot = async (
         !isParticipantHead(snapshot.head) ||
         snapshot.head.generation !== head.generation ||
         snapshot.head.hash !== head.hash ||
+        snapshot.head.runtime !== head.runtime ||
         !(snapshot.root instanceof Uint8Array) ||
         !equalBytes(snapshot.root, sealed)
     )

@@ -44,7 +44,11 @@ import { openDelivery } from './delivery.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { participantRuntimeLabel } from './identity.js';
-import { instantiateParticipantKernel, ResourceFailure } from './kernel.js';
+import {
+    instantiateParticipantKernel,
+    ModuleFailure,
+    ResourceFailure,
+} from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
 import {
     helperRole,
@@ -61,12 +65,7 @@ import {
     publishRelease,
     resumeRelease,
 } from './release.js';
-import {
-    authenticateRoot,
-    dataKind,
-    readDataKind,
-    StoragePending,
-} from './root.js';
+import { authenticateRoot, dataKind, readDataKind } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
     acceptRoster,
@@ -81,10 +80,11 @@ import {
 import { restoreSetup, retainSetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
 import {
-    isEmptyParticipant,
     namespacedName,
     openParticipantDatabase,
     participantNamespacePattern,
+    StoragePending,
+    storedRuntime,
 } from './storage.js';
 import { targetPhase } from './target-state.js';
 import { EvaluationRetained, publishTarget, signTarget } from './target.js';
@@ -121,10 +121,13 @@ type WorkerCommand = Readonly<{
 }>;
 
 // An evaluated result reports the memory of a worker that retained the
-// target it evaluated, and is never an operation's result.
+// target it evaluated, and is never an operation's result. A participant that
+// another runtime created is refused with that runtime's identity when its
+// head names one.
 export type WorkerResult = Readonly<
     | { status: 'completed'; details: Readonly<Record<string, unknown>> }
     | { status: 'refused' }
+    | { status: 'refused'; reason: 'another runtime'; runtime?: string }
     | { status: 'pending'; reason: string }
     | {
           status: 'stopped';
@@ -356,10 +359,23 @@ const execute = async (
             details: summary(root, enrollment, undefined),
         };
     }
-    // An empty namespace holds no participant, so no authority starts and
-    // nothing can stop.
-    if (await isEmptyParticipant(context.database))
-        return { status: 'refused' };
+    // An empty namespace holds no participant, and a participant that another
+    // runtime created is that runtime's to continue: this worker cannot open
+    // its root, so no authority starts, nothing is written and nothing can
+    // stop.
+    const stored = await storedRuntime(context.database);
+    if (stored.status === 'empty') return { status: 'refused' };
+    if (
+        stored.status === 'named' &&
+        stored.runtime !== hexadecimal(context.runtime)
+    )
+        return {
+            status: 'refused',
+            reason: 'another runtime',
+            ...(stored.runtime === undefined
+                ? {}
+                : { runtime: stored.runtime }),
+        };
     started();
     let root = await authenticateRoot(context);
     const enrollment = await restoreEnrollment(context, root, false);
@@ -981,13 +997,15 @@ const run = async (
                         };
                     // A local failure after authority started stops the
                     // participant before any other operation takes the lock.
-                    // A failed helper or an exhausted memory bound touches no
-                    // retained state and leaves the participant pending.
+                    // A failed helper, an exhausted memory bound and a module
+                    // call that ended without returning touch no retained
+                    // state and leave the participant pending.
                     if (
                         !authorityStarted ||
                         error instanceof PublicInputFailure ||
                         error instanceof StoragePending ||
-                        error instanceof ResourceFailure
+                        error instanceof ResourceFailure ||
+                        error instanceof ModuleFailure
                     )
                         throw error;
                     const stop = await stopParticipant(opened);
@@ -1003,8 +1021,8 @@ const run = async (
             },
         );
     } catch (error) {
-        // Public input, pending storage, resource failures and failures
-        // before authority started leave the participant pending.
+        // Public input, pending storage, resource and module failures and
+        // failures before authority started leave the participant pending.
         return {
             status: 'pending',
             reason: error instanceof Error ? error.message : String(error),

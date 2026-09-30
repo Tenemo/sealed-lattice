@@ -32,6 +32,55 @@ const storeCounts = async (name: string) => {
     }
 };
 
+// Writes a participant database for a namespace, with a root key, a sealed
+// root of arbitrary bytes and the given head, beside empty record stores.
+const participantStores = [
+    'key',
+    'root',
+    'head',
+    'stopped',
+    'data',
+    'contribution',
+    'checkpoint',
+    'ballot',
+    'close',
+    'release',
+];
+const writeParticipant = async (name: string, head: unknown) => {
+    const opening = indexedDB.open(name, 1);
+    opening.onupgradeneeded = () => {
+        for (const store of participantStores)
+            opening.result.createObjectStore(store);
+    };
+    const database = await requestResult(opening);
+    try {
+        const key = await crypto.subtle.generateKey(
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt'],
+        );
+        const transaction = database.transaction(
+            ['key', 'root', 'head'],
+            'readwrite',
+        );
+        const written = new Promise<void>((resolve, reject) => {
+            transaction.oncomplete = () => resolve();
+            transaction.onabort = () =>
+                reject(transaction.error ?? new Error('Aborted.'));
+        });
+        transaction.objectStore('key').put(key, 0);
+        transaction
+            .objectStore('root')
+            .put(crypto.getRandomValues(new Uint8Array(96)), 0);
+        if (head !== undefined) transaction.objectStore('head').put(head, 0);
+        await written;
+    } finally {
+        database.close();
+    }
+};
+const otherRuntime = 'b3'.repeat(64);
+const rootHash = 'e1'.repeat(64);
+
 describe('participant API', () => {
     it('refuses operations on an empty namespace and leaves it empty', async () => {
         const namespace = `empty-${crypto.randomUUID()}`;
@@ -70,6 +119,74 @@ describe('participant API', () => {
             );
         } finally {
             await requestResult(indexedDB.deleteDatabase(name));
+        }
+    });
+
+    it('refuses a participant that another runtime created and leaves its state unchanged', async () => {
+        for (const [head, refusal] of [
+            [
+                { generation: 5, hash: rootHash, runtime: otherRuntime },
+                {
+                    status: 'refused',
+                    reason: 'another runtime',
+                    runtime: otherRuntime,
+                },
+            ],
+            // A head that a runtime before the head named its runtime wrote.
+            [
+                { generation: 5, hash: rootHash },
+                { status: 'refused', reason: 'another runtime' },
+            ],
+        ] as const) {
+            const namespace = `another-${crypto.randomUUID()}`;
+            const name = `sealed-lattice-participant/${namespace}`;
+            try {
+                await writeParticipant(name, head);
+                const participant = openParticipant({
+                    namespace,
+                    relay: location.origin + '/',
+                });
+                for (const request of [
+                    { operation: 'status' },
+                    { operation: 'result' },
+                ] as const)
+                    expect(await participant.run(request)).toEqual(refusal);
+                const counts = await storeCounts(name);
+                expect(counts.key).toBe(1);
+                expect(counts.root).toBe(1);
+                expect(counts.head).toBe(1);
+                expect(counts.stopped).toBe(0);
+            } finally {
+                await requestResult(indexedDB.deleteDatabase(name));
+            }
+        }
+    });
+
+    it('stops a participant whose authority is damaged, and it stays stopped', async () => {
+        for (const head of [
+            undefined,
+            { generation: 5, hash: rootHash, runtime: 'not a runtime' },
+        ]) {
+            const namespace = `damaged-${crypto.randomUUID()}`;
+            const name = `sealed-lattice-participant/${namespace}`;
+            try {
+                await writeParticipant(name, head);
+                const participant = openParticipant({
+                    namespace,
+                    relay: location.origin + '/',
+                });
+                for (let visit = 0; visit < 2; visit++)
+                    expect(
+                        await participant.run({ operation: 'status' }),
+                    ).toEqual({
+                        status: 'stopped',
+                        reason: 'Missing or inconsistent participant authority.',
+                        stopPersistence: 'confirmed',
+                    });
+                expect((await storeCounts(name)).stopped).toBe(1);
+            } finally {
+                await requestResult(indexedDB.deleteDatabase(name));
+            }
         }
     });
 });

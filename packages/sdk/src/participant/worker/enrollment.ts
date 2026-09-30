@@ -161,6 +161,7 @@ export const createEnrollment = async (
     const intentHead = {
         generation: 0,
         hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, intent)),
+        runtime: hexadecimal(runtime),
     };
     await commitParticipantState({
         database,
@@ -286,6 +287,7 @@ export const createEnrollment = async (
     const head = {
         generation: 1,
         hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
+        runtime: hexadecimal(runtime),
     };
     await commitParticipantState({
         database,

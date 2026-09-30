@@ -47,6 +47,7 @@ const hexadecimal = (bytes: Uint8Array) =>
     Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 const rootContext = Uint8Array.of(80, 79, 76, 49, 7);
 const generation = 29;
+const runtime = 'c4'.repeat(64);
 
 // A participant database holding one sealed root, two data records and three
 // release records, and the authority a delivery expects of it.
@@ -61,6 +62,7 @@ const fixture = async () => {
     const head = {
         generation,
         hash: hexadecimal(await rootIdentity(sealed)),
+        runtime,
     };
     await write(database, 'key', (store) => store.put(key, 0));
     await write(database, 'root', (store) => store.put(sealed, 0));
@@ -134,7 +136,7 @@ describe('retained authority inspection in IndexedDB', () => {
                 );
                 const hash = hexadecimal(await rootIdentity(other));
                 await write(fixed.database, 'head', (store) =>
-                    store.put({ generation, hash }, 0),
+                    store.put({ generation, hash, runtime }, 0),
                 );
             },
             'root replaced under its head': async (fixed) => {
@@ -160,6 +162,18 @@ describe('retained authority inspection in IndexedDB', () => {
                         {
                             generation: generation - 1,
                             hash: fixed.expected.head.hash,
+                            runtime,
+                        },
+                        0,
+                    ),
+                ),
+            'head runtime changed': (fixed) =>
+                write(fixed.database, 'head', (store) =>
+                    store.put(
+                        {
+                            generation,
+                            hash: fixed.expected.head.hash,
+                            runtime: 'd5'.repeat(64),
                         },
                         0,
                     ),

@@ -54,14 +54,13 @@ import {
     dataKind,
     dataRecordInventory,
     readDataKind,
-    StoragePending,
 } from './root.js';
 import {
     deliverFinalAggregate,
     ensureFinalAggregate,
     readFinalAggregate,
 } from './setup.js';
-import { snapshotParticipant } from './storage.js';
+import { snapshotParticipant, StoragePending } from './storage.js';
 
 // Creates, retains, signs and delivers a participant's ballot through the
 // phases the ballot state records.

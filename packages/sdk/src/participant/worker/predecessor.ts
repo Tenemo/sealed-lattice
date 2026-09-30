@@ -36,7 +36,7 @@ export type ParticipantIdentities = Readonly<{
 export async function validateParticipantPredecessor(
     reader: ParticipantTransactionReader,
     expected: Readonly<{
-        head: Readonly<{ generation: number; hash: string }>;
+        head: Readonly<{ generation: number; hash: string; runtime: string }>;
         manifest: Uint8Array;
         rootContext: Uint8Array;
         maximumRootBytes: number;
@@ -108,8 +108,11 @@ export async function validateParticipantPredecessor(
         Array.isArray(head) ||
         !('generation' in head) ||
         !('hash' in head) ||
+        !('runtime' in head) ||
+        Object.keys(head).length !== 3 ||
         head.generation !== expected.head.generation ||
         head.hash !== expected.head.hash ||
+        head.runtime !== expected.head.runtime ||
         !(root instanceof Uint8Array) ||
         root.length > expected.maximumRootBytes ||
         !(key instanceof CryptoKey) ||

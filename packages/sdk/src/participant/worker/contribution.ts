@@ -32,7 +32,6 @@ import {
     dataKind,
     dataRecordInventory,
     readDataKind,
-    StoragePending,
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
@@ -47,6 +46,7 @@ import {
     discardStagedRecords,
     readParticipantValue,
     snapshotParticipant,
+    StoragePending,
 } from './storage.js';
 
 // A setup contributor's contribution; only the first roster positions

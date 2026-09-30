@@ -150,8 +150,11 @@ export type ParticipantSummary = Readonly<{
 
 /**
  * A refused request changed nothing; a pending one waits for public input,
- * storage or a device resource such as memory; a stopped participant never
- * acts again.
+ * storage or a device resource such as memory, or follows a module failure,
+ * and a later visit continues from the participant's last committed state; a
+ * stopped participant never acts again. A participant that another runtime
+ * created is refused, naming that runtime when its state records it, so the
+ * application can open it with the SDK of that runtime.
  */
 export type ParticipantResult = Readonly<
     | {
@@ -159,6 +162,7 @@ export type ParticipantResult = Readonly<
           details: ParticipantSummary & Readonly<Record<string, unknown>>;
       }
     | { status: 'refused' }
+    | { status: 'refused'; reason: 'another runtime'; runtime?: string }
     | { status: 'pending'; reason: string }
     | {
           status: 'stopped';

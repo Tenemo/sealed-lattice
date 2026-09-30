@@ -21,7 +21,12 @@ import { PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
-import { moduleChunkBytes, readKernel, writeChunkInput } from './kernel.js';
+import {
+    ModuleFailure,
+    moduleChunkBytes,
+    readKernel,
+    writeChunkInput,
+} from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
@@ -467,9 +472,19 @@ export const discardEvaluation = async (context: ProfileContext) => {
 
 // Restores the target this participant evaluated earlier from its retained
 // copy, for the verified setup live in this instance. A copy that cannot be
-// read or that the module refuses is discarded. Returns whether the target
+// read, that the module refuses or on which the module fails is discarded,
+// so a later visit evaluates the target again. Returns whether the target
 // was restored.
 const restoreEvaluation = async (context: ProfileContext) => {
+    try {
+        return await restoreEvaluationCopy(context);
+    } catch (error) {
+        if (error instanceof ModuleFailure) await discardEvaluation(context);
+        throw error;
+    }
+};
+
+const restoreEvaluationCopy = async (context: ProfileContext) => {
     const value = await evaluatedTargetRequest<unknown>(
         context.namespace,
         'readonly',

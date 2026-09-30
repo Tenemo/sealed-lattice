@@ -177,6 +177,13 @@ const maximumRandomRequest = 65_536;
 // used again; a later visit starts a fresh one.
 export class ResourceFailure extends Error {}
 
+// A module call that ended without returning for any other reason, a trap or
+// a host function's failure, also ends the operation as pending. The module
+// reads the participant's local inputs only after their authentication, so
+// such a call consumed public input or met a defect of its own, and the
+// participant stays where its last commit left it.
+export class ModuleFailure extends Error {}
+
 export type LoadedKernel = Readonly<{
     kernel: ParticipantKernel;
     // Handlers for the current operation; an absent handler refuses.
@@ -277,8 +284,19 @@ export const instantiateParticipantKernel = async (
             try {
                 return (call as KernelFunction)(...values);
             } catch (error) {
-                ended = { error };
-                throw error;
+                const failure =
+                    error instanceof ResourceFailure
+                        ? error
+                        : new ModuleFailure(
+                              'The participant module failed in ' +
+                                  name +
+                                  ': ' +
+                                  (error instanceof Error
+                                      ? error.message
+                                      : String(error)),
+                          );
+                ended = { error: failure };
+                throw failure;
             }
         };
     }
