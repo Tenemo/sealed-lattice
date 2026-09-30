@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { PublicInputFailure } from '#packages/sdk/src/participant/worker/context.js';
 import {
@@ -229,8 +229,8 @@ describe('participant transcript through the real scalar kernel and local replic
         const file = recorder.open('bounded.bin');
         await file.write(Uint8Array.of(1, 2, 3));
         await file.finish();
-        expect(cancelled).toBe(1);
         const archived = await recorder.archive();
+        expect(cancelled).toBe(1);
         const reader = await openTranscriptSource(opened, archived.transcript);
         const chunks: Uint8Array[] = [];
         await reader.read('bounded.bin', 3, (bytes) => {
@@ -238,6 +238,67 @@ describe('participant transcript through the real scalar kernel and local replic
         });
         expect(Buffer.concat(chunks)).toEqual(Buffer.from([1, 2, 3]));
     }, 5_000);
+
+    it('writes on while the replicas take earlier records up to the unacknowledged bound, and a record too few take ends later writes and the archiving', async () => {
+        const opened = await openArchive(configuration(), poll);
+        // Each replica's storage attempts in the order the recorder makes
+        // them, which the test settles.
+        const attempts: ((taken: boolean) => void)[][] = opened.replicas.map(
+            () => [],
+        );
+        const recorder = createTranscriptRecorder({
+            ...opened,
+            replicas: opened.replicas.map((replica, position) => ({
+                ...replica,
+                store: () =>
+                    new Promise<readonly number[]>((resolve, reject) => {
+                        attempts[position].push((taken) => {
+                            if (taken) resolve([position]);
+                            else
+                                reject(
+                                    new Error(
+                                        'The replica refused the record.',
+                                    ),
+                                );
+                        });
+                    }),
+            })),
+        });
+        const file = recorder.open('overlapped.bin');
+        const chunk = (value: number) => new Uint8Array(1 << 20).fill(value);
+        // Three chunks and their record headers stay within four mebibytes,
+        // so each write returns while no replica has taken the first record,
+        // and records are sent one at a time.
+        for (const value of [1, 2, 3]) await file.write(chunk(value));
+        await vi.waitFor(() => {
+            expect(attempts.map((settle) => settle.length)).toEqual([1, 1, 1]);
+        });
+        // A fourth exceeds the bound, so its write waits for the oldest.
+        let fourthWritten = false;
+        const fourth = file.write(chunk(4)).then(() => {
+            fourthWritten = true;
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(fourthWritten).toBe(false);
+        for (const settle of attempts) settle[0](true);
+        await fourth;
+        await file.finish();
+        // Two replicas refuse the second record, which leaves no more
+        // holders than the fault bound.
+        await vi.waitFor(() => {
+            expect(attempts.map((settle) => settle.length)).toEqual([2, 2, 2]);
+        });
+        attempts[0][1](false);
+        attempts[1][1](false);
+        attempts[2][1](true);
+        const failure = 'Too few archive replicas hold the transcript.';
+        await expect(recorder.archive()).rejects.toThrow(failure);
+        await expect(
+            recorder.open('later.bin').write(chunk(5)),
+        ).rejects.toThrow(failure);
+        // No record after the refused one was sent.
+        expect(attempts.map((settle) => settle.length)).toEqual([2, 2, 2]);
+    });
 
     it('archives what a visit reads and serves it back by name from the replicas', async () => {
         // The third replica is down while the visit reads, so it is sent
@@ -347,7 +408,8 @@ describe('participant transcript through the real scalar kernel and local replic
         const lone = createTranscriptRecorder(reader);
         const file = lone.open('close/intent.bin');
         await file.write(Buffer.from('intent'));
-        await expect(file.finish()).rejects.toThrow(
+        await file.finish();
+        await expect(lone.archive()).rejects.toThrow(
             'Too few archive replicas hold the transcript.',
         );
     });
