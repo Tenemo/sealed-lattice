@@ -350,9 +350,9 @@ pub struct PolynomialDecoder {
     partial: Vec<u8>,
 }
 /// A stored working value that arrives in pieces of whole words: a spilled
-/// value's readback, whose bytes must have the identity of the value the
-/// engine holds, or a reload, whose words become the value again once they
-/// have the identity recorded when it was spilled.
+/// value's readback, whose words must repeat those of the value the engine
+/// holds, or a reload, whose words become the value again once they have
+/// the identity recorded when it was spilled.
 pub struct StoredValueRead {
     index: usize,
     hash: IdentityHasher,
@@ -361,26 +361,28 @@ pub struct StoredValueRead {
     kind: StoredKind,
 }
 enum StoredKind {
-    Readback([u8; 64]),
+    /// Whether every word so far repeats the resident value's.
+    Readback(bool),
     Reload(Ciphertext),
 }
-impl StoredValueRead {
-    /// Absorbs the next piece of the stored bytes, a whole number of words.
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
-        if !bytes.len().is_multiple_of(8) || bytes.len() > self.length - self.received {
-            return Err(Refusal::Shape);
-        }
-        self.hash.absorb(bytes).map_err(|_| Refusal::Identity)?;
-        if let StoredKind::Reload(value) = &mut self.kind {
-            let words = value[0].len();
-            for (position, word) in (self.received / 8..).zip(bytes.chunks_exact(8)) {
-                value[position / words][position % words] =
-                    u64::from_le_bytes(word.try_into().unwrap());
-            }
-        }
-        self.received += bytes.len();
-        Ok(())
-    }
+/// The words of a value that a piece of its stored bytes covers, from the
+/// piece's first word: the first component's, then the second's.
+fn covered_words(value: &Ciphertext, first: usize, count: usize) -> impl Iterator<Item = &u64> {
+    let (words, end) = (value[0].len(), first + count);
+    value[0][first.min(words)..end.min(words)]
+        .iter()
+        .chain(&value[1][first.saturating_sub(words)..end.saturating_sub(words)])
+}
+fn covered_words_mut(
+    value: &mut Ciphertext,
+    first: usize,
+    count: usize,
+) -> impl Iterator<Item = &mut u64> {
+    let (words, end) = (value[0].len(), first + count);
+    let [low, high] = value;
+    low[first.min(words)..end.min(words)]
+        .iter_mut()
+        .chain(&mut high[first.saturating_sub(words)..end.saturating_sub(words)])
 }
 
 impl Engine {
@@ -862,31 +864,16 @@ impl Engine {
         .map_err(|_| Refusal::Identity)
     }
 
-    fn value_identity(&self, index: usize, value: &Ciphertext) -> Result<[u8; 64], Refusal> {
-        let mut hash = self.value_hasher(index)?;
-        let mut buffer = [0_u8; 8192];
-        for polynomial in value {
-            for words in polynomial.chunks(buffer.len() / 8) {
-                for (bytes, word) in buffer.chunks_exact_mut(8).zip(words) {
-                    bytes.copy_from_slice(&word.to_le_bytes());
-                }
-                hash.absorb(&buffer[..8 * words.len()])
-                    .map_err(|_| Refusal::Identity)?;
-            }
-        }
-        hash.finish().map_err(|_| Refusal::Identity)
-    }
-
-    /// Starts reading back a value that this step spills, whose identity
-    /// the read's bytes must have.
+    /// Starts reading back a value that this step spills, whose words the
+    /// read's bytes must repeat.
     pub fn begin_readback(&self, index: usize) -> Result<StoredValueRead, Refusal> {
-        let expected = self.value_identity(index, self.value(index)?)?;
+        self.value(index)?;
         Ok(StoredValueRead {
             index,
             hash: self.value_hasher(index)?,
             length: stored_value_bytes(self.profile),
             received: 0,
-            kind: StoredKind::Readback(expected),
+            kind: StoredKind::Readback(true),
         })
     }
     /// Starts reloading a stored value, whose words it decodes as they
@@ -900,9 +887,39 @@ impl Engine {
             kind: StoredKind::Reload([self.arithmetic.zero(), self.arithmetic.zero()]),
         })
     }
-    /// Retires a read-back value to storage, or makes a reloaded one
-    /// resident again, once the read's complete bytes have the identity the
-    /// value had when this step spilled it or when it was spilled earlier.
+    /// Absorbs the next piece of a stored value's bytes, a whole number of
+    /// words: a readback's words are compared with the resident value's and
+    /// a reload's decoded. Only the stored bytes are hashed, so a spill
+    /// hashes its value once, for the identity its reload must have.
+    pub fn push_read(&self, read: &mut StoredValueRead, bytes: &[u8]) -> Result<(), Refusal> {
+        if !bytes.len().is_multiple_of(8) || bytes.len() > read.length - read.received {
+            return Err(Refusal::Shape);
+        }
+        read.hash.absorb(bytes).map_err(|_| Refusal::Identity)?;
+        let (first, count) = (read.received / 8, bytes.len() / 8);
+        let words = bytes
+            .chunks_exact(8)
+            .map(|word| u64::from_le_bytes(word.try_into().unwrap()));
+        match &mut read.kind {
+            StoredKind::Readback(repeats) => {
+                let value = self.value(read.index)?;
+                *repeats &= covered_words(value, first, count)
+                    .zip(words)
+                    .all(|(held, word)| *held == word);
+            }
+            StoredKind::Reload(value) => {
+                for (held, word) in covered_words_mut(value, first, count).zip(words) {
+                    *held = word;
+                }
+            }
+        }
+        read.received += bytes.len();
+        Ok(())
+    }
+    /// Retires a read-back value to storage under its bytes' identity once
+    /// they repeat the value this step spills, or makes a reloaded one
+    /// resident again once its bytes have the identity recorded when it was
+    /// spilled.
     pub fn finish_read(&mut self, read: StoredValueRead) -> Result<(), Refusal> {
         let StoredValueRead {
             index,
@@ -917,8 +934,8 @@ impl Engine {
         let identity = hash.finish().map_err(|_| Refusal::Identity)?;
         let required = self.requirements()?;
         match kind {
-            StoredKind::Readback(expected) => {
-                if !required.spills.contains(&index) || identity != expected {
+            StoredKind::Readback(repeats) => {
+                if !required.spills.contains(&index) || !repeats {
                     return Err(Refusal::Identity);
                 }
                 self.stored[index] = Some(identity);
@@ -1128,8 +1145,9 @@ impl Engine {
 mod tests {
     use super::{
         super::{prime_count_bounds, primes, shared},
-        DEGREE, Instruction, MEMORY_BYTES, Profile, Refusal, capacity, evictions,
-        helper_memory_bytes, helpers_reserved_bytes, peak_values, value_bytes,
+        Ciphertext, DEGREE, Engine, Instruction, MEMORY_BYTES, Profile, Progress, Refusal,
+        capacity, evictions, helper_memory_bytes, helpers_reserved_bytes, peak_values,
+        program_identity, stored_bytes, value_bytes,
     };
     use parallel_work::JOB_MEMORY_BYTES;
     use std::collections::BTreeSet;
@@ -1285,6 +1303,99 @@ mod tests {
                 }
             }
         }
+    }
+
+    // A spilled value's readback must repeat the resident value's words: a
+    // changed word at either end of either component refuses it and leaves
+    // the value resident, and the repeated bytes retire it under the
+    // identity its reload must then have.
+    #[test]
+    fn a_readback_repeats_the_resident_value_and_keys_its_reload() {
+        let profile = Profile::new(3, 2).unwrap();
+        // Three inputs, the sum of the first two, and that sum plus the third.
+        let unused = u32::MAX;
+        let mut program = [b"BRK1".as_slice(), &(DEGREE as u32).to_le_bytes()].concat();
+        program.extend([5_u32, 4].iter().flat_map(|word| word.to_le_bytes()));
+        for instruction in [
+            [0, unused, unused, 0],
+            [0, unused, unused, 1],
+            [0, unused, unused, 2],
+            [1, 0, 1, 0],
+            [1, 3, 2, 0],
+        ] {
+            program.extend(instruction.iter().flat_map(|word| word.to_le_bytes()));
+        }
+        let mut engine =
+            Engine::new(profile, &program, program_identity(&program).unwrap()).unwrap();
+        // The smallest instance bound that holds an addition's two inputs
+        // and its output.
+        let arithmetic = shared(profile, DEGREE);
+        let at = |bound| capacity(&arithmetic, 1, parallel_work::helpers(), bound);
+        let (mut low, mut high) = (0, usize::MAX);
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if at(middle).is_ok_and(|values| values >= 3) {
+                high = middle;
+            } else {
+                low = middle + 1;
+            }
+        }
+        assert_eq!(at(low), Ok(3));
+        engine.bound_instance(low);
+        let values: Vec<Ciphertext> = (1..=3)
+            .map(|position| {
+                let mut value = engine.zero_value();
+                value[0][0] = position;
+                value[1][0] = position + 3;
+                value
+            })
+            .collect();
+        for (position, value) in values.iter().enumerate() {
+            let required = engine.requirements().unwrap();
+            assert!(required.spills.is_empty() && required.reloads.is_empty());
+            assert_eq!(required.input_position, Some(position));
+            engine.load_input(position, value.clone()).unwrap();
+            assert!(matches!(engine.execute(), Ok(Progress::Executed(_))));
+        }
+        // The addition keeps its inputs and needs room for its output, so the
+        // third input, used last, is spilled.
+        let required = engine.requirements().unwrap();
+        assert_eq!((required.spills, required.reloads), (vec![2], vec![]));
+        let stored = stored_bytes(&values[2]);
+        let half = stored.len() / 2;
+        let read_back = |engine: &mut Engine, bytes: &[u8]| {
+            let mut read = engine.begin_readback(2).unwrap();
+            // Pieces that split the first component and cross into the
+            // second.
+            for piece in [&bytes[..8], &bytes[8..half + 8], &bytes[half + 8..]] {
+                engine.push_read(&mut read, piece).unwrap();
+            }
+            engine.finish_read(read)
+        };
+        for position in [0, half - 8, half, stored.len() - 8] {
+            let mut changed = stored.clone();
+            changed[position] ^= 1;
+            assert_eq!(read_back(&mut engine, &changed), Err(Refusal::Identity));
+            assert_eq!(engine.value(2), Ok(&values[2]));
+        }
+        read_back(&mut engine, &stored).unwrap();
+        assert_eq!(engine.value(2), Err(Refusal::Phase));
+        // The addition, then the reload the final sum needs.
+        assert!(matches!(engine.execute(), Ok(Progress::Executed(_))));
+        let required = engine.requirements().unwrap();
+        assert_eq!((required.spills, required.reloads), (vec![], vec![2]));
+        let reload = |engine: &mut Engine, bytes: &[u8]| {
+            let mut read = engine.begin_reload(2).unwrap();
+            engine.push_read(&mut read, bytes).unwrap();
+            engine.finish_read(read)
+        };
+        let mut changed = stored.clone();
+        changed[half] ^= 1;
+        assert_eq!(reload(&mut engine, &changed), Err(Refusal::Identity));
+        reload(&mut engine, &stored).unwrap();
+        assert_eq!(engine.value(2), Ok(&values[2]));
+        assert!(matches!(engine.execute(), Ok(Progress::Executed(_))));
+        assert!(engine.finished());
     }
 
     #[test]

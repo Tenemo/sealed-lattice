@@ -208,12 +208,16 @@ impl ClassifiedClosedInventory {
                     .begin_readback(index)
                     .map_err(|_| Error::Arithmetic)?;
                 store.put(index, engine.value(index).map_err(|_| Error::Arithmetic)?)?;
-                read.push(&store.get(index)?).map_err(|_| Error::Storage)?;
+                engine
+                    .push_read(&mut read, &store.get(index)?)
+                    .map_err(|_| Error::Storage)?;
                 engine.finish_read(read).map_err(|_| Error::Storage)?;
             }
             for index in required.reloads {
                 let mut read = engine.begin_reload(index).map_err(|_| Error::Storage)?;
-                read.push(&store.get(index)?).map_err(|_| Error::Storage)?;
+                engine
+                    .push_read(&mut read, &store.get(index)?)
+                    .map_err(|_| Error::Storage)?;
                 engine.finish_read(read).map_err(|_| Error::Storage)?;
             }
             if let Some(cache) = required.cache {

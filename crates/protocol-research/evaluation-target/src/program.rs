@@ -398,10 +398,16 @@ mod tests {
         assert!(engine.finish_polynomial(decoder).is_err());
         let value_bytes = rns_arithmetic_probe::ranking::stored_value_bytes(profile);
         let mut read = engine.begin_reload(0).unwrap();
-        assert!(read.push(&[0; 7]).is_err());
-        assert!(read.push(&vec![0; value_bytes + 8]).is_err());
-        read.push(&vec![0; value_bytes - 8]).unwrap();
-        assert!(read.push(&[0; 16]).is_err());
+        assert!(engine.push_read(&mut read, &[0; 7]).is_err());
+        assert!(
+            engine
+                .push_read(&mut read, &vec![0; value_bytes + 8])
+                .is_err()
+        );
+        engine
+            .push_read(&mut read, &vec![0; value_bytes - 8])
+            .unwrap();
+        assert!(engine.push_read(&mut read, &[0; 16]).is_err());
     }
 
     #[test]

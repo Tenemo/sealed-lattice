@@ -188,11 +188,20 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     };
+    let output = engine.step() - 1;
+    let mut ciphertext_identity = engine.value_hasher(output)?;
+    ciphertext_identity
+        .absorb(&stored_bytes(engine.value(output)?))
+        .map_err(|_| Refusal::Identity)?;
     Ok(format!(
         "{{\"participants\":{participants},\"options\":{options},\"topCount\":{top_count},\"degree\":{DEGREE},\"optionPositions\":{:?},\"inputIdentity\":\"{}\",\"programIdentity\":\"{}\",\"ciphertextIdentity\":\"{}\"}}",
         &order[..top_count],
         to_hex(&identity(PROBE_INPUT_DOMAIN, &inputs).map_err(|_| Refusal::Identity)?),
         to_hex(&program),
-        to_hex(&engine.value_identity(engine.step() - 1, engine.value(engine.step() - 1)?)?),
+        to_hex(
+            &ciphertext_identity
+                .finish()
+                .map_err(|_| Refusal::Identity)?
+        ),
     ))
 }

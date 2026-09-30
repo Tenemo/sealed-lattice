@@ -120,7 +120,9 @@ impl State {
                     }
                 }
             }
-            Payload::Stored(read) => read.push(bytes).map_err(|_| Error::PublicInput)?,
+            Payload::Stored(read) => engine
+                .push_read(read, bytes)
+                .map_err(|_| Error::PublicInput)?,
         }
         value.received += length;
         Ok(())
