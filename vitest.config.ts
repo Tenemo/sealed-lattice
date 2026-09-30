@@ -145,6 +145,9 @@ const makeNodeProject = ({
             : { execArgv: nodeDiagnosticReportArguments }),
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
         ...(groupOrder === undefined ? {} : { sequence: { groupOrder } }),
+        setupFiles: [
+            resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
+        ],
         testTimeout,
         hookTimeout: nodeHookTimeoutMs,
     },
