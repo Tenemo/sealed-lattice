@@ -145,9 +145,13 @@ impl RosterProposal {
         records: Vec<Arc<VerifiedRegistration>>,
     ) -> Result<Self, Error> {
         // Every supported roster size has a profile for every option count
-        // a poll can have; another size is refused before any preparation.
+        // a poll can have; another size, or one above the poll's maximum, is
+        // refused before any preparation.
         let profile = Profile::new(records.len(), poll.manifest().option_count())
             .map_err(|_| Error::Shape)?;
+        if records.len() > usize::from(poll.maximum_participants()) {
+            return Err(Error::Context);
+        }
         let mut entries = Vec::with_capacity(records.len());
         let mut bodies = Vec::with_capacity(4 + 64 * records.len());
         bodies.extend((records.len() as u32).to_le_bytes());

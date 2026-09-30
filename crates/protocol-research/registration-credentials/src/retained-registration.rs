@@ -121,7 +121,8 @@ mod tests {
                 .unwrap()
             })
             .collect();
-        let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2).unwrap();
+        let draft =
+            PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
         let mut organizer = Credential::from_seeds([1; 32], [2; 32], [3; 32]);
         let packet = organizer
             .create_poll(draft, runtime, [5; 32], [6; 32])

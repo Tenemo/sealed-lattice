@@ -1822,10 +1822,12 @@ await runWithLocalRunLog(
             });
             const hexadecimal = (bytes: Uint8Array) =>
                 Buffer.from(bytes).toString('hex');
+            // The poll admits exactly the roster's participants.
             const organizer = await run(0, 'create', {
                 role: 'creator',
                 manifest: hexadecimal(manifest.canonicalBytes),
                 topCount,
+                maximumParticipants: participantCount,
                 username: 'Organizer',
             });
             assert.equal(organizer.isOrganizer, true);
@@ -2568,6 +2570,17 @@ await runWithLocalRunLog(
             ]);
             const recordIds = [organizer, ...joined].map((value) =>
                 String(value.bodyDigest),
+            );
+            // A proposal that also lists the registrant left out exceeds the
+            // poll's participant maximum and is refused.
+            assert.deepEqual(
+                await request(0, 'propose-roster', {
+                    recordIds: [
+                        ...recordIds,
+                        String(leftOutRegistration.bodyDigest),
+                    ],
+                }),
+                { status: 'refused', reason: 'invalid request' },
             );
             // The organizer crashes with its proposal intent, and its next
             // visit verifies the records again and signs the locked proposal

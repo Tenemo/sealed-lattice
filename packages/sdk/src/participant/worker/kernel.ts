@@ -36,6 +36,8 @@ export const kernelFunctions = [
     'own_registration_username_length',
     // The verified poll's option count, or zero before verification.
     'own_registration_option_count',
+    // The verified poll's participant maximum, or zero before verification.
+    'own_registration_maximum_participants',
     'roster_begin',
     // Restores the retained roster from the begin input and the retained
     // roster after it.

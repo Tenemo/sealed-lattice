@@ -266,8 +266,8 @@ fn main() {
             .collect(),
     )
     .unwrap();
-    // The result lists every option.
-    let draft = PollDraft::new(manifest, profile.options() as u16).unwrap();
+    // The result lists every option, and the roster fills the poll.
+    let draft = PollDraft::new(manifest, profile.options() as u16, count as u16).unwrap();
     let directories = (0..count)
         .map(|index| {
             let directory = output.join(format!("participant-{index}"));

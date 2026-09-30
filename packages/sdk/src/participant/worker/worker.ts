@@ -381,6 +381,7 @@ const execute = async (
                 role,
                 manifest: bytes(parameters.manifest),
                 topCount: Number(parameters.topCount),
+                maximumParticipants: Number(parameters.maximumParticipants),
                 username: text(parameters.username),
             };
         else if (role === 'join')

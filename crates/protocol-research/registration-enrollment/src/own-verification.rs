@@ -184,6 +184,19 @@ pub extern "C" fn own_registration_command(operation: u32, length: usize) -> u32
 pub extern "C" fn own_registration_option_count() -> usize {
     verified_option_count().unwrap_or(0)
 }
+/// The participant maximum of the poll this instance verified the
+/// registration of, or zero before verification.
+#[unsafe(no_mangle)]
+pub extern "C" fn own_registration_maximum_participants() -> usize {
+    STATE.with(|state| {
+        let state = state.borrow();
+        state
+            .verified
+            .as_ref()
+            .and(state.poll.as_ref())
+            .map_or(0, |poll| usize::from(poll.maximum_participants()))
+    })
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn own_registration_username_pointer() -> usize {
     STATE.with(|state| {

@@ -12,33 +12,45 @@ use fips204::{
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
-pub const POLL_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/poll-definition/v1";
+pub const POLL_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/poll-definition/v2";
 pub const MAXIMUM_POLL_BYTES: usize = 1_048_576;
 pub const POLL_BODY_OVERHEAD: usize =
-    8 + 6 * 6 + 4 + b"sealed-lattice/poll-definition/v1".len() + 64 + 32 + 1952 + 4 + 2;
+    8 + 7 * 6 + 4 + b"sealed-lattice/poll-definition/v2".len() + 64 + 32 + 1952 + 4 + 2 + 2;
 
 pub struct PollDraft {
     manifest: Manifest,
     top_count: u16,
+    maximum_participants: u16,
 }
-fn validate_fields(manifest: &Manifest, top_count: u16) -> Result<(), Error> {
-    // Only an option count without a supported profile is refused when the
-    // poll is created; the roster size is known only when it is proposed.
+fn validate_fields(
+    manifest: &Manifest,
+    top_count: u16,
+    maximum_participants: u16,
+) -> Result<(), Error> {
+    // An option count or participant maximum without a supported profile is
+    // refused when the poll is created. The roster size is known only when
+    // it is proposed, and a roster above the maximum is refused.
     // The manifest itself owns the nonempty title and distinct labels.
     if !Profile::option_range().contains(&manifest.option_count())
         || top_count == 0
         || usize::from(top_count) > manifest.option_count()
+        || !Profile::participant_range().contains(&usize::from(maximum_participants))
     {
         return Err(Error::Shape);
     }
     Ok(())
 }
 impl PollDraft {
-    pub fn new(manifest: Manifest, top_count: u16) -> Result<Self, Error> {
-        validate_fields(&manifest, top_count)?;
+    pub fn new(
+        manifest: Manifest,
+        top_count: u16,
+        maximum_participants: u16,
+    ) -> Result<Self, Error> {
+        validate_fields(&manifest, top_count, maximum_participants)?;
         let value = Self {
             manifest,
             top_count,
+            maximum_participants,
         };
         if value.body([0; 64], [0; 32], [0; 1952])?.len() > MAXIMUM_POLL_BYTES {
             return Err(Error::Shape);
@@ -59,13 +71,14 @@ impl PollDraft {
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/poll-definition/v1")
+                CanonicalItem::nonempty_ascii("sealed-lattice/poll-definition/v2")
                     .map_err(|_| Error::Shape)?,
                 CanonicalItem::hash512(runtime),
                 CanonicalItem::fixed_bytes(nonce).map_err(|_| Error::Shape)?,
                 CanonicalItem::fixed_bytes(organizer).map_err(|_| Error::Shape)?,
                 CanonicalItem::variable_bytes(manifest).map_err(|_| Error::Shape)?,
                 CanonicalItem::unsigned16(self.top_count),
+                CanonicalItem::unsigned16(self.maximum_participants),
             ],
         )
         .encode()
@@ -88,6 +101,7 @@ pub struct VerifiedPoll {
     organizer: [u8; 1952],
     manifest: Manifest,
     top_count: u16,
+    maximum_participants: u16,
 }
 impl VerifiedPoll {
     pub fn identity(&self) -> [u8; 64] {
@@ -104,6 +118,10 @@ impl VerifiedPoll {
     }
     pub fn top_count(&self) -> u16 {
         self.top_count
+    }
+    /// The largest roster the poll admits.
+    pub fn maximum_participants(&self) -> u16 {
+        self.maximum_participants
     }
 }
 fn identity(body: &[u8]) -> Result<[u8; 64], Error> {
@@ -156,20 +174,20 @@ pub fn verify_poll(
     }
     let limits = CanonicalDecodeLimits {
         maximum_tuple_byte_length: MAXIMUM_POLL_BYTES,
-        maximum_item_count: 6,
+        maximum_item_count: 7,
         maximum_item_byte_length: MAXIMUM_POLL_BYTES,
         maximum_nesting_depth: 32,
         maximum_cumulative_work_byte_length: 4 * MAXIMUM_POLL_BYTES,
         maximum_cumulative_allocation_byte_length: 4 * MAXIMUM_POLL_BYTES,
     };
     let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
-    if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 6 {
+    if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 7 {
         return Err(Error::Shape);
     }
     let items = &tuple.items;
     if items[0].item_type() != CanonicalItemType::Ascii
         || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
-            != b"sealed-lattice/poll-definition/v1"
+            != b"sealed-lattice/poll-definition/v2"
         || items[1].item_type() != CanonicalItemType::Hash512
         || items[1].canonical_bytes() != expected_runtime
         || items[2].item_type() != CanonicalItemType::RawBytes
@@ -177,6 +195,7 @@ pub fn verify_poll(
         || items[3].item_type() != CanonicalItemType::RawBytes
         || items[4].item_type() != CanonicalItemType::RawBytes
         || items[5].item_type() != CanonicalItemType::Unsigned16
+        || items[6].item_type() != CanonicalItemType::Unsigned16
     {
         return Err(Error::Context);
     }
@@ -197,19 +216,22 @@ pub fn verify_poll(
         &CanonicalDecodeLimits::default(),
     )
     .map_err(|_| Error::Shape)?;
-    let top_count = u16::from_le_bytes(
-        items[5]
-            .canonical_bytes()
+    let unsigned16 = |item: &CanonicalItem| {
+        item.canonical_bytes()
             .try_into()
-            .map_err(|_| Error::Shape)?,
-    );
-    validate_fields(&manifest, top_count)?;
+            .map(u16::from_le_bytes)
+            .map_err(|_| Error::Shape)
+    };
+    let top_count = unsigned16(&items[5])?;
+    let maximum_participants = unsigned16(&items[6])?;
+    validate_fields(&manifest, top_count, maximum_participants)?;
     Ok(VerifiedPoll {
         identity: expected_identity,
         runtime: expected_runtime,
         organizer,
         manifest,
         top_count,
+        maximum_participants,
     })
 }
 
@@ -238,7 +260,7 @@ mod tests {
         Manifest::new(label(title), options).unwrap()
     }
     fn draft(top_count: u16) -> Result<PollDraft, Error> {
-        PollDraft::new(manifest("Question", "First", "Second", 10), top_count)
+        PollDraft::new(manifest("Question", "First", "Second", 10), top_count, 10)
     }
     #[test]
     fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
@@ -252,6 +274,16 @@ mod tests {
         assert_eq!(verified.organizer(), &original);
         assert_eq!(verified.manifest().option_count(), 10);
         assert_eq!(verified.top_count(), 2);
+        assert_eq!(verified.maximum_participants(), 10);
+        // The body is its fixed fields around the canonical manifest.
+        assert_eq!(
+            packet.body.len(),
+            POLL_BODY_OVERHEAD
+                + manifest("Question", "First", "Second", 10)
+                    .encode()
+                    .unwrap()
+                    .len()
+        );
         assert!(
             creator
                 .create_poll(draft(1).unwrap(), [2; 64], [4; 32], [5; 32])
@@ -271,9 +303,12 @@ mod tests {
         for count in Profile::option_range() {
             let count = u16::try_from(count).unwrap();
             for top_count in [1, count] {
-                let draft =
-                    PollDraft::new(manifest("Question", "First", "Second", count), top_count)
-                        .unwrap();
+                let draft = PollDraft::new(
+                    manifest("Question", "First", "Second", count),
+                    top_count,
+                    10,
+                )
+                .unwrap();
                 let packet = Credential::from_seeds([7; 32], [8; 32], [9; 32])
                     .create_poll(draft, [2; 64], [3; 32], [4; 32])
                     .unwrap();
@@ -282,11 +317,37 @@ mod tests {
                 assert_eq!(verified.manifest().option_count(), usize::from(count));
             }
             assert!(matches!(
-                PollDraft::new(manifest("Question", "First", "Second", count), count + 1),
+                PollDraft::new(
+                    manifest("Question", "First", "Second", count),
+                    count + 1,
+                    10
+                ),
                 Err(Error::Shape)
             ));
         }
         assert_eq!(Profile::option_range(), 2..=20);
+    }
+
+    #[test]
+    fn every_supported_participant_maximum_can_be_created() {
+        for maximum in Profile::participant_range() {
+            let maximum = u16::try_from(maximum).unwrap();
+            let draft =
+                PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum).unwrap();
+            let packet = Credential::from_seeds([7; 32], [8; 32], [9; 32])
+                .create_poll(draft, [2; 64], [3; 32], [4; 32])
+                .unwrap();
+            let verified =
+                verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
+            assert_eq!(verified.maximum_participants(), maximum);
+        }
+        for maximum in [0, 2, 21] {
+            assert!(matches!(
+                PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum),
+                Err(Error::Shape)
+            ));
+        }
+        assert_eq!(Profile::participant_range(), 3..=20);
     }
 
     #[test]
@@ -309,6 +370,16 @@ mod tests {
         let mut top = original.clone();
         top.items[5] = CanonicalItem::unsigned16(11);
         signed_refusal(top);
+        for maximum in [2, 21] {
+            let mut participants = original.clone();
+            participants.items[6] = CanonicalItem::unsigned16(maximum);
+            signed_refusal(participants);
+        }
+        // A maximum of another type is refused although its bytes name a
+        // supported roster size.
+        let mut typed = original.clone();
+        typed.items[6] = CanonicalItem::fixed_bytes([10, 0]).unwrap();
+        signed_refusal(typed);
         // Nine options cannot carry the signed top count of ten.
         let mut body = original.clone();
         body.items[4] = CanonicalItem::variable_bytes(

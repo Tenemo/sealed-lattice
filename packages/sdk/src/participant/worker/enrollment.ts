@@ -48,6 +48,7 @@ export type EnrollmentRequest = Readonly<
           role: 'creator';
           manifest: Uint8Array;
           topCount: number;
+          maximumParticipants: number;
           username: string;
       }
     | {
@@ -112,14 +113,16 @@ export const createEnrollment = async (
     let input: Uint8Array;
     if (request.role === 'creator') {
         if (
-            !Number.isSafeInteger(request.topCount) ||
-            request.topCount < 1 ||
-            request.topCount > 0xffff
+            [request.topCount, request.maximumParticipants].some(
+                (value) =>
+                    !Number.isSafeInteger(value) || value < 1 || value > 0xffff,
+            )
         )
             return 'invalid request';
         input = concatenate(
             runtime,
             unsigned16(request.topCount),
+            unsigned16(request.maximumParticipants),
             unsigned32(request.manifest.length),
             request.manifest,
             unsigned32(name.length),

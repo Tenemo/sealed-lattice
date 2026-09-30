@@ -35,7 +35,7 @@ fn registration() -> (VerifiedPoll, Record) {
             .unwrap()
         })
         .collect();
-    let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2).unwrap();
+    let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
     let runtime = [7; 64];
     let mut parts: [Vec<u8>; 4] = Default::default();
     let (packet, _) = Enrollment::create_creator(

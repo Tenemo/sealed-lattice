@@ -299,7 +299,13 @@ const verifyProposalInputs = async (
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
 ): Promise<VerifiedProposal> => {
-    if (!validRecordIds(recordIds, context.limits))
+    // The module verified the poll with the participant's own registration,
+    // and the poll's signed maximum bounds the roster.
+    if (
+        !validRecordIds(recordIds, context.limits) ||
+        recordIds.length >
+            context.kernel.own_registration_maximum_participants()
+    )
         throw new InvalidRequest('The proposed records are invalid.');
     const begin = rosterBegin(
         context,

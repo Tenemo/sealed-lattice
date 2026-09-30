@@ -60,29 +60,32 @@ fn creator_context(
     usize,
 )> {
     use registration_credentials::foundation::{CanonicalDecodeLimits, ceremony::Manifest};
-    if input.len() < 74 {
+    if input.len() < 76 {
         return None;
     }
     let runtime = input[..64].try_into().ok()?;
     let top_count = u16::from_le_bytes(input[64..66].try_into().ok()?);
-    let manifest_length = u32::from_le_bytes(input[66..70].try_into().ok()?) as usize;
+    let maximum_participants = u16::from_le_bytes(input[66..68].try_into().ok()?);
+    let manifest_length = u32::from_le_bytes(input[68..72].try_into().ok()?) as usize;
     if manifest_length > registration_credentials::poll::MAXIMUM_POLL_BYTES
-        || input.len() < 74 + manifest_length
+        || input.len() < 76 + manifest_length
     {
         return None;
     }
     let manifest = Manifest::decode(
-        &input[70..70 + manifest_length],
+        &input[72..72 + manifest_length],
         &CanonicalDecodeLimits::default(),
     )
     .ok()?;
-    let draft = registration_credentials::poll::PollDraft::new(manifest, top_count).ok()?;
+    let draft =
+        registration_credentials::poll::PollDraft::new(manifest, top_count, maximum_participants)
+            .ok()?;
     let name_length = u32::from_le_bytes(
-        input[70 + manifest_length..74 + manifest_length]
+        input[72 + manifest_length..76 + manifest_length]
             .try_into()
             .ok()?,
     ) as usize;
-    let name_start = 74 + manifest_length;
+    let name_start = 76 + manifest_length;
     if name_length > MAXIMUM_USERNAME_INGRESS_BYTES || input.len() < name_start + name_length {
         return None;
     }

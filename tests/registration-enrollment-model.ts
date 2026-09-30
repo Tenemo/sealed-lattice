@@ -68,15 +68,18 @@ export const compileRegistrationEnrollmentCensus = () => {
     const maximumRootBytes = maximumManifestBytes + 16n;
     const proofRoleBytes =
         bytes('registered-recipient-key/1') + 2n * 64n + 128n;
+    // Seven items: the purpose, runtime, nonce, organizer key, manifest,
+    // result length and participant maximum.
     const pollDefinitionOverheadBytes =
         8n +
-        6n * 6n +
+        7n * 6n +
         4n +
-        bytes('sealed-lattice/poll-definition/v1') +
+        bytes('sealed-lattice/poll-definition/v2') +
         64n +
         32n +
         inputs.signingPublicKeyBytes +
         4n +
+        2n +
         2n;
     return {
         ...inputs,
@@ -96,6 +99,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         pollDefinitionOverheadBytes,
         maximumCreatorInputBytes:
             64n +
+            2n +
             2n +
             4n +
             inputs.maximumPollDefinitionBytes -

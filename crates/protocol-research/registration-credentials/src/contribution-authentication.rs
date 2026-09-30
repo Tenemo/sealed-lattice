@@ -705,7 +705,8 @@ mod tests {
                 .unwrap()
             })
             .collect();
-        let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1).unwrap();
+        let draft =
+            PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1, 3).unwrap();
         let mut credentials: Vec<_> = (1..4)
             .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))
             .collect();

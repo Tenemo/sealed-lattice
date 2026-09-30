@@ -67,6 +67,9 @@ impl RosterInputVerifier {
             &input[134..134 + length],
             &input[134 + length..],
         )?;
+        if count > usize::from(poll.maximum_participants()) {
+            return Err(Error::Context);
+        }
         Ok(Self {
             poll,
             records: (0..count).map(|_| Record::Unread).collect(),
@@ -302,6 +305,13 @@ mod tests {
             &packet.signature,
         ]
         .concat();
+        // The poll admits at most three participants, so a roster of four
+        // is refused before any record opens.
+        let above = [&input[..128], &4u16.to_le_bytes(), &input[130..]].concat();
+        assert!(matches!(
+            RosterInputVerifier::new(&above),
+            Err(Error::Context)
+        ));
         let mut roster = RosterInputVerifier::new(&input).unwrap();
         let record = |position: u16| {
             [

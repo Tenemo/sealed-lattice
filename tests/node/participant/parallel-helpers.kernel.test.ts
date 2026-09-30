@@ -259,6 +259,7 @@ const prepare = (
             ? concatenate(
                   runtimeIdentity,
                   unsigned16(1),
+                  unsigned16(3),
                   unsigned32(manifest.length),
                   manifest,
                   unsigned32(username.length),
@@ -494,6 +495,27 @@ describe('participant helpers with registration work', () => {
                     verifyRoster(helpers, poll, candidate),
                 ),
             ).toEqual(verdictAlone);
+        }
+        // The poll admits at most three participants, so the roster
+        // verifier refuses a roster of four before reading any record.
+        const { kernel } = await instantiateParticipantKernel(
+            participantModule,
+            noParallelHelpers,
+        );
+        for (const [count, refusal] of [
+            [4, 1],
+            [3, 0],
+        ]) {
+            const begin = concatenate(
+                poll.poll,
+                runtimeIdentity,
+                unsigned16(count),
+                unsigned32(poll.definition.length),
+                poll.definition,
+                poll.signature,
+            );
+            writeInput(kernel, begin);
+            expect(kernel.roster_begin(begin.length)).toBe(refusal);
         }
     });
 

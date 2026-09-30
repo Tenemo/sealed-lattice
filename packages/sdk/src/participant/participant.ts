@@ -85,6 +85,8 @@ export type ParticipantEnrollment = Readonly<
           role: 'creator';
           manifest: string;
           topCount: number;
+          /** The largest roster the poll admits. */
+          maximumParticipants: number;
           username: string;
       }
     | {

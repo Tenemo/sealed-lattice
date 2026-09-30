@@ -7,7 +7,7 @@ describe('signed registration and original-key custody', () => {
         const value = compileRegistrationEnrollmentCensus();
         expect(value.maximumHeaderBytes).toBe(3565n);
         expect(value.proofRoleBytes).toBe(282n);
-        expect(value.pollDefinitionOverheadBytes).toBe(2135n);
+        expect(value.pollDefinitionOverheadBytes).toBe(2143n);
         expect(value.maximumCreatorInputBytes).toBeLessThan(1_048_576n);
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(532n);

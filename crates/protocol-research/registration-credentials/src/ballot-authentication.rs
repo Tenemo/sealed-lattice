@@ -407,7 +407,8 @@ mod tests {
                 .unwrap()
             })
             .collect();
-        let draft = PollDraft::new(Manifest::new(label("Question"), options).unwrap(), 10).unwrap();
+        let draft =
+            PollDraft::new(Manifest::new(label("Question"), options).unwrap(), 10, 10).unwrap();
         let packet = Credential::from_seeds([20; 32], [21; 32], [22; 32])
             .create_poll(draft, runtime, [3; 32], [4; 32])
             .unwrap();
