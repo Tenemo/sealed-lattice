@@ -234,7 +234,6 @@ impl Enrollment {
             poll,
             runtime,
             signing_public: *credential.signing_public(),
-            mailbox_public: *credential.mailbox_public(),
             recipient_key_hash: key_hash,
             proof_length: length,
         }
@@ -311,7 +310,6 @@ impl Enrollment {
         }
         let credential = Credential::open_complete(
             header.signing_public,
-            header.mailbox_public,
             body_digest,
             data_keys[32..].try_into().unwrap(),
             signing_capsule,
@@ -330,10 +328,5 @@ impl Enrollment {
 }
 
 fn fresh_credential() -> Credential {
-    let seeds = random::<96>();
-    Credential::from_seeds(
-        seeds[..32].try_into().unwrap(),
-        seeds[32..64].try_into().unwrap(),
-        seeds[64..].try_into().unwrap(),
-    )
+    Credential::from_seed(*random::<32>())
 }

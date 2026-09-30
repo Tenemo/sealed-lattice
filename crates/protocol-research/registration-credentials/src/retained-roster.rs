@@ -131,7 +131,7 @@ mod tests {
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
         let mut credentials: Vec<Credential> = (0..3u8)
-            .map(|seed| Credential::from_seeds([seed + 1; 32], [seed + 11; 32], [seed + 21; 32]))
+            .map(|seed| Credential::from_seed([seed + 1; 32]))
             .collect();
         let packet = credentials[0]
             .create_poll(draft, runtime, [5; 32], [6; 32])
@@ -148,7 +148,6 @@ mod tests {
                 poll: poll.identity(),
                 runtime,
                 signing_public: *credential.signing_public(),
-                mailbox_public: *credential.mailbox_public(),
                 recipient_key_hash: ProtocolHash::digest(&keys[position]).into(),
                 proof_length: PROOF_HEADER_BYTES + position,
             };
@@ -259,8 +258,8 @@ mod tests {
             RosterInputVerifier::retained(begin, credential, retained).is_err()
         };
         assert!(!refused(owner, &begin, &retained));
-        // Another signing seed, even with the same mailbox seeds.
-        let other = Credential::from_seeds([9; 32], [12; 32], [22; 32]);
+        // Another signing seed.
+        let other = Credential::from_seed([9; 32]);
         assert!(refused(&other, &begin, &retained));
         assert!(refused(&ceremony.credentials[2], &begin, &retained));
         // The same records under a poll of another runtime.

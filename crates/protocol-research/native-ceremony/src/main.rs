@@ -943,7 +943,6 @@ fn main() {
     let restore_credential = || {
         registration_credentials::Credential::open_complete(
             original.header().signing_public,
-            original.header().mailbox_public,
             original.body_digest(),
             data_keys[32..].try_into().unwrap(),
             &signing_capsule,
@@ -1291,7 +1290,6 @@ fn main() {
         let restore = || {
             registration_credentials::Credential::open_complete(
                 record.header().signing_public,
-                record.header().mailbox_public,
                 record.body_digest(),
                 &corrupt_wrapping_key,
                 &corrupt_signing_capsule,

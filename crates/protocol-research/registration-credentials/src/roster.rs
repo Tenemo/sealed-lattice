@@ -135,7 +135,6 @@ pub struct RosterProposal {
     identity: [u8; 64],
     body: Vec<u8>,
     records: Vec<Arc<VerifiedRegistration>>,
-    canonical_roster: Vec<u8>,
     organizer_position: usize,
     profile: Profile,
 }
@@ -162,12 +161,8 @@ impl RosterProposal {
                 return Err(Error::Context);
             }
             entries.push(
-                RosterEntry::new(
-                    position as u16,
-                    header.signing_public,
-                    header.mailbox_public,
-                )
-                .map_err(|_| Error::Shape)?,
+                RosterEntry::new(position as u16, header.signing_public)
+                    .map_err(|_| Error::Shape)?,
             );
             bodies.extend(record.body_digest());
             if &header.signing_public == poll.organizer()
@@ -177,10 +172,8 @@ impl RosterProposal {
             }
         }
         let organizer_position = organizer_position.ok_or(Error::Context)?;
-        let canonical_roster = Roster::new(entries)
-            .map_err(|_| Error::Shape)?
-            .encode()
-            .map_err(|_| Error::Shape)?;
+        // The roster refuses a repeated signing key or identity.
+        Roster::new(entries).map_err(|_| Error::Shape)?;
         let body = encode_proposal(poll.identity(), poll.runtime(), bodies)?;
         let identity = hash_foundation_tuple_512(
             "sealed-lattice/roster-proposal-id/v1",
@@ -194,7 +187,6 @@ impl RosterProposal {
             identity,
             body,
             records,
-            canonical_roster,
             organizer_position,
             profile,
         })
@@ -210,9 +202,6 @@ impl RosterProposal {
     }
     pub fn body(&self) -> &[u8] {
         &self.body
-    }
-    pub fn canonical_roster(&self) -> &[u8] {
-        &self.canonical_roster
     }
     pub fn records(&self) -> &[Arc<VerifiedRegistration>] {
         &self.records

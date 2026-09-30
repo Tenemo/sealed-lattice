@@ -343,7 +343,7 @@ pub(crate) mod tests {
             .collect();
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
-        let mut organizer = Credential::from_seeds([1; 32], [2; 32], [3; 32]);
+        let mut organizer = Credential::from_seed([1; 32]);
         let packet = organizer
             .create_poll(draft, [4; 64], [5; 32], [6; 32])
             .unwrap();
@@ -352,7 +352,6 @@ pub(crate) mod tests {
             poll: packet.identity,
             runtime,
             signing_public: *organizer.signing_public(),
-            mailbox_public: *organizer.mailbox_public(),
             recipient_key_hash: [0; 64],
             proof_length: PROOF_HEADER_BYTES,
         }

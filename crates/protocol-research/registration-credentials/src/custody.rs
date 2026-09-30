@@ -3,7 +3,6 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{AeadInPlace, KeyInit},
 };
-use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
 use zeroize::Zeroizing;
 
 /// The sealed signing seed: its magic, the seed and the AES-GCM tag.
@@ -56,7 +55,6 @@ impl Credential {
     }
     pub fn open_complete(
         signing_public: [u8; 1952],
-        mailbox_public: [u8; 1184],
         body: [u8; 64],
         key: &[u8; 32],
         sealed: &[u8],
@@ -64,7 +62,6 @@ impl Credential {
         if sealed.len() != SEALED_SIGNING_SEED_BYTES {
             return Err(Error::Shape);
         }
-        ml_kem_768::EncapsKey::try_from_bytes(mailbox_public).map_err(|_| Error::Shape)?;
         let mut bytes = Zeroizing::new(sealed.to_vec());
         Aes256Gcm::new(key.into())
             .decrypt_in_place(Nonce::from_slice(&[0; 12]), &associated(body), &mut *bytes)
@@ -75,7 +72,6 @@ impl Credential {
         let value = Self {
             signing_seed: Zeroizing::new(bytes[4..].try_into().map_err(|_| Error::Shape)?),
             signing_public,
-            mailbox_public,
             signed: true,
             completed_body: Some(body),
             sealed: true,
@@ -126,7 +122,7 @@ mod tests {
     };
     #[test]
     fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
-        let mut original = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let mut original = Credential::from_seed([7; 32]);
         let data_key = [11; 32];
         assert!(original.seal_complete(&data_key).is_err());
         let make = || {
@@ -135,7 +131,6 @@ mod tests {
                 poll: [1; 64],
                 runtime: [2; 64],
                 signing_public: *original.signing_public(),
-                mailbox_public: *original.mailbox_public(),
                 recipient_key_hash: [3; 64],
                 proof_length: 5000,
             })
@@ -150,14 +145,9 @@ mod tests {
         let sealed = original.seal_complete(&data_key).unwrap();
         assert_eq!(sealed.len(), SEALED_SIGNING_SEED_BYTES);
         assert!(original.seal_complete(&data_key).is_err());
-        let mut restored = Credential::open_complete(
-            *original.signing_public(),
-            *original.mailbox_public(),
-            body,
-            &data_key,
-            &sealed,
-        )
-        .unwrap();
+        let mut restored =
+            Credential::open_complete(*original.signing_public(), body, &data_key, &sealed)
+                .unwrap();
         assert!(restored.check_retained());
         assert!(restored.sign_registration(for_repeat, [12; 32]).is_err());
         assert!(restored.seal_complete(&data_key).is_err());
@@ -203,14 +193,8 @@ mod tests {
         let mut changed = sealed.clone();
         changed[20] ^= 1;
         assert!(
-            Credential::open_complete(
-                *original.signing_public(),
-                *original.mailbox_public(),
-                body,
-                &data_key,
-                &changed
-            )
-            .is_err()
+            Credential::open_complete(*original.signing_public(), body, &data_key, &changed)
+                .is_err()
         );
         let mut wrong_seed = Vec::from(b"RCS1".as_slice());
         wrong_seed.extend([6u8; 32]);
@@ -222,36 +206,17 @@ mod tests {
             )
             .unwrap();
         assert!(
-            Credential::open_complete(
-                *original.signing_public(),
-                *original.mailbox_public(),
-                body,
-                &data_key,
-                &wrong_seed
-            )
-            .is_err()
+            Credential::open_complete(*original.signing_public(), body, &data_key, &wrong_seed)
+                .is_err()
         );
         let mut extra = sealed.clone();
         extra.push(0);
         assert!(
-            Credential::open_complete(
-                *original.signing_public(),
-                *original.mailbox_public(),
-                body,
-                &data_key,
-                &extra
-            )
-            .is_err()
+            Credential::open_complete(*original.signing_public(), body, &data_key, &extra).is_err()
         );
         assert!(
-            Credential::open_complete(
-                *original.signing_public(),
-                *original.mailbox_public(),
-                [0; 64],
-                &data_key,
-                &sealed
-            )
-            .is_err()
+            Credential::open_complete(*original.signing_public(), [0; 64], &data_key, &sealed)
+                .is_err()
         );
     }
 }

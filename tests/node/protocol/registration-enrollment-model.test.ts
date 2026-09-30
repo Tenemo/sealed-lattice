@@ -5,7 +5,7 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 describe('signed registration and original-key custody', () => {
     it('accounts for the canonical username and every public or secret record', () => {
         const value = compileRegistrationEnrollmentCensus();
-        expect(value.maximumHeaderBytes).toBe(3565n);
+        expect(value.maximumHeaderBytes).toBe(2375n);
         expect(value.proofRoleBytes).toBe(282n);
         expect(value.pollDefinitionOverheadBytes).toBe(2143n);
         expect(value.maximumCreatorInputBytes).toBeLessThan(1_048_576n);

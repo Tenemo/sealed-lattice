@@ -708,7 +708,7 @@ mod tests {
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1, 3).unwrap();
         let mut credentials: Vec<_> = (1..4)
-            .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))
+            .map(|seed| Credential::from_seed([seed; 32]))
             .collect();
         let packet = credentials[0]
             .create_poll(draft, [4; 64], [5; 32], [6; 32])
@@ -725,7 +725,6 @@ mod tests {
                         poll: poll.identity(),
                         runtime: poll.runtime(),
                         signing_public: *credential.signing_public(),
-                        mailbox_public: *credential.mailbox_public(),
                         recipient_key_hash: [0; 64],
                         proof_length: 0,
                     },
@@ -774,7 +773,7 @@ mod tests {
         );
         // The root shows the proposal and the confirmation used, so the
         // restored owner unlocks every purpose but those two.
-        let mut restored = Credential::from_seeds([2; 32], [32; 32], [62; 32]);
+        let mut restored = Credential::from_seed([2; 32]);
         restored.completed_body = Some([2; 64]);
         restored.locked_purposes =
             SigningPurpose::Proposal.mask() | SigningPurpose::Confirmation.mask();

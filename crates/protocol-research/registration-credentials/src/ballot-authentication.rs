@@ -409,16 +409,16 @@ mod tests {
             .collect();
         let draft =
             PollDraft::new(Manifest::new(label("Question"), options).unwrap(), 10, 10).unwrap();
-        let packet = Credential::from_seeds([20; 32], [21; 32], [22; 32])
+        let packet = Credential::from_seed([20; 32])
             .create_poll(draft, runtime, [3; 32], [4; 32])
             .unwrap();
         verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap()
     }
     #[test]
     fn retained_setup_tags_bind_the_credential_poll_and_exact_reference() {
-        let participant = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
-        let same_seed = Credential::from_seeds([7; 32], [11; 32], [12; 32]);
-        let other = Credential::from_seeds([10; 32], [8; 32], [9; 32]);
+        let participant = Credential::from_seed([7; 32]);
+        let same_seed = Credential::from_seed([7; 32]);
+        let other = Credential::from_seed([10; 32]);
         let poll = verified_poll([2; 64]);
         let reference = [b"SAV1".as_slice(), &[5; 64], &[6; 128]].concat();
         let tag = participant.retained_setup_tag(&poll, &reference);

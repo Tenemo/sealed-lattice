@@ -52,7 +52,6 @@ pub struct RegistrationHeader {
     pub poll: [u8; 64],
     pub runtime: [u8; 64],
     pub signing_public: [u8; 1952],
-    pub mailbox_public: [u8; 1184],
     pub recipient_key_hash: [u8; 64],
     pub proof_length: usize,
 }
@@ -66,7 +65,6 @@ impl RegistrationHeader {
             poll: [0; 64],
             runtime: [0; 64],
             signing_public: [0; 1952],
-            mailbox_public: [0; 1184],
             recipient_key_hash: [0; 64],
             proof_length: 0,
         }
@@ -84,11 +82,10 @@ impl RegistrationHeader {
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v2").unwrap(),
+                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v3").unwrap(),
                 CanonicalItem::hash512(self.poll),
                 CanonicalItem::hash512(self.runtime),
                 CanonicalItem::fixed_bytes(self.signing_public).unwrap(),
-                CanonicalItem::fixed_bytes(self.mailbox_public).unwrap(),
                 CanonicalItem::hash512(self.recipient_key_hash),
                 CanonicalItem::unsigned64(self.proof_length as u64),
                 CanonicalItem::display_text(&self.username).map_err(|_| crate::Error::Shape)?,
@@ -101,7 +98,7 @@ impl RegistrationHeader {
         use canonical_tuple::{CanonicalDecodeBudget, CanonicalDecodeLimits};
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: 4096,
-            maximum_item_count: 8,
+            maximum_item_count: 7,
             maximum_item_byte_length: 1952,
             maximum_nesting_depth: 0,
             maximum_cumulative_work_byte_length: 16384,
@@ -114,7 +111,7 @@ impl RegistrationHeader {
             0,
         )
         .map_err(|_| crate::Error::Shape)?;
-        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 8 {
+        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 7 {
             return Err(crate::Error::Shape);
         }
         let items = &tuple.items;
@@ -122,7 +119,7 @@ impl RegistrationHeader {
             || items[0]
                 .variable_value_bytes()
                 .map_err(|_| crate::Error::Shape)?
-                != b"sealed-lattice/registration-header/v2"
+                != b"sealed-lattice/registration-header/v3"
         {
             return Err(crate::Error::Context);
         }
@@ -142,22 +139,19 @@ impl RegistrationHeader {
         let signing_public = field(3, CanonicalItemType::RawBytes)?
             .try_into()
             .map_err(|_| crate::Error::Shape)?;
-        let mailbox_public = field(4, CanonicalItemType::RawBytes)?
-            .try_into()
-            .map_err(|_| crate::Error::Shape)?;
-        let recipient_key_hash = field(5, CanonicalItemType::Hash512)?
+        let recipient_key_hash = field(4, CanonicalItemType::Hash512)?
             .try_into()
             .map_err(|_| crate::Error::Shape)?;
         let proof_length = usize::try_from(u64::from_le_bytes(
-            field(6, CanonicalItemType::Unsigned64)?
+            field(5, CanonicalItemType::Unsigned64)?
                 .try_into()
                 .map_err(|_| crate::Error::Shape)?,
         ))
         .map_err(|_| crate::Error::Shape)?;
-        if items[7].item_type() != CanonicalItemType::DisplayText {
+        if items[6].item_type() != CanonicalItemType::DisplayText {
             return Err(crate::Error::Shape);
         }
-        let username_bytes = items[7]
+        let username_bytes = items[6]
             .variable_value_bytes()
             .map_err(|_| crate::Error::Shape)?;
         if username_bytes.is_empty() || username_bytes.len() > MAXIMUM_USERNAME_BYTES {
@@ -171,7 +165,6 @@ impl RegistrationHeader {
                 poll,
                 runtime,
                 signing_public,
-                mailbox_public,
                 recipient_key_hash,
                 proof_length,
             },

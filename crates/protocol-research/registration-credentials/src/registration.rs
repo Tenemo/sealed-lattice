@@ -237,14 +237,14 @@ mod tests {
                 maximum as u16,
             )
             .unwrap();
-            let packet = Credential::from_seeds([1; 32], [2; 32], [3; 32])
+            let packet = Credential::from_seed([1; 32])
                 .create_poll(draft, [4; 64], [5; 32], [6; 32])
                 .unwrap();
             verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap()
         };
-        let organizer = Credential::from_seeds([1; 32], [2; 32], [3; 32]);
+        let organizer = Credential::from_seed([1; 32]);
         let members: Vec<_> = (10..30)
-            .map(|seed| Credential::from_seeds([seed; 32], [seed + 30; 32], [seed + 60; 32]))
+            .map(|seed| Credential::from_seed([seed; 32]))
             .collect();
         let proposal = |poll: &VerifiedPoll, size: usize| {
             let records = std::iter::once(&organizer)
@@ -256,7 +256,6 @@ mod tests {
                             poll: poll.identity(),
                             runtime: poll.runtime(),
                             signing_public: *credential.signing_public(),
-                            mailbox_public: *credential.mailbox_public(),
                             recipient_key_hash: [0; 64],
                             proof_length: 0,
                         },

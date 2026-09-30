@@ -8,7 +8,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fips203 = { version = "=0.4.3", default-features = false, features = ["ml-kem-768"] }
 fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
 sha3 = "=0.10.9"
 unicode-normalization = "=0.1.25"

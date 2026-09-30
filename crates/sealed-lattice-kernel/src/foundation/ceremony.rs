@@ -477,10 +477,6 @@ fn validate_external_identifier(identifier: &str) -> SchemaResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use fips203::{
-        ml_kem_768,
-        traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
-    };
     use fips204::{
         ml_dsa_65,
         traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes},
@@ -524,18 +520,9 @@ mod tests {
                 let mut signing_seed = [0x23_u8; 32];
                 signing_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
                 let (signing_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
-                let mut mailbox_seed = [0x61_u8; 32];
-                mailbox_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
-                let mut mailbox_fallback_seed = [0x97_u8; 32];
-                mailbox_fallback_seed[31] =
-                    u8::try_from(PROTOTYPE_PARTICIPANT_COUNT - roster_position)
-                        .expect("reverse test position fits u8");
-                let (mailbox_key, _) =
-                    ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
                 RosterEntry {
                     roster_position,
                     signing_verification_key: signing_key.into_bytes(),
-                    mailbox_encapsulation_key: mailbox_key.into_bytes(),
                 }
             })
             .collect();

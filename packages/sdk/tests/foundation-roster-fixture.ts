@@ -1,5 +1,5 @@
 // Independent canonical-wire fixture. These are structural public-key bytes,
-// not generated signing/encryption keys and not protocol participation evidence.
+// not generated signing keys and not protocol participation evidence.
 const join = (parts: readonly Uint8Array[]): Uint8Array => {
     const output = new Uint8Array(
         parts.reduce((size, part) => size + part.length, 0),
@@ -37,12 +37,9 @@ export const createFoundationRosterFixture = (
     const entries = Array.from({ length: participantCount }, (_, position) => {
         const signingKey = new Uint8Array(1952);
         signingKey[0] = position + 1;
-        const mailboxKey = new Uint8Array(1184);
-        mailboxKey[1152] = position + 1;
         return tuple(0x0114, [
             [3, unsigned(position, 2)],
             [1, signingKey],
-            [1, mailboxKey],
         ]);
     });
     return tuple(0x0115, [

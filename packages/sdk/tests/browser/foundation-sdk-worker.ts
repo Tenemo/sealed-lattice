@@ -50,7 +50,7 @@ const run = async (participantCount: number, optionCount: number) => {
     });
     const duplicateRoster = createFoundationRosterFixture(participantCount);
     // Each canonical entry has its own position; duplicate only the key material.
-    const entryLength = 8 + 3 * 6 + 2 + 1952 + 1184;
+    const entryLength = 8 + 2 * 6 + 2 + 1952;
     const keyOffset = 8 + 6 + 6 + 8 + 6 + 2 + 6;
     duplicateRoster.set(
         duplicateRoster.slice(keyOffset, keyOffset + 1952),

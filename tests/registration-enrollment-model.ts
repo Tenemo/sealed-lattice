@@ -22,7 +22,6 @@ const maximumRetainedRosterBytes = () =>
 
 const registrationEnrollmentInputs = {
     signingPublicKeyBytes: registrationSigningPublicKeyBytes,
-    mailboxPublicKeyBytes: 1184n,
     signatureBytes: 3309n,
     maximumUsernameBytes: 128n,
     maximumUsernameIngressBytes: 512n,
@@ -40,12 +39,11 @@ export const compileRegistrationEnrollmentCensus = () => {
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'utf8'));
     const maximumHeaderBytes =
         8n +
-        8n * 6n +
+        7n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header/v2') +
+        bytes('sealed-lattice/registration-header/v3') +
         3n * 64n +
         inputs.signingPublicKeyBytes +
-        inputs.mailboxPublicKeyBytes +
         8n +
         4n +
         inputs.maximumUsernameBytes;

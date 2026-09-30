@@ -264,7 +264,7 @@ mod tests {
     }
     #[test]
     fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
-        let mut creator = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let mut creator = Credential::from_seed([7; 32]);
         let original = *creator.signing_public();
         let packet = creator
             .create_poll(draft(2).unwrap(), [2; 64], [3; 32], [4; 32])
@@ -309,7 +309,7 @@ mod tests {
                     10,
                 )
                 .unwrap();
-                let packet = Credential::from_seeds([7; 32], [8; 32], [9; 32])
+                let packet = Credential::from_seed([7; 32])
                     .create_poll(draft, [2; 64], [3; 32], [4; 32])
                     .unwrap();
                 let verified =
@@ -334,7 +334,7 @@ mod tests {
             let maximum = u16::try_from(maximum).unwrap();
             let draft =
                 PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum).unwrap();
-            let packet = Credential::from_seeds([7; 32], [8; 32], [9; 32])
+            let packet = Credential::from_seed([7; 32])
                 .create_poll(draft, [2; 64], [3; 32], [4; 32])
                 .unwrap();
             let verified =
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn valid_signatures_do_not_authorize_invalid_poll_fields() {
-        let mut creator = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let mut creator = Credential::from_seed([7; 32]);
         let packet = creator
             .create_poll(draft(10).unwrap(), [2; 64], [3; 32], [4; 32])
             .unwrap();

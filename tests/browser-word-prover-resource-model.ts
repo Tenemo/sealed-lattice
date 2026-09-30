@@ -129,9 +129,7 @@ export const compileContributionGenerationResources = (
     const sharingDegree = BigInt(profile.releaseThreshold - 1);
     const roster = compileRosterProposalCensus(Number(participants));
     const retainedRosterPayloadBytes =
-        roster.retainedRecordPayloadBytes +
-        roster.canonicalRosterBytes +
-        roster.proposalBytes;
+        roster.retainedRecordPayloadBytes + roster.proposalBytes;
     const additionalInputBufferBytes = 1_572_864n - (1n << 20n);
     const relation = compileSetupContributionRelationCensus(profile);
     const proof = compileFullWordProofLayout(profile);

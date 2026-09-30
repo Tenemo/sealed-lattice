@@ -1,8 +1,6 @@
 use core::{fmt, str};
 use std::collections::BTreeSet;
 
-use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
-
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -12,7 +10,6 @@ use super::{
 
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
-pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 
@@ -75,19 +72,16 @@ pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
 pub struct RosterEntry {
     pub roster_position: u16,
     pub signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
-    pub mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 }
 
 impl RosterEntry {
     pub fn new(
         roster_position: u16,
         signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
-        mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
     ) -> SchemaResult<Self> {
         let entry = Self {
             roster_position,
             signing_verification_key,
-            mailbox_encapsulation_key,
         };
         entry.validate()?;
         Ok(entry)
@@ -100,7 +94,7 @@ impl RosterEntry {
                 "roster position is outside the configurable range",
             ));
         }
-        validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
+        Ok(())
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
@@ -111,17 +105,15 @@ impl RosterEntry {
             vec![
                 CanonicalItem::unsigned16(self.roster_position),
                 CanonicalItem::fixed_bytes(self.signing_verification_key)?,
-                CanonicalItem::fixed_bytes(self.mailbox_encapsulation_key)?,
             ],
         ))
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 3)?;
+        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 2)?;
         Self::new(
             read_u16(&tuple.items[0])?,
             read_fixed_bytes(&tuple.items[1])?,
-            read_fixed_bytes(&tuple.items[2])?,
         )
     }
 }
@@ -193,7 +185,6 @@ fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
     }
 
     let mut signing_keys = BTreeSet::new();
-    let mut mailbox_keys = BTreeSet::new();
     let mut participant_identities = BTreeSet::new();
     for (entry_index, entry) in entries.iter().enumerate() {
         entry.validate()?;
@@ -205,32 +196,13 @@ fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
         }
         let participant_identity = derive_participant_identity(&entry.signing_verification_key)?;
         if !signing_keys.insert(entry.signing_verification_key.as_slice())
-            || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
             || !participant_identities.insert(participant_identity)
         {
             return Err(FoundationSchemaError::new(
                 RefusalReason::DuplicateIdentity,
-                "roster contains a duplicate identity, signing key, or mailbox key",
+                "roster contains a duplicate identity or signing key",
             ));
         }
-    }
-    Ok(())
-}
-
-fn validate_ml_kem_768_encapsulation_key(
-    key: &[u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
-) -> SchemaResult<()> {
-    let encapsulation_key = ml_kem_768::EncapsKey::try_from_bytes(*key).map_err(|_| {
-        FoundationSchemaError::new(
-            RefusalReason::MalformedEncoding,
-            "mailbox encapsulation key is not a canonical ML-KEM-768 public key",
-        )
-    })?;
-    if encapsulation_key.into_bytes() != *key {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::MalformedEncoding,
-            "mailbox encapsulation key is not a canonical ML-KEM-768 public key",
-        ));
     }
     Ok(())
 }
@@ -461,11 +433,6 @@ pub(super) fn read_nested_tuple_list_with_budget(
 
 #[cfg(test)]
 mod tests {
-    use fips203::{
-        ml_kem_768,
-        traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
-    };
-
     use super::*;
 
     fn roster_entries(participant_count: u16) -> Vec<RosterEntry> {
@@ -474,19 +441,8 @@ mod tests {
                 let mut signing_verification_key =
                     [0x23_u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
                 signing_verification_key[0..2].copy_from_slice(&roster_position.to_le_bytes());
-                let mut mailbox_seed = [0x61_u8; 32];
-                mailbox_seed[0] = u8::try_from(roster_position + 1).expect("position fits u8");
-                let mut fallback_seed = [0x97_u8; 32];
-                fallback_seed[31] = u8::try_from(participant_count - roster_position)
-                    .expect("reverse position fits u8");
-                let (mailbox_key, _) =
-                    ml_kem_768::KG::keygen_from_seed(mailbox_seed, fallback_seed);
-                RosterEntry::new(
-                    roster_position,
-                    signing_verification_key,
-                    mailbox_key.into_bytes(),
-                )
-                .expect("test roster entry is valid")
+                RosterEntry::new(roster_position, signing_verification_key)
+                    .expect("test roster entry is valid")
             })
             .collect()
     }
@@ -547,6 +503,41 @@ mod tests {
                 .expect_err("oversized declared roster refuses before allocation")
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
+        );
+    }
+
+    #[test]
+    fn roster_entries_carry_no_encryption_key() {
+        // An entry holds its position and signing key alone; an entry that
+        // also carries a third item, as a former encapsulation key did, is
+        // refused.
+        let entries = roster_entries(3)
+            .iter()
+            .map(|entry| {
+                CanonicalTuple::new(
+                    ROSTER_ENTRY_SCHEMA_IDENTIFIER,
+                    FOUNDATION_SCHEMA_VERSION,
+                    vec![
+                        CanonicalItem::unsigned16(entry.roster_position),
+                        CanonicalItem::fixed_bytes(entry.signing_verification_key)
+                            .expect("signing key encodes"),
+                        CanonicalItem::fixed_bytes([0x61_u8; 1184]).expect("third item encodes"),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>();
+        let encoded = CanonicalTuple::new(
+            ROSTER_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![CanonicalItem::nested_tuple_list(&entries).expect("entries encode")],
+        )
+        .encode()
+        .expect("three-item roster encodes");
+        assert_eq!(
+            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect_err("a three-item entry refuses")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
         );
     }
 

@@ -26,10 +26,6 @@ pub mod roster_input;
 #[path = "target-signing.rs"]
 pub mod target_signing;
 
-use fips203::{
-    ml_kem_768,
-    traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
-};
 use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
@@ -64,7 +60,6 @@ pub enum Error {
 pub struct Credential {
     signing_seed: Zeroizing<[u8; 32]>,
     signing_public: [u8; 1952],
-    mailbox_public: [u8; 1184],
     signed: bool,
     completed_body: Option<[u8; 64]>,
     sealed: bool,
@@ -86,21 +81,13 @@ pub struct Credential {
     locked_purposes: u16,
 }
 impl Credential {
-    pub fn from_seeds(
-        signing: [u8; 32],
-        mailbox_first: [u8; 32],
-        mailbox_second: [u8; 32],
-    ) -> Self {
+    pub fn from_seed(signing: [u8; 32]) -> Self {
         let signing_seed = Zeroizing::new(signing);
         let (public, private) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
         drop(private);
-        let (mailbox, private_mailbox) =
-            ml_kem_768::KG::keygen_from_seed(mailbox_first, mailbox_second);
-        drop(private_mailbox);
         Self {
             signing_seed,
             signing_public: public.into_bytes(),
-            mailbox_public: mailbox.into_bytes(),
             signed: false,
             completed_body: None,
             sealed: false,
@@ -123,9 +110,6 @@ impl Credential {
     pub fn signing_public(&self) -> &[u8; 1952] {
         &self.signing_public
     }
-    pub fn mailbox_public(&self) -> &[u8; 1184] {
-        &self.mailbox_public
-    }
     pub fn proof_role(&self, poll: [u8; 64], runtime: [u8; 64]) -> Vec<u8> {
         registration_proof_role(poll, runtime, &self.signing_public)
     }
@@ -137,8 +121,7 @@ impl Credential {
         if self.signed {
             return Err(Error::Consumed);
         }
-        if body.signing_public != self.signing_public || body.mailbox_public != self.mailbox_public
-        {
+        if body.signing_public != self.signing_public {
             return Err(Error::Context);
         }
         self.signed = true;
@@ -213,7 +196,6 @@ pub fn registration_proof_role(poll: [u8; 64], runtime: [u8; 64], public: &[u8; 
 pub struct BodyDigest {
     digest: [u8; 64],
     signing_public: [u8; 1952],
-    mailbox_public: [u8; 1184],
 }
 impl BodyDigest {
     pub fn bytes(&self) -> [u8; 64] {
@@ -224,7 +206,6 @@ impl BodyDigest {
 pub struct BodyHasher {
     hash: Option<StreamingFoundationTupleHash512>,
     signing_public: [u8; 1952],
-    mailbox_public: [u8; 1184],
 }
 impl BodyHasher {
     pub fn new(header: RegistrationHeader) -> Result<Self, Error> {
@@ -240,7 +221,6 @@ impl BodyHasher {
         Ok(Self {
             hash: Some(hash),
             signing_public: header.signing_public,
-            mailbox_public: header.mailbox_public,
         })
     }
     pub fn from_header(
@@ -276,12 +256,11 @@ impl BodyHasher {
         Ok(BodyDigest {
             digest,
             signing_public: self.signing_public,
-            mailbox_public: self.mailbox_public,
         })
     }
 }
 
-// The proof length and public keys that every registration header carries.
+// The proof length and signing key that every registration header carries.
 fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
     if !(PROOF_HEADER_BYTES..=registration_relation().maximum_proof_bytes())
         .contains(&header.proof_length)
@@ -289,7 +268,6 @@ fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
         return Err(Error::Shape);
     }
     ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Error::Shape)?;
-    ml_kem_768::EncapsKey::try_from_bytes(header.mailbox_public).map_err(|_| Error::Shape)?;
     Ok(())
 }
 /// A complete registration header of the poll and runtime, checked as the
@@ -329,7 +307,6 @@ mod tests {
             poll,
             runtime: [2; 64],
             signing_public: *credential.signing_public(),
-            mailbox_public: *credential.mailbox_public(),
             recipient_key_hash: [3; 64],
             proof_length: 5000,
         })
@@ -340,7 +317,7 @@ mod tests {
     }
     #[test]
     fn credentials_sign_one_body_and_bind_the_full_public_context() {
-        let mut credential = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let mut credential = Credential::from_seed([7; 32]);
         let signature = credential
             .sign_registration(body(&credential, [1; 64]), [10; 32])
             .unwrap();
@@ -364,14 +341,13 @@ mod tests {
     }
     #[test]
     fn body_streams_refuse_incomplete_or_ignored_overrun_requests() {
-        let credential = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let credential = Credential::from_seed([7; 32]);
         let make = || {
             BodyHasher::new(RegistrationHeader {
                 username: foundation::normalize_username(b"Participant").unwrap(),
                 poll: [1; 64],
                 runtime: [2; 64],
                 signing_public: *credential.signing_public(),
-                mailbox_public: *credential.mailbox_public(),
                 recipient_key_hash: [3; 64],
                 proof_length: 5000,
             })
@@ -387,13 +363,12 @@ mod tests {
     }
     #[test]
     fn canonical_header_prefixes_bind_context_and_delimit_the_proof() {
-        let credential = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let credential = Credential::from_seed([7; 32]);
         let header = RegistrationHeader {
             username: foundation::normalize_username(b"Participant").unwrap(),
             poll: [1; 64],
             runtime: [2; 64],
             signing_public: *credential.signing_public(),
-            mailbox_public: *credential.mailbox_public(),
             recipient_key_hash: [3; 64],
             proof_length: 5000,
         }
@@ -418,13 +393,12 @@ mod tests {
 
     #[test]
     fn signed_usernames_are_canonical_bounded_and_not_replaceable() {
-        let mut credential = Credential::from_seeds([7; 32], [8; 32], [9; 32]);
+        let mut credential = Credential::from_seed([7; 32]);
         let make = |name: &[u8]| RegistrationHeader {
             username: foundation::normalize_username(name).unwrap(),
             poll: [1; 64],
             runtime: [2; 64],
             signing_public: *credential.signing_public(),
-            mailbox_public: *credential.mailbox_public(),
             recipient_key_hash: [3; 64],
             proof_length: 5000,
         };

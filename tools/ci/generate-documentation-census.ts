@@ -3169,10 +3169,6 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(registrationEnrollment.signingPublicKeyBytes),
                 ],
                 [
-                    'Mailbox public-key bytes',
-                    formatCount(registrationEnrollment.mailboxPublicKeyBytes),
-                ],
-                [
                     'Signature bytes',
                     formatCount(registrationEnrollment.signatureBytes),
                 ],
@@ -3846,7 +3842,6 @@ export const renderDocumentationCensus = (): string => {
                 'Proposal bytes',
                 'Contribution role bytes',
                 'Retained recipient-key bytes',
-                'Canonical roster bytes',
                 'Retained record payload bytes',
                 'Maximum public corpus bytes',
             ],
@@ -3855,7 +3850,6 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(proposal.proposalBytes),
                 formatCount(proposal.roleBytes),
                 formatCount(proposal.retainedRecipientKeyBytes),
-                formatCount(proposal.canonicalRosterBytes),
                 formatCount(proposal.retainedRecordPayloadBytes),
                 formatCount(proposal.maximumPublicCorpusBytes),
             ]),

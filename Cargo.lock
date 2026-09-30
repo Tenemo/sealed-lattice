@@ -47,18 +47,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fips203"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8bdb6454f692ca2a2b45cd554c6828c639d7f9c968cf83a678899ec4443a280"
-dependencies = [
- "rand_core",
- "sha3",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "fips204"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -123,7 +111,6 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 name = "sealed-lattice-kernel"
 version = "0.1.0"
 dependencies = [
- "fips203",
  "fips204",
  "sha3",
  "unicode-normalization",
@@ -150,12 +137,6 @@ dependencies = [
  "digest",
  "keccak",
 ]
-
-[[package]]
-name = "subtle"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "syn"

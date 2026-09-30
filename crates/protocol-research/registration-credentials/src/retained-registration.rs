@@ -123,19 +123,18 @@ mod tests {
             .collect();
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
-        let mut organizer = Credential::from_seeds([1; 32], [2; 32], [3; 32]);
+        let mut organizer = Credential::from_seed([1; 32]);
         let packet = organizer
             .create_poll(draft, runtime, [5; 32], [6; 32])
             .unwrap();
         let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
-        let credential = Credential::from_seeds([seed; 32], [seed + 10; 32], [seed + 20; 32]);
+        let credential = Credential::from_seed([seed; 32]);
         let key: Vec<u8> = (0..KEY_BYTES).map(|index| (index as u8) ^ seed).collect();
         let header = RegistrationHeader {
             username: normalize_username(b"Participant").unwrap(),
             poll: poll.identity(),
             runtime,
             signing_public: *credential.signing_public(),
-            mailbox_public: *credential.mailbox_public(),
             recipient_key_hash: ProtocolHash::digest(&key).into(),
             proof_length: PROOF_HEADER_BYTES + 1,
         };
@@ -197,14 +196,10 @@ mod tests {
                 .is_err()
         };
         assert!(!refused(credential, poll, &retained));
-        // Another credential, and one that shares every seed but the
-        // signing seed.
-        let other = Credential::from_seeds([8; 32], [18; 32], [28; 32]);
+        // Another credential.
+        let other = Credential::from_seed([8; 32]);
         assert!(registration.verified.retain(&other, poll).is_err());
         assert!(refused(&other, poll, &retained));
-        let resealed = Credential::from_seeds([9; 32], [17; 32], [27; 32]);
-        assert!(registration.verified.retain(&resealed, poll).is_err());
-        assert!(refused(&resealed, poll, &retained));
         // The same member's registration under a poll of another runtime.
         let foreign = super::tests::registration([5; 64], 7);
         assert!(
