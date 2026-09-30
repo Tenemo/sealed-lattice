@@ -6,7 +6,7 @@ use crate::{
         CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalTuple,
     },
 };
-use parallel_work::{HashStream, Sponge};
+use parallel_work::{HashStream, PendingDigest, Sponge};
 
 /// The identity of a public polynomial in its canonical coefficient
 /// encoding: a setup aggregate, a common polynomial, or a key polynomial read
@@ -51,10 +51,15 @@ impl IdentityHasher {
         Ok(())
     }
     pub fn finish(self) -> Result<[u8; 64], Error> {
+        Ok(self.finish_later()?.wait())
+    }
+    /// Starts the identity without waiting for it, for a caller whose work
+    /// goes on while a helper finishes the sponge.
+    pub fn finish_later(self) -> Result<PendingDigest, Error> {
         if self.remaining != 0 {
             return Err(Error::Shape);
         }
-        Ok(self.hash.finish())
+        Ok(self.hash.finish_later())
     }
 }
 
@@ -145,6 +150,9 @@ mod tests {
         let mut short = IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], 2).unwrap();
         short.absorb(&[1]).unwrap();
         assert!(short.finish().is_err());
+        let mut short = IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], 2).unwrap();
+        short.absorb(&[1]).unwrap();
+        assert!(short.finish_later().is_err());
         assert!(IdentityHasher::new("", &[], 0).is_err());
     }
 }

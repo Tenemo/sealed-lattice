@@ -15,5 +15,6 @@ bridge = []
 num-bigint = "=0.5.1"
 
 opened-contribution = { path = "../opened-contribution", default-features = false }
+parallel-work = { path = "../parallel-work" }
 registration-credentials = { path = "../registration-credentials", default-features = false }
 supported-profile = { path = "../supported-profile" }

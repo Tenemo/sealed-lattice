@@ -22,7 +22,7 @@ use std::{
     collections::VecDeque,
     sync::atomic::{AtomicU64, Ordering},
 };
-pub use stream::{HashStream, Sponge};
+pub use stream::{HashStream, PendingDigest, Sponge};
 use zeroize::Zeroizing;
 
 /// The most bytes one job's input or output holds, the bound on one buffer

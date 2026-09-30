@@ -922,6 +922,7 @@ version = "0.0.0"
 dependencies = [
  "num-bigint",
  "opened-contribution",
+ "parallel-work",
  "registration-credentials",
  "supported-profile",
 ]

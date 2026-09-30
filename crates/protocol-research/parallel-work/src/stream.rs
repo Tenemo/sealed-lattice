@@ -168,17 +168,47 @@ impl HashStream {
             remote.keep(send(sponge, remote.session, ABSORB, part, 0));
         }
     }
-    pub fn finish(mut self) -> [u8; 64] {
+    pub fn finish(self) -> [u8; 64] {
+        self.finish_later().wait()
+    }
+    /// Starts the digest without waiting for it, so the caller's work goes
+    /// on while the stream's helper finishes it. An unwaited digest is still
+    /// computed and then cleared.
+    pub fn finish_later(mut self) -> PendingDigest {
         if let Some(local) = self.local.take() {
-            return local.finish();
+            return PendingDigest(Digesting::Ready(local.finish()));
         }
         let remote = self.remote.take().expect("A stream is held somewhere");
         // The helper finishes the stream after its earlier absorptions.
-        let ticket = send(self.sponge, remote.session, FINISH, &remote.pending, 64);
-        for earlier in remote.running {
-            earlier.wait();
+        let finish = send(self.sponge, remote.session, FINISH, &remote.pending, 64);
+        PendingDigest(Digesting::Remote {
+            earlier: remote.running,
+            finish,
+        })
+    }
+}
+
+/// A stream's digest, which its helper may still be computing.
+pub struct PendingDigest(Digesting);
+enum Digesting {
+    Ready([u8; 64]),
+    Remote {
+        earlier: VecDeque<Ticket>,
+        finish: Ticket,
+    },
+}
+
+impl PendingDigest {
+    pub fn wait(self) -> [u8; 64] {
+        match self.0 {
+            Digesting::Ready(digest) => digest,
+            Digesting::Remote { earlier, finish } => {
+                for ticket in earlier {
+                    ticket.wait();
+                }
+                finish.wait().as_slice().try_into().unwrap()
+            }
         }
-        ticket.wait().as_slice().try_into().unwrap()
     }
 }
 
@@ -310,6 +340,35 @@ mod tests {
         drop(abandoned);
         assert_eq!(one.finish(), direct(Sponge::ProtocolHash, &first));
         assert_eq!(two.finish(), direct(Sponge::Shake256, &second));
+        STREAMS.with(|streams| assert!(streams.borrow().is_empty()));
+    }
+
+    // Digests started before earlier ones are waited for resolve, in any
+    // order, to the direct ones, and an unwaited digest leaves no state
+    // behind.
+    #[test]
+    fn deferred_digests_resolve_in_any_order() {
+        let inputs = [0, 7, BATCH_BYTES, 3 * BATCH_BYTES + 1, SEND_BYTES + 3].map(bytes);
+        for remote in [false, true] {
+            let mut pending: Vec<_> = inputs
+                .iter()
+                .enumerate()
+                .map(|(position, input)| {
+                    let sponge = [Sponge::ProtocolHash, Sponge::Shake256][position % 2];
+                    let mut stream = HashStream::held(sponge, remote);
+                    stream.update(input);
+                    (sponge, input, stream.finish_later())
+                })
+                .collect();
+            let mut abandoned = HashStream::held(Sponge::Shake256, remote);
+            abandoned.update(&inputs[3]);
+            drop(abandoned.finish_later());
+            // The latest first, then the earliest.
+            let earliest = pending.remove(0);
+            for (sponge, input, digest) in pending.into_iter().rev().chain([earliest]) {
+                assert_eq!(digest.wait(), direct(sponge, input), "{remote}");
+            }
+        }
         STREAMS.with(|streams| assert!(streams.borrow().is_empty()));
     }
 }

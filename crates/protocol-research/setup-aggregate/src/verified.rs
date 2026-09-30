@@ -1,12 +1,13 @@
 use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
 use opened_contribution::OpenedContributionVerifier;
+use parallel_work::PendingDigest;
 use registration_credentials::{
     Credential, RETAINED_TAG_BYTES,
     contribution_authentication::CommitmentInventory,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
 };
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 use supported_profile::Profile;
 
 #[derive(Clone, Debug)]
@@ -76,12 +77,48 @@ struct Pending {
     // read back from the host, and the new aggregate.
     previous_hash: Option<IdentityHasher>,
     output_hash: Option<IdentityHasher>,
+    // The completed polynomials whose identities helpers may still be
+    // finishing, oldest first.
+    finishing: VecDeque<FinishingPolynomial>,
     outputs: Vec<AggregatePolynomial>,
     failed: bool,
 }
 
+struct FinishingPolynomial {
+    index: usize,
+    bytes: usize,
+    // The previous aggregate's identity and the digest it must equal.
+    previous: Option<(PendingDigest, [u8; 64])>,
+    output: PendingDigest,
+}
+
+// Checks the oldest completed polynomials' identities and adds each one's
+// output until at most the kept number remain unchecked.
+fn settle(
+    finishing: &mut VecDeque<FinishingPolynomial>,
+    kept: usize,
+    outputs: &mut Vec<AggregatePolynomial>,
+) -> Result<(), Refusal> {
+    while finishing.len() > kept {
+        let polynomial = finishing.pop_front().unwrap();
+        if let Some((identity, expected)) = polynomial.previous
+            && identity.wait() != expected
+        {
+            return Err(Refusal::PreviousAggregate);
+        }
+        outputs.push(AggregatePolynomial {
+            index: polynomial.index,
+            bytes: polynomial.bytes,
+            digest: polynomial.output.wait(),
+        });
+    }
+    Ok(())
+}
+
 /// Only a completed, positively verified opening advances the accepted prefix.
-/// Output chunks are provisional until `finish_contribution` succeeds.
+/// Output chunks are provisional until `finish_contribution` succeeds. A
+/// polynomial's identities are checked while later polynomials stream, and
+/// `finish_contribution` checks the last ones.
 pub struct SetupAggregator {
     inventory: Arc<CommitmentInventory>,
     profile: Profile,
@@ -174,6 +211,7 @@ impl SetupAggregator {
             offset: 0,
             previous_hash: None,
             output_hash: None,
+            finishing: VecDeque::new(),
             outputs: Vec::new(),
             failed: false,
         });
@@ -236,29 +274,40 @@ impl SetupAggregator {
                 .map_err(|_| Refusal::Body)?;
             pending.offset += incoming.len();
             if pending.offset == bytes {
-                if let Some(hash) = pending.previous_hash.take() {
-                    let expected = &self.previous[pending.ordinal];
-                    let digest = hash.finish().map_err(|_| Refusal::PreviousAggregate)?;
-                    if expected.index != index
-                        || expected.bytes != bytes
-                        || expected.digest != digest
-                    {
-                        return Err(Refusal::PreviousAggregate);
+                let previous = match pending.previous_hash.take() {
+                    None => None,
+                    Some(hash) => {
+                        let expected = &self.previous[pending.ordinal];
+                        if expected.index != index || expected.bytes != bytes {
+                            return Err(Refusal::PreviousAggregate);
+                        }
+                        let identity = hash
+                            .finish_later()
+                            .map_err(|_| Refusal::PreviousAggregate)?;
+                        Some((identity, expected.digest))
                     }
-                }
-                let digest = pending
+                };
+                let output = pending
                     .output_hash
                     .take()
                     .ok_or(Refusal::Order)?
-                    .finish()
+                    .finish_later()
                     .map_err(|_| Refusal::Body)?;
-                pending.outputs.push(AggregatePolynomial {
+                pending.finishing.push_back(FinishingPolynomial {
                     index,
                     bytes,
-                    digest,
+                    previous,
+                    output,
                 });
                 pending.ordinal += 1;
                 pending.offset = 0;
+                // The next polynomials stream while helpers finish these
+                // identities, as many as the jobs kept ahead.
+                settle(
+                    &mut pending.finishing,
+                    parallel_work::window(),
+                    &mut pending.outputs,
+                )?;
             }
             Ok(())
         })();
@@ -279,10 +328,11 @@ impl SetupAggregator {
         Ok(())
     }
     pub fn finish_contribution(&mut self) -> Result<(), Refusal> {
-        let pending = self.pending.take().ok_or(Refusal::Order)?;
+        let mut pending = self.pending.take().ok_or(Refusal::Order)?;
         if pending.failed || pending.ordinal != self.indices.len() || pending.offset != 0 {
             return Err(Refusal::Incomplete);
         }
+        settle(&mut pending.finishing, 0, &mut pending.outputs)?;
         let verified = pending.verifier.finish().map_err(|_| Refusal::Proof)?;
         if verified.position() != self.accepted
             || verified.inventory() != &self.inventory.identity()
@@ -421,5 +471,96 @@ mod retained_tests {
         reader.push(0, &bytes).unwrap();
         assert!(reader.push(bytes.len(), &bytes[..6]).is_err());
         assert!(reader.finish().is_err());
+    }
+}
+
+#[cfg(test)]
+mod finishing_tests {
+    use super::*;
+    use registration_credentials::identity::identity;
+
+    fn payload(index: usize) -> Vec<u8> {
+        (0..100 + index)
+            .map(|byte| (byte * 7 + index) as u8)
+            .collect()
+    }
+    fn deferred(bytes: &[u8]) -> PendingDigest {
+        let mut hasher = IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes.len()).unwrap();
+        hasher.absorb(bytes).unwrap();
+        hasher.finish_later().unwrap()
+    }
+    // A completed polynomial whose previous aggregate was read as the bytes
+    // and verified as the expected ones.
+    fn completed(index: usize, read: &[u8], expected: &[u8]) -> FinishingPolynomial {
+        let output = payload(index + 50);
+        FinishingPolynomial {
+            index,
+            bytes: output.len(),
+            previous: Some((
+                deferred(read),
+                identity(PUBLIC_POLYNOMIAL_DOMAIN, expected).unwrap(),
+            )),
+            output: deferred(&output),
+        }
+    }
+
+    // Once more than the kept number are pending, the oldest polynomials
+    // enter the aggregate in order, each with its output's identity.
+    #[test]
+    fn deferred_identities_enter_the_aggregate_in_order() {
+        let mut finishing = VecDeque::new();
+        let mut outputs = Vec::new();
+        for index in 0..5 {
+            let previous = payload(index);
+            finishing.push_back(completed(index, &previous, &previous));
+            settle(&mut finishing, 2, &mut outputs).unwrap();
+            assert_eq!(finishing.len(), (index + 1).min(2));
+            assert_eq!(outputs.len(), (index + 1).saturating_sub(2));
+        }
+        settle(&mut finishing, 0, &mut outputs).unwrap();
+        assert!(finishing.is_empty());
+        for (index, output) in outputs.iter().enumerate() {
+            let bytes = payload(index + 50);
+            assert_eq!(output.index(), index);
+            assert_eq!(output.bytes(), bytes.len());
+            assert_eq!(
+                output.digest(),
+                &identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).unwrap()
+            );
+        }
+    }
+
+    // A previous aggregate read with one changed byte is refused when its
+    // polynomial is checked, and neither it nor a later one enters the
+    // aggregate.
+    #[test]
+    fn a_changed_previous_aggregate_is_refused_when_checked() {
+        for kept in [0, 1, 3] {
+            let mut finishing = VecDeque::new();
+            let mut outputs = Vec::new();
+            let mut refused = None;
+            for index in 0..4 {
+                let expected = payload(index);
+                let mut read = expected.clone();
+                if index == 1 {
+                    read[40] ^= 1;
+                }
+                finishing.push_back(completed(index, &read, &expected));
+                if let Err(refusal) = settle(&mut finishing, kept, &mut outputs) {
+                    refused = Some((index, refusal));
+                    break;
+                }
+            }
+            if refused.is_none() {
+                refused = settle(&mut finishing, 0, &mut outputs)
+                    .err()
+                    .map(|refusal| (4, refusal));
+            }
+            let (checked, refusal) = refused.expect("The changed aggregate is refused");
+            assert!(matches!(refusal, Refusal::PreviousAggregate));
+            assert_eq!(checked, (1 + kept).min(4), "{kept}");
+            assert_eq!(outputs.len(), 1, "{kept}");
+            assert_eq!(outputs[0].index(), 0);
+        }
     }
 }
