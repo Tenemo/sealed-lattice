@@ -326,13 +326,15 @@ impl PolynomialRecords {
     }
     /// Keeps bytes that fit the polynomial and passes on each run they
     /// complete: the position of its first record, its records, and whether
-    /// it is the last.
+    /// it is the last. A refused run stays whole in the buffer, so every
+    /// later push is refused as well.
     pub(crate) fn push(
         &mut self,
         mut bytes: &[u8],
         mut take: impl FnMut(usize, &[u8], bool) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        if bytes.len() > self.remaining() {
+        let whole = self.run.min(self.degree - self.taken) * self.width;
+        if bytes.len() > self.remaining() || (whole > 0 && self.buffer.len() == whole) {
             return Err(Error::Length);
         }
         while !bytes.is_empty() {
@@ -544,6 +546,10 @@ mod tests {
             assert_eq!(
                 records.push(&changed, |_, _, _| Ok(())),
                 Err(Error::Encoding)
+            );
+            assert_eq!(
+                records.push(&bytes[..width], |_, _, _| Ok(())),
+                Err(Error::Length)
             );
         }
     }

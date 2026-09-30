@@ -93,7 +93,9 @@ impl BallotWork {
         );
         let owner = if contributor {
             let opening_length = u32::from_le_bytes(packet[..4].try_into().unwrap()) as usize;
-            if packet_length != 4 + opening_length + 3309 {
+            // The packet holds the opening's length, the opening and its
+            // signature.
+            if opening_length != packet_length - 4 - 3309 {
                 return Err(Error::Shape);
             }
             let owner = credential.retain_ballot_owner(

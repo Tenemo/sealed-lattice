@@ -33,8 +33,12 @@ struct Session {
 }
 impl Session {
     fn new() -> Self {
+        Self::with_input(vec![0; 1 << 20])
+    }
+    // A session that keeps the host's input buffer.
+    fn with_input(input: Vec<u8>) -> Self {
         Self {
-            input: vec![0; 1 << 20],
+            input,
             context: None,
             intent: None,
             envelopes: Vec::new(),
@@ -51,10 +55,10 @@ impl Session {
                 return Err(());
             }
             let (poll, setup) = setup_aggregate::setup_browser::context().ok_or(())?;
+            let context = CloseContext::new(poll, setup).map_err(|_| ())?;
             *self = Self {
-                input: std::mem::take(&mut self.input),
-                context: Some(CloseContext::new(poll, setup).map_err(|_| ())?),
-                ..Self::new()
+                context: Some(context),
+                ..Self::with_input(std::mem::take(&mut self.input))
             };
             return Ok(());
         }

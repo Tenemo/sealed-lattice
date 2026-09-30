@@ -770,12 +770,14 @@ impl Arithmetic {
         prime: usize,
         record: &[u8],
     ) -> bool {
+        // Once every job has requested its records, no request is left.
+        if product.requested == KEYED_GROUPS * self.external_primes || product.shared.is_some() {
+            return false;
+        }
         let record_bytes = 8 * self.degree;
         let request = self.keyed_request(product);
         let received = product.delivered.len() / record_bytes;
-        if product.requested == KEYED_GROUPS * self.external_primes
-            || product.shared.is_some()
-            || prime != request.prime
+        if prime != request.prime
             || received == request.count
             || ordinal != request.first + received
             || record.len() != record_bytes
@@ -1208,6 +1210,17 @@ mod tests {
         ));
         drop(product);
         assert_eq!(kept_everywhere(), 0);
+    }
+
+    // A product whose every job has requested its records has no request
+    // left, so it refuses another record.
+    #[test]
+    fn a_product_past_its_last_request_refuses_a_record() {
+        let profile = Profile::new(3, 2).unwrap();
+        let arithmetic = Arithmetic::new(profile, TEST_DEGREE);
+        let mut product = arithmetic.keyed_product(&arithmetic.uniform(1), context(0));
+        product.requested = KEYED_GROUPS * arithmetic.external_primes;
+        assert!(!arithmetic.deliver_record(&mut product, 0, 0, &[0; 8 * TEST_DEGREE]));
     }
 
     // A keyed product's jobs name every prime's two groups once, each

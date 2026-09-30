@@ -489,7 +489,7 @@ impl State {
                     u32::from_le_bytes(self.input[4 * index..4 * (index + 1)].try_into().unwrap())
                         as usize
                 });
-                let records = parallel_work::adopt(argument as u32, bytes);
+                let records = parallel_work::adopt(argument as u32, bytes).ok_or(Error::Storage)?;
                 self.session
                     .as_mut()
                     .and_then(|session| session.engine.as_mut())
