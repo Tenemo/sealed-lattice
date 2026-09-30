@@ -1228,6 +1228,12 @@ await runWithLocalRunLog(
                     const interruptedOperation = recovery
                         ? recoveryOperations.get(position)
                         : undefined;
+                    // The page names the archive that the relay configures
+                    // when the operation starts, unless it is the corrupt
+                    // client's.
+                    const namesArchive =
+                        relay?.archive.configuration !== undefined &&
+                        corrupt?.position !== position;
                     // The deadline ends with its operation so that no timer
                     // outlives the run.
                     const deadline = new AbortController();
@@ -1292,7 +1298,7 @@ await runWithLocalRunLog(
                         )
                             assert.equal(
                                 archiveBytes > 0,
-                                corrupt?.position !== position,
+                                namesArchive,
                                 'Archive memory must match the configured client at position ' +
                                     String(position) +
                                     ' during ' +
