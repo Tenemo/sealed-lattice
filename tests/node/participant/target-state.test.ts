@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import {
+    ballotStatuses,
     decodeTargetState,
     encodeTargetState,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/target-state.js';
+import type { BallotStatus } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
@@ -15,8 +17,13 @@ const census = compileTargetSigningStateCensus();
 const filled = (length: number, value: number) =>
     new Uint8Array(length).fill(value);
 
-const state = (organizer: boolean, bodyLength: number) => ({
+const state = (
+    organizer: boolean,
+    bodyLength: number,
+    ballotStatus: BallotStatus = 'included',
+) => ({
     predecessor: completedClosePhase(organizer),
+    ballotStatus,
     body: filled(bodyLength, 7),
     coins: filled(32, 9),
     vote: filled(profile.target.votePacketBytes, 11),
@@ -65,6 +72,25 @@ describe('participant target signing state', () => {
             }
     });
 
+    it('retains every own ballot status through both phases', () => {
+        for (const ballotStatus of ballotStatuses) {
+            const value = state(false, 40, ballotStatus);
+            for (const generation of [
+                targetPhase.intent,
+                targetPhase.signed,
+                targetPhase.signed + 5,
+            ])
+                expect(
+                    decodeTargetState(
+                        profile,
+                        generation,
+                        false,
+                        encodeTargetState(generation, value),
+                    ).ballotStatus,
+                ).toBe(ballotStatus);
+        }
+    });
+
     it('bounds the complete state by the census', () => {
         const largest = encodeTargetState(
             targetPhase.signed,
@@ -99,6 +125,13 @@ describe('participant target signing state', () => {
         const marker = intent.slice();
         marker[0] ^= 1;
         refused(targetPhase.intent, false, marker);
+        // The state before the retained status is another shape.
+        const unversioned = intent.slice();
+        unversioned[3] = '1'.charCodeAt(0);
+        refused(targetPhase.intent, false, unversioned);
+        const unknownStatus = intent.slice();
+        unknownStatus[5] = ballotStatuses.length;
+        refused(targetPhase.intent, false, unknownStatus);
         const empty = encodeTargetState(targetPhase.intent, state(false, 0));
         refused(targetPhase.intent, false, empty);
         const oversized = encodeTargetState(

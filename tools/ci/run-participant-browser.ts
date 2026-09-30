@@ -3442,6 +3442,14 @@ await runWithLocalRunLog(
                     .map((position) => [position, 23] as const),
                 [0, 24] as const,
             ]);
+            const ballotStatus = (position: number) =>
+                position === omittedVoter
+                    ? 'omitted'
+                    : onTime(position)
+                      ? 'included'
+                      : ballotAuthors.includes(position)
+                        ? 'late'
+                        : 'not cast';
             await Promise.all(
                 voters.map(async (position) => {
                     const halt = targetHalts.get(position);
@@ -3455,28 +3463,26 @@ await runWithLocalRunLog(
                         );
                     const details = await run(position, 'target');
                     assert.equal(details.generation, 24);
-                    if (halt === 24) {
-                        assert.equal(details.ballotStatus, undefined);
-                        return;
-                    }
-                    assert.equal(
-                        details.ballotStatus,
-                        position === omittedVoter
-                            ? 'omitted'
-                            : onTime(position)
-                              ? 'included'
-                              : ballotAuthors.includes(position)
-                                ? 'late'
-                                : 'not cast',
-                    );
+                    // The signing state retains the own ballot's status, so
+                    // a visit that only delivers the vote reports it too.
+                    assert.equal(details.ballotStatus, ballotStatus(position));
+                    if (halt === 24) return;
                     assert.equal(details.usableBallots, usableCount);
                     assert.equal(details.validBallots, validCount);
                 }),
             );
-            // A signed vote is only delivered again.
+            // A signed vote is only delivered again, and every later visit
+            // reports the retained status.
             const repeated = await run(voters[voters.length - 1], 'target');
             assert.equal(repeated.generation, 24);
-            assert.equal(repeated.ballotStatus, undefined);
+            assert.equal(
+                repeated.ballotStatus,
+                ballotStatus(voters[voters.length - 1]),
+            );
+            assert.equal(
+                (await run(voters[voters.length - 1], 'status')).ballotStatus,
+                ballotStatus(voters[voters.length - 1]),
+            );
             const targetBounds = bounds.target;
             const completionDirectory = path.join(
                 publicDirectory,

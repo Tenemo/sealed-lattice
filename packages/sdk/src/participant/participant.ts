@@ -150,6 +150,12 @@ export type ParticipantSummary = Readonly<{
     /** Whether the participant contributes setup key material, once its roster is retained. */
     isSetupContributor: boolean | undefined;
     ballot: 'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
+    /**
+     * The own ballot's status in the target the participant signs, once it
+     * has evaluated that target; a participant that releases without a
+     * target vote of its own reports none.
+     */
+    ballotStatus: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
 }>;
 
 /**

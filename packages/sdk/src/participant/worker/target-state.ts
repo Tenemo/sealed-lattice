@@ -10,17 +10,28 @@ import { completedClosePhase } from './close-state.js';
 
 // The target signing suffix follows the completed close: the participant's
 // signed response, and for the organizer its signed proposal. Generation 23
-// retains the exact evaluated target body and the signing coins before the
-// signature exists; generation 24 retains the body and the completed vote,
-// which later generations keep unchanged.
+// retains the exact evaluated target body, the own ballot's status in it and
+// the signing coins before the signature exists; generation 24 retains the
+// body, the status and the completed vote, which later generations keep
+// unchanged.
 
 export const targetPhase = { intent: 23, signed: 24 } as const;
-const marker = encodeText('TST1');
+const marker = encodeText('TST2');
 const coinBytes = 32;
+
+// The own ballot's status in the target, by the finality work's code.
+export const ballotStatuses = [
+    'not cast',
+    'late',
+    'included',
+    'omitted',
+] as const;
+export type BallotStatus = (typeof ballotStatuses)[number];
 
 export type TargetState = Readonly<{
     // The close generation the target signing follows.
     predecessor: number;
+    ballotStatus: BallotStatus;
     body: Uint8Array;
     coins: Uint8Array;
     vote: Uint8Array;
@@ -29,7 +40,10 @@ export type TargetState = Readonly<{
 export const encodeTargetState = (generation: number, state: TargetState) =>
     concatenate(
         marker,
-        Uint8Array.of(state.predecessor),
+        Uint8Array.of(
+            state.predecessor,
+            ballotStatuses.indexOf(state.ballotStatus),
+        ),
         unsigned16(state.body.length),
         state.body,
         generation === targetPhase.intent ? state.coins : state.vote,
@@ -45,13 +59,14 @@ export const decodeTargetState = (
     const signed = generation >= targetPhase.signed;
     if (
         generation < targetPhase.intent ||
-        bytes.length < marker.length + 3 ||
+        bytes.length < marker.length + 4 ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
-        bytes[marker.length] !== completedClosePhase(organizer)
+        bytes[marker.length] !== completedClosePhase(organizer) ||
+        bytes[marker.length + 1] >= ballotStatuses.length
     )
         throw new Error('The target state is malformed.');
-    const length = readUnsigned16(bytes, marker.length + 1);
-    const start = marker.length + 3;
+    const length = readUnsigned16(bytes, marker.length + 2);
+    const start = marker.length + 4;
     const tail = signed ? votePacketBytes : coinBytes;
     if (
         length === 0 ||
@@ -62,6 +77,7 @@ export const decodeTargetState = (
     const rest = bytes.slice(start + length);
     return {
         predecessor: bytes[marker.length],
+        ballotStatus: ballotStatuses[bytes[marker.length + 1]],
         body: bytes.slice(start, start + length),
         coins: signed ? new Uint8Array() : rest,
         vote: signed ? rest : new Uint8Array(),

@@ -518,11 +518,12 @@ const closeBounds = (
     };
 };
 
-// The target suffix: its marker, phase and signer position, the target body,
-// then its signing coins or the signed vote.
+// The target suffix: its marker, the close phase it follows, the own
+// ballot's status and the body length, the target body, then its signing
+// coins or the signed vote.
 const targetBounds = (module: ModuleLimits) => {
     const { target } = module;
-    const prefix = 4 + 1 + 2;
+    const prefix = 4 + 1 + 1 + 2;
     return {
         ...target,
         maximumStateBytes:

@@ -86,7 +86,7 @@ import {
     StoragePending,
     storedRuntime,
 } from './storage.js';
-import { targetPhase } from './target-state.js';
+import { decodeTargetState, targetPhase } from './target-state.js';
 import { EvaluationRetained, publishTarget, signTarget } from './target.js';
 import {
     createTranscriptRecorder,
@@ -307,6 +307,28 @@ const ballotState = (root: AuthenticatedRoot) => {
         : 'could not vote';
 };
 
+// The own ballot's status in the target this participant signs, which its
+// target signing state retains from the evaluation on. A release that
+// followed the completed close retains no target.
+const ballotStatus = (
+    root: AuthenticatedRoot,
+    organizer: boolean,
+    profiled: ProfileContext | undefined,
+) => {
+    const retained = root.manifest.suffixes.target;
+    return profiled === undefined ||
+        root.head.generation < targetPhase.intent ||
+        retained === undefined ||
+        retained.length === 0
+        ? undefined
+        : decodeTargetState(
+              profiled.profile,
+              root.head.generation,
+              organizer,
+              retained,
+          ).ballotStatus;
+};
+
 // Whether the participant contributes setup key material is known once its
 // roster is retained.
 const summary = (
@@ -323,6 +345,7 @@ const summary = (
     isSetupContributor:
         profiled === undefined ? undefined : isSetupContributor(profiled),
     ballot: ballotState(root),
+    ballotStatus: ballotStatus(root, enrollment.isOrganizer, profiled),
 });
 
 const execute = async (

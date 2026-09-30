@@ -33,6 +33,7 @@ import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import { evaluatedTargetName, namespacedName } from './storage.js';
 import {
+    ballotStatuses,
     decodeTargetState,
     encodeTargetState,
     targetPhase,
@@ -41,8 +42,9 @@ import type { TargetState } from './target-state.js';
 
 // A participant's target signing. It verifies the organizer's close barrier
 // from the public close records, classifies each usable ballot, evaluates
-// the public ranking target and retains the exact target body with fresh
-// signing coins before its target vote exists. An interrupted signing
+// the public ranking target and retains the exact target body and the own
+// ballot's status in it with fresh signing coins before its target vote
+// exists. An interrupted signing
 // evaluates again and must reproduce the retained body. The values the
 // evaluation spills and the records of its keys are public work in their own
 // database, which each evaluation clears first; the engine checks every value
@@ -59,9 +61,6 @@ export const completionDirectory = 'completion/';
 const evaluationDatabase = 'sealed-lattice-public-evaluation';
 const evaluationStore = 'values';
 const evaluatedTargetStore = 'target';
-
-// The own ballot's status in the target, by the finality work's code.
-const ballotStatuses = ['not cast', 'late', 'included', 'omitted'] as const;
 
 const words = (bytes: Uint8Array) => {
     if (bytes.length % 4 !== 0)
@@ -971,9 +970,9 @@ export const restoreOrEvaluateTarget = async (
 
 // Evaluates the target from the public close records and signs this
 // participant's target vote. The owning setup verifier must have verified
-// the complete setup in this instance first. Returns the own ballot's status
-// in the target, how many slots were usable and how many usable ballots were
-// valid.
+// the complete setup in this instance first. The signing state retains the
+// own ballot's status in the target. Returns how many slots were usable and
+// how many usable ballots were valid.
 export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const { participant } = close;
     const { context } = participant;
@@ -986,10 +985,15 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const finality = finalityCommand(context, 0);
     if (!equalBytes(finality.subarray(1), body))
         throw new Error('The finality work names another target.');
+    const code = finality[0];
+    if (code >= ballotStatuses.length)
+        throw new Error('The finality work reported no ballot status.');
+    const ballotStatus = ballotStatuses[code];
     let state = resumeTarget(close);
     if (state === undefined) {
         state = {
             predecessor: completedClosePhase(close.organizer),
+            ballotStatus,
             body,
             coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
             vote: new Uint8Array(),
@@ -999,6 +1003,8 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         throw new PublicInputFailure(
             'The public close records name another target.',
         );
+    else if (state.ballotStatus !== ballotStatus)
+        throw new Error('The finality work reported another ballot status.');
     const vote = finalityCommand(
         context,
         1,
@@ -1009,10 +1015,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         coins: new Uint8Array(),
         vote,
     });
-    const code = finality[0];
-    if (code >= ballotStatuses.length)
-        throw new Error('The finality work reported no ballot status.');
-    return { ballotStatus: ballotStatuses[code], usableBallots, validBallots };
+    return { usableBallots, validBallots };
 };
 
 // Delivers the signed target vote, and the organizer the target body,
