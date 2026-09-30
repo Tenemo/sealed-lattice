@@ -25,6 +25,8 @@ import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
 import type { PublicArchiveStore } from '#packages/sdk/src/public-archive.js';
 import {
     createFoundationCeremonyRuntimeLoader,
+    FoundationKernelCommandError,
+    type ArchiveAcknowledgement,
     type ArchivePolicy,
     type FoundationCeremonyRuntime,
 } from '#packages/wasm/src/index.js';
@@ -59,6 +61,38 @@ const kernelUrl = new URL(
     '../../../packages/wasm/dist/sealed-lattice-kernel.wasm',
     import.meta.url,
 );
+// A record identity as the foundation framing defines it, encoded here: the
+// tuple header (schema 1, version 1, two items), the domain as an ASCII item
+// (type 2) and the record as a raw-bytes item (type 1), each item's length
+// before its inner length, hashed with SHAKE256 to 64 bytes.
+const recordIdentity = (bytes: Uint8Array) => {
+    const variable = (value: Uint8Array) => {
+        const length = Buffer.alloc(4);
+        length.writeUInt32LE(value.length);
+        return Buffer.concat([length, value]);
+    };
+    const item = (tag: number, value: Uint8Array) => {
+        const header = Buffer.alloc(6);
+        header.writeUInt16LE(tag);
+        header.writeUInt32LE(value.length, 2);
+        return Buffer.concat([header, value]);
+    };
+    return createHash('shake256', { outputLength: 64 })
+        .update(
+            Buffer.concat([
+                Buffer.from([1, 0, 1, 0, 2, 0, 0, 0]),
+                item(
+                    2,
+                    variable(
+                        Buffer.from('sealed-lattice/archive-record-id/v1'),
+                    ),
+                ),
+                item(1, variable(bytes)),
+            ]),
+        )
+        .digest('hex');
+};
+const receiptContext = Buffer.from('sealed-lattice/archive-retention/v1');
 const store = () => {
     const records = new Map<string, Uint8Array>();
     const storage: PublicArchiveStore = {
@@ -603,33 +637,7 @@ describe('public archive through the real scalar kernel and local storage hosts'
             dependencies: [],
             payload: Uint8Array.of(1, 2, 3),
         });
-        const variable = (bytes: Uint8Array) => {
-            const length = Buffer.alloc(4);
-            length.writeUInt32LE(bytes.length);
-            return Buffer.concat([length, bytes]);
-        };
-        const item = (tag: number, value: Uint8Array) => {
-            const header = Buffer.alloc(6);
-            header.writeUInt16LE(tag);
-            header.writeUInt32LE(value.length, 2);
-            return Buffer.concat([header, value]);
-        };
-        const header = Buffer.from([1, 0, 1, 0, 2, 0, 0, 0]);
-        const identity = createHash('shake256', { outputLength: 64 })
-            .update(
-                Buffer.concat([
-                    header,
-                    item(
-                        2,
-                        variable(
-                            Buffer.from('sealed-lattice/archive-record-id/v1'),
-                        ),
-                    ),
-                    item(1, variable(encoded.bytes)),
-                ]),
-            )
-            .digest('hex');
-        expect(encoded.reference.identity).toBe(identity);
+        expect(encoded.reference.identity).toBe(recordIdentity(encoded.bytes));
         const message = runtime.archiveReceiptMessage(
             policy,
             context,
@@ -639,7 +647,7 @@ describe('public archive through the real scalar kernel and local storage hosts'
             replicaPosition,
             signature: sign(null, message, {
                 key,
-                context: Buffer.from('sealed-lattice/archive-retention/v1'),
+                context: receiptContext,
             }),
         }));
         expect(
@@ -648,7 +656,7 @@ describe('public archive through the real scalar kernel and local storage hosts'
                 message,
                 {
                     key: createPublicKey(keys[0]),
-                    context: Buffer.from('sealed-lattice/archive-retention/v1'),
+                    context: receiptContext,
                 },
                 signatures[0].signature,
             ),
@@ -703,6 +711,187 @@ describe('public archive through the real scalar kernel and local storage hosts'
                 encoded.bytes,
             ),
         ).toThrow();
+    });
+
+    it('refuses changed records and acknowledgements without ending the kernel, and accepts only canonical records and genuine signers', () => {
+        // Every case derives its choices from its label, so a failing case
+        // replays from the label its failure names.
+        const draws = (label: string) => {
+            let block = 0;
+            let words = Buffer.alloc(0);
+            let offset = 0;
+            return (bound: number) => {
+                if (offset === words.length) {
+                    words = createHash('shake256', { outputLength: 256 })
+                        .update(label + '#' + String(block))
+                        .digest();
+                    block += 1;
+                    offset = 0;
+                }
+                const value = words.readUInt32LE(offset);
+                offset += 4;
+                return value % bound;
+            };
+        };
+        // A kernel call's result or refusal. A refusal is the kernel's command
+        // error; any other failure ended the kernel instance and fails the
+        // case.
+        const attempt = <Value>(
+            call: () => Value,
+        ): Value | FoundationKernelCommandError => {
+            try {
+                return call();
+            } catch (error) {
+                if (error instanceof FoundationKernelCommandError) return error;
+                throw error;
+            }
+        };
+        const genuine = runtime.encodeArchiveRecord({
+            context,
+            purpose: 'ballot-body',
+            dependencies: [1, 2, 3].map((index) => ({
+                identity: String(index).padStart(2, '0').repeat(64),
+                byteLength: 100 * index,
+            })),
+            payload: Uint8Array.from(
+                { length: 300 },
+                (_unused, offset) => offset % 251,
+            ),
+        });
+        // Whether each changed record was refused, so that both the decoder's
+        // acceptance and its refusals are exercised.
+        const recordOutcomes = new Set<boolean>();
+        for (let index = 0; index < 256; index += 1) {
+            const label = 'record/' + String(index);
+            const draw = draws(label);
+            const bytes = Uint8Array.from(genuine.bytes);
+            const changed =
+                draw(3) === 0
+                    ? bytes.subarray(0, 1 + draw(bytes.length - 1))
+                    : draw(2) === 0
+                      ? Buffer.concat([
+                            bytes,
+                            Buffer.alloc(1 + draw(64), draw(256)),
+                        ])
+                      : bytes;
+            if (changed === bytes) bytes[draw(bytes.length)] ^= 1 + draw(255);
+            // The reference names the changed bytes, so the kernel decodes
+            // them.
+            const record = attempt(() =>
+                runtime.readArchiveRecord(
+                    context,
+                    {
+                        identity: recordIdentity(changed),
+                        byteLength: changed.length,
+                    },
+                    changed,
+                ),
+            );
+            // A changed payload or purpose may still be a record, but only
+            // one that encodes back to the same bytes.
+            expect(
+                record instanceof FoundationKernelCommandError ||
+                    Buffer.from(
+                        runtime.encodeArchiveRecord(record).bytes,
+                    ).equals(Buffer.from(changed)),
+                label,
+            ).toBe(true);
+            recordOutcomes.add(record instanceof FoundationKernelCommandError);
+        }
+        expect(recordOutcomes).toEqual(new Set([true, false]));
+        expect(
+            runtime.readArchiveRecord(
+                context,
+                genuine.reference,
+                genuine.bytes,
+            ),
+        ).toMatchObject({ purpose: 'ballot-body' });
+        const message = runtime.archiveReceiptMessage(
+            policy,
+            context,
+            genuine.reference,
+        );
+        const signatures = keys.map((key, replicaPosition) => ({
+            replicaPosition,
+            signature: sign(null, message, { key, context: receiptContext }),
+        }));
+        // OpenSSL's verdict on an acknowledgement under the policy key at its
+        // position.
+        const verifies = ({
+            replicaPosition,
+            signature,
+        }: ArchiveAcknowledgement) => {
+            if (replicaPosition >= keys.length) return false;
+            try {
+                return verify(
+                    null,
+                    message,
+                    {
+                        key: createPublicKey(keys[replicaPosition]),
+                        context: receiptContext,
+                    },
+                    signature,
+                );
+            } catch {
+                return false;
+            }
+        };
+        const acknowledgementOutcomes = new Set<boolean>();
+        for (let index = 0; index < 64; index += 1) {
+            const label = 'acknowledgement/' + String(index);
+            const draw = draws(label);
+            const acknowledgements = Array.from({ length: draw(6) }, () => {
+                const { replicaPosition, signature } =
+                    signatures[draw(signatures.length)];
+                const copy = Uint8Array.from(signature);
+                const change = draw(4);
+                if (change === 1) copy[draw(copy.length)] ^= 1 + draw(255);
+                return {
+                    replicaPosition:
+                        change === 2
+                            ? [0, 1, 2, keys.length, 0xffff][draw(5)]
+                            : replicaPosition,
+                    signature:
+                        change === 3
+                            ? copy.subarray(0, draw(copy.length))
+                            : copy,
+                };
+            });
+            const signers = [
+                ...new Set(
+                    acknowledgements
+                        .filter(verifies)
+                        .map(({ replicaPosition }) => replicaPosition),
+                ),
+            ].sort((left, right) => left - right);
+            // Too few signers are refused.
+            const authenticated = attempt(() =>
+                runtime.authenticateArchiveAcknowledgements(
+                    policy,
+                    context,
+                    genuine.reference,
+                    acknowledgements,
+                ),
+            );
+            expect(
+                authenticated instanceof FoundationKernelCommandError
+                    ? 'refused'
+                    : authenticated,
+                label,
+            ).toEqual(signers.length > policy.faultBound ? signers : 'refused');
+            acknowledgementOutcomes.add(
+                authenticated instanceof FoundationKernelCommandError,
+            );
+        }
+        expect(acknowledgementOutcomes).toEqual(new Set([true, false]));
+        expect(
+            runtime.authenticateArchiveAcknowledgements(
+                policy,
+                context,
+                genuine.reference,
+                signatures,
+            ),
+        ).toEqual([0, 1, 2]);
     });
 
     it('retains the complete closure and retrieves it after author loss and replica restart', async () => {
