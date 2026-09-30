@@ -263,13 +263,19 @@ export const deriveFloodedRelease = (
             BigInt(interpolation.releaseThreshold) *
             interpolation.maximumScaledReconstructionOneNorm *
             releaseNoiseRadius;
+    // Release decodes correctly when the bound stays strictly below the
+    // limit; their ratio is the correctness margin.
+    const releaseCorrectnessBound =
+        2n * plaintextModulus * scaledCorrectnessLeft;
+    const releaseCorrectnessLimit = 4n * releaseModulus;
     return {
         releaseError,
         releaseNoiseBits,
         jointStatisticalBoundHolds:
             jointShift << BigInt(statisticalBits) <=
             1n << BigInt(releaseNoiseBits),
-        releaseCorrect:
-            2n * plaintextModulus * scaledCorrectnessLeft < 4n * releaseModulus,
+        releaseCorrectnessBound,
+        releaseCorrectnessLimit,
+        releaseCorrect: releaseCorrectnessBound < releaseCorrectnessLimit,
     };
 };

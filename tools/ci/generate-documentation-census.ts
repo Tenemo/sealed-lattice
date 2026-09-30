@@ -5255,6 +5255,14 @@ export const renderDocumentationCensus = (): string => {
                     'Largest ranking error bound bits',
                     formatCount(supportedProfiles.maximumRankingErrorBits),
                 ],
+                [
+                    'Smallest release correctness margin bits, rounded down',
+                    `\`${(Number(supportedProfiles.tightestRelease.marginHundredths) / 100).toFixed(2)}\` at ${formatCount(supportedProfiles.tightestRelease.participantCount)} participants and ${formatCount(supportedProfiles.tightestRelease.optionCount)} options`,
+                ],
+                [
+                    'Profiles with a release correctness margin under one bit',
+                    formatCount(supportedProfiles.releaseMarginsUnderOneBit),
+                ],
             ],
         ),
         '',

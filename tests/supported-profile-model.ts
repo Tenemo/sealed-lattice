@@ -494,6 +494,8 @@ const computeSupportedProfile = (
             rotations: ranking.model.counts.rotations,
             releaseError: release.flooded.releaseError,
             releaseNoiseBits: release.flooded.releaseNoiseBits,
+            releaseCorrectnessBound: release.flooded.releaseCorrectnessBound,
+            releaseCorrectnessLimit: release.flooded.releaseCorrectnessLimit,
             releaseLifting: release.lifting,
             interpolation: deriveReleaseInterpolation(participantCount),
             shareLifting: deriveSupportedShareLifting(participantCount),
@@ -619,6 +621,18 @@ export const compileProfileBfvCensus = (profile: SupportedProfile) => {
     };
 };
 
+// The release correctness margin, log2 of the limit over the bound, rounded
+// down to hundredths of a bit: the largest k with bound^100 * 2^k at most
+// limit^100.
+const releaseMarginHundredths = (profile: SupportedProfile) => {
+    const bound = profile.releaseCorrectnessBound ** 100n;
+    const limit = profile.releaseCorrectnessLimit ** 100n;
+    let hundredths = BigInt(bitLength(limit) - bitLength(bound));
+    while (hundredths > 0n && bound << hundredths > limit) hundredths--;
+    while (bound << (hundredths + 1n) <= limit) hundredths++;
+    return hundredths;
+};
+
 export const compileSupportedProfileCensus = () => {
     const participantCounts = supportedParticipantCounts();
     const optionCounts = supportedOptionCountRange();
@@ -648,6 +662,14 @@ export const compileSupportedProfileCensus = () => {
             flattened.map((profile) => [profile.release.bits, profile.release]),
         ).values(),
     ];
+    // The first profile whose correctness bound comes closest to its limit,
+    // compared exactly.
+    const tightestRelease = flattened.reduce((tightest, profile) =>
+        profile.releaseCorrectnessBound * tightest.releaseCorrectnessLimit >
+        tightest.releaseCorrectnessBound * profile.releaseCorrectnessLimit
+            ? profile
+            : tightest,
+    );
     return {
         participantCounts,
         optionCounts,
@@ -670,5 +692,15 @@ export const compileSupportedProfileCensus = () => {
         maximumRankingErrorBits: Math.max(
             ...flattened.map((profile) => bitLength(profile.rankingError)),
         ),
+        tightestRelease: {
+            participantCount: tightestRelease.participantCount,
+            optionCount: tightestRelease.optionCount,
+            marginHundredths: releaseMarginHundredths(tightestRelease),
+        },
+        releaseMarginsUnderOneBit: flattened.filter(
+            (profile) =>
+                profile.releaseCorrectnessLimit <
+                2n * profile.releaseCorrectnessBound,
+        ).length,
     };
 };

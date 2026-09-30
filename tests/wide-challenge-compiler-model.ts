@@ -1,4 +1,7 @@
+import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
+import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -127,9 +130,39 @@ export const compileProofCompilerCapCensus = () => {
     };
 };
 
+// The counts of an accepted proof role's word relation that its round error
+// grows with: its committed and virtual oracles, its lookup entries and its
+// affine rows.
+const proofEvents = (
+    name: string,
+    relation: Readonly<{
+        wordColumns: number;
+        booleanColumns: number;
+        lookupEntries: number;
+        zeroProducts: number;
+        affineRows: bigint;
+    }>,
+) => ({
+    name,
+    originalOracles:
+        relation.wordColumns +
+        relation.booleanColumns +
+        relation.lookupEntries +
+        4,
+    virtualOracles:
+        relation.booleanColumns +
+        relation.zeroProducts +
+        relation.lookupEntries +
+        2,
+    lookupEntries: relation.lookupEntries,
+    affineRows: relation.affineRows,
+});
+
 // Ordinary IOP event counts for one profile's full word relation, which is
-// the largest proof operator of that profile. The QROM compilation and
-// whole-protocol assumptions remain separate obligations.
+// the largest proof operator of that profile: the union over accepted proof
+// roles charges every role these counts, so the registration, ballot and
+// release relations must not exceed them in any count. The QROM compilation
+// and whole-protocol assumptions remain separate obligations.
 export const compileWideChallengeCompilerCensus = (
     profile: SupportedProfile,
 ) => {
@@ -137,16 +170,36 @@ export const compileWideChallengeCompilerCensus = (
     const agreement = compileCommonAgreementDegreeCensus();
     const queryCount = agreement.queries;
     const relation = deriveSetupContributionShape(profile);
-    const originalOracles =
-        relation.wordColumns +
-        relation.booleanColumns +
-        relation.lookupEntries +
-        4;
-    const virtualOracles =
-        relation.booleanColumns +
-        relation.disjointPairs +
-        relation.lookupEntries +
-        2;
+    const { originalOracles, virtualOracles } = proofEvents('setup', {
+        ...relation,
+        zeroProducts: relation.disjointPairs,
+    });
+    const registration = compileRegistrationKeyRelationCensus();
+    const ballot = compileBallotEncryptionRelationCensus(profile);
+    const release = compileLinkedReleaseRelationCensus(profile);
+    for (const role of [
+        proofEvents('registration', {
+            ...registration,
+            lookupEntries: registration.lookups,
+            zeroProducts: registration.disjointPairs,
+        }),
+        proofEvents('ballot', {
+            ...ballot,
+            zeroProducts: ballot.additionalQuadraticConstraints,
+        }),
+        // The release secret's positive and negative columns are its one
+        // zero product.
+        proofEvents('release', { ...release, zeroProducts: 1 }),
+    ])
+        if (
+            role.originalOracles > originalOracles ||
+            role.virtualOracles > virtualOracles ||
+            role.lookupEntries > relation.lookupEntries ||
+            role.affineRows > relation.affineRows
+        )
+            throw new Error(
+                'The ' + role.name + ' proof exceeds the charged proof events.',
+            );
     const layout = wideChallengeLayout(
         originalOracles + virtualOracles,
         queryCount,
