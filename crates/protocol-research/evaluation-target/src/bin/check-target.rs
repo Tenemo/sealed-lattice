@@ -596,7 +596,7 @@ fn main() -> io::Result<()> {
         work.read(&mut body, &mut header)?;
         authenticated.push(&header).map_err(refusal)?;
         let mut classifier =
-            SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header)
+            SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
                 .map_err(refusal)?;
         if classifier.requires_keys() {
             for (_, _, index) in setup_inputs(profile) {

@@ -1,14 +1,43 @@
 use crate::{
     CHUNK_LIMIT, Refusal, Verifier,
     parameters::BALLOT_HEADER_BYTES,
-    statement::{self, coefficient_bytes, encode_polynomial, polynomial_bytes, setup_inputs},
+    statement::{self, polynomial_bytes, setup_inputs},
 };
 use registration_credentials::{
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
+use std::cell::RefCell;
 use supported_profile::Profile;
+
+thread_local! {
+    /// Each profile's common polynomial identities, which every ballot of
+    /// the profile's statement shares.
+    static COMMON_IDENTITIES: RefCell<Vec<(Profile, [[u8; 64]; 2])>> =
+        const { RefCell::new(Vec::new()) };
+}
+fn common_identities(profile: Profile) -> Result<[[u8; 64]; 2], Refusal> {
+    let known = COMMON_IDENTITIES.with(|known| {
+        known
+            .borrow()
+            .iter()
+            .find(|(value, _)| *value == profile)
+            .map(|(_, identities)| *identities)
+    });
+    if let Some(identities) = known {
+        return Ok(identities);
+    }
+    let mut identities = [[0; 64]; 2];
+    for (slot, (_, common, _)) in setup_inputs(profile).into_iter().enumerate() {
+        let records = setup_witness::contribution::common_records(profile, common)
+            .map_err(|_| Refusal::Context)?;
+        identities[slot] =
+            identity(PUBLIC_POLYNOMIAL_DOMAIN, &records).map_err(|_| Refusal::Context)?;
+    }
+    COMMON_IDENTITIES.with(|known| known.borrow_mut().push((profile, identities)));
+    Ok(identities)
+}
 
 /// Proof-valid linked ciphertexts under this verifier's own setup.
 /// Envelope authentication and authoritative publication are separate gates.
@@ -71,14 +100,10 @@ impl BallotRelationVerifier {
             usize::from(poll.top_count()),
         )
         .map_err(|_| Refusal::Context)?;
+        let commons = common_identities(profile)?;
         let mut expected_inputs = [[0; 64]; 4];
-        for (slot, (family, common, key)) in setup_inputs(profile).into_iter().enumerate() {
-            let common = setup_witness::contribution::common_polynomial(profile, common)
-                .map_err(|_| Refusal::Context)?;
-            let bytes = encode_polynomial(&common, coefficient_bytes(profile, family))
-                .map_err(|_| Refusal::Context)?;
-            expected_inputs[2 * slot] =
-                identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).map_err(|_| Refusal::Context)?;
+        for (slot, (_, _, key)) in setup_inputs(profile).into_iter().enumerate() {
+            expected_inputs[2 * slot] = commons[slot];
             let key = setup
                 .polynomials()
                 .iter()

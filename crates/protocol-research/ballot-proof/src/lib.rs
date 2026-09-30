@@ -80,6 +80,12 @@ pub fn take_browser_classification() -> Option<body::BallotBodyClassification> {
     body_browser::take_classification()
 }
 
+/// Releases the statement inputs that the classified ballots shared.
+#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+pub fn release_browser_ballot_inputs() {
+    body_browser::release_inputs()
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "bridge"))]
 pub fn take_browser_close_barrier() -> Option<close::VerifiedCloseBarrier> {
     close_browser::take_barrier()

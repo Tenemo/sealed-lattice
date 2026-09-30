@@ -74,7 +74,7 @@ fn invalid_source(
     crate::write(directory.join("signature.bin"), &signature);
     let authentication = authenticate_envelope(setup, envelope.bytes(), &signature).unwrap();
     assert!(
-        SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header)
+        SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
             .unwrap()
             .requires_keys()
     );

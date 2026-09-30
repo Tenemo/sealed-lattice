@@ -171,12 +171,8 @@ pub fn verify(
             return Err(Error::Context);
         }
         polynomials.push(
-            encode_polynomial(
-                &setup_witness::contribution::common_polynomial(profile, common)
-                    .map_err(|_| Error::Encoding)?,
-                width,
-            )
-            .map_err(|_| Error::Encoding)?,
+            setup_witness::contribution::common_records(profile, common)
+                .map_err(|_| Error::Encoding)?,
         );
         polynomials
             .push(encode_polynomial(key.coefficients(), width).map_err(|_| Error::Encoding)?);

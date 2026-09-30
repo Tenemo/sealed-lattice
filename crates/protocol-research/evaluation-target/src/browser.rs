@@ -191,6 +191,8 @@ impl State {
                 }
                 self.context =
                     Some(setup_aggregate::setup_browser::context().ok_or(Error::Context)?);
+                // Inputs an earlier, unfinished classification kept.
+                ballot_proof::release_browser_ballot_inputs();
                 Ok(())
             }
             1 => {
@@ -210,6 +212,9 @@ impl State {
                     return Err(Error::Context);
                 }
                 let (poll, setup) = self.context.take().ok_or(Error::Context)?;
+                // Every classification is taken, so the ballots' shared
+                // inputs are not held through the evaluation.
+                ballot_proof::release_browser_ballot_inputs();
                 let barrier =
                     ballot_proof::take_browser_close_barrier().ok_or(Error::Incomplete)?;
                 // The barrier must come from this instance's own setup verifier.

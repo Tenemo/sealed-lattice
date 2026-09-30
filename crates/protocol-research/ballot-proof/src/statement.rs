@@ -817,4 +817,24 @@ pub(crate) mod tests {
                 .all(|(index, bytes)| bytes.len() == polynomial_bytes(profile, index))
         );
     }
+
+    // Verifiers stream each common polynomial's canonical records where the
+    // prover encodes its generated coefficients; both give the statement the
+    // same bytes, at the smallest and the largest ciphertext modulus.
+    #[test]
+    fn common_records_encode_the_generated_common_polynomials() {
+        let smallest = Profile::all().next().unwrap();
+        let largest = Profile::all().last().unwrap();
+        assert_ne!(smallest.ciphertext_modulus(), largest.ciphertext_modulus());
+        for profile in [smallest, largest] {
+            for (family, common, _) in setup_inputs(profile) {
+                let values =
+                    setup_witness::contribution::common_polynomial(profile, common).unwrap();
+                assert_eq!(
+                    setup_witness::contribution::common_records(profile, common).unwrap(),
+                    encode_polynomial(&values, coefficient_bytes(profile, family)).unwrap()
+                );
+            }
+        }
+    }
 }

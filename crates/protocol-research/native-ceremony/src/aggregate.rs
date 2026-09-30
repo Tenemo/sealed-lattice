@@ -193,7 +193,7 @@ pub fn classify_ballot(
     if mode == "header" {
         header[0] ^= 1;
     }
-    let mut verifier = SignedBallotVerifier::new(poll, setup, authentication, &header)?;
+    let mut verifier = SignedBallotVerifier::new(poll, setup, authentication, &header, None)?;
     let [fhe_key, last_key] = ballot_keys(profile);
     if verifier.requires_keys() {
         for index in [fhe_key, last_key] {
