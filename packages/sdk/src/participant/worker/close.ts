@@ -91,13 +91,23 @@ const parsePositions = (
         : undefined;
 };
 
-// The deliveries and close time a request supplies, or undefined when any
-// is malformed.
+// The deliveries and close time a request supplies to the participant at
+// the position, or undefined when any is malformed. A request that names
+// neither list delivers every other roster position's published ballot with
+// its body, so that an honest participant holds every ballot it can read
+// before it responds.
 export const parseCloseRequest = (
     profile: ParticipantProfile,
+    position: number,
     parameters: Readonly<Record<string, unknown>>,
 ): CloseRequest | undefined => {
-    const deliver = parsePositions(profile, parameters.deliver);
+    const deliver =
+        parameters.deliver === undefined && parameters.announce === undefined
+            ? Array.from(
+                  { length: profile.participantCount },
+                  (_unused, author) => author,
+              ).filter((author) => author !== position)
+            : parsePositions(profile, parameters.deliver);
     const announce = parsePositions(profile, parameters.announce);
     const { closeTime } = parameters;
     if (

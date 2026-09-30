@@ -2203,31 +2203,33 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
+                // A close request that names no ballots collects every other
+                // participant's published ballot with its body.
                 const authors = members.map((_member, position) => position);
+                const collectsEvery = (position: number) => [
+                    { kind: 'own', position },
+                    ...authors
+                        .filter((author) => author !== position)
+                        .map((author) => ({ kind: 'held', position: author })),
+                ];
                 await Promise.all(
                     accepting.map(async (member, index) => {
-                        assert.equal(
-                            (
-                                await act(member, 'close', {
-                                    deliver: authors.filter(
-                                        (author) => author !== index + 1,
-                                    ),
-                                })
-                            ).generation,
-                            17,
+                        const collected = await act(member, 'close');
+                        assert.equal(collected.generation, 17);
+                        assert.deepEqual(
+                            collected.closeEvents,
+                            collectsEvery(index + 1),
                         );
                     }),
                 );
-                assert.equal(
-                    (
-                        await act(organizing, 'close', {
-                            deliver: authors.slice(1),
-                            announce: [],
-                            closeTime: Date.now(),
-                        })
-                    ).generation,
-                    19,
-                );
+                const opened = await act(organizing, 'close', {
+                    closeTime: Date.now(),
+                });
+                assert.equal(opened.generation, 19);
+                assert.deepEqual(opened.closeEvents, [
+                    ...collectsEvery(0),
+                    { kind: 'lock' },
+                ]);
                 await Promise.all(
                     accepting.map(async (member) => {
                         assert.equal(
@@ -3247,18 +3249,27 @@ await runWithLocalRunLog(
                     .slice(0, 2)
                     .map((position, index) => [position, [19, 20][index]]),
             );
+            // They collect nothing more, so the public body probe keeps its
+            // envelopes without their bodies.
             await Promise.all(
                 responders.map(async (position) => {
                     const halt = responseHalts.get(position);
                     if (halt !== undefined)
-                        await interrupt(position, 'close', {}, halt);
+                        await interrupt(
+                            position,
+                            'close',
+                            { deliver: [] },
+                            halt,
+                        );
                     if (halt === 19)
                         await loseState(
                             position,
                             await closeStore(position),
                             'close',
                         );
-                    const details = await run(position, 'close');
+                    const details = await run(position, 'close', {
+                        deliver: [],
+                    });
                     assert.equal(details.generation, 21);
                     assert.deepEqual(details.closeEvents, [
                         ...submissions('own', [position].filter(onTime)),
@@ -3279,9 +3290,10 @@ await runWithLocalRunLog(
             // The organizer takes the other responses, fetches the body they
             // list that it lacks, responds and proposes. It halts with its
             // signed response and retained proposal intent, and with its
-            // signed proposal before delivering it.
-            await interrupt(0, 'close', {}, 21);
-            await interrupt(0, 'close', {}, 22);
+            // signed proposal before delivering it. It collects nothing more
+            // itself, so it fetches only the listed body.
+            await interrupt(0, 'close', { deliver: [] }, 21);
+            await interrupt(0, 'close', { deliver: [] }, 22);
             // Its next visit restores the completed close without replaying
             // the log, so the retained events name no author or responder;
             // the published proposal below names the responses it took.

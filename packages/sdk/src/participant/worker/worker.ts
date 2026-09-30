@@ -608,7 +608,11 @@ const execute = async (
             const request =
                 profiled === undefined
                     ? undefined
-                    : parseCloseRequest(profiled.profile, parameters);
+                    : parseCloseRequest(
+                          profiled.profile,
+                          profiled.position,
+                          parameters,
+                      );
             const generation = root.head.generation;
             if (
                 request === undefined ||
