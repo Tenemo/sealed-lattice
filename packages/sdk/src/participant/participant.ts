@@ -6,6 +6,10 @@ import {
 } from '../foundation-kernel.js';
 
 import { hexadecimal } from './worker/bytes.js';
+import type {
+    ParticipantPendingCause,
+    ParticipantRefusalReason,
+} from './worker/outcome.js';
 import {
     affordedHelpers,
     helperRole,
@@ -13,6 +17,11 @@ import {
 } from './worker/parallel.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
+
+export type {
+    ParticipantPendingCause,
+    ParticipantRefusalReason,
+} from './worker/outcome.js';
 
 // The application page's side of the participant runtime. The SDK carries the
 // packaged worker's source, so no server can alter it, and runs every request
@@ -164,21 +173,26 @@ export type ParticipantSummary = Readonly<{
 }>;
 
 /**
- * A refused request changed nothing; a pending one waits for public input,
- * storage or a device resource such as memory, or follows a module failure,
- * and a later visit continues from the participant's last committed state; a
- * stopped participant never acts again. A participant that another runtime
- * created is refused, naming that runtime when its state records it, so the
- * application can open it with the SDK of that runtime.
+ * A refused request changed nothing, and its reason says why; a pending one
+ * waits for public input, storage or a device resource such as memory, or
+ * follows a module or worker failure, as its cause names and its reason
+ * describes, and a later visit continues from the participant's last
+ * committed state; a stopped participant never acts again. A participant
+ * that another runtime created is refused, naming that runtime when its
+ * state records it, so the application can open it with the SDK of that
+ * runtime.
  */
 export type ParticipantResult = Readonly<
     | {
           status: 'completed';
           details: ParticipantSummary & Readonly<Record<string, unknown>>;
       }
-    | { status: 'refused' }
+    | {
+          status: 'refused';
+          reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
+      }
     | { status: 'refused'; reason: 'another runtime'; runtime?: string }
-    | { status: 'pending'; reason: string }
+    | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
     | {
           status: 'stopped';
           reason: string;
@@ -263,6 +277,7 @@ const runWorkerOnce = async (
         worker.onerror = (event) => {
             finish({
                 status: 'pending',
+                cause: 'worker',
                 reason: event.message || 'The participant worker failed.',
             });
         };
@@ -272,6 +287,7 @@ const runWorkerOnce = async (
             helper.onerror = (event) => {
                 finish({
                     status: 'pending',
+                    cause: 'worker',
                     reason: event.message || 'A participant helper failed.',
                 });
             };
@@ -304,6 +320,7 @@ const runWorker = async (
         if (result.status === 'evaluated')
             return {
                 status: 'pending',
+                cause: 'worker',
                 reason: 'The participant worker evaluated again.',
             } as const;
         return (

@@ -749,6 +749,7 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                             } else {
                                 assert.deepEqual(outcome, {
                                     status: 'pending',
+                                    cause: 'public input',
                                     reason: 'A usable body was refused.',
                                 });
                                 assert.equal(delivered.has(route), true);
@@ -837,6 +838,7 @@ window.runParticipant = (operation, parameters = {}) => openParticipant({namespa
                             );
                             assert.deepEqual(consumed, {
                                 status: 'pending',
+                                cause: 'public input',
                                 reason,
                             });
                             assert.ok(

@@ -16,6 +16,7 @@ import {
     custodyPurpose,
 } from './identity.js';
 import { readKernel } from './kernel.js';
+import type { ParticipantRefusalReason } from './outcome.js';
 import { validateParticipantPredecessor } from './predecessor.js';
 import {
     authenticateRoot,
@@ -35,6 +36,12 @@ import {
     participantRecordStores,
     participantStores,
 } from './storage.js';
+
+// Why an enrollment was refused.
+type EnrollmentRefusal = Extract<
+    ParticipantRefusalReason,
+    'participant exists' | 'invalid request' | 'insufficient storage'
+>;
 
 export type EnrollmentRequest = Readonly<
     | {
@@ -88,20 +95,20 @@ type StagedRecord = { kind: number; offset: number; bytes: Uint8Array };
 // The intent commits before any private generation, and the completed root,
 // head and every record commit together; interruption between them stops
 // the participant, so the caller learns when the intent exists. A refusal
-// leaves the namespace unchanged.
+// leaves the namespace unchanged and says why.
 export const createEnrollment = async (
     context: ParticipantContext,
     request: EnrollmentRequest,
     onIntent: () => void,
-): Promise<AuthenticatedRoot | undefined> => {
+): Promise<AuthenticatedRoot | EnrollmentRefusal> => {
     const { database, limits, kernel, handlers, runtime } = context;
-    if (!(await isEmptyParticipant(database))) return undefined;
+    if (!(await isEmptyParticipant(database))) return 'participant exists';
     const name = encodeUsername(request.username);
     if (
         name === undefined ||
         name.length > limits.registration.maximumUsernameIngressBytes
     )
-        return undefined;
+        return 'invalid request';
     let input: Uint8Array;
     if (request.role === 'creator') {
         if (
@@ -109,7 +116,7 @@ export const createEnrollment = async (
             request.topCount < 1 ||
             request.topCount > 0xffff
         )
-            return undefined;
+            return 'invalid request';
         input = concatenate(
             runtime,
             unsigned16(request.topCount),
@@ -118,16 +125,18 @@ export const createEnrollment = async (
             unsigned32(name.length),
             name,
         );
-        if (input.length + 64 > kernel.input_capacity()) return undefined;
+        if (input.length + 64 > kernel.input_capacity())
+            return 'invalid request';
         sessionInput(context, input);
-        if (kernel.validate_creator(input.length) !== 0) return undefined;
+        if (kernel.validate_creator(input.length) !== 0)
+            return 'invalid request';
     } else {
         if (
             request.poll.length !== 64 ||
             request.definitionSignature.length !==
                 limits.registration.signatureBytes
         )
-            return undefined;
+            return 'invalid request';
         input = concatenate(
             request.poll,
             runtime,
@@ -137,9 +146,10 @@ export const createEnrollment = async (
             unsigned32(name.length),
             name,
         );
-        if (input.length + 64 > kernel.input_capacity()) return undefined;
+        if (input.length + 64 > kernel.input_capacity())
+            return 'invalid request';
         sessionInput(context, input);
-        if (kernel.validate_join(input.length) !== 0) return undefined;
+        if (kernel.validate_join(input.length) !== 0) return 'invalid request';
     }
     const estimate = await navigator.storage.estimate();
     if (
@@ -150,7 +160,7 @@ export const createEnrollment = async (
                 (limits.registration.publicKeyBytes +
                     limits.registration.maximumProofBytes)
     )
-        return undefined;
+        return 'insufficient storage';
     const associatedData = rootAssociatedData(runtime);
     const key = await createRootKey();
     const intentPlaintext = concatenate(

@@ -1507,6 +1507,7 @@ await runWithLocalRunLog(
                     const result = await request(position, operation);
                     assert.ok(
                         result.status === 'pending' &&
+                            result.cause === 'resource' &&
                             result.reason.includes(
                                 'exhausted its memory bound',
                             ),
@@ -2486,7 +2487,11 @@ await runWithLocalRunLog(
                             else
                                 assert.deepEqual(
                                     await request(member.origin, 'result'),
-                                    { status: 'pending', reason },
+                                    {
+                                        status: 'pending',
+                                        cause: 'public input',
+                                        reason,
+                                    },
                                 );
                         } finally {
                             views[member.origin].clear();
@@ -2598,6 +2603,7 @@ await runWithLocalRunLog(
                 await request(leftOut, 'accept-roster', { recordIds }),
                 {
                     status: 'pending',
+                    cause: 'public input',
                     reason: 'The proposal omits this participant.',
                 },
             );
@@ -2612,16 +2618,13 @@ await runWithLocalRunLog(
             // every participant restores its retained state.
             await expectStatus(0, 'propose-roster', 'refused', { recordIds });
             await expectStatus(1, 'accept-roster', 'refused', { recordIds });
-            // A malformed request is refused as public input; the participant
-            // continues below.
+            // A malformed request is refused; the participant continues
+            // below.
             assert.deepEqual(
                 await request(1, 'accept-roster', {
                     recordIds: recordIds.map((id) => id.toUpperCase()),
                 }),
-                {
-                    status: 'pending',
-                    reason: 'Malformed proposed record identifiers.',
-                },
+                { status: 'refused', reason: 'invalid request' },
             );
             await expectStatus(1, 'create', 'refused', {
                 role: 'join',
@@ -2692,6 +2695,7 @@ await runWithLocalRunLog(
             assert.equal((await run(0, 'confirm')).generation, 9);
             assert.deepEqual(await request(0, 'open'), {
                 status: 'pending',
+                cause: 'public input',
                 reason: 'A public record is unavailable.',
             });
             assert.equal((await run(0, 'status')).generation, 9);
@@ -2712,6 +2716,7 @@ await runWithLocalRunLog(
             if (confirmers.length > 0) {
                 assert.deepEqual(await request(0, 'open'), {
                     status: 'pending',
+                    cause: 'public input',
                     reason: 'A public record is unavailable.',
                 });
                 const confirmationReplay = [...confirmers]
@@ -2868,6 +2873,7 @@ await runWithLocalRunLog(
             }
             const refusedDelivery = {
                 status: 'pending',
+                cause: 'public input',
                 reason: 'Public delivery was refused.',
             };
             // The first honest authors halt between them at every ballot
@@ -4165,6 +4171,7 @@ await runWithLocalRunLog(
                 try {
                     assert.deepEqual(await request(position, operation), {
                         status: 'pending',
+                        cause: 'public input',
                         reason,
                     });
                     if (

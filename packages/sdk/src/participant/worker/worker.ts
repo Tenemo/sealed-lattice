@@ -23,7 +23,11 @@ import {
     publishClose,
     resumeClose,
 } from './close.js';
-import { isSetupContributor, PublicInputFailure } from './context.js';
+import {
+    InvalidRequest,
+    isSetupContributor,
+    PublicInputFailure,
+} from './context.js';
 import type { ParticipantContext, ProfileContext } from './context.js';
 import {
     beginContribution,
@@ -50,6 +54,11 @@ import {
     ResourceFailure,
 } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
+import { pendingCause } from './outcome.js';
+import type {
+    ParticipantPendingCause,
+    ParticipantRefusalReason,
+} from './outcome.js';
 import {
     helperRole,
     listenAsHelper,
@@ -121,14 +130,18 @@ type WorkerCommand = Readonly<{
 }>;
 
 // An evaluated result reports the memory of a worker that retained the
-// target it evaluated, and is never an operation's result. A participant that
-// another runtime created is refused with that runtime's identity when its
-// head names one.
+// target it evaluated, and is never an operation's result. A refused result
+// says why, and a participant that another runtime created is refused with
+// that runtime's identity when its head names one. A pending result names
+// what the participant waits for.
 export type WorkerResult = Readonly<
     | { status: 'completed'; details: Readonly<Record<string, unknown>> }
-    | { status: 'refused' }
+    | {
+          status: 'refused';
+          reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
+      }
     | { status: 'refused'; reason: 'another runtime'; runtime?: string }
-    | { status: 'pending'; reason: string }
+    | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
     | {
           status: 'stopped';
           reason: string;
@@ -138,6 +151,11 @@ export type WorkerResult = Readonly<
 >;
 
 const maximumModuleBytes = 8_388_608;
+
+// A refused request changed nothing.
+const refused = (
+    reason: Exclude<ParticipantRefusalReason, 'another runtime'>,
+) => ({ status: 'refused', reason }) as const;
 
 // The pinned delivery digest that gates executing the module, and the runtime
 // identity derived from the delivered files' digests. Neither is an identity
@@ -230,7 +248,7 @@ const runtimeIdentity = async (command: WorkerCommand, module: Uint8Array) =>
 
 const text = (value: unknown) => {
     if (typeof value !== 'string')
-        throw new PublicInputFailure('Malformed text parameter.');
+        throw new InvalidRequest('Malformed text parameter.');
     return value;
 };
 
@@ -239,14 +257,14 @@ const text = (value: unknown) => {
 const bytes = (value: unknown) => {
     const encoded = text(value);
     if (!/^(?:[0-9a-f]{2})*$/u.test(encoded))
-        throw new PublicInputFailure('Malformed byte parameter.');
+        throw new InvalidRequest('Malformed byte parameter.');
     return fromHexadecimal(encoded);
 };
 
 // An archived transcript's index: its identity and its record's length.
 const transcriptReference = (value: unknown) => {
     if (typeof value !== 'object' || value === null)
-        throw new PublicInputFailure('Malformed transcript parameter.');
+        throw new InvalidRequest('Malformed transcript parameter.');
     const { identity, byteLength } = value as Record<string, unknown>;
     if (
         typeof identity !== 'string' ||
@@ -255,7 +273,7 @@ const transcriptReference = (value: unknown) => {
         (byteLength as number) < 1 ||
         (byteLength as number) > 1_572_864
     )
-        throw new PublicInputFailure('Malformed transcript parameter.');
+        throw new InvalidRequest('Malformed transcript parameter.');
     return { identity, byteLength: byteLength as number };
 };
 
@@ -373,9 +391,9 @@ const execute = async (
                 definitionSignature: bytes(parameters.definitionSignature),
                 username: text(parameters.username),
             };
-        else return { status: 'refused' };
+        else return refused('invalid request');
         const root = await createEnrollment(context, request, started);
-        if (root === undefined) return { status: 'refused' };
+        if (typeof root === 'string') return refused(root);
         const enrollment = await restoreEnrollment(context, root, true);
         return {
             status: 'completed',
@@ -387,7 +405,7 @@ const execute = async (
     // its root, so no authority starts, nothing is written and nothing can
     // stop.
     const stored = await storedRuntime(context.database);
-    if (stored.status === 'empty') return { status: 'refused' };
+    if (stored.status === 'empty') return refused('no participant');
     if (
         stored.status === 'named' &&
         stored.runtime !== hexadecimal(context.runtime)
@@ -406,7 +424,7 @@ const execute = async (
         parameters.poll !== undefined &&
         parameters.poll !== hexadecimal(root.manifest.poll)
     )
-        return { status: 'refused' };
+        return refused('another poll');
     // The retained roster names the profile from generation two on; every
     // operation past the roster runs only at such a generation.
     const profiled =
@@ -436,7 +454,7 @@ const execute = async (
                     enrollment,
                 );
                 if (proposal.recordIds.join(',') !== recordIds.join(','))
-                    return { status: 'refused' };
+                    return refused('invalid request');
                 root = await signRoster(context, root, proposal);
             } else {
                 const proposed = await proposeRoster(
@@ -446,7 +464,7 @@ const execute = async (
                     enrollment,
                     recordIds,
                 );
-                if (proposed === undefined) return { status: 'refused' };
+                if (proposed === undefined) return refused('unavailable');
                 root = proposed;
             }
             break;
@@ -459,7 +477,7 @@ const execute = async (
                 enrollment,
                 parseRecordIds(parameters.recordIds),
             );
-            if (accepted === undefined) return { status: 'refused' };
+            if (accepted === undefined) return refused('unavailable');
             root = accepted;
             break;
         }
@@ -474,7 +492,7 @@ const execute = async (
                 generation >= 7 ||
                 !isSetupContributor(profileContext())
             )
-                return { status: 'refused' };
+                return refused('unavailable');
             if (generation === 4 || generation === 6)
                 await discardInterruptedRecords(profileContext(), root);
             let session;
@@ -511,14 +529,14 @@ const execute = async (
             // contributor with its contribution, any other participant
             // with its own registration body.
             if (!isSetupContributor(profileContext())) {
-                if (root.head.generation < 3) return { status: 'refused' };
+                if (root.head.generation < 3) return refused('unavailable');
                 const session = await resumeParticipant(profileContext(), root);
                 const confirmation = await confirmRoster(session);
                 root = session.root;
                 await publishConfirmation(session, relay, confirmation);
                 break;
             }
-            if (root.head.generation < 7) return { status: 'refused' };
+            if (root.head.generation < 7) return refused('unavailable');
             const session = await resumeContribution(profileContext(), root);
             const confirmation =
                 root.head.generation >= 9
@@ -533,7 +551,7 @@ const execute = async (
                 root.head.generation < 9 ||
                 !isSetupContributor(profileContext())
             )
-                return { status: 'refused' };
+                return refused('unavailable');
             const session = await resumeContribution(
                 profileContext(),
                 root,
@@ -552,7 +570,7 @@ const execute = async (
                 profiled === undefined ||
                 root.head.generation !== (isSetupContributor(profiled) ? 11 : 9)
             )
-                return { status: 'refused' };
+                return refused('unavailable');
             const session = await resumeParticipant(profiled, root);
             const recorder =
                 command.archive === undefined
@@ -592,29 +610,31 @@ const execute = async (
             // A retained attempt continues only with its locked scores, and a
             // signed ballot is only delivered again, also after an intent.
             const generation = root.head.generation;
+            if (profiled === undefined || generation < 12)
+                return refused('unavailable');
             const scores =
-                parameters.scores === undefined || profiled === undefined
+                parameters.scores === undefined
                     ? undefined
                     : parseBallotScores(profiled.profile, parameters.scores);
             if (
-                generation < 12 ||
                 (parameters.scores !== undefined && scores === undefined) ||
-                (generation === 12 && scores === undefined) ||
-                (generation >= 17 && scores !== undefined)
+                (generation === 12 && scores === undefined)
             )
-                return { status: 'refused' };
+                return refused('invalid request');
+            if (generation >= 17 && scores !== undefined)
+                return refused('unavailable');
             const participant = await resumeParticipant(profileContext(), root);
             let session;
             if (scores !== undefined && generation === 12)
                 session = await beginBallot(participant, scores);
             else {
                 session = await resumeBallot(participant);
+                if (session === undefined) return refused('unavailable');
                 if (
-                    session === undefined ||
-                    (scores !== undefined &&
-                        !equalBytes(scores, session.state.scores))
+                    scores !== undefined &&
+                    !equalBytes(scores, session.state.scores)
                 )
-                    return { status: 'refused' };
+                    return refused('invalid request');
             }
             await completeBallot(session, relay);
             root = participant.root;
@@ -628,23 +648,25 @@ const execute = async (
         case 'close': {
             // Only the organizer opens the close, and only before an intent
             // and with no ballot attempt pending.
-            const request =
-                profiled === undefined
-                    ? undefined
-                    : parseCloseRequest(
-                          profiled.profile,
-                          profiled.position,
-                          parameters,
-                      );
             const generation = root.head.generation;
+            if (profiled === undefined || generation < 12)
+                return refused('unavailable');
+            const request = parseCloseRequest(
+                profiled.profile,
+                profiled.position,
+                parameters,
+            );
             if (
                 request === undefined ||
-                generation < 12 ||
-                (request.closeTime !== undefined &&
-                    (!enrollment.isOrganizer ||
-                        (generation !== 12 && generation !== 17)))
+                (request.closeTime !== undefined && !enrollment.isOrganizer)
             )
-                return { status: 'refused' };
+                return refused('invalid request');
+            if (
+                request.closeTime !== undefined &&
+                generation !== 12 &&
+                generation !== 17
+            )
+                return refused('unavailable');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
@@ -674,7 +696,7 @@ const execute = async (
                 (generation >= releasePhase.locked &&
                     root.manifest.suffixes.target?.length === 0)
             )
-                return { status: 'refused' };
+                return refused('unavailable');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
@@ -704,13 +726,17 @@ const execute = async (
             // delivered again.
             const generation = root.head.generation;
             if (
+                parameters.transcript !== undefined &&
+                command.archive === undefined
+            )
+                return refused('invalid request');
+            if (
                 (generation !== completedClosePhase(enrollment.isOrganizer) &&
                     generation < targetPhase.signed) ||
                 (parameters.transcript !== undefined &&
-                    (command.archive === undefined ||
-                        generation >= releasePhase.signed))
+                    generation >= releasePhase.signed)
             )
-                return { status: 'refused' };
+                return refused('unavailable');
             const archiving =
                 parameters.transcript === undefined &&
                 generation < releasePhase.locked;
@@ -792,18 +818,20 @@ const execute = async (
             // visit reads the relay or the archived transcript the request
             // names, and archiving sends every record it reads to the
             // replicas as one transcript, acknowledged once verified.
-            if (
-                root.head.generation <
-                    completedClosePhase(enrollment.isOrganizer) ||
-                (parameters.transcript !== undefined &&
-                    command.operation === 'archive')
-            )
-                return { status: 'refused' };
             const archived =
                 command.operation === 'archive' ||
                 parameters.transcript !== undefined;
-            if (archived && command.archive === undefined)
-                return { status: 'refused' };
+            if (
+                (parameters.transcript !== undefined &&
+                    command.operation === 'archive') ||
+                (archived && command.archive === undefined)
+            )
+                return refused('invalid request');
+            if (
+                root.head.generation <
+                completedClosePhase(enrollment.isOrganizer)
+            )
+                return refused('unavailable');
             const archive =
                 command.archive === undefined || !archived
                     ? undefined
@@ -849,7 +877,8 @@ const execute = async (
         case 'transcripts': {
             // The transcripts the archive holds for the poll are hints for a
             // later result visit, which verifies whichever it reads.
-            if (command.archive === undefined) return { status: 'refused' };
+            if (command.archive === undefined)
+                return refused('invalid request');
             return {
                 status: 'completed',
                 details: {
@@ -865,7 +894,7 @@ const execute = async (
             };
         }
         default:
-            return { status: 'refused' };
+            return refused('invalid request');
     }
     // A roster retained by this operation names the profile only now.
     return {
@@ -922,10 +951,10 @@ const run = async (
         !isSecureContext ||
         typeof navigator.locks !== 'object' ||
         typeof crypto.subtle !== 'object' ||
-        typeof indexedDB !== 'object' ||
-        !isWellFormed(command)
+        typeof indexedDB !== 'object'
     )
-        return { status: 'refused' };
+        return refused('unsupported browser');
+    if (!isWellFormed(command)) return refused('invalid request');
     const relay: PublicRelay = { base: command.relay };
     let database: IDBDatabase | undefined;
     let helpers: ParallelHelpers | undefined;
@@ -940,7 +969,7 @@ const run = async (
         );
         const runtime = await runtimeIdentity(command, moduleBytes);
         if (hexadecimal(runtime) !== command.identity.runtime)
-            return { status: 'refused' };
+            return refused('runtime mismatch');
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
         const evaluation = evaluatingOperations.has(command.operation);
         const started = startParallelHelpers(module, helperPorts, evaluation);
@@ -1022,6 +1051,10 @@ const run = async (
                                 archiveBytes(),
                             ),
                         };
+                    // A malformed request is refused before the operation
+                    // changes anything.
+                    if (error instanceof InvalidRequest)
+                        return refused('invalid request');
                     // A local failure after authority started stops the
                     // participant before any other operation takes the lock.
                     // A failed helper, an exhausted memory bound and a module
@@ -1052,6 +1085,7 @@ const run = async (
         // failures before authority started leave the participant pending.
         return {
             status: 'pending',
+            cause: pendingCause(error),
             reason: error instanceof Error ? error.message : String(error),
         };
     } finally {
@@ -1072,6 +1106,7 @@ self.onmessage = (event: MessageEvent<WorkerCommand | typeof helperRole>) => {
         (error: unknown) =>
             self.postMessage({
                 status: 'pending',
+                cause: pendingCause(error),
                 reason: error instanceof Error ? error.message : String(error),
             }),
     );

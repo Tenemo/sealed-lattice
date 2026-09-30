@@ -1,0 +1,44 @@
+import { PublicInputFailure } from './context.js';
+import { ModuleFailure, ResourceFailure } from './kernel.js';
+import { StoragePending } from './storage.js';
+
+/**
+ * Why a refused request changed nothing: the browser lacks a required
+ * capability; the request is malformed or asks for something its parameters
+ * or the application's configuration cannot supply; the delivered worker or
+ * module is not the runtime this SDK recorded; the namespace holds no
+ * participant, or already holds one; the device lacks the storage an
+ * enrollment needs; the participant belongs to another poll or another
+ * runtime; or the operation is not available at the participant's stage or
+ * role.
+ */
+export type ParticipantRefusalReason =
+    | 'unsupported browser'
+    | 'invalid request'
+    | 'runtime mismatch'
+    | 'no participant'
+    | 'participant exists'
+    | 'insufficient storage'
+    | 'another poll'
+    | 'another runtime'
+    | 'unavailable';
+
+/**
+ * What a pending participant waits for or what ended its operation early:
+ * missing or refused public input, storage, a device resource such as
+ * memory, a failed module call, or a worker or helper that ended or failed
+ * before the participant's authority started.
+ */
+export type ParticipantPendingCause =
+    'public input' | 'storage' | 'resource' | 'module' | 'worker';
+
+export const pendingCause = (error: unknown): ParticipantPendingCause =>
+    error instanceof PublicInputFailure
+        ? 'public input'
+        : error instanceof StoragePending
+          ? 'storage'
+          : error instanceof ResourceFailure
+            ? 'resource'
+            : error instanceof ModuleFailure
+              ? 'module'
+              : 'worker';

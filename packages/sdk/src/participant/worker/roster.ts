@@ -9,7 +9,7 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import { InvalidRequest, PublicInputFailure, sessionInput } from './context.js';
 import type { ParticipantContext, ProfileContext } from './context.js';
 import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
@@ -270,7 +270,7 @@ const verifyProposalInputs = async (
     recordIds: readonly string[],
 ): Promise<VerifiedProposal> => {
     if (!validRecordIds(recordIds, context.limits))
-        throw new PublicInputFailure('The proposed records are invalid.');
+        throw new InvalidRequest('The proposed records are invalid.');
     const begin = rosterBegin(
         context,
         root,
@@ -547,6 +547,6 @@ export const parseRecordIds = (value: unknown): string[] => {
             (id) => typeof id === 'string' && /^[0-9a-f]{128}$/u.test(id),
         )
     )
-        throw new PublicInputFailure('Malformed proposed record identifiers.');
+        throw new InvalidRequest('Malformed proposed record identifiers.');
     return value as string[];
 };

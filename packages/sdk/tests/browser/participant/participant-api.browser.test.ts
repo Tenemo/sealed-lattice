@@ -97,6 +97,7 @@ describe('participant API', () => {
             ] as const)
                 expect(await participant.run(request)).toEqual({
                     status: 'refused',
+                    reason: 'no participant',
                 });
             // The worker checked the packaged module and recomputed the
             // runtime identity before it opened the namespace's database, and

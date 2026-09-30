@@ -40,6 +40,8 @@ export type {
     ParticipantArchive,
     ParticipantEnrollment,
     ParticipantOptions,
+    ParticipantPendingCause,
+    ParticipantRefusalReason,
     ParticipantRequest,
     ParticipantResult,
     ParticipantSummary,
