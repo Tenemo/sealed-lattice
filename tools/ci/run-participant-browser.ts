@@ -1828,6 +1828,9 @@ await runWithLocalRunLog(
                 username: 'Organizer',
             });
             assert.equal(organizer.isOrganizer, true);
+            // The page asked the browser to keep the origin's storage, which
+            // it grants by its own policy.
+            assert.equal(typeof organizer.persistentStorage, 'boolean');
             await run(0, 'publish');
             // An operation on an empty namespace is refused and leaves it
             // empty, so that participant still joins below.

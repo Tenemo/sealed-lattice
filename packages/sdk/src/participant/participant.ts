@@ -156,6 +156,11 @@ export type ParticipantSummary = Readonly<{
      * target vote of its own reports none.
      */
     ballotStatus: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
+    /**
+     * Whether the browser keeps the origin's storage under storage pressure.
+     * It may evict best-effort storage, which stops the participant.
+     */
+    persistentStorage: boolean;
 }>;
 
 /**
@@ -337,6 +342,18 @@ const baseUrl = (value: unknown) => {
     return url;
 };
 
+// Asks the browser to keep the origin's storage under storage pressure,
+// which it grants by its own policy; a context that cannot ask reads whether
+// it already does. A refused request means best-effort storage.
+const persistStorage = async () => {
+    if (typeof navigator.storage !== 'object') return false;
+    const request =
+        typeof navigator.storage.persist === 'function'
+            ? navigator.storage.persist()
+            : navigator.storage.persisted();
+    return request.catch(() => false);
+};
+
 /**
  * Opens the participant whose local state the namespace names. The relay and
  * the archive replicas are untrusted: the participant verifies every record
@@ -403,8 +420,9 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
             'An archive has 2b + 1 to 32 distinct replicas for its fault bound b.',
         );
     return {
-        run: (request) =>
-            runWorker(runtime.worker, {
+        run: async (request) => {
+            const persistentStorage = await persistStorage();
+            const result = await runWorker(runtime.worker, {
                 operation: request.operation,
                 parameters: request.parameters ?? {},
                 namespace,
@@ -421,6 +439,13 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
                               kernelSha256,
                           },
                       }),
-            }),
+            });
+            return result.status === 'completed'
+                ? {
+                      status: 'completed',
+                      details: { ...result.details, persistentStorage },
+                  }
+                : result;
+        },
     };
 };

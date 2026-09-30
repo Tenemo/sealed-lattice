@@ -369,7 +369,8 @@ const participantConsumer = [
     "    commands[1] !== command('release', true) ||",
     "    commands[2] !== command('release', false) ||",
     '    JSON.stringify(released) !==',
-    "        JSON.stringify({ status: 'completed', details: { memory: { workerBytes: 1 }, evaluationMemory: { workerBytes: 2 } } })",
+    // Node offers no storage manager, so the storage stays best-effort.
+    "        JSON.stringify({ status: 'completed', details: { memory: { workerBytes: 1 }, evaluationMemory: { workerBytes: 2 }, persistentStorage: false } })",
     ')',
     "    throw new Error('The participant API did not run a separate evaluation: ' + JSON.stringify(released));",
     '',
