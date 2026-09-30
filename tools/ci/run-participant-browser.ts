@@ -3988,15 +3988,18 @@ await runWithLocalRunLog(
                             ),
                         ),
                     );
-            // With ballots cast, a fourth set of views forges the vote
-            // probe's nonlocal ballot input, which the certified target counts: its
-            // body altered or withheld, its submission replaced by another
-            // counted author's authentic one, or its signature altered. The
-            // refused votes of the first view discard the vote probe's
-            // evaluated target, so each of these visits evaluates the target
-            // again from the public close records and verifies the close
-            // barrier; none of them withdraws or replaces the accepted
-            // ballot, and its participant stays pending.
+            // With ballots cast, a fourth set of views forges another ballot
+            // that the certified target counts, which the vote probe reads
+            // from the public records: its body altered or withheld, its
+            // submission replaced by another counted author's authentic one,
+            // or its signature altered. The refused votes of the first view
+            // discard the vote probe's evaluated target, so each of these
+            // visits evaluates the target again from the public close records
+            // and verifies the close barrier; none of them withdraws or
+            // replaces the accepted ballot, and its participant stays pending.
+            // When the vote probe's own ballot is the only one counted, the
+            // probe reads no counted ballot from the public records, and
+            // there is no such view.
             const countedBallots = onTimeBallots.filter(
                 (position) =>
                     ![equivocator, omittedVoter, invalidAuthor].includes(
@@ -4016,11 +4019,10 @@ await runWithLocalRunLog(
             );
             if (mode !== 'empty') {
                 assert.equal(voteProbe, publicBodyProbe);
-                assert.ok(
-                    countedBallots.includes(voteProbe) &&
-                        forgedAuthor !== undefined &&
-                        replacingAuthor !== undefined,
-                );
+                assert.ok(countedBallots.includes(voteProbe));
+            }
+            if (forgedAuthor !== undefined) {
+                assert.ok(replacingAuthor !== undefined);
                 const directory = await submissionDirectory(forgedAuthor);
                 const replacing = await submissionDirectory(replacingAuthor);
                 const ballotName = (file: string) =>
@@ -4521,11 +4523,12 @@ await runWithLocalRunLog(
                                 position: voteProbe,
                                 paths: [...registrationForgeries.keys()],
                             },
-                            ...(mode === 'empty'
+                            ...(forgedAuthor === undefined
                                 ? {}
                                 : {
                                       ballot: {
                                           position: voteProbe,
+                                          forgedAuthor,
                                           replacingAuthor,
                                           probes: ballotForgeries.map(
                                               ({
