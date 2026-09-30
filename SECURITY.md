@@ -18,7 +18,7 @@ Do not attach real election data, private keys, ballots, shares, witnesses, auth
 ## Intended security model
 
 - For a frozen roster of `n` participants, let `f = floor((n - 1) / 3)`, the largest whole number below one third of `n`. The adversary is quantum polynomial time and statically compromises at most `f` participants in total; active and passive compromise are one budget.
-- The security argument may model SHAKE as an ideal random function, rely on the standard assumptions of the NIST post-quantum algorithms it uses, and assume decision Ring-LWE for its lattice encryption and circular security of its evaluation keys at the parameters it fixes. These are stated assumptions; every other assumption remains an open gap until it is reduced or removed.
+- The security argument may model SHAKE as an ideal random function, rely on the standard assumptions of the NIST post-quantum algorithms it uses, and assume decision Ring-LWE for its lattice encryption at the parameters it fixes. These are stated assumptions; every other assumption remains an open gap until it is reduced or removed.
 - The compromised participants and every relay may collude, equivocate, replay, reorder, delay, omit, replace, or withhold messages. Invalid actions are ignored. If too few valid actions remain, the poll stays unresolved.
 - Completion assumes eventual delivery among cooperating honest participants and that published records remain retrievable through at least one path after their authors leave. Permanent suppression of every communication path may prevent completion.
 - The protocol protects scores, totals, margins, intermediate comparisons, and ranks. Public ballot information is limited to the frozen roster, submission authorship, signed ballot times, the close time, which participants reported holding each submission, acceptance, whether enough ballots were accepted for a result, and the requested terminal result.
@@ -41,7 +41,7 @@ Removed construction formats are not accepted as compatibility inputs or fallbac
 
 ## Open security blockers
 
-The emitted protocol implements a candidate for each of the first five items, and a conditional composition argument and security ledger stand for the next two; none is closed without independent review. The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
+The emitted protocol implements a candidate for each of the first five items, and a conditional composition argument and security ledger stand for the next two; none is closed without independent review. That argument also relies on two premises that are not accepted assumptions, circular security of its evaluation keys and a cost model that charges each SHAKE call the permutations it runs, and its concrete bound covers only polls whose honest registrations stay within a fixed limit, which no participant can observe, because its signature and per-roster terms grow with each registration. The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
 
 - a malicious, dealerless, fixed-roster BFV/BGV setup that creates threshold secret shares and every evaluation key without participant removal or retry;
 - an asynchronous close rule that completes from the close responses of any `n-f` participants including the organizer and limits a malicious relay or organizer to the bounded omission above;
