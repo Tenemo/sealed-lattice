@@ -17,6 +17,40 @@ pub enum OwnBallotStatus {
     Included,
     Omitted,
 }
+impl OwnBallotStatus {
+    /// The status's code in the browser interface.
+    pub fn code(self) -> u8 {
+        match self {
+            Self::NotCast => 0,
+            Self::Late => 1,
+            Self::Included => 2,
+            Self::Omitted => 3,
+        }
+    }
+}
+
+/// The own ballot's status read from a target's classification of this
+/// participant's slot instead of from the close barrier: late when signed
+/// after the locked close time, included when the slot is usable, which the
+/// target classifies as invalid or accepted, and otherwise omitted. Only this
+/// participant signs envelopes for its slot, and it signs one, so a usable
+/// slot holds that ballot, as the barrier's status requires.
+pub fn classified_ballot_status(
+    signed_time: Option<u64>,
+    close_time: u64,
+    classification: Option<u8>,
+) -> OwnBallotStatus {
+    let Some(time) = signed_time else {
+        return OwnBallotStatus::NotCast;
+    };
+    if time > close_time {
+        return OwnBallotStatus::Late;
+    }
+    match classification {
+        Some(1 | 2) => OwnBallotStatus::Included,
+        _ => OwnBallotStatus::Omitted,
+    }
+}
 
 /// Signing continuation from a target this instance evaluated, whose
 /// classified closed inventory it keeps. Persistence stays in the root
@@ -104,5 +138,38 @@ impl FinalityWork {
             &self.message,
             coins,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_classified_status_needs_a_timely_ballot_in_a_usable_slot() {
+        let close = 1_000;
+        for (classification, timely) in [
+            (None, OwnBallotStatus::Omitted),
+            (Some(0), OwnBallotStatus::Omitted),
+            (Some(1), OwnBallotStatus::Included),
+            (Some(2), OwnBallotStatus::Included),
+            (Some(3), OwnBallotStatus::Omitted),
+        ] {
+            assert_eq!(
+                classified_ballot_status(None, close, classification),
+                OwnBallotStatus::NotCast
+            );
+            for time in [0, close] {
+                assert_eq!(
+                    classified_ballot_status(Some(time), close, classification),
+                    timely
+                );
+            }
+            for time in [close + 1, u64::MAX] {
+                assert_eq!(
+                    classified_ballot_status(Some(time), close, classification),
+                    OwnBallotStatus::Late
+                );
+            }
+        }
     }
 }

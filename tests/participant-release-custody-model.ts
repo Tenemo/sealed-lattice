@@ -36,7 +36,7 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
     const envelopeBytes = participantReleaseEnvelopeBytes;
     const maximumBodyRecords =
         (maximumBodyBytes + recordBytes - 1n) / recordBytes;
-    const prefixBytes = 4n + 1n + 2n + 4n + 2n;
+    const prefixBytes = 4n + 1n + 1n + 2n + 4n + 2n;
     const attempt =
         prefixBytes + compileTargetSigningStateCensus().maximumBodyBytes;
     const retainedBody = keyBytes * maximumBodyRecords + envelopeBytes;

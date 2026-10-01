@@ -163,8 +163,9 @@ export type ParticipantSummary = Readonly<{
     ballot: 'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
     /**
      * The own ballot's status in the target the participant signs, once it
-     * has evaluated that target; a participant that releases without a
-     * target vote of its own reports none.
+     * has evaluated that target. A participant that signs no target reads it
+     * from the certified target in its release and result visits, and every
+     * operation reports it again once its release is locked.
      */
     ballotStatus: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
     /**

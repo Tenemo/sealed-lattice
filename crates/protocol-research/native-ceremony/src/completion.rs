@@ -8,10 +8,11 @@ use evaluation_target::{
 };
 use registration_credentials::{
     Credential, contribution_authentication::SignedOpening, release_signing::body_header,
+    target_signing::TargetMessage,
 };
 use registration_enrollment::{
     Enrollment,
-    finality_work::{FinalityWork, OwnBallotStatus},
+    finality_work::{FinalityWork, OwnBallotStatus, classified_ballot_status},
     release_work::ReleaseWork,
 };
 use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value_bytes};
@@ -267,16 +268,38 @@ pub fn run(
     assert_eq!(statuses.len(), enrollments.len());
     // Target signing reads the barrier, which only the evaluated target has.
     assert!(FinalityWork::new(owners[0].clone(), target.clone()).is_err());
+    // A release that follows the completed close reads the same status from
+    // the restored target's classification of the slot and the close time.
+    let message = TargetMessage::parse(target.body(), setup.profile().participants()).unwrap();
+    let close_time = evaluated
+        .classified()
+        .unwrap()
+        .barrier()
+        .intent()
+        .message()
+        .close_time();
+    let released = |position: usize, credential: &Credential| {
+        classified_ballot_status(
+            credential.signed_ballot().map(|(_, time)| *time),
+            close_time,
+            message.classification(position),
+        )
+    };
     for (position, status) in statuses {
         let work = FinalityWork::new(owners[position].clone(), evaluated.clone()).unwrap();
         assert_eq!(
             work.ballot_status(&enrollments[position].credential),
             status
         );
+        assert_eq!(
+            released(position, &enrollments[position].credential),
+            status
+        );
     }
     for (position, credential, status) in &forks {
         let work = FinalityWork::new(owners[*position].clone(), evaluated.clone()).unwrap();
         assert_eq!(work.ballot_status(credential), *status);
+        assert_eq!(released(*position, credential), *status);
     }
     for (ordinal, &position) in signers.iter().enumerate() {
         let owner = owners[position].clone();

@@ -1017,6 +1017,15 @@ const finalityCommand = (
     );
 };
 
+// The own ballot's status in the target this instance certified, which the
+// finality work reads for a participant that signed no target of its own.
+export const certifiedBallotStatus = (context: ProfileContext) => {
+    const output = finalityCommand(context, 3);
+    if (output.length !== 1 || output[0] >= ballotStatuses.length)
+        throw new Error('The finality work reported no ballot status.');
+    return ballotStatuses[output[0]];
+};
+
 // The retained target signing state, or undefined before it begins.
 export const resumeTarget = (close: CloseSession): TargetState | undefined => {
     const { root, context } = close.participant;

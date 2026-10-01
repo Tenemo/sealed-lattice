@@ -30,12 +30,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             let target = evaluation_target::verified_browser_target().ok_or(Error::Context)?;
             let work = crate::finality_work::FinalityWork::new(close.owner(), target)?;
             let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
-            let mut output = vec![match work.ballot_status(&enrollment.credential) {
-                crate::finality_work::OwnBallotStatus::NotCast => 0,
-                crate::finality_work::OwnBallotStatus::Late => 1,
-                crate::finality_work::OwnBallotStatus::Included => 2,
-                crate::finality_work::OwnBallotStatus::Omitted => 3,
-            }];
+            let mut output = vec![work.ballot_status(&enrollment.credential).code()];
             output.extend(work.body());
             session.finality = Some(work);
             Ok(output)
@@ -66,6 +61,20 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
             close.restore_target(&mut enrollment.credential, body, remaining)?;
             Ok(Vec::new())
+        }
+        // The own ballot's status code in the target this instance
+        // certified, for a participant that signed no target of its own.
+        // Only the certificate verifier supplies the target.
+        3 => {
+            if !input.is_empty() {
+                return Err(Error::Shape);
+            }
+            let certificate =
+                evaluation_target::verified_browser_certificate().ok_or(Error::Context)?;
+            let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
+            close
+                .released_ballot_status(&enrollment.credential, certificate.target().body())
+                .map(|status| vec![status.code()])
         }
         _ => Err(Error::Shape),
     }

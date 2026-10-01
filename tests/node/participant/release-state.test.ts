@@ -9,7 +9,11 @@ import {
     releaseRecordLengths,
 } from '#packages/sdk/src/participant/worker/release-state.js';
 import type { ReleaseState } from '#packages/sdk/src/participant/worker/release-state.js';
-import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
+import {
+    ballotStatuses,
+    targetPhase,
+} from '#packages/sdk/src/participant/worker/target-state.js';
+import type { BallotStatus } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -33,8 +37,10 @@ const stateAt = (
     targetLength: number,
     bodyLength: number,
     predecessor: number = targetPhase.signed,
+    ballotStatus: BallotStatus = 'included',
 ): ReleaseState => ({
     predecessor,
+    ballotStatus,
     target: filled(targetLength, 5),
     seed: phase === releasePhase.ready ? filled(64, 6) : new Uint8Array(),
     bodyLength: phase >= releasePhase.body ? bodyLength : 0,
@@ -54,32 +60,34 @@ const stateAt = (
 const phases = Object.values(releasePhase);
 
 describe('participant release state', () => {
-    it('round-trips every phase after a signed target or a completed close', () => {
+    it('round-trips every phase and status after a signed target or a completed close', () => {
         for (const organizer of [false, true])
             for (const predecessor of [
                 targetPhase.signed,
                 completedClosePhase(organizer),
             ])
                 for (const phase of phases)
-                    for (const bodyLength of [
-                        bounds.minimumBodyBytes,
-                        bounds.maximumBodyBytes,
-                    ]) {
-                        const state = stateAt(
-                            phase,
-                            7,
-                            bodyLength,
-                            predecessor,
-                        );
-                        expect(
-                            decodeReleaseState(
-                                profile,
+                    for (const ballotStatus of ballotStatuses)
+                        for (const bodyLength of [
+                            bounds.minimumBodyBytes,
+                            bounds.maximumBodyBytes,
+                        ]) {
+                            const state = stateAt(
                                 phase,
-                                organizer,
-                                encodeReleaseState(phase, state),
-                            ),
-                        ).toEqual(state);
-                    }
+                                7,
+                                bodyLength,
+                                predecessor,
+                                ballotStatus,
+                            );
+                            expect(
+                                decodeReleaseState(
+                                    profile,
+                                    phase,
+                                    organizer,
+                                    encodeReleaseState(phase, state),
+                                ),
+                            ).toEqual(state);
+                        }
     });
 
     it('bounds each phase by the census', () => {
@@ -121,6 +129,13 @@ describe('participant release state', () => {
         const marker = body.slice();
         marker[0] ^= 1;
         refused(releasePhase.body, marker);
+        // The state before the retained status is another shape.
+        const unversioned = body.slice();
+        unversioned[3] = '2'.charCodeAt(0);
+        refused(releasePhase.body, unversioned);
+        const unknownStatus = body.slice();
+        unknownStatus[5] = ballotStatuses.length;
+        refused(releasePhase.body, unknownStatus);
         // A release follows a signed target or the participant's own
         // completed close, never a pending signature or another role's close.
         const predecessor = body.slice();

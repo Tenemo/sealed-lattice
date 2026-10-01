@@ -3464,8 +3464,9 @@ await runWithLocalRunLog(
                     .map((position) => [position, 23] as const),
                 [0, 24] as const,
             ]);
+            // A conflicting slot leaves the equivocator's ballot omitted.
             const ballotStatus = (position: number) =>
-                position === omittedVoter
+                position === omittedVoter || position === equivocator
                     ? 'omitted'
                     : onTime(position)
                       ? 'included'
@@ -3697,6 +3698,8 @@ await runWithLocalRunLog(
                     assert.equal(details.encrypted, false);
                     assert.equal(details.predecessor, undefined);
                     assert.equal(details.resumedFrom, undefined);
+                    // A non-voter reads its status from the certified target.
+                    assert.equal(details.ballotStatus, ballotStatus(position));
                     if (position === corrupt?.position) {
                         assert.equal(details.closure, undefined);
                         continue;
@@ -3751,6 +3754,10 @@ await runWithLocalRunLog(
                     const details = await run(interruptedPosition, 'release');
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
+                    assert.equal(
+                        details.ballotStatus,
+                        ballotStatus(interruptedPosition),
+                    );
                     // Its first visit archived the closure before the seed.
                     assert.equal(details.closure, undefined);
                     assert.equal(
@@ -3776,6 +3783,10 @@ await runWithLocalRunLog(
                             assert.equal(details.generation, 29);
                             assert.equal(details.resumedFrom, undefined);
                             assert.equal(details.encrypted, true);
+                            assert.equal(
+                                details.ballotStatus,
+                                ballotStatus(position),
+                            );
                             assert.equal(
                                 details.predecessor,
                                 predecessor(position),
@@ -3853,9 +3864,15 @@ await runWithLocalRunLog(
                     reader: combiningPosition,
                     transcript: hint,
                 };
-                // A release after the completed close spent the target purpose.
-                for (const position of nonVoters)
+                // A release after the completed close spent the target
+                // purpose, and its lock retains the own ballot's status.
+                for (const position of nonVoters) {
                     await expectStatus(position, 'target', 'refused');
+                    assert.equal(
+                        (await run(position, 'status')).ballotStatus,
+                        ballotStatus(position),
+                    );
+                }
                 // A signed release is only delivered again.
                 const rereleased = await run(combiningPosition, 'release');
                 assert.equal(rereleased.generation, 29);

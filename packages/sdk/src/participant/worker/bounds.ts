@@ -533,15 +533,15 @@ const targetBounds = (module: ModuleLimits) => {
     };
 };
 
-// The release suffix: its marker, predecessor, target length, body length
-// and key count, the target body, the randomness seed until the body exists,
+// The release suffix: its marker, predecessor, own ballot status, target
+// length, body length and key count, the target body, the randomness seed until the body exists,
 // a key per body record, the envelope, the signing coins and the signature.
 const releaseBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     const { release } = module;
     const bodyRecords = Math.ceil(
         profile.maximumReleaseBodyBytes / release.recordBytes,
     );
-    const attempt = 4 + 1 + 2 + 4 + 2 + module.target.maximumBodyBytes;
+    const attempt = 4 + 1 + 1 + 2 + 4 + 2 + module.target.maximumBodyBytes;
     const retainedBody = keyBytes * bodyRecords + release.envelopeBytes;
     return {
         ...release,

@@ -15,6 +15,12 @@ pub fn restore_browser_target(target: target::VerifiedEvaluationTarget) -> bool 
 pub fn verified_browser_release_context() -> Option<std::sync::Arc<release::ReleaseContext>> {
     completion_browser::verified_context()
 }
+/// The target certificate that this instance's completion verified.
+#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+pub fn verified_browser_certificate()
+-> Option<std::sync::Arc<certification::VerifiedTargetCertificate>> {
+    completion_browser::verified_certificate()
+}
 pub mod certification;
 #[cfg(all(target_arch = "wasm32", feature = "browser"))]
 #[path = "completion-browser.rs"]

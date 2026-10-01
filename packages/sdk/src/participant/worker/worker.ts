@@ -67,7 +67,7 @@ import {
 import type { ParallelHelpers } from './parallel.js';
 import { publishRecord, readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
-import { releasePhase } from './release-state.js';
+import { decodeReleaseState, releasePhase } from './release-state.js';
 import {
     advanceRelease,
     computeResult,
@@ -96,7 +96,12 @@ import {
     storedRuntime,
 } from './storage.js';
 import { decodeTargetState, targetPhase } from './target-state.js';
-import { EvaluationRetained, publishTarget, signTarget } from './target.js';
+import {
+    certifiedBallotStatus,
+    EvaluationRetained,
+    publishTarget,
+    signTarget,
+} from './target.js';
 import {
     createTranscriptRecorder,
     discoverTranscripts,
@@ -325,26 +330,33 @@ const ballotState = (root: AuthenticatedRoot) => {
         : 'could not vote';
 };
 
-// The own ballot's status in the target this participant signs, which its
-// target signing state retains from the evaluation on. A release that
-// followed the completed close retains no target.
+// The own ballot's status in the certified target, which the target
+// signing state retains from the evaluation on, and the release state of a
+// participant that signed no target from its lock on. A participant that
+// signed no target and locked no release retains none.
 const ballotStatus = (
     root: AuthenticatedRoot,
     organizer: boolean,
     profiled: ProfileContext | undefined,
 ) => {
-    const retained = root.manifest.suffixes.target;
-    return profiled === undefined ||
-        root.head.generation < targetPhase.intent ||
-        retained === undefined ||
-        retained.length === 0
+    const { generation } = root.head;
+    const { target, release } = root.manifest.suffixes;
+    if (profiled === undefined) return undefined;
+    if (
+        generation >= targetPhase.intent &&
+        target !== undefined &&
+        target.length !== 0
+    )
+        return decodeTargetState(
+            profiled.profile,
+            generation,
+            organizer,
+            target,
+        ).ballotStatus;
+    return generation < releasePhase.locked || release === undefined
         ? undefined
-        : decodeTargetState(
-              profiled.profile,
-              root.head.generation,
-              organizer,
-              retained,
-          ).ballotStatus;
+        : decodeReleaseState(profiled.profile, generation, organizer, release)
+              .ballotStatus;
 };
 
 // Whether the participant contributes setup key material is known once its
@@ -783,7 +795,7 @@ const execute = async (
                         : { resumedFrom: { generation } };
                 await restoreSetup(participant, source);
                 let closure: ArchivedTranscript | undefined;
-                const encrypted = await advanceRelease(
+                const advanced = await advanceRelease(
                     session,
                     source,
                     recorder === undefined
@@ -798,7 +810,7 @@ const execute = async (
                 released = {
                     ...resumed,
                     predecessor: session.state?.predecessor,
-                    encrypted,
+                    ...advanced,
                     ...(closure === undefined ? {} : { closure }),
                     ...(proofRandomBytes === undefined
                         ? {}
@@ -869,10 +881,20 @@ const execute = async (
             const result = await computeResult(session, source);
             const transcript =
                 recorder === undefined ? undefined : await recorder.archive();
+            const summarized = summary(root, enrollment, profiled);
             return {
                 status: 'completed',
                 details: {
-                    ...summary(root, enrollment, profiled),
+                    ...summarized,
+                    // A participant that retains no status reads it from
+                    // the target this visit certified.
+                    ...(summarized.ballotStatus === undefined
+                        ? {
+                              ballotStatus: certifiedBallotStatus(
+                                  participant.context,
+                              ),
+                          }
+                        : {}),
                     ...result,
                     ...transcript,
                 },

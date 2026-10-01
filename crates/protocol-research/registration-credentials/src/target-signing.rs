@@ -37,6 +37,7 @@ pub struct TargetMessage {
     identity: [u8; 64],
     participants: usize,
     encrypted: bool,
+    classifications: Vec<u8>,
 }
 impl TargetMessage {
     pub fn parse(body: &[u8], participants: usize) -> Result<Self, Error> {
@@ -130,6 +131,7 @@ impl TargetMessage {
             identity,
             participants,
             encrypted: branch == 1,
+            classifications: classifications.to_vec(),
         })
     }
     pub fn body(&self) -> &[u8] {
@@ -154,6 +156,10 @@ impl TargetMessage {
     }
     pub fn encrypted(&self) -> bool {
         self.encrypted
+    }
+    /// A participant's classification code, or `None` outside the roster.
+    pub fn classification(&self, position: usize) -> Option<u8> {
+        self.classifications.get(position).copied()
     }
 }
 
@@ -340,6 +346,17 @@ mod tests {
                     TargetMessage::parse(&body(participants, accepted, evaluated), participants)
                         .unwrap();
                 assert_eq!(message.encrypted(), evaluated);
+                for position in 0..participants {
+                    assert_eq!(
+                        message.classification(position),
+                        Some(if position < accepted {
+                            2
+                        } else {
+                            [0, 1, 3][position % 3]
+                        })
+                    );
+                }
+                assert_eq!(message.classification(participants), None);
                 assert!(
                     TargetMessage::parse(&body(participants, accepted, !evaluated), participants)
                         .is_err(),

@@ -42,8 +42,9 @@ import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import { snapshotParticipant } from './storage.js';
 import { targetPhase } from './target-state.js';
-import type { TargetState } from './target-state.js';
+import type { BallotStatus, TargetState } from './target-state.js';
 import {
+    certifiedBallotStatus,
     completionDirectory,
     discardEvaluation,
     restoreOrEvaluateTarget,
@@ -395,9 +396,12 @@ const commitRelease = async (
         (await openReleaseRecord(session, record.index)).fill(0);
 };
 
-// Locks the certified target the release follows, then the seed of all its
-// randomness.
-const lockRelease = async (session: ReleaseSession) => {
+// Locks the certified target the release follows and the own ballot's
+// status in it, then the seed of all its randomness.
+const lockRelease = async (
+    session: ReleaseSession,
+    ballotStatus: BallotStatus,
+) => {
     if (generationOf(session) < releasePhase.locked)
         await commitRelease(session, {
             generation: releasePhase.locked,
@@ -406,6 +410,7 @@ const lockRelease = async (session: ReleaseSession) => {
                     session.signed === undefined
                         ? completedClosePhase(session.close.organizer)
                         : targetPhase.signed,
+                ballotStatus,
                 target: releaseTarget(session).body,
                 seed: new Uint8Array(),
                 bodyLength: 0,
@@ -553,7 +558,9 @@ const restoreSignedTarget = (context: ProfileContext, signed: TargetState) => {
 // verifier must have verified the complete setup in this instance first.
 // Once the target is certified, and before any release randomness, the
 // visit may archive the certified target closure it read. Returns whether
-// the certified target carries a result to release.
+// the certified target carries a result to release, and the own ballot's
+// status in it: the signed target's, or else the one the finality work
+// reads from the certified target, which a locked release retains.
 export const advanceRelease = async (
     session: ReleaseSession,
     relay: PublicRelay,
@@ -576,7 +583,14 @@ export const advanceRelease = async (
     }
     const encrypted = await certifyTarget(context, relay, evaluated.restored);
     await archiveClosure?.();
-    if (!encrypted) return false;
+    const ballotStatus =
+        session.signed?.ballotStatus ?? certifiedBallotStatus(context);
+    if (
+        session.state !== undefined &&
+        session.state.ballotStatus !== ballotStatus
+    )
+        throw new Error('The release names another ballot status.');
+    if (!encrypted) return { encrypted, ballotStatus };
     // A release that follows the completed close takes the certified target.
     session.target ??= {
         body: evaluated.body,
@@ -587,12 +601,12 @@ export const advanceRelease = async (
         ),
     };
     await establishReleaseContext(context, close.records.position);
-    await lockRelease(session);
+    await lockRelease(session, ballotStatus);
     if (generationOf(session) === releasePhase.ready)
         await proveRelease(session);
     else await restoreReleaseBody(session);
     await signRelease(session);
-    return true;
+    return { encrypted, ballotStatus };
 };
 
 // Delivers the signed release body and then its envelope packet, inspecting

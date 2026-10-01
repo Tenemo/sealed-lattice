@@ -13,15 +13,17 @@ import { operationSeedBytes } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
-import { targetPhase } from './target-state.js';
+import { ballotStatuses, targetPhase } from './target-state.js';
+import type { BallotStatus } from './target-state.js';
 
 // The release suffix follows the signed target, or the completed close when
 // the participant signed no target and a certificate already exists; the
-// target field then stays empty. Generation 25 locks the certified target,
-// and generation 26 adds the seed of all the release's randomness before
-// any private generation. Generation 27 retains the generated body's records
-// and its envelope, retiring the seed; 28 also the signing coins before the
-// signature exists, and 29 the signature.
+// target field then stays empty. Generation 25 locks the certified target
+// and the own ballot's status in it, and generation 26 adds the seed of all
+// the release's randomness before any private generation. Generation 27
+// retains the generated body's records and its envelope, retiring the seed;
+// 28 also the signing coins before the signature exists, and 29 the
+// signature.
 
 export const releasePhase = {
     locked: 25,
@@ -31,13 +33,15 @@ export const releasePhase = {
     signed: 29,
 } as const;
 
-const marker = encodeText('RST2');
-const prefixBytes = marker.length + 1 + 2 + 4 + 2;
+const marker = encodeText('RST3');
+const prefixBytes = marker.length + 2 + 2 + 4 + 2;
 const coinBytes = 32;
 
 export type ReleaseState = Readonly<{
     // The signed-target or completed-close generation the release follows.
     predecessor: number;
+    // The own ballot's status in the certified target.
+    ballotStatus: BallotStatus;
     // The certified target body.
     target: Uint8Array;
     // The randomness seed, retained only until the body is.
@@ -56,7 +60,10 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
     const phase = phaseOf(generation);
     return concatenate(
         marker,
-        Uint8Array.of(state.predecessor),
+        Uint8Array.of(
+            state.predecessor,
+            ballotStatuses.indexOf(state.ballotStatus),
+        ),
         unsigned16(state.target.length),
         unsigned32(state.bodyLength),
         unsigned16(state.bodyKeys.length),
@@ -97,12 +104,13 @@ export const decodeReleaseState = (
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         (bytes[marker.length] !== targetPhase.signed &&
-            bytes[marker.length] !== completedClosePhase(organizer))
+            bytes[marker.length] !== completedClosePhase(organizer)) ||
+        bytes[marker.length + 1] >= ballotStatuses.length
     )
         throw new Error('The release state is malformed.');
-    const targetLength = readUnsigned16(bytes, marker.length + 1);
-    const bodyLength = readUnsigned32(bytes, marker.length + 3);
-    const bodyCount = readUnsigned16(bytes, marker.length + 7);
+    const targetLength = readUnsigned16(bytes, marker.length + 2);
+    const bodyLength = readUnsigned32(bytes, marker.length + 4);
+    const bodyCount = readUnsigned16(bytes, marker.length + 8);
     const seedLength = phase === releasePhase.ready ? operationSeedBytes : 0;
     const withBody = phase >= releasePhase.body;
     if (
@@ -129,6 +137,7 @@ export const decodeReleaseState = (
     const envelopeEnd = tailStart + (withBody ? bounds.envelopeBytes : 0);
     return {
         predecessor: bytes[marker.length],
+        ballotStatus: ballotStatuses[bytes[marker.length + 1]],
         target: bytes.slice(prefixBytes, seedStart),
         seed: bytes.slice(seedStart, keysStart),
         bodyLength,
