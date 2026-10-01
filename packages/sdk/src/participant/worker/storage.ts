@@ -51,6 +51,26 @@ export const participantDatabaseName = (namespace: string) =>
 // evaluated.
 export const setupCacheName = 'sealed-lattice-setup';
 export const evaluatedTargetName = 'sealed-lattice-evaluated-target';
+// The values an evaluation spills and the records of its keys, which each
+// evaluation clears before it starts and after the target exists.
+export const publicEvaluationName = 'sealed-lattice-public-evaluation';
+
+// Deletes a verification's public working storage: its aggregate cache and
+// its evaluation's values and key records. A database that another
+// connection holds is deleted once that connection closes. The storage
+// holds no authority and the next verification clears it before use, so a
+// deletion the browser refuses leaves nothing to report.
+export const deleteWorkingStorage = async (namespace: string) => {
+    for (const name of [setupCacheName, publicEvaluationName])
+        await new Promise<void>((resolve) => {
+            const request = indexedDB.deleteDatabase(
+                namespacedName(name, namespace),
+            );
+            request.onsuccess = () => resolve();
+            request.onerror = () => resolve();
+            request.onblocked = () => resolve();
+        });
+};
 
 const requestResult = <Value>(request: IDBRequest<Value>) =>
     new Promise<Value>((resolve, reject) => {

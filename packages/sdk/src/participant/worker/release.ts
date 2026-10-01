@@ -10,7 +10,7 @@ import { completedClosePhase } from './close-state.js';
 import { completedCloseRecords, restoreCompletedClose } from './close.js';
 import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ProfileContext } from './context.js';
+import type { ProfileContext, PublicProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
@@ -176,7 +176,7 @@ const releaseCommand = (
 };
 
 const tryCompletionCommand = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -193,7 +193,7 @@ const tryCompletionCommand = (
 };
 
 const completionCommand = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -213,8 +213,8 @@ const completionCommand = (
 // is, is discarded, so that the next visit evaluates the target the public
 // close records name; missing votes alone keep it. Returns whether the target
 // is encrypted.
-const certifyTarget = async (
-    context: ProfileContext,
+export const certifyTarget = async (
+    context: PublicProfileContext,
     relay: PublicRelay,
     restored: boolean,
 ) => {
@@ -270,7 +270,7 @@ const certifyTarget = async (
 // Creates the certified release context of one position from its two share
 // polynomials of the verified aggregate.
 const establishReleaseContext = async (
-    context: ProfileContext,
+    context: PublicProfileContext,
     position: number,
 ) => {
     const stream = (index: number) =>
@@ -645,21 +645,18 @@ export const publishRelease = async (
     );
 };
 
-// Combines published release shares of the certified target into the result
-// in this participant's own module: the ordered option identifiers, or none
-// for a certified no-result target. Each share passes the owning envelope
-// and body verifiers under its position's release context; too few verified
-// shares leave the participant pending.
-export const computeResult = async (
-    close: CloseSession,
+// Combines the published release shares of the target this instance
+// certified into the result: the ordered option identifiers, or none for a
+// certified no-result target. Each share passes the owning envelope and body
+// verifiers under its position's release context; too few verified shares
+// leave the work pending.
+export const combineReleaseShares = async (
+    context: PublicProfileContext,
     relay: PublicRelay,
+    encrypted: boolean,
 ) => {
-    const { context } = close.participant;
     const { profile } = context;
     const bounds = profile.release;
-    await restoreCompletedClose(close);
-    const { restored } = await restoreOrEvaluateTarget(close, relay);
-    const encrypted = await certifyTarget(context, relay, restored);
     let result = encrypted ? undefined : tryCompletionCommand(context, 10);
     for (
         let position = 0;
@@ -734,4 +731,21 @@ export const computeResult = async (
         offset += 4 + length;
     }
     return { encrypted, identifiers };
+};
+
+// Combines published release shares of the certified target into the result
+// in this participant's own module, once its completed close and the target
+// it evaluated are restored and the target is certified.
+export const computeResult = async (
+    close: CloseSession,
+    relay: PublicRelay,
+) => {
+    const { context } = close.participant;
+    await restoreCompletedClose(close);
+    const { restored } = await restoreOrEvaluateTarget(close, relay);
+    return combineReleaseShares(
+        context,
+        relay,
+        await certifyTarget(context, relay, restored),
+    );
 };

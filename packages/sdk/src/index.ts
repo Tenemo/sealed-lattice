@@ -34,8 +34,10 @@ export type {
     PublicArchiveOptions,
     PublicArchiveStore,
 } from './public-archive.js';
-export { openParticipant } from './participant/participant.js';
+export { openParticipant, verifyOutcome } from './participant/participant.js';
 export type {
+    OutcomeVerification,
+    OutcomeVerificationOptions,
     Participant,
     ParticipantArchive,
     ParticipantEnrollment,

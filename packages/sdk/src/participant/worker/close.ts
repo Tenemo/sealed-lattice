@@ -33,7 +33,7 @@ import {
 } from './close-state.js';
 import type { CloseEvent, CloseState } from './close-state.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ProfileContext } from './context.js';
+import type { ProfileContext, PublicProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
@@ -392,23 +392,11 @@ const namesEnvelope = (
     return value !== undefined && equalBytes(value, identity);
 };
 
-// Whether a submission is the listed author's envelope with the listed
-// identity, followed by a signature.
-export const isListedSubmission = (
-    context: ProfileContext,
-    submission: Uint8Array,
-    author: number,
-    identity: Uint8Array,
-) =>
-    submission.length === context.profile.close.submissionBytes &&
-    readUnsigned16(submission, envelopeAuthorOffset) === author &&
-    namesEnvelope(context, submission, identity);
-
 // The identity of the envelope a retained submission begins with, derived
 // without the close module, so that a visit that restores no setup can name
 // what its custody holds.
 const custodyEnvelopeIdentity = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     submission: Uint8Array,
 ) =>
     custodyIdentity(
@@ -416,6 +404,20 @@ const custodyEnvelopeIdentity = (
         custodyPurpose.envelope,
         submission.subarray(0, context.profile.ballot.envelopeBytes),
     );
+
+// Whether a submission is the listed author's envelope with the listed
+// identity, followed by a signature. Only the listed envelope's bytes have
+// its identity, so a copy selected here is the one the barrier verifier then
+// authenticates.
+export const isListedSubmission = (
+    context: PublicProfileContext,
+    submission: Uint8Array,
+    author: number,
+    identity: Uint8Array,
+) =>
+    submission.length === context.profile.close.submissionBytes &&
+    readUnsigned16(submission, envelopeAuthorOffset) === author &&
+    equalBytes(custodyEnvelopeIdentity(context, submission), identity);
 
 // Whether bytes frame one response packet of the profile.
 export const isResponsePacket = (
@@ -434,7 +436,7 @@ export const isResponsePacket = (
 // A response packet's identity, by which a proposal names it: the identity
 // of its signed body.
 export const responseIdentity = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     response: Uint8Array,
 ) =>
     custodyIdentity(

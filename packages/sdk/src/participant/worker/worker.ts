@@ -1,3 +1,5 @@
+import type { ArchiveReference } from '@sealed-lattice/wasm';
+
 import {
     beginBallot,
     completeBallot,
@@ -89,6 +91,7 @@ import {
 import { restoreSetup, retainSetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
 import {
+    deleteWorkingStorage,
     namespacedName,
     openParticipantDatabase,
     participantNamespacePattern,
@@ -109,6 +112,7 @@ import {
     openTranscriptSource,
 } from './transcript.js';
 import type { ArchivedTranscript, WorkerArchive } from './transcript.js';
+import { transcriptsToVerify, verifyTranscript } from './verifier.js';
 
 // The application's SDK supplies the namespace of the participant's local
 // state, the relay's base URL, the module's URL, the identities its build
@@ -241,13 +245,16 @@ const isWellFormed = (command: WorkerCommand) =>
     (command.separateEvaluation === undefined ||
         typeof command.separateEvaluation === 'boolean');
 
-const runtimeIdentity = async (command: WorkerCommand, module: Uint8Array) =>
+const runtimeIdentity = async (
+    identity: WorkerCommand['identity'],
+    module: Uint8Array,
+) =>
     deliveryDigest(
         concatenate(
             encodeText(participantRuntimeLabel),
-            fromHexadecimal(command.identity.source),
+            fromHexadecimal(identity.source),
             await deliveryDigest(module),
-            fromHexadecimal(command.identity.worker),
+            fromHexadecimal(identity.worker),
         ),
     );
 
@@ -993,7 +1000,7 @@ const run = async (
             command.module,
             command.identity.module,
         );
-        const runtime = await runtimeIdentity(command, moduleBytes);
+        const runtime = await runtimeIdentity(command.identity, moduleBytes);
         if (hexadecimal(runtime) !== command.identity.runtime)
             return refused('runtime mismatch');
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
@@ -1120,14 +1127,165 @@ const run = async (
     }
 };
 
-self.onmessage = (event: MessageEvent<WorkerCommand | typeof helperRole>) => {
+// A verification of a poll's outcome from its archive alone, which holds
+// no participant state: the discovery of the transcripts to try, or the
+// verification of one of them, each in a fresh worker. The page names the
+// poll's identity, and the module refuses a poll of another runtime.
+type VerificationCommand = Readonly<{
+    operation: 'discover-transcripts' | 'verify-transcript';
+    poll: string;
+    module: string;
+    archive: WorkerArchive;
+    identity: WorkerCommand['identity'];
+    transcript?: ArchiveReference;
+}>;
+
+const isVerification = (
+    command: WorkerCommand | VerificationCommand,
+): command is VerificationCommand =>
+    command.operation === 'discover-transcripts' ||
+    command.operation === 'verify-transcript';
+
+const isWellFormedVerification = (command: VerificationCommand) =>
+    typeof command.poll === 'string' &&
+    /^[0-9a-f]{128}$/u.test(command.poll) &&
+    httpUrl(command.module) !== undefined &&
+    typeof command.archive === 'object' &&
+    isArchive(command.archive) &&
+    (command.operation === 'verify-transcript') ===
+        (command.transcript !== undefined);
+
+// A verification's public working storage, named apart from every
+// participant's, since no participant namespace has a full stop.
+const verificationNamespace = (poll: string) => 'verification.' + poll;
+
+const runVerification = async (
+    command: VerificationCommand,
+    helperPorts: readonly MessagePort[],
+): Promise<WorkerResult> => {
+    if (
+        !isSecureContext ||
+        typeof navigator.locks !== 'object' ||
+        typeof crypto.subtle !== 'object' ||
+        typeof indexedDB !== 'object'
+    )
+        return refused('unsupported browser');
+    if (!isWellFormedVerification(command)) return refused('invalid request');
+    let helpers: ParallelHelpers | undefined;
+    const archiveMeasurements: (() => number)[] = [];
+    const archiveBytes = () =>
+        archiveMeasurements.reduce((total, measure) => total + measure(), 0);
+    try {
+        const transcript =
+            command.transcript === undefined
+                ? undefined
+                : transcriptReference(command.transcript);
+        const opened = await openArchive(
+            command.archive,
+            command.poll,
+            (measure) => {
+                archiveMeasurements.push(measure);
+            },
+        );
+        if (transcript === undefined)
+            return {
+                status: 'completed',
+                details: {
+                    poll: command.poll,
+                    transcripts: await transcriptsToVerify(opened),
+                },
+            };
+        const moduleBytes = await fetchModule(
+            command.module,
+            command.identity.module,
+        );
+        const runtime = await runtimeIdentity(command.identity, moduleBytes);
+        if (hexadecimal(runtime) !== command.identity.runtime)
+            return refused('runtime mismatch');
+        const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
+        helpers = await startParallelHelpers(module, helperPorts, true);
+        const parallel = helpers;
+        const namespace = verificationNamespace(command.poll);
+        return await navigator.locks.request(
+            namespacedName('sealed-lattice-verification', namespace),
+            async (): Promise<WorkerResult> => {
+                const { kernel, handlers } = await instantiateParticipantKernel(
+                    module,
+                    parallel,
+                );
+                if (kernel.worker_reserve(parallel.count, 1) !== 0)
+                    throw new Error(
+                        'The participant module refused its memory plan.',
+                    );
+                try {
+                    // Every read comes from the transcript; no relay serves
+                    // the verification.
+                    const outcome = await verifyTranscript(
+                        {
+                            namespace,
+                            kernel,
+                            handlers,
+                            parallel,
+                            runtime,
+                            limits: readParticipantLimits(kernel),
+                        },
+                        {
+                            base: '',
+                            transcript: await openTranscriptSource(
+                                opened,
+                                transcript,
+                            ),
+                        },
+                        fromHexadecimal(command.poll),
+                    );
+                    return {
+                        status: 'completed',
+                        details: {
+                            poll: command.poll,
+                            transcript,
+                            ...outcome,
+                            memory: operationMemory(
+                                kernel,
+                                parallel,
+                                true,
+                                archiveBytes(),
+                            ),
+                        },
+                    };
+                } finally {
+                    await deleteWorkingStorage(namespace);
+                }
+            },
+        );
+    } catch (error) {
+        if (error instanceof InvalidRequest) return refused('invalid request');
+        return {
+            status: 'pending',
+            cause: pendingCause(error),
+            reason: error instanceof Error ? error.message : String(error),
+        };
+    } finally {
+        helpers?.stop();
+    }
+};
+
+self.onmessage = (
+    event: MessageEvent<
+        WorkerCommand | VerificationCommand | typeof helperRole
+    >,
+) => {
     if (event.data === helperRole) {
         self.onmessage = null;
         listenAsHelper(event.ports[0]);
         self.postMessage(true);
         return;
     }
-    void run(event.data, event.ports).then(
+    const command = event.data;
+    void (
+        isVerification(command)
+            ? runVerification(command, event.ports)
+            : run(command, event.ports)
+    ).then(
         (result) => self.postMessage(result),
         (error: unknown) =>
             self.postMessage({

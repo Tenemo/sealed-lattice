@@ -87,6 +87,9 @@ export const kernelFunctions = [
     'ballot_classification_begin',
     // One when the body relation needs its encryption keys.
     'ballot_classification_requires_keys',
+    // The aggregate polynomial of the key at an ordinal under the verified
+    // setup, or the maximum value without one.
+    'ballot_classification_key_index',
     'ballot_classification_key_begin',
     'ballot_classification_key_chunk',
     'ballot_classification_key_finish',
@@ -133,6 +136,8 @@ export const kernelFunctions = [
     'setup_roster_record',
     // One when the organizer's proposal verifies.
     'setup_roster_finish',
+    // The verified roster's poll option count, or zero before it verifies.
+    'setup_option_count',
     'setup_confirmation',
     // One when every confirmation is known.
     'setup_inventory_finish',

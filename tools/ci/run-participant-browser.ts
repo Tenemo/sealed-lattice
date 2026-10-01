@@ -291,10 +291,22 @@ const participantDatabase = participantDatabaseName(participantNamespace);
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
 // beside the packaged module and kernel, and names the archive once its
-// replicas run.
+// replicas run. The page also runs the SDK's standalone verifier for the
+// poll and archive the runner names.
 const participantPage = `<!doctype html><meta charset="utf-8"><title>Participant</title><script type="module">
-import { openParticipant } from '/sdk/index.js';
+import { openParticipant, verifyOutcome } from '/sdk/index.js';
 const bytes = (value) => Uint8Array.from(value.match(/../g), (byte) => Number.parseInt(byte, 16));
+window.verifyOutcome = (poll, archive) =>
+    verifyOutcome({
+        poll,
+        archive: {
+            faultBound: archive.faultBound,
+            replicas: archive.replicas.map((replica) => ({
+                baseUrl: replica.baseUrl,
+                verificationKey: bytes(replica.verificationKey),
+            })),
+        },
+    });
 window.runParticipant = async (operation, parameters) => {
     const response = await fetch('/archive.json', { cache: 'no-store' });
     const archive = response.ok ? await response.json() : undefined;
@@ -4408,8 +4420,11 @@ await runWithLocalRunLog(
             } finally {
                 relay.withheld.delete(voteProbe);
             }
+            const archiveConfiguration = relay.archive.configuration;
             relay.archive.configuration = undefined;
-            assert.ok(listed !== undefined);
+            assert.ok(
+                listed !== undefined && archiveConfiguration !== undefined,
+            );
             // Altered retained state stops an honest participant at its next
             // visit, and the stop outlasts restoring the exact bytes. The
             // first byte of its first data record is flipped from its own
@@ -4452,6 +4467,68 @@ await runWithLocalRunLog(
                 reason: 'Missing or inconsistent participant authority.',
                 stopPersistence: 'confirmed',
             });
+            // The stopped participant, and the registrant left out of the
+            // roster, which holds no part in the poll, verify the outcome
+            // with the standalone verifier from the poll's identity and the
+            // surviving replicas alone, while the relay serves them no
+            // public record.
+            for (const position of [stoppedPosition, leftOut]) {
+                relay.withheld.add(position);
+                try {
+                    const started = performance.now();
+                    const deadline = new AbortController();
+                    const verification = await inBrowser(
+                        position,
+                        undefined,
+                        (chrome) =>
+                            Promise.race([
+                                chrome.evaluate(
+                                    `window.verifyOutcome(${JSON.stringify(organizer.poll)}, ${archiveConfiguration})`,
+                                ),
+                                delay(operationMilliseconds, undefined, {
+                                    signal: deadline.signal,
+                                }).then(() => {
+                                    throw new Error(
+                                        'Standalone verification deadline.',
+                                    );
+                                }),
+                            ]).finally(() => deadline.abort()),
+                    );
+                    const verified = verification as WorkerResult;
+                    log.writeEvent({
+                        eventType: 'standalone-verification',
+                        details: {
+                            position,
+                            milliseconds: performance.now() - started,
+                            ...(verified.status === 'completed'
+                                ? {
+                                      transcript: verified.details.transcript,
+                                      memory: verified.details.memory,
+                                  }
+                                : { result: verified }),
+                        },
+                    });
+                    assert.ok(
+                        verified.status === 'completed',
+                        'The standalone verification did not complete.',
+                    );
+                    assert.equal(verified.details.poll, organizer.poll);
+                    assert.equal(verified.details.encrypted, result.encrypted);
+                    assert.deepEqual(
+                        verified.details.identifiers,
+                        result.identifiers,
+                    );
+                    const { identity } = verified.details
+                        .transcript as Readonly<{
+                        identity: string;
+                    }>;
+                    assert.ok(
+                        listed.some((index) => index.identity === identity),
+                    );
+                } finally {
+                    relay.withheld.delete(position);
+                }
+            }
             // Browser fault checks are over. Remove every source-service
             // endpoint before the independent archive retrieval; only the
             // surviving archive replicas can supply these public records.
@@ -4534,7 +4611,7 @@ await runWithLocalRunLog(
                     : [
                           `Relay views that serve another poll's ${prose(foreignProbes.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
                       ]),
-                `Three local archive replicas and a fourth that never answers run with fault bound one from setup verification on. Successful setup verification archives its complete public inputs and binds that index into the participant's authenticated root. Each remaining participant's first release visit archives the certified target closure before any release randomness, reusing those authenticated setup dependencies${noResult ? '' : ', and the last remaining participant, served no public record by the relay, finds a closure among the archive hints and releases from the replicas alone'}. The last remaining participant then archives the transcript of its verified outcome; after one of the three replicas stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Local replicas on one host are not independent fault domains.`,
+                `Three local archive replicas and a fourth that never answers run with fault bound one from setup verification on. Successful setup verification archives its complete public inputs and binds that index into the participant's authenticated root. Each remaining participant's first release visit archives the certified target closure before any release randomness, reusing those authenticated setup dependencies${noResult ? '' : ', and the last remaining participant, served no public record by the relay, finds a closure among the archive hints and releases from the replicas alone'}. The last remaining participant then archives the transcript of its verified outcome; after one of the three replicas stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Once that participant's altered state stops it, it and the registrant left out of the roster each verify the same outcome with the standalone verifier from the poll's identity and the surviving replicas alone, served no public record by the relay. Local replicas on one host are not independent fault domains.`,
             ].join(' ');
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),

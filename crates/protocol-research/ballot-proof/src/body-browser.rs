@@ -63,6 +63,19 @@ pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {
         u32::from(classifier.is_none())
     })
 }
+/// The aggregate polynomial that a ballot classified under the verified
+/// setup reads as its key at this ordinal; the maximum value when no setup is
+/// verified or no such key exists.
+#[unsafe(no_mangle)]
+pub extern "C" fn ballot_classification_key_index(ordinal: usize) -> usize {
+    setup_aggregate::setup_browser::context()
+        .and_then(|(_, setup)| {
+            crate::statement::setup_inputs(setup.profile())
+                .get(ordinal)
+                .map(|input| input.2)
+        })
+        .unwrap_or(usize::MAX)
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn ballot_classification_requires_keys() -> u32 {
     SESSION.with(|session| {

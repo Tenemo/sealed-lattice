@@ -10,7 +10,11 @@ import {
     unsigned32,
 } from './bytes.js';
 import { InvalidRequest, PublicInputFailure, sessionInput } from './context.js';
-import type { ParticipantContext, ProfileContext } from './context.js';
+import type {
+    ParticipantContext,
+    ProfileContext,
+    PublicContext,
+} from './context.js';
 import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { readKernel } from './kernel.js';
@@ -182,7 +186,10 @@ export const streamRegistrations = async (
 
 // The module decides whether it supports a roster of this size; a request
 // outside every supported size is refused before it reaches the module.
-const validRecordIds = (ids: readonly string[], limits: ParticipantLimits) =>
+export const validRecordIds = (
+    ids: readonly string[],
+    limits: ParticipantLimits,
+) =>
     ids.length >= limits.participants.minimum &&
     ids.length <= limits.participants.maximum &&
     new Set(ids).size === ids.length &&
@@ -220,17 +227,17 @@ export const verifiedRosterUsernames = (kernel: ParticipantKernel) => {
     return usernames;
 };
 
-// A roster verifier's begin input: the retained poll, its definition and
+// A roster verifier's begin input: the poll's identity, its definition and
 // signature, and the record count.
 export const rosterBegin = (
-    context: ParticipantContext,
-    root: AuthenticatedRoot,
+    context: PublicContext,
+    poll: Uint8Array,
     definition: Uint8Array,
     definitionSignature: Uint8Array,
     count: number,
 ) =>
     concatenate(
-        root.manifest.poll,
+        poll,
         context.runtime,
         unsigned16(count),
         unsigned32(definition.length),
@@ -309,7 +316,7 @@ const verifyProposalInputs = async (
         throw new InvalidRequest('The proposed records are invalid.');
     const begin = rosterBegin(
         context,
-        root,
+        root.manifest.poll,
         enrollment.definition,
         enrollment.definitionSignature,
         recordIds.length,
@@ -506,7 +513,7 @@ export const reverifyRoster = async (
     const recordIds = proposalRecordIds(stored);
     const begin = rosterBegin(
         context,
-        root,
+        root.manifest.poll,
         enrollment.definition,
         enrollment.definitionSignature,
         recordIds.length,

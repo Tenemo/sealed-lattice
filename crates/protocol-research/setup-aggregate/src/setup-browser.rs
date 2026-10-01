@@ -148,6 +148,18 @@ pub extern "C" fn setup_roster_finish(length: usize) -> u32 {
         1
     })
 }
+/// The option count of the poll whose roster this verification verified, or
+/// zero before the roster verifies.
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_option_count() -> usize {
+    SESSION.with(|value| {
+        value
+            .borrow()
+            .proposal
+            .as_ref()
+            .map_or(0, |proposal| proposal.proposal().profile().options())
+    })
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_confirmation(length: usize) -> u32 {
     SESSION.with(|value| {

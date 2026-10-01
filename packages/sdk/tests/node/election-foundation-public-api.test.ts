@@ -33,6 +33,16 @@ type OpenParticipant = (options: {
         }[];
     };
 }) => { readonly run: unknown };
+type VerifyOutcome = (options: {
+    readonly poll: string;
+    readonly archive: {
+        readonly faultBound: number;
+        readonly replicas: readonly {
+            readonly baseUrl: string;
+            readonly verificationKey: Uint8Array;
+        }[];
+    };
+}) => Promise<unknown>;
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const createCanonicalManifest =
     publicApiRuntimeRecord.createCanonicalManifest as CreateCanonicalManifest;
@@ -40,6 +50,7 @@ const verifyCanonicalManifest =
     publicApiRuntimeRecord.verifyCanonicalManifest as VerifyCanonicalManifest;
 const openParticipant =
     publicApiRuntimeRecord.openParticipant as OpenParticipant;
+const verifyOutcome = publicApiRuntimeRecord.verifyOutcome as VerifyOutcome;
 const expectedPublicRuntimeExportNames = [
     'createCanonicalActionDefinition',
     'createCanonicalBoardPolicy',
@@ -52,6 +63,7 @@ const expectedPublicRuntimeExportNames = [
     'verifyCanonicalBoardPolicy',
     'verifyCanonicalCeremonyContext',
     'verifyCanonicalManifest',
+    'verifyOutcome',
 ] as const;
 const expectedPublicWasmExportNames = [
     '__data_end',
@@ -252,6 +264,30 @@ describe('election foundation public package API in Node', () => {
             expect(() =>
                 openParticipant({ namespace: 'poll', relay, archive }),
             ).toThrow(TypeError);
+    });
+
+    it('verifies an outcome only for a well-formed poll identity and archive', async () => {
+        const replicas = [0, 1, 2].map((position) => ({
+            baseUrl: `https://replica-${String(position)}.example/archive/`,
+            verificationKey: new Uint8Array(1952).fill(position + 1),
+        }));
+        const archive = { faultBound: 1, replicas };
+        for (const poll of [
+            '',
+            'a'.repeat(126),
+            'a'.repeat(130),
+            'A'.repeat(128),
+            'g'.repeat(128),
+        ])
+            await expect(verifyOutcome({ poll, archive })).rejects.toThrow(
+                TypeError,
+            );
+        await expect(
+            verifyOutcome({
+                poll: 'a'.repeat(128),
+                archive: { faultBound: 1, replicas: replicas.slice(0, 2) },
+            }),
+        ).rejects.toThrow(TypeError);
     });
 
     it('emits declarations for the foundation verification result', () => {

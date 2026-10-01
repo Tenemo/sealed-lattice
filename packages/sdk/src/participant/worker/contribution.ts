@@ -14,7 +14,7 @@ import {
     PublicInputFailure,
     sessionInput,
 } from './context.js';
-import type { ProfileContext } from './context.js';
+import type { ProfileContext, PublicProfileContext } from './context.js';
 import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
@@ -1401,10 +1401,10 @@ export const polynomialFile = (expandedIndex: number) =>
 
 // Reads every participant's published confirmation into one inventory.
 export const readConfirmations = async (
-    session: ParticipantSession,
+    context: PublicProfileContext,
     relay: PublicRelay,
 ) => {
-    const { profile } = session.context;
+    const { profile } = context;
     const packets: Uint8Array[] = [];
     for (let position = 0; position < profile.participantCount; position++) {
         const directory = contributionDirectory(position);
@@ -1476,7 +1476,7 @@ export const openContribution = async (
         throw new Error('No signed confirmation is retained.');
     const inventory =
         session.root.head.generation === 9
-            ? await readConfirmations(session, relay)
+            ? await readConfirmations(session.context, relay)
             : await openSigning(session, 'inventory');
     const identity = loadInventory(session, inventory);
     if (session.root.head.generation === 9) {

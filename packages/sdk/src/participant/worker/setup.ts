@@ -1,5 +1,6 @@
 import type { ArchiveReference } from '@sealed-lattice/wasm';
 
+import { readParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -16,7 +17,7 @@ import {
     PublicInputFailure,
     sessionInput,
 } from './context.js';
-import type { ProfileContext } from './context.js';
+import type { PublicContext, PublicProfileContext } from './context.js';
 import {
     contributionDirectory,
     contributionRecords,
@@ -42,6 +43,7 @@ import {
     proposalRecordIds,
     rosterBegin,
     streamRegistrations,
+    validRecordIds,
 } from './roster.js';
 import { awaitLater, namespacedName, setupCacheName } from './storage.js';
 
@@ -59,7 +61,10 @@ import { awaitLater, namespacedName, setupCacheName } from './storage.js';
 // setup from that reference while the cache holds the final aggregate. A
 // recording visit may reuse the input archive bound into the same root when
 // setup first verified. Without that binding it records a complete fresh
-// verification, including every registration proof.
+// verification, including every registration proof. A verifier without
+// participant state verifies the same records from the poll's identity
+// alone, every registration proof included, and keeps the aggregate in its
+// own working cache.
 
 const cacheStore = 'aggregate';
 
@@ -112,7 +117,7 @@ const writeCache = async (
 // and caches its aggregate: the whole coefficients that fit the module's
 // setup chunk capacity.
 const aggregateCapacity = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     polynomial: Readonly<{ bytes: number; coefficients: number }>,
 ) => {
     const width = polynomial.bytes / polynomial.coefficients;
@@ -143,7 +148,7 @@ const discardSetupCache = async (namespace: string) => {
 // Whether the cache holds a chunk of the final aggregate at every offset
 // setup verification writes one. Each consumer checks the bytes it reads
 // against the retained setup reference.
-const holdsFinalAggregate = async (context: ProfileContext) => {
+const holdsFinalAggregate = async (context: PublicProfileContext) => {
     const { profile } = context;
     const accepted = profile.setupContributorCount - 1;
     const expected = new Set<string>();
@@ -188,7 +193,7 @@ const holdsFinalAggregate = async (context: ProfileContext) => {
 // is discarded and the next visit verifies the setup again, which rewrites
 // it.
 export const deliverFinalAggregate = async (
-    context: ProfileContext,
+    context: PublicProfileContext,
     deliver: () => Promise<void>,
 ) => {
     try {
@@ -240,7 +245,7 @@ const readCachedAggregate = async (
 // in the whole-coefficient chunks setup verification wrote. The consumer
 // checks the bytes against the retained setup reference.
 export const readFinalAggregate = async (
-    context: ProfileContext,
+    context: PublicProfileContext,
     expandedIndex: number,
     consume: (offset: number, bytes: Uint8Array) => void,
 ) => {
@@ -272,7 +277,7 @@ export const readFinalAggregate = async (
 // Verifies one opening, streams its body polynomials in whole-coefficient
 // chunks against the running aggregate, and then its proof.
 const verifyContribution = async (
-    context: ProfileContext,
+    context: PublicProfileContext,
     relay: PublicRelay,
     cache: IDBDatabase,
     position: number,
@@ -444,6 +449,75 @@ const verifyContribution = async (
 // their refusal stops the participant; published ones leave it pending.
 type SetupInventory = Readonly<{ bytes: Uint8Array; retained: boolean }>;
 
+// Verifies every confirmation of the inventory under the verified roster,
+// recording each one's bytes, and builds the commitment inventory that
+// leaves the module ready for the openings.
+const verifyConfirmations = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    inventory: SetupInventory,
+) => {
+    const { kernel, profile } = context;
+    const refuse = (message: string) =>
+        inventory.retained
+            ? new Error(message)
+            : new PublicInputFailure(message);
+    const participants = profile.participantCount;
+    const packetBytes = profile.contribution.confirmationPacketBytes;
+    if (
+        inventory.bytes.length !== profile.root.setupInventoryBytes ||
+        readUnsigned32(inventory.bytes, 0) !== participants
+    )
+        throw refuse('The confirmation inventory is incomplete.');
+    for (let position = 0; position < participants; position++) {
+        const confirmation = inventory.bytes.subarray(
+            4 + position * packetBytes,
+            4 + (position + 1) * packetBytes,
+        );
+        writeSetupInput(kernel, confirmation);
+        if (kernel.setup_confirmation(confirmation.length) !== 0)
+            throw refuse('The setup verifier refused a confirmation.');
+        const directory = contributionDirectory(position);
+        const bodyEnd = 4 + profile.contribution.confirmationBodyBytes;
+        await recordPublic(
+            relay,
+            directory + 'confirmation.bin',
+            confirmation.subarray(4, bodyEnd),
+        );
+        await recordPublic(
+            relay,
+            directory + 'confirmation-signature.bin',
+            confirmation.subarray(bodyEnd),
+        );
+    }
+    if (kernel.setup_inventory_finish() !== 1)
+        throw refuse('The setup verifier refused the inventory.');
+};
+
+// Verifies every setup contributor's opening, body and proof in roster
+// order, starting from an empty aggregate cache, and then the complete
+// setup.
+const verifyContributions = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+) => {
+    const { kernel, profile } = context;
+    const cache = await openSetupCache(context.namespace);
+    try {
+        await writeCache(cache, (store) => store.clear());
+        for (
+            let position = 0;
+            position < profile.setupContributorCount;
+            position++
+        )
+            await verifyContribution(context, relay, cache, position);
+    } finally {
+        cache.close();
+    }
+    if (kernel.setup_finish() !== 1)
+        throw new PublicInputFailure('The complete setup was refused.');
+};
+
 // Starts a setup verification in the module with the participant's retained
 // roster, the published keys, the organizer's proposal signature and the
 // given confirmations, which leaves it ready for the openings.
@@ -469,7 +543,7 @@ const verifySetupInventory = async (
     const recordIds = proposalRecordIds(proposal);
     const begin = rosterBegin(
         context,
-        session.root,
+        manifest.poll,
         definition,
         pollSignature,
         recordIds.length,
@@ -524,40 +598,7 @@ const verifySetupInventory = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained roster.',
         );
-    const refuse = (message: string) =>
-        inventory.retained
-            ? new Error(message)
-            : new PublicInputFailure(message);
-    const participants = profile.participantCount;
-    const packetBytes = profile.contribution.confirmationPacketBytes;
-    if (
-        inventory.bytes.length !== profile.root.setupInventoryBytes ||
-        readUnsigned32(inventory.bytes, 0) !== participants
-    )
-        throw refuse('The confirmation inventory is incomplete.');
-    for (let position = 0; position < participants; position++) {
-        const confirmation = inventory.bytes.subarray(
-            4 + position * packetBytes,
-            4 + (position + 1) * packetBytes,
-        );
-        writeSetupInput(kernel, confirmation);
-        if (kernel.setup_confirmation(confirmation.length) !== 0)
-            throw refuse('The setup verifier refused a confirmation.');
-        const directory = contributionDirectory(position);
-        const bodyEnd = 4 + profile.contribution.confirmationBodyBytes;
-        await recordPublic(
-            relay,
-            directory + 'confirmation.bin',
-            confirmation.subarray(4, bodyEnd),
-        );
-        await recordPublic(
-            relay,
-            directory + 'confirmation-signature.bin',
-            confirmation.subarray(bodyEnd),
-        );
-    }
-    if (kernel.setup_inventory_finish() !== 1)
-        throw refuse('The setup verifier refused the inventory.');
+    await verifyConfirmations(context, relay, inventory);
     for (const [name, bytes] of [
         ['poll-definition.bin', definition],
         ['poll-signature.bin', pollSignature],
@@ -578,20 +619,7 @@ const verifyCompleteSetup = async (
     const { context } = session;
     const { kernel, profile } = context;
     await verifySetupInventory(session, relay, inventory);
-    const cache = await openSetupCache(context.namespace);
-    try {
-        await writeCache(cache, (store) => store.clear());
-        for (
-            let position = 0;
-            position < profile.setupContributorCount;
-            position++
-        )
-            await verifyContribution(context, relay, cache, position);
-    } finally {
-        cache.close();
-    }
-    if (kernel.setup_finish() !== 1)
-        throw new PublicInputFailure('The complete setup was refused.');
+    await verifyContributions(context, relay);
     if (kernel.retain_setup() !== 0)
         throw new Error('The credential refused the verified setup.');
     const reference = readKernel(
@@ -624,7 +652,7 @@ export const verifySetup = async (
             throw new Error(
                 'No signed roster confirmation awaits setup verification.',
             );
-        const inventory = await readConfirmations(session, relay);
+        const inventory = await readConfirmations(session.context, relay);
         return {
             reference: await verifyCompleteSetup(session, relay, {
                 bytes: inventory,
@@ -727,6 +755,100 @@ export const restoreSetup = async (
     sessionInput(context, reference);
     if (context.kernel.restore_setup(reference.length) !== 0)
         throw new Error('The credential refused the retained setup.');
+};
+
+// The proposal's ordered registration identities, which must name a
+// supported roster; malformed bytes are public input.
+const publishedRecordIds = (context: PublicContext, proposal: Uint8Array) => {
+    let recordIds: string[];
+    try {
+        recordIds = proposalRecordIds(proposal);
+    } catch {
+        throw new PublicInputFailure('The roster proposal is malformed.');
+    }
+    if (!validRecordIds(recordIds, context.limits))
+        throw new PublicInputFailure('The roster proposal is malformed.');
+    return recordIds;
+};
+
+// Verifies the complete setup of the poll the identity names from public
+// records alone, for a verifier that holds no participant state: the poll's
+// signed definition, every registration with its signature and proof, the
+// organizer's proposal signature, every participant's published
+// confirmation and every setup contributor's opening with its body and
+// proof. Returns the context of the profile the verified roster names.
+export const verifyPublicSetup = async (
+    context: PublicContext,
+    relay: PublicRelay,
+    poll: Uint8Array,
+): Promise<PublicProfileContext> => {
+    const { kernel, limits } = context;
+    const { registration } = limits;
+    const definition = await readPublic(
+        relay,
+        'poll-definition.bin',
+        registration.maximumPollDefinitionBytes,
+    );
+    const pollSignature = await readPublic(
+        relay,
+        'poll-signature.bin',
+        registration.signatureBytes,
+    );
+    const proposal = await readPublic(
+        relay,
+        'proposal.bin',
+        registration.maximumProposalBytes,
+    );
+    const proposalSignature = await readPublic(
+        relay,
+        'proposal-signature.bin',
+        registration.signatureBytes,
+    );
+    const recordIds = publishedRecordIds(context, proposal);
+    const begin = rosterBegin(
+        context,
+        poll,
+        definition,
+        pollSignature,
+        recordIds.length,
+    );
+    writeSetupInput(kernel, begin);
+    if (kernel.setup_roster_begin(begin.length) !== 0)
+        throw new PublicInputFailure('The poll was refused.');
+    await streamRegistrations(
+        relay,
+        recordIds,
+        registration,
+        kernel.roster_open_records(),
+        (operation, position, bytes) => {
+            writeSetupInput(kernel, bytes);
+            return (
+                kernel.setup_roster_record(
+                    operation,
+                    position,
+                    bytes.length,
+                ) === 0
+            );
+        },
+    );
+    writeSetupInput(kernel, proposalSignature);
+    if (kernel.setup_roster_finish(proposalSignature.length) !== 1)
+        throw new PublicInputFailure('The roster proposal was refused.');
+    const profile = readParticipantProfile(
+        kernel,
+        limits,
+        recordIds.length,
+        kernel.setup_option_count(),
+    );
+    if (profile === undefined || proposal.length !== profile.proposalBytes)
+        throw new PublicInputFailure('The poll names no supported profile.');
+    const profiled = { ...context, profile };
+    await verifyConfirmations(profiled, relay, {
+        bytes: await readConfirmations(profiled, relay),
+        retained: false,
+    });
+    await verifyContributions(profiled, relay);
+    return profiled;
 };
 
 // The identity of the confirmation inventory the retained setup names.

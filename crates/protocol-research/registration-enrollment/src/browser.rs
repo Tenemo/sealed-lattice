@@ -1124,8 +1124,8 @@ pub extern "C" fn participant_ballot_command(
 }
 
 /// The aggregate polynomial a ballot of the retained poll encrypts under at
-/// this ordinal, which ballot creation and classification read as their
-/// keys; the maximum value when no poll is retained or no such key exists.
+/// this ordinal, which ballot creation reads as its key; the maximum value
+/// when no poll is retained or no such key exists.
 #[unsafe(no_mangle)]
 pub extern "C" fn participant_ballot_key_index(ordinal: usize) -> usize {
     SESSION.with(|session| {

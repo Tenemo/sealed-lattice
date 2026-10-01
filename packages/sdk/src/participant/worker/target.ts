@@ -26,7 +26,11 @@ import {
 } from './close.js';
 import type { CloseSession } from './close.js';
 import { PublicInputFailure, sessionInput } from './context.js';
-import type { ProfileContext } from './context.js';
+import type {
+    ProfileContext,
+    PublicContext,
+    PublicProfileContext,
+} from './context.js';
 import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
@@ -44,7 +48,11 @@ import {
 import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
-import { evaluatedTargetName, namespacedName } from './storage.js';
+import {
+    evaluatedTargetName,
+    namespacedName,
+    publicEvaluationName,
+} from './storage.js';
 import {
     ballotStatuses,
     decodeTargetState,
@@ -65,12 +73,13 @@ import type { TargetState } from './target-state.js';
 // The evaluated target, keyed to the credential, lives in another database
 // of the participant's origin, from which release and result restore it
 // instead of evaluating again; a missing or refused copy only means
-// evaluating again.
+// evaluating again. A verifier without participant state verifies the
+// barrier, classifies and evaluates from the public records alone, in its
+// own working storage, and retains nothing.
 
 const coinBytes = 32;
 const unusedWord = 0xff_ff_ff_ff;
 export const completionDirectory = 'completion/';
-const evaluationDatabase = 'sealed-lattice-public-evaluation';
 const evaluationStore = 'values';
 const evaluatedTargetStore = 'target';
 
@@ -110,10 +119,39 @@ const readCandidate = async (
     }
 };
 
-// Reads a usable body from this root's custody, or from a route without
-// recording it.
+// The close records a barrier verification reads, beside the copies of
+// them that a participant's close log holds, which it takes before their
+// public routes. A verifier without participant state holds none.
+export type CloseRecordSource = Readonly<{
+    context: PublicProfileContext;
+    heldResponses: () => Promise<ReadonlyMap<number, Uint8Array>>;
+    heldSubmissions: () => Promise<ReadonlyMap<string, Uint8Array>>;
+    heldBody: (
+        author: number,
+        identity: Uint8Array,
+    ) => ReturnType<typeof heldBallotBody>;
+}>;
+
+const participantCloseRecords = (session: CloseSession): CloseRecordSource => ({
+    context: session.participant.context,
+    heldResponses: () => heldResponses(session),
+    heldSubmissions: () => heldSubmissions(session),
+    heldBody: (author, identity) => heldBallotBody(session, author, identity),
+});
+
+export const publicCloseRecords = (
+    context: PublicProfileContext,
+): CloseRecordSource => ({
+    context,
+    heldResponses: () => Promise.resolve(new Map()),
+    heldSubmissions: () => Promise.resolve(new Map()),
+    heldBody: () => Promise.resolve(undefined),
+});
+
+// Reads a usable body from its held copy, or from a route without recording
+// it.
 const readBody = async (
-    session: CloseSession,
+    records: CloseRecordSource,
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
@@ -124,10 +162,10 @@ const readBody = async (
         return streamPublic(
             { ...relay, recorder: undefined },
             route,
-            session.participant.context.profile.ballot.maximumBodyBytes,
+            records.context.profile.ballot.maximumBodyBytes,
             consume,
         );
-    const held = await heldBallotBody(session, author, identity);
+    const held = await records.heldBody(author, identity);
     if (held === undefined) throw new Error('The held ballot body is gone.');
     return held(consume);
 };
@@ -135,7 +173,7 @@ const readBody = async (
 // Streams a usable body from the copy the barrier accepted, recording its
 // bytes under the author's route, by which the transcript names them.
 const streamBody = async (
-    session: CloseSession,
+    records: CloseRecordSource,
     relay: PublicRelay,
     author: number,
     { identity, route }: UsableSlot,
@@ -145,7 +183,7 @@ const streamBody = async (
         submissionDirectory(author, identity) + 'body.bin',
     );
     const length = await readBody(
-        session,
+        records,
         relay,
         author,
         identity,
@@ -160,7 +198,7 @@ const streamBody = async (
 };
 
 const barrierCommand = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
@@ -170,7 +208,7 @@ const barrierCommand = (
 };
 
 const requireBarrier = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     operation: number,
     input: Uint8Array,
     reason: string,
@@ -179,17 +217,16 @@ const requireBarrier = (
         throw new PublicInputFailure(reason);
 };
 
-// The response a proposal names: from this root's custody, the organizer's
+// The response a proposal names: from its held copy, the organizer's
 // closure or the responder's own route, the first copy whose body has the
 // named identity, recorded under the responder's route.
 const namedResponse = async (
-    session: CloseSession,
+    context: PublicProfileContext,
     relay: PublicRelay,
     held: ReadonlyMap<number, Uint8Array>,
     responder: number,
     identity: Uint8Array,
 ) => {
-    const { context } = session.participant;
     const { profile } = context;
     const route = closeDirectory + 'response-' + String(responder) + '.bin';
     const maximum =
@@ -214,18 +251,17 @@ const namedResponse = async (
     throw new PublicInputFailure('A named close response is unavailable.');
 };
 
-// An envelope a named response lists, with its signature: from this root's
-// custody, the organizer's closure or the author's own route, the first copy
-// of that author's envelope with the listed identity, recorded under the
+// An envelope a named response lists, with its signature: from its held
+// copy, the organizer's closure or the author's own route, the first copy of
+// that author's envelope with the listed identity, recorded under the
 // author's route.
 const listedSubmission = async (
-    session: CloseSession,
+    context: PublicProfileContext,
     relay: PublicRelay,
     held: ReadonlyMap<string, Uint8Array>,
     author: number,
     identity: Uint8Array,
 ) => {
-    const { context } = session.participant;
     const { profile } = context;
     for (const candidate of [
         () => Promise.resolve(held.get(hexadecimal(identity))),
@@ -266,28 +302,28 @@ const listedSubmission = async (
     throw new PublicInputFailure('A listed envelope is unavailable.');
 };
 
-// Authenticates a usable slot's body from this root's custody, the
-// organizer's closure or the author's own route, restarting the body
-// verifier after a refused or interrupted copy. Its bytes are recorded under
-// the author's route once the verifier accepts them. Returns the accepted
-// copy's route, or none for custody.
+// Authenticates a usable slot's body from its held copy, the organizer's
+// closure or the author's own route, restarting the body verifier after a
+// refused or interrupted copy. Its bytes are recorded under the author's
+// route once the verifier accepts them. Returns the accepted copy's route,
+// or none for the held copy.
 const verifyUsableBody = async (
-    session: CloseSession,
+    records: CloseRecordSource,
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
 ) => {
-    const { context } = session.participant;
+    const { context } = records;
     const route = submissionDirectory(author, identity) + 'body.bin';
     const sources: (string | undefined)[] = [closureBodyRoute(identity), route];
-    if ((await heldBallotBody(session, author, identity)) !== undefined)
+    if ((await records.heldBody(author, identity)) !== undefined)
         sources.unshift(undefined);
     for (const source of sources) {
         requireBarrier(context, 4, identity, 'A usable body was refused.');
         const record = relay.recorder?.open(route);
         try {
             await readBody(
-                session,
+                records,
                 relay,
                 author,
                 identity,
@@ -316,13 +352,13 @@ const verifyUsableBody = async (
 
 // Verifies the organizer's close barrier from the close records: the intent,
 // the proposal's named responses with every envelope they list, and the body
-// of each usable slot, each record from this root's custody, the organizer's
+// of each usable slot, each record from its held copy, the organizer's
 // closure or its author's route. Returns each usable slot by its author.
 const verifyCloseBarrier = async (
-    session: CloseSession,
+    records: CloseRecordSource,
     relay: PublicRelay,
 ) => {
-    const { context } = session.participant;
+    const { context } = records;
     const { profile, kernel } = context;
     const { close, registration } = profile;
     const { signatureBytes } = registration;
@@ -345,8 +381,8 @@ const verifyCloseBarrier = async (
     );
     if (proposal.length !== 4 + close.proposalBodyBytes + signatureBytes)
         throw new PublicInputFailure('The close proposal is incomplete.');
-    const responses = await heldResponses(session);
-    const submissions = await heldSubmissions(session);
+    const responses = await records.heldResponses();
+    const submissions = await records.heldSubmissions();
     const listed = new Map<
         string,
         { author: number; submission: Uint8Array }
@@ -356,7 +392,7 @@ const verifyCloseBarrier = async (
         proposal,
     )) {
         const response = await namedResponse(
-            session,
+            context,
             relay,
             responses,
             responder,
@@ -366,7 +402,7 @@ const verifyCloseBarrier = async (
             const key = hexadecimal(entry.identity);
             if (listed.has(key)) continue;
             const submission = await listedSubmission(
-                session,
+                context,
                 relay,
                 submissions,
                 entry.author,
@@ -400,7 +436,7 @@ const verifyCloseBarrier = async (
             submission: slot.submission,
             identity: identity.slice(),
             route: await verifyUsableBody(
-                session,
+                records,
                 relay,
                 slot.author,
                 identity,
@@ -411,7 +447,7 @@ const verifyCloseBarrier = async (
     return usable;
 };
 
-const classifierInput = (context: ProfileContext, bytes: Uint8Array) => {
+const classifierInput = (context: PublicProfileContext, bytes: Uint8Array) => {
     const { kernel } = context;
     writeChunkInput(kernel, kernel.ballot_body_input_pointer(), bytes);
     return bytes.length;
@@ -421,7 +457,7 @@ const classifierInput = (context: ProfileContext, bytes: Uint8Array) => {
 // body header, and delivers the encryption keys from the verified aggregate
 // while the body relation needs them.
 const beginClassification = async (
-    context: ProfileContext,
+    context: PublicProfileContext,
     submission: Uint8Array,
     header: Uint8Array,
 ) => {
@@ -437,7 +473,7 @@ const beginClassification = async (
         kernel.ballot_classification_requires_keys() === 1;
         ordinal++
     ) {
-        const index = kernel.participant_ballot_key_index(ordinal) >>> 0;
+        const index = kernel.ballot_classification_key_index(ordinal) >>> 0;
         if (
             index === unusedWord ||
             kernel.ballot_classification_key_begin(index) !== 0
@@ -461,16 +497,16 @@ const beginClassification = async (
 // Classifies one usable ballot as valid or invalid. The body must be the one
 // the barrier authenticated, or the classifier refuses it.
 const classifyBallot = async (
-    session: CloseSession,
+    records: CloseRecordSource,
     relay: PublicRelay,
     author: number,
     slot: UsableSlot,
 ) => {
-    const { context } = session.participant;
+    const { context } = records;
     const { kernel, profile } = context;
     const { headerBytes } = profile.ballot;
     let header: Uint8Array = new Uint8Array();
-    await streamBody(session, relay, author, slot, async (bytes) => {
+    await streamBody(records, relay, author, slot, async (bytes) => {
         let rest = bytes;
         if (header.length < headerBytes) {
             const taken = rest.subarray(0, headerBytes - header.length);
@@ -497,7 +533,7 @@ const classifyBallot = async (
 };
 
 const tryEvaluationCommand = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -517,7 +553,7 @@ const tryEvaluationCommand = (
 };
 
 const evaluationCommand = (
-    context: ProfileContext,
+    context: PublicProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -533,7 +569,7 @@ const evaluationCommand = (
 // Delivers one incoming evaluation input in chunks and finishes it. A refusal
 // means the bytes are not the ones the engine expects.
 const deliverEvaluationInput = async (
-    context: ProfileContext,
+    context: PublicProfileContext,
     produce: (accept: (bytes: Uint8Array) => void) => Promise<unknown>,
     reason: string,
 ) => {
@@ -561,7 +597,7 @@ const completion = (transaction: IDBTransaction) =>
 
 const openEvaluationStorage = async (namespace: string) => {
     const opened = indexedDB.open(
-        namespacedName(evaluationDatabase, namespace),
+        namespacedName(publicEvaluationName, namespace),
         1,
     );
     opened.onupgradeneeded = () =>
@@ -630,7 +666,7 @@ const retainEvaluation = async (context: ProfileContext) => {
 
 // Discards the retained evaluated target, so that the next visit evaluates
 // the target again.
-export const discardEvaluation = async (context: ProfileContext) => {
+export const discardEvaluation = async (context: PublicContext) => {
     await evaluatedTargetRequest(context.namespace, 'readwrite', (store) =>
         store.clear(),
     );
@@ -734,11 +770,11 @@ const readStoredRecords = async (
 // loaded key leaves its records in storage, and a product or rotation
 // requests them back one key group and prime at a time.
 const evaluate = async (
-    session: CloseSession,
+    source: CloseRecordSource,
     relay: PublicRelay,
     usable: ReadonlyMap<number, UsableSlot>,
 ) => {
-    const { context } = session.participant;
+    const { context } = source;
     const { kernel, profile } = context;
     const { polynomialDegree, storedCoefficientBytes } = profile.evaluation;
     const coefficients = 2 * polynomialDegree;
@@ -878,7 +914,7 @@ const evaluate = async (
                     await deliverEvaluationInput(
                         context,
                         (accept) =>
-                            streamBody(session, relay, author, slot, accept),
+                            streamBody(source, relay, author, slot, accept),
                         'An accepted ballot changed.',
                     );
             }
@@ -1067,29 +1103,29 @@ const commitTarget = async (
 
 // Verifies the close barrier, classifies each usable ballot and evaluates
 // the target in this instance. Returns the target body, how many slots were
-// usable and how many usable ballots were valid. The completed close must be
-// restored first, after the owning setup verifier verified the complete setup
-// in this instance.
-const evaluateClosedTarget = async (
-    session: CloseSession,
+// usable and how many usable ballots were valid. The owning setup verifier
+// must have verified the complete setup in this instance first, and a
+// participant must have restored its completed close.
+export const evaluateClosedTarget = async (
+    records: CloseRecordSource,
     relay: PublicRelay,
 ) => {
-    const { context } = session.participant;
-    const usable = await verifyCloseBarrier(session, relay);
+    const { context } = records;
+    const usable = await verifyCloseBarrier(records, relay);
     evaluationCommand(context, 0);
     let validBallots = 0;
     for (let author = 0; author < context.profile.participantCount; author++) {
         const slot = usable.get(author);
         if (
             slot !== undefined &&
-            (await classifyBallot(session, relay, author, slot))
+            (await classifyBallot(records, relay, author, slot))
         )
             validBallots++;
         // Each slot takes the classification just made, or none.
         evaluationCommand(context, 1);
     }
     return {
-        body: await evaluate(session, relay, usable),
+        body: await evaluate(records, relay, usable),
         usableBallots: usable.size,
         validBallots,
     };
@@ -1115,7 +1151,7 @@ export const restoreOrEvaluateTarget = async (
     const { context } = close.participant;
     if (await restoreEvaluation(context)) {
         if (relay.recorder !== undefined) {
-            await verifyCloseBarrier(close, relay);
+            await verifyCloseBarrier(participantCloseRecords(close), relay);
             if (tryEvaluationCommand(context, 24) === undefined)
                 throw new PublicInputFailure(
                     'The public close records name another target.',
@@ -1131,7 +1167,10 @@ export const restoreOrEvaluateTarget = async (
             restored: true,
         };
     }
-    const { body } = await evaluateClosedTarget(close, relay);
+    const { body } = await evaluateClosedTarget(
+        participantCloseRecords(close),
+        relay,
+    );
     await retainEvaluation(context);
     if (context.separateEvaluation)
         throw new EvaluationRetained('The evaluated target is retained.');
@@ -1148,7 +1187,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const { context } = participant;
     await restoreCompletedClose(close);
     const { body, usableBallots, validBallots } = await evaluateClosedTarget(
-        close,
+        participantCloseRecords(close),
         relay,
     );
     await retainEvaluation(context);

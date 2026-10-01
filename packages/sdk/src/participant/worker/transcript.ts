@@ -66,7 +66,7 @@ const withDeadline = (signal: AbortSignal | undefined) =>
  * the network deadline, and one client for each replica alone, which sends a
  * record to that replica without waiting for another.
  */
-type OpenedArchive = Readonly<{
+export type OpenedArchive = Readonly<{
     faultBound: number;
     archive: PublicArchive;
     replicas: readonly PublicArchive[];
