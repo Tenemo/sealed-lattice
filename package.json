@@ -22,7 +22,6 @@
         "research:protocol:public": "tsx ./tools/ci/check-protocol-public-completion.ts",
         "research:participant": "pnpm run build && tsx ./tools/ci/run-participant-browser.ts",
         "research:profiles": "tsx ./tools/ci/generate-research-profile-table.ts",
-        "research:arithmetic-width": "tsx ./tools/ci/run-arithmetic-width-benchmark.ts",
         "docs:census": "tsx ./tools/ci/generate-documentation-census.ts",
         "docs:verify-sources": "tsx ./tools/ci/verify-source-manifest.ts",
         "release:version": "tsx ./tools/ci/release-version.ts",

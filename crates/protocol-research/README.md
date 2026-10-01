@@ -149,16 +149,6 @@ The original participant bridge also exposes target signing and certified releas
 
 The module refuses a release unless the worker installed the retained seed and nothing was drawn from it, and it expands the release's randomness from that seed alone; the seed supplies no release authority. The numerical proof workload binds only its dedicated workload role when proving and verifying, so it cannot produce or accept a proof bound to a protocol role; actual certified messages must pass the public release-records case above.
 
-## Arithmetic width benchmark
-
-`arithmetic-width-benchmark` is its own Cargo workspace, so the research workspace's manifest and lockfile, which the participant module's identity covers, stay unchanged. It compares the encrypted arithmetic's transforms with pointwise products on the current 58-bit primes with the same work on 30-bit and 31-bit primes that cover the same tensor bound:
-
-```text
-pnpm run research:arithmetic-width
-```
-
-The runner checks formatting, lints and unit tests, then checks at the ring degree that every width reconstructs the same negacyclic products for the smallest and the largest ciphertext modulus, against closed forms and direct convolution. It times each kernel on one thread natively and in the scalar WebAssembly build under Node, compares the builds' output digests, and writes the samples, medians and speedups to the run's `result.json` and the module to the run's artifacts.
-
 ## Third-party sources
 
 `vendor/fhe-rs` contains the used arithmetic, utility and trait crates from `tlepoint/fhe.rs` at `e248cd288c754e5cca9a54d4b7df505058a539ed`, plus the previously verified scalar execution and dependency-pin changes. The imported local revision is `877151d0f2484aef379c2253fb5bb0d380eb528a`. On WebAssembly, which has no widening multiplication, its modular multiplication forms each double-word product and Barrett quotient from 32-bit partial products instead of calling the library routine for a 128-bit product, with the same results. Its negacyclic transform keeps only the forward twiddles and their Shoup companions, and its backward transform reads each inverse twiddle as the negation of a forward one, so each prime's plan holds two tables instead of four with the same results. Only its tests enable rand's operating-system generator: the browser modules build for `wasm32-unknown-unknown`, where that generator has no backend, and receive randomness from their host. The `check` case builds the browser participant module for that target. Its MIT license is retained. Its Protobuf schema is unchanged, and the Rust code that prost-build 0.14.4 generated from it with protoc 36.1 is committed in place of the build script, so no build needs a Protocol Buffers compiler.
