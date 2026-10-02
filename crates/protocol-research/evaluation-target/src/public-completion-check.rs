@@ -49,7 +49,6 @@ pub fn verify(
     target: Arc<VerifiedEvaluationTarget>,
     directory: &Path,
     aggregate: &Path,
-    certificate_records: &Path,
     work: &mut Work,
     stage: Stage,
 ) -> io::Result<String> {
@@ -61,7 +60,6 @@ pub fn verify(
     {
         return Err(refusal("published target differs from recomputation"));
     }
-    work.depend(&directory.join("target.bin"))?;
     let profile = target.setup().profile();
     let count = profile.participants();
     let mut votes = CertificateCollector::new(target.clone());
@@ -87,14 +85,10 @@ pub fn verify(
             }
         };
         let accepted_before = votes.accepted();
-        match votes.insert(&packet) {
-            Ok(true) => work.depend(&directory.join(format!("target-vote-{position}.bin")))?,
-            Ok(false) => {}
-            Err(_) => {
-                invalid_votes.push(position);
-                assert_eq!(votes.accepted(), accepted_before);
-                continue;
-            }
+        if votes.insert(&packet).is_err() {
+            invalid_votes.push(position);
+            assert_eq!(votes.accepted(), accepted_before);
+            continue;
         }
         assert!(!votes.insert(&packet).map_err(refusal)?);
     }
@@ -106,15 +100,6 @@ pub fn verify(
         .iter()
         .map(|vote| vote.position())
         .collect();
-    // A transport position need not equal the authenticated author. Retain
-    // the exact accepted packets instead of locating them again by filename.
-    std::fs::create_dir(certificate_records)?;
-    for vote in certificate.votes() {
-        work.save(
-            &certificate_records.join(format!("target-vote-{}.bin", vote.position())),
-            &vote.encode(),
-        )?;
-    }
     if stage == Stage::Certificate {
         let encrypted = target.ciphertext().is_some();
         if !encrypted {
@@ -251,12 +236,6 @@ pub fn verify(
         };
         assert!(collector.insert(share.clone()).map_err(refusal)?);
         assert!(!collector.insert(share.clone()).map_err(refusal)?);
-        for name in [
-            format!("release-envelope-{position}.bin"),
-            format!("release-{position}.bin"),
-        ] {
-            work.depend(&directory.join(name))?;
-        }
         if stage == Stage::Release {
             assert!(matches!(
                 collector.result(),

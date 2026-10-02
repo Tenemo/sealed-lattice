@@ -14,7 +14,6 @@ export type PublicContext = Readonly<{
     parallel: ParallelHelpers;
     runtime: Uint8Array;
     limits: ParticipantLimits;
-    observeArchiveResources?: (measureBytes: () => number) => void;
 }>;
 
 // A public verification once the verified roster names the poll's profile.

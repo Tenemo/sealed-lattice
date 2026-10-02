@@ -1,11 +1,3 @@
-import type { ArchiveReference } from '@sealed-lattice/wasm';
-
-import {
-    foundationKernelSha256,
-    foundationKernelUrl,
-} from '../foundation-kernel.js';
-
-import { hexadecimal } from './worker/bytes.js';
 import type {
     ParticipantPendingCause,
     ParticipantRefusalReason,
@@ -56,27 +48,6 @@ export type ParticipantOptions = Readonly<{
      * and accepts its publication at `publish/<name>?offset=<offset>`.
      */
     relay: string;
-    /**
-     * The archive replicas that retain the poll's certified target closure,
-     * which a participant archives before it releases its share, and its
-     * transcript once a participant archives its verified result, with the
-     * fault bound `b` the application trusts: at least `2b + 1` and at most
-     * 32 replicas.
-     */
-    archive?: ParticipantArchive;
-}>;
-
-export type ParticipantArchive = Readonly<{
-    faultBound: number;
-    replicas: readonly Readonly<{
-        /**
-         * An HTTPS URL, or HTTP on a loopback address, without credentials, a
-         * query or a fragment.
-         */
-        baseUrl: string;
-        /** The replica's raw ML-DSA-65 verification key. */
-        verificationKey: Uint8Array;
-    }>[];
 }>;
 
 /** Creates a poll as its organizer, or joins a poll from its signed definition. Bytes are lower-case hexadecimal. */
@@ -136,17 +107,9 @@ export type ParticipantRequest = Readonly<
               | 'open'
               | 'verify-setup'
               | 'target'
-              | 'archive'
-              | 'transcripts';
+              | 'release'
+              | 'result';
           parameters?: PollBinding;
-      }
-    | {
-          operation: 'release' | 'result';
-          parameters?: PollBinding &
-              Readonly<{
-                  /** An archived transcript's index to read instead of the relay. */
-                  transcript?: ArchiveReference;
-              }>;
       }
 >;
 
@@ -211,29 +174,27 @@ export type Participant = Readonly<{
 export type OutcomeVerificationOptions = Readonly<{
     /** The poll's identity in lower-case hexadecimal. */
     poll: string;
-    /** The archive replicas that hold the poll's transcripts. */
-    archive: ParticipantArchive;
     /**
-     * An archived transcript's index to verify. Without one, the verifier
-     * tries the transcripts the replicas report until one verifies.
+     * The relay's absolute HTTP or HTTPS base URL, without credentials, a
+     * query or a fragment, which serves each public record at
+     * `public/<name>`.
      */
-    transcript?: ArchiveReference;
+    relay: string;
 }>;
 
 /**
- * A completed verification names the transcript it verified, whether the
- * certified target carries an encrypted result, and the result's ordered
- * option identifiers, none for a certified no-result target. A refused
- * request changed nothing, and its reason says why; a pending one found no
- * transcript that verifies, or ended on a device resource or a module or
- * worker failure, as its cause names and its reason describes.
+ * A completed verification names whether the certified target carries an
+ * encrypted result, and the result's ordered option identifiers, none for a
+ * certified no-result target. A refused request changed nothing, and its
+ * reason says why; a pending one waits for public records that verify, or
+ * ended on a device resource or a module or worker failure, as its cause
+ * names and its reason describes.
  */
 export type OutcomeVerification = Readonly<
     | {
           status: 'completed';
           details: Readonly<{
               poll: string;
-              transcript: ArchiveReference;
               encrypted: boolean;
               identifiers: readonly string[];
           }> &
@@ -299,17 +260,13 @@ const openHelpers = async (url: string) => {
     return { workers, ports };
 };
 
-// Runs the command in a worker of its own beside helpers of their own,
-// unless the command runs no module, and ends them all once the worker
-// answers.
+// Runs the command in a worker of its own beside helpers of their own, and
+// ends them all once the worker answers.
 const runWorkerOnce = async (
     url: string,
     command: Readonly<Record<string, unknown>>,
-    withHelpers = true,
 ) => {
-    const helpers = withHelpers
-        ? await openHelpers(url)
-        : { workers: [], ports: [] };
+    const helpers = await openHelpers(url);
     return new Promise<WorkerResult>((resolve) => {
         const worker = new Worker(url, { type: 'module' });
         let finished = false;
@@ -432,56 +389,19 @@ const packagedRuntime = () => {
     return runtime;
 };
 
-// The archive configuration the worker takes, with the SDK's pinned
-// foundation kernel. The archive client accepts HTTP only on a loopback
-// address.
-const workerArchive = (archive: ParticipantArchive) => {
-    const kernelSha256 = foundationKernelSha256;
-    if (kernelSha256 === undefined)
-        throw new Error(
-            'Build the SDK through its package script so the foundation kernel is pinned.',
-        );
-    const replicas = archive.replicas.map((replica) => {
-        const url = baseUrl(replica.baseUrl);
-        if (
-            url === undefined ||
-            (url.protocol === 'http:' &&
-                url.hostname !== '127.0.0.1' &&
-                url.hostname !== 'localhost') ||
-            !(replica.verificationKey instanceof Uint8Array) ||
-            replica.verificationKey.length !== 1952
-        )
-            throw new TypeError(
-                'An archive replica has an HTTPS or loopback HTTP base URL without credentials, a query or a fragment, and an ML-DSA-65 verification key.',
-            );
-        return {
-            baseUrl: url.href,
-            verificationKey: hexadecimal(replica.verificationKey),
-        };
-    });
-    if (
-        !Number.isSafeInteger(archive.faultBound) ||
-        archive.faultBound < 0 ||
-        replicas.length < 2 * archive.faultBound + 1 ||
-        replicas.length > 32 ||
-        new Set(replicas.map((replica) => replica.baseUrl)).size !==
-            replicas.length
-    )
+// The relay's base URL, which every request names.
+const relayUrl = (value: unknown) => {
+    const relay = baseUrl(value)?.href;
+    if (relay === undefined)
         throw new TypeError(
-            'An archive has 2b + 1 to 32 distinct replicas for its fault bound b.',
+            'The relay is an absolute HTTP or HTTPS URL without credentials, a query or a fragment.',
         );
-    return {
-        faultBound: archive.faultBound,
-        replicas,
-        kernel: foundationKernelUrl.href,
-        kernelSha256,
-    };
+    return relay;
 };
 
 /**
- * Opens the participant whose local state the namespace names. The relay and
- * the archive replicas are untrusted: the participant verifies every record
- * it reads.
+ * Opens the participant whose local state the namespace names. The relay is
+ * untrusted: the participant verifies every record it reads.
  */
 export const openParticipant = (options: ParticipantOptions): Participant => {
     const runtime = packagedRuntime();
@@ -493,15 +413,7 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
         throw new TypeError(
             'A participant namespace has 1 to 64 lower-case letters, digits and inner hyphens.',
         );
-    const relay = baseUrl(options.relay)?.href;
-    if (relay === undefined)
-        throw new TypeError(
-            'The relay is an absolute HTTP or HTTPS URL without credentials, a query or a fragment.',
-        );
-    const archive =
-        options.archive === undefined
-            ? undefined
-            : workerArchive(options.archive);
+    const relay = relayUrl(options.relay);
     return {
         run: async (request) => {
             const persistentStorage = await persistStorage();
@@ -512,7 +424,6 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
                 relay,
                 module: participantModuleUrl.href,
                 identity: runtime.identity,
-                ...(archive === undefined ? {} : { archive }),
             });
             return result.status === 'completed'
                 ? {
@@ -525,66 +436,34 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
 };
 
 /**
- * Verifies a poll's outcome from its archive alone, without participant
- * state, so a participant whose state stopped, or any page that holds the
- * poll's identity and archive, checks the result. Each transcript runs in a
- * fresh worker that reads only that transcript, holds no credential or
- * randomness, and runs every owning verifier from the signed poll definition
- * through the certified target and its release shares. The archive replicas
- * are untrusted.
+ * Verifies a poll's outcome from the relay's public records alone, without
+ * participant state, so a participant whose state stopped, or any page that
+ * holds the poll's identity and relay, checks the result. A fresh worker
+ * holds no credential or randomness and runs every owning verifier from the
+ * signed poll definition through the certified target and its release
+ * shares. The relay is untrusted.
  */
 export const verifyOutcome = async (
     options: OutcomeVerificationOptions,
 ): Promise<OutcomeVerification> => {
     const runtime = packagedRuntime();
-    const { poll, transcript } = options;
+    const { poll } = options;
     if (typeof poll !== 'string' || !/^[0-9a-f]{128}$/u.test(poll))
         throw new TypeError(
             'A poll identity is 64 bytes in lower-case hexadecimal.',
         );
-    const command = {
-        poll,
-        module: participantModuleUrl.href,
-        identity: runtime.identity,
-        archive: workerArchive(options.archive),
-    };
+    const relay = relayUrl(options.relay);
     const url = URL.createObjectURL(
         new Blob([runtime.worker], { type: 'text/javascript' }),
     );
     try {
-        let candidates: readonly ArchiveReference[];
-        if (transcript === undefined) {
-            const discovered = await runWorkerOnce(
-                url,
-                { ...command, operation: 'discover-transcripts' },
-                false,
-            );
-            if (discovered.status !== 'completed')
-                return discovered as OutcomeVerification;
-            candidates = discovered.details
-                .transcripts as readonly ArchiveReference[];
-        } else candidates = [transcript];
-        // A transcript that does not verify is public input; the next one
-        // may.
-        let pending: OutcomeVerification = {
-            status: 'pending',
-            cause: 'public input',
-            reason: 'The archive replicas report no transcript of the poll.',
-        };
-        for (const candidate of candidates) {
-            const verified = await runWorkerOnce(url, {
-                ...command,
-                operation: 'verify-transcript',
-                transcript: candidate,
-            });
-            if (
-                verified.status !== 'pending' ||
-                verified.cause !== 'public input'
-            )
-                return verified as OutcomeVerification;
-            pending = verified;
-        }
-        return pending;
+        return (await runWorkerOnce(url, {
+            operation: 'verify-outcome',
+            poll,
+            relay,
+            module: participantModuleUrl.href,
+            identity: runtime.identity,
+        })) as OutcomeVerification;
     } finally {
         URL.revokeObjectURL(url);
     }

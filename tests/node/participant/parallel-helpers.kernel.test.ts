@@ -381,22 +381,20 @@ const verifyRoster = async (
             ]),
         ),
     );
-    const relay = {
-        base: 'unused/',
-        transcript: {
-            read: async (
-                name: string,
-                maximum: number,
-                accept: (bytes: Uint8Array) => void | Promise<void>,
-            ) => {
-                const bytes = files.get(name)!;
-                expect(bytes.length).toBeLessThanOrEqual(maximum);
-                for (let offset = 0; offset < bytes.length; offset += 1 << 20)
-                    await accept(bytes.subarray(offset, offset + (1 << 20)));
-                return bytes.length;
-            },
-        },
-    };
+    // The relay serves each registration file at its public route.
+    const relay = { base: 'https://relay.test/' };
+    const served = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation((request) => {
+            const bytes = files.get(
+                (request as string).slice((relay.base + 'public/').length),
+            );
+            return Promise.resolve(
+                bytes === undefined
+                    ? new Response(null, { status: 404 })
+                    : new Response(new Uint8Array(bytes)),
+            );
+        });
     try {
         await streamRegistrations(
             relay,
@@ -413,6 +411,8 @@ const verifyRoster = async (
         );
     } catch {
         return undefined;
+    } finally {
+        served.mockRestore();
     }
     return kernel.roster_finish() === 1
         ? {

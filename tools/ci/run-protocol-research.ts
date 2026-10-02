@@ -202,7 +202,7 @@ await runWithLocalRunLog(
             // the native setup verification keeps each contributor's running
             // aggregate. The native close records every response, the late
             // control response and an index line of at most 128 bytes per
-            // archived submission.
+            // stored submission.
             const closeRecordBound =
                 close.maximumRosterCloseMetadataBytes +
                 close.maximumResponsePacketBytes +
@@ -799,7 +799,6 @@ await runWithLocalRunLog(
                             physicalStorage: null,
                             browserCompletion: null,
                             actualDepartureChronology: null,
-                            archiveDelivery: null,
                             participantVisits: null,
                             networkTransfers: null,
                             recoveryWork: null,
@@ -807,8 +806,8 @@ await runWithLocalRunLog(
                         scope: prefixCase
                             ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
                             : selected.noResult
-                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, archive availability, security admission or physical qualification.'
-                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, archive availability, security admission or physical qualification.',
+                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
+                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or physical qualification.',
                     },
                     null,
                     2,

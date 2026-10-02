@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
     copyFile,
     mkdir,
@@ -11,22 +11,11 @@ import {
 import { freemem } from 'node:os';
 import path from 'node:path';
 
-import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
-import { retrieveTranscript } from '#packages/sdk/src/transcript-archive.js';
-import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
-import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
-import { layParticipantCeremony } from '#tools/ci/participant-public-ceremony.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
-import {
-    directoryArchiveStore,
-    encodeArchiveRoutes,
-    materializeArchiveRoutes,
-    type ArchiveRoute,
-} from '#tools/ci/protocol-public-archive.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
@@ -65,9 +54,6 @@ type ReleaseResult = {
 
 const selected = selectPublicCompletionCase(process.argv.slice(2)),
     source = path.resolve(selected.source);
-const participantArchive =
-    selected.name === 'participant-closure' ||
-    selected.name === 'participant-transcript';
 await runWithLocalRunLog(
     {
         commandLineArguments: [
@@ -89,136 +75,16 @@ await runWithLocalRunLog(
             assert.ok(freemem() >= 2147483648);
             const summary = JSON.parse(
                 await readFile(path.join(source, 'summary.json'), 'utf8'),
-            ) as { result: string; scriptName: string };
+            ) as { result: string };
             assert.equal(summary.result, 'passed');
-            // A browser cohort's relayed records are laid out as the reader
-            // takes them, and supply only the archived closure.
-            let participantCeremony: string | undefined;
-            let archivedPublic: string | undefined;
-            let run: ResearchRun;
-            let ceremony: string;
-            if (summary.scriptName === 'research:participant') {
-                assert.ok(
-                    selected.name === 'archived-records' || participantArchive,
-                    'A browser participant run supplies only its archived records.',
-                );
-                participantCeremony = path.resolve(
-                    'temp',
-                    'participant-ceremony-' +
-                        path.basename(log.runDirectoryPath),
-                );
-                let publicDirectory = path.join(
-                    runArtifactDirectoryPath(source),
-                    'public',
-                );
-                if (participantArchive) {
-                    const saved = JSON.parse(
-                        await readFile(
-                            path.join(source, 'result.json'),
-                            'utf8',
-                        ),
-                    ) as {
-                        poll: string;
-                        archive: {
-                            transcript: {
-                                identity: string;
-                                byteLength: number;
-                            };
-                            independentClosure: {
-                                identity: string;
-                                byteLength: number;
-                            };
-                            verificationKeys: string[];
-                        };
-                    };
-                    const stage =
-                        selected.stage === 'certificate'
-                            ? 'closure'
-                            : 'terminal';
-                    const index =
-                        stage === 'closure'
-                            ? saved.archive.independentClosure
-                            : saved.archive.transcript;
-                    const kernel = new URL(
-                        '../../packages/wasm/dist/sealed-lattice-kernel.wasm',
-                        import.meta.url,
-                    );
-                    const runtime = await createFoundationCeremonyRuntimeLoader(
-                        kernel,
-                        {
-                            expectedKernelSha256Hex: createHash('sha256')
-                                .update(await readFile(kernel))
-                                .digest('hex'),
-                        },
-                    )();
-                    const archive = openPublicArchive(runtime, {
-                        context: saved.poll,
-                        faultBound: 1,
-                        replicas: saved.archive.verificationKeys.map(
-                            (key, position) => ({
-                                baseUrl: `http://127.0.0.1:9/retained-${String(position)}/`,
-                                verificationKey: Buffer.from(key, 'hex'),
-                            }),
-                        ),
-                        maximumRecords: 65_536,
-                        maximumTotalBytes: 4_294_967_291,
-                    });
-                    archivedPublic = participantCeremony + '-public';
-                    const materialized = await materializeArchiveRoutes(
-                        archive,
-                        index,
-                        await directoryArchiveStore(
-                            path.join(
-                                runArtifactDirectoryPath(source),
-                                'archived-' + stage,
-                            ),
-                        ),
-                        archivedPublic,
-                    );
-                    assert.equal(materialized.targetBody.length, 0);
-                    assert.ok(
-                        materialized.routes.includes('completion/target.bin'),
-                    );
-                    publicDirectory = archivedPublic;
-                }
-                const participant = await layParticipantCeremony(
-                    source,
-                    publicDirectory,
-                    participantCeremony,
-                );
-                ceremony = participantCeremony;
-                run = {
-                    case: 'browser-' + participant.result.kind,
-                    participantCount: participant.participantCount,
-                    optionCount: participant.optionCount,
-                    result:
-                        participant.result.kind === 'result'
-                            ? {
-                                  kind: 'result',
-                                  identifiers: [
-                                      ...participant.result.identifiers,
-                                  ],
-                              }
-                            : { kind: 'no-result' },
-                };
-            } else {
-                assert.equal(
-                    participantArchive,
-                    false,
-                    'This case requires a browser participant archive.',
-                );
-                run = JSON.parse(
-                    await readFile(path.join(source, 'result.json'), 'utf8'),
-                ) as ResearchRun;
-                assert.match(
-                    run.case,
-                    /^native-(?:result|empty|invalid-only)$/u,
-                );
-                ceremony = path.join(
-                    runArtifactDirectoryPath(source),
-                    'ceremony',
-                );
-            }
+            const run = JSON.parse(
+                await readFile(path.join(source, 'result.json'), 'utf8'),
+            ) as ResearchRun;
+            assert.match(run.case, /^native-(?:result|empty|invalid-only)$/u);
+            const ceremony = path.join(
+                runArtifactDirectoryPath(source),
+                'ceremony',
+            );
             assert.ok((await stat(path.join(ceremony, 'close'))).isDirectory());
             const scenario = deriveResearchScenario(
                 run.participantCount,
@@ -309,14 +175,6 @@ await runWithLocalRunLog(
                         flag: 'wx',
                     },
                 );
-            } else if (
-                selected.name === 'archived-records' ||
-                participantArchive
-            ) {
-                // Every record the owning verifiers depend on is archived
-                // from the source run, then retrieved by a fresh reader.
-                directory = path.join(ceremony, 'completion');
-                assert.ok((await stat(directory)).isDirectory());
             } else {
                 assert.ok(selected.completionDirectory);
                 directory = path.resolve(selected.completionDirectory);
@@ -397,9 +255,6 @@ await runWithLocalRunLog(
             for (const file of [
                 'crates/protocol-research/evaluation-target/src/public-completion-check.rs',
                 'crates/protocol-research/evaluation-target/src/bin/check-target.rs',
-                'packages/sdk/src/transcript-archive.ts',
-                'tools/ci/protocol-public-archive.ts',
-                'tools/ci/participant-public-ceremony.ts',
                 import.meta.filename,
             ])
                 await writeFile(
@@ -522,20 +377,6 @@ await runWithLocalRunLog(
                 'verification',
             );
             assert.equal(exitCode, 0);
-            if (participantArchive) {
-                // This is an expected-value comparison after verification,
-                // never a source-service fallback for a missing input.
-                assert.deepEqual(
-                    await readFile(path.join(output, 'target.bin')),
-                    await readFile(
-                        path.join(
-                            runArtifactDirectoryPath(source),
-                            'public/completion/target.bin',
-                        ),
-                    ),
-                    'The archived target differs from the originally published target.',
-                );
-            }
             const verified = JSON.parse(
                 await readFile(
                     path.join(output, selected.stage + '.json'),
@@ -605,334 +446,6 @@ await runWithLocalRunLog(
                         code: 'ENOENT',
                     });
             }
-            let archive: Record<string, unknown> | undefined;
-            if (selected.name === 'archived-records') {
-                const { createPublicArchive } =
-                    await import('#packages/sdk/dist/index.js');
-                const context = String(report.pollIdentity);
-                assert.match(context, /^[0-9a-f]{128}$/u);
-                const dependencies = (
-                    await readFile(
-                        path.join(output, 'dependencies.txt'),
-                        'utf8',
-                    )
-                )
-                    .trimEnd()
-                    .split('\n');
-                const archiveScratch = path.resolve(
-                    'temp',
-                    'public-archive-' + path.basename(log.runDirectoryPath),
-                );
-                await mkdir(archiveScratch);
-                // The needed submissions keep their index order under new
-                // consecutive transport names; the index lists only them.
-                const routes: ArchiveRoute[] = [];
-                const lines: string[] = [];
-                const submissionIndex = await readFile(
-                    path.join(ceremony, 'close', 'submissions.txt'),
-                    'utf8',
-                );
-                // A close that lists no submission has an empty index.
-                for (const line of submissionIndex === ''
-                    ? []
-                    : submissionIndex.trimEnd().split(/\r?\n/u)) {
-                    const [name, body] = line.split(' ');
-                    assert.ok(body, 'Malformed submission index line.');
-                    if (!dependencies.includes('ceremony/close/' + name))
-                        continue;
-                    const renamed = 'submission-' + lines.length + '.bin';
-                    routes.push({
-                        route: 'ceremony/close/' + renamed,
-                        file: path.join(ceremony, 'close', name),
-                    });
-                    lines.push(renamed + ' ' + body);
-                }
-                const index = path.join(archiveScratch, 'submissions.txt');
-                await writeFile(
-                    index,
-                    lines.map((line) => line + '\n').join(''),
-                    { flag: 'wx' },
-                );
-                for (const route of dependencies) {
-                    if (/^ceremony\/close\/submission-\d+\.bin$/u.test(route))
-                        continue;
-                    const [root, ...parts] = route.split('/');
-                    assert.ok(root === 'ceremony' || root === 'completion');
-                    routes.push({
-                        route,
-                        file:
-                            route === 'ceremony/close/submissions.txt'
-                                ? index
-                                : path.join(
-                                      root === 'ceremony'
-                                          ? ceremony
-                                          : directory,
-                                      ...parts,
-                                  ),
-                    });
-                }
-                assert.equal(
-                    lines.length,
-                    dependencies.filter((route) =>
-                        /^ceremony\/close\/submission-\d+\.bin$/u.test(route),
-                    ).length,
-                );
-                const kernel = new URL(
-                    '../../packages/wasm/dist/sealed-lattice-kernel.wasm',
-                    import.meta.url,
-                );
-                const runtime = await createFoundationCeremonyRuntimeLoader(
-                    kernel,
-                    {
-                        expectedKernelSha256Hex: createHash('sha256')
-                            .update(await readFile(kernel))
-                            .digest('hex'),
-                    },
-                )();
-                const keys = Array.from(
-                    { length: 3 },
-                    () => generateKeyPairSync('ml-dsa-65').privateKey,
-                );
-                const policy = {
-                    faultBound: 1,
-                    verificationKeys: keys.map((key) =>
-                        createPublicKey(key)
-                            .export({ format: 'der', type: 'spki' })
-                            .subarray(-1952),
-                    ),
-                };
-                // The format's largest retrieval; a closure beyond it is
-                // archived in several parts.
-                const limits = {
-                    maximumRecords: 65_536,
-                    maximumTotalBytes: 4_294_967_291,
-                };
-                const configuration = (
-                    archiveContext: string,
-                    endpoints: readonly string[],
-                ) => ({
-                    context: archiveContext,
-                    faultBound: policy.faultBound,
-                    replicas: endpoints.map((baseUrl, position) => ({
-                        baseUrl,
-                        verificationKey: policy.verificationKeys[position],
-                    })),
-                    ...limits,
-                });
-                const sourceStore = await directoryArchiveStore(
-                    path.join(archiveScratch, 'source'),
-                );
-                const target = await readFile(path.join(output, 'target.bin'));
-                // Encoding contacts no replica, so each replica's capacity is
-                // the encoded closure: every part and the index.
-                const encoded = await encodeArchiveRoutes(
-                    await createPublicArchive(
-                        configuration(
-                            context,
-                            keys.map(
-                                (_key, position) =>
-                                    `http://127.0.0.1:9/encoder-${String(position)}/`,
-                            ),
-                        ),
-                    ),
-                    routes,
-                    target,
-                    sourceStore,
-                    limits,
-                );
-                const replicas: Awaited<
-                    ReturnType<typeof startPublicArchiveReplica>
-                >[] = [];
-                let shutdown: PromiseSettledResult<void>[] = [];
-                try {
-                    for (let position = 0; position < keys.length; position++)
-                        replicas.push(
-                            await startPublicArchiveReplica({
-                                directory: path.join(
-                                    archiveScratch,
-                                    'replica-' + position,
-                                ),
-                                context,
-                                policy,
-                                replicaPosition: position,
-                                privateKey: keys[position],
-                                runtime,
-                                ...limits,
-                                maximumStoredRecords: encoded.records,
-                                maximumStoredBytes: encoded.byteLength,
-                            }),
-                        );
-                    const endpoints = replicas.map(
-                        (replica) => replica.baseUrl,
-                    );
-                    const publisher = await createPublicArchive(
-                        configuration(context, endpoints),
-                    );
-                    // Every part is retained before the index that lists it.
-                    const partAcknowledgements: (readonly number[])[] = [];
-                    for (const part of encoded.parts) {
-                        const acknowledged = await publisher.publish(
-                            part.root,
-                            sourceStore,
-                        );
-                        assert.ok(acknowledged.length > policy.faultBound);
-                        partAcknowledgements.push(acknowledged);
-                    }
-                    const acknowledged = await publisher.publish(
-                        encoded.index,
-                        sourceStore,
-                    );
-                    assert.ok(acknowledged.length > policy.faultBound);
-                    // Readers have only the replicas, and one acknowledging
-                    // replica is gone.
-                    const unavailableReplica = acknowledged[0];
-                    await replicas[unavailableReplica].close();
-                    // A reader bound to another poll refuses every record.
-                    const otherContext =
-                        context.slice(0, -1) +
-                        (context.endsWith('0') ? '1' : '0');
-                    await assert.rejects(
-                        retrieveTranscript(
-                            await createPublicArchive(
-                                configuration(otherContext, endpoints),
-                            ),
-                            encoded.index,
-                            await directoryArchiveStore(
-                                path.join(archiveScratch, 'other-context'),
-                            ),
-                        ),
-                    );
-                    const reader = await createPublicArchive(
-                        configuration(context, endpoints),
-                    );
-                    const retrievedStore = await directoryArchiveStore(
-                        path.join(archiveScratch, 'retrieved'),
-                    );
-                    const retrieved = await retrieveTranscript(
-                        reader,
-                        encoded.index,
-                        retrievedStore,
-                    );
-                    assert.deepEqual(retrieved, encoded.parts);
-                    const materialize = async (name: string) => {
-                        const directoryPath = path.join(archiveScratch, name);
-                        const materialized = await materializeArchiveRoutes(
-                            reader,
-                            encoded.index,
-                            retrievedStore,
-                            directoryPath,
-                        );
-                        assert.deepEqual(
-                            materialized.routes,
-                            routes.map((value) => value.route).sort(),
-                        );
-                        assert.deepEqual(
-                            Buffer.from(materialized.targetBody),
-                            target,
-                        );
-                        return directoryPath;
-                    };
-                    // The owning verifiers accept the retrieved files and
-                    // depend on every one of them.
-                    const reconstruction = await materialize('reconstruction');
-                    const archivedOutput = path.join(
-                        log.artifactDirectoryPath,
-                        'verification-archived',
-                    );
-                    const archived = await verifyRecords(
-                        path.join(reconstruction, 'ceremony'),
-                        path.join(reconstruction, 'completion'),
-                        archivedOutput,
-                        scratch + '-archived',
-                        'verification-archived',
-                    );
-                    assert.equal(archived.exitCode, 0);
-                    assert.deepEqual(
-                        (
-                            await readFile(
-                                path.join(archivedOutput, 'dependencies.txt'),
-                                'utf8',
-                            )
-                        )
-                            .trimEnd()
-                            .split('\n'),
-                        routes.map((value) => value.route).sort(),
-                    );
-                    assert.deepEqual(
-                        await readFile(path.join(archivedOutput, 'target.bin')),
-                        target,
-                    );
-                    const archivedReport = JSON.parse(
-                        await readFile(
-                            path.join(archivedOutput, 'result.json'),
-                            'utf8',
-                        ),
-                    ) as Record<string, unknown>;
-                    assert.equal(archivedReport.pollIdentity, context);
-                    const archivedTerminal = JSON.parse(
-                        await readFile(
-                            path.join(archivedOutput, 'terminal.json'),
-                            'utf8',
-                        ),
-                    ) as TerminalResult;
-                    assert.equal(archivedTerminal.kind, verified.kind);
-                    assert.deepEqual(
-                        archivedTerminal.identifiers,
-                        (verified as TerminalResult).identifiers,
-                    );
-                    // A closure without one usable body is refused.
-                    const omittedRoute = lines
-                        .map((line) => 'ceremony/' + line.split(' ')[1])
-                        .find((route) =>
-                            routes.some((value) => value.route === route),
-                        );
-                    let omittedExitCode: number | undefined;
-                    if (omittedRoute !== undefined) {
-                        const omitted = await materialize('omitted');
-                        await rm(
-                            path.join(omitted, ...omittedRoute.split('/')),
-                        );
-                        omittedExitCode = (
-                            await verifyRecords(
-                                path.join(omitted, 'ceremony'),
-                                path.join(omitted, 'completion'),
-                                path.join(
-                                    log.artifactDirectoryPath,
-                                    'verification-omitted',
-                                ),
-                                scratch + '-omitted',
-                                'verification-omitted',
-                            )
-                        ).exitCode;
-                        assert.notEqual(omittedExitCode, 0);
-                    }
-                    archive = {
-                        context,
-                        routes: routes.length,
-                        records: encoded.records,
-                        byteLength: encoded.byteLength,
-                        index: encoded.index,
-                        acknowledged,
-                        parts: encoded.parts.map((part, position) => ({
-                            ...part,
-                            acknowledged: partAcknowledgements[position],
-                        })),
-                        unavailableReplica,
-                        archivedPeakMemory: archived.peakMemory,
-                        omittedRoute,
-                        omittedExitCode,
-                    };
-                } finally {
-                    shutdown = await Promise.allSettled(
-                        replicas.map((replica) => replica.close()),
-                    );
-                }
-                assert.ok(
-                    shutdown.every((value) => value.status === 'fulfilled'),
-                    'Replica shutdown failed.',
-                );
-                await rm(archiveScratch, { recursive: true });
-            }
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -944,29 +457,15 @@ await runWithLocalRunLog(
                         stage: selected.stage,
                         output,
                         completionDirectory: directory,
-                        certificateRecordsDirectory: path.join(
-                            output,
-                            'certificate-records',
-                        ),
                         [selected.stage]: verified,
                         peakMemory,
                         samples,
-                        archive,
                         executableSha512: createHash('sha512')
                             .update(await readFile(executable))
                             .digest('hex'),
-                        scope: participantArchive
-                            ? 'Only the participant-published archive records retrieved after replica loss supply this reader. Their content identities and routes are decoded again, then a fresh native process verifies setup, close, classification, target and certificate, and the terminal case also verifies release. No source relay, participant state or retained verification result is available to this reader.'
-                            : selected.name === 'available-records'
-                              ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
-                              : selected.name === 'archived-records'
-                                ? (participantCeremony === undefined
-                                      ? ''
-                                      : "A browser cohort's relayed records are laid out as the native reader takes them in a scratch directory. ") +
-                                  'The records the owning verifiers depend on are published through the maintained public archive to three local replicas as consecutive parts under one index, retrieved by a fresh native reader after the source and one acknowledging replica are gone, and verified again from only the retrieved files, which the verifiers depend on exactly. A reader bound to another poll refuses the closure and a closure without one usable body is refused. Local replicas on one host do not establish independent fault domains, and no browser reader ' +
-                                  (participantCeremony === undefined
-                                      ? 'or departure chronology is exercised.'
-                                      : "is exercised; only the source cohort's own departures precede the archive.")
+                        scope:
+                            selected.name === 'available-records'
+                                ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
                                 : selected.stage === 'certificate'
                                   ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
                                   : selected.stage === 'release'
@@ -979,10 +478,6 @@ await runWithLocalRunLog(
                 ) + '\n',
                 { flag: 'wx' },
             );
-            if (participantCeremony !== undefined)
-                await rm(participantCeremony, { recursive: true });
-            if (archivedPublic !== undefined)
-                await rm(archivedPublic, { recursive: true });
             process.stdout.write(log.runDirectoryPath + '\n');
         } finally {
             await releaseLock();

@@ -82,26 +82,6 @@ export const retainPublishedValue = (
     return { ...published };
 };
 
-export const delayedArchiveDiscoveryViews = () => {
-    const closingView = {
-        receivedRecords: [] as Envelope[],
-        reports: [0, 1, 2, 3].map((sender) => ({ sender, records: [] })),
-        organizerIntent: 'close',
-    };
-    return [
-        {
-            durableRecordsBeforeClose: [] as Envelope[],
-            closingView: structuredClone(closingView),
-            deliveredAfterClose: [] as Envelope[],
-        },
-        {
-            durableRecordsBeforeClose: [first],
-            closingView: structuredClone(closingView),
-            deliveredAfterClose: [first],
-        },
-    ] as const;
-};
-
 // Functional reference only. `linearize` represents an already established
 // authoritative publication event. It is not implemented by a receipt, this
 // registry, or the caller's choice of invocation order.

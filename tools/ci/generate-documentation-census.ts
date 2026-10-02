@@ -2,8 +2,6 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { adaptiveWotsBound } from '#tests/adaptive-wots-model.js';
-import { compileArchiveAuthenticationWork } from '#tests/archive-authentication-model.js';
-import { archiveHolderRequirements } from '#tests/archive-availability-model.js';
 import {
     compileCompleteAuthenticationFrameWork,
     compileCompleteCredentialIntentBounds,
@@ -23,7 +21,10 @@ import {
     compileBrowserWordProverResources,
     compileContributionGenerationResources,
 } from '#tests/browser-word-prover-resource-model.js';
-import { compileCertificateCustodyCensus } from '#tests/certificate-custody-model.js';
+import {
+    compileCertificateCustodyCensus,
+    fullHolderRequirements,
+} from '#tests/certificate-custody-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import {
@@ -120,7 +121,6 @@ import {
 } from '#tests/proof-hash-work-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
-import { compilePublicArchiveResourceCensus } from '#tests/public-archive-resource-model.js';
 import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
@@ -280,9 +280,8 @@ export const renderDocumentationCensus = (): string => {
     const contributionBodies = supportedProfiles.profiles.map((row) =>
         row.map((profile) => compileContributionBodyCensus(profile)),
     );
-    // A roster's setup contributions, which every participant verifies and
-    // every archived closure carries, at the option count with the largest
-    // bodies.
+    // A roster's setup contributions, which every participant verifies, at the
+    // option count with the largest bodies.
     const contributionCorpus = contributionBodies.map((row, index) => ({
         participants: supportedProfiles.profiles[index][0].participantCount,
         bytes: row.reduce(
@@ -294,10 +293,8 @@ export const renderDocumentationCensus = (): string => {
         ),
     }));
     // The mobile runtime's public corpus planning target plus its fifty
-    // percent variance, and its bound on one canonical transport stream,
-    // which also caps the bytes one archive retrieval holds.
+    // percent variance.
     const publicCorpusVarianceCeiling = (2_147_483_648n * 3n) / 2n;
-    const transportStreamBound = 4_294_967_291n;
     const countsAbove = (bound: bigint): string => {
         const counts = contributionCorpus
             .filter((entry) => entry.bytes > bound)
@@ -939,7 +936,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Authentication frames and completed prefix',
         '',
-        'The pure FIPS 204 interface frames each participant application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. These rows cover participant credentials; public-archive receipt credentials have their own population. The counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
+        'The pure FIPS 204 interface frames each participant application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. These rows cover participant credentials. The counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
         '',
         table(
             [
@@ -3541,7 +3538,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Contribution body census',
         '',
-        'The active profile frames one complete contribution as a fixed header, its owned public polynomials in the compiled statement order, and its complete proof. Fixed common inputs, the statement header, and previously verified recipient keys are reconstructed from predecessors. The body is a virtual concatenation of bounded records; these payload counts do not allocate another whole-body copy or include checkpoint, database, signature, or archive overhead.',
+        'The active profile frames one complete contribution as a fixed header, its owned public polynomials in the compiled statement order, and its complete proof. Fixed common inputs, the statement header, and previously verified recipient keys are reconstructed from predecessors. The body is a virtual concatenation of bounded records; these payload counts do not allocate another whole-body copy or include checkpoint, database or signature overhead.',
         '',
         table(
             ['Property', 'Value'],
@@ -3623,7 +3620,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Setup aggregate cache census',
         '',
-        'The public aggregator retains the previous accepted generation and one provisional generation. Coefficient-aligned reads return one immutable polynomial only after its complete digest matches the owning setup reference. Counts below cover canonical polynomial payload and successful cache traffic; they exclude proof verification, database journals, allocation overhead, failed candidates, participant private state, and archive replication.',
+        'The public aggregator retains the previous accepted generation and one provisional generation. Coefficient-aligned reads return one immutable polynomial only after its complete digest matches the owning setup reference. Counts below cover canonical polynomial payload and successful cache traffic; they exclude proof verification, database journals, allocation overhead, failed candidates and participant private state.',
         '',
         table(
             ['Property', 'Value'],
@@ -3732,10 +3729,6 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(participantCustody.setupReferenceBytes),
                 ],
                 [
-                    'Retained setup archive index bytes',
-                    formatCount(participantCustody.setupArchiveBytes),
-                ],
-                [
                     'Maximum public body ciphertext bytes',
                     formatCount(
                         participantCustody.maximumPublicBodyCiphertextBytes,
@@ -3783,7 +3776,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Contribution authentication census',
         '',
-        'Every participant signs one canonical confirmation body, which binds the proposal, the position, and either the commitment of a setup contributor or, for any other participant, its own registration body. Only setup contributors sign opening headers, which bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing, archive replication, and local custody.',
+        'Every participant signs one canonical confirmation body, which binds the proposal, the position, and either the commitment of a setup contributor or, for any other participant, its own registration body. Only setup contributors sign opening headers, which bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing and local custody.',
         '',
         table(
             [
@@ -4017,31 +4010,6 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Public archive resource census',
-        '',
-        'Independent sizes for the maintained archive record and acknowledgement commands. Replica responses are concurrent to avoid a silent replica blocking an available one. These are buffer and wire bounds, not complete participant memory or workflow costs.',
-        '',
-        table(
-            ['Property', 'Value'],
-            Object.entries(compilePublicArchiveResourceCensus()).map(
-                ([property, value]) => [property, formatCount(value)],
-            ),
-        ),
-        '',
-        '## Archive authentication call bounds',
-        '',
-        'Receipt signing uses the pure FIPS 204 frame under its separate archive context. The default table uses the maximum configured replica count. SDK request bounds count issued attempts, not adversarial replay or total host requests. The host signs each successful retention request, including retries for an unchanged root. Cumulative acknowledgement batches revisit earlier signatures; duplicate authors in a direct verification call are checked before distinct valid signers are counted. These per-call bounds supply no lifetime key, signing or verification cap and exclude closure/policy hashing, other signing work and provider failures.',
-        '',
-        table(
-            ['Property', 'Value'],
-            Object.entries(compileArchiveAuthenticationWork()).map(
-                ([property, value]) => [
-                    property,
-                    typeof value === 'bigint' ? formatCount(value) : value,
-                ],
-            ),
-        ),
-        '',
         '## Certificate custody census',
         '',
         "The counterexample delivers all continuing honest participants' messages but permits suppression of earlier sends from participants who disappeared. Full holders possess the entire certificate and every required predecessor; individual signers do not establish that premise.",
@@ -4076,7 +4044,7 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Full-copy holders sufficient without ledger delivery',
                     formatCount(
-                        archiveHolderRequirements(
+                        fullHolderRequirements(
                             certificateCustody.participantCount,
                             certificateCustody.corruptCount,
                             certificateCustody.corruptCount,
@@ -4087,7 +4055,7 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Coded holders sufficient at the release reconstruction threshold',
                     formatCount(
-                        archiveHolderRequirements(
+                        fullHolderRequirements(
                             certificateCustody.participantCount,
                             certificateCustody.corruptCount,
                             certificateCustody.corruptCount,
@@ -4440,7 +4408,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'Only the first `d` roster positions contribute to the setup. Every participant verifies, and every archived closure carries, all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target, and its bound on one canonical transport stream also caps the bytes one archive retrieval holds, so a larger closure is archived in several parts. A participant count is listed when some option count exceeds the bound.',
+        'Only the first `d` roster positions contribute to the setup. Every participant verifies all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target. A participant count is listed when some option count exceeds the ceiling.',
         '',
         table(
             ['Property', 'Value'],
@@ -4452,14 +4420,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Participant counts whose contributions exceed the variance ceiling',
                     countsAbove(publicCorpusVarianceCeiling),
-                ],
-                [
-                    'One canonical transport stream bound',
-                    formatCount(transportStreamBound),
-                ],
-                [
-                    'Participant counts whose contributions exceed the stream bound',
-                    countsAbove(transportStreamBound),
                 ],
             ],
         ),
@@ -5498,14 +5458,14 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Close wire census',
         '',
-        'Exact canonical lengths of the signed close messages and bounds on the archived closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. Delivery adds a new envelope to a slot only while fewer than two are known, and the lock also discards late envelopes. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Only the organizer takes responses; it retains the first of each responder with exactly the listed envelopes it did not know. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares, archive framing and storage-engine overhead.',
+        'Exact canonical lengths of the signed close messages and bounds on the closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. Delivery adds a new envelope to a slot only while fewer than two are known, and the lock also discards late envelopes. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Only the organizer takes responses; it retains the first of each responder with exactly the listed envelopes it did not know. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares and storage-engine overhead.',
         '',
         table(
             ['Property', 'Value'],
             [
                 ['Envelope bytes', formatCount(ballotBody.envelopeBytes)],
                 [
-                    'Archived submission bytes',
+                    'Closure submission bytes',
                     formatCount(
                         compileCloseWireCensus(completion).submissionBytes,
                     ),

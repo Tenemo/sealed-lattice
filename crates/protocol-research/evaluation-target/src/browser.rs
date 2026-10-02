@@ -516,22 +516,6 @@ impl State {
                 }
                 Ok(())
             }
-            24 => {
-                // The close barrier this instance verified again beside a
-                // restored target, which must be the barrier the target was
-                // evaluated from, so that a visit recording its reads
-                // records that close.
-                if argument != 0 || length != 0 {
-                    return Err(Error::Encoding);
-                }
-                let target = self.target.as_ref().ok_or(Error::Incomplete)?;
-                let barrier =
-                    ballot_proof::take_browser_close_barrier().ok_or(Error::Incomplete)?;
-                if !target.names_barrier(&barrier) {
-                    return Err(Error::PublicInput);
-                }
-                Ok(())
-            }
             20 => {
                 if argument != 0 || length != 8 {
                     return Err(Error::Encoding);

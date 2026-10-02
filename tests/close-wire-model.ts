@@ -96,7 +96,7 @@ export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
         submissionBytes,
         maximumUnionEnvelopes,
         maximumUsableBodies: participants,
-        // The archived closure of one barrier: the intent, the used responses,
+        // The closure of one barrier: the intent, the used responses,
         // the proposal and every listed envelope. Only usable slots need
         // their bodies.
         maximumBarrierMetadataBytes:

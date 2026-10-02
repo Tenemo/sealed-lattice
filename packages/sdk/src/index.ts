@@ -22,24 +22,11 @@ import {
     type PollSpecValidation,
     validatePollSpec as validatePollSpecInternal,
 } from './poll-spec.js';
-import {
-    openPublicArchive,
-    type PublicArchive,
-    type PublicArchiveOptions,
-} from './public-archive.js';
-export type {
-    ArchiveRecord,
-    ArchiveReference,
-    PublicArchive,
-    PublicArchiveOptions,
-    PublicArchiveStore,
-} from './public-archive.js';
 export { openParticipant, verifyOutcome } from './participant/participant.js';
 export type {
     OutcomeVerification,
     OutcomeVerificationOptions,
     Participant,
-    ParticipantArchive,
     ParticipantEnrollment,
     ParticipantOptions,
     ParticipantPendingCause,
@@ -53,12 +40,6 @@ const loadFoundationCeremonyRuntime: () => Promise<FoundationCeremonyRuntime> =
     createFoundationCeremonyRuntimeLoader(foundationKernelUrl, {
         expectedKernelSha256Hex: foundationKernelSha256,
     });
-
-/** Public-byte custody and retrieval only; this does not authorize a poll transition. */
-export const createPublicArchive = async (
-    options: PublicArchiveOptions,
-): Promise<PublicArchive> =>
-    openPublicArchive(await loadFoundationCeremonyRuntime(), options);
 
 export type {
     PollSpec,

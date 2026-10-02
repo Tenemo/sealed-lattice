@@ -25,23 +25,10 @@ type VerifyCanonicalManifest = (canonicalBytes: Uint8Array) => Promise<
 type OpenParticipant = (options: {
     readonly namespace: string;
     readonly relay: string;
-    readonly archive?: {
-        readonly faultBound: number;
-        readonly replicas: readonly {
-            readonly baseUrl: string;
-            readonly verificationKey: Uint8Array;
-        }[];
-    };
 }) => { readonly run: unknown };
 type VerifyOutcome = (options: {
     readonly poll: string;
-    readonly archive: {
-        readonly faultBound: number;
-        readonly replicas: readonly {
-            readonly baseUrl: string;
-            readonly verificationKey: Uint8Array;
-        }[];
-    };
+    readonly relay: string;
 }) => Promise<unknown>;
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const createCanonicalManifest =
@@ -55,7 +42,6 @@ const expectedPublicRuntimeExportNames = [
     'createCanonicalActionDefinition',
     'createCanonicalBoardPolicy',
     'createCanonicalManifest',
-    'createPublicArchive',
     'openParticipant',
     'validatePollSpec',
     'verifyCanonicalActionContext',
@@ -178,100 +164,8 @@ describe('election foundation public package API in Node', () => {
         ).toBe('function');
     });
 
-    it('opens a participant only with a well-formed archive', () => {
+    it('verifies an outcome only for a well-formed poll identity and relay', async () => {
         const relay = 'https://relay.example/polls/';
-        const replica = (
-            position: number,
-            baseUrl = `https://replica-${String(position)}.example/archive/`,
-            keyBytes = 1952,
-        ) => ({
-            baseUrl,
-            verificationKey: new Uint8Array(keyBytes).fill(position + 1),
-        });
-        const replicas = [0, 1, 2].map((position) => replica(position));
-        for (const archive of [
-            { faultBound: 1, replicas },
-            {
-                faultBound: 0,
-                replicas: [replica(0, 'http://127.0.0.1:9000/archive')],
-            },
-            {
-                faultBound: 0,
-                replicas: Array.from({ length: 32 }, (_unused, position) =>
-                    replica(position),
-                ),
-            },
-        ])
-            expect(
-                typeof openParticipant({ namespace: 'poll', relay, archive })
-                    .run,
-            ).toBe('function');
-        for (const archive of [
-            { faultBound: 1, replicas: replicas.slice(0, 2) },
-            { faultBound: -1, replicas },
-            { faultBound: 0.5, replicas },
-            { faultBound: 0, replicas: [] },
-            {
-                faultBound: 1,
-                replicas: [replicas[0], replica(0), replicas[2]],
-            },
-            {
-                faultBound: 1,
-                replicas: [
-                    replica(0, 'http://replica.example/archive/'),
-                    ...replicas.slice(1),
-                ],
-            },
-            {
-                faultBound: 1,
-                replicas: [
-                    replica(0, 'ftp://replica.example/archive/'),
-                    ...replicas.slice(1),
-                ],
-            },
-            {
-                faultBound: 1,
-                replicas: [
-                    replica(0, 'https://replica.example/archive/#poll'),
-                    ...replicas.slice(1),
-                ],
-            },
-            {
-                faultBound: 1,
-                replicas: [
-                    replica(0, 'https://replica.example/archive/?poll=1'),
-                    ...replicas.slice(1),
-                ],
-            },
-            {
-                faultBound: 1,
-                replicas: [
-                    replica(0, 'https://user@replica.example/archive/'),
-                    ...replicas.slice(1),
-                ],
-            },
-            {
-                faultBound: 1,
-                replicas: [replica(0, undefined, 1951), ...replicas.slice(1)],
-            },
-            {
-                faultBound: 0,
-                replicas: Array.from({ length: 33 }, (_unused, position) =>
-                    replica(position),
-                ),
-            },
-        ])
-            expect(() =>
-                openParticipant({ namespace: 'poll', relay, archive }),
-            ).toThrow(TypeError);
-    });
-
-    it('verifies an outcome only for a well-formed poll identity and archive', async () => {
-        const replicas = [0, 1, 2].map((position) => ({
-            baseUrl: `https://replica-${String(position)}.example/archive/`,
-            verificationKey: new Uint8Array(1952).fill(position + 1),
-        }));
-        const archive = { faultBound: 1, replicas };
         for (const poll of [
             '',
             'a'.repeat(126),
@@ -279,15 +173,19 @@ describe('election foundation public package API in Node', () => {
             'A'.repeat(128),
             'g'.repeat(128),
         ])
-            await expect(verifyOutcome({ poll, archive })).rejects.toThrow(
+            await expect(verifyOutcome({ poll, relay })).rejects.toThrow(
                 TypeError,
             );
-        await expect(
-            verifyOutcome({
-                poll: 'a'.repeat(128),
-                archive: { faultBound: 1, replicas: replicas.slice(0, 2) },
-            }),
-        ).rejects.toThrow(TypeError);
+        for (const malformed of [
+            'relay.example/polls/',
+            'ftp://relay.example/polls/',
+            'https://relay.example/polls/?poll=1',
+            'https://relay.example/polls/#poll',
+            'https://user@relay.example/polls/',
+        ])
+            await expect(
+                verifyOutcome({ poll: 'a'.repeat(128), relay: malformed }),
+            ).rejects.toThrow(TypeError);
     });
 
     it('emits declarations for the foundation verification result', () => {

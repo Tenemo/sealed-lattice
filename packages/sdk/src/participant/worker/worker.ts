@@ -1,5 +1,3 @@
-import type { ArchiveReference } from '@sealed-lattice/wasm';
-
 import {
     beginBallot,
     completeBallot,
@@ -105,20 +103,12 @@ import {
     publishTarget,
     signTarget,
 } from './target.js';
-import {
-    createTranscriptRecorder,
-    discoverTranscripts,
-    openArchive,
-    openTranscriptSource,
-} from './transcript.js';
-import type { ArchivedTranscript, WorkerArchive } from './transcript.js';
-import { transcriptsToVerify, verifyTranscript } from './verifier.js';
+import { verifyPublishedOutcome } from './verifier.js';
 
 // The application's SDK supplies the namespace of the participant's local
-// state, the relay's base URL, the module's URL, the identities its build
-// recorded and, when the application configures one, the archive; the worker
-// fetches the module itself and recomputes the runtime identity that every
-// retained root binds. Every bound comes from the module and the retained
+// state, the relay's base URL, the module's URL and the identities its build
+// recorded; the worker fetches the module itself and recomputes the runtime
+// identity that every retained root binds. Every bound comes from the module and the retained
 // state, never from the page. When the page separates evaluation, a worker
 // that retains the target it evaluated before the operation's other work
 // ends there, and the page runs the operation again in a fresh worker.
@@ -127,7 +117,6 @@ type WorkerCommand = Readonly<{
     namespace: string;
     relay: string;
     module: string;
-    archive?: WorkerArchive;
     identity: Readonly<{
         runtime: string;
         source: string;
@@ -203,45 +192,11 @@ const isBaseUrl = (value: unknown) => {
     );
 };
 
-// An archive names its fault bound, 1 to 32 replicas with their ML-DSA-65
-// verification keys, and the foundation kernel with its SHA-256 digest.
-const isArchive = (archive: unknown) => {
-    if (archive === undefined) return true;
-    if (typeof archive !== 'object' || archive === null) return false;
-    const { faultBound, replicas, kernel, kernelSha256 } = archive as Record<
-        string,
-        unknown
-    >;
-    return (
-        Number.isSafeInteger(faultBound) &&
-        (faultBound as number) >= 0 &&
-        Array.isArray(replicas) &&
-        replicas.length >= 1 &&
-        replicas.length <= 32 &&
-        replicas.every((replica: unknown) => {
-            if (typeof replica !== 'object' || replica === null) return false;
-            const { baseUrl, verificationKey } = replica as Record<
-                string,
-                unknown
-            >;
-            return (
-                isBaseUrl(baseUrl) &&
-                typeof verificationKey === 'string' &&
-                /^[0-9a-f]{3904}$/u.test(verificationKey)
-            );
-        }) &&
-        httpUrl(kernel) !== undefined &&
-        typeof kernelSha256 === 'string' &&
-        /^[0-9a-f]{64}$/u.test(kernelSha256)
-    );
-};
-
 const isWellFormed = (command: WorkerCommand) =>
     typeof command.namespace === 'string' &&
     participantNamespacePattern.test(command.namespace) &&
     isBaseUrl(command.relay) &&
     httpUrl(command.module) !== undefined &&
-    isArchive(command.archive) &&
     (command.separateEvaluation === undefined ||
         typeof command.separateEvaluation === 'boolean');
 
@@ -271,22 +226,6 @@ const bytes = (value: unknown) => {
     if (!/^(?:[0-9a-f]{2})*$/u.test(encoded))
         throw new InvalidRequest('Malformed byte parameter.');
     return fromHexadecimal(encoded);
-};
-
-// An archived transcript's index: its identity and its record's length.
-const transcriptReference = (value: unknown) => {
-    if (typeof value !== 'object' || value === null)
-        throw new InvalidRequest('Malformed transcript parameter.');
-    const { identity, byteLength } = value as Record<string, unknown>;
-    if (
-        typeof identity !== 'string' ||
-        !/^[0-9a-f]{128}$/u.test(identity) ||
-        !Number.isSafeInteger(byteLength) ||
-        (byteLength as number) < 1 ||
-        (byteLength as number) > 1_572_864
-    )
-        throw new InvalidRequest('Malformed transcript parameter.');
-    return { identity, byteLength: byteLength as number };
 };
 
 // Publishes every public record the current root holds: the registration
@@ -595,27 +534,9 @@ const execute = async (
             )
                 return refused('unavailable');
             const session = await resumeParticipant(profiled, root);
-            const recorder =
-                command.archive === undefined
-                    ? undefined
-                    : createTranscriptRecorder(
-                          await openArchive(
-                              command.archive,
-                              hexadecimal(root.manifest.poll),
-                              context.observeArchiveResources,
-                          ),
-                      );
-            const verified = await verifySetup(
-                session,
-                recorder === undefined ? relay : { ...relay, recorder },
-            );
-            // The index is retained only after the owning verifier accepted
-            // every recorded input and the replicas retained the closure.
-            const setupArchive = await recorder?.archive();
             root = await retainSetup(
                 session,
-                verified,
-                setupArchive?.transcript,
+                await verifySetup(session, relay),
             );
             // A participant that finds the organizer's close intent once its
             // setup is retained learned that ballot submission closed before
@@ -741,53 +662,13 @@ const execute = async (
             // Release follows this participant's signed target, or its
             // completed close when it signed no target and a certificate
             // already exists; a pending target signature cannot be
-            // bypassed. With an archive, the visit that certifies the target
-            // before any release randomness first archives the certified
-            // target closure it read, as one transcript that more replicas
-            // than the fault bound acknowledge; a visit may instead read an
-            // archived closure the request names. A signed release is only
-            // delivered again.
+            // bypassed. A signed release is only delivered again.
             const generation = root.head.generation;
             if (
-                parameters.transcript !== undefined &&
-                command.archive === undefined
-            )
-                return refused('invalid request');
-            if (
-                (generation !== completedClosePhase(enrollment.isOrganizer) &&
-                    generation < targetPhase.signed) ||
-                (parameters.transcript !== undefined &&
-                    generation >= releasePhase.signed)
+                generation !== completedClosePhase(enrollment.isOrganizer) &&
+                generation < targetPhase.signed
             )
                 return refused('unavailable');
-            const archiving =
-                parameters.transcript === undefined &&
-                generation < releasePhase.locked;
-            const archive =
-                command.archive === undefined ||
-                (!archiving && parameters.transcript === undefined)
-                    ? undefined
-                    : await openArchive(
-                          command.archive,
-                          hexadecimal(root.manifest.poll),
-                          context.observeArchiveResources,
-                      );
-            const recorder =
-                archive === undefined || !archiving
-                    ? undefined
-                    : createTranscriptRecorder(archive);
-            const source: PublicRelay =
-                archive !== undefined && parameters.transcript !== undefined
-                    ? {
-                          ...relay,
-                          transcript: await openTranscriptSource(
-                              archive,
-                              transcriptReference(parameters.transcript),
-                          ),
-                      }
-                    : recorder === undefined
-                      ? relay
-                      : { ...relay, recorder };
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeRelease(
                 await resumeClose(participant, enrollment.isOrganizer),
@@ -800,17 +681,8 @@ const execute = async (
                     session.state === undefined
                         ? {}
                         : { resumedFrom: { generation } };
-                await restoreSetup(participant, source);
-                let closure: ArchivedTranscript | undefined;
-                const advanced = await advanceRelease(
-                    session,
-                    source,
-                    recorder === undefined
-                        ? undefined
-                        : async () => {
-                              closure = await recorder.archive();
-                          },
-                );
+                await restoreSetup(participant, relay);
+                const advanced = await advanceRelease(session, relay);
                 // A release generated in this visit reports the proof
                 // randomness the module drew.
                 const { proofRandomBytes } = session;
@@ -818,7 +690,6 @@ const execute = async (
                     ...resumed,
                     predecessor: session.state?.predecessor,
                     ...advanced,
-                    ...(closure === undefined ? {} : { closure }),
                     ...(proofRandomBytes === undefined
                         ? {}
                         : { proofRandomBytes }),
@@ -834,60 +705,21 @@ const execute = async (
                 },
             };
         }
-        case 'result':
-        case 'archive': {
+        case 'result': {
             // Any participant past its close combines the published release
-            // shares in its own module; the result is not published. The
-            // visit reads the relay or the archived transcript the request
-            // names, and archiving sends every record it reads to the
-            // replicas as one transcript, acknowledged once verified.
-            const archived =
-                command.operation === 'archive' ||
-                parameters.transcript !== undefined;
-            if (
-                (parameters.transcript !== undefined &&
-                    command.operation === 'archive') ||
-                (archived && command.archive === undefined)
-            )
-                return refused('invalid request');
+            // shares in its own module; the result is not published.
             if (
                 root.head.generation <
                 completedClosePhase(enrollment.isOrganizer)
             )
                 return refused('unavailable');
-            const archive =
-                command.archive === undefined || !archived
-                    ? undefined
-                    : await openArchive(
-                          command.archive,
-                          hexadecimal(root.manifest.poll),
-                          context.observeArchiveResources,
-                      );
-            const recorder =
-                archive === undefined || command.operation !== 'archive'
-                    ? undefined
-                    : createTranscriptRecorder(archive);
-            const source: PublicRelay =
-                archive !== undefined && parameters.transcript !== undefined
-                    ? {
-                          ...relay,
-                          transcript: await openTranscriptSource(
-                              archive,
-                              transcriptReference(parameters.transcript),
-                          ),
-                      }
-                    : recorder === undefined
-                      ? relay
-                      : { ...relay, recorder };
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
                 enrollment.isOrganizer,
             );
-            await restoreSetup(participant, source);
-            const result = await computeResult(session, source);
-            const transcript =
-                recorder === undefined ? undefined : await recorder.archive();
+            await restoreSetup(participant, relay);
+            const result = await computeResult(session, relay);
             const summarized = summary(root, enrollment, profiled);
             return {
                 status: 'completed',
@@ -903,26 +735,6 @@ const execute = async (
                           }
                         : {}),
                     ...result,
-                    ...transcript,
-                },
-            };
-        }
-        case 'transcripts': {
-            // The transcripts the archive holds for the poll are hints for a
-            // later result visit, which verifies whichever it reads.
-            if (command.archive === undefined)
-                return refused('invalid request');
-            return {
-                status: 'completed',
-                details: {
-                    ...summary(root, enrollment, profiled),
-                    transcripts: await discoverTranscripts(
-                        await openArchive(
-                            command.archive,
-                            hexadecimal(root.manifest.poll),
-                            context.observeArchiveResources,
-                        ),
-                    ),
                 },
             };
         }
@@ -953,9 +765,7 @@ const operationMemory = (
     kernel: ParticipantKernel,
     helpers: ParallelHelpers,
     evaluation: boolean,
-    archiveBytes: number,
 ) => ({
-    archiveBytes,
     workerBytes: kernel.memory.buffer.byteLength,
     workerUsedBytes: kernel.linear_memory_high_water() >>> 0,
     workerBoundBytes:
@@ -973,7 +783,6 @@ const evaluatingOperations: ReadonlySet<string> = new Set([
     'target',
     'release',
     'result',
-    'archive',
 ]);
 
 const run = async (
@@ -992,9 +801,6 @@ const run = async (
     let database: IDBDatabase | undefined;
     let helpers: ParallelHelpers | undefined;
     let authorityStarted = false;
-    const archiveMeasurements: (() => number)[] = [];
-    const archiveBytes = () =>
-        archiveMeasurements.reduce((total, measure) => total + measure(), 0);
     try {
         const moduleBytes = await fetchModule(
             command.module,
@@ -1043,9 +849,6 @@ const run = async (
                             limits: readParticipantLimits(kernel),
                             separateEvaluation:
                                 command.separateEvaluation === true,
-                            observeArchiveResources: (measure) => {
-                                archiveMeasurements.push(measure);
-                            },
                         },
                         relay,
                         command,
@@ -1062,7 +865,6 @@ const run = async (
                                       kernel,
                                       parallel,
                                       evaluation,
-                                      archiveBytes(),
                                   ),
                               },
                           }
@@ -1081,7 +883,6 @@ const run = async (
                                 kernel,
                                 parallel,
                                 evaluation,
-                                archiveBytes(),
                             ),
                         };
                     // A malformed request is refused before the operation
@@ -1127,33 +928,26 @@ const run = async (
     }
 };
 
-// A verification of a poll's outcome from its archive alone, which holds
-// no participant state: the discovery of the transcripts to try, or the
-// verification of one of them, each in a fresh worker. The page names the
+// A verification of a poll's outcome from the relay's public records alone,
+// in a fresh worker that holds no participant state. The page names the
 // poll's identity, and the module refuses a poll of another runtime.
 type VerificationCommand = Readonly<{
-    operation: 'discover-transcripts' | 'verify-transcript';
+    operation: 'verify-outcome';
     poll: string;
+    relay: string;
     module: string;
-    archive: WorkerArchive;
     identity: WorkerCommand['identity'];
-    transcript?: ArchiveReference;
 }>;
 
 const isVerification = (
     command: WorkerCommand | VerificationCommand,
-): command is VerificationCommand =>
-    command.operation === 'discover-transcripts' ||
-    command.operation === 'verify-transcript';
+): command is VerificationCommand => command.operation === 'verify-outcome';
 
 const isWellFormedVerification = (command: VerificationCommand) =>
     typeof command.poll === 'string' &&
     /^[0-9a-f]{128}$/u.test(command.poll) &&
-    httpUrl(command.module) !== undefined &&
-    typeof command.archive === 'object' &&
-    isArchive(command.archive) &&
-    (command.operation === 'verify-transcript') ===
-        (command.transcript !== undefined);
+    isBaseUrl(command.relay) &&
+    httpUrl(command.module) !== undefined;
 
 // A verification's public working storage, named apart from every
 // participant's, since no participant namespace has a full stop.
@@ -1172,29 +966,7 @@ const runVerification = async (
         return refused('unsupported browser');
     if (!isWellFormedVerification(command)) return refused('invalid request');
     let helpers: ParallelHelpers | undefined;
-    const archiveMeasurements: (() => number)[] = [];
-    const archiveBytes = () =>
-        archiveMeasurements.reduce((total, measure) => total + measure(), 0);
     try {
-        const transcript =
-            command.transcript === undefined
-                ? undefined
-                : transcriptReference(command.transcript);
-        const opened = await openArchive(
-            command.archive,
-            command.poll,
-            (measure) => {
-                archiveMeasurements.push(measure);
-            },
-        );
-        if (transcript === undefined)
-            return {
-                status: 'completed',
-                details: {
-                    poll: command.poll,
-                    transcripts: await transcriptsToVerify(opened),
-                },
-            };
         const moduleBytes = await fetchModule(
             command.module,
             command.identity.module,
@@ -1218,9 +990,7 @@ const runVerification = async (
                         'The participant module refused its memory plan.',
                     );
                 try {
-                    // Every read comes from the transcript; no relay serves
-                    // the verification.
-                    const outcome = await verifyTranscript(
+                    const outcome = await verifyPublishedOutcome(
                         {
                             namespace,
                             kernel,
@@ -1229,27 +999,15 @@ const runVerification = async (
                             runtime,
                             limits: readParticipantLimits(kernel),
                         },
-                        {
-                            base: '',
-                            transcript: await openTranscriptSource(
-                                opened,
-                                transcript,
-                            ),
-                        },
+                        { base: command.relay },
                         fromHexadecimal(command.poll),
                     );
                     return {
                         status: 'completed',
                         details: {
                             poll: command.poll,
-                            transcript,
                             ...outcome,
-                            memory: operationMemory(
-                                kernel,
-                                parallel,
-                                true,
-                                archiveBytes(),
-                            ),
+                            memory: operationMemory(kernel, parallel, true),
                         },
                     };
                 } finally {
@@ -1258,7 +1016,6 @@ const runVerification = async (
             },
         );
     } catch (error) {
-        if (error instanceof InvalidRequest) return refused('invalid request');
         return {
             status: 'pending',
             cause: pendingCause(error),

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    delayedArchiveDiscoveryViews,
     orderedPublicationReference,
     publicationOriginOrderViews,
     singleValidBodyOriginViews,
@@ -82,17 +81,6 @@ describe('observable publication and non-revocation', () => {
         expect(() =>
             retainPublishedValue(first, { ...second, slot: 'another-slot' }),
         ).toThrow();
-    });
-
-    it('does not turn eventual archive discovery into a complete finite close view', () => {
-        const [empty, delayed] = delayedArchiveDiscoveryViews();
-        expect(empty.closingView).toEqual(delayed.closingView);
-        expect(empty.durableRecordsBeforeClose).not.toEqual(
-            delayed.durableRecordsBeforeClose,
-        );
-        expect(delayed.deliveredAfterClose).toEqual(
-            delayed.durableRecordsBeforeClose,
-        );
     });
 
     it('preserves the first ordered outer publication despite later conflict and invalid proof data', () => {

@@ -420,15 +420,3 @@ export const instantiateFoundationKernelCommandRuntime = async (
         expectedKernelSha256Hex,
     );
 };
-
-// Instantiates kernel bytes the caller already holds after checking their
-// SHA-256 digest, so a bundle that fetches the kernel itself carries no file
-// system access.
-export const instantiatePinnedFoundationKernelCommandRuntime = (
-    bytes: ArrayBuffer,
-    expectedKernelSha256Hex: string,
-): Promise<FoundationKernelCommandRuntime> =>
-    instantiateKernelCommandRuntime(
-        bytes,
-        requireKernelIntegrityExpectation({ expectedKernelSha256Hex }),
-    );

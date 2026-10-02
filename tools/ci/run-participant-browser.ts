@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
     cp,
     mkdir,
@@ -16,7 +16,6 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { availableParallelism, freemem } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { registrationFile } from '#packages/sdk/src/participant/worker/roster.js';
@@ -24,21 +23,12 @@ import {
     evaluatedTargetName,
     namespacedName,
     participantDatabaseName,
-    setupCacheName,
 } from '#packages/sdk/src/participant/worker/storage.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
-import { openPublicArchive } from '#packages/sdk/src/public-archive.js';
-import {
-    createTranscriptFileEncoder,
-    readTranscript,
-    retrieveTranscript,
-} from '#packages/sdk/src/transcript-archive.js';
-import { createFoundationCeremonyRuntimeLoader } from '#packages/wasm/src/index.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-import { startPublicArchiveReplica } from '#tools/archive/public-archive-replica.js';
 import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
@@ -66,7 +56,6 @@ import {
     readProtocolProcesses,
     sumProtocolProcessTree,
 } from '#tools/ci/protocol-process-memory.js';
-import { directoryArchiveStore } from '#tools/ci/protocol-public-archive.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 
 // Runs a browser cohort of the selected profile through the maintained
@@ -101,8 +90,6 @@ const profileOption = '--profile';
 const basePortOption = '--base-port=';
 const memoryPressureOption = '--memory-pressure';
 const sequentialOption = '--sequential';
-const prepopulateOption = '--prepopulate-archive';
-const preserveProfilesOption = '--preserve-profiles';
 const allArguments = process.argv.slice(2).filter((value) => value !== '--');
 const foreignPoll = allArguments
     .find((value) => value.startsWith(foreignOption))
@@ -110,8 +97,6 @@ const foreignPoll = allArguments
 const profiling = allArguments.includes(profileOption);
 const memoryPressure = allArguments.includes(memoryPressureOption);
 const sequential = allArguments.includes(sequentialOption);
-const prepopulateArchive = allArguments.includes(prepopulateOption);
-const preserveProfiles = allArguments.includes(preserveProfilesOption);
 const basePortArgument = allArguments
     .find((value) => value.startsWith(basePortOption))
     ?.slice(basePortOption.length);
@@ -121,8 +106,6 @@ const commandArguments = allArguments.filter(
         value !== profileOption &&
         value !== memoryPressureOption &&
         value !== sequentialOption &&
-        value !== prepopulateOption &&
-        value !== preserveProfilesOption &&
         !value.startsWith(basePortOption),
 );
 const mode =
@@ -145,14 +128,6 @@ assert.ok(
 assert.ok(
     !sequential || mode === 'plain',
     'Only an ordinary plain run selects sequential execution.',
-);
-assert.ok(
-    !preserveProfiles || mode === 'plain',
-    'Only an ordinary run preserves completed profiles for a subsequent exact-build comparison.',
-);
-assert.ok(
-    !prepopulateArchive || mode !== 'rosters',
-    'Archive prepopulation selects one roster.',
 );
 assert.ok(
     (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
@@ -222,10 +197,6 @@ type Relay = Readonly<{
     // The halting client a participant's origin serves instead of the
     // runtime's page and worker while one is set.
     halting: Map<number, HaltingClient>;
-    // The archive every honest page configures once the replicas run.
-    archive: { configuration: string | undefined };
-    // Positions the relay serves no public record.
-    withheld: Set<number>;
     // The public records the relay delivered to each position, by name.
     delivered: Set<string>[];
     // Successfully served public payloads, by exact route, for cost accounting.
@@ -290,70 +261,22 @@ const participantDatabase = participantDatabaseName(participantNamespace);
 
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
-// beside the packaged module and kernel, and names the archive once its
-// replicas run. The page also runs the SDK's standalone verifier for the
-// poll and archive the runner names.
+// beside the packaged module and kernel. The page also runs the SDK's
+// standalone verifier for the poll the runner names, from the same relay.
 const participantPage = `<!doctype html><meta charset="utf-8"><title>Participant</title><script type="module">
 import { openParticipant, verifyOutcome } from '/sdk/index.js';
-const bytes = (value) => Uint8Array.from(value.match(/../g), (byte) => Number.parseInt(byte, 16));
-window.verifyOutcome = (poll, archive) =>
-    verifyOutcome({
-        poll,
-        archive: {
-            faultBound: archive.faultBound,
-            replicas: archive.replicas.map((replica) => ({
-                baseUrl: replica.baseUrl,
-                verificationKey: bytes(replica.verificationKey),
-            })),
-        },
-    });
-window.runParticipant = async (operation, parameters) => {
-    const response = await fetch('/archive.json', { cache: 'no-store' });
-    const archive = response.ok ? await response.json() : undefined;
-    return openParticipant({
-        namespace: ${JSON.stringify(participantNamespace)},
-        relay: new URL('./', location.href).href,
-        ...(archive === undefined
-            ? {}
-            : {
-                  archive: {
-                      faultBound: archive.faultBound,
-                      replicas: archive.replicas.map((replica) => ({
-                          baseUrl: replica.baseUrl,
-                          verificationKey: bytes(replica.verificationKey),
-                      })),
-                  },
-              }),
-    }).run({ operation, parameters });
-};
+const relay = new URL('./', location.href).href;
+window.verifyOutcome = (poll) => verifyOutcome({ poll, relay });
+window.runParticipant = (operation, parameters) =>
+    openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay }).run({ operation, parameters });
 </script>`;
 
 // A patched client's page checks the patched worker against the digest it
-// names and sends the SDK's commands, claiming the runtime's identity. A
-// halting client stands in for an honest page, so it also names the archive
-// as that page does, with the foundation kernel the SDK pins.
-const clientPage = (
-    runtime: ParticipantRuntime,
-    workerDigest: string,
-    namesArchive: boolean,
-) =>
+// names and sends the SDK's commands, claiming the runtime's identity.
+const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
     `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
-const runtime = ${JSON.stringify({
-        identity: runtime.identity,
-        worker: workerDigest,
-        ...(namesArchive
-            ? {
-                  kernelSha256: createHash('sha256')
-                      .update(runtime.kernel)
-                      .digest('hex'),
-              }
-            : {}),
-    })};
+const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
-    const configuration = runtime.kernelSha256 === undefined
-        ? undefined
-        : await fetch('/archive.json', { cache: 'no-store' });
-    const archive = configuration?.ok ? await configuration.json() : undefined;
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
     const digest = Array.from(
@@ -383,19 +306,6 @@ window.runParticipant = async (operation, parameters) => {
             relay: location.origin + '/',
             module: location.origin + '/sdk/participant.wasm',
             identity: runtime.identity,
-            ...(archive === undefined
-                ? {}
-                : {
-                      archive: {
-                          faultBound: archive.faultBound,
-                          replicas: archive.replicas.map((replica) => ({
-                              baseUrl: new URL(replica.baseUrl).href,
-                              verificationKey: replica.verificationKey,
-                          })),
-                          kernel: location.origin + '/sdk/sealed-lattice-kernel.wasm',
-                          kernelSha256: runtime.kernelSha256,
-                      },
-                  }),
         });
     });
 };
@@ -422,8 +332,6 @@ const startRelay = async (
     );
     const refused = new Set<string>();
     const earlyContributionRecords: string[] = [];
-    const archive: Relay['archive'] = { configuration: undefined };
-    const withheld = new Set<number>();
     const delivered = Array.from(
         { length: originCount },
         () => new Set<string>(),
@@ -443,7 +351,7 @@ const startRelay = async (
                     bytes: Buffer.from(
                         client === undefined
                             ? participantPage
-                            : clientPage(runtime, client.workerDigest, false),
+                            : clientPage(runtime, client.workerDigest),
                     ),
                 },
             ],
@@ -474,7 +382,6 @@ const startRelay = async (
         origin: string,
         served: ReadonlyMap<string, Readonly<{ type: string; bytes: Buffer }>>,
         view: ReadonlyMap<string, ViewedRecord>,
-        servesPublic: boolean,
         delivering: Set<string>,
         ownRecords: string,
         request: IncomingMessage,
@@ -507,23 +414,8 @@ const startRelay = async (
                 response.end(asset.bytes);
                 return;
             }
-            if (
-                url.pathname === '/archive.json' &&
-                archive.configuration !== undefined
-            ) {
-                response.writeHead(200, {
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-store',
-                });
-                response.end(archive.configuration);
-                return;
-            }
             const name = url.pathname.slice('/public/'.length);
-            if (
-                servesPublic &&
-                url.pathname.startsWith('/public/') &&
-                publicPath.test(name)
-            ) {
+            if (url.pathname.startsWith('/public/') && publicPath.test(name)) {
                 const file = path.join(records, name);
                 const viewed = view.get(name);
                 const bytes = !view.has(name)
@@ -635,7 +527,7 @@ const startRelay = async (
                               {
                                   type: 'text/html',
                                   bytes: Buffer.from(
-                                      clientPage(runtime, client.digest, true),
+                                      clientPage(runtime, client.digest),
                                   ),
                               },
                           ],
@@ -648,7 +540,6 @@ const startRelay = async (
                           ],
                       ]),
                 views[position],
-                !withheld.has(position),
                 delivered[position],
                 ownRecords,
                 request,
@@ -671,8 +562,6 @@ const startRelay = async (
         refused,
         earlyContributionRecords,
         halting,
-        archive,
-        withheld,
         delivered,
         reads,
     };
@@ -837,8 +726,6 @@ await runWithLocalRunLog(
             ...(foreignPoll === undefined ? [] : [foreignOption + foreignPoll]),
             ...(profiling ? [profileOption] : []),
             ...(sequential ? [sequentialOption] : []),
-            ...(prepopulateArchive ? [prepopulateOption] : []),
-            ...(preserveProfiles ? [preserveProfilesOption] : []),
             ...(memoryPressure ? [memoryPressureOption] : []),
             ...(basePortArgument === undefined
                 ? []
@@ -902,12 +789,10 @@ await runWithLocalRunLog(
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
-        // Failed runs retain their original profiles for same-runtime
-        // continuation; a completed run may retire its test profiles.
+        // Failed runs retain their original profiles; a completed run deletes
+        // its test profiles.
         let profiles: string | undefined;
         let guardFailure: Error | undefined;
-        // The local archive replicas, available from setup verification on.
-        const archiveServers: { close(): Promise<void> }[] = [];
         let completed = false;
         const ordinaryOperations: ParticipantOperationMeasurement[] = [];
         const transfers = Array.from(
@@ -1240,12 +1125,6 @@ await runWithLocalRunLog(
                     const interruptedOperation = recovery
                         ? recoveryOperations.get(position)
                         : undefined;
-                    // The page names the archive that the relay configures
-                    // when the operation starts, unless it is the corrupt
-                    // client's.
-                    const namesArchive =
-                        relay?.archive.configuration !== undefined &&
-                        corrupt?.position !== position;
                     // The deadline ends with its operation so that no timer
                     // outlives the run.
                     const deadline = new AbortController();
@@ -1295,46 +1174,13 @@ await runWithLocalRunLog(
                     }
                     if (guardFailure !== undefined) throw guardFailure;
                     const milliseconds = performance.now() - started;
-                    if (result.status === 'completed') {
-                        const { archiveBytes } = result.details.memory as {
-                            archiveBytes: number;
-                        };
-                        assert.ok(
-                            Number.isSafeInteger(archiveBytes) &&
-                                archiveBytes >= 0,
-                        );
-                        if (
-                            ['verify-setup', 'archive', 'transcripts'].includes(
-                                operation,
-                            )
-                        )
-                            assert.equal(
-                                archiveBytes > 0,
-                                namesArchive,
-                                'Archive memory must match the configured client at position ' +
-                                    String(position) +
-                                    ' during ' +
-                                    operation +
-                                    '.',
-                            );
-                    }
                     if (
                         recovery &&
                         result.status === 'completed' &&
-                        !['status', 'transcripts'].includes(operation)
+                        operation !== 'status'
                     )
                         recoveryOperations.delete(position);
                     if (mode === 'plain' && result.status === 'completed') {
-                        if (operation === 'release' || operation === 'archive')
-                            assert.deepEqual(
-                                publicRecordReads().filter(({ route }) =>
-                                    /^contribution-\d+\/(?:polynomial-\d+|proof)\.bin$/u.test(
-                                        route,
-                                    ),
-                                ),
-                                [],
-                                'A healthy recording visit must reuse its authenticated setup archive.',
-                            );
                         const details = result.details as unknown as Pick<
                             ParticipantOperationMeasurement,
                             'generation' | 'memory' | 'evaluationMemory'
@@ -1484,23 +1330,6 @@ await runWithLocalRunLog(
 })`),
                     ),
                 );
-            // Deletes a participant's public caches from its own page: the
-            // verified setup's aggregate and the target it evaluated, which
-            // hold no authority. Its next visit rebuilds them by verifying
-            // the setup and evaluating the target again from whatever public
-            // records it reads.
-            const discardPublicCaches = async (position: number) => {
-                const names = [setupCacheName, evaluatedTargetName].map(
-                    (name) => namespacedName(name, participantNamespace),
-                );
-                await inBrowser(position, undefined, (chrome) =>
-                    chrome.evaluate(`Promise.all(${JSON.stringify(names)}.map((name) => new Promise((resolve, reject) => {
-    const deleting = indexedDB.deleteDatabase(name);
-    deleting.onsuccess = () => resolve(undefined);
-    deleting.onerror = () => reject(deleting.error);
-})))`),
-                );
-            };
             // Ends a participant's browser as a crash would. Its committed
             // state is what the next launch finds, while Chrome's own
             // shutdown can outlast its deadline when other browsers write.
@@ -1926,232 +1755,6 @@ await runWithLocalRunLog(
             // Every member casts a counted ballot, the organizer closes
             // at the current time after every ballot, the first quorum of
             // members vote on the target, and every member releases.
-            const servicePrepopulation: Readonly<Record<string, unknown>>[] =
-                [];
-            const createArchives = async () => {
-                assert.ok(relay);
-                const archiveKeys = Array.from(
-                    { length: mode === 'plain' ? 3 : 4 },
-                    () => generateKeyPairSync('ml-dsa-65').privateKey,
-                );
-                const archivePolicy = {
-                    faultBound: 1,
-                    verificationKeys: archiveKeys.map((key) =>
-                        createPublicKey(key)
-                            .export({ type: 'spki', format: 'der' })
-                            .subarray(-1952),
-                    ),
-                };
-                const archiveRuntime =
-                    await createFoundationCeremonyRuntimeLoader(
-                        pathToFileURL(
-                            path.join(
-                                root,
-                                'packages/sdk/dist/sealed-lattice-kernel.wasm',
-                            ),
-                        ),
-                        {
-                            expectedKernelSha256Hex: createHash('sha256')
-                                .update(runtime.kernel)
-                                .digest('hex'),
-                        },
-                    )();
-                let silentBase: string | undefined;
-                if (mode !== 'plain') {
-                    const silentReplica = createServer(() => {
-                        /* A replica that accepts connections and never answers. */
-                    });
-                    archiveServers.push({
-                        close: () =>
-                            new Promise<void>((resolve) => {
-                                silentReplica.closeAllConnections();
-                                silentReplica.close(() => resolve());
-                            }),
-                    });
-                    await new Promise<void>((resolve) => {
-                        silentReplica.listen(0, '127.0.0.1', resolve);
-                    });
-                    const silentAddress = silentReplica.address();
-                    assert.ok(
-                        silentAddress !== null &&
-                            typeof silentAddress === 'object',
-                    );
-                    silentBase = `http://127.0.0.1:${String(silentAddress.port)}/`;
-                }
-                const archiveContext = organizer.poll;
-                assert.ok(typeof archiveContext === 'string');
-                const replicas: Awaited<
-                    ReturnType<typeof startPublicArchiveReplica>
-                >[] = [];
-                let serviceTransfer: ParticipantTransfer | undefined;
-                for (const [replicaPosition, privateKey] of archiveKeys
-                    .slice(0, 3)
-                    .entries()) {
-                    const replica = await startPublicArchiveReplica({
-                        directory: path.join(
-                            profileDirectory,
-                            'archive',
-                            String(replicaPosition),
-                        ),
-                        context: archiveContext,
-                        policy: archivePolicy,
-                        replicaPosition,
-                        privateKey,
-                        runtime: archiveRuntime,
-                        maximumRecords: 65_536,
-                        maximumTotalBytes: 4_294_967_291,
-                        maximumStoredRecords: 65_536,
-                        maximumStoredBytes: 4_294_967_291,
-                        observeRequest: (incoming, response) => {
-                            const position = positions.find(
-                                (candidate) =>
-                                    incoming.headers.origin ===
-                                    origin(candidate),
-                            );
-                            if (position !== undefined)
-                                observeParticipantTransfer(
-                                    incoming,
-                                    response,
-                                    transfers[position],
-                                );
-                            else if (serviceTransfer !== undefined)
-                                observeParticipantTransfer(
-                                    incoming,
-                                    response,
-                                    serviceTransfer,
-                                );
-                        },
-                    });
-                    archiveServers.push(replica);
-                    replicas.push(replica);
-                }
-                relay.archive.configuration = JSON.stringify({
-                    faultBound: archivePolicy.faultBound,
-                    replicas: [
-                        ...replicas.map((replica) => replica.baseUrl),
-                        ...(silentBase === undefined ? [] : [silentBase]),
-                    ].map((baseUrl, replicaPosition) => ({
-                        baseUrl,
-                        verificationKey:
-                            archivePolicy.verificationKeys[
-                                replicaPosition
-                            ].toString('hex'),
-                    })),
-                });
-                const populated = new Set<string>();
-                const prepopulate = async () => {
-                    if (!prepopulateArchive) return;
-                    // Only copy public relay bytes. Participants still encode
-                    // the bytes their verifiers consume, check the resulting
-                    // identities, and require complete-closure acknowledgements.
-                    const files = (
-                        await readdir(publicDirectory, {
-                            recursive: true,
-                            withFileTypes: true,
-                        })
-                    )
-                        .filter((entry) => entry.isFile())
-                        .map((entry) =>
-                            path
-                                .relative(
-                                    publicDirectory,
-                                    path.join(entry.parentPath, entry.name),
-                                )
-                                .split(path.sep)
-                                .join('/'),
-                        )
-                        .filter((name) => !populated.has(name))
-                        .sort();
-                    let bytes = 0;
-                    for (const name of files) {
-                        assert.match(name, publicPath);
-                        bytes += (await stat(path.join(publicDirectory, name)))
-                            .size;
-                    }
-                    if (files.length === 0) return;
-                    assert.ok(bytes <= 4_294_967_291);
-                    const clients = replicas.map((replica, position) =>
-                        openPublicArchive(archiveRuntime, {
-                            context: archiveContext,
-                            faultBound: 0,
-                            replicas: [
-                                {
-                                    baseUrl: replica.baseUrl,
-                                    verificationKey:
-                                        archivePolicy.verificationKeys[
-                                            position
-                                        ],
-                                },
-                            ],
-                            maximumRecords: 65_536,
-                            maximumTotalBytes: 4_294_967_291,
-                        }),
-                    );
-                    const started = performance.now();
-                    serviceTransfer = emptyParticipantTransfer();
-                    try {
-                        for (const name of files) {
-                            const encoder = createTranscriptFileEncoder(
-                                clients[0],
-                                name,
-                                async (record) => {
-                                    await Promise.all(
-                                        clients.map((client) =>
-                                            client.store(
-                                                record,
-                                                AbortSignal.timeout(60_000),
-                                            ),
-                                        ),
-                                    );
-                                },
-                            );
-                            const file = await open(
-                                path.join(publicDirectory, name),
-                                'r',
-                            );
-                            try {
-                                const chunk = Buffer.alloc(1 << 20);
-                                for (;;) {
-                                    const { bytesRead } =
-                                        await file.read(chunk);
-                                    if (bytesRead === 0) break;
-                                    await encoder.write(
-                                        chunk.subarray(0, bytesRead),
-                                    );
-                                }
-                                await encoder.finish();
-                                populated.add(name);
-                            } finally {
-                                await file.close();
-                            }
-                        }
-                        const measurement = {
-                            files: files.length,
-                            sourceDiskReadBytes: bytes,
-                            milliseconds: performance.now() - started,
-                            transfers: serviceTransfer,
-                        };
-                        servicePrepopulation.push(measurement);
-                        log.writeEvent({
-                            eventType: 'service-archive-prepopulation',
-                            details: measurement,
-                        });
-                    } finally {
-                        serviceTransfer = undefined;
-                    }
-                };
-                await prepopulate();
-                return {
-                    archiveContext,
-                    archivePolicy,
-                    archiveRuntime,
-                    replicas,
-                    prepopulate,
-                };
-            };
-            let startedArchives: ReturnType<typeof createArchives> | undefined;
-            const startArchives = () => (startedArchives ??= createArchives());
-            let ordinaryArchive: Record<string, unknown> | undefined;
             const completeRoster = async (
                 members: readonly Member[],
                 recordIds: readonly string[],
@@ -2201,7 +1804,6 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
-                if (mode === 'plain') await startArchives();
                 await Promise.all(
                     members.map(async (member) => {
                         const verified = await act(member, 'verify-setup');
@@ -2268,9 +1870,6 @@ await runWithLocalRunLog(
                             assert.equal(voted.validBallots, participantCount);
                         }),
                 );
-                const archiveStorage =
-                    mode === 'plain' ? await startArchives() : undefined;
-                await archiveStorage?.prepopulate();
                 for (const details of await Promise.all(
                     members.map((member) => act(member, 'release')),
                 )) {
@@ -2286,17 +1885,6 @@ await runWithLocalRunLog(
                     combined.identifiers,
                     rankedIdentifiers(scores),
                 );
-                if (mode === 'plain') {
-                    await archiveStorage?.prepopulate();
-                    ordinaryArchive = await act(
-                        members[members.length - 1],
-                        'archive',
-                    );
-                    assert.deepEqual(
-                        ordinaryArchive.identifiers,
-                        combined.identifiers,
-                    );
-                }
                 return combined.identifiers as readonly string[];
             };
             if (mode === 'plain') {
@@ -2327,7 +1915,6 @@ await runWithLocalRunLog(
                             optionCount,
                             mode,
                             sequential,
-                            servicePrepopulation,
                             poll: organizer.poll,
                             recordIds: plainRecordIds,
                             runtimeIdentity: runtime.identity.runtime,
@@ -2336,7 +1923,6 @@ await runWithLocalRunLog(
                             topCount,
                             profiled: profiling,
                             memoryPressures,
-                            archive: ordinaryArchive,
                             transfers,
                             sampledResources,
                             unmeasured: [
@@ -2792,7 +2378,6 @@ await runWithLocalRunLog(
                 ...[...contributors].reverse(),
             ].find((position) => honest(position) && position !== lateSetup);
             assert.ok(verificationReplay !== undefined);
-            await startArchives();
             await Promise.all(
                 positions
                     .filter((position) => position !== lateSetup)
@@ -3565,107 +3150,6 @@ await runWithLocalRunLog(
             for (const view of views)
                 for (const name of omission) view.delete(name);
             await depart(0);
-            // The three local archive replicas and a fourth that never answers
-            // have run since setup verification, with fault bound one. Every
-            // honest page configures them. A participant's first release archives
-            // the certified target closure it read before it draws release
-            // randomness.
-            const { archiveContext, archivePolicy, archiveRuntime, replicas } =
-                await startArchives();
-            await (await startArchives()).prepopulate();
-            type ArchivedTranscript = Readonly<{
-                transcript: Readonly<{ identity: string; byteLength: number }>;
-                parts: number;
-                records: number;
-                byteLength: number;
-            }>;
-            // The routes of an archived transcript, which the runner
-            // retrieves from the replicas that still run.
-            const transcriptRoutes = async (
-                index: ArchivedTranscript['transcript'],
-            ) => {
-                const archive = openPublicArchive(archiveRuntime, {
-                    context: archiveContext,
-                    faultBound: archivePolicy.faultBound,
-                    replicas: replicas.map((replica, replicaPosition) => ({
-                        baseUrl: replica.baseUrl,
-                        verificationKey:
-                            archivePolicy.verificationKeys[replicaPosition],
-                    })),
-                    maximumRecords: 65_536,
-                    maximumTotalBytes: 4_294_967_291,
-                });
-                const records = new Map<string, Uint8Array>();
-                const store = {
-                    get: (identity: string) =>
-                        Promise.resolve(records.get(identity)),
-                    put: (identity: string, bytes: Uint8Array) => {
-                        records.set(identity, bytes);
-                        return Promise.resolve();
-                    },
-                };
-                await retrieveTranscript(archive, index, store);
-                const { routes } = await readTranscript(
-                    archive,
-                    index,
-                    store,
-                    () =>
-                        Promise.resolve({
-                            write: () => Promise.resolve(),
-                            close: () => Promise.resolve(),
-                        }),
-                );
-                return new Set(routes);
-            };
-            // A participant archives, with the target closure and with its
-            // outcome's transcript, every record a fresh reader verifies the
-            // setup and the close from, whatever its own retained state
-            // lets it skip: each roster registration's header, signature,
-            // public key and proof, each setup contributor's opening, body
-            // and proof, and the close intent and proposal.
-            const assertClosureRoutes = async (
-                index: ArchivedTranscript['transcript'],
-            ) => {
-                const routes = await transcriptRoutes(index);
-                const expected = [
-                    'poll-definition.bin',
-                    'poll-signature.bin',
-                    'proposal.bin',
-                    'proposal-signature.bin',
-                    ...recordIds.flatMap((id) =>
-                        Object.values(registrationFile).map(
-                            (file) => `registration/${id}/${file}`,
-                        ),
-                    ),
-                    'close/intent.bin',
-                    'close/proposal.bin',
-                    'completion/target.bin',
-                    ...positions.flatMap((position) => [
-                        `contribution-${String(position)}/confirmation.bin`,
-                        `contribution-${String(position)}/confirmation-signature.bin`,
-                    ]),
-                ];
-                for (
-                    let contributor = 0;
-                    contributor < setupContributorCount;
-                    contributor++
-                ) {
-                    const directory = `contribution-${String(contributor)}`;
-                    for (const file of await readdir(
-                        path.join(publicDirectory, directory),
-                    ))
-                        if (!file.startsWith('confirmation'))
-                            expected.push(directory + '/' + file);
-                }
-                for (const route of expected)
-                    assert.ok(
-                        routes.has(route),
-                        'The archived transcript lacks ' + route + '.',
-                    );
-            };
-            // The certified target closures the first release visits
-            // archived, by the position that archived each.
-            const closures = new Map<number, ArchivedTranscript>();
             const remaining = positions.filter(
                 (position) => !departed.has(position),
             );
@@ -3688,22 +3172,9 @@ await runWithLocalRunLog(
                       resumedFrom: Readonly<{ generation: number }>;
                   }>
                 | undefined;
-            // The participant that released from an archived closure, and
-            // that closure's index.
-            let closureReader:
-                | Readonly<{
-                      reader: number;
-                      transcript: Readonly<{
-                          identity: string;
-                          byteLength: number;
-                      }>;
-                  }>
-                | undefined;
             if (noResult) {
                 // The certified target carries no result, so each remaining
-                // participant's release certifies it, archives its closure
-                // and creates nothing. The corrupt client's page names no
-                // archive, so its release archives nothing.
+                // participant's release certifies it and creates nothing.
                 for (const position of remaining) {
                     const details = await run(position, 'release');
                     assert.equal(details.generation, predecessor(position));
@@ -3712,26 +3183,14 @@ await runWithLocalRunLog(
                     assert.equal(details.resumedFrom, undefined);
                     // A non-voter reads its status from the certified target.
                     assert.equal(details.ballotStatus, ballotStatus(position));
-                    if (position === corrupt?.position) {
-                        assert.equal(details.closure, undefined);
-                        continue;
-                    }
-                    assert.ok(details.closure !== undefined);
-                    closures.set(
-                        position,
-                        details.closure as ArchivedTranscript,
-                    );
                 }
-                for (const archived of closures.values())
-                    await assertClosureRoutes(archived.transcript);
             } else {
                 // Every remaining participant certifies the target from the
-                // published votes, archives the certified target closure it
-                // read, retains the seed of its release randomness, and
-                // generates and signs its release share. The first remaining
-                // voter's browser closes while it generates its share from the
-                // retained seed, and its next visit generates it again from
-                // that seed.
+                // published votes, retains the seed of its release
+                // randomness, and generates and signs its release share. The
+                // first remaining voter's browser closes while it generates
+                // its share from the retained seed, and its next visit
+                // generates it again from that seed.
                 const interruptedPosition = remaining.find((position) =>
                     voters.includes(position),
                 );
@@ -3770,8 +3229,6 @@ await runWithLocalRunLog(
                         details.ballotStatus,
                         ballotStatus(interruptedPosition),
                     );
-                    // Its first visit archived the closure before the seed.
-                    assert.equal(details.closure, undefined);
                     assert.equal(
                         details.predecessor,
                         predecessor(interruptedPosition),
@@ -3803,79 +3260,22 @@ await runWithLocalRunLog(
                                 details.predecessor,
                                 predecessor(position),
                             );
-                            assert.ok(details.closure !== undefined);
-                            closures.set(
-                                position,
-                                details.closure as ArchivedTranscript,
-                            );
                         }),
                 ]);
                 interruption = { position: interruptedPosition, resumedFrom };
-                for (const archived of closures.values())
-                    await assertClosureRoutes(archived.transcript);
-                // The combining participant, which the relay then serves no
-                // public record and which has lost its public caches, finds
-                // the archived closures among the archive's hints and
-                // releases from the replicas alone, verifying the setup and
-                // evaluating the target again from a closure. It halts at
-                // every generation after its target lock, the last with its
-                // signed release before delivery, which its next visit only
-                // delivers.
-                await discardPublicCaches(combiningPosition);
-                let hint: Readonly<{ identity: string; byteLength: number }>;
-                relay.withheld.add(combiningPosition);
-                try {
-                    await expectStatus(combiningPosition, 'release', 'pending');
-                    const hints = (await run(combiningPosition, 'transcripts'))
-                        .transcripts as readonly Readonly<{
-                        identity: string;
-                        byteLength: number;
-                    }>[];
-                    for (const archived of closures.values())
-                        assert.ok(
-                            hints.some(
-                                (index) =>
-                                    index.identity ===
-                                    archived.transcript.identity,
-                            ),
-                        );
-                    assert.ok(hints.length > 0);
-                    const certifiedHints = new Set(
-                        [...closures.values()].map(
-                            (closure) => closure.transcript.identity,
-                        ),
+                // The combining participant halts at every generation after
+                // its target lock, the last with its signed release before
+                // delivery, which its next visit only delivers.
+                for (const generation of [26, 27, 28, 29])
+                    await interrupt(
+                        combiningPosition,
+                        'release',
+                        {},
+                        generation,
                     );
-                    for (const index of hints.filter(
-                        (candidate) => !certifiedHints.has(candidate.identity),
-                    ))
-                        await expectStatus(
-                            combiningPosition,
-                            'release',
-                            'pending',
-                            { transcript: index },
-                        );
-                    const candidate = hints.find((index) =>
-                        certifiedHints.has(index.identity),
-                    );
-                    assert.ok(candidate !== undefined);
-                    hint = candidate;
-                    for (const generation of [26, 27, 28, 29])
-                        await interrupt(
-                            combiningPosition,
-                            'release',
-                            { transcript: hint },
-                            generation,
-                        );
-                } finally {
-                    relay.withheld.delete(combiningPosition);
-                }
                 const delivered = await run(combiningPosition, 'release');
                 assert.equal(delivered.generation, 29);
                 assert.equal(delivered.encrypted, undefined);
-                closureReader = {
-                    reader: combiningPosition,
-                    transcript: hint,
-                };
                 // A release after the completed close spent the target
                 // purpose, and its lock retains the own ballot's status.
                 for (const position of nonVoters) {
@@ -4179,17 +3579,6 @@ await runWithLocalRunLog(
                             view,
                         );
                         unreadOutcomes.push({ family, encrypted, identifiers });
-                        await probe(
-                            position,
-                            view,
-                            family === 'contributions'
-                                ? 'An opening was refused.'
-                                : 'The close intent was refused.',
-                            'archive',
-                        );
-                        // Restore the cache from genuine inputs before testing
-                        // another family's cached-result behavior.
-                        await run(position, 'result');
                     } else await probe(position, view, reason);
                     foreignProbes.push({
                         family,
@@ -4203,15 +3592,12 @@ await runWithLocalRunLog(
                 position: number,
                 forgeries: ReadonlyMap<string, ViewedRecord>,
                 reason: string,
-                operation: 'result' | 'archive' = 'result',
             ) => {
-                if (operation === 'archive')
-                    await discardPublicCaches(position);
                 deliveredRecords[position].clear();
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
                 try {
-                    assert.deepEqual(await request(position, operation), {
+                    assert.deepEqual(await request(position, 'result'), {
                         status: 'pending',
                         cause: 'public input',
                         reason,
@@ -4235,13 +3621,12 @@ await runWithLocalRunLog(
             const probeUnread = async (
                 position: number,
                 forgeries: ReadonlyMap<string, ViewedRecord>,
-                operation: 'result' | 'archive' = 'result',
             ) => {
                 deliveredRecords[position].clear();
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
                 try {
-                    const result = await run(position, operation);
+                    const result = await run(position, 'result');
                     assert.ok(
                         [...forgeries.keys()].every(
                             (name) => !deliveredRecords[position].has(name),
@@ -4290,18 +3675,6 @@ await runWithLocalRunLog(
                 result.identifiers,
                 noResult ? [] : expectedResult,
             );
-            // The archive path actually streams the held body through the
-            // barrier verifier and recorder despite these wire substitutions.
-            // The other probe above consumes the altered body and refuses it.
-            for (const { forgeries } of ballotForgeries.slice(0, 2)) {
-                const reused = await probeUnread(
-                    combiningPosition,
-                    forgeries,
-                    'archive',
-                );
-                assert.equal(reused.encrypted, result.encrypted);
-                assert.deepEqual(reused.identifiers, result.identifiers);
-            }
             for (const { family, encrypted, identifiers } of unreadOutcomes) {
                 assert.equal(encrypted, result.encrypted, family);
                 assert.deepEqual(identifiers, result.identifiers, family);
@@ -4349,9 +3722,9 @@ await runWithLocalRunLog(
                 eventType: 'participant-damaged-target-recomputed',
                 details: { position: voteProbe },
             });
-            // A retained roster need not read an old proof. The archive
-            // probe clears public caches to force owning verification of
-            // the newly consumed proof instead of authenticated reuse.
+            // A retained roster need not read an old proof, so a result
+            // visit served a changed registration proof combines the same
+            // outcome without reading it.
             const changedProofName = `registration/${recordIds[0]}/${registrationFile.proof}`;
             const changedProof = await readFile(
                 path.join(publicDirectory, changedProofName),
@@ -4364,67 +3737,6 @@ await runWithLocalRunLog(
             );
             assert.equal(cachedProofResult.encrypted, result.encrypted);
             assert.deepEqual(cachedProofResult.identifiers, result.identifiers);
-            await probe(
-                voteProbe,
-                proofForgery,
-                'The published registrations are not the retained roster.',
-                'archive',
-            );
-            // The combining participant archives the transcript of its
-            // verified outcome to three local replicas and a fourth that
-            // never answers, with fault bound one. After one of the three
-            // stops, the voter probe, served no public record by the relay,
-            // finds the transcript among the archive's hints and reaches the
-            // same outcome from the replicas alone.
-            const archived = await run(combiningPosition, 'archive');
-            assert.equal(archived.encrypted, result.encrypted);
-            assert.deepEqual(archived.identifiers, result.identifiers);
-            const transcript = archived.transcript as Readonly<{
-                identity: string;
-                byteLength: number;
-            }>;
-            await assertClosureRoutes(transcript);
-            let listed:
-                | readonly Readonly<{ identity: string; byteLength: number }>[]
-                | undefined;
-            await replicas[0].close();
-            relay.withheld.add(voteProbe);
-            // The voter probe has lost its public caches too, so it verifies
-            // the setup and evaluates the target again from the transcript.
-            await discardPublicCaches(voteProbe);
-            try {
-                await expectStatus(voteProbe, 'result', 'pending');
-                listed = (await run(voteProbe, 'transcripts'))
-                    .transcripts as NonNullable<typeof listed>;
-                assert.ok(
-                    listed.some(
-                        (index) => index.identity === transcript.identity,
-                    ),
-                );
-                // Every hint is tried until one verifies; a forged one
-                // leaves the participant pending.
-                let fromArchive: Record<string, unknown> | undefined;
-                for (const index of listed) {
-                    const attempt = await request(voteProbe, 'result', {
-                        transcript: index,
-                    });
-                    if (attempt.status === 'completed') {
-                        fromArchive = attempt.details;
-                        break;
-                    }
-                    assert.equal(attempt.status, 'pending');
-                }
-                assert.ok(fromArchive !== undefined);
-                assert.equal(fromArchive.encrypted, result.encrypted);
-                assert.deepEqual(fromArchive.identifiers, result.identifiers);
-            } finally {
-                relay.withheld.delete(voteProbe);
-            }
-            const archiveConfiguration = relay.archive.configuration;
-            relay.archive.configuration = undefined;
-            assert.ok(
-                listed !== undefined && archiveConfiguration !== undefined,
-            );
             // Altered retained state stops an honest participant at its next
             // visit, and the stop outlasts restoring the exact bytes. The
             // first byte of its first data record is flipped from its own
@@ -4470,117 +3782,48 @@ await runWithLocalRunLog(
             // The stopped participant, and the registrant left out of the
             // roster, which holds no part in the poll, verify the outcome
             // with the standalone verifier from the poll's identity and the
-            // surviving replicas alone, while the relay serves them no
-            // public record.
+            // relay's public records alone.
             for (const position of [stoppedPosition, leftOut]) {
-                relay.withheld.add(position);
-                try {
-                    const started = performance.now();
-                    const deadline = new AbortController();
-                    const verification = await inBrowser(
-                        position,
-                        undefined,
-                        (chrome) =>
-                            Promise.race([
-                                chrome.evaluate(
-                                    `window.verifyOutcome(${JSON.stringify(organizer.poll)}, ${archiveConfiguration})`,
-                                ),
-                                delay(operationMilliseconds, undefined, {
-                                    signal: deadline.signal,
-                                }).then(() => {
-                                    throw new Error(
-                                        'Standalone verification deadline.',
-                                    );
-                                }),
-                            ]).finally(() => deadline.abort()),
-                    );
-                    const verified = verification as WorkerResult;
-                    log.writeEvent({
-                        eventType: 'standalone-verification',
-                        details: {
-                            position,
-                            milliseconds: performance.now() - started,
-                            ...(verified.status === 'completed'
-                                ? {
-                                      transcript: verified.details.transcript,
-                                      memory: verified.details.memory,
-                                  }
-                                : { result: verified }),
-                        },
-                    });
-                    assert.ok(
-                        verified.status === 'completed',
-                        'The standalone verification did not complete.',
-                    );
-                    assert.equal(verified.details.poll, organizer.poll);
-                    assert.equal(verified.details.encrypted, result.encrypted);
-                    assert.deepEqual(
-                        verified.details.identifiers,
-                        result.identifiers,
-                    );
-                    const { identity } = verified.details
-                        .transcript as Readonly<{
-                        identity: string;
-                    }>;
-                    assert.ok(
-                        listed.some((index) => index.identity === identity),
-                    );
-                } finally {
-                    relay.withheld.delete(position);
-                }
-            }
-            // Browser fault checks are over. Remove every source-service
-            // endpoint before the independent archive retrieval; only the
-            // surviving archive replicas can supply these public records.
-            for (const server of relay.servers) {
-                server.closeAllConnections();
-                await new Promise<void>((resolve, reject) =>
-                    server.close((error) =>
-                        error === undefined ? resolve() : reject(error),
-                    ),
-                );
-            }
-            // Keep exactly the participant-published records retrieved
-            // after source-service and replica loss.
-            // The independent reader materializes these content-bound
-            // closures afresh and has no participant verification cache.
-            const independentClosure = [...closures.values()][0].transcript;
-            const independentArchive = openPublicArchive(archiveRuntime, {
-                context: archiveContext,
-                faultBound: archivePolicy.faultBound,
-                replicas: replicas.map((replica, position) => ({
-                    baseUrl: replica.baseUrl,
-                    verificationKey: archivePolicy.verificationKeys[position],
-                })),
-                maximumRecords: 65_536,
-                maximumTotalBytes: 4_294_967_291,
-            });
-            for (const [stage, index] of [
-                ['closure', independentClosure],
-                ['terminal', transcript],
-            ] as const) {
                 const started = performance.now();
-                const parts = await retrieveTranscript(
-                    independentArchive,
-                    index,
-                    await directoryArchiveStore(
-                        path.join(
-                            log.artifactDirectoryPath,
-                            'archived-' + stage,
-                        ),
-                    ),
+                const deadline = new AbortController();
+                const verification = await inBrowser(
+                    position,
+                    undefined,
+                    (chrome) =>
+                        Promise.race([
+                            chrome.evaluate(
+                                `window.verifyOutcome(${JSON.stringify(organizer.poll)})`,
+                            ),
+                            delay(operationMilliseconds, undefined, {
+                                signal: deadline.signal,
+                            }).then(() => {
+                                throw new Error(
+                                    'Standalone verification deadline.',
+                                );
+                            }),
+                        ]).finally(() => deadline.abort()),
                 );
+                const verified = verification as WorkerResult;
                 log.writeEvent({
-                    eventType: 'independent-archive-retrieval',
+                    eventType: 'standalone-verification',
                     details: {
-                        stage,
-                        index,
-                        parts,
+                        position,
                         milliseconds: performance.now() - started,
-                        unavailableReplica: 0,
-                        sourceServiceUnavailable: true,
+                        ...(verified.status === 'completed'
+                            ? { memory: verified.details.memory }
+                            : { result: verified }),
                     },
                 });
+                assert.ok(
+                    verified.status === 'completed',
+                    'The standalone verification did not complete.',
+                );
+                assert.equal(verified.details.poll, organizer.poll);
+                assert.equal(verified.details.encrypted, result.encrypted);
+                assert.deepEqual(
+                    verified.details.identifiers,
+                    result.identifiers,
+                );
             }
             const scope = [
                 mode === 'empty'
@@ -4611,7 +3854,7 @@ await runWithLocalRunLog(
                     : [
                           `Relay views that serve another poll's ${prose(foreignProbes.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
                       ]),
-                `Three local archive replicas and a fourth that never answers run with fault bound one from setup verification on. Successful setup verification archives its complete public inputs and binds that index into the participant's authenticated root. Each remaining participant's first release visit archives the certified target closure before any release randomness, reusing those authenticated setup dependencies${noResult ? '' : ', and the last remaining participant, served no public record by the relay, finds a closure among the archive hints and releases from the replicas alone'}. The last remaining participant then archives the transcript of its verified outcome; after one of the three replicas stops, another remaining participant that the relay serves no public record finds the transcript among the archive hints and reaches the same outcome from the replicas alone. Once that participant's altered state stops it, it and the registrant left out of the roster each verify the same outcome with the standalone verifier from the poll's identity and the surviving replicas alone, served no public record by the relay. Local replicas on one host are not independent fault domains.`,
+                "Once its altered retained state stops a participant, that participant and the registrant left out of the roster each verify the same outcome with the standalone verifier from the poll's identity and the relay's public records alone.",
             ].join(' ');
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
@@ -4691,30 +3934,6 @@ await runWithLocalRunLog(
                             position: stoppedPosition,
                             record: alteredRecord,
                         },
-                        closures: {
-                            archived: Object.fromEntries(
-                                [...closures].map(([position, closure]) => [
-                                    position,
-                                    closure.transcript,
-                                ]),
-                            ),
-                            ...closureReader,
-                        },
-                        archive: {
-                            archivist: combiningPosition,
-                            transcript: archived.transcript,
-                            parts: archived.parts,
-                            records: archived.records,
-                            byteLength: archived.byteLength,
-                            unavailableReplica: 0,
-                            silentReplica: 3,
-                            reader: voteProbe,
-                            hints: listed.length,
-                            independentClosure,
-                            verificationKeys: archivePolicy.verificationKeys
-                                .slice(0, 3)
-                                .map((key) => key.toString('hex')),
-                        },
                         foreignPoll:
                             foreign === undefined
                                 ? undefined
@@ -4741,23 +3960,18 @@ await runWithLocalRunLog(
             sampling = false;
             await monitor;
             await browsers.closeAll();
-            for (const server of archiveServers) await server.close();
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));
             log.writeEvent({
                 eventType: 'participant-transfer-summary',
                 details: { participants: transfers },
             });
-            if (profiles !== undefined && completed && !preserveProfiles)
+            if (profiles !== undefined && completed)
                 await rm(profiles, { recursive: true, force: true });
             else if (profiles !== undefined)
                 log.writeEvent({
                     eventType: 'participant-checkpoint-preserved',
-                    details: {
-                        directory: profiles,
-                        runtimeBound: true,
-                        completed,
-                    },
+                    details: { directory: profiles, runtimeBound: true },
                 });
             await releaseLock();
         }

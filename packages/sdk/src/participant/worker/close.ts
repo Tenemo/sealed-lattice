@@ -481,9 +481,8 @@ export const proposalResponses = (
 };
 
 // Supplies only a body named by this root's authenticated custody. The
-// caller still runs its owning public verifiers and records every consumed
-// byte for archival. A missing listed record is state loss, never a reason
-// to fetch a replacement from the relay.
+// caller still runs its owning public verifiers. A missing listed record is
+// state loss, never a reason to fetch a replacement from the relay.
 export const heldBallotBody = async (
     session: CloseSession,
     author: number,

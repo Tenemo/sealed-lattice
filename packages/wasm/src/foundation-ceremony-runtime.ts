@@ -12,15 +12,9 @@ import {
 } from './foundation-contract.js';
 import {
     instantiateFoundationKernelCommandRuntime,
-    instantiatePinnedFoundationKernelCommandRuntime,
     type FoundationKernelCommandRuntime,
     type FoundationKernelLoaderOptions,
 } from './foundation-kernel/kernel-runtime.js';
-import type {
-    ArchivePolicy,
-    ArchiveReference,
-    PublicArchiveRuntime,
-} from './public-archive-contract.js';
 
 export type FoundationManifestInput = Readonly<{
     readonly displayTitle: string;
@@ -74,44 +68,38 @@ export type FoundationActionContextVerification = VerificationResult<{
     readonly suiteId: ProtocolHash;
 }>;
 
-export type FoundationCeremonyRuntime = PublicArchiveRuntime &
-    Readonly<{
-        measureResources: FoundationKernelCommandRuntime['measureResources'];
-        encodeActionDefinition(input: {
-            readonly topCount: number;
-        }): CanonicalFoundationActionDefinition;
-        encodeBoardPolicy(input: {
-            readonly boardOriginIdentifier: string;
-        }): CanonicalFoundationBoardPolicy;
-        encodeManifest(
-            input: FoundationManifestInput,
-        ): CanonicalFoundationManifest;
-        verifyActionContext(input: {
-            readonly actionIdentifier: string;
-            readonly canonicalActionDefinitionBytes: Uint8Array;
-            readonly canonicalBoardPolicyBytes: Uint8Array;
-            readonly canonicalManifestBytes: Uint8Array;
-            readonly canonicalRosterBytes: Uint8Array;
-            readonly ceremonyIdentifier: string;
-            readonly expectedCeremonyContextHash: ProtocolHash;
-            readonly expectedSuiteId: ProtocolHash;
-        }): FoundationActionContextVerification;
-        verifyActionDefinition(
-            canonicalBytes: Uint8Array,
-        ): FoundationActionDefinitionVerification;
-        verifyBoardPolicy(
-            canonicalBytes: Uint8Array,
-        ): FoundationBoardPolicyVerification;
-        verifyCeremonyContext(input: {
-            readonly canonicalManifestBytes: Uint8Array;
-            readonly canonicalRosterBytes: Uint8Array;
-            readonly ceremonyIdentifier: string;
-            readonly expectedSuiteId: ProtocolHash;
-        }): FoundationCeremonyContextVerification;
-        verifyManifest(
-            canonicalBytes: Uint8Array,
-        ): FoundationManifestVerification;
-    }>;
+export type FoundationCeremonyRuntime = Readonly<{
+    encodeActionDefinition(input: {
+        readonly topCount: number;
+    }): CanonicalFoundationActionDefinition;
+    encodeBoardPolicy(input: {
+        readonly boardOriginIdentifier: string;
+    }): CanonicalFoundationBoardPolicy;
+    encodeManifest(input: FoundationManifestInput): CanonicalFoundationManifest;
+    verifyActionContext(input: {
+        readonly actionIdentifier: string;
+        readonly canonicalActionDefinitionBytes: Uint8Array;
+        readonly canonicalBoardPolicyBytes: Uint8Array;
+        readonly canonicalManifestBytes: Uint8Array;
+        readonly canonicalRosterBytes: Uint8Array;
+        readonly ceremonyIdentifier: string;
+        readonly expectedCeremonyContextHash: ProtocolHash;
+        readonly expectedSuiteId: ProtocolHash;
+    }): FoundationActionContextVerification;
+    verifyActionDefinition(
+        canonicalBytes: Uint8Array,
+    ): FoundationActionDefinitionVerification;
+    verifyBoardPolicy(
+        canonicalBytes: Uint8Array,
+    ): FoundationBoardPolicyVerification;
+    verifyCeremonyContext(input: {
+        readonly canonicalManifestBytes: Uint8Array;
+        readonly canonicalRosterBytes: Uint8Array;
+        readonly ceremonyIdentifier: string;
+        readonly expectedSuiteId: ProtocolHash;
+    }): FoundationCeremonyContextVerification;
+    verifyManifest(canonicalBytes: Uint8Array): FoundationManifestVerification;
+}>;
 
 const encodeManifestCommand = 1;
 const verifyManifestCommand = 2;
@@ -121,7 +109,6 @@ const encodeBoardPolicyCommand = 5;
 const verifyBoardPolicyCommand = 6;
 const verifyCeremonyContextCommand = 7;
 const verifyActionContextCommand = 8;
-const maximumUnsigned64 = (1n << 64n) - 1n;
 const hashByteLength = 64;
 const maximumCopiedBufferByteLength = maximumFoundationCopiedBufferByteLength;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
@@ -181,21 +168,6 @@ class BinaryWriter {
         }
         const bytes = new Uint8Array(2);
         new DataView(bytes.buffer).setUint16(0, value, true);
-        this.writeFixed(bytes);
-    }
-
-    writeU64(value: unknown, fieldName: string): void {
-        if (
-            typeof value !== 'bigint' ||
-            value < 0n ||
-            value > maximumUnsigned64
-        ) {
-            throw new RangeError(
-                `${fieldName} must fit an unsigned 64-bit integer.`,
-            );
-        }
-        const bytes = new Uint8Array(8);
-        new DataView(bytes.buffer).setBigUint64(0, value, true);
         this.writeFixed(bytes);
     }
 
@@ -266,28 +238,6 @@ class BinaryReader {
 
     readU8(): number {
         return this.readFixed(1)[0] ?? 0;
-    }
-
-    readU16(): number {
-        const bytes = this.readFixed(2);
-        return new DataView(bytes.buffer, bytes.byteOffset, 2).getUint16(
-            0,
-            true,
-        );
-    }
-
-    readU64(): number {
-        const bytes = this.readFixed(8);
-        const value = new DataView(
-            bytes.buffer,
-            bytes.byteOffset,
-            8,
-        ).getBigUint64(0, true);
-        if (value > BigInt(Number.MAX_SAFE_INTEGER))
-            throw new RangeError(
-                'Archive length exceeds the safe integer range.',
-            );
-        return Number(value);
     }
 
     readBytes(): Uint8Array {
@@ -391,83 +341,6 @@ const canonicalInputCommand = (
 export const openFoundationCeremonyRuntime = (
     kernel: FoundationKernelCommandRuntime,
 ): FoundationCeremonyRuntime => ({
-    measureResources: kernel.measureResources,
-    encodeArchiveRecord: (record) => {
-        if (
-            record.dependencies.length > 4096 ||
-            record.payload.byteLength > 1_048_576 ||
-            record.purpose.length > 128
-        )
-            throw new RangeError('Archive record exceeds its bound.');
-        const request = new BinaryWriter();
-        request.writeU8(9);
-        request.writeProtocolHash(record.context, 'context');
-        request.writeString(record.purpose, 'purpose');
-        request.writeU16(record.dependencies.length, 'dependencies.length');
-        for (const reference of record.dependencies)
-            writeArchiveReference(request, reference);
-        request.writeBytes(record.payload, 'payload');
-        return executeCommand(kernel, request, (reader) => {
-            const identity = readHash(reader);
-            const bytes = Uint8Array.from(reader.readBytes());
-            return {
-                reference: { identity, byteLength: bytes.byteLength },
-                bytes,
-            };
-        });
-    },
-    readArchiveRecord: (context, reference, bytes) => {
-        const request = new BinaryWriter();
-        request.writeU8(10);
-        request.writeProtocolHash(context, 'context');
-        writeArchiveReference(request, reference);
-        if (bytes.byteLength !== reference.byteLength)
-            throw new RangeError('Archive record length does not match.');
-        request.writeBytes(bytes, 'bytes');
-        return executeCommand(kernel, request, (reader) => {
-            const purpose = reader.readString();
-            const count = reader.readU16();
-            const dependencies = Array.from({ length: count }, () => ({
-                identity: readHash(reader),
-                byteLength: reader.readU64(),
-            }));
-            return {
-                context,
-                purpose,
-                dependencies,
-                payload: Uint8Array.from(reader.readBytes()),
-            };
-        });
-    },
-    archiveReceiptMessage: (policy, context, root) =>
-        executeCommand(
-            kernel,
-            archiveReceiptRequest(11, policy, context, root),
-            (reader) => Uint8Array.from(reader.readFixed(64)),
-        ),
-    authenticateArchiveAcknowledgements: (
-        policy,
-        context,
-        root,
-        acknowledgements,
-    ) => {
-        if (acknowledgements.length > 32)
-            throw new RangeError('Too many archive acknowledgements.');
-        const request = archiveReceiptRequest(12, policy, context, root);
-        request.writeU16(acknowledgements.length, 'acknowledgements.length');
-        for (const acknowledgement of acknowledgements) {
-            request.writeU16(
-                acknowledgement.replicaPosition,
-                'replicaPosition',
-            );
-            if (acknowledgement.signature.byteLength > 3309)
-                throw new RangeError('Archive signature exceeds its bound.');
-            request.writeBytes(acknowledgement.signature, 'signature');
-        }
-        return executeCommand(kernel, request, (reader) =>
-            Array.from({ length: reader.readU16() }, () => reader.readU16()),
-        );
-    },
     encodeActionDefinition: (input) => {
         const request = new BinaryWriter();
         request.writeU8(encodeActionDefinitionCommand);
@@ -620,58 +493,6 @@ export const openFoundationCeremonyRuntime = (
                 })),
         ),
 });
-
-const writeArchiveReference = (
-    writer: BinaryWriter,
-    reference: ArchiveReference,
-): void => {
-    if (
-        !Number.isSafeInteger(reference.byteLength) ||
-        reference.byteLength < 1 ||
-        reference.byteLength > 1_572_864
-    )
-        throw new RangeError('Archive reference length exceeds its bound.');
-    writer.writeProtocolHash(reference.identity, 'identity');
-    writer.writeU64(BigInt(reference.byteLength), 'byteLength');
-};
-
-const archiveReceiptRequest = (
-    command: number,
-    policy: ArchivePolicy,
-    context: ProtocolHash,
-    root: ArchiveReference,
-): BinaryWriter => {
-    if (policy.verificationKeys.length > 32)
-        throw new RangeError('Too many archive replicas.');
-    const request = new BinaryWriter();
-    request.writeU8(command);
-    request.writeU16(policy.faultBound, 'faultBound');
-    request.writeU16(policy.verificationKeys.length, 'verificationKeys.length');
-    for (const key of policy.verificationKeys) {
-        if (key.byteLength !== 1952)
-            throw new RangeError('Archive verification key length is invalid.');
-        // The command carries fixed-width keys; their bytes are not protocol hashes.
-        request.writeFixed(key);
-    }
-    request.writeProtocolHash(context, 'context');
-    writeArchiveReference(request, root);
-    return request;
-};
-
-/**
- * Opens the foundation runtime over kernel bytes the caller fetched, after
- * checking them against the SHA-256 digest its build recorded.
- */
-export const openPinnedFoundationCeremonyRuntime = async (
-    bytes: ArrayBuffer,
-    expectedKernelSha256Hex: string,
-): Promise<FoundationCeremonyRuntime> =>
-    openFoundationCeremonyRuntime(
-        await instantiatePinnedFoundationKernelCommandRuntime(
-            bytes,
-            expectedKernelSha256Hex,
-        ),
-    );
 
 export const createFoundationCeremonyRuntimeLoader = (
     foundationKernelUrl: URL,

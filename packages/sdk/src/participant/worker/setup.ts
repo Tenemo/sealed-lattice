@@ -1,14 +1,8 @@
-import type { ArchiveReference } from '@sealed-lattice/wasm';
-
 import { readParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
     readUnsigned32,
-    readUnsigned64,
-    fromHexadecimal,
-    hexadecimal,
-    unsigned64,
     unsigned32,
 } from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
@@ -28,7 +22,7 @@ import {
 } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { readKernel, ResourceFailure, writeSetupInput } from './kernel.js';
-import { readPublic, recordPublic, streamPublic } from './public.js';
+import { readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
     addedReferences,
@@ -59,12 +53,9 @@ import { awaitLater, namespacedName, setupCacheName } from './storage.js';
 // chunk it reads back. Only the complete verified setup lets the module emit
 // the retained setup reference, and a later visit restores the verified
 // setup from that reference while the cache holds the final aggregate. A
-// recording visit may reuse the input archive bound into the same root when
-// setup first verified. Without that binding it records a complete fresh
-// verification, including every registration proof. A verifier without
-// participant state verifies the same records from the poll's identity
-// alone, every registration proof included, and keeps the aggregate in its
-// own working cache.
+// verifier without participant state verifies the same records from the
+// poll's identity alone, every registration proof included, and keeps the
+// aggregate in its own working cache.
 
 const cacheStore = 'aggregate';
 
@@ -452,9 +443,8 @@ type SetupInventory = Readonly<{ bytes: Uint8Array; retained: boolean }>;
 // Verifies every confirmation of the inventory under the verified roster,
 // recording each one's bytes, and builds the commitment inventory that
 // leaves the module ready for the openings.
-const verifyConfirmations = async (
+const verifyConfirmations = (
     context: PublicProfileContext,
-    relay: PublicRelay,
     inventory: SetupInventory,
 ) => {
     const { kernel, profile } = context;
@@ -477,18 +467,6 @@ const verifyConfirmations = async (
         writeSetupInput(kernel, confirmation);
         if (kernel.setup_confirmation(confirmation.length) !== 0)
             throw refuse('The setup verifier refused a confirmation.');
-        const directory = contributionDirectory(position);
-        const bodyEnd = 4 + profile.contribution.confirmationBodyBytes;
-        await recordPublic(
-            relay,
-            directory + 'confirmation.bin',
-            confirmation.subarray(4, bodyEnd),
-        );
-        await recordPublic(
-            relay,
-            directory + 'confirmation-signature.bin',
-            confirmation.subarray(bodyEnd),
-        );
     }
     if (kernel.setup_inventory_finish() !== 1)
         throw refuse('The setup verifier refused the inventory.');
@@ -548,26 +526,15 @@ const verifySetupInventory = async (
         pollSignature,
         recordIds.length,
     );
-    // A visit that records its reads verifies every registration again, its
-    // signature and proof too, so that its transcript holds them; any other
-    // visit restores the verified registrations from the retained roster
-    // and the published headers and keys.
-    const recording = relay.recorder !== undefined;
-    if (recording) {
-        writeSetupInput(kernel, begin);
-        if (kernel.setup_roster_begin(begin.length) !== 0)
-            throw new Error('The setup verifier refused the retained poll.');
-    } else {
-        const input = concatenate(
-            begin,
-            await readDataKind(context, manifest, dataKind.retainedRoster),
-        );
-        sessionInput(context, input);
-        if (
-            kernel.setup_roster_begin_retained(begin.length, input.length) !== 0
-        )
-            throw new Error('The setup verifier refused the retained roster.');
-    }
+    // The verified registrations are restored from the retained roster and
+    // the published headers and keys.
+    const input = concatenate(
+        begin,
+        await readDataKind(context, manifest, dataKind.retainedRoster),
+    );
+    sessionInput(context, input);
+    if (kernel.setup_roster_begin_retained(begin.length, input.length) !== 0)
+        throw new Error('The setup verifier refused the retained roster.');
     await streamRegistrations(
         relay,
         recordIds,
@@ -583,7 +550,7 @@ const verifySetupInventory = async (
                 ) === 0
             );
         },
-        !recording,
+        true,
     );
     const proposalSignature = await readDataKind(
         context,
@@ -598,14 +565,7 @@ const verifySetupInventory = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained roster.',
         );
-    await verifyConfirmations(context, relay, inventory);
-    for (const [name, bytes] of [
-        ['poll-definition.bin', definition],
-        ['poll-signature.bin', pollSignature],
-        ['proposal.bin', proposal],
-        ['proposal-signature.bin', proposalSignature],
-    ] as const)
-        await recordPublic(relay, name, bytes);
+    verifyConfirmations(context, inventory);
 };
 
 // Verifies the complete setup behind the given confirmations and has the
@@ -676,11 +636,9 @@ export const verifySetup = async (
 };
 
 // Makes sure the cache holds the final aggregate that work after the setup
-// reads. A recording visit imports the setup input archive from the private
-// root when available. A missing aggregate, or a recording visit without
-// that binding, verifies the complete setup again, which rewrites the cache
-// and must reproduce the retained setup reference. Returns whether this
-// instance performed the complete verification.
+// reads. A missing aggregate verifies the complete setup again, which
+// rewrites the cache and must reproduce the retained setup reference.
+// Returns whether this instance performed the complete verification.
 export const ensureFinalAggregate = async (
     session: ParticipantSession,
     relay: PublicRelay,
@@ -688,21 +646,7 @@ export const ensureFinalAggregate = async (
     if (session.root.head.generation < 12)
         throw new Error('No setup reference is retained.');
     const { context, root } = session;
-    if (await holdsFinalAggregate(context)) {
-        if (relay.recorder === undefined) return false;
-        const index = await readDataKind(
-            context,
-            root.manifest,
-            dataKind.setupArchive,
-        );
-        if (index.length !== 0) {
-            await relay.recorder.reuse({
-                identity: hexadecimal(index.subarray(0, 64)),
-                byteLength: Number(readUnsigned64(index, 64)),
-            });
-            return false;
-        }
-    }
+    if (await holdsFinalAggregate(context)) return false;
     const reference = await verifyCompleteSetup(session, relay, {
         bytes: await readDataKind(
             context,
@@ -731,22 +675,14 @@ export const restoreSetup = async (
 ) => {
     if (await ensureFinalAggregate(session, relay)) return;
     const { context, root } = session;
-    // ensureFinalAggregate either recorded a fresh complete verification or
-    // imported this participant's authenticated setup archive. These reads
-    // still validate the retained roster and confirmations; their bytes are
-    // already present in that archive under the exact original identities.
-    await verifySetupInventory(
-        session,
-        { ...relay, recorder: undefined },
-        {
-            bytes: await readDataKind(
-                context,
-                root.manifest,
-                dataKind.setupInventory,
-            ),
-            retained: true,
-        },
-    );
+    await verifySetupInventory(session, relay, {
+        bytes: await readDataKind(
+            context,
+            root.manifest,
+            dataKind.setupInventory,
+        ),
+        retained: true,
+    });
     const reference = await readDataKind(
         context,
         root.manifest,
@@ -843,7 +779,7 @@ export const verifyPublicSetup = async (
     if (profile === undefined || proposal.length !== profile.proposalBytes)
         throw new PublicInputFailure('The poll names no supported profile.');
     const profiled = { ...context, profile };
-    await verifyConfirmations(profiled, relay, {
+    verifyConfirmations(profiled, {
         bytes: await readConfirmations(profiled, relay),
         retained: false,
     });
@@ -867,23 +803,11 @@ export const retainedSetupInventory = async (session: ParticipantSession) =>
 export const retainSetup = async (
     session: ParticipantSession,
     verified: VerifiedSetup,
-    archive?: ArchiveReference,
 ): Promise<AuthenticatedRoot> => {
     const { context, root } = session;
     const added = [
         { kind: dataKind.setupReference, bytes: verified.reference },
         { kind: dataKind.setupInventory, bytes: verified.inventory },
-        ...(archive === undefined
-            ? []
-            : [
-                  {
-                      kind: dataKind.setupArchive,
-                      bytes: concatenate(
-                          fromHexadecimal(archive.identity),
-                          unsigned64(BigInt(archive.byteLength)),
-                      ),
-                  },
-              ]),
     ];
     return commitRoot(context, root, {
         generation: 12,

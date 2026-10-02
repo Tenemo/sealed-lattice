@@ -42,6 +42,33 @@ export const runCertificateCustodyCounterexample = (
     };
 };
 
+// The full holders whose copies survive the corruption and disappearance
+// bounds, for a code that recovers from the given number of distinct holders:
+// one for a full copy.
+export const fullHolderRequirements = (
+    participantCount: number,
+    corruptionBound: number,
+    disappearanceBound: number,
+    fragmentThreshold: number,
+) => {
+    for (const value of [
+        participantCount,
+        corruptionBound,
+        disappearanceBound,
+        fragmentThreshold,
+    ])
+        if (!Number.isInteger(value) || value < 0)
+            throw new RangeError('Invalid holder count.');
+    if (fragmentThreshold === 0 || participantCount === 0)
+        throw new RangeError('Recovery requires a nonempty holder set.');
+    const requiredHolders =
+        corruptionBound + disappearanceBound + fragmentThreshold;
+    return {
+        requiredHolders,
+        possible: requiredHolders <= participantCount,
+    };
+};
+
 export const compileCertificateCustodyCensus = () => {
     const participantCount = 10;
     const corruptCount = Math.floor((participantCount - 1) / 3);

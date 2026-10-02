@@ -12,7 +12,6 @@ export type {
 export {
     createFoundationCeremonyRuntimeLoader,
     FoundationKernelCommandError,
-    openPinnedFoundationCeremonyRuntime,
 } from './foundation-ceremony-runtime.js';
 export type {
     CanonicalFoundationActionDefinition,
@@ -27,10 +26,3 @@ export type {
     FoundationManifestVerification,
 } from './foundation-ceremony-runtime.js';
 export type { FoundationKernelLoaderOptions } from './foundation-kernel/kernel-runtime.js';
-export type {
-    ArchiveAcknowledgement,
-    ArchivePolicy,
-    ArchiveRecord,
-    ArchiveReference,
-    PublicArchiveRuntime,
-} from './public-archive-contract.js';

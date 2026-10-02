@@ -84,9 +84,9 @@ impl CertificateCollector {
     }
 }
 
-/// Cryptographic certificate evidence. Durable publication of this certificate
-/// and its complete dependencies remains the existing archive/lifecycle step.
-/// An archive acknowledgement never replaces any predicate verified here.
+/// Cryptographic certificate evidence. Publication of this certificate and its
+/// complete dependencies to the relay remains a lifecycle step, and no relay
+/// receipt replaces any predicate verified here.
 pub struct VerifiedTargetCertificate {
     target: Arc<VerifiedEvaluationTarget>,
     votes: Vec<TargetVote>,

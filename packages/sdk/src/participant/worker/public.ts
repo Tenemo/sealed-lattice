@@ -1,5 +1,3 @@
-import type { ArchiveReference } from '@sealed-lattice/wasm';
-
 import { concatenate } from './bytes.js';
 import { describe, PublicInputFailure } from './context.js';
 
@@ -7,28 +5,12 @@ import { describe, PublicInputFailure } from './context.js';
 // bound checked before the bytes are kept, and every failure leaves the
 // participant pending. Owning verifiers decide acceptance.
 const transferChunkBytes = 1 << 20;
-export const networkMilliseconds = 60_000;
+const networkMilliseconds = 60_000;
 
 export type PublicRelay = Readonly<{
     // The relay's base URL, ending with a slash: it serves each record at
     // public/<name> and accepts publications at publish/<name>.
     base: string;
-    // Serves every read from an archived transcript instead of the relay.
-    transcript?: Readonly<{
-        read(
-            name: string,
-            maximum: number,
-            accept: (bytes: Uint8Array) => void | Promise<void>,
-        ): Promise<number>;
-    }>;
-    // Receives the bytes of every record the visit reads to its end.
-    recorder?: Readonly<{
-        reuse(index: ArchiveReference): Promise<void>;
-        open(name: string): Readonly<{
-            write(bytes: Uint8Array): Promise<void>;
-            finish(): Promise<void>;
-        }>;
-    }>;
 }>;
 
 const withDeadline = async <Value>(
@@ -105,31 +87,12 @@ export const readBounded = async (url: string, maximum: number) => {
     return concatenate(...parts);
 };
 
-export const streamPublic = async (
+export const streamPublic = (
     relay: PublicRelay,
     name: string,
     maximum: number,
     accept: (bytes: Uint8Array) => void | Promise<void>,
-) => {
-    const file = relay.recorder?.open(name);
-    const forward =
-        file === undefined
-            ? accept
-            : async (bytes: Uint8Array) => {
-                  await file.write(bytes);
-                  await accept(bytes);
-              };
-    const length =
-        relay.transcript === undefined
-            ? await streamBounded(
-                  relay.base + 'public/' + name,
-                  maximum,
-                  forward,
-              )
-            : await relay.transcript.read(name, maximum, forward);
-    await file?.finish();
-    return length;
-};
+) => streamBounded(relay.base + 'public/' + name, maximum, accept);
 
 export const readPublic = async (
     relay: PublicRelay,
@@ -141,19 +104,6 @@ export const readPublic = async (
         parts.push(bytes.slice());
     });
     return concatenate(...parts);
-};
-
-// Public bytes an owning verifier consumed from authenticated local custody
-// or produced itself still belong in the archive's public dependency closure.
-export const recordPublic = async (
-    relay: PublicRelay,
-    name: string,
-    bytes: Uint8Array,
-) => {
-    const record = relay.recorder?.open(name);
-    if (record === undefined) return;
-    await record.write(bytes);
-    await record.finish();
 };
 
 // Publishes bytes of one record at an offset. The relay keeps the first

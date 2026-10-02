@@ -25,7 +25,7 @@ const ordinary = (): ParticipantOperationMeasurement[] => {
         }
     operations.push({
         position: 2,
-        operation: 'archive',
+        operation: 'result',
         started: 150,
         finished: 158,
         memory: { workerBytes: 100, helperBytes: 70, arenaBytes: 30 },
@@ -35,7 +35,7 @@ const ordinary = (): ParticipantOperationMeasurement[] => {
 };
 
 describe('complete participant workflow measurements', () => {
-    it('charges archiving and combined instance memory, and distinguishes wall time from active work', () => {
+    it('charges the combined result and combined instance memory, and distinguishes wall time from active work', () => {
         const measured = summarizeParticipantWorkflow(ordinary(), 3, true);
         expect(measured.activeMilliseconds).toBe(98);
         expect(measured.sequentialCompletionMilliseconds).toBe(158);
@@ -44,6 +44,14 @@ describe('complete participant workflow measurements', () => {
                 (participant) => participant.activeMilliseconds,
             ),
         ).toEqual([30, 30, 38]);
+        expect(measured.participants[2].stages).toEqual({
+            registration: 6,
+            'roster and confirmation': 6,
+            ballot: 6,
+            closing: 6,
+            release: 6,
+            result: 8,
+        });
         expect(measured.participants[2].maximumStageMilliseconds).toBe(8);
         expect(
             measured.participants.map(
@@ -65,53 +73,62 @@ describe('complete participant workflow measurements', () => {
         expect(measured.cohortWallMilliseconds).toBe(6);
         expect(measured.activeMilliseconds).toBe(96);
     });
-    it('includes archive memory within each worker lifetime and leaves incomplete historical totals unknown', () => {
+    it("takes each participant's largest combined instance memory and refuses malformed memory reports", () => {
         const operations = ordinary().map((operation) => ({
             ...operation,
-            memory: {
-                workerBytes: 10,
-                helperBytes: 1,
+            memory: operation.memory ?? {
+                workerBytes: operation.started,
+                helperBytes: operation.position,
                 arenaBytes: 1,
-                ...operation.memory,
-                archiveBytes: operation.operation === 'archive' ? 80 : 0,
             },
-            ...(operation.evaluationMemory === undefined
-                ? {}
-                : {
-                      evaluationMemory: {
-                          ...operation.evaluationMemory,
-                          archiveBytes: 12,
-                      },
-                  }),
         }));
-        const measured = summarizeParticipantWorkflow(operations, 3, true);
         expect(
-            measured.participants.map(
-                (participant) => participant.completeKernelHelperArenaBytes,
+            summarizeParticipantWorkflow(operations, 3, true).participants.map(
+                (participant) => participant.combinedWorkerHelperArenaBytes,
             ),
-        ).toEqual([12, 12, 280]);
-        expect(measured.participants[2].combinedWorkerHelperArenaBytes).toBe(
-            240,
-        );
-        expect(
-            summarizeParticipantWorkflow(ordinary(), 3, true).participants[2]
-                .completeKernelHelperArenaBytes,
-        ).toBeNull();
-        expect(() =>
-            summarizeParticipantWorkflow(
-                operations.map((operation) => ({
-                    ...operation,
-                    memory: { ...operation.memory, archiveBytes: -1 },
-                })),
-                3,
-                true,
-            ),
-        ).toThrow();
+        ).toEqual([41, 92, 240]);
+        for (const malformed of [-1, 0.5, NaN, 2 ** 53]) {
+            expect(() =>
+                summarizeParticipantWorkflow(
+                    operations.map((operation) =>
+                        operation.position === 1 &&
+                        operation.operation === 'ballot'
+                            ? {
+                                  ...operation,
+                                  memory: {
+                                      ...operation.memory,
+                                      helperBytes: malformed,
+                                  },
+                              }
+                            : operation,
+                    ),
+                    3,
+                    true,
+                ),
+            ).toThrow();
+            expect(() =>
+                summarizeParticipantWorkflow(
+                    operations.map((operation) =>
+                        operation.evaluationMemory === undefined
+                            ? operation
+                            : {
+                                  ...operation,
+                                  evaluationMemory: {
+                                      ...operation.evaluationMemory,
+                                      arenaBytes: malformed,
+                                  },
+                              },
+                    ),
+                    3,
+                    true,
+                ),
+            ).toThrow();
+        }
     });
-    it('refuses omitted archiving, missing participant work and invalid intervals', () => {
+    it('refuses an unmeasured result, missing participant work, unclassified operations and invalid intervals', () => {
         expect(() =>
             summarizeParticipantWorkflow(ordinary().slice(0, -1), 3, true),
-        ).toThrow('archiving');
+        ).toThrow('The combined result was not measured.');
         expect(() =>
             summarizeParticipantWorkflow(
                 ordinary().filter(
@@ -120,7 +137,22 @@ describe('complete participant workflow measurements', () => {
                 3,
                 true,
             ),
-        ).toThrow('not measured');
+        ).toThrow('An ordinary participant stage was not measured: release');
+        expect(() =>
+            summarizeParticipantWorkflow(
+                [
+                    ...ordinary(),
+                    {
+                        position: 1,
+                        operation: 'status',
+                        started: 160,
+                        finished: 161,
+                    },
+                ],
+                3,
+                true,
+            ),
+        ).toThrow('Unclassified ordinary operation: status');
         expect(() =>
             summarizeParticipantWorkflow(
                 [

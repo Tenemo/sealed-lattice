@@ -5,8 +5,6 @@
             "entry": [
                 "tests/**/*.test.ts",
                 "tools/ci/sdk-package-tsdown.config.ts",
-                "tools/ci/resume-participant-release.ts",
-                "tools/ci/measure-archive-transfer.ts",
             ],
             "project": ["tests/**/*.ts", "tools/**/*.ts"],
         },

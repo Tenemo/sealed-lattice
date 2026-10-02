@@ -24,7 +24,6 @@ import {
     publishChunk,
     publishRecord,
     readPublic,
-    recordPublic,
     streamPublic,
 } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -248,21 +247,6 @@ export const certifyTarget = async (
     if (certified === undefined) {
         if (restored && refused) await discardEvaluation(context);
         throw new PublicInputFailure('The target votes are incomplete.');
-    }
-    // The evaluator supplies these exact certified bytes even when this
-    // visit restored its local target and never fetched the relay's copy.
-    // A fresh public reader checks them against its own recomputation.
-    if (relay.recorder !== undefined) {
-        const { kernel } = context;
-        await recordPublic(
-            relay,
-            completionDirectory + 'target.bin',
-            readKernel(
-                kernel,
-                kernel.evaluation_target_body_pointer(),
-                kernel.evaluation_target_body_length(),
-            ),
-        );
     }
     return words(certified)[0] === 1;
 };
@@ -556,15 +540,13 @@ const restoreSignedTarget = (context: ProfileContext, signed: TargetState) => {
 
 // Advances this participant's release to its signature. The owning setup
 // verifier must have verified the complete setup in this instance first.
-// Once the target is certified, and before any release randomness, the
-// visit may archive the certified target closure it read. Returns whether
-// the certified target carries a result to release, and the own ballot's
-// status in it: the signed target's, or else the one the finality work
-// reads from the certified target, which a locked release retains.
+// Returns whether the certified target carries a result to release, and the
+// own ballot's status in it: the signed target's, or else the one the
+// finality work reads from the certified target, which a locked release
+// retains.
 export const advanceRelease = async (
     session: ReleaseSession,
     relay: PublicRelay,
-    archiveClosure?: () => Promise<void>,
 ) => {
     const { close } = session;
     const { context } = close.participant;
@@ -582,7 +564,6 @@ export const advanceRelease = async (
         );
     }
     const encrypted = await certifyTarget(context, relay, evaluated.restored);
-    await archiveClosure?.();
     const ballotStatus =
         session.signed?.ballotStatus ?? certifiedBallotStatus(context);
     if (

@@ -14,7 +14,7 @@ const packageOutput = path.join(root, 'packages/sdk/dist');
 
 export type ParticipantRuntime = Readonly<{
     // The SDK entry that serves the participant API to the page, and the
-    // foundation kernel it ships beside it for archive records.
+    // foundation kernel its foundation functions load.
     sdk: Buffer;
     kernel: Buffer;
     module: Buffer;

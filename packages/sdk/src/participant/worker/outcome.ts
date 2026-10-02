@@ -5,7 +5,7 @@ import { StoragePending } from './storage.js';
 /**
  * Why a refused request changed nothing: the browser lacks a required
  * capability; the request is malformed or asks for something its parameters
- * or the application's configuration cannot supply; the delivered worker or
+ * cannot supply; the delivered worker or
  * module is not the runtime this SDK recorded; the namespace holds no
  * participant, or already holds one; the device lacks the storage an
  * enrollment needs; the participant belongs to another poll or another

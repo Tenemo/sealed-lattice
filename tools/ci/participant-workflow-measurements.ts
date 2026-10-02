@@ -10,13 +10,11 @@ export type ParticipantOperationMeasurement = Readonly<{
         workerBytes: number;
         helperBytes: number;
         arenaBytes: number;
-        archiveBytes?: number;
     }>;
     evaluationMemory?: Readonly<{
         workerBytes: number;
         helperBytes: number;
         arenaBytes: number;
-        archiveBytes?: number;
     }>;
 }>;
 
@@ -42,9 +40,8 @@ const stage = ({ operation, generation }: ParticipantOperationMeasurement) => {
     if (operation === 'close')
         return generation === 22 ? 'certification' : 'closing';
     if (operation === 'target') return 'certification';
-    if (operation === 'release') return 'release and certified archive';
-    if (operation === 'result' || operation === 'archive')
-        return 'terminal and transcript archive';
+    if (operation === 'release') return 'release';
+    if (operation === 'result') return 'result';
     throw new Error('Unclassified ordinary operation: ' + operation);
 };
 
@@ -67,8 +64,6 @@ export const summarizeParticipantWorkflow = (
         activeMilliseconds: number;
         stages: Record<string, number>;
         combinedWorkerHelperArenaBytes: number | undefined;
-        completeKernelHelperArenaBytes: number | undefined;
-        missingMemoryReports: boolean;
     };
     const byParticipant = Array.from(
         { length: participants },
@@ -76,8 +71,6 @@ export const summarizeParticipantWorkflow = (
             activeMilliseconds: 0,
             stages: {},
             combinedWorkerHelperArenaBytes: undefined,
-            completeKernelHelperArenaBytes: undefined,
-            missingMemoryReports: false,
         }),
     );
     for (const operation of ordered) {
@@ -104,8 +97,6 @@ export const summarizeParticipantWorkflow = (
             (participant.stages[name] ?? 0) + milliseconds;
         participant.activeMilliseconds += milliseconds;
         activeMilliseconds += milliseconds;
-        if (operation.memory === undefined)
-            participant.missingMemoryReports = true;
         for (const memory of [operation.memory, operation.evaluationMemory]) {
             if (memory === undefined) continue;
             const values = [
@@ -122,21 +113,6 @@ export const summarizeParticipantWorkflow = (
                 participant.combinedWorkerHelperArenaBytes ?? 0,
                 values.reduce((sum, value) => sum + value, 0),
             );
-            if (memory.archiveBytes === undefined)
-                participant.missingMemoryReports = true;
-            else {
-                assert.ok(
-                    Number.isSafeInteger(memory.archiveBytes) &&
-                        memory.archiveBytes >= 0,
-                );
-                participant.completeKernelHelperArenaBytes = Math.max(
-                    participant.completeKernelHelperArenaBytes ?? 0,
-                    values.reduce(
-                        (sum, value) => sum + value,
-                        memory.archiveBytes,
-                    ),
-                );
-            }
         }
     }
     for (const participant of byParticipant)
@@ -145,15 +121,15 @@ export const summarizeParticipantWorkflow = (
             'roster and confirmation',
             'ballot',
             'closing',
-            'release and certified archive',
+            'release',
         ])
             assert.ok(
                 required in participant.stages,
                 'An ordinary participant stage was not measured: ' + required,
             );
     assert.ok(
-        operations.some((operation) => operation.operation === 'archive'),
-        'Terminal archiving was not measured.',
+        operations.some((operation) => operation.operation === 'result'),
+        'The combined result was not measured.',
     );
     const workflowMilliseconds = lastFinished - ordered[0].started;
     return {
@@ -171,10 +147,7 @@ export const summarizeParticipantWorkflow = (
             ),
             combinedWorkerHelperArenaBytes:
                 participant.combinedWorkerHelperArenaBytes ?? null,
-            completeKernelHelperArenaBytes: participant.missingMemoryReports
-                ? null
-                : (participant.completeKernelHelperArenaBytes ?? null),
         })),
-        scope: 'Successful ordinary operations, including certified closure and terminal transcript archiving. Stage totals are accounting groups, not a measured visit partition: adjacent stages can coalesce, so the maximum stage is not the maximum visit. Browser launch and human delays are not part of active operation time. Combined worker/helper/arena memory preserves the earlier measurement definition. Complete kernel/helper/arena memory also includes archive foundation instances and is null if any operation lacks those reports. Separate evaluation and continuation workers run successively, so their totals are compared rather than added. These are module high-water totals; sampled browser-process memory additionally includes JavaScript and browser allocations.',
+        scope: 'Successful ordinary operations, including the combined result. Stage totals are accounting groups, not a measured visit partition: adjacent stages can coalesce, so the maximum stage is not the maximum visit. Browser launch and human delays are not part of active operation time. Combined worker/helper/arena memory covers participant-module linear memory in the worker and its helpers plus their shared arena. Separate evaluation and continuation workers run successively, so their totals are compared rather than added. These are module high-water totals; sampled browser-process memory additionally includes JavaScript and browser allocations.',
     };
 };
