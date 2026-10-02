@@ -50,11 +50,17 @@ export type ParticipantOptions = Readonly<{
     relay: string;
 }>;
 
-/** Creates a poll as its organizer, or joins a poll from its signed definition. Bytes are lower-case hexadecimal. */
+/**
+ * Creates a poll as its organizer from its question and option labels, or
+ * joins a poll from its signed definition. Bytes are lower-case hexadecimal.
+ */
 export type ParticipantEnrollment = Readonly<
     | {
           role: 'creator';
-          manifest: string;
+          question: string;
+          /** The option labels in order; the result names option `i` as `option-i`. */
+          options: readonly string[];
+          /** How many option identifiers the result lists. */
           topCount: number;
           /** The largest roster the poll admits. */
           maximumParticipants: number;
@@ -113,6 +119,12 @@ export type ParticipantSummary = Readonly<{
     bodyDigest: string;
     username: string;
     isOrganizer: boolean;
+    /** The poll's question, as the participant module verified it from the signed poll definition. */
+    question: string;
+    /** The poll's options in order, each with the identifier the result names it by. */
+    options: readonly Readonly<{ identifier: string; label: string }>[];
+    /** How many option identifiers the result lists. */
+    topCount: number;
     /** Whether the participant contributes setup key material, once its roster is retained. */
     isSetupContributor: boolean | undefined;
     ballot: 'open' | 'in progress' | 'signed' | 'could not vote' | undefined;

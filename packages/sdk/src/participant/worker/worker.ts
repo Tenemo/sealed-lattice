@@ -318,6 +318,9 @@ const summary = (
     bodyDigest: hexadecimal(enrollment.bodyDigest),
     username: enrollment.username,
     isOrganizer: enrollment.isOrganizer,
+    question: enrollment.poll.question,
+    options: enrollment.poll.options,
+    topCount: enrollment.poll.topCount,
     isSetupContributor:
         profiled === undefined ? undefined : isSetupContributor(profiled),
     ballot: ballotState(root),
@@ -334,15 +337,19 @@ const execute = async (
     if (command.operation === 'create') {
         const role = text(parameters.role);
         let request: EnrollmentRequest;
-        if (role === 'creator')
+        if (role === 'creator') {
+            const { options } = parameters;
+            if (!Array.isArray(options))
+                throw new InvalidRequest('Malformed option labels.');
             request = {
                 role,
-                manifest: bytes(parameters.manifest),
+                question: text(parameters.question),
+                options: (options as unknown[]).map((label) => text(label)),
                 topCount: Number(parameters.topCount),
                 maximumParticipants: Number(parameters.maximumParticipants),
                 username: text(parameters.username),
             };
-        else if (role === 'join')
+        } else if (role === 'join')
             request = {
                 role,
                 poll: bytes(parameters.poll),

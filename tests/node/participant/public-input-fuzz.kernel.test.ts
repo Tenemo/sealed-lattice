@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { createCanonicalManifest } from '#packages/sdk/dist/index.js';
 import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     concatenate,
@@ -85,12 +84,19 @@ const call = (
 
 // The organizer's enrollment, whose public records every case changes.
 const runtimeIdentity = shake('runtime', 64);
-const manifest = (
-    await createCanonicalManifest({
-        question: 'Which option leads?',
-        options: ['Option 0', 'Option 1'],
-    })
-).canonicalBytes;
+// The poll's question and its two option labels as the creator input frames
+// them: each text after its four-byte length, the labels after their count.
+// The second label is not in NFC, which the module applies once at ingress.
+const framedText = (value: string) => {
+    const bytes = encodeText(value);
+    return concatenate(unsigned32(bytes.length), bytes);
+};
+const pollText = concatenate(
+    framedText('Which option leads?'),
+    unsigned16(2),
+    framedText('Option 0'),
+    framedText('Cafe\u0301'),
+);
 const organizerName = 'Organizer';
 const organizer = await (async () => {
     const { kernel, handlers } = await instantiate();
@@ -101,8 +107,7 @@ const organizer = await (async () => {
         runtimeIdentity,
         unsigned16(1),
         unsigned16(limits.participants.minimum),
-        unsigned32(manifest.length),
-        manifest,
+        pollText,
         unsigned32(username.length),
         username,
     );
@@ -647,7 +652,18 @@ describe('participant module public input', () => {
                 ...parts(record.proof).map((part) => [3, part] as const),
                 [4, new Uint8Array()],
             ];
+            // The poll the module verified the registration against, which
+            // it reports only once the registration verifies.
+            const verifiedPoll = () =>
+                kernel.own_registration_poll() === 0
+                    ? readKernel(
+                          kernel,
+                          kernel.contribution_output_pointer(),
+                          kernel.contribution_output_length(),
+                      )
+                    : undefined;
             for (const [operation, bytes] of steps) {
+                expect(verifiedPoll(), label).toBeUndefined();
                 writeOwnRegistrationInput(kernel, bytes);
                 if (
                     call(
@@ -659,13 +675,16 @@ describe('participant module public input', () => {
                 )
                     return undefined;
             }
-            return new TextDecoder().decode(
-                readKernel(
-                    kernel,
-                    kernel.own_registration_username_pointer(),
-                    kernel.own_registration_username_length(),
+            return {
+                username: new TextDecoder().decode(
+                    readKernel(
+                        kernel,
+                        kernel.own_registration_username_pointer(),
+                        kernel.own_registration_username_length(),
+                    ),
                 ),
-            );
+                poll: verifiedPoll(),
+            };
         };
         for (const [field, count] of [
             ['header', 2],
@@ -704,6 +723,103 @@ describe('participant module public input', () => {
                 'own/shortened',
             ),
         ).toBeUndefined();
-        expect(await verify(organizer, 'own/genuine')).toBe(organizerName);
+        // The verified poll is its result length, its question, its option
+        // count and each option's identifier and label, the label in NFC.
+        expect(await verify(organizer, 'own/genuine')).toEqual({
+            username: organizerName,
+            poll: concatenate(
+                unsigned16(1),
+                framedText('Which option leads?'),
+                unsigned16(2),
+                framedText('option-0'),
+                framedText('Option 0'),
+                framedText('option-1'),
+                framedText('Caf\u00e9'),
+            ),
+        });
+    });
+
+    it('refuses a creator input whose poll the module cannot frame', async () => {
+        const { kernel } = await instantiate();
+        const creatorInput = (
+            question: string,
+            labels: readonly string[],
+            topCount: number,
+        ) =>
+            concatenate(
+                runtimeIdentity,
+                unsigned16(topCount),
+                unsigned16(minimumParticipants),
+                framedText(question),
+                unsigned16(labels.length),
+                ...labels.map(framedText),
+                framedText(organizerName),
+            );
+        const validates = (input: Uint8Array) => {
+            writeInput(kernel, input);
+            return kernel.validate_creator(input.length) === 0;
+        };
+        const question = 'Which option leads?';
+        const genuine = creatorInput(question, ['Option 0', 'Option 1'], 2);
+        expect(validates(genuine)).toBe(true);
+        const counted = (count: number) =>
+            Array.from(
+                { length: count },
+                (_unused, index) => `Option ${String(index)}`,
+            );
+        expect(validates(creatorInput(question, counted(20), 20))).toBe(true);
+        for (const [label, input] of [
+            ['empty question', creatorInput('', counted(2), 1)],
+            ['one option', creatorInput(question, counted(1), 1)],
+            ['too many options', creatorInput(question, counted(21), 1)],
+            ['empty label', creatorInput(question, ['Option 0', ''], 1)],
+            [
+                'repeated label',
+                creatorInput(question, ['Option 0', 'Option 0'], 1),
+            ],
+            // Canonically equivalent labels are one label.
+            [
+                'equivalent labels',
+                creatorInput(question, ['Caf\u00e9', 'Cafe\u0301'], 1),
+            ],
+            [
+                'private-use label',
+                creatorInput(question, ['Option 0', '\ue000'], 1),
+            ],
+            ['no result', creatorInput(question, counted(2), 0)],
+            [
+                'result longer than the options',
+                creatorInput(question, counted(2), 3),
+            ],
+            ['truncated', genuine.subarray(0, -1)],
+            ['extended', concatenate(genuine, Uint8Array.of(0))],
+            [
+                'label beyond the input',
+                concatenate(
+                    runtimeIdentity,
+                    unsigned16(1),
+                    unsigned16(minimumParticipants),
+                    framedText(question),
+                    unsigned16(3),
+                    framedText('Option 0'),
+                    framedText('Option 1'),
+                ),
+            ],
+            [
+                'invalid UTF-8 label',
+                concatenate(
+                    runtimeIdentity,
+                    unsigned16(1),
+                    unsigned16(minimumParticipants),
+                    framedText(question),
+                    unsigned16(2),
+                    framedText('Option 0'),
+                    unsigned32(1),
+                    Uint8Array.of(0xff),
+                    framedText(organizerName),
+                ),
+            ],
+        ] as const)
+            expect(validates(input), label).toBe(false);
     });
 });

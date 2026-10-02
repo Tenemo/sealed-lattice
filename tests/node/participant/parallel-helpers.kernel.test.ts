@@ -7,7 +7,6 @@ import { MessageChannel, Worker } from 'node:worker_threads';
 import binaryen from 'binaryen';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createCanonicalManifest } from '#packages/sdk/dist/index.js';
 import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     concatenate,
@@ -279,8 +278,7 @@ const prepare = (
                   runtimeIdentity,
                   unsigned16(1),
                   unsigned16(3),
-                  unsigned32(manifest.length),
-                  manifest,
+                  pollText,
                   unsigned32(username.length),
                   username,
               )
@@ -334,12 +332,18 @@ const enroll = async (
         name,
         joining,
     );
-const manifest = (
-    await createCanonicalManifest({
-        question: 'Which option leads?',
-        options: ['Option 0', 'Option 1'],
-    })
-).canonicalBytes;
+// The poll's question and its two option labels as the creator input frames
+// them: each text after its four-byte length, the labels after their count.
+const framedText = (value: string) => {
+    const bytes = new TextEncoder().encode(value);
+    return concatenate(unsigned32(bytes.length), bytes);
+};
+const pollText = concatenate(
+    framedText('Which option leads?'),
+    unsigned16(2),
+    framedText('Option 0'),
+    framedText('Option 1'),
+);
 
 // A roster verifier's verdict on the registrations, streamed as the worker
 // streams them from its relay: the proposal body it accepts, or undefined

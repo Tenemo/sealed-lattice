@@ -158,6 +158,27 @@ pub(super) fn retain(credential: &Credential) -> Option<Vec<u8>> {
     })
 }
 
+/// The result length, question and options of the poll this instance
+/// verified the registration of, as `own_registration_poll` writes them.
+pub(super) fn verified_poll() -> Option<Vec<u8>> {
+    STATE.with(|state| {
+        let state = state.borrow();
+        let poll = state.verified.as_ref().and(state.poll.as_ref())?;
+        let manifest = poll.manifest();
+        let text = |bytes: &mut Vec<u8>, value: &str| {
+            bytes.extend((value.len() as u32).to_le_bytes());
+            bytes.extend(value.as_bytes());
+        };
+        let mut bytes = Vec::from(poll.top_count().to_le_bytes());
+        text(&mut bytes, manifest.display_title().as_str());
+        bytes.extend((manifest.option_count() as u16).to_le_bytes());
+        for option in manifest.options() {
+            text(&mut bytes, option.option_identifier());
+            text(&mut bytes, option.display_label().as_str());
+        }
+        Some(bytes)
+    })
+}
 /// The option count of the poll this instance verified the registration of.
 pub(super) fn verified_option_count() -> Option<usize> {
     STATE.with(|state| {

@@ -51,6 +51,22 @@ pub extern "C" fn poll_identity_pointer() -> usize {
     SESSION.with(|state| state.borrow().poll_identity.as_ptr() as usize)
 }
 
+/// The bytes after a four-byte length at an offset, as their range, when the
+/// input holds them and they fit a poll definition.
+fn framed(input: &[u8], offset: usize) -> Option<(usize, usize)> {
+    let start = offset.checked_add(4)?;
+    let length = u32::from_le_bytes(input.get(offset..start)?.try_into().ok()?) as usize;
+    if length > registration_credentials::poll::MAXIMUM_POLL_BYTES {
+        return None;
+    }
+    let end = start.checked_add(length)?;
+    (end <= input.len()).then_some((start, end))
+}
+/// The creator input is the runtime, the result length, the participant
+/// maximum, the question, the option count, each option's label in order and
+/// the username, each text after its four-byte length. The question and
+/// labels become the poll's manifest under the module's own normalization,
+/// option `i` named `option-i`, and the poll definition bounds them all.
 fn creator_context(
     input: &[u8],
 ) -> Option<(
@@ -59,38 +75,42 @@ fn creator_context(
     usize,
     usize,
 )> {
-    use registration_credentials::foundation::{CanonicalDecodeLimits, ceremony::Manifest};
-    if input.len() < 76 {
-        return None;
+    use registration_credentials::foundation::{
+        StabilizedDisplayText,
+        ceremony::{Manifest, OptionDefinition},
+    };
+    let runtime = input.get(..64)?.try_into().ok()?;
+    let top_count = u16::from_le_bytes(input.get(64..66)?.try_into().ok()?);
+    let maximum_participants = u16::from_le_bytes(input.get(66..68)?.try_into().ok()?);
+    let (start, end) = framed(input, 68)?;
+    let question = StabilizedDisplayText::from_ingress_utf8(&input[start..end]).ok()?;
+    let option_count = u16::from_le_bytes(input.get(end..end + 2)?.try_into().ok()?);
+    let mut offset = end + 2;
+    // An option index past the supported count is refused, which bounds
+    // this loop.
+    let mut options = Vec::new();
+    for index in 0..option_count {
+        let (start, end) = framed(input, offset)?;
+        offset = end;
+        options.push(
+            OptionDefinition::new(
+                index,
+                format!("option-{index}"),
+                StabilizedDisplayText::from_ingress_utf8(&input[start..end]).ok()?,
+            )
+            .ok()?,
+        );
     }
-    let runtime = input[..64].try_into().ok()?;
-    let top_count = u16::from_le_bytes(input[64..66].try_into().ok()?);
-    let maximum_participants = u16::from_le_bytes(input[66..68].try_into().ok()?);
-    let manifest_length = u32::from_le_bytes(input[68..72].try_into().ok()?) as usize;
-    if manifest_length > registration_credentials::poll::MAXIMUM_POLL_BYTES
-        || input.len() < 76 + manifest_length
-    {
-        return None;
-    }
-    let manifest = Manifest::decode(
-        &input[72..72 + manifest_length],
-        &CanonicalDecodeLimits::default(),
-    )
-    .ok()?;
+    let manifest = Manifest::new(question, options).ok()?;
     let draft =
         registration_credentials::poll::PollDraft::new(manifest, top_count, maximum_participants)
             .ok()?;
-    let name_length = u32::from_le_bytes(
-        input[72 + manifest_length..76 + manifest_length]
-            .try_into()
-            .ok()?,
-    ) as usize;
-    let name_start = 76 + manifest_length;
-    if name_length > MAXIMUM_USERNAME_INGRESS_BYTES || input.len() < name_start + name_length {
+    let (name_start, name_end) = framed(input, offset)?;
+    if name_end - name_start > MAXIMUM_USERNAME_INGRESS_BYTES {
         return None;
     }
-    normalize_username(&input[name_start..name_start + name_length]).ok()?;
-    Some((draft, runtime, name_start, name_start + name_length))
+    normalize_username(&input[name_start..name_end]).ok()?;
+    Some((draft, runtime, name_start, name_end))
 }
 fn join_context(
     input: &[u8],
@@ -379,6 +399,22 @@ pub extern "C" fn setup_roster_begin_retained(begin: usize, length: usize) -> u3
     };
     setup_aggregate::setup_browser::begin_roster(roster);
     0
+}
+/// Writes the poll this instance verified the participant's own registration
+/// against to the contribution output: the two-byte result length, the
+/// question, the two-byte option count and each option's identifier and
+/// label, each text after its four-byte length.
+#[unsafe(no_mangle)]
+pub extern "C" fn own_registration_poll() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.contribution_output.clear();
+        let Some(poll) = crate::own_verification::verified_poll() else {
+            return 1;
+        };
+        state.contribution_output = poll;
+        0
+    })
 }
 /// Emits this instance's verification of the participant's own
 /// registration, keyed to the restored credential, so that a later visit

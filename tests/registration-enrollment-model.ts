@@ -79,6 +79,43 @@ export const compileRegistrationEnrollmentCensus = () => {
         4n +
         2n +
         2n;
+    // The canonical manifest inside the poll definition frames the question
+    // and labels: its eight-byte tuple header, two six-byte item headers, the
+    // question's four-byte length and the option list's two-byte element type
+    // and four-byte count, then per option its own tuple header, three item
+    // headers, its two-byte index and the four-byte lengths of its identifier
+    // `option-i` and its label.
+    const manifestFramingBytes = (options: bigint) => {
+        let identifierBytes = 0n;
+        for (let index = 0n; index < options; index++)
+            identifierBytes += bytes(`option-${String(index)}`);
+        return 30n + 36n * options + identifierBytes;
+    };
+    // The creator input carries the runtime, the result length, the
+    // participant maximum, the question, the option count, each label and
+    // the username, each text after its four-byte length, then the two data
+    // keys. The texts fill what the poll definition leaves beside its own
+    // framing and the manifest's, which grows faster with the option count
+    // than the input's framing, so the fewest options give the longest input.
+    const creatorInputBytes = (options: bigint) =>
+        64n +
+        2n +
+        2n +
+        4n +
+        2n +
+        4n * options +
+        inputs.maximumPollDefinitionBytes -
+        pollDefinitionOverheadBytes -
+        manifestFramingBytes(options) +
+        4n +
+        inputs.maximumUsernameIngressBytes +
+        64n;
+    const { options } = supportedProfileRanges();
+    let maximumCreatorInputBytes = 0n;
+    for (let count = options.minimum; count <= options.maximum; count++) {
+        const value = creatorInputBytes(BigInt(count));
+        if (value > maximumCreatorInputBytes) maximumCreatorInputBytes = value;
+    }
     return {
         ...inputs,
         maximumHeaderBytes,
@@ -95,16 +132,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumRootBytes,
         proofRoleBytes,
         pollDefinitionOverheadBytes,
-        maximumCreatorInputBytes:
-            64n +
-            2n +
-            2n +
-            4n +
-            inputs.maximumPollDefinitionBytes -
-            pollDefinitionOverheadBytes +
-            4n +
-            inputs.maximumUsernameIngressBytes +
-            64n,
+        maximumCreatorInputBytes,
         maximumJoinInputBytes:
             128n +
             4n +

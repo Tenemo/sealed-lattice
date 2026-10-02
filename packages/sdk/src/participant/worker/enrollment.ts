@@ -4,6 +4,8 @@ import {
     encodeText,
     equalBytes,
     hexadecimal,
+    readUnsigned16,
+    readUnsigned32,
     tupleFields,
     unsigned16,
     unsigned32,
@@ -46,7 +48,8 @@ type EnrollmentRefusal = Extract<
 export type EnrollmentRequest = Readonly<
     | {
           role: 'creator';
-          manifest: Uint8Array;
+          question: string;
+          options: readonly string[];
           topCount: number;
           maximumParticipants: number;
           username: string;
@@ -65,17 +68,17 @@ export type EnrollmentRequest = Readonly<
 const validationMilliseconds = 15 * 60 * 1000;
 
 // A lone surrogate cannot be encoded without replacement, which would change
-// the name that the credential binds.
-const encodeUsername = (username: string) => {
-    for (let index = 0; index < username.length; index++) {
-        const unit = username.charCodeAt(index);
+// the text that the poll or the credential binds.
+const encodeWellFormed = (value: string) => {
+    for (let index = 0; index < value.length; index++) {
+        const unit = value.charCodeAt(index);
         if (unit >= 0xd800 && unit <= 0xdbff) {
-            const next = username.charCodeAt(index + 1);
+            const next = value.charCodeAt(index + 1);
             if (!(next >= 0xdc00 && next <= 0xdfff)) return undefined;
             index++;
         } else if (unit >= 0xdc00 && unit <= 0xdfff) return undefined;
     }
-    return encodeText(username);
+    return encodeText(value);
 };
 
 // Signing purposes in the credential's order, each with the last generation
@@ -104,7 +107,7 @@ export const createEnrollment = async (
 ): Promise<AuthenticatedRoot | EnrollmentRefusal> => {
     const { database, limits, kernel, handlers, runtime } = context;
     if (!(await isEmptyParticipant(database))) return 'participant exists';
-    const name = encodeUsername(request.username);
+    const name = encodeWellFormed(request.username);
     if (
         name === undefined ||
         name.length > limits.registration.maximumUsernameIngressBytes
@@ -112,19 +115,31 @@ export const createEnrollment = async (
         return 'invalid request';
     let input: Uint8Array;
     if (request.role === 'creator') {
+        const question = encodeWellFormed(request.question);
         if (
+            question === undefined ||
+            request.options.length > limits.options.maximum ||
             [request.topCount, request.maximumParticipants].some(
                 (value) =>
                     !Number.isSafeInteger(value) || value < 1 || value > 0xffff,
             )
         )
             return 'invalid request';
+        // The module frames the question and labels as the poll's manifest.
+        const labels: Uint8Array[] = [];
+        for (const option of request.options) {
+            const label = encodeWellFormed(option);
+            if (label === undefined) return 'invalid request';
+            labels.push(unsigned32(label.length), label);
+        }
         input = concatenate(
             runtime,
             unsigned16(request.topCount),
             unsigned16(request.maximumParticipants),
-            unsigned32(request.manifest.length),
-            request.manifest,
+            unsigned32(question.length),
+            question,
+            unsigned16(request.options.length),
+            ...labels,
             unsigned32(name.length),
             name,
         );
@@ -335,9 +350,17 @@ export const createEnrollment = async (
     return root;
 };
 
+// The poll the module verified the participant's own registration against.
+type VerifiedPoll = Readonly<{
+    question: string;
+    options: readonly Readonly<{ identifier: string; label: string }>[];
+    topCount: number;
+}>;
+
 export type RestoredEnrollment = Readonly<{
     username: string;
     isOrganizer: boolean;
+    poll: VerifiedPoll;
     bodyDigest: Uint8Array;
     proofHash: Uint8Array;
     header: Uint8Array;
@@ -362,6 +385,37 @@ export const retainRegistration = (context: ParticipantContext) => {
         kernel.contribution_output_pointer(),
         kernel.contribution_output_length(),
     );
+};
+
+// The result length, question and options the module writes for the poll it
+// verified the participant's own registration against.
+const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
+    const { kernel } = context;
+    if (kernel.own_registration_poll() !== 0)
+        throw new Error('The module verified no poll.');
+    const bytes = readKernel(
+        kernel,
+        kernel.contribution_output_pointer(),
+        kernel.contribution_output_length(),
+    );
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    let offset = 0;
+    const take = (length: number) => {
+        if (length > bytes.length - offset)
+            throw new Error('The verified poll is truncated.');
+        offset += length;
+        return bytes.subarray(offset - length, offset);
+    };
+    const text = () => decoder.decode(take(readUnsigned32(take(4), 0)));
+    const topCount = readUnsigned16(take(2), 0);
+    const question = text();
+    const options = Array.from({ length: readUnsigned16(take(2), 0) }, () => {
+        const identifier = text();
+        return { identifier, label: text() };
+    });
+    if (offset !== bytes.length)
+        throw new Error('The verified poll has trailing bytes.');
+    return { question, options, topCount };
 };
 
 // Verifies the retained registration through the module's own registration
@@ -454,6 +508,7 @@ export const restoreEnrollment = async (
         kernel.restore(0) !== 1
     )
         throw new Error('The original enrollment keys could not be restored.');
+    const poll = readVerifiedPoll(context);
     const usernameBytes = readKernel(
         kernel,
         kernel.own_registration_username_pointer(),
@@ -480,6 +535,7 @@ export const restoreEnrollment = async (
     return {
         username,
         isOrganizer,
+        poll,
         bodyDigest,
         proofHash,
         header,

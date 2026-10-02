@@ -8,7 +8,12 @@ describe('signed registration and original-key custody', () => {
         expect(value.maximumHeaderBytes).toBe(2375n);
         expect(value.proofRoleBytes).toBe(282n);
         expect(value.pollDefinitionOverheadBytes).toBe(2143n);
-        expect(value.maximumCreatorInputBytes).toBeLessThan(1_048_576n);
+        // A two-option poll: 662 bytes of runtime, lengths, counts, username
+        // and data keys beside the texts, which fill the poll definition but
+        // its 2,143 bytes of framing and the manifest's 30 + 2 * 36 + 16.
+        expect(value.maximumCreatorInputBytes).toBe(
+            662n + 1_048_576n - 2143n - 118n,
+        );
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(532n);
         expect(value.signingCapsuleBytes).toBe(52n);

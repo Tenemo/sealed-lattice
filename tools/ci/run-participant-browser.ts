@@ -1652,26 +1652,40 @@ await runWithLocalRunLog(
                           ((position * (optionCount + 1) + option) %
                               (maximumScore - minimumScore + 1)),
                 );
-            const { createCanonicalManifest } =
-                await import('#packages/sdk/dist/index.js');
-            const manifest = await createCanonicalManifest({
-                question: 'Verify the complete signed ballot path',
-                options: Array.from(
-                    { length: optionCount },
-                    (_unused, index) => `Option ${String(index)}`,
-                ),
-            });
+            const question = 'Verify the complete signed ballot path';
+            const labels = Array.from(
+                { length: optionCount },
+                (_unused, index) => `Option ${String(index)}`,
+            );
             const hexadecimal = (bytes: Uint8Array) =>
                 Buffer.from(bytes).toString('hex');
             // The poll admits exactly the roster's participants.
             const organizer = await run(0, 'create', {
                 role: 'creator',
-                manifest: hexadecimal(manifest.canonicalBytes),
+                question,
+                options: labels,
                 topCount,
                 maximumParticipants: participantCount,
                 username: 'Organizer',
             });
             assert.equal(organizer.isOrganizer, true);
+            // Every participant reports the poll its module verified: the
+            // question, each option's identifier and label, and the result
+            // length.
+            const verifiedPoll = (details: Record<string, unknown>) => ({
+                question: details.question,
+                options: details.options,
+                topCount: details.topCount,
+            });
+            const createdPoll = {
+                question,
+                options: labels.map((label, index) => ({
+                    identifier: `option-${String(index)}`,
+                    label,
+                })),
+                topCount,
+            };
+            assert.deepEqual(verifiedPoll(organizer), createdPoll);
             // The page asked the browser to keep the origin's storage, which
             // it grants by its own policy.
             assert.equal(typeof organizer.persistentStorage, 'boolean');
@@ -1695,6 +1709,7 @@ await runWithLocalRunLog(
                 });
                 assert.equal(details.isOrganizer, false);
                 assert.equal(details.poll, organizer.poll);
+                assert.deepEqual(verifiedPoll(details), createdPoll);
                 await run(position, 'publish');
                 return details;
             };
