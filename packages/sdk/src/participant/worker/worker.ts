@@ -595,11 +595,7 @@ const execute = async (
             const generation = root.head.generation;
             if (profiled === undefined || generation < 12)
                 return refused('unavailable');
-            const request = parseCloseRequest(
-                profiled.profile,
-                profiled.position,
-                parameters,
-            );
+            const request = parseCloseRequest(parameters);
             if (
                 request === undefined ||
                 (request.closeTime !== undefined && !enrollment.isOrganizer)

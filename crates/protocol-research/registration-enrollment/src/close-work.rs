@@ -47,9 +47,10 @@ impl Prepared {
 /// the retained set beyond two envelopes per slot and per retained response,
 /// and the intent lock discards late envelopes.
 ///
-/// Every accepted delivery changes the state: an already known envelope, an
-/// already held body and a later response of a responder are refused. A
-/// persistent log of accepted inputs therefore stays within these bounds.
+/// Every accepted delivery changes the state: an already held body, an already
+/// known envelope supplied with a response and a later response of a
+/// responder are refused. A persistent log of accepted inputs therefore stays
+/// within these bounds.
 pub struct CloseWork {
     owner: Arc<RetainedBallotOwner>,
     context: CloseContext,
@@ -545,27 +546,6 @@ impl CloseWork {
                     &envelope,
                     &input[ENVELOPE_BYTES..],
                 )?;
-                Ok(Vec::new())
-            }
-            // A known envelope whose body this participant does not hold. A
-            // second known on-time envelope for a slot lets the honest listing
-            // name both; a slot's third is refused like its third body, and an
-            // envelope already known like a body already held.
-            12 => {
-                if !ready || input.len() != ENVELOPE_BYTES + 3309 {
-                    return Err(Error::Shape);
-                }
-                let authentication = authenticate_envelope(
-                    self.context.setup(),
-                    &input[..ENVELOPE_BYTES],
-                    &input[ENVELOPE_BYTES..],
-                )
-                .map_err(|_| Error::Crypto)?;
-                self.admit(&authentication)?;
-                if self.known(&authentication.envelope().identity()) {
-                    return Err(Error::Consumed);
-                }
-                self.remember(&authentication);
                 Ok(Vec::new())
             }
             // The bodies the organizer still needs, as consecutive two-byte

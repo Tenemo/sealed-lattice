@@ -43,12 +43,6 @@ const held: CloseEvent = {
         key(20 + index),
     ),
 };
-const known: CloseEvent = {
-    kind: closeEventKind.known,
-    serial: 4,
-    length: close.submissionBytes,
-    keys: [key(3)],
-};
 const lock: CloseEvent = {
     kind: closeEventKind.lock,
     serial: 5,
@@ -65,7 +59,7 @@ const response: CloseEvent = {
         close.submissionBytes,
     keys: [key(4)],
 };
-const collected = [own, held, known];
+const collected = [own, held];
 const responseBodyBytes = close.minimumResponseBodyBytes + 66;
 
 const state = (fields: Partial<CloseState>): CloseState => ({
@@ -237,10 +231,9 @@ describe('participant close state', () => {
         for (const event of [
             { ...held, keys: held.keys.slice(1) },
             { ...held, length: ballot.minimumBodyBytes - 1 },
-            { ...known, length: known.length + 1 },
             { ...own, keys: [key(1)] },
             { ...lock, length: 1 },
-            { ...own, kind: 5 },
+            { ...own, kind: 4 },
         ])
             expect(() =>
                 decode(
@@ -304,12 +297,10 @@ describe('participant close state', () => {
         );
         expect(records.map((record) => record.key)).toEqual([
             ...held.keys.map((_key, index) => [held.serial, index]),
-            [known.serial, 0],
             [response.serial, 0],
         ]);
         expect(records.map((record) => record.byteLength)).toEqual([
             ...lengths.map((length) => length + 16),
-            close.submissionBytes + 16,
             response.length + 16,
         ]);
         const bindings = new Set(

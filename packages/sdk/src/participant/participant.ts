@@ -88,14 +88,6 @@ export type ParticipantRequest = Readonly<
               Readonly<{
                   /** The organizer's close time in Unix milliseconds. */
                   closeTime?: number;
-                  /**
-                   * Roster positions whose published ballots to collect with
-                   * their bodies. A request that names neither list collects
-                   * every other position's published ballot.
-                   */
-                  deliver?: readonly number[];
-                  /** Roster positions whose published envelopes alone to record. */
-                  announce?: readonly number[];
               }>;
       }
     | {

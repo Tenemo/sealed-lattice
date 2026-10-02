@@ -1823,8 +1823,8 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
-                // A close request that names no ballots collects every other
-                // participant's published ballot with its body.
+                // A close collects every other participant's published ballot
+                // with its body.
                 const authors = members.map((_member, position) => position);
                 const collectsEvery = (position: number) => [
                     { kind: 'own', position },
@@ -2695,9 +2695,25 @@ await runWithLocalRunLog(
             const beforeClose = mode === 'empty' ? 12 : 17;
             const submissions = (kind: string, authors: readonly number[]) =>
                 authors.map((position) => ({ kind, position }));
-            // One honest verifier learns the other envelopes without their
-            // bodies. Its later target checks must consume those bodies from
-            // the public source even when other participants reuse custody.
+            // Hides the pointers to the authors' ballots from a participant,
+            // but those its view already replaces, and returns a function
+            // that shows them again.
+            const hidePointers = (
+                position: number,
+                authors: readonly number[],
+            ) => {
+                const hidden = authors
+                    .map(pointerName)
+                    .filter((name) => !views[position].has(name));
+                for (const name of hidden) views[position].set(name, undefined);
+                return () => {
+                    for (const name of hidden) views[position].delete(name);
+                };
+            };
+            // The relay shows one honest verifier no other author's pointer
+            // until it responds, so it holds only its own ballot. Its later
+            // target checks must consume every other body from the public
+            // source even when other participants reuse custody.
             const publicBodyProbe =
                 mode === 'empty'
                     ? undefined
@@ -2707,6 +2723,14 @@ await runWithLocalRunLog(
                               honest(position) &&
                               !departed.has(position),
                       );
+            // The probe holds no close record to lose, so the participants
+            // that lose state are chosen with the probe last.
+            const probeLast = (candidates: number[]) =>
+                candidates.sort(
+                    (left, right) =>
+                        Number(left === publicBodyProbe) -
+                        Number(right === publicBodyProbe),
+                );
             // The relay serves every other participant none of the omitted
             // ballot's records until the target votes are published.
             const omission: string[] = [];
@@ -2738,6 +2762,10 @@ await runWithLocalRunLog(
                     pointerName(equivocation.position),
                     pointerTo(equivocation.late.identity),
                 );
+            const showProbePointers =
+                publicBodyProbe === undefined
+                    ? () => undefined
+                    : hidePointers(publicBodyProbe, others(publicBodyProbe));
             // Every other participant with its verified setup collects the
             // published ballots, its own first, before any intent exists;
             // with no ballot it collects nothing and commits nothing.
@@ -2749,39 +2777,36 @@ await runWithLocalRunLog(
                             position !== lateSetup && !departed.has(position),
                     )
                     .map(async (position) => {
-                        const announced = shown(
-                            position,
-                            cast(others(position)),
-                        );
-                        const delivered =
-                            position === publicBodyProbe ? [] : announced;
-                        const details = await run(position, 'close', {
-                            deliver: delivered,
-                            announce:
-                                position === publicBodyProbe ? announced : [],
-                        });
+                        const details = await run(position, 'close');
                         assert.equal(details.generation, beforeClose);
                         assert.deepEqual(details.closeEvents, [
                             ...submissions('own', cast([position])),
-                            ...submissions('held', delivered),
                             ...submissions(
-                                'known',
-                                position === publicBodyProbe ? announced : [],
+                                'held',
+                                position === publicBodyProbe
+                                    ? []
+                                    : shown(position, cast(others(position))),
                             ),
                         ]);
                     }),
             );
+            // The organizer's first collection sees only the pointer to the
+            // equivocator's conflicting copy.
             const equivocatorHeld =
                 equivocation === undefined ? [] : [equivocation.position];
             if (equivocation !== undefined) {
-                views[lastPosition].delete(pointerName(equivocation.position));
                 views[0].set(
                     pointerName(equivocation.position),
                     pointerTo(equivocation.conflicting.identity),
                 );
-                const collected = await run(0, 'close', {
-                    deliver: equivocatorHeld,
-                });
+                const showOrganizerPointers = hidePointers(
+                    0,
+                    others(0).filter(
+                        (author) => author !== equivocation.position,
+                    ),
+                );
+                const collected = await run(0, 'close');
+                showOrganizerPointers();
                 views[0].delete(pointerName(equivocation.position));
                 assert.equal(collected.generation, 17);
                 assert.deepEqual(collected.closeEvents, [
@@ -2789,41 +2814,34 @@ await runWithLocalRunLog(
                     ...submissions('held', equivocatorHeld),
                 ]);
             }
-            // The organizer learns one honest on-time envelope without its
-            // body, opens the close and locks its own intent. It then holds
-            // both of the equivocator's on-time envelopes. With no ballot it
-            // learns nothing.
-            const announced = shown(0, others(0)).find(
+            // The relay hides one honest on-time ballot's pointer from the
+            // organizer until its proposal exists, so the organizer opens the
+            // close and locks its own intent without that ballot and learns
+            // its envelope only from the responses. It then holds both of the
+            // equivocator's on-time envelopes. With no ballot it learns
+            // nothing.
+            const withheld = shown(0, others(0)).find(
                 (position) =>
                     onTime(position) &&
                     position !== equivocator &&
                     honest(position),
             );
-            assert.equal(announced === undefined, mode === 'empty');
-            const announcedList = announced === undefined ? [] : [announced];
+            assert.equal(withheld === undefined, mode === 'empty');
+            const withheldList = withheld === undefined ? [] : [withheld];
+            const showWithheldPointer = hidePointers(0, withheldList);
             const organizerDeliveries = shown(0, cast(others(0))).filter(
-                (position) => position !== announced,
+                (position) => position !== withheld,
             );
             await expectStatus(1, 'close', 'refused', { closeTime });
             // The organizer halts with its intent before signing it, and its
             // next visit signs the retained intent without a close time.
-            await interrupt(
-                0,
-                'close',
-                {
-                    deliver: organizerDeliveries,
-                    announce: announcedList,
-                    closeTime,
-                },
-                18,
-            );
+            await interrupt(0, 'close', { closeTime }, 18);
             const opened = await run(0, 'close');
             assert.equal(opened.generation, 19);
             const organizerCollected = [
                 ...submissions('own', [0].filter(onTime)),
                 ...submissions('held', equivocatorHeld),
                 ...submissions('held', organizerDeliveries.filter(onTime)),
-                ...submissions('known', announcedList),
             ];
             assert.deepEqual(opened.closeEvents, [
                 ...organizerCollected,
@@ -2863,43 +2881,41 @@ await runWithLocalRunLog(
             // The first two other honest responders halt after locking the
             // intent and with their response intent.
             const responseHalts = new Map(
-                responders
-                    .filter(honest)
+                probeLast(responders.filter(honest))
                     .slice(0, 2)
                     .map((position, index) => [position, [19, 20][index]]),
             );
-            // They collect nothing more, so the public body probe keeps its
-            // envelopes without their bodies.
+            // They collect nothing more: the public body probe still sees no
+            // other pointer, and the last participant still sees only the
+            // equivocator's late copy.
             await Promise.all(
                 responders.map(async (position) => {
                     const halt = responseHalts.get(position);
                     if (halt !== undefined)
-                        await interrupt(
-                            position,
-                            'close',
-                            { deliver: [] },
-                            halt,
-                        );
+                        await interrupt(position, 'close', {}, halt);
                     if (halt === 19)
                         await loseState(
                             position,
                             await closeStore(position),
                             'close',
                         );
-                    const details = await run(position, 'close', {
-                        deliver: [],
-                    });
+                    const details = await run(position, 'close');
                     assert.equal(details.generation, 21);
                     assert.deepEqual(details.closeEvents, [
                         ...submissions('own', [position].filter(onTime)),
                         ...submissions(
-                            position === publicBodyProbe ? 'known' : 'held',
-                            heldOnTime(position),
+                            'held',
+                            position === publicBodyProbe
+                                ? []
+                                : heldOnTime(position),
                         ),
                         { kind: 'lock' },
                     ]);
                 }),
             );
+            showProbePointers();
+            if (equivocation !== undefined)
+                views[lastPosition].delete(pointerName(equivocation.position));
             // The lock ended the ballot window, so a participant without a
             // ballot starts none.
             if (mode === 'empty')
@@ -2909,10 +2925,11 @@ await runWithLocalRunLog(
             // The organizer takes the other responses, fetches the body they
             // list that it lacks, responds and proposes. It halts with its
             // signed response and retained proposal intent, and with its
-            // signed proposal before delivering it. It collects nothing more
-            // itself, so it fetches only the listed body.
-            await interrupt(0, 'close', { deliver: [] }, 21);
-            await interrupt(0, 'close', { deliver: [] }, 22);
+            // signed proposal before delivering it. The withheld pointer keeps
+            // it from collecting that ballot itself, so it fetches only the
+            // listed body.
+            await interrupt(0, 'close', {}, 21);
+            await interrupt(0, 'close', {}, 22);
             // Its next visit restores the completed close without replaying
             // the log, so the retained events name no author or responder;
             // the published proposal below names the responses it took.
@@ -2924,9 +2941,10 @@ await runWithLocalRunLog(
                     ...organizerCollected,
                     { kind: 'lock' },
                     ...submissions('response', responders),
-                    ...submissions('held', announcedList),
+                    ...submissions('held', withheldList),
                 ].map(({ kind }) => ({ kind })),
             );
+            showWithheldPointer();
             // Completed close work is only delivered again.
             assert.equal((await run(1, 'close')).generation, 21);
             assert.equal((await run(0, 'close')).generation, 22);
@@ -3055,8 +3073,11 @@ await runWithLocalRunLog(
             // the organizer with its signed vote before delivering it, so its
             // next visit only delivers the vote.
             const targetHalts = new Map([
-                ...voters
-                    .filter((position) => position !== 0 && honest(position))
+                ...probeLast(
+                    voters.filter(
+                        (position) => position !== 0 && honest(position),
+                    ),
+                )
                     .slice(0, 1)
                     .map((position) => [position, 23] as const),
                 [0, 24] as const,

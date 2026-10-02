@@ -454,8 +454,8 @@ const ballotBounds = (
 // The close suffix: its marker and event count, then the accepted close
 // inputs in arrival order. Each event holds its kind, its record count, the
 // serial that locates its records, its payload length and a key per
-// record: a known envelope has one record, a held body its envelope and
-// body records, and a response the organizer takes one record.
+// record: a held body has its envelope and body records, and a response the
+// organizer takes one record.
 const closePrefixBytes = 4 + 4;
 const eventBytes = (records: number) => 1 + 2 + 4 + 4 + keyBytes * records;
 
@@ -472,11 +472,8 @@ const closeBounds = (
     // two before the intent lock and two on-time bodies after it, and
     // delivery keeps at most two envelopes per slot.
     const heldBodies = participants - corrupt + corrupt * listed;
-    const knownEnvelopes = heldBodies;
     const responseEvents = participants - 1;
-    const deliveryEventBytes =
-        knownEnvelopes * eventBytes(1) +
-        heldBodies * eventBytes(1 + ballotBodyRecords);
+    const deliveryEventBytes = heldBodies * eventBytes(1 + ballotBodyRecords);
     const organizerEventBytes =
         deliveryEventBytes + eventBytes(0) + responseEvents * eventBytes(1);
     const intentStateBytes =
@@ -496,11 +493,8 @@ const closeBounds = (
         maximumResponseRecordBytes:
             profile.maximumResponsePacketBytes +
             listed * participants * close.submissionBytes,
-        maximumEvents: knownEnvelopes + heldBodies + 1 + responseEvents,
-        maximumRecords:
-            knownEnvelopes +
-            heldBodies * (1 + ballotBodyRecords) +
-            responseEvents,
+        maximumEvents: heldBodies + 1 + responseEvents,
+        maximumRecords: heldBodies * (1 + ballotBodyRecords) + responseEvents,
         maximumStateBytes: maximum(
             collectingBytes,
             collectingBytes + close.intentBodyBytes + coinBytes,

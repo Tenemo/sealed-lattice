@@ -101,66 +101,21 @@ const maximumListedEntries = ({ close }: ParticipantProfile) =>
     listedEntryBytes;
 
 export type CloseRequest = Readonly<{
-    // Published ballots to deliver with their bodies, by author.
-    deliver: readonly number[];
-    // Published ballots to deliver as envelopes alone, by author.
-    announce: readonly number[];
     // The organizer's close time in Unix milliseconds, only before an intent.
     closeTime?: bigint;
 }>;
 
-// Distinct roster positions, or undefined when the value lists anything else.
-const parsePositions = (
-    profile: ParticipantProfile,
-    value: unknown,
-): number[] | undefined => {
-    if (value === undefined) return [];
-    if (!Array.isArray(value)) return undefined;
-    const positions: unknown[] = value;
-    return positions.every(
-        (position) =>
-            typeof position === 'number' &&
-            Number.isSafeInteger(position) &&
-            position >= 0 &&
-            position < profile.participantCount,
-    ) && new Set(positions).size === positions.length
-        ? (positions as number[])
-        : undefined;
-};
-
-// The deliveries and close time a request supplies to the participant at
-// the position, or undefined when any is malformed. A request that names
-// neither list delivers every other roster position's published ballot with
-// its body, so that an honest participant holds every ballot it can read
-// before it responds.
+// The close time a request supplies, or undefined when it is malformed.
 export const parseCloseRequest = (
-    profile: ParticipantProfile,
-    position: number,
     parameters: Readonly<Record<string, unknown>>,
 ): CloseRequest | undefined => {
-    const deliver =
-        parameters.deliver === undefined && parameters.announce === undefined
-            ? Array.from(
-                  { length: profile.participantCount },
-                  (_unused, author) => author,
-              ).filter((author) => author !== position)
-            : parsePositions(profile, parameters.deliver);
-    const announce = parsePositions(profile, parameters.announce);
     const { closeTime } = parameters;
-    if (
-        deliver === undefined ||
-        announce === undefined ||
-        (closeTime !== undefined &&
-            (typeof closeTime !== 'number' ||
-                !Number.isSafeInteger(closeTime) ||
-                closeTime < 0))
-    )
-        return undefined;
-    return {
-        deliver,
-        announce,
-        ...(closeTime === undefined ? {} : { closeTime: BigInt(closeTime) }),
-    };
+    if (closeTime === undefined) return {};
+    return typeof closeTime === 'number' &&
+        Number.isSafeInteger(closeTime) &&
+        closeTime >= 0
+        ? { closeTime: BigInt(closeTime) }
+        : undefined;
 };
 
 // What replay and delivery learned of a retained submission.
@@ -176,9 +131,9 @@ export type CloseSession = {
     readonly organizer: boolean;
     readonly ballot: BallotSession | undefined;
     state: CloseState;
-    // The submission of each own, known or held event and the responder of
-    // each taken response, by serial, and every envelope identity the
-    // module knows.
+    // The submission of each own or held event and the responder of each
+    // taken response, by serial, and every envelope identity the module
+    // knows.
     readonly submissions: Map<number, Submission>;
     readonly responders: Map<number, number>;
     readonly known: Set<string>;
@@ -582,8 +537,8 @@ const ownSubmission = (ballot: BallotSession) =>
     concatenate(ballot.state.envelope, ballot.state.signature);
 
 // Every submission this root's custody holds, by envelope identity: the own
-// signed ballot, each known or held envelope and each envelope delivered with
-// a taken response.
+// signed ballot, each held envelope and each envelope delivered with a taken
+// response.
 export const heldSubmissions = async (session: CloseSession) => {
     const { context } = session.participant;
     const { close, registration } = context.profile;
@@ -595,10 +550,7 @@ export const heldSubmissions = async (session: CloseSession) => {
         );
     if (session.ballot !== undefined) hold(ownSubmission(session.ballot));
     for (const event of session.state.events)
-        if (
-            event.kind === closeEventKind.known ||
-            event.kind === closeEventKind.held
-        )
+        if (event.kind === closeEventKind.held)
             hold(await openCloseRecord(session, event, 0));
         else if (event.kind === closeEventKind.response) {
             const record = await openCloseRecord(session, event, 0);
@@ -656,12 +608,6 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
             });
             closeCommand(context, 5);
             learnSubmission(session, event.serial, ballot.state.envelope);
-            break;
-        }
-        case closeEventKind.known: {
-            const submission = await openCloseRecord(session, event, 0);
-            closeCommand(context, 12, 0, submission);
-            learnSubmission(session, event.serial, submission);
             break;
         }
         case closeEventKind.held: {
@@ -955,32 +901,6 @@ const deliverBallot = async (
         submission,
         submissionDirectory(author, identity) + 'body.bin',
     );
-};
-
-// Delivers a published envelope without its body.
-const announceBallot = async (
-    session: CloseSession,
-    relay: PublicRelay,
-    author: number,
-) => {
-    const { context } = session.participant;
-    const submission = await readAnnouncedSubmission(context, relay, author);
-    if (
-        submission === undefined ||
-        tryCloseCommand(context, 12, 0, submission) === undefined
-    )
-        return;
-    const event = {
-        kind: closeEventKind.known,
-        serial: nextSerial(session.state),
-    };
-    const added = [await sealCloseRecord(session, event, 0, submission)];
-    await appendEvent(
-        session,
-        { ...event, length: submission.length, keys: [added[0].key] },
-        added,
-    );
-    learnSubmission(session, event.serial, submission);
 };
 
 // The organizer's intent. Its body and fresh coins enter the root before the
@@ -1335,11 +1255,16 @@ export const advanceClose = async (
         generation() < closePhase.responding;
     await startCloseWork(session);
     if (collecting()) {
+        // Every other roster position's published ballot, so that an honest
+        // participant holds every ballot it can read before it responds.
         await deliverOwnBallot(session);
-        for (const author of request.deliver)
-            await deliverBallot(session, relay, author);
-        for (const author of request.announce)
-            await announceBallot(session, relay, author);
+        for (
+            let author = 0;
+            author < session.participant.context.profile.participantCount;
+            author++
+        )
+            if (author !== session.records.position)
+                await deliverBallot(session, relay, author);
     }
     // A locked ballot attempt completes before any intent is locked.
     const unlocked = generation() === 12 || generation() === 17;
@@ -1594,7 +1519,7 @@ export const publishClose = async (
     }
 };
 
-const kindNames = ['own', 'known', 'held', 'lock', 'response'];
+const kindNames = ['own', 'held', 'lock', 'response'];
 
 // The retained events in arrival order, with the author or responder each
 // replay or delivery learned.

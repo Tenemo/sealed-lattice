@@ -30,21 +30,20 @@ export const closePhase = {
     responded: 21,
     proposed: 22,
 } as const;
-const marker = encodeText('CST1');
+const marker = encodeText('CST2');
 const coinBytes = 32;
 const eventHeaderBytes = 1 + 2 + 4 + 4;
 
 // The participant's own signed ballot and the locked intent reference other
-// retained state and add no record. A known envelope has one record with its
-// signature; a held body that record and its body records; a response the
+// retained state and add no record. A held body has one record with its
+// envelope and signature and then its body records; a response the
 // organizer takes one record with the packet and the envelopes delivered
 // with it.
 export const closeEventKind = {
     own: 0,
-    known: 1,
-    held: 2,
-    lock: 3,
-    response: 4,
+    held: 1,
+    lock: 2,
+    response: 3,
 } as const;
 
 export type CloseEvent = Readonly<{
@@ -154,7 +153,6 @@ export const closeRecordLengths = (
                 Math.min(recordBytes, event.length - index * recordBytes),
             ),
         ];
-    if (event.kind === closeEventKind.known) return [submissionBytes];
     if (event.kind === closeEventKind.response) return [event.length];
     return [];
 };
@@ -166,8 +164,6 @@ const validEvent = (profile: ParticipantProfile, event: CloseEvent) => {
         case closeEventKind.own:
         case closeEventKind.lock:
             return count === 0 && event.length === 0;
-        case closeEventKind.known:
-            return count === 1 && event.length === close.submissionBytes;
         case closeEventKind.held:
             return (
                 event.length >= ballot.minimumBodyBytes &&

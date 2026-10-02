@@ -7,9 +7,9 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 // accepted, in arrival order, so restoration replays them into the same
 // state. Each event holds its kind, its record count, the serial that
 // locates its records, its payload length and one key per encrypted record:
-// a known envelope has one record, a held body its envelope record and its
-// body records, and a response the organizer takes one record with the
-// packet and the envelopes delivered with it. The participant's own ballot
+// a held body has its envelope record and its body records, and a response
+// the organizer takes one record with the packet and the envelopes
+// delivered with it. The participant's own ballot
 // references the completed ballot suffix and adds no record, and neither
 // does the locked intent, whose event fixes where replay applies it. Before
 // an intent the suffix only collects, alongside every ballot phase.
@@ -25,10 +25,9 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     const prefixBytes = 4n + 4n;
     const eventBytes = (records: bigint) =>
         1n + 2n + 4n + 4n + keyBytes * records;
-    // Delivery adds one event per new known envelope and per held body; only
-    // the organizer takes responses, one retained event per other responder.
+    // Delivery adds one event per held body; only the organizer takes
+    // responses, one retained event per other responder.
     const deliveryEventBytes =
-        wire.maximumKnownEnvelopes * eventBytes(1n) +
         wire.maximumHeldBodies * eventBytes(1n + maximumBodyRecords);
     const maximumResponseEvents = participants - 1n;
     const organizerEventBytes =
@@ -84,12 +83,11 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     const envelopeRecordBytes = wire.submissionBytes + tagBytes;
     const bodyRecordBytes =
         ballot.maximumBodyBytes + tagBytes * maximumBodyRecords;
-    // Every retained envelope copy is one known envelope's record or the
-    // envelope record of a held body.
+    // A participant's retained envelope copies are the envelope records of
+    // its held bodies; the organizer's taken responses also deliver at most
+    // one copy of each envelope it knows.
     const maximumEncryptedRecordBytes =
-        (wire.maximumKnownEnvelopes + wire.maximumHeldBodies) *
-            envelopeRecordBytes +
-        wire.maximumHeldBodies * bodyRecordBytes;
+        wire.maximumHeldBodies * (envelopeRecordBytes + bodyRecordBytes);
     const maximumOrganizerEncryptedRecordBytes =
         (wire.maximumOrganizerKnownEnvelopes + wire.maximumHeldBodies) *
             envelopeRecordBytes +
@@ -98,13 +96,8 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     return {
         prefixBytes,
         maximumBodyRecords,
-        maximumEvents:
-            wire.maximumKnownEnvelopes +
-            wire.maximumHeldBodies +
-            1n +
-            maximumResponseEvents,
+        maximumEvents: wire.maximumHeldBodies + 1n + maximumResponseEvents,
         maximumRecords:
-            wire.maximumKnownEnvelopes +
             wire.maximumHeldBodies * (1n + maximumBodyRecords) +
             maximumResponseEvents,
         collectingBytes: prefixBytes + deliveryEventBytes,

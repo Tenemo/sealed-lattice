@@ -910,14 +910,18 @@ pub fn run(
         Err(Error::Context)
     ));
     let mut probe = close_work(&enrollments[0], &poll, &setup, openings.first(), 0);
+    let mut hashed = 0;
     if let Some(forged) = &forged {
         for submission in [&forged.a, &forged.late] {
-            probe
-                .command(&mut enrollments[0].credential, 12, 0, &control(submission))
-                .unwrap();
+            deliver(
+                &mut probe,
+                &mut enrollments[0].credential,
+                submission,
+                &mut hashed,
+            );
         }
         assert!(matches!(
-            probe.command(&mut enrollments[0].credential, 12, 0, &control(&forged.b)),
+            probe.command(&mut enrollments[0].credential, 3, 0, &control(&forged.b)),
             Err(Error::Consumed)
         ));
     }
@@ -926,17 +930,15 @@ pub fn run(
         .unwrap();
     if let Some(forged) = &forged {
         assert!(matches!(
-            probe.command(
-                &mut enrollments[0].credential,
-                12,
-                0,
-                &control(&forged.late)
-            ),
+            probe.command(&mut enrollments[0].credential, 3, 0, &control(&forged.late)),
             Err(Error::Context)
         ));
-        probe
-            .command(&mut enrollments[0].credential, 12, 0, &control(&forged.b))
-            .unwrap();
+        deliver(
+            &mut probe,
+            &mut enrollments[0].credential,
+            &forged.b,
+            &mut hashed,
+        );
     }
     // A response carries exactly the unknown envelopes it lists: adding one
     // it does not list, or one already known, refuses the whole response.
@@ -949,13 +951,16 @@ pub fn run(
     };
     let known = common[0];
     assert!(lists(known));
-    probe
-        .command(&mut enrollments[0].credential, 12, 0, &control(known))
-        .unwrap();
+    deliver(
+        &mut probe,
+        &mut enrollments[0].credential,
+        known,
+        &mut hashed,
+    );
     // An input that changes nothing is refused, so no log of accepted inputs
     // records it.
     assert!(matches!(
-        probe.command(&mut enrollments[0].credential, 12, 0, &control(known)),
+        probe.command(&mut enrollments[0].credential, 3, 0, &control(known)),
         Err(Error::Consumed)
     ));
     let missing: Vec<u8> = common[1..]

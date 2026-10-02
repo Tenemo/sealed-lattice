@@ -15,12 +15,12 @@ const recordBytes = 1n << 20n;
 describe('participant close custody layout', () => {
     it('counts the completion roster suffix by hand', () => {
         const value = compileParticipantCloseCustody(completionProfile());
-        // Ten participants, three corrupt: thirteen known envelopes and held
-        // bodies, nine other responders and twenty-five body records. An
-        // event opens with an 11-byte header: kind, record count, serial and
-        // payload length. The locked intent is one event without records.
+        // Ten participants, three corrupt: thirteen held bodies, nine other
+        // responders and twenty-five body records. An event opens with an
+        // 11-byte header: kind, record count, serial and payload length. The
+        // locked intent is one event without records.
         expect(value.maximumBodyRecords).toBe(25n);
-        const delivery = 13n * (11n + 32n) + 13n * (11n + 32n * 26n);
+        const delivery = 13n * (11n + 32n * 26n);
         const events = delivery + 11n + 9n * (11n + 32n);
         const intent = 4n + 202n + signatureBytes;
         const response = 4n + (280n + 20n * 66n - 2n) + signatureBytes;
@@ -39,9 +39,9 @@ describe('participant close custody layout', () => {
             },
             { phase: 22, bytes: 8n + intent + events + response + proposal },
         ]);
-        expect(value.maximumStateBytes).toBe(24_395n);
-        expect(value.maximumEvents).toBe(13n + 13n + 1n + 9n);
-        expect(value.maximumRecords).toBe(13n + 13n * 26n + 9n);
+        expect(value.maximumStateBytes).toBe(23_836n);
+        expect(value.maximumEvents).toBe(13n + 1n + 9n);
+        expect(value.maximumRecords).toBe(13n * 26n + 9n);
     });
 
     it('bounds the encrypted close records of every roster by its held bodies', () => {
@@ -64,7 +64,7 @@ describe('participant close custody layout', () => {
             const envelopeRecord = envelopeBytes + signatureBytes + 16n;
             const bodyBytes = body.maximumBodyBytes + 16n * bodyRecords;
             expect(value.maximumEncryptedRecordBytes).toBe(
-                2n * held * envelopeRecord + held * bodyBytes,
+                held * envelopeRecord + held * bodyBytes,
             );
             const responsePacket =
                 4n + 280n + 2n * count * 66n - 2n + signatureBytes;

@@ -2265,7 +2265,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Participant close custody',
         '',
-        'Private close suffix and record bounds, excluding the already retained participant root and its earlier records. The suffix retains the accepted close inputs in arrival order with one key per encrypted record, so restoration replays them into the same state through the owning state machine. Before an intent the suffix only collects, alongside every ballot phase. Known envelopes and held bodies bound the delivery events, since the state machine refuses an input that changes nothing, and only the organizer adds one event per other responder and retains its proposal body and coins when its response completes. The per-roster table uses the completion option count, and the held bodies dominate the record bytes. The encoded suffix supplies no verification or signing authority by itself.',
+        'Private close suffix and record bounds, excluding the already retained participant root and its earlier records. The suffix retains the accepted close inputs in arrival order with one key per encrypted record, so restoration replays them into the same state through the owning state machine. Before an intent the suffix only collects, alongside every ballot phase. Held bodies bound the delivery events, since the state machine refuses an input that changes nothing, and only the organizer adds one event per other responder and retains its proposal body and coins when its response completes. The per-roster table uses the completion option count, and the held bodies dominate the record bytes. The encoded suffix supplies no verification or signing authority by itself.',
         '',
         table(
             ['Property', 'Value'],
