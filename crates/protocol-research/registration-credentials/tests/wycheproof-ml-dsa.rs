@@ -1,6 +1,6 @@
-//! ML-DSA-65 conformance of the pinned `fips204` release, which the kernel
-//! verifies with and the participant runtime signs with, against the
-//! Wycheproof vectors in `test-vectors/wycheproof`. The vectors fix the
+//! ML-DSA-65 conformance of the pinned `fips204` release, which the
+//! participant module signs and verifies with, against the Wycheproof
+//! vectors in `test-vectors/wycheproof`. The vectors fix the
 //! signature of each message and context under a key seed and the signing
 //! randomness, and the verdict on modified signatures, public keys, lengths
 //! and contexts, including contexts over the 255-byte bound. The runtime
@@ -11,9 +11,9 @@
 use fips204::ml_dsa_65;
 use fips204::traits::{KeyGen, SerDes, Signer, Verifier};
 
-const VERIFY: &str = include_str!("../../../test-vectors/wycheproof/mldsa_65_verify_test.json");
+const VERIFY: &str = include_str!("../../../../test-vectors/wycheproof/mldsa_65_verify_test.json");
 const SIGN_SEED: &str =
-    include_str!("../../../test-vectors/wycheproof/mldsa_65_sign_seed_test.json");
+    include_str!("../../../../test-vectors/wycheproof/mldsa_65_sign_seed_test.json");
 
 /// A value of the vector files, which hold objects, arrays, strings,
 /// integers and null.
@@ -270,8 +270,8 @@ fn verification_matches_every_wycheproof_verdict() {
         let signature = test.bytes("sig").unwrap();
         let context = test.bytes("ctx").unwrap_or_default();
         contexts += usize::from(has_context(test));
-        // As the kernel reads a verification key and a signature: fixed
-        // lengths, then a decoded key.
+        // As the participant module reads a verification key and a
+        // signature: fixed lengths, then a decoded key.
         let verified = <[u8; ml_dsa_65::PK_LEN]>::try_from(public.as_slice())
             .ok()
             .and_then(|bytes| ml_dsa_65::PublicKey::try_from_bytes(bytes).ok())

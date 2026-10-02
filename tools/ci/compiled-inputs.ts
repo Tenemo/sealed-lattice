@@ -42,12 +42,9 @@ export const compiledRustSources = async (
         .map((name) => repositoryFile(name.replace(/\0/gu, ' ')));
 };
 
-// A bundler plugin that records every module the bundle read. The foundation
-// bridge enters a bundle as its compiled output, so each output file is
-// recorded as the source its compiler maps to it.
+// A bundler plugin that records every module the bundle read.
 export const recordBundleSources = () => {
     const sources: string[] = [];
-    const bridgeOutput = 'packages/wasm/dist/';
     return {
         sources,
         plugin: {
@@ -55,13 +52,7 @@ export const recordBundleSources = () => {
             buildEnd(this: { getModuleIds(): IterableIterator<string> }) {
                 for (const id of this.getModuleIds()) {
                     const file = repositoryFile(id);
-                    if (file.startsWith(bridgeOutput) && file.endsWith('.js'))
-                        sources.push(
-                            'packages/wasm/src/' +
-                                file.slice(bridgeOutput.length, -3) +
-                                '.ts',
-                        );
-                    else if (
+                    if (
                         file.startsWith('packages/') &&
                         !file.includes('/node_modules/') &&
                         !file.includes('/dist/')

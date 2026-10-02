@@ -1,22 +1,50 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
+    type CommandInvocation,
 } from './run-command.js';
 
 const usage =
     'Usage: run-rust-kernel-tests.ts [<test name, module name, or Rust file filter>].';
-const cargoArguments = [
+// The participant module's crates build in their own workspace with its
+// pinned compiler and locked offline dependencies.
+const workspace = fileURLToPath(
+    new URL('../../crates/protocol-research/', import.meta.url),
+);
+
+export const rustKernelCommand = (
+    description: string,
+    args: readonly string[],
+    logFileSlug: string,
+): CommandInvocation => ({
+    args: ['+1.95.0', ...args],
+    command: 'cargo',
+    description,
+    env: {
+        ...process.env,
+        CARGO_INCREMENTAL: '0',
+        CARGO_TARGET_DIR: path.join(workspace, 'target'),
+        RUSTFLAGS: '',
+        RUST_BACKTRACE: '1',
+    },
+    logFileSlug,
+    workingDirectoryPath: workspace,
+});
+
+// The canonical encoding, hashing and registration credentials that the
+// participant module signs and verifies with, and their ML-DSA-65
+// conformance vectors.
+export const rustKernelTestArguments = [
     'test',
+    '--offline',
     '--locked',
     '-p',
-    'sealed-lattice-kernel',
+    'registration-credentials',
 ] as const;
-const cargoEnvironment = {
-    ...process.env,
-    CARGO_INCREMENTAL: '0',
-    RUST_BACKTRACE: '1',
-};
 
 const parseFilter = (rawArguments: readonly string[]): string | undefined => {
     const arguments_ = rawArguments.filter((argument) => argument !== '--');
@@ -46,20 +74,18 @@ const requireTestMatch = async (
     runLog: ActiveLocalRunLog,
 ): Promise<void> => {
     const result = await runCommandAndCaptureOutput(
-        {
-            args: [
-                ...cargoArguments,
+        rustKernelCommand(
+            `list Rust kernel tests matching ${filter}`,
+            [
+                ...rustKernelTestArguments,
                 filter,
                 '--',
                 '--list',
                 '--format',
                 'terse',
             ],
-            command: 'cargo',
-            description: `list Rust kernel tests matching ${filter}`,
-            env: cargoEnvironment,
-            logFileSlug: 'cargo-test-rust-kernel-inventory',
-        },
+            'cargo-test-rust-kernel-inventory',
+        ),
         { runLog },
     );
     if (result.exitCode !== 0 || result.terminationSignal !== null) {
@@ -89,23 +115,20 @@ const main = async (): Promise<void> => {
             if (filter !== undefined) await requireTestMatch(filter, runLog);
             process.exitCode = await runCommandsInSeries(
                 [
-                    {
-                        args: [
-                            ...cargoArguments,
+                    rustKernelCommand(
+                        filter === undefined
+                            ? 'cargo test Rust kernel'
+                            : `cargo test Rust kernel (${filter})`,
+                        [
+                            ...rustKernelTestArguments,
                             ...(filter === undefined ? [] : [filter]),
                             '--',
                             '--test-threads',
                             '1',
                             '--show-output',
                         ],
-                        command: 'cargo',
-                        description:
-                            filter === undefined
-                                ? 'cargo test Rust kernel'
-                                : `cargo test Rust kernel (${filter})`,
-                        env: cargoEnvironment,
-                        logFileSlug: 'cargo-test-rust-kernel',
-                    },
+                        'cargo-test-rust-kernel',
+                    ),
                 ],
                 { outputMode: 'inherit', runLog },
             );

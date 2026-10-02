@@ -42,7 +42,6 @@ const expectedPackageFiles = [
     'dist/participant-source-manifest.json',
     'dist/participant-worker.js',
     'dist/participant.wasm',
-    'dist/sealed-lattice-kernel.wasm',
     'package.json',
 ] as const;
 
@@ -193,41 +192,6 @@ const requireSelfContainedBundle = async (
             'Published declaration output retains a workspace import.',
         );
     }
-    if (runtimeSource.includes('__SEALED_LATTICE_KERNEL_SHA256_HEX__')) {
-        throw new Error(
-            'Published runtime output has an unresolved kernel hash.',
-        );
-    }
-};
-
-const requireFoundationOnlyKernel = async (
-    packageDirectoryPath: string,
-): Promise<void> => {
-    const kernel = new WebAssembly.Module(
-        await readFile(
-            path.join(
-                packageDirectoryPath,
-                'dist',
-                'sealed-lattice-kernel.wasm',
-            ),
-        ),
-    );
-    const exportNames = WebAssembly.Module.exports(kernel)
-        .map((entry) => entry.name)
-        .sort();
-    const expectedExportNames = [
-        '__data_end',
-        '__heap_base',
-        'memory',
-        'sealed_lattice_allocate',
-        'sealed_lattice_deallocate',
-        'sealed_lattice_foundation_command_with_length',
-    ].sort();
-    if (JSON.stringify(exportNames) !== JSON.stringify(expectedExportNames)) {
-        throw new Error(
-            `Published WebAssembly exports differ from the foundation-only inventory: ${exportNames.join(', ')}.`,
-        );
-    }
 };
 
 // The published participant module exports exactly what the worker and its
@@ -270,8 +234,7 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
         typeof record.compiler !== 'string' ||
         !Array.isArray(record.flags) ||
         !record.flags.every((value) => typeof value === 'string') ||
-        Object.keys(tools).join(',') !==
-            'binaryen,rolldown,tsdown,typescript' ||
+        Object.keys(tools).join(',') !== 'rolldown,tsdown,typescript' ||
         !Object.values(tools).every(
             (version) =>
                 typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version),
@@ -393,17 +356,6 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
             'utf8',
         ),
         writeFile(
-            path.join(consumerDirectoryPath, 'smoke.mjs'),
-            [
-                "import { createCanonicalBoardPolicy, verifyCanonicalBoardPolicy } from 'sealed-lattice';",
-                "const policy = await createCanonicalBoardPolicy({ boardOriginIdentifier: 'https://board.example' });",
-                'const verification = await verifyCanonicalBoardPolicy(policy.canonicalBytes);',
-                "if (!verification.isValid) throw new Error('Packed WASM verification refused.');",
-                '',
-            ].join('\n'),
-            'utf8',
-        ),
-        writeFile(
             path.join(consumerDirectoryPath, 'participant.mjs'),
             participantConsumer,
             'utf8',
@@ -411,9 +363,12 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
         writeFile(
             path.join(consumerDirectoryPath, 'smoke.ts'),
             [
-                "import { createCanonicalBoardPolicy, type CanonicalFoundationBoardPolicy } from 'sealed-lattice';",
-                "const policy: Promise<CanonicalFoundationBoardPolicy> = createCanonicalBoardPolicy({ boardOriginIdentifier: 'https://board.example' });",
-                'void policy;',
+                "import { openParticipant, type ParticipantResult, type ParticipantSummary } from 'sealed-lattice';",
+                "const participant = openParticipant({ namespace: 'smoke-poll', relay: 'https://relay.example/polls' });",
+                "const result: Promise<ParticipantResult> = participant.run({ operation: 'status' });",
+                "const options: ParticipantSummary['options'] = [{ identifier: 'option-0', label: 'Option 0' }];",
+                'void result;',
+                'void options;',
                 '',
             ].join('\n'),
             'utf8',
@@ -452,7 +407,6 @@ const verifyPackedPackage = async (
         await mkdir(packDirectory);
         await stagePublicPackage(packageDirectory);
         await requireSelfContainedBundle(packageDirectory);
-        await requireFoundationOnlyKernel(packageDirectory);
         const participantIdentity =
             await requireParticipantRuntime(packageDirectory);
         await runPackageManager(
@@ -532,12 +486,6 @@ const verifyPackedPackage = async (
                 workingDirectoryPath: consumerDirectory,
             },
         );
-        await runCommand(runLog, {
-            args: ['smoke.mjs'],
-            command: process.execPath,
-            description: 'Execute the packed WebAssembly API',
-            workingDirectoryPath: consumerDirectory,
-        });
         await runCommand(runLog, {
             args: ['participant.mjs', JSON.stringify(participantIdentity)],
             command: process.execPath,

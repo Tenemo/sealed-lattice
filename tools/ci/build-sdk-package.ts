@@ -1,11 +1,4 @@
-import {
-    copyFile,
-    mkdir,
-    readdir,
-    readFile,
-    rm,
-    writeFile,
-} from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,19 +9,12 @@ import {
     participantRuntimeIdentity,
     participantSourceManifest,
 } from './build-participant-module.js';
-import { buildWasmKernel } from './build-wasm-kernel.js';
 import { recordBundleSources } from './compiled-inputs.js';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
 import { sdkPackageOptions } from './sdk-package-tsdown.config.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
-const kernelStagingPath = path.join(
-    repositoryRoot,
-    'target',
-    'public-sdk-kernel',
-    'sealed-lattice-kernel.wasm',
-);
 const workerStagingPath = path.join(
     repositoryRoot,
     'target',
@@ -44,10 +30,6 @@ const sdkOutputDirectoryPath = path.join(
     'packages',
     'sdk',
     'dist',
-);
-const kernelOutputPath = path.join(
-    sdkOutputDirectoryPath,
-    'sealed-lattice-kernel.wasm',
 );
 
 // Bundles the participant worker into one unminified browser module, and
@@ -102,7 +84,7 @@ const sdkEntrySources = async (): Promise<readonly string[]> => {
     await rm(entryStagingPath, { recursive: true, force: true });
     try {
         await build({
-            ...sdkPackageOptions('0'.repeat(64), null),
+            ...sdkPackageOptions(null),
             config: false,
             dts: false,
             logLevel: 'warn',
@@ -117,15 +99,10 @@ const sdkEntrySources = async (): Promise<readonly string[]> => {
 };
 
 export const buildSdkPackage = async (): Promise<void> => {
-    const { hash: kernelHash, sources: kernelSources } = await buildWasmKernel({
-        outputFilePath: kernelStagingPath,
-    });
-    const kernelBytes = await readFile(kernelStagingPath);
     const participant = await buildParticipantModule();
     const { worker, sources: workerSources } = await buildParticipantWorker();
     const sourceManifest = Buffer.from(
         await participantSourceManifest(participant, [
-            ...kernelSources,
             ...workerSources,
             ...(await sdkEntrySources()),
         ]),
@@ -160,7 +137,6 @@ export const buildSdkPackage = async (): Promise<void> => {
         {
             environment: {
                 ...process.env,
-                SEALED_LATTICE_KERNEL_SHA256_HEX: kernelHash,
                 SEALED_LATTICE_PARTICIPANT_RUNTIME:
                     JSON.stringify(participantRuntime),
             },
@@ -169,19 +145,13 @@ export const buildSdkPackage = async (): Promise<void> => {
     if (output.length > 0) process.stdout.write(output);
 
     await mkdir(sdkOutputDirectoryPath, { recursive: true });
-    await copyFile(kernelStagingPath, kernelOutputPath);
-    if (!kernelBytes.equals(await readFile(kernelOutputPath))) {
-        throw new Error('The public SDK kernel copy differs from its build.');
-    }
     for (const [name, bytes] of [
         ['participant.wasm', participant.module],
         ['participant-worker.js', worker],
         ['participant-source-manifest.json', sourceManifest],
     ] as const)
         await writeFile(path.join(sdkOutputDirectoryPath, name), bytes);
-    console.log(
-        `Public SDK bundled with exact kernel ${kernelHash} and the participant module and worker.`,
-    );
+    console.log('Public SDK bundled with the participant module and worker.');
 };
 
 if (import.meta.main) await buildSdkPackage();

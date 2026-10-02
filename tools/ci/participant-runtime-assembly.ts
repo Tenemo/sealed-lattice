@@ -13,10 +13,8 @@ const root = path.resolve('.');
 const packageOutput = path.join(root, 'packages/sdk/dist');
 
 export type ParticipantRuntime = Readonly<{
-    // The SDK entry that serves the participant API to the page, and the
-    // foundation kernel its foundation functions load.
+    // The SDK entry that serves the participant API to the page.
     sdk: Buffer;
-    kernel: Buffer;
     module: Buffer;
     worker: Buffer;
     identity: Readonly<{
@@ -57,10 +55,9 @@ export const assembleParticipantRuntime = async (
         invalidBallotClient: CorruptParticipantClient | undefined;
     }>
 > => {
-    const [sdk, kernel, module, worker, sourceManifest] = await Promise.all(
+    const [sdk, module, worker, sourceManifest] = await Promise.all(
         [
             'index.js',
-            'sealed-lattice-kernel.wasm',
             'participant.wasm',
             'participant-worker.js',
             'participant-source-manifest.json',
@@ -133,7 +130,6 @@ export const assembleParticipantRuntime = async (
     await mkdir(runLog.artifactDirectoryPath, { recursive: true });
     for (const [name, bytes] of [
         ['index.js', sdk],
-        ['sealed-lattice-kernel.wasm', kernel],
         ['participant.wasm', module],
         ['worker.js', worker],
         ...(invalidBallotClient === undefined
@@ -147,7 +143,7 @@ export const assembleParticipantRuntime = async (
             flag: 'wx',
         });
     return {
-        runtime: { sdk, kernel, module, worker, identity },
+        runtime: { sdk, module, worker, identity },
         invalidBallotClient,
     };
 };

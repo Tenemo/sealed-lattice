@@ -43,29 +43,23 @@ const allowedImports = [
     'word_proof.fill_random',
 ];
 
-// The build definitions beside the compiled sources: the lockfiles and the
-// toolchain file the Rust builds resolve, the package manifests and
-// TypeScript configurations the bundler and the foundation bridge's compiler
-// read, and the build scripts. Every Cargo manifest above a compiled Rust
-// source joins them.
+// The build definitions beside the compiled sources: the lockfile the Rust
+// build resolves, the package manifest and TypeScript configurations the
+// bundler reads, and the build scripts. Every Cargo manifest above a compiled
+// Rust source joins them.
 const buildDefinitions = [
-    'Cargo.lock',
     'crates/protocol-research/Cargo.lock',
     'packages/sdk/package.json',
     'packages/sdk/tsconfig.json',
-    'packages/wasm/package.json',
-    'packages/wasm/tsconfig.json',
-    'rust-toolchain.toml',
     'tools/ci/build-participant-module.ts',
     'tools/ci/build-sdk-package.ts',
-    'tools/ci/build-wasm-kernel.ts',
     'tools/ci/compiled-inputs.ts',
     'tools/ci/sdk-package-tsdown.config.ts',
     'tsconfig.base.json',
 ];
-// The packages whose installed versions compile the foundation bridge,
-// bundle the worker and the SDK entry, and optimize the foundation kernel.
-const buildTools = ['binaryen', 'rolldown', 'tsdown', 'typescript'];
+// The packages whose installed versions bundle the worker and the SDK entry
+// and emit the entry's declarations.
+const buildTools = ['rolldown', 'tsdown', 'typescript'];
 
 export type ParticipantModuleBuild = Readonly<{
     module: Buffer;
@@ -273,8 +267,8 @@ const toolVersions = (): Record<string, string> => {
 // The canonical source manifest: the compiler, its flags, the build tools'
 // versions and the digest and length of every compiled source and build
 // definition, in path order. The compiled sources are every repository file
-// the compilers and the bundler read for the packaged module, foundation
-// kernel, worker and SDK entry, so documentation, tests and crates outside
+// the compiler and the bundler read for the packaged module, worker and SDK
+// entry, so documentation, tests and crates outside
 // those builds leave it unchanged. Its digest is the source component of the
 // runtime identity.
 export const participantSourceManifest = async (

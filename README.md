@@ -23,17 +23,9 @@ The application and library must not expose raw ballot, total, or intermediate-v
 
 ## Current implementation boundary
 
-The public package exposes construction-neutral foundation operations:
+The public package exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result, and the outcome verifier, which checks a poll's outcome from the relay without participant state. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
 
-- poll validation;
-- canonical poll, action, and board-policy encoding;
-- canonical manifest, action, ceremony-context, and action-context verification;
-- bounded Rust/WebAssembly parsing and hashing; and
-- reproducible package assembly and public-export checks.
-
-It also exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result, and the outcome verifier, which checks a poll's outcome from the relay without participant state. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release. Rejected construction formats and commands have been removed rather than retained as compatibility paths.
-
-The separate [protocol research workspace](crates/protocol-research/README.md) contains the executable native construction and its guarded runner. It is not part of the published SDK. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
+The [protocol research workspace](crates/protocol-research/README.md) holds the Rust crates from which the participant module is built, the executable native construction and its guarded runner. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
 
 `sealed-vote` is the host application responsible for registration, invitations, poll management, notifications, and the user interface. Anyone with the poll link may register until the organizer closes registration. Participants use the displayed public usernames to confirm the same ordered username-to-credential roster before it is frozen and supplied to `sealed-lattice`. Public usernames do not establish real-world identity, and duplicate-person prevention, coercion resistance, and endpoint security remain outside this library.
 
@@ -54,27 +46,33 @@ pnpm add sealed-lattice
 ## Usage
 
 ```typescript
-import { createCanonicalManifest, validatePollSpec } from "sealed-lattice";
+import { openParticipant } from "sealed-lattice";
 
-const validation = validatePollSpec({
-    question: "Which proposals should be adopted?",
-    options: Array.from(
-        { length: 10 },
-        (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
-    ),
+const participant = openParticipant({
+    namespace: "board-vote",
+    relay: "https://relay.example/polls/",
+});
+const created = await participant.run({
+    operation: "create",
+    parameters: {
+        role: "creator",
+        question: "Which proposals should be adopted?",
+        options: Array.from(
+            { length: 10 },
+            (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
+        ),
+        topCount: 3,
+        maximumParticipants: 10,
+        username: "Organizer",
+    },
 });
 
-if (!validation.isValid) {
-    throw new Error(
-        validation.errors[0]?.message ?? "Invalid poll specification.",
-    );
+if (created.status === "completed") {
+    console.log(created.details.poll, created.details.options);
 }
-
-const manifest = await createCanonicalManifest(validation.normalized);
-console.log(manifest.manifestHash, manifest.canonicalBytes);
 ```
 
-`validatePollSpec` handles pre-protocol user input. Protocol identity starts with the canonical bytes and hash produced by the Rust/WebAssembly kernel. Import public APIs from the package root; workspace internals are not public API.
+The participant module checks the question and option labels and refuses an invalid poll as `invalid request` before it generates any key. Import the public API from the package root; workspace internals are not public API.
 
 ### Participant
 
@@ -90,7 +88,7 @@ The worker runs from a `blob:` URL, compiles the packaged `participant.wasm` aft
 
 ## Development
 
-The repository uses Node.js 24.14.1, pnpm 11.25.0, Rust 1.90.0 for the foundation kernel, and Rust 1.95.0 with the `wasm32-unknown-unknown` target for the participant module. The participant module builds offline, so fetch its locked dependencies once before the first build.
+The repository uses Node.js 24.14.1, pnpm 11.25.0, and Rust 1.95.0 with the `wasm32-unknown-unknown` target, Clippy and rustfmt for the participant module. The participant module builds offline, so fetch its locked dependencies once before the first build.
 
 ```bash
 pnpm install --frozen-lockfile

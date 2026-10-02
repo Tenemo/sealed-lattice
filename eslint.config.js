@@ -162,18 +162,6 @@ export default defineConfig(
         },
     },
     {
-        files: ['packages/wasm/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: ['sealed-lattice'],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
         files: toolFiles,
         languageOptions: {
             parserOptions: {
@@ -224,13 +212,7 @@ export default defineConfig(
         },
     },
     {
-        files: [
-            'packages/sdk/tests/node/election-foundation-public-api.test.ts',
-            'tests/node/participant/parallel-helpers.kernel.test.ts',
-            'tests/node/participant/public-input-fuzz.kernel.test.ts',
-            'tools/ci/check-protocol-public-completion.ts',
-            'tools/ci/run-participant-browser.ts',
-        ],
+        files: ['packages/sdk/tests/node/public-api.test.ts'],
         rules: {
             'import-x/extensions': [
                 'error',

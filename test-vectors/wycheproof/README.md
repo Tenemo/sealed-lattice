@@ -1,6 +1,6 @@
 # Wycheproof ML-DSA-65 vectors
 
-These files are unmodified copies from the [Wycheproof](https://github.com/C2SP/wycheproof) repository at commit `6d7cccd0fcb1917368579adeeac10fe802f1b521`, distributed under the Apache License 2.0 in [LICENSE](LICENSE). The kernel test [wycheproof-ml-dsa.rs](../../crates/sealed-lattice-kernel/tests/wycheproof-ml-dsa.rs) checks the pinned ML-DSA-65 implementation against them.
+These files are unmodified copies from the [Wycheproof](https://github.com/C2SP/wycheproof) repository at commit `6d7cccd0fcb1917368579adeeac10fe802f1b521`, distributed under the Apache License 2.0 in [LICENSE](LICENSE). The registration credentials test [wycheproof-ml-dsa.rs](../../crates/protocol-research/registration-credentials/tests/wycheproof-ml-dsa.rs) checks the pinned ML-DSA-65 implementation, as the participant module builds it, against them.
 
 | File | Upstream path | SHA-256 |
 | --- | --- | --- |

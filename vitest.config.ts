@@ -25,10 +25,7 @@ const nodeHookTimeoutMs = 240_000;
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelTestTimeoutMs = 15 * 60_000;
 
-const kernelNodeTestGlobs = [
-    'packages/wasm/tests/node/**/*.kernel.test.ts',
-    'tests/node/**/*.kernel.test.ts',
-] as const;
+const kernelNodeTestGlobs = ['tests/node/**/*.kernel.test.ts'] as const;
 const censusNodeTestGlobs = [
     'tests/node/tools/documentation-census.test.ts',
 ] as const;

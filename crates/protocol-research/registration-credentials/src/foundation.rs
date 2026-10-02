@@ -1,16 +1,9 @@
-#[path = "../../../sealed-lattice-kernel/src/foundation/canonical_tuple.rs"]
 pub mod canonical_tuple;
-#[path = "../../../sealed-lattice-kernel/src/foundation/ceremony.rs"]
 pub mod ceremony;
-#[path = "../../../sealed-lattice-kernel/src/foundation/hash.rs"]
 pub mod hash;
-#[path = "../../../sealed-lattice-kernel/src/foundation/participant_identity.rs"]
 pub mod participant_identity;
-#[path = "../../../sealed-lattice-kernel/src/foundation/refusal.rs"]
 pub mod refusal;
-#[path = "../../../sealed-lattice-kernel/src/foundation/schemas.rs"]
 pub mod schemas;
-#[path = "../../../sealed-lattice-kernel/src/foundation/text.rs"]
 pub mod text;
 
 pub use canonical_tuple::{

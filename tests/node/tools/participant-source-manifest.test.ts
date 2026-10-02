@@ -30,28 +30,26 @@ describe('participant source identity', () => {
             await participantSourceManifest(
                 fixtureBuild([
                     'crates/protocol-research/registration-enrollment/src/lib.rs',
-                    'crates/sealed-lattice-kernel/src/foundation/hash.rs',
+                    'crates/protocol-research/registration-credentials/src/foundation/hash.rs',
                 ]),
                 [
+                    'packages/sdk/src/index.ts',
                     'packages/sdk/src/participant/participant.ts',
-                    'packages/wasm/src/foundation-contract.ts',
                 ],
             ),
         ) as Manifest;
-        // The page controller and the bridge come from the bundles, the Rust
-        // sources from the compiler, and the manifests above them define
-        // their packages and workspaces.
+        // The SDK entry and the page controller come from the bundles, the
+        // Rust sources from the compiler, and the manifests above them define
+        // their packages and workspace.
         for (const file of [
+            'packages/sdk/src/index.ts',
             'packages/sdk/src/participant/participant.ts',
-            'packages/wasm/src/foundation-contract.ts',
             'crates/protocol-research/registration-enrollment/src/lib.rs',
             'crates/protocol-research/registration-enrollment/Cargo.toml',
+            'crates/protocol-research/registration-credentials/src/foundation/hash.rs',
+            'crates/protocol-research/registration-credentials/Cargo.toml',
             'crates/protocol-research/Cargo.toml',
             'crates/protocol-research/Cargo.lock',
-            'crates/sealed-lattice-kernel/Cargo.toml',
-            'Cargo.toml',
-            'Cargo.lock',
-            'rust-toolchain.toml',
             'tools/ci/sdk-package-tsdown.config.ts',
         ]) {
             const source = await readFile(file);
@@ -79,7 +77,6 @@ describe('participant source identity', () => {
                 file,
             ).toBe(false);
         expect(Object.keys(manifest.tools)).toEqual([
-            'binaryen',
             'rolldown',
             'tsdown',
             'typescript',

@@ -33,7 +33,6 @@
         "build": "tsx ../../tools/ci/build-sdk-package.ts"
     },
     "devDependencies": {
-        "@sealed-lattice/wasm": "workspace:*",
         "vitest": "^4.1.11"
     },
     "keywords": [

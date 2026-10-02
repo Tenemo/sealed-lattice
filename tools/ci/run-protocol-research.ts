@@ -313,9 +313,6 @@ await runWithLocalRunLog(
                 }
             };
             await snapshot(workspace);
-            await snapshot(
-                path.join(root, 'crates/sealed-lattice-kernel/src/foundation'),
-            );
             await writeFile(
                 path.join(log.runDirectoryPath, 'source-manifest.json'),
                 JSON.stringify({ compiler, sources }, null, 2) + '\n',

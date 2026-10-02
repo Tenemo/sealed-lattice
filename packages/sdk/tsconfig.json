@@ -7,10 +7,5 @@
         "rootDir": "./src",
         "tsBuildInfoFile": "../../temp/typescript/sdk.tsbuildinfo"
     },
-    "include": ["src/**/*.ts"],
-    "references": [
-        {
-            "path": "../wasm"
-        }
-    ]
+    "include": ["src/**/*.ts"]
 }

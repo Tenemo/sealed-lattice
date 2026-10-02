@@ -35,9 +35,9 @@ These are requirements, not claims about the current package.
 
 ## Current implementation boundary
 
-The package implements bounded canonical foundation encodings, context verification, and hashing in Rust/WebAssembly, TypeScript poll validation, and package integrity checks. It also ships the participant runtime, a WebAssembly module and worker that carry one participant through registration, roster agreement, the distributed setup, the ballot and its proof, closing, the target vote, the release share, and the local result, and that verify a poll's outcome from its published records without participant state. The participant API returns only the participant's verified progress and its authorized result; it exposes no raw decryption, participant-secret export, or path around certified release. An implemented step is not an established one: the runtime has run only in development environments, and its security argument has no independent review.
+The package ships the participant runtime, a WebAssembly module and worker that carry one participant through registration, roster agreement, the distributed setup, the ballot and its proof, closing, the target vote, the release share, and the local result, and that verify a poll's outcome from its published records without participant state. The participant API returns only the participant's verified progress and its authorized result; it exposes no raw decryption, participant-secret export, or path around certified release. An implemented step is not an established one: the runtime has run only in development environments, and its security argument has no independent review.
 
-Removed construction formats are not accepted as compatibility inputs or fallback modes. Passing tests for the retained foundation establish only the tested encoding and verification behavior.
+Removed construction formats are not accepted as compatibility inputs or fallback modes.
 
 ## Open security blockers
 

@@ -9,6 +9,10 @@ import {
     type CommandInvocation,
     type CommandRunObserver,
 } from './run-command.js';
+import {
+    rustKernelCommand,
+    rustKernelTestArguments,
+} from './run-rust-kernel-tests.js';
 
 type Lane = {
     readonly commands: readonly CommandInvocation[];
@@ -157,22 +161,6 @@ class Reporter {
     }
 }
 
-const createCargoCommand = (
-    description: string,
-    args: readonly string[],
-    logFileSlug: string,
-): CommandInvocation => ({
-    args,
-    command: 'cargo',
-    description,
-    env: {
-        ...process.env,
-        CARGO_INCREMENTAL: '0',
-        RUST_BACKTRACE: '1',
-    },
-    logFileSlug,
-});
-
 const buildLanes = (): {
     readonly desktopBrowser: Lane;
     readonly gating: readonly Lane[];
@@ -211,32 +199,30 @@ const buildLanes = (): {
             lane('Lint', 'lint', ['run', 'lint']),
             {
                 commands: [
-                    createCargoCommand(
+                    rustKernelCommand(
                         'cargo fmt --check',
-                        ['fmt', '--all', '--check'],
+                        ['fmt', '--all', '--', '--check'],
                         'cargo-fmt',
                     ),
-                    createCargoCommand(
+                    rustKernelCommand(
                         'cargo clippy',
                         [
                             'clippy',
+                            '--offline',
                             '--locked',
-                            '--workspace',
+                            '-p',
+                            'registration-credentials',
                             '--all-targets',
-                            '--all-features',
                             '--',
                             '-D',
                             'warnings',
                         ],
                         'cargo-clippy',
                     ),
-                    createCargoCommand(
+                    rustKernelCommand(
                         'cargo test (optimized test profile, fast)',
                         [
-                            'test',
-                            '--locked',
-                            '-p',
-                            'sealed-lattice-kernel',
+                            ...rustKernelTestArguments,
                             '--',
                             '--test-threads',
                             '1',

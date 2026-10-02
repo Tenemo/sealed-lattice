@@ -11,14 +11,12 @@ import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const generatedArtifactRelativePaths = [
-    'packages/wasm/dist/sealed-lattice-kernel.wasm',
     'packages/sdk/dist/index.d.ts',
     'packages/sdk/dist/index.js',
     'packages/sdk/dist/index.js.map',
     'packages/sdk/dist/participant-source-manifest.json',
     'packages/sdk/dist/participant-worker.js',
     'packages/sdk/dist/participant.wasm',
-    'packages/sdk/dist/sealed-lattice-kernel.wasm',
 ] as const;
 
 const collectGeneratedArtifactHashes = async (): Promise<readonly string[]> =>
@@ -46,12 +44,6 @@ const runPackageCommand = (argumentsList: readonly string[]): void => {
 export const verifyBuildReproducibility = async (): Promise<void> => {
     const before = await collectGeneratedArtifactHashes();
 
-    runPackageCommand([
-        '--filter',
-        '@sealed-lattice/wasm',
-        'run',
-        'build:wasm',
-    ]);
     runPackageCommand(['--filter', 'sealed-lattice', 'run', 'build']);
 
     const after = await collectGeneratedArtifactHashes();
@@ -64,7 +56,7 @@ export const verifyBuildReproducibility = async (): Promise<void> => {
         );
     }
 
-    console.log('Repeated WASM and SDK builds reproduced every package byte.');
+    console.log('A repeated SDK build reproduced every package byte.');
 };
 
 if (import.meta.main) {

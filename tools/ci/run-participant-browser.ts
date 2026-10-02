@@ -261,7 +261,7 @@ const participantDatabase = participantDatabaseName(participantNamespace);
 
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
-// beside the packaged module and kernel. The page also runs the SDK's
+// beside the packaged module. The page also runs the SDK's
 // standalone verifier for the poll the runner names, from the same relay.
 const participantPage = `<!doctype html><meta charset="utf-8"><title>Participant</title><script type="module">
 import { openParticipant, verifyOutcome } from '/sdk/index.js';
@@ -359,10 +359,6 @@ const startRelay = async (
             [
                 '/sdk/participant.wasm',
                 { type: 'application/wasm', bytes: runtime.module },
-            ],
-            [
-                '/sdk/sealed-lattice-kernel.wasm',
-                { type: 'application/wasm', bytes: runtime.kernel },
             ],
             ...(client === undefined
                 ? []

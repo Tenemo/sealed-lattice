@@ -17,9 +17,6 @@
     "references": [
         {
             "path": "./packages/sdk"
-        },
-        {
-            "path": "./packages/wasm"
         }
     ]
 }

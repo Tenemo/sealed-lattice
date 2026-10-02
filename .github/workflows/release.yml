@@ -45,11 +45,11 @@ jobs:
                   ref: ${{ github.sha }}
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: ./.github/actions/participant-toolchain
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  toolchain: 1.90.0
-                  targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+              with:
+                  workspaces: |
+                      crates/protocol-research -> ../../target/participant-module
+                      crates/protocol-research
 
             - name: Install Chromium
               run: pnpm exec playwright install --with-deps chromium
@@ -176,11 +176,9 @@ jobs:
                   ref: ${{ needs.verify.outputs.tag }}
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: ./.github/actions/participant-toolchain
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  toolchain: 1.90.0
-                  targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+              with:
+                  workspaces: crates/protocol-research -> ../../target/participant-module
 
             - name: Verify checked-out release commit
               env:

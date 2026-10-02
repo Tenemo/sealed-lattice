@@ -1,11 +1,12 @@
 name: Participant module toolchain
-description: Install the Rust toolchain that builds the participant module and fetch its locked dependencies
+description: Install the Rust toolchain that builds, lints and tests the participant module and fetch its locked dependencies
 
 runs:
     using: composite
     steps:
         - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
           with:
+              components: clippy, rustfmt
               toolchain: 1.95.0
               targets: wasm32-unknown-unknown
         # The module builds offline from the research workspace's lockfile.

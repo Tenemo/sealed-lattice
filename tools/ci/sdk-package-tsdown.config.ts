@@ -5,26 +5,19 @@ import { defineConfig, type UserConfig } from 'tsdown';
 const sdkPackageDirectoryPath = fileURLToPath(
     new URL('../../packages/sdk/', import.meta.url),
 );
-const internalWasmPackage = /^@sealed-lattice\/wasm(?:\/|$)/u;
 const nodeBuiltin = /^node:/u;
 
-// The SDK entry's bundle options, which embed the exact kernel digest and the
-// participant runtime the SDK build packaged.
-export const sdkPackageOptions = (
-    kernelHash: string,
-    participantRuntime: unknown,
-): UserConfig => ({
+// The SDK entry's bundle options, which embed the participant runtime the
+// SDK build packaged.
+export const sdkPackageOptions = (participantRuntime: unknown): UserConfig => ({
     clean: true,
     cwd: sdkPackageDirectoryPath,
     define: {
-        __SEALED_LATTICE_KERNEL_SHA256_HEX__: JSON.stringify(kernelHash),
         __SEALED_LATTICE_PARTICIPANT_RUNTIME__:
             JSON.stringify(participantRuntime),
     },
     deps: {
-        alwaysBundle: [internalWasmPackage],
         dts: {
-            alwaysBundle: [internalWasmPackage],
             neverBundle: [nodeBuiltin],
         },
         neverBundle: [nodeBuiltin],
@@ -68,12 +61,6 @@ const isParticipantRuntime = (
     Object.keys(value).length === 2;
 
 export default defineConfig(() => {
-    const kernelHash = process.env.SEALED_LATTICE_KERNEL_SHA256_HEX ?? '';
-    if (!/^[a-f0-9]{64}$/u.test(kernelHash)) {
-        throw new Error(
-            'Build the SDK through its package script so the exact kernel hash is available.',
-        );
-    }
     const participantRuntime: unknown = JSON.parse(
         process.env.SEALED_LATTICE_PARTICIPANT_RUNTIME ?? 'null',
     );
@@ -92,5 +79,5 @@ export default defineConfig(() => {
             'Build the SDK through its package script so the participant runtime is available.',
         );
     }
-    return sdkPackageOptions(kernelHash, participantRuntime);
+    return sdkPackageOptions(participantRuntime);
 });
