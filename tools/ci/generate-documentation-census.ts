@@ -109,10 +109,6 @@ import {
     compileParticipantVaultKeyClasses,
 } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
-import {
-    createFalseBinaryRelationTable,
-    enumerateRandomizedEncodingViews,
-} from '#tests/polynomial-oracle-boundary-model.js';
 import { compileProofCompilerChronology } from '#tests/proof-compiler-chronology-model.js';
 import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
 import {
@@ -121,7 +117,6 @@ import {
 } from '#tests/proof-hash-work-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
-import { compilePublicationCutCensus } from '#tests/publication-cut-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
@@ -150,7 +145,6 @@ import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowled
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
-import { compileSpongePathExtractionCensus } from '#tests/sponge-path-extraction-model.js';
 import {
     stagedPreimageBound,
     stagedPreimageStateControl,
@@ -274,7 +268,6 @@ export const renderDocumentationCensus = (): string => {
     const linkedRelease = compileLinkedReleaseRelationCensus(completion);
     const linkedReleaseProof = compileLinkedReleaseWordProofLayout(completion);
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
-    const spongePaths = compileSpongePathExtractionCensus();
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
     const contributionBodies = supportedProfiles.profiles.map((row) =>
@@ -334,16 +327,12 @@ export const renderDocumentationCensus = (): string => {
             : `${formatCount(low)} to ${formatCount(high)}`;
     };
     const certificateCustody = compileCertificateCustodyCensus();
-    const publicationCut = compilePublicationCutCensus();
     const wideShareLifting = compileWideShareLiftingCensus(
         completion.shareLifting,
     );
     const releaseShareLifting = compileReleaseShareLiftingCensus(
         completion.releaseLifting,
     );
-    const firstMaskedView = enumerateRandomizedEncodingViews(0, 1, [2, 3]);
-    const secondMaskedView = enumerateRandomizedEncodingViews(1, 1, [2, 3]);
-    const falseRelation = createFalseBinaryRelationTable();
     if (
         thresholdKeyAggregation.maximumScaledReconstructionCoefficientOneNorm !==
             thresholdReleaseNoise.exactMaximumScaledReconstructionCoefficientOneNorm ||
@@ -459,42 +448,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Experiment gadget length',
                     formatCount(thresholdKeyAggregation.gadgetLength),
-                ],
-            ],
-        ),
-        '',
-        '## Polynomial oracle boundary census',
-        '',
-        'These exact finite-field counterexamples reject the one-mask, reused-query projection and bare-table compilation. Sufficient independent masks repair only the displayed witness-query marginal; low-degree binding, all auxiliary-polynomial views, QROM compilation, and a complete regeneration schedule remain unproved. No proof-size or streaming-feasibility claim is derived from these examples.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'One-mask support per witness after two distinct queries',
-                    formatCount(firstMaskedView.size),
-                ],
-                [
-                    'Shared views between the two one-mask witnesses',
-                    formatCount(
-                        [...firstMaskedView.keys()].filter((view) =>
-                            secondMaskedView.has(view),
-                        ).length,
-                    ),
-                ],
-                [
-                    'Two-mask support per witness after two queries',
-                    formatCount(
-                        enumerateRandomizedEncodingViews(0, 2, [2, 3]).size,
-                    ),
-                ],
-                [
-                    'False binary relation table checks passed',
-                    formatCount(falseRelation.entries.length),
-                ],
-                [
-                    'Required quotient maximum degree',
-                    formatCount(falseRelation.claimedQuotientMaximumDegree),
                 ],
             ],
         ),
@@ -730,28 +683,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Carry needed by the false release equation',
                     formatCount(releaseShareLifting.aliasCarry),
-                ],
-            ],
-        ),
-        '',
-        '## Sponge-path extraction census',
-        '',
-        'The finite model checks change counts of the shortest complete sponge-path label on injective compression blocks, in both permutation directions and with truncated tags. It tests a proposed local commutator premise; it is not an online extraction theorem or a fixed-Keccak claim.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Forward compression blocks checked',
-                    formatCount(spongePaths.checkedForwardStars),
-                ],
-                [
-                    'Inverse compression blocks checked',
-                    formatCount(spongePaths.checkedInverseStars),
-                ],
-                [
-                    'Changed path labels across both directions',
-                    formatCount(spongePaths.changedPaths),
                 ],
             ],
         ),
@@ -3978,31 +3909,6 @@ export const renderDocumentationCensus = (): string => {
                     'Combined initialization distance exponent',
                     formatCount(
                         fixedSpongeInitialization.combinedInitializationFailureExponent,
-                    ),
-                ],
-            ],
-        ),
-        '',
-        '## Publication cut census',
-        '',
-        "The freeze-and-union model retains complete ECHO certificates inside each honest READY sender's close report. The intersection census checks every named completed-publication quorum, close quorum, and maximum corruption set. It establishes the required honest reporter, not a complete protocol or a visit bound.",
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                ['Participants', formatCount(publicationCut.participantCount)],
-                [
-                    'Publication and close quorum',
-                    formatCount(publicationCut.quorum),
-                ],
-                [
-                    'Named intersections checked',
-                    formatCount(publicationCut.checkedIntersections),
-                ],
-                [
-                    'Minimum honest reporters of every completed publication',
-                    formatCount(
-                        publicationCut.minimumHonestPublicationReporters,
                     ),
                 ],
             ],

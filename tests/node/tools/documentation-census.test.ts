@@ -13,7 +13,6 @@ describe('documentation census generator', () => {
         for (const heading of [
             '## Threshold completion census',
             '## Threshold key-aggregation structural census',
-            '## Polynomial oracle boundary census',
             '## Recipient-key uniqueness census',
             '## Early commitment extraction census',
             '## Full-body commitment equivocation census',
@@ -21,7 +20,6 @@ describe('documentation census generator', () => {
             '## Small-limb proof-field census',
             '## Fixed-modulus BFV noise census',
             '## Certificate custody census',
-            '## Publication cut census',
             '## Roster proposal census',
             '## Contribution body census',
             '## Common-matrix sampling census',
@@ -31,7 +29,6 @@ describe('documentation census generator', () => {
             '## Setup contribution operator census',
             '## Linked release relation census',
             '## Linked ballot encryption census',
-            '## Sponge-path extraction census',
             '## Wide sharing and release lifting census',
             '## Threshold release flooding bound',
         ]) {
@@ -45,9 +42,6 @@ describe('documentation census generator', () => {
         );
         expect(rendered).toContain(
             '| Authorized release subsets checked | `210` |',
-        );
-        expect(rendered).toContain(
-            '| Shared views between the two one-mask witnesses | `0` |',
         );
         expect(rendered).toContain(
             '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
