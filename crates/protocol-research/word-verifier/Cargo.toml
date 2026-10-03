@@ -13,7 +13,7 @@ crate-type = ["rlib"]
 parallel-work = { path = "../parallel-work" }
 proof-lookup-table = { path = "../proof-lookup-table" }
 sha3 = "=0.10.9"
-setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
 
 [dev-dependencies]

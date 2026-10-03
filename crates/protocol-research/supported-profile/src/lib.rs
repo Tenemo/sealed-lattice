@@ -309,12 +309,6 @@ impl Profile {
     pub fn fhe_common_sample_bits(self) -> usize {
         self.common_sample_bits
     }
-    pub fn family_common_sample_bits(self, family: Family) -> usize {
-        match family {
-            Family::Fhe => self.common_sample_bits,
-            _ => fixed_common_sample_bits(),
-        }
-    }
     pub fn sharing_coefficient_bits(self) -> usize {
         self.sharing_coefficient_bits
     }
@@ -350,9 +344,6 @@ impl Profile {
     }
     pub fn release_quotient_limbs(self) -> usize {
         self.release_quotient_bits.div_ceil(RELEASE_LIMB_BITS)
-    }
-    pub fn release_noise_limbs(self) -> usize {
-        self.release_noise_bits.div_ceil(RELEASE_LIMB_BITS)
     }
     pub fn release_output_limbs(self) -> usize {
         self.release_public_limbs()

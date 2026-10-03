@@ -118,7 +118,6 @@ type WorkerCommand = Readonly<{
     relay: string;
     module: string;
     identity: Readonly<{
-        runtime: string;
         source: string;
         module: string;
         worker: string;
@@ -130,15 +129,15 @@ type WorkerCommand = Readonly<{
 // An evaluated result reports the memory of a worker that retained the
 // target it evaluated, and is never an operation's result. A refused result
 // says why, and a participant that another runtime created is refused with
-// that runtime's identity when its head names one. A pending result names
-// what the participant waits for.
+// that runtime's identity, which its head names. A pending result names what
+// the participant waits for.
 export type WorkerResult = Readonly<
     | { status: 'completed'; details: Readonly<Record<string, unknown>> }
     | {
           status: 'refused';
           reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
       }
-    | { status: 'refused'; reason: 'another runtime'; runtime?: string }
+    | { status: 'refused'; reason: 'another runtime'; runtime: string }
     | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
     | {
           status: 'stopped';
@@ -313,7 +312,6 @@ const summary = (
     profiled: ProfileContext | undefined,
 ) => ({
     generation: root.head.generation,
-    rootHash: root.head.hash,
     poll: hexadecimal(root.manifest.poll),
     bodyDigest: hexadecimal(enrollment.bodyDigest),
     username: enrollment.username,
@@ -379,9 +377,7 @@ const execute = async (
         return {
             status: 'refused',
             reason: 'another runtime',
-            ...(stored.runtime === undefined
-                ? {}
-                : { runtime: stored.runtime }),
+            runtime: stored.runtime,
         };
     started();
     let root = await authenticateRoot(context);
@@ -810,8 +806,6 @@ const run = async (
             command.identity.module,
         );
         const runtime = await runtimeIdentity(command.identity, moduleBytes);
-        if (hexadecimal(runtime) !== command.identity.runtime)
-            return refused('runtime mismatch');
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
         const evaluation = evaluatingOperations.has(command.operation);
         const started = startParallelHelpers(module, helperPorts, evaluation);
@@ -975,8 +969,6 @@ const runVerification = async (
             command.identity.module,
         );
         const runtime = await runtimeIdentity(command.identity, moduleBytes);
-        if (hexadecimal(runtime) !== command.identity.runtime)
-            return refused('runtime mismatch');
         const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
         helpers = await startParallelHelpers(module, helperPorts, true);
         const parallel = helpers;

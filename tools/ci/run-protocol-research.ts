@@ -388,9 +388,9 @@ await runWithLocalRunLog(
                 ],
                 'clippy-invalid-ballot',
             );
-            // The browser participant and completion modules are wasm32
-            // cdylibs whose host supplies randomness, so their dependency
-            // graphs must build there without an operating-system generator.
+            // The participant module is a wasm32 cdylib whose host supplies
+            // randomness, so its dependency graph must build there without an
+            // operating-system generator.
             await execute(
                 'cargo',
                 [
@@ -405,23 +405,6 @@ await runWithLocalRunLog(
                     '--lib',
                 ],
                 'browser-target',
-            );
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
-                    'check',
-                    '--offline',
-                    '--locked',
-                    '--target',
-                    'wasm32-unknown-unknown',
-                    '-p',
-                    'evaluation-target',
-                    '--features',
-                    'browser',
-                    '--lib',
-                ],
-                'browser-completion-target',
             );
             // Unit tests of every member, including the ceremony's
             // profile-derived roles, alone and then with every job on a

@@ -124,42 +124,34 @@ describe('participant API', () => {
     });
 
     it('refuses a participant that another runtime created and leaves its state unchanged', async () => {
-        for (const [head, refusal] of [
-            [
-                { generation: 5, hash: rootHash, runtime: otherRuntime },
-                {
+        const namespace = `another-${crypto.randomUUID()}`;
+        const name = `sealed-lattice-participant/${namespace}`;
+        try {
+            await writeParticipant(name, {
+                generation: 5,
+                hash: rootHash,
+                runtime: otherRuntime,
+            });
+            const participant = openParticipant({
+                namespace,
+                relay: location.origin + '/',
+            });
+            for (const request of [
+                { operation: 'status' },
+                { operation: 'result' },
+            ] as const)
+                expect(await participant.run(request)).toEqual({
                     status: 'refused',
                     reason: 'another runtime',
                     runtime: otherRuntime,
-                },
-            ],
-            // A head that a runtime before the head named its runtime wrote.
-            [
-                { generation: 5, hash: rootHash },
-                { status: 'refused', reason: 'another runtime' },
-            ],
-        ] as const) {
-            const namespace = `another-${crypto.randomUUID()}`;
-            const name = `sealed-lattice-participant/${namespace}`;
-            try {
-                await writeParticipant(name, head);
-                const participant = openParticipant({
-                    namespace,
-                    relay: location.origin + '/',
                 });
-                for (const request of [
-                    { operation: 'status' },
-                    { operation: 'result' },
-                ] as const)
-                    expect(await participant.run(request)).toEqual(refusal);
-                const counts = await storeCounts(name);
-                expect(counts.key).toBe(1);
-                expect(counts.root).toBe(1);
-                expect(counts.head).toBe(1);
-                expect(counts.stopped).toBe(0);
-            } finally {
-                await requestResult(indexedDB.deleteDatabase(name));
-            }
+            const counts = await storeCounts(name);
+            expect(counts.key).toBe(1);
+            expect(counts.root).toBe(1);
+            expect(counts.head).toBe(1);
+            expect(counts.stopped).toBe(0);
+        } finally {
+            await requestResult(indexedDB.deleteDatabase(name));
         }
     });
 
@@ -167,6 +159,8 @@ describe('participant API', () => {
         for (const head of [
             undefined,
             { generation: 5, hash: rootHash, runtime: 'not a runtime' },
+            // A head that names no runtime.
+            { generation: 5, hash: rootHash },
         ]) {
             const namespace = `damaged-${crypto.randomUUID()}`;
             const name = `sealed-lattice-participant/${namespace}`;

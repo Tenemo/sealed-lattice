@@ -23,7 +23,6 @@ export type {
 
 type PackagedParticipantRuntime = Readonly<{
     identity: Readonly<{
-        runtime: string;
         source: string;
         module: string;
         worker: string;
@@ -114,7 +113,6 @@ export type ParticipantRequest = Readonly<
 /** What the participant retains, after every completed operation. */
 export type ParticipantSummary = Readonly<{
     generation: number;
-    rootHash: string;
     poll: string;
     bodyDigest: string;
     username: string;
@@ -148,9 +146,8 @@ export type ParticipantSummary = Readonly<{
  * follows a module or worker failure, as its cause names and its reason
  * describes, and a later visit continues from the participant's last
  * committed state; a stopped participant never acts again. A participant
- * that another runtime created is refused, naming that runtime when its
- * state records it, so the application can open it with the SDK of that
- * runtime.
+ * that another runtime created is refused, naming that runtime, so the
+ * application can open it with the SDK of that runtime.
  */
 export type ParticipantResult = Readonly<
     | {
@@ -161,7 +158,7 @@ export type ParticipantResult = Readonly<
           status: 'refused';
           reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
       }
-    | { status: 'refused'; reason: 'another runtime'; runtime?: string }
+    | { status: 'refused'; reason: 'another runtime'; runtime: string }
     | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
     | {
           status: 'stopped';
@@ -208,7 +205,7 @@ export type OutcomeVerification = Readonly<
           status: 'refused';
           reason: Extract<
               ParticipantRefusalReason,
-              'unsupported browser' | 'invalid request' | 'runtime mismatch'
+              'unsupported browser' | 'invalid request'
           >;
       }
     | { status: 'pending'; cause: ParticipantPendingCause; reason: string }

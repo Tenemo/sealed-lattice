@@ -7,28 +7,25 @@ autobins = false
 
 
 [lib]
-crate-type = ["rlib", "cdylib"]
-
-[features]
-browser = ["ballot-proof/bridge", "setup-aggregate/bridge"]
+crate-type = ["rlib"]
 
 [dependencies]
 fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
 num-bigint = "=0.5.1"
-ballot-proof = { path = "../ballot-proof", default-features = false }
-registration-credentials = { path = "../registration-credentials", default-features = false }
-setup-aggregate = { path = "../setup-aggregate", default-features = false }
+ballot-proof = { path = "../ballot-proof" }
+registration-credentials = { path = "../registration-credentials" }
+setup-aggregate = { path = "../setup-aggregate" }
 setup-witness = { path = "../setup-witness" }
 rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
 parallel-work = { path = "../parallel-work" }
-linked-release-proof = { path = "../linked-release-proof", default-features = false }
+linked-release-proof = { path = "../linked-release-proof" }
 supported-profile = { path = "../supported-profile" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = "=0.2.11"
 
 [dev-dependencies]
-ballot-encryption = { path = "../ballot-encryption", default-features = false }
+ballot-encryption = { path = "../ballot-encryption" }
 
 
 [[bin]]

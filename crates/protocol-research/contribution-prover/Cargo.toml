@@ -11,10 +11,10 @@ crate-type = ["rlib"]
 
 [dependencies]
 parallel-work = { path = "../parallel-work" }
-registration-credentials = { path = "../registration-credentials", default-features = false }
+registration-credentials = { path = "../registration-credentials" }
 setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
-word-proof = { path = "../word-proof", default-features = false }
+word-proof = { path = "../word-proof" }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha3 = "=0.10.9"

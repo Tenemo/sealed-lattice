@@ -120,9 +120,6 @@ impl ClassifiedClosedInventory {
             .enumerate()
             .filter_map(|(position, value)| value.as_ref().map(|_| position))
     }
-    pub fn proposal_identity(&self) -> &[u8; 64] {
-        self.barrier.proposal().identity()
-    }
     pub fn poll(&self) -> &Arc<VerifiedPoll> {
         &self.poll
     }

@@ -231,31 +231,21 @@ export const isParticipantHead = (value: unknown): value is ParticipantHead =>
     isDigest(value.runtime);
 
 // Which runtime created the namespace's participant, read before any
-// authority starts: none for an empty namespace, the runtime a head names, or
-// no named runtime for a head that runtimes before the head named its runtime
-// wrote. Any other state leaves the question to root authentication, which
-// stops a participant whose authority is damaged.
+// authority starts: none for an empty namespace, or the runtime a head names.
+// Any other state leaves the question to root authentication, which stops a
+// participant whose authority is damaged.
 export const storedRuntime = async (
     database: IDBDatabase,
 ): Promise<
     | Readonly<{ status: 'empty' }>
-    | Readonly<{ status: 'named'; runtime: string | undefined }>
+    | Readonly<{ status: 'named'; runtime: string }>
     | Readonly<{ status: 'unnamed' }>
 > => {
     const { head, counts } = await snapshotParticipant(database);
     if (participantStores.every((store) => counts[store] === 0))
         return { status: 'empty' };
-    if (counts.head !== 1) return { status: 'unnamed' };
-    if (isParticipantHead(head))
-        return { status: 'named', runtime: head.runtime };
-    return typeof head === 'object' &&
-        head !== null &&
-        'generation' in head &&
-        'hash' in head &&
-        Object.keys(head).length === 2 &&
-        Number.isSafeInteger(head.generation) &&
-        isDigest(head.hash)
-        ? { status: 'named', runtime: undefined }
+    return counts.head === 1 && isParticipantHead(head)
+        ? { status: 'named', runtime: head.runtime }
         : { status: 'unnamed' };
 };
 

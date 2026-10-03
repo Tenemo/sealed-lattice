@@ -8,17 +8,15 @@ publish = false
 crate-type = ["rlib"]
 
 [features]
-default = ["bridge"]
-bridge = ["setup-aggregate/bridge"]
 # A corrupt participant's runtime: ballot creation proves a false statement.
 invalid-ballot = []
 
 [dependencies]
 proof-lookup-table = { path = "../proof-lookup-table" }
-ballot-encryption = { path = "../ballot-encryption", default-features = false }
-setup-aggregate = { path = "../setup-aggregate", default-features = false }
-registration-credentials = { path = "../registration-credentials", default-features = false }
-setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+ballot-encryption = { path = "../ballot-encryption" }
+setup-aggregate = { path = "../setup-aggregate" }
+registration-credentials = { path = "../registration-credentials" }
+setup-stream-kernel = { path = "../setup-stream-kernel" }
 num-bigint = "=0.5.1"
 sha3 = "=0.10.9"
 setup-witness = { path = "../setup-witness" }

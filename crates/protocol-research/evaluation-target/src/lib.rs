@@ -1,28 +1,28 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+#[cfg(target_arch = "wasm32")]
 mod browser;
-#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+#[cfg(target_arch = "wasm32")]
 pub fn verified_browser_target() -> Option<std::sync::Arc<target::VerifiedEvaluationTarget>> {
     browser::verified_target()
 }
 /// Takes a target restored from the participant's retained copy while this
 /// instance holds no target and runs no evaluation.
-#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+#[cfg(target_arch = "wasm32")]
 pub fn restore_browser_target(target: target::VerifiedEvaluationTarget) -> bool {
     browser::restore_target(target)
 }
-#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+#[cfg(target_arch = "wasm32")]
 pub fn verified_browser_release_context() -> Option<std::sync::Arc<release::ReleaseContext>> {
     completion_browser::verified_context()
 }
 /// The target certificate that this instance's completion verified.
-#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+#[cfg(target_arch = "wasm32")]
 pub fn verified_browser_certificate()
 -> Option<std::sync::Arc<certification::VerifiedTargetCertificate>> {
     completion_browser::verified_certificate()
 }
 pub mod certification;
-#[cfg(all(target_arch = "wasm32", feature = "browser"))]
+#[cfg(target_arch = "wasm32")]
 #[path = "completion-browser.rs"]
 mod completion_browser;
 mod interpolation;

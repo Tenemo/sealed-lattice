@@ -603,17 +603,6 @@ pub extern "C" fn evaluation_target_body_length() -> usize {
     })
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_ciphertext_length() -> usize {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .target
-            .as_ref()
-            .and_then(|target| target.ciphertext())
-            .map_or(0, <[u8]>::len)
-    })
-}
-#[unsafe(no_mangle)]
 pub extern "C" fn evaluation_target_finished() -> u32 {
     STATE.with(|state| {
         u32::from(

@@ -1,9 +1,6 @@
 #[path = "../../setup-stream-kernel/src/arithmetic.rs"]
 pub mod base;
 pub(crate) use base::MODULUS;
-/// Uniform 16-byte candidate words at least the modulus, which the prover
-/// rejects.
-pub const REJECTED_WORDS: u128 = 0u128.wrapping_sub(MODULUS);
 pub type Element = [u128; 3];
 pub const ZERO: Element = [0, 0, 0];
 pub const ONE: Element = [1, 0, 0];

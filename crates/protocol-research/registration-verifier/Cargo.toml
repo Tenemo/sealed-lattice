@@ -9,7 +9,7 @@ autobins = false
 [dependencies]
 parallel-work = { path = "../parallel-work" }
 proof-lookup-table = { path = "../proof-lookup-table" }
-registration-proof = { path = "../registration-proof", default-features = false }
-setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+registration-proof = { path = "../registration-proof" }
+setup-stream-kernel = { path = "../setup-stream-kernel" }
 sha3 = "=0.10.9"
 supported-profile = { path = "../supported-profile" }

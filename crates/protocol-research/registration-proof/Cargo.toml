@@ -11,7 +11,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 setup-witness = { path = "../setup-witness" }
-setup-stream-kernel = { path = "../setup-stream-kernel", default-features = false }
+setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
 sha3 = "=0.10.9"
 num-bigint = "=0.5.1"

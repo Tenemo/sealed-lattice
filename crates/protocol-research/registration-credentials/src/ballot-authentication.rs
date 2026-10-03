@@ -336,32 +336,6 @@ impl Credential {
             .try_sign_with_seed(&coins, envelope.bytes(), BALLOT_SIGNATURE_CONTEXT)
             .map_err(|_| Error::Crypto)
     }
-    pub fn restore_ballot_signing(
-        &mut self,
-        roster: &OrganizerSignedRoster,
-        expected_inventory: &[u8; 64],
-        envelope: &BallotEnvelope,
-        signature: &[u8],
-    ) -> Result<(), Error> {
-        if self.signed_ballot.is_some() {
-            return Err(Error::Consumed);
-        }
-        let record = roster
-            .proposal()
-            .records()
-            .get(envelope.position())
-            .ok_or(Error::Context)?;
-        if record.header().signing_public != self.signing_public
-            || self.completed_body != Some(record.body_digest())
-        {
-            return Err(Error::Context);
-        }
-        if !verify_ballot_signature(roster, expected_inventory, envelope, signature) {
-            return Err(Error::Crypto);
-        }
-        self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
-        Ok(())
-    }
 }
 
 pub fn verify_ballot_signature(

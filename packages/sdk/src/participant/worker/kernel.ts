@@ -105,7 +105,6 @@ export const kernelFunctions = [
     'evaluation_target_command',
     'evaluation_target_body_pointer',
     'evaluation_target_body_length',
-    'evaluation_target_ciphertext_length',
     // One when every evaluation step has run.
     'evaluation_target_finished',
     // The evaluated target keyed to the credential, and its restoration:
@@ -152,7 +151,6 @@ export const kernelFunctions = [
     'setup_accepted',
     // One when the setup is complete.
     'setup_finish',
-    'setup_inventory_pointer',
     'retain_setup',
     // Restores the verified setup from the retained setup reference.
     'restore_setup',

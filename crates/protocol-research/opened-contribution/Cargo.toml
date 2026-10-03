@@ -8,8 +8,8 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
-registration-credentials = { path = "../registration-credentials", default-features = false }
+registration-credentials = { path = "../registration-credentials" }
 parallel-work = { path = "../parallel-work" }
 setup-witness = { path = "../setup-witness" }
-word-verifier = { path = "../word-verifier", default-features = false }
+word-verifier = { path = "../word-verifier" }
 num-bigint = "=0.5.1"

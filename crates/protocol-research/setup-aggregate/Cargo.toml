@@ -7,14 +7,10 @@ publish = false
 [lib]
 crate-type = ["rlib"]
 
-[features]
-default = ["bridge"]
-bridge = []
-
 [dependencies]
 num-bigint = "=0.5.1"
 
-opened-contribution = { path = "../opened-contribution", default-features = false }
+opened-contribution = { path = "../opened-contribution" }
 parallel-work = { path = "../parallel-work" }
-registration-credentials = { path = "../registration-credentials", default-features = false }
+registration-credentials = { path = "../registration-credentials" }
 supported-profile = { path = "../supported-profile" }

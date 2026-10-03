@@ -21,10 +21,9 @@ struct Session {
     confirmations: Vec<VerifiedConfirmation>,
     aggregator: Option<SetupAggregator>,
     verified: Option<Arc<VerifiedSetupAggregate>>,
-    inventory: [u8; 64],
 }
 thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session {
-    input: vec![0; INPUT_BYTES], roster: None, proposal: None, poll: None, confirmations: Vec::new(), aggregator: None, verified: None, inventory: [0;64],
+    input: vec![0; INPUT_BYTES], roster: None, proposal: None, poll: None, confirmations: Vec::new(), aggregator: None, verified: None,
 }); }
 
 pub fn context() -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)> {
@@ -66,7 +65,6 @@ pub fn begin_roster(roster: RosterInputVerifier) {
         value.confirmations.clear();
         value.aggregator = None;
         value.verified = None;
-        value.inventory.fill(0);
     })
 }
 #[unsafe(no_mangle)]
@@ -92,7 +90,6 @@ pub fn restore(credential: &Credential, retained: &[u8]) -> bool {
         let Ok(verified) = aggregator.restore(credential, &poll, retained) else {
             return false;
         };
-        value.inventory = verified.inventory().identity();
         value.verified = Some(Arc::new(verified));
         true
     })
@@ -325,19 +322,7 @@ pub extern "C" fn setup_finish() -> u32 {
         let Ok(verified) = value.aggregator.take().unwrap().finish() else {
             return 0;
         };
-        value.inventory = verified.inventory().identity();
         value.verified = Some(Arc::new(verified));
         1
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_inventory_pointer() -> usize {
-    SESSION.with(|value| {
-        let value = value.borrow();
-        if value.verified.is_none() {
-            0
-        } else {
-            value.inventory.as_ptr() as usize
-        }
     })
 }

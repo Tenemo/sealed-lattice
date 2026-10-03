@@ -107,14 +107,16 @@ export const buildSdkPackage = async (): Promise<void> => {
             ...(await sdkEntrySources()),
         ]),
     );
-    // The SDK carries the worker's source and passes this identity to it,
-    // and the worker recomputes the identity from the module it fetches.
+    // The SDK carries the worker's source and passes it these digests; the
+    // worker recomputes the runtime identity from them and the module it
+    // fetches.
+    const {
+        source,
+        module,
+        worker: workerDigest,
+    } = participantRuntimeIdentity(sourceManifest, participant.module, worker);
     const participantRuntime = {
-        identity: participantRuntimeIdentity(
-            sourceManifest,
-            participant.module,
-            worker,
-        ),
+        identity: { source, module, worker: workerDigest },
         worker: worker.toString('utf8'),
     };
     if (!Buffer.from(participantRuntime.worker, 'utf8').equals(worker))

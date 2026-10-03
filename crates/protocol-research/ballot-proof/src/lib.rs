@@ -1,11 +1,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod admission;
 pub mod body;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[cfg(target_arch = "wasm32")]
 #[path = "body-browser.rs"]
 mod body_browser;
 pub mod close;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[cfg(target_arch = "wasm32")]
 #[path = "close-browser.rs"]
 mod close_browser;
 pub mod columns;
@@ -75,18 +75,18 @@ impl Verifier {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[cfg(target_arch = "wasm32")]
 pub fn take_browser_classification() -> Option<body::BallotBodyClassification> {
     body_browser::take_classification()
 }
 
 /// Releases the statement inputs that the classified ballots shared.
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[cfg(target_arch = "wasm32")]
 pub fn release_browser_ballot_inputs() {
     body_browser::release_inputs()
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[cfg(target_arch = "wasm32")]
 pub fn take_browser_close_barrier() -> Option<close::VerifiedCloseBarrier> {
     close_browser::take_barrier()
 }

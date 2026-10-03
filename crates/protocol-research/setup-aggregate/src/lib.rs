@@ -2,7 +2,7 @@ use num_bigint::{BigInt, Sign};
 use supported_profile::{Family, Profile};
 
 mod retained;
-#[cfg(all(target_arch = "wasm32", feature = "bridge"))]
+#[cfg(target_arch = "wasm32")]
 #[path = "setup-browser.rs"]
 pub mod setup_browser;
 pub mod verified;

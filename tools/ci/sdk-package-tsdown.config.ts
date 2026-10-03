@@ -67,7 +67,7 @@ export default defineConfig(() => {
     if (
         !isParticipantRuntime(participantRuntime) ||
         Object.keys(participantRuntime.identity).sort().join(',') !==
-            'module,runtime,source,worker' ||
+            'module,source,worker' ||
         !Object.values(participantRuntime.identity).every(
             (digest) =>
                 typeof digest === 'string' && hexadecimalDigest.test(digest),

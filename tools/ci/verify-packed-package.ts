@@ -196,7 +196,8 @@ const requireSelfContainedBundle = async (
 
 // The published participant module exports exactly what the worker and its
 // helpers call, the worker is one self-contained module, and the source manifest names no
-// machine path. Returns the runtime identity of the published files.
+// machine path. Returns the digests of the published files that the SDK
+// passes its worker.
 const requireParticipantRuntime = async (packageDirectoryPath: string) => {
     const dist = path.join(packageDirectoryPath, 'dist');
     const [module, worker, manifest] = await Promise.all([
@@ -261,16 +262,21 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
         throw new Error(
             'The published participant source manifest is malformed.',
         );
-    return participantRuntimeIdentity(
+    const identity = participantRuntimeIdentity(
         Buffer.from(manifest),
         module,
         Buffer.from(worker),
     );
+    return {
+        source: identity.source,
+        module: identity.module,
+        worker: identity.worker,
+    };
 };
 
 // Runs the installed participant API against stand-in workers, which check
 // that the API starts the published worker's exact source and passes it the
-// runtime identity of the published files, the published module's URL, the
+// digests of the published files, the published module's URL, the
 // namespace, the normalized relay and whether evaluation is separate. A
 // refused request ends its one worker. A worker that answers that it
 // evaluated ends, and a fresh one runs the same command without separating
