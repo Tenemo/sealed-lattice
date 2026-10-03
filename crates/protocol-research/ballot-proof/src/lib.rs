@@ -10,42 +10,16 @@ pub mod close;
 mod close_browser;
 pub mod columns;
 pub mod context;
-#[path = "../../word-proof/src/field.rs"]
-pub mod field;
-#[path = "../../word-proof/src/oracles.rs"]
-pub mod oracles;
 pub mod parameters;
-#[path = "../../word-proof/src/random.rs"]
-mod random;
-pub mod statement;
-pub mod submission;
-#[path = "../../word-proof/src/transcript.rs"]
-pub mod transcript;
-#[path = "../../word-proof/src/tree.rs"]
-pub mod tree;
-use field::base as arithmetic;
-#[path = "../../word-proof/src/combination.rs"]
-pub mod combination;
-#[path = "../../word-verifier/src/engine.rs"]
-mod engine;
-#[path = "../../word-proof/src/fri.rs"]
-pub mod fri;
-#[path = "../../word-proof/src/jobs.rs"]
-pub mod jobs;
-#[path = "../../registration-proof/src/linear.rs"]
-pub mod linear;
-#[path = "../../word-proof/src/linear-oracle.rs"]
-pub mod linear_oracle;
 #[path = "private-ballot.rs"]
 pub mod private_ballot;
 pub mod proof;
-#[path = "../../word-proof/src/rows.rs"]
-pub mod rows;
-#[path = "../../word-proof/src/sums.rs"]
-pub mod sums;
-pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
+pub mod statement;
+pub mod submission;
 use statement::{StatementOutput, StatementStream};
 use supported_profile::{Profile, relation::ballot_relation};
+use word_verifier::engine;
+pub use word_verifier::engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 
 impl engine::Statement for StatementStream {
     fn push(&mut self, bytes: &[u8]) -> bool {
@@ -57,22 +31,20 @@ impl engine::Statement for StatementStream {
 }
 
 pub type Verifier = engine::Verifier<StatementStream>;
-impl Verifier {
-    /// Verifies one profile's ballot proof against its expected statement.
-    pub fn new(
-        profile: Profile,
-        role: &[u8],
-        expected_statement: [u8; 64],
-        proof_header: &[u8],
-    ) -> Result<Self, Refusal> {
-        Self::open(
-            ballot_relation(profile),
-            role,
-            expected_statement,
-            proof_header,
-            |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
-        )
-    }
+/// Verifies one profile's ballot proof against its expected statement.
+pub fn verifier(
+    profile: Profile,
+    role: &[u8],
+    expected_statement: [u8; 64],
+    proof_header: &[u8],
+) -> Result<Verifier, Refusal> {
+    Verifier::open(
+        ballot_relation(profile),
+        role,
+        expected_statement,
+        proof_header,
+        |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
+    )
 }
 
 #[cfg(target_arch = "wasm32")]

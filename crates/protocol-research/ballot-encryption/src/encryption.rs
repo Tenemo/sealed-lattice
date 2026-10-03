@@ -124,8 +124,7 @@ fn component(
     } = input;
     let degree = public.len();
     let modulus_bytes = modulus.to_bytes_le().1;
-    let reducer =
-        reduction::Modulus::new(&modulus_bytes, RADIX_BITS).map_err(|_| Refusal::Arithmetic)?;
+    let reducer = reduction::Modulus::new(&modulus_bytes, RADIX_BITS).ok_or(Refusal::Arithmetic)?;
     let limbs = reducer.digits.len();
     if errors.len() != degree || message.is_some_and(|value| value.len() != degree) {
         return Err(Refusal::Arithmetic);
@@ -150,7 +149,7 @@ fn component(
         let mut reduced = vec![0u128; limbs];
         let result = reducer
             .reduce(&raw, &mut reduced)
-            .map_err(|_| Refusal::Arithmetic)?;
+            .ok_or(Refusal::Arithmetic)?;
         let magnitude = reduced.iter().rev().fold(BigInt::from(0), |sum, value| {
             (sum << RADIX_BITS) + BigInt::from(*value)
         });

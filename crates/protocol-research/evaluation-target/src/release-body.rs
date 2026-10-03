@@ -3,7 +3,7 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier as SignatureVerifier},
 };
-use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
+use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 use num_bigint::BigInt;
 use registration_credentials::release_signing::{
     RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, RELEASE_SIGNATURE_CONTEXT,
@@ -118,7 +118,7 @@ impl ReleaseBodyVerifier {
             bytes = &bytes[count..];
             if self.proof_prefix.len() == HEADER_LENGTH {
                 let statement = self.context.statement(&self.partial)?;
-                let mut verifier = Verifier::new(
+                let mut verifier = verifier(
                     self.context.profile(),
                     &self.context.proof_role()?,
                     statement.digest(),

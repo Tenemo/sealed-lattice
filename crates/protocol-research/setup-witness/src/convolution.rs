@@ -1,11 +1,6 @@
-// The shared proof-field module also carries the extension product, which
-// the convolution does not use.
-#[path = "../../setup-stream-kernel/src/arithmetic.rs"]
-#[allow(dead_code)]
-mod field;
-use field::{MODULUS, add, multiply, power, subtract};
 use num_bigint::BigInt;
 use num_traits::Signed;
+use setup_stream_kernel::arithmetic::{MODULUS, add, multiply, power, subtract};
 use zeroize::Zeroizing;
 
 // FHE, registration and auxiliary equations use 96-bit limbs; share

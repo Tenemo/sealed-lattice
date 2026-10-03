@@ -100,7 +100,7 @@ mod tests {
         registration::{KEY_BYTES, VerifiedRegistration},
         roster_input::RosterInputVerifier,
     };
-    use registration_verifier::CHUNK_LIMIT;
+    use registration_proof::CHUNK_LIMIT;
     use std::sync::Arc;
     use supported_profile::relation::PROOF_HEADER_BYTES;
 

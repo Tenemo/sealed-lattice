@@ -1,10 +1,10 @@
-use crate::arithmetic::{
+use parallel_work::{Digest, ProtocolHash};
+use parallel_work::{HashStream, Sponge};
+use setup_stream_kernel::SetupStatementOutput as StatementOutput;
+use setup_stream_kernel::arithmetic::{
     MODULUS, add as add_base, multiply as multiply_base, power as power_base,
     subtract as subtract_base,
 };
-use crate::statement::StatementOutput;
-use parallel_work::{Digest, ProtocolHash};
-use parallel_work::{HashStream, Sponge};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -81,7 +81,7 @@ fn scale(value: Element, factor: u128) -> Element {
     value.map(|entry| multiply_base(entry, factor))
 }
 fn multiply(left: Element, right: Element) -> Element {
-    crate::arithmetic::multiply_extension(left, right)
+    setup_stream_kernel::arithmetic::multiply_extension(left, right)
 }
 fn encode(value: Element) -> [u8; 48] {
     let mut bytes = [0; 48];
@@ -561,7 +561,7 @@ impl<S: Statement> Verifier<S> {
     /// Opens a proof of the relation against its expected statement. The
     /// statement parser opens only after the proof header fixes its
     /// challenges.
-    pub(crate) fn open(
+    pub fn open(
         relation: Relation,
         role: &[u8],
         expected_statement: [u8; 64],

@@ -1,13 +1,12 @@
-use crate::{
-    combination, field, fri,
-    linear::LinearOracle,
-    oracles::{FirstOracle, SecondOracle, Witness},
-    parameters::*,
-    statement::PublicStatement,
-    transcript::{self, Transcript},
-};
+use crate::{parameters::*, statement::PublicStatement};
 use parallel_work::Digest;
 use std::io::Write;
+use word_proof::{
+    combination, field, fri,
+    linear_oracle::LinearOracle,
+    oracles::{FirstOracle, SecondOracle, Witness},
+    transcript::{self, Transcript},
+};
 
 pub struct ReleaseRelationProof {
     statement_digest: [u8; 64],
@@ -155,12 +154,11 @@ impl ReleaseRelationProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, witness::tests::synthetic_release};
+    use crate::{CHUNK_LIMIT, HEADER_LENGTH, verifier, witness::tests::synthetic_release};
     use supported_profile::Profile;
 
     fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
-        let Ok(mut verifier) =
-            Verifier::new(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
+        let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
         else {
             return false;
         };
@@ -234,7 +232,7 @@ mod tests {
         let profile = Profile::new(3, 2).unwrap();
         let role = b"release-proof-test";
         let release = |seed| {
-            crate::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
+            word_proof::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
             let (prepared, _) = synthetic_release(profile);
             let (statement, proof) = ReleaseRelationProof::from_prepared(role, prepared);
             let mut bytes = Vec::new();

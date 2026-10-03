@@ -17,7 +17,7 @@ pub fn helper_memory_bytes(helpers: usize, evaluation: bool) -> Option<usize> {
     if helpers == 0 || helpers > MAXIMUM_HELPERS {
         return None;
     }
-    let rows = registration_proof::rows::helper_rows_bytes(helpers);
+    let rows = word_proof::rows::helper_rows_bytes(helpers);
     let kept = if evaluation {
         rns_arithmetic_probe::ranking::helper_memory_bytes(helpers)
     } else {

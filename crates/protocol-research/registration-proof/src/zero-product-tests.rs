@@ -1,4 +1,5 @@
-use crate::{combination, field, linear, oracles, parameters};
+use crate::parameters;
+use word_proof::{combination, field, linear_oracle, oracles};
 #[path = "reference/combination-before-products.rs"]
 mod previous;
 
@@ -30,7 +31,7 @@ fn registration_combination_is_unchanged_for_the_same_committed_oracles() {
             .collect::<Vec<_>>(),
     );
     let second = SecondOracle::initialize(&relation, role);
-    let linear = linear::LinearOracle {
+    let linear = linear_oracle::LinearOracle {
         target: ZERO,
         claimed_sum: ZERO,
         quotient: (0..SUM_DEGREE - SYSTEMATIC + 1)
@@ -39,7 +40,7 @@ fn registration_combination_is_unchanged_for_the_same_committed_oracles() {
         remainder: (0..SYSTEMATIC - 1)
             .map(|index| [41, index as u128, 23])
             .collect(),
-        tree: crate::tree::Tree::new(role, 2, DOMAIN, 48),
+        tree: word_proof::tree::Tree::new(role, 2, DOMAIN, 48),
         lookup_weight: ZERO,
     };
     let message: Vec<u8> = (0..relation.message_bytes())

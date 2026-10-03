@@ -1,27 +1,27 @@
 const OFFSET: u128 = 133;
-pub(crate) const MODULUS: u128 = u128::MAX - (OFFSET << 64) + 2;
+pub const MODULUS: u128 = u128::MAX - (OFFSET << 64) + 2;
 
 #[inline(always)]
-pub(crate) fn normalize(value: u128) -> u128 {
+pub fn normalize(value: u128) -> u128 {
     let (reduced, borrowed) = value.overflowing_sub(MODULUS);
     reduced.wrapping_add(MODULUS & 0u128.wrapping_sub(u128::from(borrowed)))
 }
 
 #[inline(always)]
-pub(crate) fn add(left: u128, right: u128) -> u128 {
+pub fn add(left: u128, right: u128) -> u128 {
     let (sum, carry) = left.overflowing_add(right);
     let correction = ((OFFSET << 64) - 1) & 0u128.wrapping_sub(u128::from(carry));
     normalize(sum.wrapping_add(correction))
 }
 
 #[inline(always)]
-pub(crate) fn subtract(left: u128, right: u128) -> u128 {
+pub fn subtract(left: u128, right: u128) -> u128 {
     let (difference, borrowed) = left.overflowing_sub(right);
     difference.wrapping_add(MODULUS & 0u128.wrapping_sub(u128::from(borrowed)))
 }
 
 #[inline(always)]
-pub(crate) fn multiply(left: u128, right: u128) -> u128 {
+pub fn multiply(left: u128, right: u128) -> u128 {
     if cfg!(target_arch = "wasm32") {
         multiply_bounded(left, right)
     } else {
@@ -50,13 +50,13 @@ fn limbs(value: u128) -> [u64; 4] {
 /// One product adds at most seven terms below 2^32 to a column, so a sum of
 /// at most 4,096 products keeps every column below 2^47.
 #[derive(Clone, Copy)]
-pub(crate) struct Columns([u64; 8]);
+pub struct Columns([u64; 8]);
 
 impl Columns {
-    pub(crate) const ZERO: Self = Self([0; 8]);
+    pub const ZERO: Self = Self([0; 8]);
 
     #[inline(always)]
-    pub(crate) fn add_product(&mut self, left: u128, right: u128) {
+    pub fn add_product(&mut self, left: u128, right: u128) {
         let (left, right) = (limbs(left), limbs(right));
         for (i, a) in left.iter().enumerate() {
             for (j, b) in right.iter().enumerate() {
@@ -69,7 +69,7 @@ impl Columns {
 
     /// Adds twice the other sum, which counts as twice its products.
     #[inline(always)]
-    pub(crate) fn add_double(&mut self, other: &Self) {
+    pub fn add_double(&mut self, other: &Self) {
         for (column, value) in self.0.iter_mut().zip(other.0) {
             *column = column.wrapping_add(value << 1);
         }
@@ -84,7 +84,7 @@ impl Columns {
     /// chain leaves a 128-bit value and a top word below 2^31 in magnitude,
     /// whose own fold top (133 2^64 - 1) is below 2^102 in magnitude.
     #[inline(always)]
-    pub(crate) fn reduce(self) -> u128 {
+    pub fn reduce(self) -> u128 {
         let s = self.0.map(|value| value as i64);
         let t4 = 133 * s[6];
         let t5 = 133 * s[7];
@@ -113,7 +113,7 @@ impl Columns {
 }
 
 #[inline(always)]
-pub(crate) fn multiply_bounded(left: u128, right: u128) -> u128 {
+pub fn multiply_bounded(left: u128, right: u128) -> u128 {
     let mut columns = Columns::ZERO;
     columns.add_product(left, right);
     columns.reduce()
@@ -122,7 +122,7 @@ pub(crate) fn multiply_bounded(left: u128, right: u128) -> u128 {
 /// The product of two elements of the cubic extension with x^3 = 2. On
 /// WebAssembly each coordinate is one reduced sum of its three products.
 #[inline(always)]
-pub(crate) fn multiply_extension(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
+pub fn multiply_extension(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
     if cfg!(target_arch = "wasm32") {
         multiply_extension_columns(left, right)
     } else {
@@ -131,7 +131,7 @@ pub(crate) fn multiply_extension(left: [u128; 3], right: [u128; 3]) -> [u128; 3]
 }
 
 #[inline(always)]
-pub(crate) fn multiply_extension_columns(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
+pub fn multiply_extension_columns(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
     let [a0, a1, a2] = left;
     let [b0, b1, b2] = right;
     let mut constant = Columns::ZERO;
@@ -154,7 +154,7 @@ pub(crate) fn multiply_extension_columns(left: [u128; 3], right: [u128; 3]) -> [
 }
 
 #[inline(always)]
-pub(crate) fn multiply_extension_native(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
+pub fn multiply_extension_native(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
     let mut result = [0; 3];
     for (first, a) in left.iter().enumerate() {
         for (second, b) in right.iter().enumerate() {
@@ -199,7 +199,7 @@ fn multiply_native(left: u128, right: u128) -> u128 {
     normalize(((linear_third as u128) << 64) | constant_third as u64 as u128)
 }
 
-pub(crate) fn power(mut value: u128, mut exponent: u128) -> u128 {
+pub fn power(mut value: u128, mut exponent: u128) -> u128 {
     let mut result = 1;
     while exponent != 0 {
         if exponent & 1 != 0 {

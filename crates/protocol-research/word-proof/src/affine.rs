@@ -1,7 +1,6 @@
-pub use crate::linear_oracle::LinearOracle;
 use crate::{
     field::{self, Element, ONE, ZERO},
-    linear_oracle::{AffineValues, Public},
+    linear_oracle::{AffineValues, LinearOracle, Public},
     oracles::{FirstOracle, SecondOracle, Witness},
     parameters::*,
 };
@@ -100,7 +99,7 @@ impl Operator {
         Ok(output)
     }
     /// Every row of the relation's columns.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn columns(&self, columns: usize) -> Vec<Vec<Element>> {
         let mut output = vec![vec![ZERO; SYSTEMATIC]; columns];
         for term in &self.terms {

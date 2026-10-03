@@ -1,40 +1,14 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-#[path = "../../word-proof/src/combination.rs"]
-pub mod combination;
 mod convolution;
-#[path = "../../word-proof/src/field.rs"]
-pub mod field;
-#[path = "../../word-proof/src/fri.rs"]
-pub mod fri;
-#[path = "../../word-proof/src/jobs.rs"]
-pub mod jobs;
-#[path = "../../registration-proof/src/linear.rs"]
-pub mod linear;
-#[path = "../../word-proof/src/linear-oracle.rs"]
-pub mod linear_oracle;
-#[path = "../../word-proof/src/oracles.rs"]
-pub mod oracles;
 pub mod parameters;
 pub mod proof;
-#[path = "../../word-proof/src/random.rs"]
-mod random;
-#[path = "../../word-proof/src/rows.rs"]
-pub mod rows;
 pub mod statement;
-#[path = "../../word-proof/src/sums.rs"]
-pub mod sums;
-use field::base as arithmetic;
-#[path = "../../word-verifier/src/engine.rs"]
-mod engine;
-pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
-#[path = "../../word-proof/src/transcript.rs"]
-pub mod transcript;
-#[path = "../../word-proof/src/tree.rs"]
-pub mod tree;
 mod witness;
 use statement::{StatementOutput, StatementStream};
 use supported_profile::{Profile, relation::release_relation};
 pub use witness::{PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound};
+use word_verifier::engine;
+pub use word_verifier::engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 
 impl engine::Statement for StatementStream {
     fn push(&mut self, bytes: &[u8]) -> bool {
@@ -46,20 +20,18 @@ impl engine::Statement for StatementStream {
 }
 
 pub type Verifier = engine::Verifier<StatementStream>;
-impl Verifier {
-    /// Verifies one profile's release proof against its expected statement.
-    pub fn new(
-        profile: Profile,
-        role: &[u8],
-        expected_statement: [u8; 64],
-        proof_header: &[u8],
-    ) -> Result<Self, Refusal> {
-        Self::open(
-            release_relation(profile),
-            role,
-            expected_statement,
-            proof_header,
-            |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
-        )
-    }
+/// Verifies one profile's release proof against its expected statement.
+pub fn verifier(
+    profile: Profile,
+    role: &[u8],
+    expected_statement: [u8; 64],
+    proof_header: &[u8],
+) -> Result<Verifier, Refusal> {
+    Verifier::open(
+        release_relation(profile),
+        role,
+        expected_statement,
+        proof_header,
+        |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
+    )
 }

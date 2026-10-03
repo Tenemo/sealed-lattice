@@ -18,6 +18,7 @@ sha3 = "=0.10.9"
 zeroize = "=1.8.2"
 linked-release-proof = { path = "../linked-release-proof" }
 parallel-work = { path = "../parallel-work" }
+setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

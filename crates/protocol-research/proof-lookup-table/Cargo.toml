@@ -7,3 +7,4 @@ autobins = false
 
 [dependencies]
 supported-profile = { path = "../supported-profile" }
+word-proof = { path = "../word-proof" }

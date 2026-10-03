@@ -1,7 +1,7 @@
 pub mod contribution;
-mod convolution;
-mod gaussian;
-mod reduction;
+pub mod convolution;
+pub mod gaussian;
+pub mod reduction;
 pub mod registration;
 use convolution::{Plan, RADIX_BITS, digit, digit_in};
 use num_bigint::{BigInt, BigUint, Sign};

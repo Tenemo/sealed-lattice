@@ -112,8 +112,8 @@ impl RegistrationKey {
         let common = contribution::common_share_polynomial();
         let products =
             Zeroizing::new(plan.digit_products(&common, &self.secret, &transformed, 2, RADIX_BITS));
-        let modulus = reduction::Modulus::new(share_modulus(), RADIX_BITS)
-            .map_err(|_| Error::InvalidState)?;
+        let modulus =
+            reduction::Modulus::new(share_modulus(), RADIX_BITS).ok_or(Error::InvalidState)?;
         for position in 0..DEGREE {
             let raw = Zeroizing::new([
                 products[0][position] + digit(&self.public[position], 0),
@@ -122,7 +122,7 @@ impl RegistrationKey {
             let mut output = Zeroizing::new([0u128; 2]);
             let reduced = modulus
                 .reduce(raw.as_ref(), output.as_mut())
-                .map_err(|_| Error::InvalidState)?;
+                .ok_or(Error::InvalidState)?;
             if output[1] != 0 || output[0] > 64 || (!reduced.negative && output[0] == 64) {
                 return Err(Error::InvalidState);
             }

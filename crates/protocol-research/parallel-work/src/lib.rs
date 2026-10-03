@@ -46,8 +46,8 @@ pub struct Job {
 static SESSIONS: AtomicU64 = AtomicU64::new(1);
 
 /// A number no other caller in this instance receives, which names the
-/// state its jobs keep on their shards. Every crate that includes the same
-/// job source draws from this one sequence.
+/// state its jobs keep on their shards. Every crate that defines jobs draws
+/// from this one sequence.
 pub fn session() -> u64 {
     SESSIONS.fetch_add(1, Ordering::Relaxed)
 }

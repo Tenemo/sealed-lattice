@@ -13,10 +13,10 @@ crate-type = ["rlib"]
 setup-witness = { path = "../setup-witness" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
-sha3 = "=0.10.9"
 num-bigint = "=0.5.1"
-zeroize = "=1.8.2"
 parallel-work = { path = "../parallel-work" }
+word-proof = { path = "../word-proof" }
+word-verifier = { path = "../word-verifier" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = "=0.3.3"
+[dev-dependencies]
+word-proof = { path = "../word-proof", features = ["test-support"] }

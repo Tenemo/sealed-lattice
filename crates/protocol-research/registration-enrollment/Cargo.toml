@@ -29,6 +29,7 @@ setup-aggregate = { path = "../setup-aggregate" }
 evaluation-target = { path = "../evaluation-target" }
 linked-release-proof = { path = "../linked-release-proof" }
 parallel-work = { path = "../parallel-work" }
+word-proof = { path = "../word-proof" }
 rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 

@@ -1,7 +1,6 @@
 use crate::{
-    Verifier, columns,
+    columns,
     context::private_proof_role,
-    oracles::Witness,
     proof::BallotProof,
     statement::{PublicStatement, coefficient_bytes, encode_polynomial, setup_inputs},
 };
@@ -9,6 +8,7 @@ use ballot_encryption::{context::BallotComputationContext, encryption::LinkedBal
 use registration_credentials::{ballot_authentication::BallotEnvelope, ballot_body};
 use setup_aggregate::RetainedAggregatePolynomial;
 use supported_profile::relation::{PROOF_HEADER_BYTES, ballot_relation};
+use word_proof::oracles::Witness;
 
 #[derive(Debug)]
 pub enum Error {
@@ -27,7 +27,7 @@ fn verify_expanded(
         return Err(Error::Encoding);
     }
     let role = private_proof_role(context).map_err(|_| Error::Context)?;
-    let mut verifier = Verifier::new(
+    let mut verifier = crate::verifier(
         profile,
         &role,
         public.digest(),

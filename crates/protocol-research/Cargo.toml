@@ -4,7 +4,6 @@ members = [
     "registration-enrollment",
     "registration-credentials",
     "registration-proof",
-    "registration-verifier",
     "setup-witness",
     "word-proof",
     "word-verifier",

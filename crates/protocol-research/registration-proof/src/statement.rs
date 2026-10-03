@@ -1,11 +1,11 @@
-use crate::{
-    field::{self, Element, MODULUS, ONE, ZERO},
-    linear::{Operator, PublicColumn, Term},
-    parameters::*,
-};
+use crate::parameters::*;
 use num_bigint::{BigInt, Sign};
 use parallel_work::{Digest, ProtocolHash};
 use setup_stream_kernel::{PolynomialStream, SetupStatementOutput};
+use word_proof::{
+    affine::{Operator, PublicColumn, Term},
+    field::{self, Element, MODULUS, ONE, ZERO},
+};
 
 use std::sync::OnceLock;
 

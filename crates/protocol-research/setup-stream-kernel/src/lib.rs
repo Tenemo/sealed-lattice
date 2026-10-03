@@ -1,6 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod arithmetic;
+pub mod arithmetic;
 mod jobs;
 mod query;
 mod setup;

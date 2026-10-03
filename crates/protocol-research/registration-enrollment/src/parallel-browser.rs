@@ -1,6 +1,5 @@
 //! The exports through which a helper instance runs jobs. Every proof crate
-//! includes the same job source with the same parameters, so the
-//! registration proof's jobs serve every proof kind.
+//! proves with the one shared engine, so its jobs serve every proof kind.
 use parallel_work::helper;
 
 /// Bounds a helper instance's memory, before its first allocation, to its
@@ -36,7 +35,7 @@ pub extern "C" fn parallel_run(kind: u32) -> u32 {
         &[
             &parallel_work::JOBS,
             &registration_credentials::JOBS,
-            &registration_proof::jobs::JOBS,
+            &word_proof::jobs::JOBS,
             &setup_stream_kernel::JOBS,
             &setup_witness::JOBS,
             &rns_arithmetic_probe::JOBS,

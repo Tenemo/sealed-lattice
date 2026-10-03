@@ -186,7 +186,7 @@ pub(crate) fn masked_base_polynomial(values: BaseValues, mask: &[u128]) -> Zeroi
 }
 /// The coefficients of an extension column's masked polynomial: its
 /// interpolant less the mask, then the mask times the systematic power.
-pub(crate) fn masked_extension_coefficients(
+pub fn masked_extension_coefficients(
     values: impl Iterator<Item = Element>,
     mask: &[Element],
     transform: &Transform,
@@ -365,7 +365,7 @@ impl SecondOracle {
         data
     }
 }
-pub(crate) fn coset(index: usize) -> u128 {
+pub fn coset(index: usize) -> u128 {
     base::multiply(7, base::power(field::root(DOMAIN), index as u128))
 }
 fn query_groups(indices: &[usize]) -> [Vec<(usize, usize)>; 4] {
@@ -375,7 +375,7 @@ fn query_groups(indices: &[usize]) -> [Vec<(usize, usize)>; 4] {
     }
     groups
 }
-pub(crate) fn masked_base_coefficients(
+pub fn masked_base_coefficients(
     coefficients: Vec<u128>,
     mask: &[u128],
     coset: u128,

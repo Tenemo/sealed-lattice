@@ -14,7 +14,6 @@ sha3 = "=0.10.9"
 unicode-normalization = "=0.1.25"
 zeroize = "=1.8.2"
 registration-proof = { path = "../registration-proof" }
-registration-verifier = { path = "../registration-verifier" }
 linked-release-proof = { path = "../linked-release-proof" }
 supported-profile = { path = "../supported-profile" }
 

@@ -12,17 +12,17 @@ crate-type = ["rlib"]
 invalid-ballot = []
 
 [dependencies]
-proof-lookup-table = { path = "../proof-lookup-table" }
 ballot-encryption = { path = "../ballot-encryption" }
 setup-aggregate = { path = "../setup-aggregate" }
 registration-credentials = { path = "../registration-credentials" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 num-bigint = "=0.5.1"
-sha3 = "=0.10.9"
 setup-witness = { path = "../setup-witness" }
 zeroize = "=1.8.2"
 parallel-work = { path = "../parallel-work" }
 supported-profile = { path = "../supported-profile" }
+word-proof = { path = "../word-proof" }
+word-verifier = { path = "../word-verifier" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = "=0.3.3"
+[dev-dependencies]
+word-proof = { path = "../word-proof", features = ["test-support"] }

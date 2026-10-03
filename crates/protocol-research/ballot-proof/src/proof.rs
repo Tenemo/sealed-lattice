@@ -1,13 +1,12 @@
-use crate::{
-    combination, field, fri,
-    linear::LinearOracle,
-    oracles::{FirstOracle, SecondOracle, Witness},
-    parameters::*,
-    statement::PublicStatement,
-    transcript::{self, Transcript},
-};
+use crate::{parameters::*, statement::PublicStatement};
 use parallel_work::Digest;
 use std::io::Write;
+use word_proof::{
+    combination, field, fri,
+    linear_oracle::LinearOracle,
+    oracles::{FirstOracle, SecondOracle, Witness},
+    transcript::{self, Transcript},
+};
 
 pub struct BallotProof {
     statement_digest: [u8; 64],
@@ -142,12 +141,11 @@ impl BallotProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, statement::tests::synthetic_ballot};
+    use crate::{CHUNK_LIMIT, HEADER_LENGTH, statement::tests::synthetic_ballot, verifier};
     use supported_profile::Profile;
 
     fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
-        let Ok(mut verifier) =
-            Verifier::new(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
+        let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
         else {
             return false;
         };
@@ -214,7 +212,7 @@ mod tests {
         let (statement, columns) = synthetic_ballot(profile);
         let relation = ballot_relation(profile);
         let prove = |seed| {
-            crate::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
+            word_proof::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
             let witness =
                 Witness::from_columns(&relation, statement.digest(), columns.clone()).unwrap();
             let mut bytes = Vec::new();

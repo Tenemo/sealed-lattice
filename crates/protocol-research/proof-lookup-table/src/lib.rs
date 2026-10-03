@@ -1,8 +1,9 @@
-#[path = "../../word-proof/src/field.rs"]
-pub mod field;
-use field::base::{MODULUS, multiply, power, subtract};
 use std::sync::OnceLock;
 use supported_profile::relation::SYSTEMATIC;
+use word_proof::field::{
+    self,
+    base::{MODULUS, multiply, power, subtract},
+};
 
 // The caller supplies the fixed lookup polynomial coefficients under this
 // field. This computes its complete coset evaluation; it creates no proof or

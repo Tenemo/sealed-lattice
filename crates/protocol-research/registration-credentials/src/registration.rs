@@ -4,7 +4,7 @@ use crate::{
 };
 use parallel_work::{Digest, ProtocolHash};
 use registration_proof::statement;
-use registration_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
+use registration_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 
 #[path = "retained-registration.rs"]
 mod retained;
@@ -156,7 +156,7 @@ impl RegistrationVerifier {
                     &self.header.signing_public,
                 );
                 let mut verifier =
-                    Verifier::new(&role, digest, &self.proof_prefix).map_err(|_| Error::Crypto)?;
+                    verifier(&role, digest, &self.proof_prefix).map_err(|_| Error::Crypto)?;
                 verifier
                     .push_statement(&statement::header())
                     .map_err(|_| Error::Crypto)?;

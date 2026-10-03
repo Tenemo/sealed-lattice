@@ -1,4 +1,5 @@
 #![deny(unsafe_op_in_unsafe_fn)]
+pub mod affine;
 pub mod bridge;
 pub mod combination;
 pub mod field;
@@ -12,7 +13,7 @@ pub mod linear_oracle;
 mod linear_tests;
 pub mod oracles;
 pub mod parameters;
-mod random;
+pub mod random;
 pub mod rows;
 pub mod sums;
 pub mod transcript;

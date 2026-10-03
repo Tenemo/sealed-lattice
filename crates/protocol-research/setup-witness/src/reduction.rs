@@ -17,9 +17,9 @@ pub struct Reduced {
 }
 impl Modulus {
     /// An odd little-endian modulus split into limbs of `radix_bits` bits.
-    pub fn new(bytes: &[u8], radix_bits: usize) -> Result<Self, ()> {
+    pub fn new(bytes: &[u8], radix_bits: usize) -> Option<Self> {
         if bytes.is_empty() || bytes[0] & 1 == 0 || !(17..=96).contains(&radix_bits) {
-            return Err(());
+            return None;
         }
         let mask = (1u128 << radix_bits) - 1;
         let split = |mut value: BigUint| {
@@ -38,29 +38,29 @@ impl Modulus {
         let value = BigUint::from_bytes_le(bytes);
         let digits = split(value.clone());
         if digits.len() > MAXIMUM_LIMBS || digits.last().copied().unwrap() <= 65536 {
-            return Err(());
+            return None;
         }
         let mut ceiling_half = split((value >> 1usize) + 1u8);
         ceiling_half.resize(digits.len(), 0);
-        Ok(Self {
+        Some(Self {
             digits,
             ceiling_half,
             radix_bits,
             mask,
         })
     }
-    pub fn reduce(&self, raw: &[i128], output: &mut [u128]) -> Result<Reduced, ()> {
+    pub fn reduce(&self, raw: &[i128], output: &mut [u128]) -> Option<Reduced> {
         let count = self.digits.len();
         let bits = self.radix_bits;
         let mask = self.mask;
         if raw.len() != count || output.len() != count {
-            return Err(());
+            return None;
         }
         let mut magnitude = Zeroizing::new([0u128; MAXIMUM_LIMBS]);
         let mut remainder = Zeroizing::new([0u128; MAXIMUM_LIMBS]);
         let mut carry = 0i128;
         for index in 0..count {
-            let value = raw[index].checked_add(carry).ok_or(())?;
+            let value = raw[index].checked_add(carry)?;
             magnitude[index] = (value as u128) & mask;
             carry = value >> bits;
         }
@@ -80,11 +80,10 @@ impl Modulus {
         let high = positive_high ^ ((positive_high ^ negative_high) & sign_mask);
         let top = high
             .checked_mul(1u128 << bits)
-            .and_then(|value| value.checked_add(magnitude[count - 1]))
-            .ok_or(())?;
+            .and_then(|value| value.checked_add(magnitude[count - 1]))?;
         let modulus_top = self.digits[count - 1];
         if top >= modulus_top << 16 {
-            return Err(());
+            return None;
         }
         let mut quotient = 0u128;
         for bit in (0..16).rev() {
@@ -107,7 +106,7 @@ impl Modulus {
         }
         let mut high_difference = high as i128 - product_carry as i128 - borrow;
         if !matches!(high_difference, 0 | -1) {
-            return Err(());
+            return None;
         }
         let correction = ((high_difference >> 127) & 1) as u128;
         let correction_mask = 0u128.wrapping_sub(correction);
@@ -119,7 +118,7 @@ impl Modulus {
         }
         high_difference += addition_carry as i128;
         if high_difference != 0 {
-            return Err(());
+            return None;
         }
         quotient -= correction;
         borrow = 0;
@@ -138,7 +137,7 @@ impl Modulus {
             output[index] = remainder[index] ^ ((remainder[index] ^ complemented) & wrap_mask);
             nonzero |= output[index];
         }
-        Ok(Reduced {
+        Some(Reduced {
             negative: (negative ^ wrap) != 0 && nonzero != 0,
             quotient: (quotient + wrap) as i128 * (1 - 2 * negative as i128),
         })
@@ -253,11 +252,11 @@ mod tests {
         let modulus = Modulus::new(&profile.family_modulus(Family::Fhe), 96).unwrap();
         let mut raw = vec![0; 9];
         raw[8] = (modulus.digits[8] << 16) as i128;
-        assert!(modulus.reduce(&raw, &mut [0; 9]).is_err());
-        assert!(modulus.reduce(&[0; 8], &mut [0; 9]).is_err());
-        assert!(Modulus::new(&[], 96).is_err());
-        assert!(Modulus::new(&[2, 1, 0, 0, 1], 96).is_err());
-        assert!(Modulus::new(supported_profile::share_modulus(), 16).is_err());
-        assert!(Modulus::new(supported_profile::share_modulus(), 97).is_err());
+        assert!(modulus.reduce(&raw, &mut [0; 9]).is_none());
+        assert!(modulus.reduce(&[0; 8], &mut [0; 9]).is_none());
+        assert!(Modulus::new(&[], 96).is_none());
+        assert!(Modulus::new(&[2, 1, 0, 0, 1], 96).is_none());
+        assert!(Modulus::new(supported_profile::share_modulus(), 16).is_none());
+        assert!(Modulus::new(supported_profile::share_modulus(), 97).is_none());
     }
 }

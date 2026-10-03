@@ -5,7 +5,7 @@ use registration_credentials::{
 };
 use setup_witness::{Profile, contribution::common_records_job};
 use std::{collections::VecDeque, sync::Arc};
-use word_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
+use word_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 
 /// The most common polynomials whose records helpers compute ahead of
 /// their use; the host holds each one's records until the verifier takes
@@ -84,7 +84,7 @@ impl OpenedContributionVerifier {
         // This declared value is not trusted: the underlying statement stream
         // recomputes it from fixed predecessors and every supplied polynomial.
         let declared_statement = proof_header[4..68].try_into().map_err(|_| Refusal::Shape)?;
-        let mut verifier = Verifier::new(profile, &role, declared_statement, proof_header)
+        let mut verifier = verifier(profile, &role, declared_statement, proof_header)
             .map_err(|_| Refusal::Proof)?;
         verifier
             .push_statement(&profile.setup_statement_header())

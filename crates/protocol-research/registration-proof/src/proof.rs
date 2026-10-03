@@ -1,14 +1,13 @@
-use crate::{
-    combination, field, fri,
-    linear::LinearOracle,
-    oracles::{FirstOracle, SecondOracle, Witness},
-    parameters::*,
-    statement,
-    transcript::{self, Transcript},
-};
+use crate::{parameters::*, statement};
 use parallel_work::Digest;
 use setup_witness::registration::RegistrationKey;
 use std::io::Write;
+use word_proof::{
+    combination, field, fri,
+    linear_oracle::LinearOracle,
+    oracles::{FirstOracle, SecondOracle, Witness},
+    transcript::{self, Transcript},
+};
 
 pub struct RegistrationProof {
     // Retained for the original recipient's subsequent authenticated state.

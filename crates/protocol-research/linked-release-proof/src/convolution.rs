@@ -1,6 +1,6 @@
-use crate::field::{self, MODULUS, Transform, base};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};
+use word_proof::field::{self, MODULUS, Transform, base};
 use zeroize::Zeroizing;
 
 pub fn signed_digit(value: &BigInt, limb: usize, bits: usize) -> i128 {

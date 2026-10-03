@@ -10,7 +10,7 @@ use crate::{
     Error, SIGNATURE_BYTES, checked_header, foundation::RegistrationHeader, poll::VerifiedPoll,
 };
 use parallel_work::{Job, Part, Ticket, session, submit};
-use registration_verifier::CHUNK_LIMIT;
+use registration_proof::CHUNK_LIMIT;
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},

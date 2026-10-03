@@ -1,8 +1,8 @@
-use crate::{
+use crate::parameters::{MAX_DEGREE, SYSTEMATIC, registration_relation};
+use word_proof::{
     field::{self, Element, MODULUS, Transform, ZERO, base},
-    linear::LinearOracle,
+    linear_oracle::LinearOracle,
     oracles::{self, FirstOracle, SecondOracle, Witness},
-    parameters::{MAX_DEGREE, SYSTEMATIC, registration_relation},
     transcript::challenge,
 };
 
@@ -337,7 +337,7 @@ pub fn polynomial(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field::ONE;
+    use word_proof::field::ONE;
     #[test]
     fn collected_reciprocal_terms_equal_the_direct_constraint_for_both_lookup_scales() {
         let mut state = 0x935ac307125aec91u128;

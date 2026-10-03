@@ -2,6 +2,7 @@ use crate::{
     CHUNK_LIMIT, Refusal, Verifier,
     parameters::BALLOT_HEADER_BYTES,
     statement::{self, polynomial_bytes, setup_inputs},
+    verifier,
 };
 use registration_credentials::{
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN, identity},
@@ -113,7 +114,7 @@ impl BallotRelationVerifier {
         }
         Ok(Self {
             profile,
-            verifier: Some(Verifier::new(profile, &role, statement, proof_header)?),
+            verifier: Some(verifier(profile, &role, statement, proof_header)?),
             expected_header,
             expected_inputs,
             header_offset: 0,

@@ -10,7 +10,7 @@ use crate::{
     roster::RosterProposal,
 };
 use parallel_work::{Digest, ProtocolHash};
-use registration_verifier::CHUNK_LIMIT;
+use registration_proof::CHUNK_LIMIT;
 
 use std::sync::Arc;
 
@@ -286,7 +286,7 @@ impl RosterInputVerifier {
 mod tests {
     use super::*;
     use crate::registration::{KEY_BYTES, session::tests::unproved_record};
-    use registration_verifier::CHUNK_LIMIT;
+    use registration_proof::CHUNK_LIMIT;
 
     // One record is open for each helper, or one without helpers. Each
     // position opens once, every step names an open record, and the roster

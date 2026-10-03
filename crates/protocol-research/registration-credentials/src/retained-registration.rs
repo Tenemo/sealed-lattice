@@ -94,7 +94,7 @@ mod tests {
         registration::KEY_BYTES,
     };
     use parallel_work::{Digest, ProtocolHash};
-    use registration_verifier::CHUNK_LIMIT;
+    use registration_proof::CHUNK_LIMIT;
 
     use supported_profile::relation::PROOF_HEADER_BYTES;
 

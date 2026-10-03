@@ -1,30 +1,38 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-#[path = "../../word-proof/src/combination.rs"]
-pub mod combination;
-#[path = "../../word-proof/src/field.rs"]
-pub mod field;
-#[path = "../../word-proof/src/fri.rs"]
-pub mod fri;
-#[path = "../../word-proof/src/jobs.rs"]
-pub mod jobs;
-pub mod linear;
-#[path = "../../word-proof/src/linear-oracle.rs"]
-pub mod linear_oracle;
-#[path = "../../word-proof/src/oracles.rs"]
-pub mod oracles;
 pub mod parameters;
 pub mod proof;
-#[path = "../../word-proof/src/random.rs"]
-mod random;
-#[path = "../../word-proof/src/rows.rs"]
-pub mod rows;
 pub mod statement;
-#[path = "../../word-proof/src/sums.rs"]
-pub mod sums;
-#[path = "../../word-proof/src/transcript.rs"]
-pub mod transcript;
-#[path = "../../word-proof/src/tree.rs"]
-pub mod tree;
 #[cfg(test)]
 #[path = "zero-product-tests.rs"]
 mod zero_product_tests;
+use setup_stream_kernel::SetupStatementOutput;
+use statement::StatementStream;
+use supported_profile::relation::registration_relation;
+use word_verifier::engine;
+pub use word_verifier::engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
+
+impl engine::Statement for StatementStream {
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        StatementStream::push(self, bytes).is_ok()
+    }
+    fn finish(self) -> Option<SetupStatementOutput> {
+        StatementStream::finish(self).ok()
+    }
+}
+
+pub type Verifier = engine::Verifier<StatementStream>;
+/// Verifies a registration key proof. Registration precedes the roster, so
+/// every profile shares its relation.
+pub fn verifier(
+    role: &[u8],
+    expected_statement: [u8; 64],
+    proof_header: &[u8],
+) -> Result<Verifier, Refusal> {
+    Verifier::open(
+        registration_relation(),
+        role,
+        expected_statement,
+        proof_header,
+        |alpha, queries| StatementStream::new(expected_statement, alpha, queries).ok(),
+    )
+}

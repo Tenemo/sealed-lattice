@@ -70,16 +70,15 @@ name = "ballot-proof"
 version = "0.0.0"
 dependencies = [
  "ballot-encryption",
- "getrandom 0.3.3",
  "num-bigint",
  "parallel-work",
- "proof-lookup-table",
  "registration-credentials",
  "setup-aggregate",
  "setup-stream-kernel",
  "setup-witness",
- "sha3",
  "supported-profile",
+ "word-proof",
+ "word-verifier",
  "zeroize",
 ]
 
@@ -428,14 +427,14 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 name = "linked-release-proof"
 version = "0.0.0"
 dependencies = [
- "getrandom 0.3.3",
  "num-bigint",
  "num-traits",
  "parallel-work",
- "proof-lookup-table",
  "setup-stream-kernel",
  "sha3",
  "supported-profile",
+ "word-proof",
+ "word-verifier",
  "zeroize",
 ]
 
@@ -642,6 +641,7 @@ name = "proof-lookup-table"
 version = "0.0.0"
 dependencies = [
  "supported-profile",
+ "word-proof",
 ]
 
 [[package]]
@@ -804,7 +804,6 @@ dependencies = [
  "linked-release-proof",
  "parallel-work",
  "registration-proof",
- "registration-verifier",
  "sha3",
  "supported-profile",
  "unicode-normalization",
@@ -832,6 +831,7 @@ dependencies = [
  "setup-witness",
  "sha3",
  "supported-profile",
+ "word-proof",
  "zeroize",
 ]
 
@@ -839,26 +839,13 @@ dependencies = [
 name = "registration-proof"
 version = "0.0.0"
 dependencies = [
- "getrandom 0.3.3",
  "num-bigint",
  "parallel-work",
  "setup-stream-kernel",
  "setup-witness",
- "sha3",
  "supported-profile",
- "zeroize",
-]
-
-[[package]]
-name = "registration-verifier"
-version = "0.0.0"
-dependencies = [
- "parallel-work",
- "proof-lookup-table",
- "registration-proof",
- "setup-stream-kernel",
- "sha3",
- "supported-profile",
+ "word-proof",
+ "word-verifier",
 ]
 
 [[package]]
@@ -936,6 +923,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
+ "setup-stream-kernel",
  "sha3",
  "supported-profile",
  "zeroize",

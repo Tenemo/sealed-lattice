@@ -28,7 +28,7 @@ impl Random {
         let mut used = 0;
         while used < output.len() {
             if self.offset == self.bytes.len() {
-                crate::random::fill(&mut self.bytes);
+                word_proof::random::fill(&mut self.bytes);
                 self.offset = 0;
             }
             let count = (output.len() - used).min(self.bytes.len() - self.offset);
@@ -380,7 +380,7 @@ fn derive_inner(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::field::{self, Element, ZERO};
+    use word_proof::field::{self, Element, ZERO};
     #[path = "../../../../setup-witness/src/common-polynomial.rs"]
     mod common_polynomial;
     #[path = "../../../../setup-witness/src/gaussian.rs"]
@@ -531,7 +531,7 @@ pub(crate) mod tests {
     // lookup weight.
     #[test]
     fn weighted_operators_equal_the_dense_reference_at_every_row() {
-        use crate::field::MODULUS;
+        use word_proof::field::MODULUS;
         for (participants, options) in [(3, 2), (10, 10), (20, 20)] {
             let profile = Profile::new(participants, options).unwrap();
             let (prepared, _) = synthetic_release(profile);
