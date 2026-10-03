@@ -1,6 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use registration_credentials::{
     registration::{KEY_BYTES, VerifiedRegistration},
@@ -225,7 +225,7 @@ impl Work {
         if !self.shares_started || self.proof.is_some() {
             return Err(());
         }
-        if <[u8; 64]>::from(ProtocolHash::digest(key)) != record.header().recipient_key_hash {
+        if ProtocolHash::digest(key) != record.header().recipient_key_hash {
             return Err(());
         }
         let half = BigInt::from_bytes_le(Sign::Plus, share_modulus()) >> 1usize;
@@ -542,7 +542,7 @@ pub fn checkpoint_key(position: usize, length: usize) -> u32 {
         let Some(bytes) = state.input.get(..length) else {
             return 1;
         };
-        if <[u8; 64]>::from(ProtocolHash::digest(bytes)) != *expected {
+        if ProtocolHash::digest(bytes) != *expected {
             return 1;
         }
         let key = bytes.to_vec();

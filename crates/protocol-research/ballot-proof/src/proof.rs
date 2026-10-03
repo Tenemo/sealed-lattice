@@ -1,5 +1,4 @@
 use crate::{parameters::*, statement::PublicStatement};
-use parallel_work::Digest;
 use std::io::Write;
 use word_proof::{
     combination, field, fri,
@@ -36,7 +35,7 @@ impl BallotProof {
         for polynomial in &public.polynomials {
             context_hash.update(polynomial);
         }
-        let context = context_hash.finalize().into();
+        let context = context_hash.finalize();
         let mut transcript = Transcript::new(role, context, relation.message_bytes());
         transcript.next();
         let first = FirstOracle::create(role, &witness, false);

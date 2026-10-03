@@ -1,6 +1,6 @@
 use crate::parameters::*;
 use num_bigint::{BigInt, Sign};
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
 use word_proof::{
     affine::{Operator, PublicColumn, Term},
@@ -505,7 +505,7 @@ impl PublicStatement {
         for polynomial in &self.polynomials {
             hash.update(polynomial);
         }
-        hash.finalize().into()
+        hash.finalize()
     }
     pub fn operator(&self, alpha: Element) -> Result<Operator, Error> {
         let mut builder = Builder::new(self.profile, alpha, &self.header)?;
@@ -623,7 +623,7 @@ impl StatementStream {
             || self.consumed != self.statement_bytes
             || self.index != POLYNOMIALS
             || self.parser.is_some()
-            || <[u8; 64]>::from(self.hash.finalize()) != self.expected
+            || self.hash.finalize() != self.expected
         {
             return Err(Error::Binding);
         }

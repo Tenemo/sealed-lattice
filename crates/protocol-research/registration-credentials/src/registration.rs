@@ -2,7 +2,7 @@ use crate::{
     BodyHasher, Error, foundation::RegistrationHeader, poll::VerifiedPoll, registration_proof_role,
     verify_registration_signature,
 };
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use registration_proof::statement;
 use registration_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 
@@ -119,7 +119,7 @@ impl RegistrationVerifier {
         if self.failed
             || self.key_finished
             || self.key.len() != KEY_BYTES
-            || <[u8; 64]>::from(ProtocolHash::digest(&self.key)) != self.header.recipient_key_hash
+            || ProtocolHash::digest(&self.key) != self.header.recipient_key_hash
         {
             self.failed = true;
             return Err(Error::Shape);
@@ -194,7 +194,7 @@ impl RegistrationVerifier {
         Ok(VerifiedRegistration {
             header: self.header,
             body_digest,
-            proof_hash: self.proof_hash.finalize().into(),
+            proof_hash: self.proof_hash.finalize(),
             public_key: self.key,
         })
     }

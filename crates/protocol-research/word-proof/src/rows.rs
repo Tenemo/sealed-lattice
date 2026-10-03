@@ -13,9 +13,8 @@ use crate::{
     parameters::*,
     tree::{self, Tree},
 };
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use parallel_work::{Job, Part, StreamedRecords, Ticket, share, submit};
-use parallel_work::{SerializableState, SerializedState};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, VecDeque},
@@ -63,7 +62,7 @@ const ROWS_PER_JOB: usize = 16_384;
 /// The polynomials whose shard jobs may run at once.
 const POLYNOMIALS_RUNNING: usize = 4;
 const HEADER_BYTES: usize = 16;
-const STATE_BYTES: usize = 201;
+const STATE_BYTES: usize = ProtocolHash::STATE_BYTES;
 
 /// The residue classes per coset for a helper count: the most for which
 /// every shard has a helper of its own, and one without enough helpers.
@@ -309,7 +308,7 @@ fn close(input: &[u8]) -> Vec<u8> {
         assert_eq!(state.hashers.len(), rows);
         let mut output = Vec::with_capacity(64 * count);
         for hasher in &mut state.hashers[first..first + count] {
-            output.extend(<[u8; 64]>::from(std::mem::take(hasher).finalize()));
+            output.extend(std::mem::take(hasher).finalize());
         }
         output
     });
@@ -329,7 +328,7 @@ fn export(input: &[u8]) -> Vec<u8> {
     with_shard(session, shard, |state| {
         let mut output = Vec::with_capacity(STATE_BYTES * count);
         for hasher in &state.hashers[first..first + count] {
-            output.extend(<[u8; STATE_BYTES]>::from(hasher.serialize()));
+            output.extend(hasher.serialize());
         }
         output
     })
@@ -340,7 +339,7 @@ fn import(input: &[u8]) -> Vec<u8> {
     let states = &rest[8..];
     assert!(states.len() == STATE_BYTES * count && first + count <= SYSTEMATIC / classes);
     let hashers = states.chunks_exact(STATE_BYTES).map(|bytes| {
-        let serialized: &SerializedState<ProtocolHash> = bytes.try_into().unwrap();
+        let serialized: &[u8; STATE_BYTES] = bytes.try_into().unwrap();
         ProtocolHash::deserialize(serialized).unwrap()
     });
     extend(session, shard, classes, first, hashers);

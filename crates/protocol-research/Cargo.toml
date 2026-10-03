@@ -20,11 +20,7 @@ members = [
     "supported-profile",
     "parallel-work",
 ]
-exclude = ["vendor/keccak"]
 resolver = "3"
-
-[patch.crates-io]
-keccak = { path = "vendor/keccak" }
 
 [profile.test]
 opt-level = 3

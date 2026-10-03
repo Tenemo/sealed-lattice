@@ -8,8 +8,7 @@ use crate::{
     tree::{SALT_SEED_BYTES, Tree},
 };
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
-use parallel_work::{Digest, ProtocolHash};
-use parallel_work::{SerializableState, SerializedState};
+use parallel_work::ProtocolHash;
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
@@ -352,9 +351,9 @@ impl Import {
                     if usize::from(bytes[200]) != expected_cursor {
                         return Err(Error::Operation);
                     }
-                    let encoded: &SerializedState<ProtocolHash> =
+                    let encoded: &[u8; ProtocolHash::STATE_BYTES] =
                         bytes.try_into().map_err(|_| ())?;
-                    ProtocolHash::deserialize(encoded).map_err(|_| ())?;
+                    ProtocolHash::deserialize(encoded).ok_or(())?;
                 }
                 _ => unreachable!(),
             }

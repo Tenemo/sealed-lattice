@@ -323,7 +323,7 @@ await runWithLocalRunLog(
                 await readFile(import.meta.filename),
                 { flag: 'wx' },
             );
-            // Every workspace member; the vendored crates are excluded.
+            // Every workspace member.
             await execute(
                 'cargo',
                 ['+1.95.0', 'fmt', '--all', '--', '--check'],

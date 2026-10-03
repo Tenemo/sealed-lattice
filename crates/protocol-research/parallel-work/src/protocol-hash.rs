@@ -1,17 +1,10 @@
 //! The fixed-length protocol digest: the first 64 SHAKE256 output bytes
 //! after a fixed 64-byte domain prefix and the caller's framed input.
 //! The prefix separates these calls from the compiler's wide challenges.
-//! FIPS 202 fixes the rate and suffix; RustCrypto's pinned backends provide
-//! absorption and Keccak-f. The authenticated checkpoint keeps the lanes
+//! FIPS 202 fixes the rate and suffix, and the pinned Keccak-f permutes the
+//! lanes after each full rate. The authenticated checkpoint keeps the lanes
 //! and cursor, never an algorithm selector or a transferable verdict.
 
-use digest::{
-    FixedOutput, HashMarker, Output, OutputSizeUser, Update,
-    common::hazmat::{DeserializeStateError, SerializableState, SerializedState},
-    consts::{U64, U201},
-};
-use keccak::{Keccak, State1600};
-use sponge_cursor::SpongeCursor;
 use zeroize::Zeroize;
 
 const RATE: usize = 136;
@@ -20,84 +13,114 @@ const DOMAIN: &[u8] = b"sealed-lattice/fixed-hash/v1";
 
 #[derive(Clone)]
 pub struct ProtocolHash {
-    state: State1600,
-    cursor: SpongeCursor<RATE>,
-    keccak: Keccak,
+    lanes: [u64; 25],
+    /// The offset in the rate of the next absorbed byte.
+    cursor: usize,
 }
 
 impl ProtocolHash {
+    /// Bytes of a serialized state: the little-endian lanes, then the
+    /// cursor.
+    pub const STATE_BYTES: usize = 201;
+
+    pub fn new() -> Self {
+        let mut hash = Self {
+            lanes: [0; 25],
+            cursor: 0,
+        };
+        let mut prefix = [0; PREFIX_BYTES];
+        prefix[..DOMAIN.len()].copy_from_slice(DOMAIN);
+        hash.absorb(&prefix);
+        hash
+    }
+
+    /// The digest of one input.
+    pub fn digest(bytes: impl AsRef<[u8]>) -> [u8; 64] {
+        let mut hash = Self::new();
+        hash.absorb(bytes.as_ref());
+        hash.finalize()
+    }
+
     /// The cursor after the fixed domain prefix and this many message bytes.
-    /// Checkpoint restoration uses the same rate as the absorbing backend.
+    /// Checkpoint restoration uses the same rate as the absorption.
     pub fn absorption_cursor_after(message_bytes: usize) -> usize {
         (PREFIX_BYTES + message_bytes % RATE) % RATE
+    }
+
+    pub fn update(&mut self, bytes: impl AsRef<[u8]>) {
+        self.absorb(bytes.as_ref());
+    }
+
+    /// Absorbs bytes into the lanes: one at a time up to a lane boundary,
+    /// then whole little-endian lanes.
+    fn absorb(&mut self, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            if self.cursor.is_multiple_of(8) && bytes.len() >= 8 {
+                let lanes = ((RATE - self.cursor) / 8).min(bytes.len() / 8);
+                let (whole, rest) = bytes.split_at(8 * lanes);
+                for (lane, word) in self.lanes[self.cursor / 8..]
+                    .iter_mut()
+                    .zip(whole.chunks_exact(8))
+                {
+                    *lane ^= u64::from_le_bytes(word.try_into().unwrap());
+                }
+                self.cursor += whole.len();
+                bytes = rest;
+            } else {
+                self.lanes[self.cursor / 8] ^= u64::from(bytes[0]) << (8 * (self.cursor % 8));
+                self.cursor += 1;
+                bytes = &bytes[1..];
+            }
+            if self.cursor == RATE {
+                keccak::f1600(&mut self.lanes);
+                self.cursor = 0;
+            }
+        }
+    }
+
+    pub fn finalize(mut self) -> [u8; 64] {
+        // SHAKE's delimited suffix is 0x1f; pad10*1 ends at the rate's
+        // final bit. Only one output block is needed for this digest.
+        self.lanes[self.cursor / 8] ^= 0x1f_u64 << (8 * (self.cursor % 8));
+        self.lanes[RATE / 8 - 1] ^= 1_u64 << 63;
+        keccak::f1600(&mut self.lanes);
+        let mut output = [0; 64];
+        for (lane, bytes) in self.lanes.iter().zip(output.chunks_exact_mut(8)) {
+            bytes.copy_from_slice(&lane.to_le_bytes());
+        }
+        output
+    }
+
+    pub fn serialize(&self) -> [u8; Self::STATE_BYTES] {
+        let mut bytes = [0; Self::STATE_BYTES];
+        for (lane, destination) in self.lanes.iter().zip(bytes[..200].chunks_exact_mut(8)) {
+            destination.copy_from_slice(&lane.to_le_bytes());
+        }
+        bytes[200] = self.cursor as u8;
+        bytes
+    }
+
+    /// A serialized state, refused when its cursor is outside the rate.
+    pub fn deserialize(bytes: &[u8; Self::STATE_BYTES]) -> Option<Self> {
+        let cursor = usize::from(bytes[200]);
+        (cursor < RATE).then(|| Self {
+            lanes: std::array::from_fn(|index| {
+                u64::from_le_bytes(bytes[8 * index..8 * index + 8].try_into().unwrap())
+            }),
+            cursor,
+        })
     }
 }
 
 impl Default for ProtocolHash {
     fn default() -> Self {
-        let mut hash = Self {
-            state: Default::default(),
-            cursor: Default::default(),
-            keccak: Keccak::new(),
-        };
-        let mut prefix = [0; PREFIX_BYTES];
-        prefix[..DOMAIN.len()].copy_from_slice(DOMAIN);
-        Update::update(&mut hash, &prefix);
-        hash
+        Self::new()
     }
 }
 
-impl HashMarker for ProtocolHash {}
-impl OutputSizeUser for ProtocolHash {
-    type OutputSize = U64;
-}
-impl Update for ProtocolHash {
-    fn update(&mut self, bytes: &[u8]) {
-        self.keccak.with_f1600(|permutation| {
-            self.cursor
-                .absorb_u64_le(&mut self.state, permutation, bytes);
-        });
-    }
-}
-impl FixedOutput for ProtocolHash {
-    fn finalize_into(mut self, output: &mut Output<Self>) {
-        // SHAKE's delimited suffix is 0x1f; pad10*1 ends at the rate's
-        // final bit. Only one output block is needed for this digest.
-        let position = self.cursor.pos();
-        self.state[position / 8] ^= 0x1f_u64 << (8 * (position % 8));
-        self.state[RATE / 8 - 1] ^= 1_u64 << 63;
-        self.keccak
-            .with_f1600(|permutation| permutation(&mut self.state));
-        for (word, bytes) in self.state.iter().zip(output.chunks_exact_mut(8)) {
-            bytes.copy_from_slice(&word.to_le_bytes());
-        }
-    }
-}
-
-impl SerializableState for ProtocolHash {
-    type SerializedStateSize = U201;
-    fn serialize(&self) -> SerializedState<Self> {
-        let mut bytes = [0; 201];
-        for (word, destination) in self.state.iter().zip(bytes[..200].chunks_exact_mut(8)) {
-            destination.copy_from_slice(&word.to_le_bytes());
-        }
-        bytes[200] = self.cursor.raw_pos();
-        bytes.into()
-    }
-    fn deserialize(bytes: &SerializedState<Self>) -> Result<Self, DeserializeStateError> {
-        let cursor = SpongeCursor::new(bytes[200]).ok_or(DeserializeStateError)?;
-        Ok(Self {
-            state: core::array::from_fn(|index| {
-                u64::from_le_bytes(bytes[index * 8..index * 8 + 8].try_into().unwrap())
-            }),
-            cursor,
-            keccak: Keccak::new(),
-        })
-    }
-}
 impl Drop for ProtocolHash {
     fn drop(&mut self) {
-        self.state.zeroize();
+        self.lanes.zeroize();
         self.cursor.zeroize();
     }
 }
@@ -106,7 +129,6 @@ impl zeroize::ZeroizeOnDrop for ProtocolHash {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use digest::Digest;
 
     fn message(length: usize) -> Vec<u8> {
         (0..length).map(|index| (index * 131 % 251) as u8).collect()
@@ -116,7 +138,8 @@ mod tests {
     }
 
     // Independent Python hashlib/OpenSSL SHAKE256 vectors over the literal
-    // domain padded with zeroes to 64 bytes, followed by each message.
+    // domain padded with zeroes to 64 bytes, followed by each message, which
+    // every chunking absorbs alike.
     #[test]
     fn matches_independent_shake256_vectors() {
         for (input, expected) in [
@@ -138,6 +161,13 @@ mod tests {
             ),
         ] {
             assert_eq!(hexadecimal(&ProtocolHash::digest(&input)), expected);
+            for chunk in [1, 3, 7, 8, 9, 64, 135, 136, 137] {
+                let mut hash = ProtocolHash::new();
+                for part in input.chunks(chunk) {
+                    hash.update(part);
+                }
+                assert_eq!(hexadecimal(&hash.finalize()), expected, "chunk {chunk}");
+            }
         }
     }
 
@@ -147,17 +177,22 @@ mod tests {
         let expected = "14a76849aa7c6fd964ce1df16a2683f1c00a1998b5def2934db5b24d017e85d461c729927b4038cad29c986d0b5ae51b5a3a14aaa9d63a81fa1891ed099d7972";
         for split in [0, 1, 71, 72, 73, 135, 136, 137, 207, 208, 209, 4096, 4097] {
             let mut first = ProtocolHash::new();
-            Digest::update(&mut first, &input[..split]);
-            let mut restored = ProtocolHash::deserialize(&first.serialize()).unwrap();
+            first.update(&input[..split]);
+            let state = first.serialize();
+            assert_eq!(
+                usize::from(state[200]),
+                ProtocolHash::absorption_cursor_after(split)
+            );
+            let mut restored = ProtocolHash::deserialize(&state).unwrap();
             for chunk in input[split..].chunks(17) {
-                Digest::update(&mut restored, chunk);
+                restored.update(chunk);
             }
             assert_eq!(hexadecimal(&restored.finalize()), expected, "split {split}");
         }
         let mut state = ProtocolHash::new().serialize();
         for cursor in [136, 137, 255] {
             state[200] = cursor;
-            assert!(ProtocolHash::deserialize(&state).is_err());
+            assert!(ProtocolHash::deserialize(&state).is_none());
         }
     }
 }

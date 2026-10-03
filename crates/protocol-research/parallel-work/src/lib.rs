@@ -12,10 +12,6 @@ mod protocol_hash;
 #[cfg(not(target_arch = "wasm32"))]
 mod simulated;
 mod stream;
-pub use digest::{
-    Digest,
-    common::hazmat::{SerializableState, SerializedState},
-};
 pub use protocol_hash::ProtocolHash;
 use std::{
     cell::Cell,

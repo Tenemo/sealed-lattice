@@ -1,6 +1,6 @@
 use crate::parameters::*;
 use num_bigint::{BigInt, Sign};
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use setup_stream_kernel::{PolynomialStream, SetupStatementOutput};
 use word_proof::{
     affine::{Operator, PublicColumn, Term},
@@ -67,7 +67,7 @@ pub fn digest(common: &[u8], public_key: &[u8]) -> [u8; 64] {
     hash.update(header());
     hash.update(common);
     hash.update(public_key);
-    hash.finalize().into()
+    hash.finalize()
 }
 /// The key equation's operator: the powers of alpha scaled by the modulus,
 /// the carry and minus one, and the common polynomial's adjoint with each
@@ -247,7 +247,7 @@ impl StatementStream {
         if self.failed
             || self.consumed != self.statement_bytes
             || self.parser.is_some()
-            || <[u8; 64]>::from(self.hash.finalize()) != self.expected
+            || self.hash.finalize() != self.expected
         {
             return Err(Error::Context);
         }
@@ -320,7 +320,7 @@ mod tests {
         hash.update(&wrong_header);
         hash.update(common);
         hash.update(&key);
-        let mut decoder = StatementStream::new(hash.finalize().into(), ONE, &[0]).unwrap();
+        let mut decoder = StatementStream::new(hash.finalize(), ONE, &[0]).unwrap();
         assert!(decoder.push(&wrong_header).is_err());
         assert!(decoder.push(&common[..128]).is_err());
         assert!(decoder.finish().is_err());
@@ -330,7 +330,7 @@ mod tests {
         hash.update(header());
         hash.update(&changed);
         hash.update(&key);
-        let mut decoder = StatementStream::new(hash.finalize().into(), ONE, &[0]).unwrap();
+        let mut decoder = StatementStream::new(hash.finalize(), ONE, &[0]).unwrap();
         decoder.push(&header()).unwrap();
         assert!(
             changed

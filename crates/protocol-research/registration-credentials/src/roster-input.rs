@@ -9,7 +9,7 @@ use crate::{
     retained_roster::{RetainedRecord, RetainedRoster, header_digest},
     roster::RosterProposal,
 };
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use registration_proof::CHUNK_LIMIT;
 
 use std::sync::Arc;
@@ -179,8 +179,7 @@ impl RosterInputVerifier {
                 ..
             }) if !*key_finished
                 && key.len() == KEY_BYTES
-                && <[u8; 64]>::from(ProtocolHash::digest(&key[..]))
-                    == header.recipient_key_hash =>
+                && ProtocolHash::digest(&key[..]) == header.recipient_key_hash =>
             {
                 *key_finished = true;
                 Ok(())

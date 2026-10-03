@@ -6,7 +6,7 @@
 //! keys alone: each header must be the one the verifier accepted and each key
 //! must hash to the value its header names.
 use crate::{Credential, Error, RETAINED_TAG_BYTES, poll::VerifiedPoll, roster::RosterProposal};
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 
 const LABEL: &[u8] = b"sealed-lattice/retained-roster/v1";
 const MAGIC: &[u8; 4] = b"RRV1";
@@ -19,7 +19,7 @@ pub fn retained_roster_bytes(participants: usize) -> usize {
 }
 
 pub(crate) fn header_digest(header: &[u8]) -> [u8; 64] {
-    ProtocolHash::digest(header).into()
+    ProtocolHash::digest(header)
 }
 
 impl Credential {
@@ -148,7 +148,7 @@ mod tests {
                 poll: poll.identity(),
                 runtime,
                 signing_public: *credential.signing_public(),
-                recipient_key_hash: ProtocolHash::digest(&keys[position]).into(),
+                recipient_key_hash: ProtocolHash::digest(&keys[position]),
                 proof_length: PROOF_HEADER_BYTES + position,
             };
             headers.push(header.encode().unwrap());

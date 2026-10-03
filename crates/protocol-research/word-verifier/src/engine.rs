@@ -1,4 +1,4 @@
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use setup_stream_kernel::SetupStatementOutput as StatementOutput;
 use setup_stream_kernel::arithmetic::{
@@ -126,11 +126,11 @@ fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
     for value in parts {
         part(&mut hash, value);
     }
-    hash.finalize().into()
+    hash.finalize()
 }
 fn part(hash: &mut ProtocolHash, bytes: &[u8]) {
-    Digest::update(hash, (bytes.len() as u32).to_le_bytes());
-    Digest::update(hash, bytes);
+    hash.update((bytes.len() as u32).to_le_bytes());
+    hash.update(bytes);
 }
 /// The sponge of a hash that has absorbed its domain and first parts, which
 /// every hash with that prefix continues.
@@ -148,7 +148,7 @@ fn hash_after(prefix: &ProtocolHash, parts: &[&[u8]]) -> [u8; 64] {
     for value in parts {
         part(&mut hash, value);
     }
-    hash.finalize().into()
+    hash.finalize()
 }
 fn stream_part(stream: &mut HashStream, bytes: &[u8]) {
     stream.update(&(bytes.len() as u32).to_le_bytes());

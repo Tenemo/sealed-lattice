@@ -2,7 +2,7 @@ use crate::{
     field::{Element, MODULUS, ZERO},
     parameters::*,
 };
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use sha3::{
     Shake256,
@@ -10,8 +10,8 @@ use sha3::{
 };
 
 pub fn part(state: &mut ProtocolHash, bytes: &[u8]) {
-    Digest::update(state, (bytes.len() as u32).to_le_bytes());
-    Digest::update(state, bytes);
+    state.update((bytes.len() as u32).to_le_bytes());
+    state.update(bytes);
 }
 pub fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
     let mut state = ProtocolHash::new();
@@ -19,7 +19,7 @@ pub fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
     for value in parts {
         part(&mut state, value);
     }
-    state.finalize().into()
+    state.finalize()
 }
 fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     let mut state = Shake256::default();
@@ -51,7 +51,7 @@ pub fn parameters(relation: &Relation) -> Vec<u8> {
 /// appends.
 pub fn context_hasher(relation: &Relation, role: &[u8]) -> ProtocolHash {
     let mut state = ProtocolHash::new();
-    context_prefix(relation, role, |bytes| Digest::update(&mut state, bytes));
+    context_prefix(relation, role, |bytes| state.update(bytes));
     state
 }
 /// The same context as a stream, which a helper hashes when there are

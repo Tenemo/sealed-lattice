@@ -93,7 +93,7 @@ mod tests {
         poll::{PollDraft, verify_poll},
         registration::KEY_BYTES,
     };
-    use parallel_work::{Digest, ProtocolHash};
+    use parallel_work::ProtocolHash;
     use registration_proof::CHUNK_LIMIT;
 
     use supported_profile::relation::PROOF_HEADER_BYTES;
@@ -135,7 +135,7 @@ mod tests {
             poll: poll.identity(),
             runtime,
             signing_public: *credential.signing_public(),
-            recipient_key_hash: ProtocolHash::digest(&key).into(),
+            recipient_key_hash: ProtocolHash::digest(&key),
             proof_length: PROOF_HEADER_BYTES + 1,
         };
         Registration {

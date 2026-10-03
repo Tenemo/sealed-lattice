@@ -6,7 +6,7 @@
 //! digests once committed; an opening then hashes the leaves of each block
 //! below a queried leaf's lowest kept node again from their rows.
 use crate::transcript::part;
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use parallel_work::{Job, Part, Pipeline, submit, window};
 use sha3::{
     Shake256,
@@ -56,7 +56,7 @@ fn node(prefix: &ProtocolHash, left: &[u8], right: &[u8]) -> [u8; 64] {
     let mut hash = prefix.clone();
     part(&mut hash, left);
     part(&mut hash, right);
-    hash.finalize().into()
+    hash.finalize()
 }
 /// The inner levels above the leaves of a tree of the length that the tree
 /// recomputes instead of keeping, which leaves it at least its root.
@@ -141,7 +141,7 @@ fn subtree_leaves(input: &[u8]) -> Vec<u8> {
             let index = first + offset;
             let mut hash = leaf_start(&prefix, index, &salt(seed, index), width);
             hash.update(row);
-            hash.finalize().into()
+            hash.finalize()
         })
         .collect();
     let mut output = Vec::with_capacity(64 * leaves + kept_node_bytes(leaves, omitted));
@@ -340,7 +340,7 @@ impl Tree {
     }
     #[cfg(test)]
     pub fn leaf(&mut self, index: usize, hasher: ProtocolHash) {
-        self.leaves[index] = hasher.finalize().into();
+        self.leaves[index] = hasher.finalize();
     }
     fn subtree_leaves(&self) -> usize {
         SUBTREE_LEAVES.min(self.length)
@@ -584,7 +584,6 @@ pub struct Multiproof {
 mod tests {
     use super::*;
     use crate::transcript::hash;
-    use parallel_work::SerializableState;
 
     // Every node of a tree of the leaves, in heap order, hashed directly.
     fn reference(role: &[u8], stage: u32, leaves: &[[u8; 64]]) -> Vec<[u8; 64]> {

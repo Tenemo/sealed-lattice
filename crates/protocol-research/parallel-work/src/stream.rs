@@ -4,7 +4,7 @@
 //! for a caller that needs the digest at once, the sponge stays here. Either
 //! way the digest equals the one this instance computes alone, however the
 //! bytes are divided.
-use crate::{Digest, ProtocolHash};
+use crate::ProtocolHash;
 use crate::{Job, Part, Ticket, helpers, session, submit};
 use sha3::{
     Shake256,
@@ -36,13 +36,13 @@ impl Local {
     }
     fn update(&mut self, bytes: &[u8]) {
         match self {
-            Self::ProtocolHash(hash) => Digest::update(hash, bytes),
+            Self::ProtocolHash(hash) => hash.update(bytes),
             Self::Shake256(hash) => Update::update(hash, bytes),
         }
     }
     fn finish(self) -> [u8; 64] {
         match self {
-            Self::ProtocolHash(hash) => hash.finalize().into(),
+            Self::ProtocolHash(hash) => hash.finalize(),
             Self::Shake256(hash) => {
                 let mut digest = [0; 64];
                 hash.finalize_xof().read(&mut digest);

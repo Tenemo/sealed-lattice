@@ -8,7 +8,7 @@ use crate::{
     transcript::{self, Transcript},
     tree::Multiproof,
 };
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use setup_stream_kernel::{PolynomialStream, setup_polynomial_stream};
 
 use std::collections::VecDeque;
@@ -188,7 +188,7 @@ impl Prover {
             prepared,
         );
         if affine.next() == self.profile.setup_polynomials() {
-            if <[u8; 64]>::from(self.second_pass_hash.clone().finalize()) != self.expected {
+            if self.second_pass_hash.clone().finalize() != self.expected {
                 return Err(());
             }
             self.phase = Phase::Linear;

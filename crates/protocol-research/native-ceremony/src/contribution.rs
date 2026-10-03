@@ -1,6 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use registration_credentials::{
     contribution_commitment::{
         ComputedContributionCommitment, ContributionCommitmentHasher, body_header,
@@ -152,8 +152,8 @@ pub fn generate(
     let mut prover = Prover::from_generated(
         profile,
         &role,
-        output.hash.finalize().into(),
-        output.context.finalize().into(),
+        output.hash.finalize(),
+        output.context.finalize(),
         header,
         columns,
     )

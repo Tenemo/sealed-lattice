@@ -1,5 +1,4 @@
 use crate::{parameters::*, statement};
-use parallel_work::Digest;
 use setup_witness::registration::RegistrationKey;
 use std::io::Write;
 use word_proof::{
@@ -33,7 +32,7 @@ impl RegistrationProof {
         context_hash.update(statement::header());
         context_hash.update(common);
         context_hash.update(&public_key);
-        let context = context_hash.finalize().into();
+        let context = context_hash.finalize();
         let mut witness = Witness::from_columns(
             &relation,
             statement_digest,

@@ -1,4 +1,4 @@
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use registration_credentials::{
     BodyHasher, Credential,
     foundation::{RegistrationHeader, normalize_username},
@@ -218,7 +218,7 @@ impl Enrollment {
         let proof = RegistrationProof::create(&role, false, false);
         proof.check_retained_key().map_err(|_| Error::State)?;
         let public = proof.public_key_bytes();
-        let key_hash = ProtocolHash::digest(&public).into();
+        let key_hash = ProtocolHash::digest(&public);
         let mut key_output = RecordWriter::new(0, &mut output);
         key_output.write_all(&public).unwrap();
         key_output.flush().unwrap();
@@ -227,7 +227,7 @@ impl Enrollment {
         proof.write(&mut proof_output);
         proof_output.flush().unwrap();
         let length = proof_output.offset;
-        let proof_hash: [u8; 64] = proof_output.hash.clone().finalize().into();
+        let proof_hash: [u8; 64] = proof_output.hash.clone().finalize();
         drop(proof_output);
         let header = RegistrationHeader {
             username,
@@ -250,9 +250,7 @@ impl Enrollment {
             length: 0,
         };
         proof.write(&mut body_output);
-        if body_output.length != length
-            || <[u8; 64]>::from(body_output.hash.finalize()) != proof_hash
-        {
+        if body_output.length != length || body_output.hash.finalize() != proof_hash {
             return Err(Error::State);
         }
         let body = body_output.body.finish().map_err(|_| Error::State)?;
@@ -294,7 +292,7 @@ impl Enrollment {
     ) -> Result<Self, Error> {
         use num_bigint::{BigInt, Sign};
         if public_bytes.len() != 65536 * 21
-            || <[u8; 64]>::from(ProtocolHash::digest(public_bytes)) != header.recipient_key_hash
+            || ProtocolHash::digest(public_bytes) != header.recipient_key_hash
         {
             return Err(Error::Shape);
         }

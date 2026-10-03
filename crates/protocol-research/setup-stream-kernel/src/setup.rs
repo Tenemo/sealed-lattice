@@ -925,7 +925,7 @@ mod tests {
     use super::*;
     use num_bigint::{BigInt, BigUint, Sign};
     use num_traits::ToPrimitive;
-    use parallel_work::{Digest, ProtocolHash};
+    use parallel_work::ProtocolHash;
 
     // Every size of the profile over sixteen-coefficient rings.
     fn reduced(profile: Profile) -> Layout {
@@ -1563,7 +1563,7 @@ mod tests {
             let (operator, target) = systematic_operator(layout, alpha, &statement);
             assert_eq!(apply(&operator, &columns), target, "{label}");
             // The verifier's query coefficients encode the same operator.
-            let digest: [u8; 64] = ProtocolHash::digest(&statement).into();
+            let digest: [u8; 64] = ProtocolHash::digest(&statement);
             let output = stream(layout, &statement, digest, &indices).unwrap();
             assert_eq!(output.target, target, "{label}");
             for (column, coefficients) in operator.iter().enumerate() {
@@ -1604,7 +1604,7 @@ mod tests {
         for (participants, options) in [(3, 2), (10, 10), (16, 2)] {
             let layout = reduced(Profile::new(participants, options).unwrap());
             let (original, _) = satisfying_relation(layout, &mut random);
-            let digest: [u8; 64] = ProtocolHash::digest(&original).into();
+            let digest: [u8; 64] = ProtocolHash::digest(&original);
             let header = layout.header().len();
             let share = header
                 + (0..layout.profile.share_common_polynomial())
@@ -1639,7 +1639,7 @@ mod tests {
                 let bound: [u8; 64] = if kind == 4 {
                     digest
                 } else {
-                    ProtocolHash::digest(&bytes).into()
+                    ProtocolHash::digest(&bytes)
                 };
                 assert_eq!(
                     stream(layout, &bytes, bound, &[0, 1]).err(),

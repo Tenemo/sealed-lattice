@@ -4,7 +4,7 @@ use ballot_encryption::{
     packing::PackingMatrix,
 };
 use num_bigint::{BigInt, Sign};
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use setup_stream_kernel::PolynomialStream;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
@@ -164,7 +164,7 @@ impl PublicStatement {
         for polynomial in &self.polynomials {
             hash.update(polynomial);
         }
-        hash.finalize().into()
+        hash.finalize()
     }
     pub fn operator(&self, alpha: Element) -> Result<Operator, Error> {
         let mut builder = Builder::new(self.profile, alpha, &self.header)?;

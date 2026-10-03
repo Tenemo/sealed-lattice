@@ -34,7 +34,7 @@ use foundation::{
     CanonicalItem, RegistrationHeader, hash::StreamingFoundationTupleHash512,
     participant_identity::derive_participant_identity,
 };
-use parallel_work::{Digest, ProtocolHash};
+use parallel_work::ProtocolHash;
 use poll::VerifiedPoll;
 
 use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
@@ -161,7 +161,7 @@ impl Credential {
         hash.update(poll.runtime());
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(bytes);
-        hash.finalize().into()
+        hash.finalize()
     }
     pub fn check_retained_tag(
         &self,
