@@ -20,7 +20,7 @@ export const authenticationPurposes = [
     'setup-opening',
     'ballot-envelope',
 ] as const;
-export type AuthenticationPurpose = (typeof authenticationPurposes)[number];
+type AuthenticationPurpose = (typeof authenticationPurposes)[number];
 const completeAuthenticationPurposes = [
     ...authenticationPurposes,
     'close-intent',
