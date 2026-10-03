@@ -150,7 +150,6 @@ dependencies = [
  "parallel-work",
  "registration-credentials",
  "setup-witness",
- "sha3",
  "supported-profile",
  "word-proof",
  "zeroize",
@@ -456,7 +455,6 @@ dependencies = [
  "ballot-proof",
  "evaluation-target",
  "getrandom 0.3.3",
- "linked-release-proof",
  "num-bigint",
  "num-traits",
  "parallel-work",
@@ -465,7 +463,6 @@ dependencies = [
  "rns-arithmetic-probe",
  "setup-aggregate",
  "setup-witness",
- "sha3",
  "supported-profile",
  "word-proof",
  "zeroize",
@@ -567,7 +564,6 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 name = "opened-contribution"
 version = "0.0.0"
 dependencies = [
- "num-bigint",
  "parallel-work",
  "registration-credentials",
  "setup-witness",
@@ -800,7 +796,6 @@ dependencies = [
  "aes",
  "aes-gcm",
  "fips204",
- "getrandom 0.3.3",
  "linked-release-proof",
  "parallel-work",
  "registration-proof",
@@ -818,7 +813,6 @@ dependencies = [
  "ballot-proof",
  "contribution-prover",
  "evaluation-target",
- "fips204",
  "getrandom 0.3.3",
  "linked-release-proof",
  "num-bigint",
@@ -908,7 +902,6 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "sha3",
  "supported-profile",
 ]
 

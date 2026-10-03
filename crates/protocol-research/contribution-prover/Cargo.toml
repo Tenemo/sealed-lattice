@@ -17,5 +17,4 @@ supported-profile = { path = "../supported-profile" }
 word-proof = { path = "../word-proof" }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
-sha3 = "=0.10.9"
 zeroize = "=1.8.2"

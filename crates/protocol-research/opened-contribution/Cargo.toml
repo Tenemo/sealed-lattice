@@ -12,4 +12,3 @@ registration-credentials = { path = "../registration-credentials" }
 parallel-work = { path = "../parallel-work" }
 setup-witness = { path = "../setup-witness" }
 word-verifier = { path = "../word-verifier" }
-num-bigint = "=0.5.1"

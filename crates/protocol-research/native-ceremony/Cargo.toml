@@ -17,11 +17,9 @@ ballot-encryption = { path = "../ballot-encryption" }
 ballot-proof = { path = "../ballot-proof" }
 evaluation-target = { path = "../evaluation-target" }
 rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
-linked-release-proof = { path = "../linked-release-proof" }
 supported-profile = { path = "../supported-profile" }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
-sha3 = "=0.10.9"
 getrandom = "=0.3.3"
 zeroize = "=1.8.2"
 
