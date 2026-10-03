@@ -59,7 +59,6 @@ const nodeTestProjectDefinitions = [
 
 const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
-    'tests/browser/**/*.browser.test.ts',
 ] as const;
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
 const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;

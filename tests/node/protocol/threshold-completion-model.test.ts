@@ -64,9 +64,8 @@ describe('threshold completion model', () => {
             setupReceiptThreshold: 10,
             guaranteedHonestResponderCount: 4,
             minimumHonestVerifiedShareCountAfterDisappearance: 4,
-            minimumHonestPublicationSignerCount: 4,
+            minimumHonestCertificateSignerCount: 4,
             minimumCertificateIntersection: 4,
-            maximumPostClosePublicationSignerCount: 6,
             mandatoryReleaseParticipantCount: 0,
             certificateSetCount: 120n,
             orderedCertificatePairCount: 14_400n,
@@ -119,13 +118,9 @@ describe('threshold completion model', () => {
                         participantCount - 2 * maximumCorruptParticipantCount,
                     // A closing certificate's n - f signers, less the f
                     // corrupt ones.
-                    minimumHonestPublicationSignerCount:
+                    minimumHonestCertificateSignerCount:
                         inventoryCertificateThreshold -
                         maximumCorruptParticipantCount,
-                    // Corruption and disappearance each remove at most f
-                    // certificate holders.
-                    maximumPostClosePublicationSignerCount:
-                        2 * maximumCorruptParticipantCount,
                     // Two sets of n - f participants share at least
                     // 2 * (n - f) - n of them.
                     minimumCertificateIntersection:
@@ -161,10 +156,6 @@ describe('threshold completion model', () => {
             expect(
                 expected.minimumHonestVerifiedShareCountAfterDisappearance,
             ).toBeGreaterThanOrEqual(expected.resultReleaseThreshold);
-            // A closing certificate outnumbers every holder that can be lost.
-            expect(
-                expected.maximumPostClosePublicationSignerCount,
-            ).toBeLessThan(expected.inventoryCertificateThreshold);
             // Some release set omits any given participant.
             expect(expected.resultReleaseThreshold).toBeLessThan(
                 expected.participantCount,

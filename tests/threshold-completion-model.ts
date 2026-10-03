@@ -215,9 +215,8 @@ export type ThresholdCompletionProfile = Readonly<{
     setupReceiptThreshold: number;
     guaranteedHonestResponderCount: number;
     minimumHonestVerifiedShareCountAfterDisappearance: number;
-    minimumHonestPublicationSignerCount: number;
+    minimumHonestCertificateSignerCount: number;
     minimumCertificateIntersection: number;
-    maximumPostClosePublicationSignerCount: number;
     mandatoryReleaseParticipantCount: number;
     corruptionSetCount: bigint;
     disappearanceSetCount: bigint;
@@ -266,10 +265,8 @@ export const compileThresholdCompletionProfile = (
         participantCount - 2 * maximumCorruptParticipantCount;
     const minimumHonestVerifiedShareCountAfterDisappearance =
         setupReceiptThreshold - 2 * maximumCorruptParticipantCount;
-    const minimumHonestPublicationSignerCount =
+    const minimumHonestCertificateSignerCount =
         inventoryCertificateThreshold - maximumCorruptParticipantCount;
-    const maximumPostClosePublicationSignerCount =
-        2 * maximumCorruptParticipantCount;
     const minimumCertificateIntersection =
         2 * inventoryCertificateThreshold - participantCount;
     // With every honest participant voting, the adversary can omit f honest
@@ -289,10 +286,8 @@ export const compileThresholdCompletionProfile = (
         guaranteedHonestResponderCount < resultReleaseThreshold ||
         minimumHonestVerifiedShareCountAfterDisappearance <
             resultReleaseThreshold ||
-        minimumHonestPublicationSignerCount !==
+        minimumHonestCertificateSignerCount !==
             guaranteedHonestResponderCount ||
-        maximumPostClosePublicationSignerCount >=
-            inventoryCertificateThreshold ||
         minimumCertificateIntersection <= maximumCorruptParticipantCount
     ) {
         throw new Error(
@@ -379,9 +374,8 @@ export const compileThresholdCompletionProfile = (
         setupReceiptThreshold,
         guaranteedHonestResponderCount,
         minimumHonestVerifiedShareCountAfterDisappearance,
-        minimumHonestPublicationSignerCount,
+        minimumHonestCertificateSignerCount,
         minimumCertificateIntersection,
-        maximumPostClosePublicationSignerCount,
         mandatoryReleaseParticipantCount,
         corruptionSetCount: setCount,
         disappearanceSetCount: setCount,
