@@ -1,36 +1,15 @@
 use core::{fmt, str};
 use std::collections::BTreeSet;
 
+use supported_profile::Profile;
+
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    Hash512, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, RefusalReason, derive_participant_identity,
-    hash_foundation_tuple_512,
+    ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, RefusalReason, derive_participant_identity,
 };
 
-pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
-pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
-
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-
-pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
-pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
-#[cfg(test)]
-pub(crate) const PROTOTYPE_PARTICIPANT_COUNT: u16 = 10;
-pub const MINIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 2;
-pub const MAXIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 20;
-#[cfg(test)]
-pub(crate) const PROTOTYPE_OPTION_COUNT: u16 = 10;
-pub(crate) const FOUNDATION_PROTOCOL_NAME: &str = "sealed-lattice";
-pub(crate) const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
-pub(crate) const MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH: usize = 128;
-pub(crate) const MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;
-
-fn participant_count_is_configurable(participant_count: usize) -> bool {
-    (usize::from(MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT)
-        ..=usize::from(MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT))
-        .contains(&participant_count)
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundationSchemaError {
@@ -88,33 +67,13 @@ impl RosterEntry {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        if self.roster_position >= MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT {
+        if usize::from(self.roster_position) >= *Profile::participant_range().end() {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "roster position is outside the configurable range",
             ));
         }
         Ok(())
-    }
-
-    fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        self.validate()?;
-        Ok(CanonicalTuple::new(
-            ROSTER_ENTRY_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.roster_position),
-                CanonicalItem::fixed_bytes(self.signing_verification_key)?,
-            ],
-        ))
-    }
-
-    fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 2)?;
-        Self::new(
-            read_u16(&tuple.items[0])?,
-            read_fixed_bytes(&tuple.items[1])?,
-        )
     }
 }
 
@@ -128,56 +87,10 @@ impl Roster {
         validate_roster_entries(&entries)?;
         Ok(Self { entries })
     }
-
-    pub(crate) fn validate(&self) -> SchemaResult<()> {
-        validate_roster_entries(&self.entries)
-    }
-
-    pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        self.validate()?;
-        let entries = self
-            .entries
-            .iter()
-            .map(RosterEntry::canonical_tuple)
-            .collect::<SchemaResult<Vec<_>>>()?;
-        Ok(CanonicalTuple::new(
-            ROSTER_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
-            vec![CanonicalItem::nested_tuple_list(&entries)?],
-        )
-        .encode()?)
-    }
-
-    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
-        let mut budget = CanonicalDecodeBudget::new(limits);
-        Self::decode_with_budget(bytes, limits, &mut budget)
-    }
-
-    fn decode_with_budget(
-        bytes: &[u8],
-        limits: &CanonicalDecodeLimits,
-        budget: &mut CanonicalDecodeBudget,
-    ) -> SchemaResult<Self> {
-        preflight_roster_entry_count(bytes, limits)?;
-        let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, ROSTER_SCHEMA_IDENTIFIER, 1)?;
-        let entries = read_nested_tuple_list_with_budget(&tuple.items[0], limits, budget)?
-            .iter()
-            .map(RosterEntry::from_tuple)
-            .collect::<SchemaResult<Vec<_>>>()?;
-        Self::new(entries)
-    }
-
-    pub fn roster_hash(&self) -> SchemaResult<Hash512> {
-        Ok(hash_foundation_tuple_512(
-            "sealed-lattice/foundation/roster/v1",
-            &[CanonicalItem::variable_bytes(self.encode()?)?],
-        )?)
-    }
 }
 
 fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
-    if !participant_count_is_configurable(entries.len()) {
+    if !Profile::participant_range().contains(&entries.len()) {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "roster size is outside the configurable range",
@@ -233,104 +146,6 @@ pub(super) fn require_header(
     Ok(())
 }
 
-fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<()> {
-    const ITEM_TYPES: [CanonicalItemType; 1] = [CanonicalItemType::HomogeneousList];
-    let Some(entry_list_bytes) =
-        raw_schema_item(bytes, limits, ROSTER_SCHEMA_IDENTIFIER, &ITEM_TYPES, 0)
-    else {
-        return Ok(());
-    };
-    let Some(declared_entry_count) = raw_nested_tuple_list_count(entry_list_bytes, limits) else {
-        return Ok(());
-    };
-    if !participant_count_is_configurable(declared_entry_count as usize) {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "roster size is outside the configurable range",
-        ));
-    }
-    Ok(())
-}
-
-fn raw_schema_item<'a>(
-    bytes: &'a [u8],
-    limits: &CanonicalDecodeLimits,
-    expected_schema_identifier: u16,
-    expected_item_types: &[CanonicalItemType],
-    requested_item_index: usize,
-) -> Option<&'a [u8]> {
-    const TUPLE_HEADER_BYTE_LENGTH: usize = 8;
-    const ITEM_HEADER_BYTE_LENGTH: usize = 6;
-
-    if requested_item_index >= expected_item_types.len()
-        || expected_item_types.len() > limits.maximum_item_count
-        || bytes.len() > limits.maximum_tuple_byte_length
-        || bytes.len() > limits.maximum_cumulative_work_byte_length
-    {
-        return None;
-    }
-    let tuple_header = bytes.get(..TUPLE_HEADER_BYTE_LENGTH)?;
-    if read_raw_u16(tuple_header, 0)? != expected_schema_identifier
-        || read_raw_u16(tuple_header, 2)? != FOUNDATION_SCHEMA_VERSION
-        || usize::try_from(read_raw_u32(tuple_header, 4)?).ok()? != expected_item_types.len()
-    {
-        return None;
-    }
-
-    let mut requested_item = None;
-    let mut total_item_byte_length = 0usize;
-    let mut item_offset = TUPLE_HEADER_BYTE_LENGTH;
-    for (item_index, expected_item_type) in expected_item_types.iter().enumerate() {
-        let item_header_end = item_offset.checked_add(ITEM_HEADER_BYTE_LENGTH)?;
-        let item_header = bytes.get(item_offset..item_header_end)?;
-        if read_raw_u16(item_header, 0)? != expected_item_type.canonical_code() {
-            return None;
-        }
-        let item_byte_length = usize::try_from(read_raw_u32(item_header, 2)?).ok()?;
-        if item_byte_length > limits.maximum_item_byte_length {
-            return None;
-        }
-        total_item_byte_length = total_item_byte_length.checked_add(item_byte_length)?;
-        let item_end = item_header_end.checked_add(item_byte_length)?;
-        let item_bytes = bytes.get(item_header_end..item_end)?;
-        if item_index == requested_item_index {
-            requested_item = Some(item_bytes);
-        }
-        item_offset = item_end;
-    }
-    if item_offset != bytes.len()
-        || total_item_byte_length > limits.maximum_cumulative_allocation_byte_length
-    {
-        return None;
-    }
-    requested_item
-}
-
-fn raw_nested_tuple_list_count(bytes: &[u8], limits: &CanonicalDecodeLimits) -> Option<u32> {
-    if read_raw_u16(bytes, 0)? != CanonicalItemType::NestedTuple.canonical_code() {
-        return None;
-    }
-    let declared_count = read_raw_u32(bytes, 2)?;
-    if usize::try_from(declared_count).ok()? > limits.maximum_item_count {
-        return None;
-    }
-    Some(declared_count)
-}
-
-fn read_raw_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    let value_end = offset.checked_add(2)?;
-    Some(u16::from_le_bytes(
-        bytes.get(offset..value_end)?.try_into().ok()?,
-    ))
-}
-
-fn read_raw_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    let value_end = offset.checked_add(4)?;
-    Some(u32::from_le_bytes(
-        bytes.get(offset..value_end)?.try_into().ok()?,
-    ))
-}
-
 pub(super) fn read_item(
     item: &CanonicalItem,
     expected_type: CanonicalItemType,
@@ -368,17 +183,6 @@ pub(super) fn read_ascii(item: &CanonicalItem) -> SchemaResult<&str> {
     str::from_utf8(read_variable_item(item, CanonicalItemType::Ascii)?).map_err(|_| {
         FoundationSchemaError::new(RefusalReason::MalformedEncoding, "ASCII item is invalid")
     })
-}
-
-fn read_fixed_bytes<const LENGTH: usize>(item: &CanonicalItem) -> SchemaResult<[u8; LENGTH]> {
-    read_item(item, CanonicalItemType::RawBytes)?
-        .try_into()
-        .map_err(|_| {
-            FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "fixed byte string has the wrong length",
-            )
-        })
 }
 
 fn read_nested_tuple_list_header(item: &CanonicalItem) -> SchemaResult<(usize, &[u8])> {
@@ -435,14 +239,18 @@ pub(super) fn read_nested_tuple_list_with_budget(
 mod tests {
     use super::*;
 
+    // The entries skip their own position check, so the roster's checks see
+    // every size.
     fn roster_entries(participant_count: u16) -> Vec<RosterEntry> {
         (0..participant_count)
             .map(|roster_position| {
                 let mut signing_verification_key =
                     [0x23_u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
                 signing_verification_key[0..2].copy_from_slice(&roster_position.to_le_bytes());
-                RosterEntry::new(roster_position, signing_verification_key)
-                    .expect("test roster entry is valid")
+                RosterEntry {
+                    roster_position,
+                    signing_verification_key,
+                }
             })
             .collect()
     }
@@ -452,31 +260,15 @@ mod tests {
     const GOAL_PARTICIPANT_COUNTS: std::ops::RangeInclusive<u16> = 3..=20;
 
     #[test]
-    fn every_configurable_roster_size_round_trips_canonically() {
-        assert_eq!(
-            MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
-            GOAL_PARTICIPANT_COUNTS
-        );
-        for participant_count in [
-            *GOAL_PARTICIPANT_COUNTS.start(),
-            PROTOTYPE_PARTICIPANT_COUNT,
-            *GOAL_PARTICIPANT_COUNTS.end(),
-        ] {
+    fn roster_admits_every_configurable_size() {
+        for participant_count in GOAL_PARTICIPANT_COUNTS {
             let roster = Roster::new(roster_entries(participant_count)).expect("roster is valid");
-            let encoded = roster.encode().expect("roster encodes");
-            let decoded = Roster::decode(&encoded, &CanonicalDecodeLimits::default())
-                .expect("roster decodes");
-            assert_eq!(decoded, roster);
-            assert_eq!(decoded.encode().expect("roster re-encodes"), encoded);
-            assert_eq!(
-                decoded.roster_hash().expect("decoded roster hashes"),
-                roster.roster_hash().expect("source roster hashes")
-            );
+            assert_eq!(roster.entries.len(), usize::from(participant_count));
         }
     }
 
     #[test]
-    fn roster_refuses_duplicates_reordering_and_oversized_declared_counts() {
+    fn roster_refuses_duplicates_reordering_and_unsupported_sizes() {
         let mut entries = roster_entries(3);
         entries.swap(0, 1);
         assert_eq!(
@@ -495,70 +287,24 @@ mod tests {
             RefusalReason::DuplicateIdentity
         );
 
-        let roster = Roster::new(roster_entries(3)).expect("roster is valid");
-        let mut encoded = roster.encode().expect("roster encodes");
-        encoded[16..20].copy_from_slice(&21_u32.to_le_bytes());
+        for participant_count in [
+            *GOAL_PARTICIPANT_COUNTS.start() - 1,
+            *GOAL_PARTICIPANT_COUNTS.end() + 1,
+        ] {
+            assert_eq!(
+                Roster::new(roster_entries(participant_count))
+                    .expect_err("an unsupported roster size must refuse")
+                    .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
         assert_eq!(
-            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
-                .expect_err("oversized declared roster refuses before allocation")
-                .refusal_reason,
-            RefusalReason::OutsideSupportedProfile
-        );
-    }
-
-    #[test]
-    fn roster_entries_carry_no_encryption_key() {
-        // An entry holds its position and signing key alone; an entry that
-        // also carries a third item, as a former encapsulation key did, is
-        // refused.
-        let entries = roster_entries(3)
-            .iter()
-            .map(|entry| {
-                CanonicalTuple::new(
-                    ROSTER_ENTRY_SCHEMA_IDENTIFIER,
-                    FOUNDATION_SCHEMA_VERSION,
-                    vec![
-                        CanonicalItem::unsigned16(entry.roster_position),
-                        CanonicalItem::fixed_bytes(entry.signing_verification_key)
-                            .expect("signing key encodes"),
-                        CanonicalItem::fixed_bytes([0x61_u8; 1184]).expect("third item encodes"),
-                    ],
-                )
-            })
-            .collect::<Vec<_>>();
-        let encoded = CanonicalTuple::new(
-            ROSTER_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
-            vec![CanonicalItem::nested_tuple_list(&entries).expect("entries encode")],
-        )
-        .encode()
-        .expect("three-item roster encodes");
-        assert_eq!(
-            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
-                .expect_err("a three-item entry refuses")
-                .refusal_reason,
-            RefusalReason::WrongTypeOrLength
-        );
-    }
-
-    #[test]
-    fn roster_refuses_two_participants_when_built_or_decoded() {
-        let two = *GOAL_PARTICIPANT_COUNTS.start() - 1;
-        assert_eq!(
-            Roster::new(roster_entries(two))
-                .expect_err("a two-participant roster must refuse")
-                .refusal_reason,
-            RefusalReason::OutsideSupportedProfile
-        );
-        let mut encoded = Roster::new(roster_entries(3))
-            .expect("roster is valid")
-            .encode()
-            .expect("roster encodes");
-        encoded[16..20].copy_from_slice(&u32::from(two).to_le_bytes());
-        assert_eq!(
-            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
-                .expect_err("a declared two-participant roster must refuse")
-                .refusal_reason,
+            RosterEntry::new(
+                *GOAL_PARTICIPANT_COUNTS.end(),
+                [0x23_u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+            )
+            .expect_err("a position beyond the largest roster must refuse")
+            .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );
     }

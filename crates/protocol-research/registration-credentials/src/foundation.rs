@@ -11,19 +11,12 @@ pub use canonical_tuple::{
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple,
 };
-pub(crate) use hash::StreamingFoundationTupleHash512;
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
 };
 pub use refusal::RefusalReason;
-pub(crate) use schemas::{
-    FOUNDATION_PROTOCOL_NAME, FOUNDATION_PROTOCOL_VERSION, FoundationSchemaError,
-    MAXIMUM_CONFIGURABLE_OPTION_COUNT, MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
-    MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH, MINIMUM_CONFIGURABLE_OPTION_COUNT, Roster,
-};
-#[cfg(test)]
-pub(crate) use schemas::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, RosterEntry};
+pub(crate) use schemas::FoundationSchemaError;
 pub use text::StabilizedDisplayText;
 
 pub const MAXIMUM_USERNAME_BYTES: usize = 128;

@@ -259,10 +259,10 @@ fn main() -> io::Result<()> {
     let output = Path::new(&arguments[2]);
     fs::create_dir(output)?;
     fs::create_dir(scratch)?;
-    let count = (0..=20)
+    let count = (0..=*Profile::participant_range().end())
         .take_while(|position| ceremony.join(format!("participant-{position}")).is_dir())
         .count();
-    if !(3..=20).contains(&count) {
+    if !Profile::participant_range().contains(&count) {
         return Err(refusal("participant count"));
     }
     let mut control = bounded(ceremony.join("context.bin"), 128, &mut work)?;

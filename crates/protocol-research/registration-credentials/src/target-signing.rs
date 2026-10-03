@@ -11,6 +11,7 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v1";
@@ -41,7 +42,7 @@ pub struct TargetMessage {
 }
 impl TargetMessage {
     pub fn parse(body: &[u8], participants: usize) -> Result<Self, Error> {
-        if !(3..=20).contains(&participants) {
+        if !Profile::participant_range().contains(&participants) {
             return Err(Error::Context);
         }
         // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.

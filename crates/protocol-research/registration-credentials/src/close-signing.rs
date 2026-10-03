@@ -11,6 +11,7 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
+use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 /// Two different envelopes already make a slot conflicting, so a response
@@ -104,7 +105,7 @@ pub fn verify_close_signature(
 }
 
 fn check_participants(participants: usize) -> Result<(), Error> {
-    if !(3..=20).contains(&participants) {
+    if !Profile::participant_range().contains(&participants) {
         return Err(Error::Context);
     }
     Ok(())
@@ -443,7 +444,7 @@ impl Credential {
         self.check_ballot_owner(owner)?;
         let records = roster.proposal().records();
         let record = records.get(owner.position()).ok_or(Error::Context)?;
-        if !(3..=20).contains(&records.len())
+        if !Profile::participant_range().contains(&records.len())
             || record.header().poll != *owner.poll()
             || record.header().signing_public != self.signing_public
             || self.completed_body != Some(record.body_digest())
