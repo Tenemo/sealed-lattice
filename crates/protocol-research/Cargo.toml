@@ -20,7 +20,7 @@ members = [
     "supported-profile",
     "parallel-work",
 ]
-exclude = ["vendor/fhe-rs", "vendor/keccak"]
+exclude = ["vendor/keccak"]
 resolver = "3"
 
 [patch.crates-io]

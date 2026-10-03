@@ -14,7 +14,6 @@ crate-type = ["rlib"]
 numerical-probes = []
 
 [dependencies]
-fhe-math = { path = "../vendor/fhe-rs/crates/fhe-math", default-features = false, features = ["scalar-only"] }
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 parallel-work = { path = "../parallel-work" }

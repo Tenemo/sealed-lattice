@@ -38,7 +38,7 @@ The browser participant's worker may hand independent jobs to helper workers, an
 pnpm run research:protocol -- native-invalid-only 3 2 --simulated-helpers 3
 ```
 
-Every case runs the unit tests alone and then with three simulated helpers, the proof crates' also with eight, whose proof rows hold two residue classes of each coset, and the vendored arithmetic crate's own tests, which check its WebAssembly word products natively.
+Every case runs the unit tests alone and then with three simulated helpers, and the proof crates' also with eight, whose proof rows hold two residue classes of each coset.
 
 The runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
 
@@ -126,7 +126,5 @@ The original participant bridge also exposes target signing and certified releas
 The module refuses a release unless the worker installed the retained seed and nothing was drawn from it, and it expands the release's randomness from that seed alone; the seed supplies no release authority. The numerical proof workload binds only its dedicated workload role when proving and verifying, so it cannot produce or accept a proof bound to a protocol role; actual certified messages must pass the public release-records case above.
 
 ## Third-party sources
-
-`vendor/fhe-rs` contains the used arithmetic, utility and trait crates from `tlepoint/fhe.rs` at `e248cd288c754e5cca9a54d4b7df505058a539ed`, plus the previously verified scalar execution and dependency-pin changes. The imported local revision is `877151d0f2484aef379c2253fb5bb0d380eb528a`. On WebAssembly, which has no widening multiplication, its modular multiplication forms each double-word product and Barrett quotient from 32-bit partial products instead of calling the library routine for a 128-bit product, with the same results. Its negacyclic transform keeps only the forward twiddles and their Shoup companions, and its backward transform reads each inverse twiddle as the negation of a forward one, so each prime's plan holds two tables instead of four with the same results. Only its tests enable rand's operating-system generator: the browser modules build for `wasm32-unknown-unknown`, where that generator has no backend, and receive randomness from their host. The `check` case builds the browser participant module for that target. Its MIT license is retained. Its Protobuf schema is unchanged, and the Rust code that prost-build 0.14.4 generated from it with protoc 36.1 is committed in place of the build script, so no build needs a Protocol Buffers compiler.
 
 `vendor/keccak` contains RustCrypto keccak 0.2.2 with the existing scalar backend delegation to keccak 0.1.6. Its MIT and Apache-2.0 licenses are retained. Unused registry test/benchmark manifest entries are removed because those sources were not part of the imported dependency. This is a pinned local dependency, not a claim of an unmodified upstream release.

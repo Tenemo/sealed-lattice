@@ -436,24 +436,6 @@ await runWithLocalRunLog(
                 'unit-verification-proof-helpers',
                 withSimulatedHelpers(proofSimulatedHelpers),
             );
-            // The workspace excludes the vendored arithmetic crate, whose own
-            // tests check its 32-bit partial products, which only
-            // WebAssembly builds use, and its transforms natively.
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
-                    'test',
-                    '--offline',
-                    '--locked',
-                    '--manifest-path',
-                    'vendor/fhe-rs/Cargo.toml',
-                    '-p',
-                    'fhe-math',
-                    '--lib',
-                ],
-                'vendored-arithmetic',
-            );
             await execute(
                 'cargo',
                 [

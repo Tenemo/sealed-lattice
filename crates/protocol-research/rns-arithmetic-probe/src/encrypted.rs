@@ -1,4 +1,3 @@
-use fhe_math::{ntt::NttOperator, zq::Modulus};
 use num_bigint::BigUint;
 #[cfg(any(test, feature = "numerical-probes"))]
 use num_bigint::{BigInt, Sign};
@@ -11,6 +10,8 @@ use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
 
 #[path = "arithmetic-jobs.rs"]
 mod jobs;
+#[path = "prime-transform.rs"]
+mod prime_transform;
 #[path = "ranking.rs"]
 pub mod ranking;
 #[path = "word-arithmetic.rs"]
@@ -18,6 +19,7 @@ mod word_arithmetic;
 
 use jobs::{DROP_LEFT, DROP_RIGHT, Keyed, KeyedProduct, PrimeSet, RecordContext};
 pub use jobs::{JOBS, RecordRequest};
+use prime_transform::{PrimeModulus, Transform};
 
 #[cfg(any(test, feature = "numerical-probes"))]
 use word_arithmetic::words_of;
@@ -64,13 +66,13 @@ fn prefix(primes: &[u64], bound: &BigUint) -> usize {
 /// twice the prime for any word, reduced by the Shoup quotient of one. At
 /// most sixteen products below 2^59 and an initial residue below 2^58 sum
 /// below 2^64, so no addition wraps.
-fn words_residue(prime: &Modulus, powers: &[(u64, u64)], words: &[u64], initial: u64) -> u64 {
+fn words_residue(prime: &PrimeModulus, powers: &[(u64, u64)], words: &[u64], initial: u64) -> u64 {
     debug_assert!(words.len() <= MAXIMUM_WORDS && **prime < 1 << 58);
     let mut sum = initial;
     for (word, (power, quotient)) in words.iter().zip(powers) {
-        sum = sum.wrapping_add(prime.lazy_mul_shoup(*word, *power, *quotient));
+        sum = sum.wrapping_add(prime.lazy_multiply_shoup(*word, *power, *quotient));
     }
-    prime.mul_shoup(sum, 1, powers[0].1)
+    prime.multiply_shoup(sum, 1, powers[0].1)
 }
 /// Bits `start..start + bits` of a canonical coefficient as words, one for
 /// every 64 bits of the digit.
@@ -145,7 +147,7 @@ struct Arithmetic {
     #[cfg(any(test, feature = "numerical-probes"))]
     signed_modulus: BigInt,
     wide: WideModulus,
-    reductions: Vec<Modulus>,
+    reductions: Vec<PrimeModulus>,
     /// Each prime's residues of 2^(64 j) for the coefficient words j, with
     /// their Shoup quotients. A coefficient's residue sums its words' lazy
     /// products, each below twice the prime, so a sum of at most 16 words'
@@ -156,7 +158,7 @@ struct Arithmetic {
     negated_modulus: Vec<u64>,
     /// Each prime's transform, built when first used, so an instance that
     /// runs only some primes' jobs holds only their tables.
-    transforms: Vec<OnceCell<NttOperator>>,
+    transforms: Vec<OnceCell<Transform>>,
     key_primes: usize,
     external_primes: usize,
     key_lift: Lift,
@@ -176,9 +178,9 @@ impl Arithmetic {
         let gadget_length = profile.gadget_length();
         assert!(Profile::gadget_base_bits().div_ceil(64) <= words);
         let (primes, key_primes, external_primes) = primes(profile, degree);
-        let reductions: Vec<Modulus> = primes
+        let reductions: Vec<PrimeModulus> = primes
             .iter()
-            .map(|prime| Modulus::new(*prime).unwrap())
+            .map(|prime| PrimeModulus::new(*prime))
             .collect();
         let transforms = reductions.iter().map(|_| OnceCell::new()).collect();
         let word_powers = reductions
@@ -188,7 +190,7 @@ impl Arithmetic {
                 (0..words)
                     .map(|_| {
                         let current = (power, prime.shoup(power));
-                        power = prime.mul(power, ((1u128 << 64) % u128::from(**prime)) as u64);
+                        power = prime.multiply(power, ((1u128 << 64) % u128::from(**prime)) as u64);
                         current
                     })
                     .collect()
@@ -232,9 +234,8 @@ impl Arithmetic {
     fn tensor_primes(&self) -> usize {
         self.tensor_lift.count
     }
-    fn transform(&self, prime: usize) -> &NttOperator {
-        self.transforms[prime]
-            .get_or_init(|| NttOperator::new(&self.reductions[prime], self.degree).unwrap())
+    fn transform(&self, prime: usize) -> &Transform {
+        self.transforms[prime].get_or_init(|| Transform::new(&self.reductions[prime], self.degree))
     }
     /// The lift of a plaintext or secret product, of an external product or
     /// of a ciphertext tensor.
@@ -777,12 +778,12 @@ mod tests {
     #[test]
     fn digit_residues_match_big_integer_digits_at_every_offset() {
         let prime = super::super::proth_prime(58, 1 << 58);
-        let reduction = Modulus::new(prime).unwrap();
+        let reduction = PrimeModulus::new(prime);
         let mut power = 1;
         let powers: Vec<(u64, u64)> = (0..16)
             .map(|_| {
                 let current = (power, reduction.shoup(power));
-                power = reduction.mul(power, ((1u128 << 64) % u128::from(prime)) as u64);
+                power = reduction.multiply(power, ((1u128 << 64) % u128::from(prime)) as u64);
                 current
             })
             .collect();

@@ -2,7 +2,7 @@
 //! modulus, and the exact reconstruction of bounded centered integers from
 //! their residues modulo a prefix of the transform primes.
 
-use fhe_math::zq::Modulus;
+use super::prime_transform::PrimeModulus;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 
@@ -330,7 +330,7 @@ impl Lift {
 
     pub(super) fn new(
         primes: &[u64],
-        reductions: &[Modulus],
+        reductions: &[PrimeModulus],
         modulus: &BigUint,
         plaintext: u32,
         tensor: bool,
@@ -358,9 +358,7 @@ impl Lift {
         for (prime, reduction) in primes.iter().zip(reductions) {
             assert!((1 << FRACTION_BITS) < *prime && *prime < 1 << (2 * LIMB_BITS));
             let cofactor = &product / *prime;
-            let inverse = reduction
-                .inv((&cofactor % *prime).to_u64().unwrap())
-                .unwrap();
+            let inverse = reduction.inverse((&cofactor % *prime).to_u64().unwrap());
             inverses.push((inverse, reduction.shoup(inverse)));
             fractions.push(((1u128 << (64 + FRACTION_BITS)) / u128::from(*prime)) as u64);
             if tensor {
@@ -480,7 +478,7 @@ impl Lift {
         &self,
         residues: &[&[u64]],
         position: usize,
-        reductions: &[Modulus],
+        reductions: &[PrimeModulus],
         modulus: &WideModulus,
         output: &mut [u64],
     ) {
@@ -492,7 +490,7 @@ impl Lift {
             .zip(&self.inverses)
             .enumerate()
         {
-            let multiplier = reduction.mul_shoup(values[position], *inverse, *quotient);
+            let multiplier = reduction.multiply_shoup(values[position], *inverse, *quotient);
             multipliers[index] = multiplier;
             fraction += widening_multiply(multiplier, self.fractions[index]).1;
         }
@@ -701,9 +699,9 @@ mod tests {
             limit = super::super::super::proth_prime(58, limit);
             primes.push(limit);
         }
-        let reductions: Vec<Modulus> = primes
+        let reductions: Vec<PrimeModulus> = primes
             .iter()
-            .map(|prime| Modulus::new(*prime).unwrap())
+            .map(|prime| PrimeModulus::new(*prime))
             .collect();
         for modulus in moduli() {
             let wide = WideModulus::new(&modulus);
@@ -772,9 +770,9 @@ mod tests {
             limit = super::super::super::proth_prime(58, limit);
             primes.push(limit);
         }
-        let reductions: Vec<Modulus> = primes
+        let reductions: Vec<PrimeModulus> = primes
             .iter()
-            .map(|prime| Modulus::new(*prime).unwrap())
+            .map(|prime| PrimeModulus::new(*prime))
             .collect();
         for modulus in moduli() {
             let wide = WideModulus::new(&modulus);

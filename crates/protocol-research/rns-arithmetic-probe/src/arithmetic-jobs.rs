@@ -286,11 +286,11 @@ fn tensor(input: &[u8]) -> Vec<u8> {
             };
             if left == right {
                 for value in &mut product {
-                    *value = reduction.mul(*value, *value);
+                    *value = reduction.multiply(*value, *value);
                 }
             } else {
                 for (value, other) in product.iter_mut().zip(&kept[&(session, prime, right)]) {
-                    *value = reduction.mul(*value, *other);
+                    *value = reduction.multiply(*value, *other);
                 }
                 if drops & DROP_RIGHT != 0 {
                     kept.remove(&(session, prime, right));
@@ -383,7 +383,7 @@ fn keyed(input: &[u8]) -> Vec<u8> {
                 }
             }
             for (value, product) in sum[first..first + count].iter_mut().zip(&products) {
-                *value = reduction.reduce_u128(*product);
+                *value = reduction.reduce_wide(*product);
             }
         }
         if last {
