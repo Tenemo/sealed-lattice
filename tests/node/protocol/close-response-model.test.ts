@@ -76,6 +76,133 @@ describe('close response model', () => {
             );
     });
 
+    it.each([
+        {
+            name: 'threshold holders before the request, with every excluded holder departing',
+            participantCount: 10,
+            beforeRequest: [6, 7, 8, 9],
+            beforeResponse: [],
+            afterResponse: [],
+            ballotTime: 5,
+            validProof: true,
+            classification: 'accepted',
+        },
+        {
+            name: 'the honest organizer before the request below the holder threshold',
+            participantCount: 10,
+            beforeRequest: [0, 9],
+            beforeResponse: [],
+            afterResponse: [],
+            ballotTime: 5,
+            validProof: true,
+            classification: 'accepted',
+        },
+        {
+            name: 'only excluded holders before the request',
+            participantCount: 10,
+            beforeRequest: [7, 8, 9],
+            beforeResponse: [],
+            afterResponse: [],
+            ballotTime: 5,
+            validProof: true,
+            classification: 'absent',
+        },
+        {
+            name: 'delivery after the request but before the recipient responds',
+            participantCount: 4,
+            beforeRequest: [3],
+            beforeResponse: [1],
+            afterResponse: [],
+            ballotTime: 5,
+            validProof: true,
+            classification: 'accepted',
+        },
+        {
+            name: 'delivery after the recipient responds',
+            participantCount: 4,
+            beforeRequest: [3],
+            beforeResponse: [],
+            afterResponse: [1],
+            ballotTime: 5,
+            validProof: true,
+            classification: 'absent',
+        },
+        {
+            name: 'late signed time despite threshold holders before the request',
+            participantCount: 10,
+            beforeRequest: [0, 6, 7, 8, 9],
+            beforeResponse: [],
+            afterResponse: [],
+            ballotTime: 6,
+            validProof: true,
+            classification: 'absent',
+        },
+        {
+            name: 'a protected submission whose inner proof is invalid',
+            participantCount: 10,
+            beforeRequest: [0, 9],
+            beforeResponse: [],
+            afterResponse: [],
+            ballotTime: 5,
+            validProof: false,
+            classification: 'invalid',
+        },
+    ])('honors the signed request receipt cutoff: $name', (scenario) => {
+        const profile = deriveCloseProfile(scenario.participantCount);
+        const author = scenario.participantCount - 1;
+        const ballot = envelope(author, 0, scenario.ballotTime, {
+            validProof: scenario.validProof,
+        });
+        const identity = envelopeIdentity(author, 0);
+        const envelopes = byIdentity([ballot]);
+        const held = Array.from(
+            { length: scenario.participantCount },
+            () => new Set<string>(),
+        );
+        const deliver = (recipients: readonly number[]) => {
+            for (const recipient of recipients) held[recipient].add(identity);
+        };
+        deliver(scenario.beforeRequest);
+
+        // This event is the signed request. Its close time classifies ballot
+        // timestamps; it is not the time when a recipient sees the request.
+        const intent: CloseIntent = { variant: 0, closeTime: 5 };
+        const intents = new Map([[intent.variant, intent]]);
+        deliver(scenario.beforeResponse);
+
+        // Exactly f excluded participants may depart. An invalid author is
+        // among those f, not an additional fault. Every continuer uses its
+        // current body custody, and the organizer responds last.
+        const respond = (signer: number): CloseResponse => ({
+            signer,
+            intent: intent.variant,
+            listed: listKnownEnvelopes(
+                [...held[signer]].map((value) => envelopes.get(value)!),
+                held[signer],
+                intent,
+            ),
+        });
+        const responses = Array.from(
+            { length: profile.quorum - 1 },
+            (_, index) => respond(index + 1),
+        );
+        responses.push(respond(0));
+        responses.sort((left, right) => left.signer - right.signer);
+        deliver(scenario.afterResponse);
+        const proposal = { intent: intent.variant, responses };
+        expect(verifyCloseProposal(proposal, intents, envelopes, profile)).toBe(
+            true,
+        );
+        const inventory = closeInventory(proposal, envelopes, profile);
+        expect(inventory.slots[author]).toBe(scenario.classification);
+        expect(inventory.listed.has(identity)).toBe(
+            scenario.classification !== 'absent',
+        );
+        expect(inventory.acceptedCount).toBe(
+            scenario.classification === 'accepted' ? 1 : 0,
+        );
+    });
+
     it('lists one on-time envelope with its body and two known ones without', () => {
         const intent: CloseIntent = { variant: 0, closeTime: 5 };
         const known = [

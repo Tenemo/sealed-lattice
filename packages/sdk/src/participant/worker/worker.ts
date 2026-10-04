@@ -890,7 +890,9 @@ const run = async (
                     // participant before any other operation takes the lock.
                     // A failed helper, an exhausted memory bound and a module
                     // call that ended without returning touch no retained
-                    // state and leave the participant pending.
+                    // state and leave the participant pending. Enrollment
+                    // converts failures after its intent but before retaining
+                    // its secrets into local state loss instead.
                     if (
                         !authorityStarted ||
                         error instanceof PublicInputFailure ||

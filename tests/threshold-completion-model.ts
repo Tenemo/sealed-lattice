@@ -1,6 +1,164 @@
 const minimumParticipantCount = 3;
 const maximumParticipantCount = 20;
 
+const requireParticipantCount = (participantCount: number): void => {
+    if (
+        !Number.isSafeInteger(participantCount) ||
+        participantCount < minimumParticipantCount ||
+        participantCount > maximumParticipantCount
+    ) {
+        throw new RangeError(
+            'participantCount is outside the supported range.',
+        );
+    }
+};
+
+// Cuts before work in one permitted asynchronous schedule. Roster-only
+// confirmations arrive before the contributors' commitments in this schedule;
+// that ordering is not a protocol dependency. The closing stage collects
+// the proposal and responses; target certification permanently closes the
+// inventory, so the required organizer exception lasts through that cut.
+// A completed opening includes
+// its full body and proof. Published records remain retrievable after their
+// sender leaves.
+export const lifecycleAvailabilityStages = [
+    'roster-fixed',
+    'roster-confirmation',
+    'setup-commitment',
+    'setup-opening',
+    'closing',
+    'target-certification',
+    'release',
+] as const;
+
+type LifecycleAvailabilityStage = (typeof lifecycleAvailabilityStages)[number];
+type ParticipantFailure = Readonly<{
+    participant: number;
+    before: LifecycleAvailabilityStage;
+}>;
+
+// This is the required availability envelope, not a protocol that achieves
+// it. Loss, state loss and refusal consume the same persistent participant
+// set; a later stage never obtains a fresh failure allowance.
+export const deriveLifecycleAvailability = (
+    participantCount: number,
+    organizer: number,
+    failures: readonly ParticipantFailure[],
+) => {
+    requireParticipantCount(participantCount);
+    const requirePosition = (position: number) => {
+        if (
+            !Number.isSafeInteger(position) ||
+            position < 0 ||
+            position >= participantCount
+        )
+            throw new RangeError(
+                'A participant position is outside the roster.',
+            );
+    };
+    requirePosition(organizer);
+    const faultBound = Math.floor((participantCount - 1) / 3);
+    const firstFailure = new Map<number, number>();
+    for (const { participant, before } of failures) {
+        requirePosition(participant);
+        const stage = lifecycleAvailabilityStages.indexOf(before);
+        if (stage < 0) throw new RangeError('Unknown lifecycle stage.');
+        if (
+            participant === organizer &&
+            stage <= lifecycleAvailabilityStages.indexOf('target-certification')
+        )
+            throw new RangeError('The organizer is required through closing.');
+        firstFailure.set(
+            participant,
+            Math.min(firstFailure.get(participant) ?? stage, stage),
+        );
+    }
+    if (firstFailure.size > faultBound)
+        throw new RangeError(
+            'The total unavailable set exceeds the fault bound.',
+        );
+    const roster = Array.from(
+        { length: participantCount },
+        (_unused, participant) => participant,
+    );
+    return {
+        roster,
+        faultBound,
+        requiredContinuerCount: participantCount - faultBound,
+        stages: lifecycleAvailabilityStages.map((stage, index) => ({
+            stage,
+            availableParticipants: roster.filter(
+                (participant) =>
+                    (firstFailure.get(participant) ?? Infinity) > index,
+            ),
+        })),
+    };
+};
+
+// A dependency kill experiment for the current fixed-contributor setup:
+// CommitmentInventory::new needs all n confirmations, SetupAggregator needs
+// the first d openings, and verified setup precedes CloseWork::new. See
+// registration-credentials/src/contribution-authentication.rs and
+// setup-aggregate/src/verified.rs in the protocol-research workspace.
+// This computes message producers, not cryptographic validity or admission.
+export const simulateFixedContributorMessageAvailability = (
+    participantCount: number,
+    organizer: number,
+    failures: readonly ParticipantFailure[],
+) => {
+    const availability = deriveLifecycleAvailability(
+        participantCount,
+        organizer,
+        failures,
+    );
+    const availableAt = (stage: LifecycleAvailabilityStage) =>
+        availability.stages[lifecycleAvailabilityStages.indexOf(stage)]
+            .availableParticipants;
+    const releaseThreshold = Math.max(availability.faultBound + 1, 2);
+    const contributors = availability.roster.slice(0, releaseThreshold);
+    const rosterConfirmations = availableAt('roster-confirmation').filter(
+        (participant) => !contributors.includes(participant),
+    );
+    const setupCommitments = availableAt('setup-commitment').filter(
+        (participant) => contributors.includes(participant),
+    );
+    const confirmationParticipants = [
+        ...rosterConfirmations,
+        ...setupCommitments,
+    ].sort((left, right) => left - right);
+    const missingConfirmationParticipants = availability.roster.filter(
+        (participant) => !confirmationParticipants.includes(participant),
+    );
+    const openingParticipants =
+        missingConfirmationParticipants.length === 0
+            ? availableAt('setup-opening').filter((participant) =>
+                  contributors.includes(participant),
+              )
+            : [];
+    const missingOpeningParticipants = contributors.filter(
+        (participant) => !openingParticipants.includes(participant),
+    );
+    const closeParticipants =
+        missingOpeningParticipants.length === 0 ? availableAt('closing') : [];
+    const certificateParticipants =
+        closeParticipants.length >= availability.requiredContinuerCount
+            ? availableAt('target-certification')
+            : [];
+    const releaseParticipants =
+        certificateParticipants.length >= availability.requiredContinuerCount
+            ? availableAt('release')
+            : [];
+    return {
+        confirmationParticipants,
+        missingConfirmationParticipants,
+        openingParticipants,
+        missingOpeningParticipants,
+        closeParticipants,
+        certificateParticipants,
+        releaseParticipants,
+    };
+};
+
 const binomial = (n: number, k: number): bigint => {
     if (!Number.isSafeInteger(n) || !Number.isSafeInteger(k)) {
         throw new TypeError('Binomial inputs must be safe integers.');
@@ -53,8 +211,11 @@ type SetClassCensus = Readonly<{
     minimumHonestResponderCount: number;
 }>;
 
-// This candidate stress model allows independent disappearance and corrupt
-// refusal sets. A bound on their union would be a different availability model.
+// This separate post-setup stress census allows independent disappearance
+// and corrupt-refusal sets, after every setup receipt already exists. It is
+// stronger in responder count but does not establish the required lifecycle
+// availability from roster fixing; deriveLifecycleAvailability owns that
+// envelope, whose unavailable union is bounded by f.
 const enumerateSetClassCensus = (
     participantCount: number,
     faultBound: number,
@@ -231,15 +392,7 @@ export type ThresholdCompletionProfile = Readonly<{
 export const compileThresholdCompletionProfile = (
     participantCount: number,
 ): ThresholdCompletionProfile => {
-    if (
-        !Number.isSafeInteger(participantCount) ||
-        participantCount < minimumParticipantCount ||
-        participantCount > maximumParticipantCount
-    ) {
-        throw new RangeError(
-            'participantCount is outside the supported range.',
-        );
-    }
+    requireParticipantCount(participantCount);
     const maximumCorruptParticipantCount = Math.floor(
         (participantCount - 1) / 3,
     );
@@ -250,9 +403,12 @@ export const compileThresholdCompletionProfile = (
         2,
     );
     // The first d roster positions contribute the setup's key material, so at
-    // least one contributor is honest and no single one knows the key.
+    // least one contributor is honest under the static corruption bound.
     const setupContributorCount = resultReleaseThreshold;
     const minimumTurnout = maximumCorruptParticipantCount + 2;
+    // Current candidate prerequisite, not a product requirement. The message
+    // availability experiment above demonstrates why it fails when a roster
+    // member leaves before confirming or a fixed contributor never opens.
     const setupReceiptThreshold = participantCount;
     const mandatoryReleaseParticipantCount =
         binomial(participantCount - 1, resultReleaseThreshold) === 0n

@@ -10,7 +10,7 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { ownRegistrationInput, sessionInput } from './context.js';
+import { describe, ownRegistrationInput, sessionInput } from './context.js';
 import type { ParticipantContext } from './context.js';
 import {
     custodyIdentities,
@@ -105,249 +105,282 @@ export const createEnrollment = async (
     request: EnrollmentRequest,
     onIntent: () => void,
 ): Promise<AuthenticatedRoot | EnrollmentRefusal> => {
-    const { database, limits, kernel, handlers, runtime } = context;
-    if (!(await isEmptyParticipant(database))) return 'participant exists';
-    const name = encodeWellFormed(request.username);
-    if (
-        name === undefined ||
-        name.length > limits.registration.maximumUsernameIngressBytes
-    )
-        return 'invalid request';
-    let input: Uint8Array;
-    if (request.role === 'creator') {
-        const question = encodeWellFormed(request.question);
-        if (
-            question === undefined ||
-            request.options.length > limits.options.maximum ||
-            [request.topCount, request.maximumParticipants].some(
-                (value) =>
-                    !Number.isSafeInteger(value) || value < 1 || value > 0xffff,
-            )
-        )
-            return 'invalid request';
-        // The module frames the question and labels as the poll's manifest.
-        const labels: Uint8Array[] = [];
-        for (const option of request.options) {
-            const label = encodeWellFormed(option);
-            if (label === undefined) return 'invalid request';
-            labels.push(unsigned32(label.length), label);
-        }
-        input = concatenate(
-            runtime,
-            unsigned16(request.topCount),
-            unsigned16(request.maximumParticipants),
-            unsigned32(question.length),
-            question,
-            unsigned16(request.options.length),
-            ...labels,
-            unsigned32(name.length),
-            name,
-        );
-        if (input.length + 64 > kernel.input_capacity())
-            return 'invalid request';
-        sessionInput(context, input);
-        if (kernel.validate_creator(input.length) !== 0)
-            return 'invalid request';
-    } else {
-        if (
-            request.poll.length !== 64 ||
-            request.definitionSignature.length !==
-                limits.registration.signatureBytes
-        )
-            return 'invalid request';
-        input = concatenate(
-            request.poll,
-            runtime,
-            unsigned32(request.definition.length),
-            request.definition,
-            request.definitionSignature,
-            unsigned32(name.length),
-            name,
-        );
-        if (input.length + 64 > kernel.input_capacity())
-            return 'invalid request';
-        sessionInput(context, input);
-        if (kernel.validate_join(input.length) !== 0) return 'invalid request';
-    }
-    const estimate = await navigator.storage.estimate();
-    if (
-        estimate.quota === undefined ||
-        estimate.usage === undefined ||
-        estimate.quota - estimate.usage <
-            2 *
-                (limits.registration.publicKeyBytes +
-                    limits.registration.maximumProofBytes)
-    )
-        return 'insufficient storage';
-    const associatedData = rootAssociatedData(runtime);
-    const key = await createRootKey();
-    const intentPlaintext = concatenate(
-        encodeText('INI2'),
-        custodyIdentity(kernel, custodyPurpose.enrollmentInput, input),
-    );
-    const intent = await sealRoot(key, 0, associatedData, intentPlaintext);
-    const intentHead = {
-        generation: 0,
-        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, intent)),
-        runtime: hexadecimal(runtime),
-    };
-    await commitParticipantState({
-        database,
-        stores: participantStores,
-        timeoutMilliseconds: validationMilliseconds,
-        validate: async (reader) => {
-            for (const store of participantStores)
-                if ((await reader.count(store)) !== 0)
-                    throw new Error('The participant namespace is not empty.');
-        },
-        write: (transaction) => {
-            transaction.objectStore('key').add(key, 0);
-            transaction.objectStore('root').add(intent, 0);
-            transaction.objectStore('head').add(intentHead, 0);
-        },
-    });
-    onIntent();
-    // The two capsule data keys must differ.
-    const dataKeys = crypto.getRandomValues(new Uint8Array(64));
-    if (equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(32)))
-        throw new Error('Repeated enrollment data keys.');
-    const maximums = participantDataKindMaximums(limits);
-    const lengths = maximums.map(() => 0);
-    const records: StagedRecord[] = [];
-    handlers.staged = (kind, offset, bytes) => {
-        if (
-            kind > dataKind.pollSignature ||
-            bytes.length === 0 ||
-            bytes.length > chunkBytes ||
-            offset !== lengths[kind] ||
-            bytes.length > maximums[kind] - offset
-        )
-            throw new Error('Invalid staged enrollment record.');
-        records.push({ kind, offset, bytes });
-        lengths[kind] += bytes.length;
-    };
-    let randomBytes = 0;
-    handlers.random = (source, target) => {
-        if (source === 'ballot')
-            throw new Error('Enrollment requested ballot randomness.');
-        crypto.getRandomValues(target);
-        randomBytes += target.length;
-    };
-    const control = concatenate(input, dataKeys);
-    let prepared: number;
+    let enrollmentIncomplete = false;
     try {
-        sessionInput(context, control);
-        prepared =
-            request.role === 'creator'
-                ? kernel.prepare_creator(control.length)
-                : kernel.prepare_join(control.length);
-    } finally {
-        control.fill(0);
-        delete handlers.staged;
-        delete handlers.random;
-    }
-    if (prepared !== 0 || kernel.check_retained() !== 0)
-        throw new Error('Enrollment preparation failed.');
-    const poll = readKernel(kernel, kernel.poll_identity_pointer(), 64);
-    if (request.role === 'join') {
-        if (request.definition.length > maximums[dataKind.pollDefinition])
-            throw new Error('The poll definition exceeds its bound.');
-        records.push(
-            {
-                kind: dataKind.pollDefinition,
-                offset: 0,
-                bytes: request.definition,
-            },
-            {
-                kind: dataKind.pollSignature,
-                offset: 0,
-                bytes: request.definitionSignature,
-            },
+        const { database, limits, kernel, handlers, runtime } = context;
+        if (!(await isEmptyParticipant(database))) return 'participant exists';
+        const name = encodeWellFormed(request.username);
+        if (
+            name === undefined ||
+            name.length > limits.registration.maximumUsernameIngressBytes
+        )
+            return 'invalid request';
+        let input: Uint8Array;
+        if (request.role === 'creator') {
+            const question = encodeWellFormed(request.question);
+            if (
+                question === undefined ||
+                request.options.length > limits.options.maximum ||
+                [request.topCount, request.maximumParticipants].some(
+                    (value) =>
+                        !Number.isSafeInteger(value) ||
+                        value < 1 ||
+                        value > 0xffff,
+                )
+            )
+                return 'invalid request';
+            // The module frames the question and labels as the poll's manifest.
+            const labels: Uint8Array[] = [];
+            for (const option of request.options) {
+                const label = encodeWellFormed(option);
+                if (label === undefined) return 'invalid request';
+                labels.push(unsigned32(label.length), label);
+            }
+            input = concatenate(
+                runtime,
+                unsigned16(request.topCount),
+                unsigned16(request.maximumParticipants),
+                unsigned32(question.length),
+                question,
+                unsigned16(request.options.length),
+                ...labels,
+                unsigned32(name.length),
+                name,
+            );
+            if (input.length + 64 > kernel.input_capacity())
+                return 'invalid request';
+            sessionInput(context, input);
+            if (kernel.validate_creator(input.length) !== 0)
+                return 'invalid request';
+        } else {
+            if (
+                request.poll.length !== 64 ||
+                request.definitionSignature.length !==
+                    limits.registration.signatureBytes
+            )
+                return 'invalid request';
+            input = concatenate(
+                request.poll,
+                runtime,
+                unsigned32(request.definition.length),
+                request.definition,
+                request.definitionSignature,
+                unsigned32(name.length),
+                name,
+            );
+            if (input.length + 64 > kernel.input_capacity())
+                return 'invalid request';
+            sessionInput(context, input);
+            if (kernel.validate_join(input.length) !== 0)
+                return 'invalid request';
+        }
+        const estimate = await navigator.storage.estimate();
+        if (
+            estimate.quota === undefined ||
+            estimate.usage === undefined ||
+            estimate.quota - estimate.usage <
+                2 *
+                    (limits.registration.publicKeyBytes +
+                        limits.registration.maximumProofBytes)
+        )
+            return 'insufficient storage';
+        const associatedData = rootAssociatedData(runtime);
+        const key = await createRootKey();
+        const intentPlaintext = concatenate(
+            encodeText('INI2'),
+            custodyIdentity(kernel, custodyPurpose.enrollmentInput, input),
         );
-        lengths[dataKind.pollDefinition] = request.definition.length;
-        lengths[dataKind.pollSignature] = request.definitionSignature.length;
-    }
-    const registration = limits.registration;
-    if (
-        lengths[dataKind.publicKey] !== registration.publicKeyBytes ||
-        lengths[dataKind.proof] === 0 ||
-        lengths[dataKind.header] === 0 ||
-        lengths[dataKind.signature] !== registration.signatureBytes ||
-        lengths[dataKind.recipientCapsule] !==
-            registration.recipientCapsuleBytes ||
-        lengths[dataKind.signingCapsule] !== registration.signingCapsuleBytes ||
-        lengths[dataKind.pollDefinition] === 0 ||
-        lengths[dataKind.pollSignature] !== registration.signatureBytes
-    )
-        throw new Error('Incomplete enrollment.');
-    const before = randomBytes;
-    if (
-        kernel.prepare_creator(0) !== 1 ||
-        kernel.prepare_join(0) !== 1 ||
-        kernel.check_retained() !== 0 ||
-        randomBytes !== before
-    )
-        throw new Error('Repeated preparation changed authority.');
-    records.sort((left, right) =>
-        left.kind === right.kind
-            ? left.offset - right.offset
-            : left.kind - right.kind,
-    );
-    const references: RecordReference[] = [];
-    for (const record of records)
-        references.push({
-            kind: record.kind,
-            offset: record.offset,
-            length: record.bytes.length,
-            hash: custodyIdentity(kernel, custodyPurpose.record, record.bytes),
+        const intent = await sealRoot(key, 0, associatedData, intentPlaintext);
+        const intentHead = {
+            generation: 0,
+            hash: hexadecimal(
+                custodyIdentity(kernel, custodyPurpose.root, intent),
+            ),
+            runtime: hexadecimal(runtime),
+        };
+        await commitParticipantState({
+            database,
+            stores: participantStores,
+            timeoutMilliseconds: validationMilliseconds,
+            validate: async (reader) => {
+                for (const store of participantStores)
+                    if ((await reader.count(store)) !== 0)
+                        throw new Error(
+                            'The participant namespace is not empty.',
+                        );
+            },
+            write: (transaction) => {
+                transaction.objectStore('key').add(key, 0);
+                transaction.objectStore('root').add(intent, 0);
+                transaction.objectStore('head').add(intentHead, 0);
+            },
         });
-    const plaintext = encodeManifest(
-        { dataKeys, poll, references, suffixes: {} },
-        1,
-    );
-    dataKeys.fill(0);
-    if (plaintext.length + 16 > limits.root.maximumEnrollmentRootBytes)
-        throw new Error('The enrollment root exceeds its bound.');
-    // The initial key seals the intent and the completed root under their
-    // distinct generation nonces.
-    const sealed = await sealRoot(key, 1, associatedData, plaintext);
-    plaintext.fill(0);
-    const head = {
-        generation: 1,
-        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
-        runtime: hexadecimal(runtime),
-    };
-    await commitParticipantState({
-        database,
-        stores: participantStores,
-        timeoutMilliseconds: validationMilliseconds,
-        validate: (reader) =>
-            validateParticipantPredecessor(reader, {
-                head: intentHead,
-                manifest: intentPlaintext,
-                rootContext: associatedData,
-                maximumRootBytes: limits.root.maximumEnrollmentRootBytes,
-                recordStores: participantRecordStores,
-                records: [],
-                identities: custodyIdentities(kernel),
-            }),
-        write: (transaction) => {
-            for (const record of records)
-                transaction
-                    .objectStore('data')
-                    .add(new Blob([new Uint8Array(record.bytes)]), [
-                        record.kind,
-                        record.offset,
-                    ]);
-            transaction.objectStore('root').put(sealed, 0);
-            transaction.objectStore('head').put(head, 0);
-        },
-    });
-    for (const record of records) record.bytes.fill(0);
-    const root = await authenticateRoot(context);
-    if (root.head.generation !== 1 || root.head.hash !== head.hash)
-        throw new Error('Enrollment readback failed.');
-    return root;
+        enrollmentIncomplete = true;
+        onIntent();
+        // The two capsule data keys must differ.
+        const dataKeys = crypto.getRandomValues(new Uint8Array(64));
+        if (equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(32)))
+            throw new Error('Repeated enrollment data keys.');
+        const maximums = participantDataKindMaximums(limits);
+        const lengths = maximums.map(() => 0);
+        const records: StagedRecord[] = [];
+        handlers.staged = (kind, offset, bytes) => {
+            if (
+                kind > dataKind.pollSignature ||
+                bytes.length === 0 ||
+                bytes.length > chunkBytes ||
+                offset !== lengths[kind] ||
+                bytes.length > maximums[kind] - offset
+            )
+                throw new Error('Invalid staged enrollment record.');
+            records.push({ kind, offset, bytes });
+            lengths[kind] += bytes.length;
+        };
+        let randomBytes = 0;
+        handlers.random = (source, target) => {
+            if (source === 'ballot')
+                throw new Error('Enrollment requested ballot randomness.');
+            crypto.getRandomValues(target);
+            randomBytes += target.length;
+        };
+        const control = concatenate(input, dataKeys);
+        let prepared: number;
+        try {
+            sessionInput(context, control);
+            prepared =
+                request.role === 'creator'
+                    ? kernel.prepare_creator(control.length)
+                    : kernel.prepare_join(control.length);
+        } finally {
+            control.fill(0);
+            delete handlers.staged;
+            delete handlers.random;
+        }
+        if (prepared !== 0 || kernel.check_retained() !== 0)
+            throw new Error('Enrollment preparation failed.');
+        const poll = readKernel(kernel, kernel.poll_identity_pointer(), 64);
+        if (request.role === 'join') {
+            if (request.definition.length > maximums[dataKind.pollDefinition])
+                throw new Error('The poll definition exceeds its bound.');
+            records.push(
+                {
+                    kind: dataKind.pollDefinition,
+                    offset: 0,
+                    bytes: request.definition,
+                },
+                {
+                    kind: dataKind.pollSignature,
+                    offset: 0,
+                    bytes: request.definitionSignature,
+                },
+            );
+            lengths[dataKind.pollDefinition] = request.definition.length;
+            lengths[dataKind.pollSignature] =
+                request.definitionSignature.length;
+        }
+        const registration = limits.registration;
+        if (
+            lengths[dataKind.publicKey] !== registration.publicKeyBytes ||
+            lengths[dataKind.proof] === 0 ||
+            lengths[dataKind.header] === 0 ||
+            lengths[dataKind.signature] !== registration.signatureBytes ||
+            lengths[dataKind.recipientCapsule] !==
+                registration.recipientCapsuleBytes ||
+            lengths[dataKind.signingCapsule] !==
+                registration.signingCapsuleBytes ||
+            lengths[dataKind.pollDefinition] === 0 ||
+            lengths[dataKind.pollSignature] !== registration.signatureBytes
+        )
+            throw new Error('Incomplete enrollment.');
+        const before = randomBytes;
+        if (
+            kernel.prepare_creator(0) !== 1 ||
+            kernel.prepare_join(0) !== 1 ||
+            kernel.check_retained() !== 0 ||
+            randomBytes !== before
+        )
+            throw new Error('Repeated preparation changed authority.');
+        records.sort((left, right) =>
+            left.kind === right.kind
+                ? left.offset - right.offset
+                : left.kind - right.kind,
+        );
+        const references: RecordReference[] = [];
+        for (const record of records)
+            references.push({
+                kind: record.kind,
+                offset: record.offset,
+                length: record.bytes.length,
+                hash: custodyIdentity(
+                    kernel,
+                    custodyPurpose.record,
+                    record.bytes,
+                ),
+            });
+        const plaintext = encodeManifest(
+            { dataKeys, poll, references, suffixes: {} },
+            1,
+        );
+        dataKeys.fill(0);
+        if (plaintext.length + 16 > limits.root.maximumEnrollmentRootBytes)
+            throw new Error('The enrollment root exceeds its bound.');
+        // The initial key seals the intent and the completed root under their
+        // distinct generation nonces.
+        const sealed = await sealRoot(key, 1, associatedData, plaintext);
+        plaintext.fill(0);
+        const head = {
+            generation: 1,
+            hash: hexadecimal(
+                custodyIdentity(kernel, custodyPurpose.root, sealed),
+            ),
+            runtime: hexadecimal(runtime),
+        };
+        await commitParticipantState({
+            database,
+            stores: participantStores,
+            timeoutMilliseconds: validationMilliseconds,
+            validate: (reader) =>
+                validateParticipantPredecessor(reader, {
+                    head: intentHead,
+                    manifest: intentPlaintext,
+                    rootContext: associatedData,
+                    maximumRootBytes: limits.root.maximumEnrollmentRootBytes,
+                    recordStores: participantRecordStores,
+                    records: [],
+                    identities: custodyIdentities(kernel),
+                }),
+            write: (transaction) => {
+                for (const record of records)
+                    transaction
+                        .objectStore('data')
+                        .add(new Blob([new Uint8Array(record.bytes)]), [
+                            record.kind,
+                            record.offset,
+                        ]);
+                transaction.objectStore('root').put(sealed, 0);
+                transaction.objectStore('head').put(head, 0);
+            },
+        });
+        enrollmentIncomplete = false;
+        for (const record of records) record.bytes.fill(0);
+        const root = await authenticateRoot(context);
+        if (root.head.generation !== 1 || root.head.hash !== head.hash)
+            throw new Error('Enrollment readback failed.');
+        return root;
+    } catch (error) {
+        // The committed intent cannot recreate the unpublished credential or
+        // its randomness. Even a module or resource failure loses required
+        // state in this interval; a completed enrollment remains resumable.
+        if (enrollmentIncomplete)
+            throw Object.assign(
+                new Error(
+                    'Enrollment stopped before its required secrets were retained: ' +
+                        describe(error),
+                ),
+                { cause: error },
+            );
+        throw error;
+    }
 };
 
 // The poll the module verified the participant's own registration against.

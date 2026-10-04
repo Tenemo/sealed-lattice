@@ -13,6 +13,10 @@ import {
 } from '#packages/sdk/src/participant/worker/close-state.js';
 import { heldBallotBody } from '#packages/sdk/src/participant/worker/close.js';
 import type { CloseSession } from '#packages/sdk/src/participant/worker/close.js';
+import {
+    custodyIdentity,
+    custodyPurpose,
+} from '#packages/sdk/src/participant/worker/identity.js';
 import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
 import { sealRecord } from '#packages/sdk/src/participant/worker/records.js';
@@ -58,9 +62,10 @@ const write = (
         change(transaction.objectStore(storeName));
     });
 
-// This isolates ciphertext custody and selection, using real IndexedDB and
-// AES-GCM. The envelope-decoder stand-in accepts only the fixture's exact
-// envelope; protocol proof acceptance remains the real cohort's boundary.
+// This isolates ciphertext custody and selection, using real IndexedDB,
+// AES-GCM and the module's envelope identity. The synthetic envelope and body
+// supply custody bytes; protocol proof acceptance remains the real cohort's
+// boundary.
 const fixture = async (author = 1) => {
     const namespace = 'held-' + crypto.randomUUID();
     names.push(namespace);
@@ -76,31 +81,12 @@ const fixture = async (author = 1) => {
     view.setBigUint64(142, BigInt(body.length), true);
     const submission = new Uint8Array(profile.close.submissionBytes);
     submission.set(envelope);
-    const identity = new Uint8Array(64).fill(19);
-    const memory = new WebAssembly.Memory({ initial: 2 });
-    const kernel = {
-        memory,
-        input_pointer: () => 0,
-        input_capacity: () => 65_536,
-        contribution_output_pointer: () => 65_536,
-        contribution_output_length: () => 64,
-        participant_close_command: (
-            operation: number,
-            argument: number,
-            length: number,
-        ) => {
-            expect(operation).toBe(14);
-            expect(argument).toBe(0);
-            const input = new Uint8Array(memory.buffer, 0, length);
-            if (
-                input.length !== envelope.length ||
-                input.some((byte, index) => byte !== envelope[index])
-            )
-                return 1;
-            new Uint8Array(memory.buffer, 65_536, 64).set(identity);
-            return 0;
-        },
-    };
+    const { kernel } = await instantiateParticipantKernel(
+        module,
+        noParallelHelpers,
+    );
+    expect(kernel.worker_reserve(0, 0)).toBe(0);
+    const identity = custodyIdentity(kernel, custodyPurpose.envelope, envelope);
     const records = {
         poll: new Uint8Array(64).fill(2),
         runtime: new Uint8Array(64).fill(3),

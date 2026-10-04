@@ -145,7 +145,9 @@ export type ParticipantSummary = Readonly<{
  * waits for public input, storage or a device resource such as memory, or
  * follows a module or worker failure, as its cause names and its reason
  * describes, and a later visit continues from the participant's last
- * committed state; a stopped participant never acts again. A participant
+ * committed state; a stopped participant never acts again. Enrollment that
+ * ends after its intent is retained but before its secrets are retained
+ * stops, since that intent cannot resume private generation. A participant
  * that another runtime created is refused, naming that runtime, so the
  * application can open it with the SDK of that runtime.
  */
