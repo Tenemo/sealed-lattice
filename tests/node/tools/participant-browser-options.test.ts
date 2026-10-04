@@ -45,6 +45,7 @@ describe('participant browser cohort selection', () => {
                 'empty',
                 'rosters',
                 'plain',
+                'preparation',
             ]) {
                 const options = selectParticipantBrowserOptions([
                     '4',
@@ -86,10 +87,30 @@ describe('participant browser cohort selection', () => {
             ['--sequential'],
             ['rosters'],
             ['plain', '--foreign-poll=other-run'],
+            ['preparation', '--foreign-poll=other-run'],
+            ['preparation', '--sequential'],
+            ['preparation', '--memory-pressure'],
         ])
             expect(
                 () => selectParticipantBrowserOptions(arguments_),
                 arguments_.join(' '),
             ).toThrow();
+    });
+
+    it('selects the original preparation prefix with explicit scalar execution', () => {
+        expect(
+            selectParticipantBrowserOptions([
+                '3',
+                '2',
+                'preparation',
+                '--scalar',
+            ]),
+        ).toMatchObject({
+            participantCount: 3,
+            optionCount: 2,
+            mode: 'preparation',
+            scalar: true,
+            sequential: false,
+        });
     });
 });

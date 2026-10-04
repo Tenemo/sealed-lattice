@@ -15,6 +15,12 @@ import {
     sessionInput,
 } from './context.js';
 import type { ProfileContext, PublicProfileContext } from './context.js';
+import {
+    createProofWriter,
+    proofLength,
+    proofRecordLayout,
+    readProof,
+} from './contribution-proof.js';
 import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
@@ -77,9 +83,10 @@ type SealedRecord = RecordLocation &
 
 type CheckpointRecord = Readonly<{ key: Uint8Array; hash: Uint8Array }>;
 
-type ContributionState = Readonly<{
+export type ContributionState = Readonly<{
     position: number;
     salt: Uint8Array;
+    // The first-oracle checkpoint header until completion, then SCB1.
     header: Uint8Array;
     publicRecords: readonly SealedRecord[];
     privateRecords: readonly CheckpointRecord[];
@@ -233,11 +240,6 @@ const retainedShape = (generation: number) => {
 const prefixBytes = (profile: ParticipantProfile) =>
     4 + 2 + profile.contribution.saltBytes + 4 * 4;
 
-const proofLength = (state: ContributionState, profile: ParticipantProfile) =>
-    state.publicRecords
-        .filter((record) => record.object === proofObject(profile))
-        .reduce((total, record) => total + record.length, 0);
-
 const encodeSigningRecord = (record: SealedRecord) =>
     concatenate(
         unsigned16(record.object),
@@ -248,7 +250,7 @@ const encodeSigningRecord = (record: SealedRecord) =>
 
 // A setup contributor's state lists its whole contribution; any other
 // participant's only its roster confirmation records and coins.
-const encodeContributionState = (
+export const encodeContributionState = (
     state: ContributionState,
     profile: ParticipantProfile,
 ) =>
@@ -261,7 +263,7 @@ const encodeContributionState = (
               state.coins,
           )
         : concatenate(
-              encodeText('PCS2'),
+              encodeText('PCS3'),
               unsigned16(state.position),
               state.salt,
               unsigned32(state.header.length),
@@ -355,11 +357,11 @@ const decodeConfirmationState = (
     };
 };
 
-// Decodes the contribution suffix of an authenticated root. The retained
-// body records must be exactly the profile's, the proof records contiguous
-// chunks of a proof of valid length, and the signing records those of the
-// generation.
-const decodeContributionState = (
+// Decodes the contribution suffix of an authenticated root. The body records
+// and every physical proof slot follow the profile's fixed plan. From
+// completion onward SCB1 frames the logical proof prefix inside those slots,
+// and the signing records agree with the generation.
+export const decodeContributionState = (
     bytes: Uint8Array,
     generation: number,
     profile: ParticipantProfile,
@@ -370,7 +372,7 @@ const decodeContributionState = (
         generation < 4 ||
         bytes.length < prefix ||
         bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('PCS2'))
+        !equalBytes(bytes.subarray(0, 4), encodeText('PCS3'))
     )
         throw new Error('Invalid contribution state.');
     const position = readUnsigned16(bytes, 4);
@@ -381,9 +383,7 @@ const decodeContributionState = (
     const signingCount = readUnsigned32(bytes, counts + 12);
     const shape = retainedShape(generation);
     const bodyRecords = bounds.publicRecords.length;
-    const maximumProofRecords = Math.ceil(
-        bounds.maximumProofBytes / chunkBytes,
-    );
+    const proofRecords = proofRecordLayout(bounds);
     const shaped =
         shape.stage === 4
             ? headerLength === 0 && publicCount === 0 && privateCount === 0
@@ -392,10 +392,9 @@ const decodeContributionState = (
                 headerLength <= bounds.maximumCheckpointHeaderBytes &&
                 publicCount === bodyRecords &&
                 privateCount === bounds.checkpointLengths.length
-              : headerLength === 0 &&
+              : headerLength === bounds.bodyHeaderBytes &&
                 privateCount === 0 &&
-                publicCount > bodyRecords &&
-                publicCount <= bodyRecords + maximumProofRecords;
+                publicCount === bodyRecords + proofRecords.length;
     if (
         position >= profile.setupContributorCount ||
         !shaped ||
@@ -414,7 +413,6 @@ const decodeContributionState = (
         );
     let offset = prefix + headerLength;
     const publicRecords: SealedRecord[] = [];
-    let proofBytes = 0;
     for (let index = 0; index < publicCount; index++) {
         const record = {
             object: readUnsigned16(bytes, offset),
@@ -434,24 +432,18 @@ const decodeContributionState = (
                 record.offset === expected.offset &&
                 record.length === expected.length;
         } else {
+            const expected = proofRecords[index - bodyRecords];
             canonical =
                 record.object === proofObject(profile) &&
-                record.offset === proofBytes &&
-                record.length >= 1 &&
-                record.length <= chunkBytes &&
-                (index === publicCount - 1 || record.length === chunkBytes);
-            proofBytes += record.length;
+                record.offset === expected.offset &&
+                record.length === expected.length;
         }
         if (!canonical) throw new Error('Noncanonical contribution record.');
         publicRecords.push(record);
         offset += publicEntryBytes;
     }
-    if (
-        shape.stage >= 7 &&
-        (proofBytes < bounds.minimumProofBytes ||
-            proofBytes > bounds.maximumProofBytes)
-    )
-        throw new Error('The retained proof has an invalid length.');
+    if (shape.stage >= 7)
+        proofLength(bounds, bytes.subarray(prefix, prefix + headerLength));
     const privateRecords: CheckpointRecord[] = [];
     for (let index = 0; index < privateCount; index++) {
         privateRecords.push({
@@ -667,8 +659,8 @@ const commitContribution = async (
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
             ...predecessor,
-            ...staged,
         ],
+        stagedRecords: staged,
         write: (transaction) => {
             for (const output of transition.signing ?? [])
                 transaction
@@ -1141,9 +1133,22 @@ export const continueContribution = async (session: ContributionSession) => {
     const { state } = session;
     const run = proverRun(session, false);
     const proof: SealedRecord[] = [];
-    const buffer = new Uint8Array(chunkBytes);
-    let used = 0;
-    let proofBytes = 0;
+    const writer = createProofWriter(bounds, async (slot, bytes) => {
+        const output = await sealRecord(
+            session,
+            proofObject(profile),
+            slot.offset,
+            bytes,
+        );
+        await addParticipantRecords(context.database, 'contribution', [
+            {
+                key: [output.record.object, output.record.offset],
+                bytes: output.ciphertext,
+            },
+        ]);
+        proof.push(output.record);
+    });
+    let header: Uint8Array;
     // The retained body records in the order the prover takes them; the
     // next one is opened while the prover takes the current one.
     const retained = Array.from(
@@ -1167,23 +1172,6 @@ export const continueContribution = async (session: ContributionSession) => {
                 ? awaitLater(openRecord(session, order[taken]))
                 : undefined;
         return bytes;
-    };
-    const sealProof = async () => {
-        const output = await sealRecord(
-            session,
-            proofObject(profile),
-            proofBytes,
-            buffer.subarray(0, used),
-        );
-        await addParticipantRecords(context.database, 'contribution', [
-            {
-                key: [output.record.object, output.record.offset],
-                bytes: output.ciphertext,
-            },
-        ]);
-        proof.push(output.record);
-        proofBytes += used;
-        used = 0;
     };
     try {
         while (run.phase() !== proverPhase.polynomials)
@@ -1210,28 +1198,19 @@ export const continueContribution = async (session: ContributionSession) => {
         while (run.phase() === proverPhase.output) {
             await run.advance(proverCommand.nextOutput);
             const bytes = proverOutput(context);
-            if (bytes.length > bounds.maximumProofBytes - proofBytes - used)
-                throw new Error('The proof exceeds its bound.');
-            for (let offset = 0; offset < bytes.length;) {
-                const count = Math.min(
-                    bytes.length - offset,
-                    chunkBytes - used,
-                );
-                buffer.set(bytes.subarray(offset, offset + count), used);
-                offset += count;
-                used += count;
-                if (used === chunkBytes) await sealProof();
+            try {
+                await writer.append(bytes);
+            } finally {
+                bytes.fill(0);
             }
         }
-        if (used > 0) await sealProof();
-        if (
-            run.phase() !== proverPhase.done ||
-            proofBytes < bounds.minimumProofBytes ||
-            proofBytes > bounds.maximumProofBytes
-        )
+        if (run.phase() !== proverPhase.done)
             throw new Error('The continued proof is incomplete.');
+        // The root remains at generation six while the same record writer
+        // fills every remaining profile slot, including padding-only slots.
+        header = await writer.finish();
     } finally {
-        buffer.fill(0);
+        writer.close();
         // A record opened ahead that the prover never took is cleared too.
         if (opening !== undefined)
             (await opening.catch(() => undefined))?.fill(0);
@@ -1241,7 +1220,7 @@ export const continueContribution = async (session: ContributionSession) => {
         generation: 7,
         state: {
             ...state,
-            header: new Uint8Array(),
+            header,
             publicRecords: [...state.publicRecords, ...proof],
             privateRecords: [],
             seed: new Uint8Array(),
@@ -1252,12 +1231,32 @@ export const continueContribution = async (session: ContributionSession) => {
     return run.randomBytes();
 };
 
-// The body header: its marker and the proof length.
-const bodyHeader = (proofBytes: number) => {
-    const header = new Uint8Array(12);
-    header.set(encodeText('SCB1'));
-    new DataView(header.buffer).setBigUint64(4, BigInt(proofBytes), true);
-    return header;
+// Reads every authenticated private proof slot and its padding. Only the
+// exact framed proof reaches the signer or relay, and completion of either
+// caller waits for the full fixed record pass.
+const readRetainedProof = (
+    session: ContributionSession,
+    consume: (offset: number, bytes: Uint8Array) => void | Promise<void>,
+) => {
+    const { profile } = session.context;
+    const records = session.state.publicRecords.filter(
+        (record) => record.object === proofObject(profile),
+    );
+    return readProof(
+        profile.contribution,
+        session.state.header,
+        async (slot, index) => {
+            const record = records[index];
+            if (
+                record === undefined ||
+                record.offset !== slot.offset ||
+                record.length !== slot.length
+            )
+                throw new Error('The private proof record plan changed.');
+            return openRecord(session, record);
+        },
+        consume,
+    );
 };
 
 // Recomputes the commitment to the retained body in the module's signer.
@@ -1267,7 +1266,7 @@ const bodyCommitment = async (session: ContributionSession) => {
     const control = concatenate(
         unsigned16(state.position),
         state.salt,
-        bodyHeader(proofLength(state, profile)),
+        state.header,
     );
     try {
         signing(context, signingCommand.beginBody, control);
@@ -1292,16 +1291,9 @@ const bodyCommitment = async (session: ContributionSession) => {
                 input.fill(0);
             }
         }
-    for (const record of state.publicRecords.filter(
-        (value) => value.object === proofObject(profile),
-    )) {
-        const bytes = await openRecord(session, record);
-        try {
-            signing(context, signingCommand.proof, bytes, record.offset);
-        } finally {
-            bytes.fill(0);
-        }
-    }
+    await readRetainedProof(session, (offset, bytes) => {
+        signing(context, signingCommand.proof, bytes, offset);
+    });
     return signing(context, signingCommand.finishBody);
 };
 
@@ -1824,23 +1816,28 @@ export const publishOpening = async (
         publishRecord(
             relay,
             directory + 'body-header.bin',
-            bodyHeader(proofLength(session.state, profile)),
+            session.state.header,
         ),
     );
-    for (const record of session.state.publicRecords) {
+    for (const record of session.state.publicRecords.filter(
+        (value) => value.object !== proofObject(profile),
+    )) {
         const bytes = await openRecord(session, record);
         await delivery.transfer(
             () =>
                 publishChunk(
                     relay,
-                    directory +
-                        (record.object === proofObject(profile)
-                            ? 'proof.bin'
-                            : polynomialFile(record.object - 1)),
+                    directory + polynomialFile(record.object - 1),
                     record.offset,
                     bytes,
                 ),
             bytes,
         );
     }
+    await readRetainedProof(session, (offset, bytes) =>
+        delivery.transfer(
+            () => publishChunk(relay, directory + 'proof.bin', offset, bytes),
+            bytes,
+        ),
+    );
 };

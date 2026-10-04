@@ -425,6 +425,9 @@ export type RootTransition = Readonly<{
     manifest: ParticipantManifest;
     // Records of the predecessor, decoded from its authenticated manifest.
     predecessorRecords: readonly ParticipantStoredRecord[];
+    // Already stored outputs that the successor will retain. They join
+    // commit validation, but do not become original authority on rollback.
+    stagedRecords?: readonly ParticipantStoredRecord[];
     // New data records to add, in manifest order after the existing ones.
     addedData?: readonly Readonly<{ kind: number; bytes: Uint8Array }>[];
     // Other synchronous writes that enter the same transaction.
@@ -511,6 +514,7 @@ export const commitRoot = async (
     });
     const validate = (
         reader: Parameters<typeof validateParticipantPredecessor>[0],
+        rollback = false,
     ) =>
         validateParticipantPredecessor(reader, {
             head: predecessor.head,
@@ -518,7 +522,15 @@ export const commitRoot = async (
             rootContext: associatedData,
             maximumRootBytes: rootBound(context, predecessor.head.generation),
             recordStores: participantRecordStores,
-            records: transition.predecessorRecords,
+            records: rollback
+                ? transition.predecessorRecords
+                : [
+                      ...transition.predecessorRecords,
+                      ...(transition.stagedRecords ?? []),
+                  ],
+            ...(rollback
+                ? { provisionalRecords: transition.stagedRecords ?? [] }
+                : {}),
             identities: custodyIdentities(kernel),
         });
     try {
@@ -548,7 +560,7 @@ export const commitRoot = async (
             database,
             stores: participantStores,
             timeoutMilliseconds: validationMilliseconds,
-            validate,
+            validate: (reader) => validate(reader, true),
             write: () => undefined,
         });
         throw new StoragePending(

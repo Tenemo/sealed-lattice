@@ -10,6 +10,92 @@ import { compileSetupContributionRelationCensus } from '#tests/setup-contributio
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
+const retainedProofRecordBytes = 1n << 20n;
+const retainedRecordTagBytes = 16n;
+const retainedPublicReferenceBytes = 2n + 4n + 4n + 32n + 64n;
+
+const proofRecordLayout = (maximumProofBytes: bigint) => {
+    const records: { offset: bigint; length: bigint }[] = [];
+    for (
+        let offset = 0n;
+        offset < maximumProofBytes;
+        offset += retainedProofRecordBytes
+    )
+        records.push({
+            offset,
+            length:
+                maximumProofBytes - offset < retainedProofRecordBytes
+                    ? maximumProofBytes - offset
+                    : retainedProofRecordBytes,
+        });
+    return records;
+};
+
+export const compileContributionProofStorage = (profile: SupportedProfile) => {
+    const body = compileContributionBodyCensus(profile);
+    const records = proofRecordLayout(body.maximumProofBytes);
+    const count = BigInt(records.length);
+    return {
+        records,
+        plaintextBytes: body.maximumProofBytes,
+        ciphertextBytes:
+            body.maximumProofBytes + retainedRecordTagBytes * count,
+        dataKeyBytes: 32n * count,
+        recordIdentityBytes: 64n * count,
+        recordReferenceBytes: retainedPublicReferenceBytes * count,
+        completedBodyHeaderBytes: body.headerBytes,
+    };
+};
+
+// A byte/work projection for one observed complete proof length. The format's
+// lower framing bound does not assert that a proof of that length is possible.
+// Every full consumer authenticates the whole fixed slot set, including its
+// zero tail; only the original proof prefix is hashed or published publicly.
+export const projectContributionProofPadding = (
+    profile: SupportedProfile,
+    observedProofBytes: bigint,
+    completeReadPasses: bigint,
+) => {
+    const body = compileContributionBodyCensus(profile);
+    if (
+        observedProofBytes < body.minimumProofBytes ||
+        observedProofBytes > body.maximumProofBytes ||
+        completeReadPasses < 0n
+    )
+        throw new RangeError(
+            'Proof length or complete-read count is outside its bounds.',
+        );
+    const variableRecords = BigInt(
+        proofRecordLayout(observedProofBytes).length,
+    );
+    const fixed = compileContributionProofStorage(profile);
+    const addedRecords = BigInt(fixed.records.length) - variableRecords;
+    const paddingBytes = fixed.plaintextBytes - observedProofBytes;
+    const additionalProofCiphertextBytes =
+        paddingBytes + retainedRecordTagBytes * addedRecords;
+    const additionalCompletedRootBytes =
+        body.headerBytes + retainedPublicReferenceBytes * addedRecords;
+    return {
+        observedProofBytes,
+        completeReadPasses,
+        paddingBytes,
+        additionalProofRecords: addedRecords,
+        additionalProofRecordKeyBytes: 32n * addedRecords,
+        additionalProofRecordIdentityBytes: 64n * addedRecords,
+        additionalProofRecordTagBytes: retainedRecordTagBytes * addedRecords,
+        additionalProofCiphertextBytes,
+        additionalCompletedRootBytes,
+        additionalCompletedRetainedBytes:
+            additionalProofCiphertextBytes + additionalCompletedRootBytes,
+        additionalProofWriteBytes: additionalProofCiphertextBytes,
+        additionalProofReadBytes:
+            completeReadPasses * additionalProofCiphertextBytes,
+        additionalProofVerificationCalls: completeReadPasses * addedRecords,
+        // Published SCB1 framing and the proof prefix remain byte-identical.
+        publishedProofBytes: observedProofBytes,
+    };
+};
+
 export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
     const checkpoint = compileFirstOracleCheckpointCensus(profile);
@@ -58,6 +144,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         operationSeedBytes;
     const maximumCompletedMetadataBytes =
         metadataPrefixBytes +
+        body.headerBytes +
         106n * (BigInt(publicRecords.length) + maximumProofRecords) +
         5n * 102n;
     const maximumMetadataBytes =
@@ -110,6 +197,18 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumWithLaterWork > maximumMetadataBytes
             ? maximumWithLaterWork
             : maximumMetadataBytes;
+    // The completed header changes only completed/late suffixes. A profile
+    // whose larger checkpoint dominates must keep that unchanged maximum.
+    const previousStateMaximum =
+        maximumCheckpointMetadataBytes >
+        maximumCompletedMetadataBytes - body.headerBytes
+            ? maximumCheckpointMetadataBytes
+            : maximumCompletedMetadataBytes - body.headerBytes;
+    const previousCombinedMaximum = [
+        maximumCheckpointMetadataBytes,
+        maximumCompletedMetadataBytes - body.headerBytes,
+        maximumWithLaterWork - body.headerBytes,
+    ].reduce((largest, value) => (value > largest ? value : largest));
     const maximumRootBytes =
         enrollment.manifestPrefixBytes +
         73n * maximumRootRecords +
@@ -143,6 +242,11 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         metadataPrefixBytes,
         maximumCheckpointMetadataBytes,
         maximumCompletedMetadataBytes,
+        completedBodyHeaderBytes: body.headerBytes,
+        completedHeaderStateDeltaBytes:
+            maximumMetadataBytes - previousStateMaximum,
+        completedHeaderRootDeltaBytes:
+            maximumCombinedMetadata - previousCombinedMaximum,
         maximumMetadataBytes,
         maximumRootRecords,
         setupReferenceBytes,

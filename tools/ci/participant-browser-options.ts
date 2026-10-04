@@ -47,15 +47,15 @@ export const selectParticipantBrowserOptions = (
         }
     }
     const mode =
-        (['no-result', 'empty', 'rosters', 'plain'] as const).find(
-            (value) => value === counts[counts.length - 1],
-        ) ?? 'result';
+        (
+            ['no-result', 'empty', 'rosters', 'plain', 'preparation'] as const
+        ).find((value) => value === counts[counts.length - 1]) ?? 'result';
     if (mode !== 'result') counts.pop();
     assert.ok(
         counts.length === 0 ||
             (counts.length === 2 &&
                 counts.every((value) => /^[1-9]\d*$/u.test(value))),
-        'Optionally select the participant and option counts, then no-result, empty, rosters or plain.',
+        'Optionally select the participant and option counts, then no-result, empty, rosters, plain or preparation.',
     );
     const [participantCount, optionCount] =
         counts.length === 0 ? [3, 2] : counts.map(Number);
@@ -72,8 +72,9 @@ export const selectParticipantBrowserOptions = (
         'Only an ordinary plain run selects sequential execution.',
     );
     assert.ok(
-        (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
-        'Rosters and plain runs serve no other poll.',
+        (mode !== 'rosters' && mode !== 'plain' && mode !== 'preparation') ||
+            foreignPoll === undefined,
+        'Rosters, plain and preparation runs serve no other poll.',
     );
     assert.ok(
         mode !== 'rosters' || profile.maximumCorruptParticipantCount >= 1,

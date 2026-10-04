@@ -1,6 +1,6 @@
 export interface ParticipantTransactionReader {
     get(store: string, key: IDBValidKey): Promise<unknown>;
-    count(store: string): Promise<number>;
+    count(store: string, key?: IDBValidKey): Promise<number>;
 }
 
 // WebCrypto and Blob reads complete outside IDB request tasks. Keep the write
@@ -102,7 +102,8 @@ export async function commitParticipantState({
     const reader: ParticipantTransactionReader = {
         get: (store, key) =>
             read(() => transaction.objectStore(store).get(key)),
-        count: (store) => read(() => transaction.objectStore(store).count()),
+        count: (store, key) =>
+            read(() => transaction.objectStore(store).count(key)),
     };
     const done = new Promise<void>((resolve, reject) => {
         const finish = () => {

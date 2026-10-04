@@ -42,6 +42,13 @@ export async function validateParticipantPredecessor(
         maximumRootBytes: number;
         recordStores: readonly string[];
         records: readonly ParticipantStoredRecord[];
+        // Rollback may leave only these unreferenced new keys, whose values
+        // are not authority and need not have survived. Every other record
+        // and the exact original root still authenticate before continuation.
+        provisionalRecords?: readonly Pick<
+            ParticipantStoredRecord,
+            'store' | 'key'
+        >[];
         identities: ParticipantIdentities;
     }>,
 ): Promise<void> {
@@ -89,6 +96,17 @@ export async function validateParticipantPredecessor(
         keys.add(identity);
         if (encryptionKey !== undefined) encryptionKeys.add(encryptionKey);
         counts.set(record.store, counts.get(record.store)! + 1);
+    }
+    for (const record of expected.provisionalRecords ?? []) {
+        const identity = `${record.store}:${JSON.stringify(record.key)}`;
+        if (!counts.has(record.store) || keys.has(identity))
+            throw new Error('Invalid provisional record description.');
+        keys.add(identity);
+        counts.set(
+            record.store,
+            counts.get(record.store)! +
+                (await reader.count(record.store, record.key)),
+        );
     }
     for (const [store, count] of [
         ['head', 1],

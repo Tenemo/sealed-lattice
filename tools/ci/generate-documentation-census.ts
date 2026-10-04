@@ -37,7 +37,6 @@ import {
     compileCommonMatrixSamplingCensus,
     compileCommonMatrixInitializationCensus,
 } from '#tests/common-matrix-sampling-model.js';
-import { compileCompletedContributionStateCensus } from '#tests/completed-contribution-state-model.js';
 import {
     ceilingLog2,
     compileComposedSecurityLedger,
@@ -77,6 +76,7 @@ import {
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import {
+    compileContributionProofStorage,
     compileParticipantCustodyCensus,
     compileParticipantVaultKeyClasses,
 } from '#tests/participant-custody-model.js';
@@ -162,6 +162,8 @@ export const renderDocumentationCensus = (): string => {
     const thresholdKeyAggregation = verifyThresholdKeyAggregationModel();
     const thresholdReleaseNoise = compileThresholdReleaseNoiseCensus();
     const participantCustody = compileParticipantCustodyCensus(completion);
+    const contributionProofStorage =
+        compileContributionProofStorage(completion);
     const participantBallotCustody =
         compileParticipantBallotCustody(completion);
     const participantCloseCustody = compileParticipantCloseCustody(completion);
@@ -194,8 +196,6 @@ export const renderDocumentationCensus = (): string => {
     const firstOracleCheckpoint =
         compileFirstOracleCheckpointCensus(completion);
     const selectedOpeningTransform = compileSelectedOpeningTransformCensus();
-    const completedContribution =
-        compileCompletedContributionStateCensus(completion);
     const commitmentEquivocation = compareCommitmentEquivocationHybrids(
         3,
         2,
@@ -223,6 +223,9 @@ export const renderDocumentationCensus = (): string => {
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
+    const participantCustodyProfiles = supportedProfiles.profiles.flatMap(
+        (row) => row.map((profile) => compileParticipantCustodyCensus(profile)),
+    );
     const recoverableSetup = compileRecoverableSetupResourceScreen(
         completion.participantCount,
         completion.optionCount,
@@ -2500,48 +2503,6 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Completed contribution state census',
-        '',
-        'Completion retains encrypted generated public inputs and proof records, with their keys and hashes in the authenticated root. The completed root omits the retired private checkpoint and its progress header. The staged bound includes the old checkpoint, proof records, and pending completion root before the atomic retirement transaction. Database and key-storage overhead remain measured quantities.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Maximum proof records',
-                    formatCount(completedContribution.maximumProofRecords),
-                ],
-                [
-                    'Maximum retained public records',
-                    formatCount(completedContribution.maximumPublicRecords),
-                ],
-                [
-                    'Maximum root plaintext bytes',
-                    formatCount(
-                        completedContribution.maximumRootPlaintextBytes,
-                    ),
-                ],
-                [
-                    'Maximum encrypted proof bytes',
-                    formatCount(
-                        completedContribution.maximumProofCiphertextBytes,
-                    ),
-                ],
-                [
-                    'Maximum completed retained payload bytes',
-                    formatCount(
-                        completedContribution.maximumRetainedPayloadBytes,
-                    ),
-                ],
-                [
-                    'Maximum staged payload before checkpoint retirement',
-                    formatCount(
-                        completedContribution.maximumStagedPayloadBytes,
-                    ),
-                ],
-            ],
-        ),
-        '',
         '## Contribution body census',
         '',
         'The active profile frames one complete contribution as a fixed header, its owned public polynomials in the compiled statement order, and its complete proof. Fixed common inputs, the statement header, and previously verified recipient keys are reconstructed from predecessors. The body is a virtual concatenation of bounded records; these payload counts do not allocate another whole-body copy or include checkpoint, database or signature overhead.',
@@ -2995,7 +2956,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Shared participant custody census',
         '',
-        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. Fixed statement framing is regenerated rather than retained as another contribution record. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
+        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. The expanded statement header is regenerated rather than retained as another body record. The existing length-prefixed contribution header field instead retains the canonical SCB1 body header from completed generation onward, replacing the retired first-oracle progress header. Proof storage always seals the maximum proof capacity into fixed slots. A complete consumer pass authenticates every slot and checks its zero tail, supplying only the actual-length prefix; commitment completion waits for that pass, and the existing body-commitment preflight precedes publication. The maximum payload, record-key, tag and reference envelopes already reserved this capacity. The added body header changes completed metadata and any maxima it dominates. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
         '',
         table(
             ['Property', 'Value'],
@@ -3024,6 +2985,34 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(
                         participantCustody.maximumCompletedMetadataBytes,
                     ),
+                ],
+                [
+                    'Retained completed body-header bytes',
+                    formatCount(participantCustody.completedBodyHeaderBytes),
+                ],
+                [
+                    'Fixed proof storage slots',
+                    formatCount(contributionProofStorage.records.length),
+                ],
+                [
+                    'Fixed proof plaintext capacity bytes',
+                    formatCount(contributionProofStorage.plaintextBytes),
+                ],
+                [
+                    'Fixed encrypted proof capacity bytes',
+                    formatCount(contributionProofStorage.ciphertextBytes),
+                ],
+                [
+                    'Fixed proof record-key bytes',
+                    formatCount(contributionProofStorage.dataKeyBytes),
+                ],
+                [
+                    'Fixed proof record-identity bytes',
+                    formatCount(contributionProofStorage.recordIdentityBytes),
+                ],
+                [
+                    'Fixed proof reference bytes in root',
+                    formatCount(contributionProofStorage.recordReferenceBytes),
                 ],
                 [
                     'Maximum encrypted participant root bytes',
@@ -3069,6 +3058,48 @@ export const renderDocumentationCensus = (): string => {
                 ],
             ],
         ),
+        '',
+        'Across all supported profiles, the following changes recompute the maxima of the checkpoint and completed/later suffix branches. A maximum is not increased merely because one smaller branch grew.',
+        '',
+        table(
+            [
+                'Completed-header effect in bytes',
+                'Completion profile',
+                'Minimum across profiles',
+                'Maximum across profiles',
+            ],
+            (
+                [
+                    [
+                        'Contribution-state maximum increase',
+                        'completedHeaderStateDeltaBytes',
+                    ],
+                    [
+                        'Encrypted participant-root maximum increase',
+                        'completedHeaderRootDeltaBytes',
+                    ],
+                ] as const
+            ).map(([label, field]) => [
+                label,
+                formatCount(participantCustody[field]),
+                formatCount(
+                    participantCustodyProfiles.reduce(
+                        (smallest, value) =>
+                            value[field] < smallest ? value[field] : smallest,
+                        participantCustodyProfiles[0][field],
+                    ),
+                ),
+                formatCount(
+                    participantCustodyProfiles.reduce(
+                        (largest, value) =>
+                            value[field] > largest ? value[field] : largest,
+                        0n,
+                    ),
+                ),
+            ]),
+        ),
+        '',
+        'Actual padding growth depends on an observed complete proof length `L`, not the header-only framing lower bound, which does not establish an achievable proof. With capacity `P`, chunk size `C`, `M=ceil(P/C)` and `m=ceil(L/C)`, the added proof payload is `P-L`, the added record count is `M-m`, and added encrypted proof bytes are `P-L+16*(M-m)`. The completed root adds the body header and `106*(M-m)` reference bytes; the root tag count does not change. Each actual full authentication/consumer pass reads that complete encrypted proof delta again, and an ordinary write pays it once. The [projection model](../tests/participant-custody-model.ts) takes the observed length and explicit pass count; it assumes no extra preflight passes and does not turn per-pass costs into lifetime populations. Checkpoint authentication and atomic retirement remain required, with their payload already included in the overlap bound. Public proof bytes remain the original `L`-byte prefix.',
         '',
         '## Participant vault key work',
         '',

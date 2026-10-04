@@ -370,6 +370,7 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     const prefix = contributionPrefixBytes(contribution.saltBytes);
     const completedStateBytes =
         prefix +
+        contribution.bodyHeaderBytes +
         publicEntryBytes * (publicRecords.length + maximumProofRecords) +
         signingEntryBytes * signingRecords;
     return {

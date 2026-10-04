@@ -17,7 +17,10 @@ import { availableParallelism, freemem } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { build } from 'tsdown';
+
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import { registrationFile } from '#packages/sdk/src/participant/worker/roster.js';
 import {
     evaluatedTargetName,
@@ -37,6 +40,15 @@ import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-o
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { summarizeCpuTrace } from '#tools/ci/participant-cpu-profile.js';
 import type { CpuProfileSummary } from '#tools/ci/participant-cpu-profile.js';
+import {
+    paddingHaltingClient,
+    validatePaddingObservation,
+} from '#tools/ci/participant-padding-halt.js';
+import type {
+    PaddingCut,
+    PaddingHaltObservation,
+    PaddingSlotObservation,
+} from '#tools/ci/participant-padding-halt.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
@@ -175,6 +187,7 @@ type Relay = Readonly<{
     delivered: Set<string>[];
     // Successfully served public payloads, by exact route, for cost accounting.
     reads: Map<string, Readonly<{ requests: number; bytes: number }>>[];
+    publicationAttempts: number[];
 }>;
 
 // Records a participant may publish from its contribution before its signed
@@ -251,6 +264,7 @@ const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
     `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
 const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
+    window.paddingReplay = {slots: [], halt: null};
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
     const digest = Array.from(
@@ -266,6 +280,8 @@ window.runParticipant = async (operation, parameters) => {
             URL.revokeObjectURL(url);
         };
         worker.onmessage = ({ data }) => {
+            if (data?.type === 'participant-padding-slot') { window.paddingReplay.slots.push(data); return; }
+            if (data?.type === 'participant-padding-halt') { window.paddingReplay.halt = data; return; }
             finish();
             resolve(data);
         };
@@ -306,6 +322,7 @@ const startRelay = async (
     );
     const refused = new Set<string>();
     const earlyContributionRecords: string[] = [];
+    const publicationAttempts = new Array<number>(originCount).fill(0);
     const delivered = Array.from(
         { length: originCount },
         () => new Set<string>(),
@@ -411,6 +428,8 @@ const startRelay = async (
                 }
             }
         }
+        if (request.method === 'POST' && url.pathname.startsWith('/publish/'))
+            publicationAttempts[Number(new URL(origin).port) - basePort]++;
         const name = url.pathname.slice('/publish/'.length);
         const offset = Number(url.searchParams.get('offset'));
         const file = path.join(records, name);
@@ -532,6 +551,7 @@ const startRelay = async (
     }
     return {
         servers,
+        publicationAttempts,
         owners,
         views,
         refused,
@@ -808,6 +828,12 @@ await runWithLocalRunLog(
             for (const file of [
                 'tools/ci/run-participant-browser.ts',
                 'tools/ci/participant-browser-options.ts',
+                ...(mode === 'preparation'
+                    ? [
+                          'tools/ci/participant-padding-halt.ts',
+                          'tools/ci/participant-padding-corruption.ts',
+                      ]
+                    : []),
             ]) {
                 const runnerSnapshot = path.join(
                     log.runDirectoryPath,
@@ -824,6 +850,68 @@ await runWithLocalRunLog(
                     log,
                     invalidAuthor !== undefined,
                 );
+            const paddingClients =
+                mode === 'preparation'
+                    ? new Map(
+                          (['padding', 'final-slot'] as const).map((cut) => [
+                              cut,
+                              paddingHaltingClient(runtime.worker, cut),
+                          ]),
+                      )
+                    : undefined;
+            let paddingMutationBundle: string | undefined;
+            if (mode === 'preparation') {
+                const bundles = await build({
+                    config: false,
+                    clean: false,
+                    write: false,
+                    dts: false,
+                    entry: {
+                        padding: path.join(
+                            root,
+                            'tools/ci/participant-padding-corruption.ts',
+                        ),
+                    },
+                    format: 'iife',
+                    globalName: 'participantPaddingFixture',
+                    platform: 'browser',
+                    target: 'es2022',
+                    minify: false,
+                    sourcemap: false,
+                    report: false,
+                    logLevel: 'warn',
+                    failOnWarn: true,
+                    tsconfig: path.join(root, 'tsconfig.tools.json'),
+                    outputOptions: { codeSplitting: false },
+                });
+                const chunks = bundles.flatMap((bundle) => bundle.chunks);
+                assert.equal(
+                    chunks.length,
+                    1,
+                    'The browser storage fixture must be self-contained.',
+                );
+                assert.equal(chunks[0].type, 'chunk');
+                if (chunks[0].type === 'chunk')
+                    paddingMutationBundle = chunks[0].code;
+                assert.ok(paddingMutationBundle);
+                await writeFile(
+                    path.join(
+                        log.runDirectoryPath,
+                        'padding-corruption-fixture.js',
+                    ),
+                    paddingMutationBundle,
+                    { flag: 'wx' },
+                );
+                for (const client of paddingClients!.values())
+                    await writeFile(
+                        path.join(
+                            log.runDirectoryPath,
+                            'padding-' + client.cut + '-worker.js',
+                        ),
+                        client.worker,
+                        { flag: 'wx' },
+                    );
+            }
             const corrupt =
                 invalidAuthor === undefined || invalidBallotClient === undefined
                     ? undefined
@@ -1294,6 +1382,20 @@ await runWithLocalRunLog(
 })`),
                     ),
                 );
+            const retainedHead = async (position: number) =>
+                inBrowser(position, undefined, (chrome) =>
+                    chrome.evaluate(`new Promise((resolve,reject) => {
+    const opening=indexedDB.open(${JSON.stringify(participantDatabase)});
+    opening.onerror=()=>reject(opening.error);
+    opening.onsuccess=()=>{ const database=opening.result; const reading=database.transaction('head').objectStore('head').get(0);
+        reading.onsuccess=()=>{database.close();resolve(reading.result);};
+        reading.onerror=()=>{database.close();reject(reading.error);}; };
+})`),
+                ) as Promise<{
+                    generation: number;
+                    hash: string;
+                    runtime: string;
+                }>;
             // Counts a participant's records in one store from its own page,
             // reading none of them.
             const storedRecords = async (position: number, store: string) =>
@@ -1595,6 +1697,124 @@ await runWithLocalRunLog(
                         },
                     }),
                 );
+            const paddingInterruptions: {
+                position: number;
+                observation: Readonly<{
+                    slots: readonly PaddingSlotObservation[];
+                    halt: PaddingHaltObservation;
+                }>;
+                head: Readonly<{
+                    generation: number;
+                    hash: string;
+                    runtime: string;
+                }>;
+                checkpointRecords: number;
+                originalWorkerSha512: string;
+                instrumentedWorkerSha512: string;
+                instrumentationMilliseconds: number;
+            }[] = [];
+            const interruptPadding = async (
+                position: number,
+                cut: PaddingCut,
+            ) => {
+                const client = paddingClients?.get(cut);
+                assert.ok(client);
+                await endBrowser(position);
+                halting.set(position, client);
+                try {
+                    const before = await retainedHead(position);
+                    assert.equal(before.generation, 6);
+                    const checkpointRecords = await storedRecords(
+                        position,
+                        'checkpoint',
+                    );
+                    assert.ok(checkpointRecords > 0);
+                    const interrupted = request(position, 'contribute');
+                    let observation: {
+                        slots: PaddingSlotObservation[];
+                        halt: PaddingHaltObservation | null;
+                    };
+                    for (;;) {
+                        const settled = await Promise.race([
+                            interrupted.then(
+                                () => true,
+                                () => true,
+                            ),
+                            delay(250, false),
+                        ]);
+                        assert.equal(
+                            settled,
+                            false,
+                            'Contribution ended without reaching the requested padding cut; no reseed or skipped case is allowed.',
+                        );
+                        observation = (await inBrowser(
+                            position,
+                            undefined,
+                            (chrome) => chrome.evaluate('window.paddingReplay'),
+                        )) as typeof observation;
+                        if (observation.halt !== null) break;
+                    }
+                    assert.ok(observation.halt);
+                    assert.equal(observation.halt.cut, cut);
+                    const captured = {
+                        slots: observation.slots,
+                        halt: observation.halt,
+                    };
+                    validatePaddingObservation(
+                        captured,
+                        bounds.contribution,
+                        chunkBytes,
+                    );
+                    assert.deepEqual(
+                        await retainedHead(position),
+                        before,
+                        'Padding changed its original continuation root before the cut.',
+                    );
+                    assert.equal(
+                        await storedRecords(position, 'checkpoint'),
+                        checkpointRecords,
+                    );
+                    assert.equal(
+                        await storedRecords(position, 'contribution'),
+                        bounds.contribution.publicRecords.length +
+                            captured.slots.length,
+                    );
+                    await endBrowser(position);
+                    await assert.rejects(interrupted);
+                    const entry = {
+                        position,
+                        observation: captured,
+                        head: before,
+                        checkpointRecords,
+                        originalWorkerSha512: client.originalDigest,
+                        instrumentedWorkerSha512: client.digest,
+                        instrumentationMilliseconds: captured.slots.reduce(
+                            (sum, slot) =>
+                                sum + slot.instrumentationMilliseconds,
+                            0,
+                        ),
+                    };
+                    paddingInterruptions.push(entry);
+                    interruptions.push({
+                        position,
+                        operation: 'contribute',
+                        generation: 6,
+                        staged: {
+                            store: 'contribution',
+                            records:
+                                bounds.contribution.publicRecords.length +
+                                captured.slots.length,
+                        },
+                    });
+                    recoveryOperations.set(position, 'contribute');
+                    log.writeEvent({
+                        eventType: 'participant-padding-interruption',
+                        details: entry,
+                    });
+                } finally {
+                    halting.delete(position);
+                }
+            };
             // Interrupts an operation once the relay delivered it the named
             // public record.
             const interruptDelivered = (
@@ -1632,7 +1852,10 @@ await runWithLocalRunLog(
                           ((position * (optionCount + 1) + option) %
                               (maximumScore - minimumScore + 1)),
                 );
-            const question = 'Verify the complete signed ballot path';
+            const question =
+                mode === 'preparation'
+                    ? 'Verify original participant preparation'
+                    : 'Verify the complete signed ballot path';
             const labels = Array.from(
                 { length: optionCount },
                 (_unused, index) => `Option ${String(index)}`,
@@ -2291,11 +2514,49 @@ await runWithLocalRunLog(
                             'contribution',
                             bodyRecords + 1,
                         );
+                        if (mode === 'preparation') {
+                            await interruptPadding(position, 'padding');
+                            await interruptPadding(position, 'final-slot');
+                            const [padding, final] = paddingInterruptions;
+                            assert.deepEqual(
+                                padding.head,
+                                final.head,
+                                'Padding replay recreated its continuation intent.',
+                            );
+                            assert.equal(
+                                padding.observation.halt.proofBytes,
+                                final.observation.halt.proofBytes,
+                            );
+                            for (const [
+                                index,
+                                slot,
+                            ] of padding.observation.slots.entries()) {
+                                assert.equal(
+                                    slot.sha512,
+                                    final.observation.slots[index].sha512,
+                                    'Padding replay changed its original proof bytes.',
+                                );
+                            }
+                        }
                     }
                     assert.equal(
                         (await run(position, 'contribute')).generation,
                         7,
                     );
+                    if (mode === 'preparation') {
+                        assert.equal(
+                            await storedRecords(position, 'checkpoint'),
+                            0,
+                        );
+                        assert.equal(
+                            await storedRecords(position, 'contribution'),
+                            bodyRecords +
+                                Math.ceil(
+                                    bounds.contribution.maximumProofBytes /
+                                        chunkBytes,
+                                ),
+                        );
+                    }
                 }),
             );
             await expectStatus(0, 'contribute', 'refused');
@@ -2340,6 +2601,72 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
+            }
+            const paddingRefusals: Record<string, unknown>[] = [];
+            if (mode === 'preparation') {
+                assert.ok(paddingMutationBundle && setupReplay !== undefined);
+                for (const kind of ['missing', 'nonzero'] as const) {
+                    const copy = 'padding-' + kind;
+                    await copyState(setupReplay, copy);
+                    try {
+                        const mutation = await inBrowser(
+                            setupReplay,
+                            copy,
+                            (chrome) =>
+                                chrome.evaluate(
+                                    paddingMutationBundle +
+                                        '\nparticipantPaddingFixture.mutateParticipantPadding(' +
+                                        JSON.stringify({
+                                            namespace: participantNamespace,
+                                            runtimeIdentity:
+                                                runtime.identity.runtime,
+                                            moduleDigest:
+                                                runtime.identity.module,
+                                            participants: participantCount,
+                                            options: optionCount,
+                                            position: setupReplay,
+                                            kind,
+                                        }) +
+                                        ');',
+                                ),
+                        );
+                        const before: number =
+                            relay.publicationAttempts[setupReplay];
+                        const rejected = await request(
+                            setupReplay,
+                            'open',
+                            {},
+                            copy,
+                        );
+                        assert.deepEqual(rejected, {
+                            status: 'stopped',
+                            stopPersistence: 'confirmed',
+                            reason:
+                                kind === 'nonzero'
+                                    ? 'The private proof padding is nonzero.'
+                                    : 'The contribution records changed.',
+                        });
+                        assert.equal(
+                            relay.publicationAttempts[setupReplay],
+                            before,
+                            'A damaged private proof caused a relay publication attempt.',
+                        );
+                        const recorded = {
+                            position: setupReplay,
+                            kind,
+                            mutation,
+                            result: rejected,
+                            publicationAttempts: 0,
+                        };
+                        paddingRefusals.push(recorded);
+                        log.writeEvent({
+                            eventType: 'participant-padding-refusal',
+                            details: recorded,
+                        });
+                    } finally {
+                        await removeCopy(copy);
+                    }
+                }
             }
             await Promise.all(
                 contributors.map(async (position) => {
@@ -2408,6 +2735,102 @@ await runWithLocalRunLog(
                 for (const operation of ['contribute', 'open', 'verify-setup'])
                     await expectStatus(confirmer, operation, 'refused');
                 assert.equal((await run(confirmer, 'confirm')).generation, 12);
+            }
+            if (mode === 'preparation') {
+                assert.equal(paddingInterruptions.length, 2);
+                const last = paddingInterruptions[1];
+                const proofPath = path.join(
+                    publicDirectory,
+                    `contribution-${String(last.position)}/proof.bin`,
+                );
+                const header = await readFile(
+                    path.join(
+                        publicDirectory,
+                        `contribution-${String(last.position)}/body-header.bin`,
+                    ),
+                );
+                assert.equal(
+                    header.length,
+                    bounds.contribution.bodyHeaderBytes,
+                );
+                assert.equal(header.subarray(0, 4).toString('ascii'), 'SCB1');
+                assert.equal(
+                    header.readBigUInt64LE(4),
+                    BigInt(last.observation.halt.proofBytes),
+                );
+                assert.equal(
+                    (await stat(proofPath)).size,
+                    last.observation.halt.proofBytes,
+                    'Publication extended the logical proof with private padding.',
+                );
+                const published = await open(proofPath, 'r');
+                const slotBytes = Buffer.alloc(chunkBytes);
+                try {
+                    for (const slot of last.observation.slots) {
+                        slotBytes.fill(0);
+                        const used = Math.max(
+                            0,
+                            Math.min(
+                                slot.length,
+                                last.observation.halt.proofBytes - slot.offset,
+                            ),
+                        );
+                        let read = 0;
+                        while (read < used) {
+                            const result = await published.read(
+                                slotBytes,
+                                read,
+                                used - read,
+                                slot.offset + read,
+                            );
+                            assert.ok(result.bytesRead > 0);
+                            read += result.bytesRead;
+                        }
+                        assert.equal(
+                            createHash('sha512')
+                                .update(slotBytes.subarray(0, slot.length))
+                                .digest('hex'),
+                            slot.sha512,
+                            'Published proof differs from the private replay diagnostic.',
+                        );
+                    }
+                } finally {
+                    slotBytes.fill(0);
+                    await published.close();
+                }
+                const [first, final] = paddingInterruptions.map(
+                    (entry) => entry.observation.halt,
+                );
+                await writeFile(
+                    path.join(log.runDirectoryPath, 'result.json'),
+                    JSON.stringify(
+                        {
+                            participantCount,
+                            optionCount,
+                            mode,
+                            scalar,
+                            poll: organizer.poll,
+                            recordIds,
+                            runtimeIdentity: runtime.identity.runtime,
+                            peakProcessTreeBytes: peaks,
+                            transfers,
+                            sampledResources,
+                            interruptions,
+                            paddingInterruptions,
+                            paddingRefusals,
+                            coincidentPaddingCuts:
+                                first.slotOffset === final.slotOffset,
+                            logicalProofBytes: last.observation.halt.proofBytes,
+                            scope: 'Original fixed-roster setup only: real contribution generation and original-intent restart, confirmation, opening and every recipient setup verifier. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run establishes no replacement setup, departure tolerance, ballots, outcome, exact-build qualification or phone support.',
+                        },
+                        null,
+                        2,
+                    ) + '\n',
+                    { flag: 'wx' },
+                );
+                completed = true;
+                process.stdout.write(log.runDirectoryPath + '\n');
+                return;
             }
             // The departing participant leaves after its preparation.
             if (departing !== undefined) await depart(departing);
