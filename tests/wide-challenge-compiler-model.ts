@@ -5,6 +5,9 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import { compileWeightedFriBound } from '#tests/weighted-fri-bound-model.js';
+
+type ProofPurpose = 'registration' | 'setup' | 'ballot' | 'release';
 
 export const wideChallengeLayout = (
     oracleCount: number,
@@ -60,6 +63,19 @@ export const jointModuloDensityBound = (
     // geometric upper bound. Soundness pays density, not additive distance.
     return { numerator: space, denominator: space - total };
 };
+
+// The actual supported-profile relation constructors: three fixed words and
+// one setup word sized for that relation's complete combination message.
+export const proofVerifierMessageBytes = (
+    purpose: ProofPurpose,
+    oracles: number,
+    queryCount: number,
+    largestLeafBytes: number,
+) =>
+    purpose === 'setup'
+        ? wideChallengeLayout(oracles, queryCount, largestLeafBytes)
+              .challengeBytes
+        : 262_144;
 
 // The compiler's charged caps are the same for every supported profile. The
 // ledger charges them, and the proof chronology model checks that one poll of
@@ -134,7 +150,7 @@ export const compileProofCompilerCapCensus = () => {
 // grows with: its committed and virtual oracles, its lookup entries and its
 // affine rows.
 const proofEvents = (
-    name: string,
+    name: ProofPurpose,
     relation: Readonly<{
         wordColumns: number;
         booleanColumns: number;
@@ -157,6 +173,131 @@ const proofEvents = (
     lookupEntries: relation.lookupEntries,
     affineRows: relation.affineRows,
 });
+
+const activeProofEvents = (profile: SupportedProfile) => {
+    const setup = deriveSetupContributionShape(profile);
+    const registration = compileRegistrationKeyRelationCensus();
+    const ballot = compileBallotEncryptionRelationCensus(profile);
+    const release = compileLinkedReleaseRelationCensus(profile);
+    return [
+        proofEvents('registration', {
+            ...registration,
+            lookupEntries: registration.lookups,
+            zeroProducts: registration.disjointPairs,
+        }),
+        proofEvents('setup', { ...setup, zeroProducts: setup.disjointPairs }),
+        proofEvents('ballot', {
+            ...ballot,
+            zeroProducts: ballot.additionalQuadraticConstraints,
+        }),
+        proofEvents('release', { ...release, zeroProducts: 1 }),
+    ];
+};
+
+type Fraction = Readonly<{ numerator: bigint; denominator: bigint }>;
+const largestFraction = (values: readonly Fraction[]) =>
+    values.reduce((maximum, value) =>
+        value.numerator * maximum.denominator >
+        maximum.numerator * value.denominator
+            ? value
+            : maximum,
+    );
+
+// Current conditional ordinary RBR operands for each fixed protocol family.
+// No role-population union, QROM composition or end-to-end level is asserted.
+export const compileProofRoundErrorCensus = (profile: SupportedProfile) => {
+    const field = compileSmallLimbProofFieldCensus();
+    const prime = field.modulus;
+    const fieldSize = prime ** 3n;
+    const agreement = compileCommonAgreementDegreeCensus();
+    const domain = BigInt(agreement.domainSize);
+    const systematic = BigInt(agreement.systematicSize);
+    if (2 * agreement.codeDimension !== agreement.domainSize)
+        throw new Error('The weighted FRI screen requires rate one half.');
+    const alphaNumerator = BigInt(
+        agreement.distanceDenominator - agreement.distanceNumerator,
+    );
+    const alphaDenominator = BigInt(agreement.distanceDenominator);
+    const weightedFri = compileWeightedFriBound(
+        domain,
+        alphaNumerator,
+        alphaDenominator,
+    );
+    const queryError = {
+        numerator: alphaNumerator ** BigInt(agreement.queries),
+        denominator: alphaDenominator ** BigInt(agreement.queries),
+    };
+    const roles = activeProofEvents(profile).map((role) => {
+        const oracles = role.originalOracles + role.virtualOracles;
+        const largestLeafBytes = Number(
+            BigInt(role.lookupEntries + 2) *
+                field.packedExtensionElementByteLength,
+        );
+        const layout = wideChallengeLayout(
+            oracles,
+            agreement.queries,
+            largestLeafBytes,
+        );
+        const density = jointModuloDensityBound(
+            prime,
+            256,
+            layout.baseFieldSamples,
+        );
+        const lookupEntryCount = BigInt(role.lookupEntries) * systematic;
+        if (lookupEntryCount >= prime)
+            throw new Error(
+                'Lookup multiplicities can vanish in the base field.',
+            );
+        const lookupRootDegree = lookupEntryCount + systematic - 1n;
+        const lookupChallengeSpace = prime * prime * (prime - 1n);
+        const batchingNumerator = 2n * BigInt(oracles) * domain;
+        const uniformAlgebraic = largestFraction([
+            { numerator: lookupRootDegree, denominator: lookupChallengeSpace },
+            { numerator: role.affineRows + 1n, denominator: fieldSize },
+            {
+                numerator:
+                    batchingNumerator * weightedFri.upper.denominator +
+                    weightedFri.upper.numerator,
+                denominator: weightedFri.upper.denominator * fieldSize,
+            },
+        ]);
+        const sampledAlgebraic = {
+            numerator: density.numerator * uniformAlgebraic.numerator,
+            denominator: density.denominator * uniformAlgebraic.denominator,
+        };
+        return {
+            ...role,
+            ...layout,
+            messageBytes: proofVerifierMessageBytes(
+                role.name,
+                oracles,
+                agreement.queries,
+                largestLeafBytes,
+            ),
+            density,
+            lookupEntryCount,
+            lookupRootDegree,
+            lookupChallengeSpace,
+            batchingNumerator,
+            uniformAlgebraic,
+            sampledAlgebraic,
+            queryDominates:
+                queryError.numerator * sampledAlgebraic.denominator >=
+                sampledAlgebraic.numerator * queryError.denominator,
+            roundError: largestFraction([queryError, sampledAlgebraic]),
+        };
+    });
+    return {
+        prime,
+        fieldSize,
+        weightedFri,
+        queryError,
+        roles,
+        maximumRoundError: largestFraction(
+            roles.map((role) => role.roundError),
+        ),
+    };
+};
 
 // Ordinary IOP event counts for one profile's full word relation, which is
 // the largest proof operator of that profile: the union over accepted proof
@@ -224,10 +365,13 @@ export const compileWideChallengeCompilerCensus = (
     const lookupChallengeSpace = prime * prime * (prime - 1n);
     const affineRootDegree = relation.affineRows;
     const correlatedRowCount = 2n * BigInt(originalOracles + virtualOracles);
-    // BCIKS20 Theorem 6.1, plus the coalesced first fold from BGKTTZ23
-    // Corollary 5.5. The restricted lookup challenge costs less than two.
+    const sampledRounds = compileProofRoundErrorCensus(profile);
+    // BCIKS20 correlated batching and the weighted-state first fold share
+    // one verifier message, so their bounds add. The historical unweighted
+    // extra L term did not cover the actual remaining consistency weights.
     const batchingAndFirstFoldNumerator =
-        (correlatedRowCount + 1n) * BigInt(agreement.domainSize);
+        correlatedRowCount * BigInt(agreement.domainSize) +
+        sampledRounds.weightedFri.ceiling;
     const ordinaryAlgebraicNumerator = [
         2n * lookupRootDegree,
         affineRootDegree + 1n,
@@ -242,8 +386,9 @@ export const compileWideChallengeCompilerCensus = (
         ordinaryAlgebraicNumerator * queryDenominator;
     const roundErrorDenominator = queryDenominator * fieldSize;
     const tagSpace = 1n << tagBits;
-    // Prefix-BCS extension: full verifier messages, at most four reference
-    // labels per hash input, and a two-fold modulo-density charge.
+    // Historical role-union reference arithmetic: retain its conservative
+    // two-fold density charge and query-plus-algebraic sum. The current
+    // per-role exact maximum above has no assumed corrupt-role population.
     const failureNumerator =
         roleBudget *
         (24n * chargedQueries ** 2n * roundErrorNumerator * tagSpace +
@@ -266,6 +411,8 @@ export const compileWideChallengeCompilerCensus = (
         correlatedRowCount,
         batchingAndFirstFoldNumerator,
         ordinaryAlgebraicNumerator,
+        weightedFri: sampledRounds.weightedFri,
+        sampledRoundError: sampledRounds.maximumRoundError,
         failureNumerator,
         failureDenominator,
         failureBits,

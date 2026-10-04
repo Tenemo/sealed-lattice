@@ -20,7 +20,7 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import {
     compileWideChallengeCompilerCensus,
     proofCompilerCaps,
-    wideChallengeLayout,
+    proofVerifierMessageBytes,
 } from '#tests/wide-challenge-compiler-model.js';
 
 export const byteAlignedSpongePermutations = (
@@ -218,7 +218,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             relationTag: 'linked-threshold-release/1',
             roleBytes: participantReleaseProofRoleBytes,
         },
-    ];
+    ] as const;
     return rows.map((row) => {
         const oracles =
             row.columns + 2 * row.lookups + row.booleans + row.products + 6;
@@ -226,16 +226,14 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             role: row.role,
             // supported-profile::relation fixes the other three descriptors
             // at MESSAGE_BYTES; only setup chooses its minimum word width.
-            messageBytes:
-                row.role === 'setup'
-                    ? BigInt(
-                          wideChallengeLayout(
-                              oracles,
-                              compileCommonAgreementDegreeCensus().queries,
-                              Number(row.layout.secondWidth),
-                          ).challengeBytes,
-                      )
-                    : 262_144n,
+            messageBytes: BigInt(
+                proofVerifierMessageBytes(
+                    row.role,
+                    oracles,
+                    compileCommonAgreementDegreeCensus().queries,
+                    Number(row.layout.secondWidth),
+                ),
+            ),
             firstWidth: row.layout.firstWidth,
             secondWidth: row.layout.secondWidth,
             parameterBytes:

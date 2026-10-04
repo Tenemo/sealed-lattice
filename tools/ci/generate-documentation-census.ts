@@ -139,7 +139,10 @@ import {
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
-import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
+import {
+    compileProofRoundErrorCensus,
+    compileWideChallengeCompilerCensus,
+} from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
 const formatCount = (value: bigint | number): string =>
@@ -188,6 +191,7 @@ export const renderDocumentationCensus = (): string => {
         compileFixedSpongeInitializationCensus(completion);
     const wideChallengeCompiler =
         compileWideChallengeCompilerCensus(completion);
+    const sampledRoundErrors = compileProofRoundErrorCensus(completion);
     const fullWordProof = compileFullWordProofLayout(completion);
     const ballotWordProof = compileBallotWordProofLayout(completion);
     const ballotBody = compileBallotBodyCensus(completion);
@@ -1755,7 +1759,80 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Wide-challenge compiler census',
         '',
-        'Conditional soundness screen for the full word-layout shape under the prefix-BCS lemma. The underlying IOP must separately establish its common-agreement and algebraic transition bounds. The query cap bounds every oracle call of an experiment within the target, including honest proving, verification and expansion, and the proof compiler chronology checks the other caps against every supported profile. This does not include setup privacy, proof zero knowledge, lattice assumptions, fixed-function assumptions, or phone qualification.',
+        'The current conditional ordinary round bound uses BCIKS20 Theorem 7.2 and Claim 8.5 with the reviewed consistency-weight state. At the displayed agreement threshold and rate, the proof-analysis parameter changes no verifier bytes. Each role separately compares exact-uniform query sampling against its density-adjusted maximum of the restricted lookup, affine and coalesced batching/weighted-fold terms. The underlying common-agreement, degree, masking and semantic correspondence premises remain explicit in the security argument; these arithmetic rows establish no end-to-end security level.',
+        '',
+        table(
+            ['Weighted-fold operand', 'Value'],
+            [
+                [
+                    'Proof-analysis parameter',
+                    formatCount(
+                        sampledRoundErrors.weightedFri.analysisParameter,
+                    ),
+                ],
+                [
+                    'Rate numerator',
+                    formatCount(sampledRoundErrors.weightedFri.rateNumerator),
+                ],
+                [
+                    'Rate denominator',
+                    formatCount(sampledRoundErrors.weightedFri.rateDenominator),
+                ],
+                [
+                    'Agreement numerator',
+                    formatCount(
+                        sampledRoundErrors.weightedFri.agreementNumerator,
+                    ),
+                ],
+                [
+                    'Agreement denominator',
+                    formatCount(
+                        sampledRoundErrors.weightedFri.agreementDenominator,
+                    ),
+                ],
+                [
+                    'Weighted-fold rational numerator',
+                    formatCount(sampledRoundErrors.weightedFri.upper.numerator),
+                ],
+                [
+                    'Weighted-fold rational denominator',
+                    formatCount(
+                        sampledRoundErrors.weightedFri.upper.denominator,
+                    ),
+                ],
+                [
+                    'Weighted-fold conservative integer numerator',
+                    formatCount(sampledRoundErrors.weightedFri.ceiling),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Role',
+                'Original oracles',
+                'Virtual oracles',
+                'Lookup root degree',
+                'Affine rows',
+                'Complete message bytes',
+                'Consumed base-field samples',
+                'Query dominates sampled algebraic bound',
+            ],
+            sampledRoundErrors.roles.map((role) => [
+                role.name,
+                ...[
+                    role.originalOracles,
+                    role.virtualOracles,
+                    role.lookupRootDegree,
+                    role.affineRows,
+                    role.messageBytes,
+                    role.baseFieldSamples,
+                ].map(formatCount),
+                role.queryDominates ? 'Yes' : 'No',
+            ]),
+        ),
+        '',
+        'The following prefix-compiler caps and exponents are historical role-union reference arithmetic. Its conservative algebraic numerator now includes the weighted folding term, but its finite corrupt-role population and whole-experiment composition are not established for clear preparation. The current finite-family argument takes a maximum of the per-role sampled-round bounds above without adding a family union factor. Reference exponents below do not select a new honest-credential scope or claim admission, end-to-end security, or phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -1857,7 +1934,7 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Conditional QROM soundness exponent',
+                    'Historical role-union QROM reference exponent',
                     formatCount(wideChallengeCompiler.failureBits),
                 ],
             ],

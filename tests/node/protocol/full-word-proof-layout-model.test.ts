@@ -64,7 +64,9 @@ describe('full word-proof layout and theorem operands', () => {
         expect(census.lookupEntryCount).toBe(375n * 65536n);
         expect(census.lookupRootDegree).toBe(376n * 65536n - 1n);
         expect(census.correlatedRowCount).toBe(2n * (734n + 413n));
-        expect(census.batchingAndFirstFoldNumerator).toBe(2295n * 262144n);
+        expect(census.batchingAndFirstFoldNumerator).toBe(
+            2294n * 262144n + (17n ** 7n * 262144n ** 2n) / 512n,
+        );
         expect(census.ordinaryAlgebraicNumerator).toBe(
             census.batchingAndFirstFoldNumerator,
         );

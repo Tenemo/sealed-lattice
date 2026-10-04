@@ -1,13 +1,85 @@
 import { describe, expect, it } from 'vitest';
 
-import { completionProfile } from '#tests/supported-profile-model.js';
+import {
+    completionProfile,
+    listSupportedProfiles,
+} from '#tests/supported-profile-model.js';
 import {
     compileWideChallengeCompilerCensus,
+    compileProofRoundErrorCensus,
     jointModuloDensityBound,
     wideChallengeLayout,
 } from '#tests/wide-challenge-compiler-model.js';
 
 describe('wide verifier messages and short authentication tags', () => {
+    it('derives the current four source families separately before taking a round-error maximum', () => {
+        const value = compileProofRoundErrorCensus(completionProfile());
+        expect(
+            value.roles.map((role) => [
+                role.name,
+                role.originalOracles,
+                role.virtualOracles,
+            ]),
+        ).toEqual([
+            ['registration', 13, 9],
+            ['setup', 734, 413],
+            ['ballot', 68, 42],
+            ['release', 133, 73],
+        ]);
+        for (const role of value.roles) {
+            expect(role.lookupChallengeSpace).toBe(
+                value.prime ** 2n * (value.prime - 1n),
+            );
+            expect(role.density).toEqual({
+                numerator: 1n << 256n,
+                denominator:
+                    (1n << 256n) -
+                    BigInt(
+                        3 *
+                            (2 * (role.originalOracles + role.virtualOracles) +
+                                1),
+                    ) *
+                        value.prime,
+            });
+            expect(role.roundError).toEqual(value.queryError);
+        }
+    });
+    it('independently checks every profile and family against the unchanged query term', () => {
+        for (const profile of listSupportedProfiles()) {
+            const value = compileProofRoundErrorCensus(profile);
+            expect(value.prime).toBeGreaterThan(1n << 127n);
+            expect(value.weightedFri.ceiling).toBeLessThan(1n << 56n);
+            expect(value.queryError.numerator << 302n).toBeGreaterThan(
+                value.queryError.denominator,
+            );
+            for (const role of value.roles) {
+                const oracles = role.originalOracles + role.virtualOracles;
+                expect(oracles).toBeLessThan(1 << 13);
+                expect(role.lookupRootDegree).toBeLessThan(1n << 27n);
+                expect(role.affineRows).toBeLessThan(1n << 28n);
+                expect(role.baseFieldSamples).toBeLessThan(1 << 16);
+                expect(role.density.numerator).toBeLessThan(
+                    2n * role.density.denominator,
+                );
+                // This cross-product is the actual sampled-field algebraic
+                // bound, including the non-base lookup space and density.
+                expect(
+                    role.sampledAlgebraic.numerator *
+                        value.queryError.denominator,
+                ).toBeLessThan(
+                    value.queryError.numerator *
+                        role.sampledAlgebraic.denominator,
+                );
+                expect(role.queryDominates).toBe(true);
+            }
+            expect(
+                value.roles
+                    .filter((role) => role.name !== 'setup')
+                    .map((role) => role.messageBytes),
+            ).toEqual([262144, 262144, 262144]);
+            expect(value.maximumRoundError).toEqual(value.queryError);
+        }
+    });
     it('fits every independent field challenge and all query indices in one message', () => {
         expect(wideChallengeLayout(64, 32, 720)).toEqual({
             fieldElements: 129,
