@@ -43,6 +43,7 @@ import {
     resumeContribution,
     resumeParticipant,
     storedConfirmation,
+    storedOpening,
 } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
@@ -520,10 +521,17 @@ const execute = async (
             const session = await resumeContribution(
                 profileContext(),
                 root,
-                await reverifyRoster(context, relay, root, enrollment),
+                root.head.generation < 11
+                    ? await reverifyRoster(context, relay, root, enrollment)
+                    : undefined,
             );
-            await confirmContribution(session);
-            const opening = await openContribution(session, relay);
+            let opening;
+            if (root.head.generation >= 11)
+                opening = await storedOpening(session);
+            else {
+                await confirmContribution(session);
+                opening = await openContribution(session, relay);
+            }
             root = session.root;
             await publishOpening(session, relay, opening);
             break;

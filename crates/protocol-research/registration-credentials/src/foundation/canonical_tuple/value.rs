@@ -121,6 +121,35 @@ impl CanonicalItem {
         }
     }
 
+    pub fn hash512_list(values: &[[u8; 64]]) -> Result<Self, CanonicalCodecError> {
+        if values.len() > CanonicalDecodeLimits::default().maximum_item_count {
+            return Err(CanonicalCodecError::new(
+                CanonicalCodecErrorKind::LimitExceeded,
+                0,
+                "hash-list count exceeds the default limit",
+            ));
+        }
+        let count = u32::try_from(values.len()).map_err(|_| {
+            CanonicalCodecError::new(
+                CanonicalCodecErrorKind::LengthOverflow,
+                0,
+                "hash-list count does not fit u32",
+            )
+        })?;
+        let mut canonical_bytes = Vec::with_capacity(6 + values.len() * 64);
+        canonical_bytes
+            .extend_from_slice(&CanonicalItemType::Hash512.canonical_code().to_le_bytes());
+        canonical_bytes.extend_from_slice(&count.to_le_bytes());
+        for value in values {
+            canonical_bytes.extend_from_slice(value);
+        }
+        ensure_default_item_limit(&canonical_bytes)?;
+        Ok(Self {
+            item_type: CanonicalItemType::HomogeneousList,
+            canonical_bytes,
+        })
+    }
+
     pub fn display_text(value: &StabilizedDisplayText) -> Result<Self, CanonicalCodecError> {
         let canonical_bytes = encode_variable_value(
             value.as_str().as_bytes(),

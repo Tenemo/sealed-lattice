@@ -436,6 +436,8 @@ dependencies = [
 name = "registration-enrollment"
 version = "0.0.0"
 dependencies = [
+ "aes",
+ "aes-gcm",
  "ballot-encryption",
  "ballot-proof",
  "contribution-prover",

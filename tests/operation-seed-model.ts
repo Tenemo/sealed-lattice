@@ -5,15 +5,17 @@ import {
 } from '#tests/full-word-proof-layout-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-// Every private randomness of a contribution generation or continuation, a
+// Fresh private randomness of a contribution generation or continuation, a
 // ballot or a release is SHAKE256 output over its stream's domain and one
 // 512-bit seed that the participant's root retains before the operation
-// draws any byte.
+// draws any byte. Its original FHE secret and first encryption error instead
+// come from a separately retained registration source seed.
 export const operationSeedBytes = 64n;
 
 // The seeds the participants of one roster draw: each setup contributor's
 // generation and continuation seeds, and each participant's ballot and
-// release seeds. A repeated operation reads its retained seed again.
+// release seeds. A repeated operation reads its retained seed again. Original
+// registration source seeds are counted separately by their poll-family owner.
 export const operationSeedCount = (profile: SupportedProfile) =>
     2n * BigInt(profile.setupContributorCount) +
     2n * BigInt(profile.participantCount);

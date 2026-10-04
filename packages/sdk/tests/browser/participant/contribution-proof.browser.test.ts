@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-    bodyHeader,
     createProofWriter,
     proofLength,
     readProof,
@@ -21,7 +20,15 @@ const recordBytes = 1_048_576;
 const bounds = {
     minimumProofBytes: 17,
     maximumProofBytes: 3 * recordBytes + 37,
-    bodyHeaderBytes: 12,
+    bodyHeaderBytes: 76,
+};
+// Synthetic framing exercises storage only. Production headers come from
+// the original credential's source inventory in the Rust module.
+const fixtureHeader = (length: number) => {
+    const header = new Uint8Array(76).fill(43);
+    header.set(new TextEncoder().encode('SCB2'));
+    new DataView(header.buffer).setBigUint64(4, BigInt(length), true);
+    return header;
 };
 const expectedSlots = [
     { offset: 0, length: recordBytes },
@@ -113,7 +120,7 @@ const fixture = async () => {
                 offset = end;
                 piece++;
             }
-            return await writer.finish();
+            return fixtureHeader(await writer.finish());
         } finally {
             writer.close();
         }
@@ -165,9 +172,9 @@ describe('fixed private contribution proof storage', () => {
             const bytes = proofBytes(length);
             const fixed = await fixture();
             const header = await fixed.retain(bytes, pieces);
-            expect(header.length).toBe(12);
+            expect(header.length).toBe(76);
             expect(new TextDecoder().decode(header.subarray(0, 4))).toBe(
-                'SCB1',
+                'SCB2',
             );
             expect(
                 new DataView(
@@ -301,12 +308,7 @@ describe('fixed private contribution proof storage', () => {
         // No completed header or synthesized padding can hide the missing
         // remainder. The original generation checkpoint is a separate owner.
         await expect(
-            readProof(
-                bounds,
-                bodyHeader(bounds, 17),
-                pending.read,
-                () => undefined,
-            ),
+            readProof(bounds, fixtureHeader(17), pending.read, () => undefined),
         ).rejects.toThrow();
     });
 
@@ -334,8 +336,8 @@ describe('fixed private contribution proof storage', () => {
             shortProof,
             tooLong,
             overflowing,
-            header.subarray(0, 11),
-            new Uint8Array(13),
+            header.subarray(0, 75),
+            new Uint8Array(77),
         ])
             await expect(
                 readProof(bounds, malformed, fixed.read, () => undefined),

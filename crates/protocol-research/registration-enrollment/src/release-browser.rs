@@ -1,4 +1,4 @@
-use super::{INPUT_BYTES, SESSION, Session};
+use super::{SESSION, Session};
 use evaluation_target::release_body::{ReleaseBodyVerifier, VerifiedReleaseBody};
 use registration_credentials::{
     Error,
@@ -255,7 +255,7 @@ pub extern "C" fn participant_release_command(operation: u32, length: usize) -> 
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
         session.contribution_output.clear();
-        if length > INPUT_BYTES {
+        if length > session.input.len() {
             return 1;
         }
         let input = Zeroizing::new(session.input[..length].to_vec());

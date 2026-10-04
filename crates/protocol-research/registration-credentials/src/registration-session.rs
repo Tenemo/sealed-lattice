@@ -167,7 +167,7 @@ impl RegistrationSession {
         header_bytes: &[u8],
         signature: &[u8],
     ) -> Result<Self, Error> {
-        let header = checked_header(header_bytes, poll.identity(), poll.runtime())?;
+        let header = checked_header(header_bytes, poll)?;
         if signature.len() != SIGNATURE_BYTES {
             return Err(Error::Shape);
         }
@@ -354,6 +354,7 @@ pub(crate) mod tests {
             signing_public: *organizer.signing_public(),
             recipient_key_hash: [0; 64],
             proof_length: PROOF_HEADER_BYTES,
+            fhe_key_commitments: vec![[7; 64]],
         }
         .encode()
         .unwrap();

@@ -133,6 +133,7 @@ mod tests {
                 signing_public: *original.signing_public(),
                 recipient_key_hash: [3; 64],
                 proof_length: 5000,
+                fhe_key_commitments: vec![[7; 64]],
             })
             .unwrap();
             hash.absorb(&[4; 5000]).unwrap();

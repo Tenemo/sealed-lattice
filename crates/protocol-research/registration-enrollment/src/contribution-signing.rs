@@ -4,9 +4,12 @@ use registration_credentials::{
         CommitmentInventory, SignedConfirmation, SignedOpening, VerifiedConfirmation,
         verify_confirmation,
     },
-    contribution_commitment::{ComputedContributionCommitment, ContributionCommitmentHasher},
+    contribution_commitment::{
+        ComputedContributionCommitment, ContributionBodyHeader, ContributionCommitmentHasher,
+    },
     roster::RetainedContributionContext,
     roster_authentication::OrganizerSignedRoster,
+    source_binding::FheKeyCommitmentHasher,
 };
 use std::sync::Arc;
 
@@ -15,12 +18,53 @@ enum BodyContext {
     Retained(Box<RetainedContributionContext>),
 }
 
+struct SourceBinding {
+    hash: Option<FheKeyCommitmentHasher>,
+    expected: [u8; 64],
+    polynomial: usize,
+    length: usize,
+    matched: bool,
+}
+impl SourceBinding {
+    fn new(
+        profile: supported_profile::Profile,
+        binding: (FheKeyCommitmentHasher, [u8; 64]),
+    ) -> Self {
+        let polynomial = profile.fhe_polynomial(0, 1);
+        Self {
+            hash: Some(binding.0),
+            expected: binding.1,
+            polynomial,
+            length: profile.setup_polynomial_bytes(polynomial).unwrap(),
+            matched: false,
+        }
+    }
+    fn push(&mut self, polynomial: usize, offset: usize, bytes: &[u8]) -> Result<(), Error> {
+        if polynomial != self.polynomial {
+            return Ok(());
+        }
+        self.hash
+            .as_mut()
+            .ok_or(Error::Consumed)?
+            .push(offset, bytes)?;
+        if offset + bytes.len() == self.length {
+            let actual = self.hash.take().ok_or(Error::Consumed)?.finish()?;
+            if actual != self.expected {
+                return Err(Error::Context);
+            }
+            self.matched = true;
+        }
+        Ok(())
+    }
+}
+
 /// Volatile operations beneath the worker's authenticated persist-before-sign boundary.
 /// No method restores durable authority from a public transcript.
 #[derive(Default)]
 pub struct ContributionSigning {
     context: Option<BodyContext>,
     hasher: Option<ContributionCommitmentHasher>,
+    source_binding: Option<SourceBinding>,
     computed: Option<ComputedContributionCommitment>,
     confirmation: Option<SignedConfirmation>,
     confirmations: Vec<VerifiedConfirmation>,
@@ -47,6 +91,16 @@ impl ContributionSigning {
         credential.validate_body_position(&proposal, position)?;
         let hasher =
             ContributionCommitmentHasher::new(proposal.proposal(), position, salt, header)?;
+        let decoded = ContributionBodyHeader::decode(proposal.proposal().profile(), header)?;
+        let binding = (
+            FheKeyCommitmentHasher::for_contribution(
+                proposal.proposal(),
+                position,
+                &decoded.source_salt,
+            )?,
+            *proposal.proposal().fhe_key_commitment(position)?,
+        );
+        self.source_binding = Some(SourceBinding::new(proposal.proposal().profile(), binding));
         self.context = Some(BodyContext::Public(proposal));
         self.hasher = Some(hasher);
         Ok(())
@@ -64,6 +118,12 @@ impl ContributionSigning {
         }
         let hasher =
             ContributionCommitmentHasher::from_retained(credential, &context, salt, header)?;
+        let decoded = ContributionBodyHeader::decode(context.profile(), header)?;
+        let binding = (
+            FheKeyCommitmentHasher::for_retained(&context, credential, &decoded.source_salt)?,
+            *context.fhe_key_commitment(),
+        );
+        self.source_binding = Some(SourceBinding::new(context.profile(), binding));
         self.context = Some(BodyContext::Retained(Box::new(context)));
         self.hasher = Some(hasher);
         Ok(())
@@ -80,7 +140,11 @@ impl ContributionSigning {
         self.hasher
             .as_mut()
             .ok_or(Error::Consumed)?
-            .push_polynomial(index, offset, bytes)
+            .push_polynomial(index, offset, bytes)?;
+        self.source_binding
+            .as_mut()
+            .ok_or(Error::Context)?
+            .push(index, offset, bytes)
     }
 
     pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Error> {
@@ -91,6 +155,13 @@ impl ContributionSigning {
     }
 
     pub fn finish_body(&mut self) -> Result<(), Error> {
+        if !self
+            .source_binding
+            .as_ref()
+            .is_some_and(|binding| binding.matched)
+        {
+            return Err(Error::Context);
+        }
         let value = self.hasher.as_mut().ok_or(Error::Consumed)?.finish()?;
         self.computed = Some(value);
         self.hasher = None;

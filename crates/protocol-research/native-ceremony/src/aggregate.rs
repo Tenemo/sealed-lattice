@@ -38,6 +38,70 @@ pub fn ballot_keys(profile: Profile) -> [usize; 2] {
     setup_inputs(profile).map(|(_, _, key)| key)
 }
 
+/// Both controls reach the original-coordinate comparison before any proof
+/// bytes or the complete-body commitment can decide acceptance. The foreign
+/// coordinate was genuinely generated for another registered participant.
+pub fn verify_source_refusals(
+    inventory: Arc<CommitmentInventory>,
+    directories: &[PathBuf],
+    headers: &[Vec<u8>],
+    openings: &[SignedOpening],
+) {
+    let profile = inventory.proposal().proposal().profile();
+    let index = profile.fhe_polynomial(0, 1);
+    assert_eq!(profile.contribution_body_polynomials()[0], index);
+    let mut proof_header = [0; PROOF_HEADER_BYTES];
+    File::open(directories[0].join("proof.bin"))
+        .unwrap()
+        .read_exact(&mut proof_header)
+        .unwrap();
+    let (length, capacity) = polynomial_bytes(profile, index);
+    for wrong_source in [false, true] {
+        let mut header = headers[0].clone();
+        if !wrong_source {
+            header[12] ^= 1;
+        }
+        let mut verifier = SetupAggregator::new(inventory.clone()).unwrap();
+        verifier
+            .begin(
+                openings[0].body(),
+                openings[0].signature(),
+                &header,
+                &proof_header,
+            )
+            .unwrap();
+        let directory = &directories[usize::from(wrong_source)];
+        let mut incoming =
+            File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
+        assert_eq!(incoming.metadata().unwrap().len(), length as u64);
+        let mut bytes = vec![0; capacity];
+        let mut aggregate = vec![0; capacity];
+        let mut offset = 0;
+        while offset < length {
+            let count = capacity.min(length - offset);
+            incoming.read_exact(&mut bytes[..count]).unwrap();
+            aggregate[..count].fill(0);
+            let result =
+                verifier.polynomial(index, offset, &bytes[..count], &mut aggregate[..count]);
+            if offset + count == length {
+                assert!(matches!(
+                    result,
+                    Err(setup_aggregate::verified::Refusal::Body)
+                ));
+            } else {
+                result.unwrap();
+            }
+            offset += count;
+        }
+        assert_eq!(verifier.accepted(), 0);
+        assert!(!verifier.complete());
+        assert!(verifier.finish_contribution().is_err());
+    }
+    println!(
+        "Refused a foreign registered coordinate and a changed source opening before proof consumption"
+    );
+}
+
 pub fn verify(
     inventory: Arc<CommitmentInventory>,
     directories: &[PathBuf],

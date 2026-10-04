@@ -8,6 +8,7 @@ import {
     tupleFields,
     unsigned16,
     unsigned32,
+    unsigned64,
 } from './bytes.js';
 import {
     isSetupContributor,
@@ -86,7 +87,7 @@ type CheckpointRecord = Readonly<{ key: Uint8Array; hash: Uint8Array }>;
 export type ContributionState = Readonly<{
     position: number;
     salt: Uint8Array;
-    // The first-oracle checkpoint header until completion, then SCB1.
+    // The first-oracle checkpoint header until completion, then SCB2.
     header: Uint8Array;
     publicRecords: readonly SealedRecord[];
     privateRecords: readonly CheckpointRecord[];
@@ -181,6 +182,7 @@ const signingCommand = {
     openingBody: 13,
     rosterConfirmationBody: 14,
     signRosterConfirmation: 15,
+    bodyHeader: 16,
 } as const;
 
 // Signing records follow the proof in this order, one generation after
@@ -359,7 +361,7 @@ const decodeConfirmationState = (
 
 // Decodes the contribution suffix of an authenticated root. The body records
 // and every physical proof slot follow the profile's fixed plan. From
-// completion onward SCB1 frames the logical proof prefix inside those slots,
+// completion onward SCB2 frames the logical proof prefix inside those slots,
 // and the signing records agree with the generation.
 export const decodeContributionState = (
     bytes: Uint8Array,
@@ -1208,7 +1210,16 @@ export const continueContribution = async (session: ContributionSession) => {
             throw new Error('The continued proof is incomplete.');
         // The root remains at generation six while the same record writer
         // fills every remaining profile slot, including padding-only slots.
-        header = await writer.finish();
+        const length = await writer.finish();
+        header = signing(
+            context,
+            signingCommand.bodyHeader,
+            concatenate(unsigned16(state.position), unsigned64(BigInt(length))),
+        );
+        if (proofLength(bounds, header) !== length)
+            throw new Error(
+                'The original contribution header has another proof length.',
+            );
     } finally {
         writer.close();
         // A record opened ahead that the prover never took is cleared too.
@@ -1266,10 +1277,12 @@ const bodyCommitment = async (session: ContributionSession) => {
     const control = concatenate(
         unsigned16(state.position),
         state.salt,
-        state.header,
+        unsigned64(BigInt(proofLength(profile.contribution, state.header))),
     );
     try {
-        signing(context, signingCommand.beginBody, control);
+        const header = signing(context, signingCommand.beginBody, control);
+        if (!equalBytes(header, state.header))
+            throw new Error('The original source opening changed.');
     } finally {
         control.fill(0);
     }

@@ -306,7 +306,7 @@ const prepare = (
         target.set(shake(name + '/' + String(requests), target.length));
         requests += 1;
     };
-    const control = concatenate(input, shake(name + '/data-keys', 64));
+    const control = concatenate(input, shake(name + '/data-keys', 96));
     writeInput(kernel, control);
     expect(
         joining === undefined

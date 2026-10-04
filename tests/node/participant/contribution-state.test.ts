@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { bodyHeader } from '#packages/sdk/src/participant/worker/contribution-proof.js';
 import {
     decodeContributionState,
     encodeContributionState,
@@ -11,6 +10,12 @@ import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bou
 const profile = compileParticipantRuntimeProfile(3, 2);
 const bounds = profile.contribution;
 const recordBytes = 1_048_576;
+const fixtureHeader = (length: number) => {
+    const header = new Uint8Array(76).fill(43);
+    header.set(new TextEncoder().encode('SCB2'));
+    new DataView(header.buffer).setBigUint64(4, BigInt(length), true);
+    return header;
+};
 const proofObject = bounds.expandedPolynomials + 1;
 const slots = Array.from(
     { length: Math.ceil(bounds.maximumProofBytes / recordBytes) },
@@ -55,7 +60,7 @@ const completed = (length: number, generation = 7): ContributionState => {
     return {
         position: 0,
         salt: new Uint8Array(bounds.saltBytes),
-        header: bodyHeader(bounds, length),
+        header: fixtureHeader(length),
         publicRecords: [...bounds.publicRecords, ...slots].map(record),
         privateRecords: [],
         signingRecords: signingLengths
@@ -76,7 +81,7 @@ const completed = (length: number, generation = 7): ContributionState => {
 };
 
 describe('contribution state framing', () => {
-    it('retains one fixed-width SCB1 length and the same completed slot inventory', () => {
+    it('retains one fixed-width SCB2 header and the same completed slot inventory', () => {
         for (const generation of [7, 8, 9, 10, 11, 12, 29]) {
             let encodedLength: number | undefined;
             for (const length of [
@@ -97,7 +102,7 @@ describe('contribution state framing', () => {
                     profile,
                 );
                 expect(decoded).toEqual(state);
-                expect(decoded.header.length).toBe(12);
+                expect(decoded.header.length).toBe(76);
                 expect(
                     new DataView(decoded.header.buffer).getBigUint64(4, true),
                 ).toBe(BigInt(length));

@@ -43,6 +43,7 @@ fn retained_registration(
         signing_public: *credential.signing_public(),
         recipient_key_hash: ProtocolHash::digest(&key),
         proof_length: PROOF_HEADER_BYTES + 1,
+        fhe_key_commitments: vec![[7; 64]; crate::source_binding::fhe_key_families(poll).len()],
     }
     .encode()
     .unwrap();
@@ -111,7 +112,7 @@ fn retained_context(fixture: &CustodyFixture, position: usize) -> RetainedContri
     RetainedContributionContext::parse(
         &fixture.credentials[position],
         &fixture.proposal.records()[position],
-        fixture.poll.manifest().option_count(),
+        &fixture.poll,
         position,
         fixture.proposal.body(),
     )
@@ -201,6 +202,10 @@ fn contribution_roles_retain_the_original_owner_across_roster_and_context_restor
         let context = retained_context(&fixture, position);
         assert_eq!(context.role(), role);
         assert_eq!(
+            context.fhe_key_commitment(),
+            fixture.proposal.fhe_key_commitment(position).unwrap()
+        );
+        assert_eq!(
             context
                 .checkpoint_role(
                     &checkpoint_prefix(&fixture),
@@ -226,7 +231,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
             RetainedContributionContext::parse(
                 credential,
                 record,
-                2,
+                &fixture.poll,
                 position,
                 fixture.proposal.body()
             ),
@@ -237,14 +242,26 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
     // after completing another body, must not impersonate that original.
     let mut same_key = Credential::from_seed([1; 32]);
     assert!(matches!(
-        RetainedContributionContext::parse(&same_key, original, 2, 0, fixture.proposal.body()),
+        RetainedContributionContext::parse(
+            &same_key,
+            original,
+            &fixture.poll,
+            0,
+            fixture.proposal.body()
+        ),
         Err(Error::Context)
     ));
     let other_body = retained_registration(&fixture.poll, &mut same_key, 19);
     assert_ne!(other_body.body_digest(), original.body_digest());
     for record in [original.as_ref(), &other_body] {
         assert!(matches!(
-            RetainedContributionContext::parse(&same_key, record, 2, 0, fixture.proposal.body()),
+            RetainedContributionContext::parse(
+                &same_key,
+                record,
+                &fixture.poll,
+                0,
+                fixture.proposal.body()
+            ),
             Err(Error::Context)
         ));
     }
@@ -253,7 +270,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
             RetainedContributionContext::parse(
                 &fixture.credentials[0],
                 original,
-                2,
+                &fixture.poll,
                 position,
                 fixture.proposal.body()
             )
@@ -286,7 +303,7 @@ fn retained_context_requires_the_original_poll_and_runtime() {
             RetainedContributionContext::parse(
                 &fixture.credentials[1],
                 &fixture.proposal.records()[1],
-                2,
+                &fixture.poll,
                 1,
                 &proposal.encode().unwrap(),
             ),
@@ -301,7 +318,7 @@ fn retained_context_requires_the_original_poll_and_runtime() {
             RetainedContributionContext::parse(
                 &foreign.credentials[1],
                 &foreign.proposal.records()[1],
-                2,
+                &foreign.poll,
                 1,
                 fixture.proposal.body(),
             ),
@@ -311,7 +328,7 @@ fn retained_context_requires_the_original_poll_and_runtime() {
             RetainedContributionContext::parse(
                 &fixture.credentials[1],
                 &fixture.proposal.records()[1],
-                2,
+                &fixture.poll,
                 1,
                 foreign.proposal.body(),
             ),

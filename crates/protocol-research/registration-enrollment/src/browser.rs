@@ -13,7 +13,33 @@ use zeroize::{Zeroize, Zeroizing};
 mod finality_browser;
 #[path = "release-browser.rs"]
 mod release_browser;
-const INPUT_BYTES: usize = 128 + 4 + 4096 + 128 + 64 + 65536 * 21 + 532 + 52 + 2;
+fn input_bytes() -> usize {
+    let retained_setup = supported_profile::Profile::all()
+        .map(|profile| {
+            4 + 64
+                + 64 * profile.contribution_body_polynomials().len()
+                + registration_credentials::RETAINED_TAG_BYTES
+        })
+        .max()
+        .unwrap();
+    let restore = 128
+        + 4
+        + RegistrationHeader::maximum_bytes()
+        + 128
+        + registration_credentials::registration::KEY_BYTES
+        + setup_witness::registration::SEALED_KEY_BYTES
+        + registration_credentials::SEALED_SIGNING_SEED_BYTES
+        + 2
+        + (96 + crate::fhe_sources::maximum_capsule_bytes()).max(64 + 4 + retained_setup);
+    let enrollment = 128
+        + 4
+        + registration_credentials::poll::MAXIMUM_POLL_BYTES
+        + registration_credentials::SIGNATURE_BYTES
+        + 4
+        + MAXIMUM_USERNAME_INGRESS_BYTES
+        + 96;
+    restore.max(enrollment)
+}
 struct Session {
     input: Vec<u8>,
     started: bool,
@@ -34,7 +60,7 @@ struct Session {
     // A retained evaluated target the host streams in, and its length.
     evaluation: Option<(usize, Vec<u8>)>,
 }
-thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;INPUT_BYTES],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,close:None,finality:None,release:None,evaluation:None});}
+thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;input_bytes()],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,close:None,finality:None,release:None,evaluation:None});}
 #[unsafe(no_mangle)]
 pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
@@ -43,7 +69,7 @@ pub extern "C" fn input_pointer() -> usize {
 /// The input buffer's length; the host never writes more.
 #[unsafe(no_mangle)]
 pub extern "C" fn input_capacity() -> usize {
-    INPUT_BYTES
+    SESSION.with(|state| state.borrow().input.len())
 }
 
 #[unsafe(no_mangle)]
@@ -145,7 +171,7 @@ fn join_context(
 pub extern "C" fn validate_creator(length: usize) -> u32 {
     SESSION.with(|state| {
         let state = state.borrow();
-        if length > INPUT_BYTES {
+        if length > state.input.len() {
             return 1;
         }
         u32::from(
@@ -157,7 +183,7 @@ pub extern "C" fn validate_creator(length: usize) -> u32 {
 pub extern "C" fn validate_join(length: usize) -> u32 {
     SESSION.with(|state| {
         let state = state.borrow();
-        if length > INPUT_BYTES {
+        if length > state.input.len() {
             return 1;
         }
         u32::from(join_context(&state.input[..length]).is_none_or(|(_, _, end)| end != length))
@@ -188,13 +214,19 @@ fn staged_output(kind: u32, offset: usize, bytes: &[u8]) {
 pub extern "C" fn prepare_creator(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if state.started || length > INPUT_BYTES {
+        if state.started || length > state.input.len() {
             return 1;
         }
         let Some((draft, runtime, start, end)) = creator_context(&state.input[..length]) else {
             return 1;
         };
-        if length != end + 64 || state.input[end..end + 32] == state.input[end + 32..length] {
+        if length != end + 96
+            || !crate::distinct_data_keys(
+                state.input[end..end + 32].try_into().unwrap(),
+                state.input[end + 32..end + 64].try_into().unwrap(),
+                state.input[end + 64..length].try_into().unwrap(),
+            )
+        {
             return 1;
         }
         state.started = true;
@@ -205,7 +237,8 @@ pub extern "C" fn prepare_creator(length: usize) -> u32 {
             runtime,
             &input[start..end],
             input[end..end + 32].try_into().unwrap(),
-            input[end + 32..].try_into().unwrap(),
+            input[end + 32..end + 64].try_into().unwrap(),
+            input[end + 64..].try_into().unwrap(),
             staged_output,
         ) else {
             return 1;
@@ -221,13 +254,19 @@ pub extern "C" fn prepare_creator(length: usize) -> u32 {
 pub extern "C" fn prepare_join(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if state.started || length > INPUT_BYTES {
+        if state.started || length > state.input.len() {
             return 1;
         }
         let Some((poll, start, end)) = join_context(&state.input[..length]) else {
             return 1;
         };
-        if length != end + 64 || state.input[end..end + 32] == state.input[end + 32..length] {
+        if length != end + 96
+            || !crate::distinct_data_keys(
+                state.input[end..end + 32].try_into().unwrap(),
+                state.input[end + 32..end + 64].try_into().unwrap(),
+                state.input[end + 64..length].try_into().unwrap(),
+            )
+        {
             return 1;
         }
         state.started = true;
@@ -237,7 +276,8 @@ pub extern "C" fn prepare_join(length: usize) -> u32 {
             &poll,
             &input[start..end],
             input[end..end + 32].try_into().unwrap(),
-            input[end + 32..].try_into().unwrap(),
+            input[end + 32..end + 64].try_into().unwrap(),
+            input[end + 64..].try_into().unwrap(),
             staged_output,
         ) else {
             return 1;
@@ -249,11 +289,20 @@ pub extern "C" fn prepare_join(length: usize) -> u32 {
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn restore(length: usize) -> u32 {
+    restore_enrollment(length, false)
+}
+/// The prepared path authenticates a retained setup result and accepts no
+/// source capsule or source wrapping key.
+#[unsafe(no_mangle)]
+pub extern "C" fn restore_prepared(length: usize) -> u32 {
+    restore_enrollment(length, true)
+}
+fn restore_enrollment(length: usize, prepared: bool) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.restored
             || (state.started && state.enrollment.is_none())
-            || !(132..=INPUT_BYTES).contains(&length)
+            || !(132..=state.input.len()).contains(&length)
         {
             return 1;
         }
@@ -262,9 +311,21 @@ pub extern "C" fn restore(length: usize) -> u32 {
         let input = Zeroizing::new(state.input[..length].to_vec());
         state.input[..length].zeroize();
         let header_length = u32::from_le_bytes(input[128..132].try_into().unwrap()) as usize;
-        if header_length > 4096
-            || length != 132 + header_length + 128 + 64 + 65536 * 21 + 532 + 52 + 2
-        {
+        if header_length > RegistrationHeader::maximum_bytes() {
+            return 1;
+        }
+        let key_bytes = if prepared { 64 } else { 96 };
+        let key_polynomial_bytes = registration_credentials::registration::KEY_BYTES;
+        let recipient_bytes = setup_witness::registration::SEALED_KEY_BYTES;
+        let signing_bytes = registration_credentials::SEALED_SIGNING_SEED_BYTES;
+        let base_length = 132
+            + header_length
+            + 128
+            + key_bytes
+            + key_polynomial_bytes
+            + recipient_bytes
+            + signing_bytes;
+        if length < base_length + 2 {
             return 1;
         }
         let Ok((header, consumed)) =
@@ -281,22 +342,59 @@ pub extern "C" fn restore(length: usize) -> u32 {
         let start = 132 + header_length;
         let proof_hash = input[start..start + 64].try_into().unwrap();
         let body_digest = input[start + 64..start + 128].try_into().unwrap();
-        let data_keys = input[start + 128..start + 192].try_into().unwrap();
-        let public_start = start + 192;
-        let capsule_start = public_start + 65536 * 21;
+        let data_keys = &input[start + 128..start + 128 + key_bytes];
+        let public_start = start + 128 + key_bytes;
+        let capsule_start = public_start + key_polynomial_bytes;
+        let recipient_capsule = &input[capsule_start..capsule_start + recipient_bytes];
+        let signing_capsule = &input[capsule_start + recipient_bytes..base_length];
         // The authenticated participant root names the purposes its records
         // show unused. Every other purpose of the restored credential stays
         // locked; completed messages are restored from their own records.
         let unused = u16::from_le_bytes(input[length - 2..].try_into().unwrap());
-        let Ok(mut enrollment) = Enrollment::restore(
-            &header,
-            &input[public_start..capsule_start],
-            proof_hash,
-            body_digest,
-            data_keys,
-            &input[capsule_start..capsule_start + 532],
-            &input[capsule_start + 532..length - 2],
-        ) else {
+        let Some(Ok(mut enrollment)) = crate::own_verification::with_poll(|poll| {
+            if prepared {
+                let framed = input
+                    .get(base_length..length - 2)
+                    .ok_or(crate::Error::Shape)?;
+                let frame_length = usize::try_from(u32::from_le_bytes(
+                    framed
+                        .get(..4)
+                        .ok_or(crate::Error::Shape)?
+                        .try_into()
+                        .unwrap(),
+                ))
+                .map_err(|_| crate::Error::Shape)?;
+                if frame_length != framed.len() - 4 {
+                    return Err(crate::Error::Shape);
+                }
+                Enrollment::restore_prepared(
+                    poll,
+                    &header,
+                    &input[public_start..capsule_start],
+                    proof_hash,
+                    body_digest,
+                    data_keys.try_into().unwrap(),
+                    [recipient_capsule, signing_capsule, &framed[4..]],
+                )
+            } else {
+                if length != base_length + crate::fhe_sources::capsule_bytes(poll) + 2 {
+                    return Err(crate::Error::Shape);
+                }
+                Enrollment::restore(
+                    poll,
+                    &header,
+                    &input[public_start..capsule_start],
+                    proof_hash,
+                    body_digest,
+                    data_keys.try_into().unwrap(),
+                    [
+                        recipient_capsule,
+                        signing_capsule,
+                        &input[base_length..length - 2],
+                    ],
+                )
+            }
+        }) else {
             return 1;
         };
         // The registration this instance verified, or else the verification
@@ -321,6 +419,7 @@ pub extern "C" fn restore(length: usize) -> u32 {
                 || state.poll_identity != header.poll
                 || original.credential.signing_public() != enrollment.credential.signing_public()
                 || original.key.public_key() != enrollment.key.public_key()
+                || original.sources_retired() != enrollment.sources_retired()
             {
                 return 1;
             }
@@ -335,6 +434,10 @@ pub extern "C" fn restore(length: usize) -> u32 {
             state.enrollment = Some(enrollment);
         }
         state.poll_identity = header.poll;
+        if prepared {
+            contribution_prover::browser::retire();
+            crate::operation_random::retire_contribution();
+        }
         0
     })
 }
@@ -673,17 +776,51 @@ fn contribution_operation(
     length: usize,
 ) -> Result<(), registration_credentials::Error> {
     use registration_credentials::Error;
-    if length > INPUT_BYTES || (operation != 2 && operation != 3 && argument != 0) {
+    if length > state.input.len() || (operation != 2 && operation != 3 && argument != 0) {
         return Err(Error::Shape);
     }
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
+    let body_inputs = if matches!(operation, 1 | 16) {
+        if length != if operation == 1 { 74 } else { 10 } {
+            return Err(Error::Shape);
+        }
+        let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;
+        let profile = if let Some(context) = state.retained_context.as_ref() {
+            if context.position() != position {
+                return Err(Error::Context);
+            }
+            context.profile()
+        } else {
+            let proposal = state.signed_proposal.as_ref().ok_or(Error::Context)?;
+            state
+                .enrollment
+                .as_ref()
+                .ok_or(Error::Context)?
+                .credential
+                .validate_body_position(proposal, position)?;
+            proposal.proposal().profile()
+        };
+        if position >= profile.setup_contributors() {
+            return Err(Error::Context);
+        }
+        let proof_offset = if operation == 1 { 66 } else { 2 };
+        let proof_length = usize::try_from(u64::from_le_bytes(
+            input[proof_offset..proof_offset + 8].try_into().unwrap(),
+        ))
+        .map_err(|_| Error::Shape)?;
+        let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
+        let header = enrollment
+            .contribution_header(profile, proof_length)
+            .map_err(|_| Error::Context)?;
+        Some(header)
+    } else {
+        None
+    };
     let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
     match operation {
         1 => {
-            if length != 78 {
-                return Err(Error::Shape);
-            }
+            let header = body_inputs.ok_or(Error::Context)?;
             let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;
             if let Some(context) = &state.retained_context {
                 if context.position() != position {
@@ -693,7 +830,7 @@ fn contribution_operation(
                     credential,
                     context.clone(),
                     input[2..66].try_into().unwrap(),
-                    &input[66..],
+                    &header,
                 )?;
             } else {
                 let proposal = state.signed_proposal.clone().ok_or(Error::Context)?;
@@ -702,9 +839,10 @@ fn contribution_operation(
                     proposal,
                     position,
                     input[2..66].try_into().unwrap(),
-                    &input[66..],
+                    &header,
                 )?;
             }
+            state.contribution_output = header.to_vec();
         }
         2 => {
             if !(5..=4 + (1 << 20)).contains(&length) {
@@ -824,6 +962,9 @@ fn contribution_operation(
             state.contribution_output =
                 emitted_packet(confirmation.body(), confirmation.signature());
         }
+        16 => {
+            state.contribution_output = body_inputs.ok_or(Error::Context)?.to_vec();
+        }
         _ => return Err(Error::Shape),
     }
     Ok(())
@@ -868,8 +1009,12 @@ pub extern "C" fn begin_contribution(position: usize) -> u32 {
         {
             return 1;
         }
+        let Ok(source) = enrollment.contribution_source(proposal.proposal().profile()) else {
+            return 1;
+        };
         u32::from(
-            contribution_prover::browser::begin_verified(proposal.proposal(), position).is_err(),
+            contribution_prover::browser::begin_verified(proposal.proposal(), position, source)
+                .is_err(),
         )
     })
 }
@@ -920,6 +1065,14 @@ pub extern "C" fn contribution_checkpoint_command(
     length: usize,
 ) -> u32 {
     SESSION.with(|state| {
+        if state
+            .borrow()
+            .enrollment
+            .as_ref()
+            .is_none_or(Enrollment::sources_retired)
+        {
+            return 1;
+        }
         contribution_prover::browser::checkpoint_command(
             operation,
             position,
@@ -940,16 +1093,13 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         let mut state = state.borrow_mut();
         // The proposal names the poll and runtime of this instance's verified
         // registration, whose poll fixes the option count.
-        let (Some(verified), Some(options)) = (
-            crate::own_verification::verified(),
-            crate::own_verification::verified_option_count(),
-        ) else {
+        let Some(verified) = crate::own_verification::verified() else {
             return 1;
         };
         let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
-        if !(134..=INPUT_BYTES).contains(&length)
+        if !(134..=state.input.len()).contains(&length)
             || state.retained_context.is_some()
             || state.signed_proposal.is_some()
             || state.contribution.body_started()
@@ -966,13 +1116,15 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         {
             return 1;
         }
-        let Ok(context) = RetainedContributionContext::parse(
-            &enrollment.credential,
-            &verified,
-            options,
-            u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize,
-            &input[134..],
-        ) else {
+        let Some(Ok(context)) = crate::own_verification::with_poll(|poll| {
+            RetainedContributionContext::parse(
+                &enrollment.credential,
+                &verified,
+                poll,
+                u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize,
+                &input[134..],
+            )
+        }) else {
             return 1;
         };
         state.retained_context = Some(context);
@@ -1001,6 +1153,53 @@ pub extern "C" fn retain_setup() -> u32 {
             return 1;
         };
         state.contribution_output = reference;
+        0
+    })
+}
+
+/// The worker calls retirement only after authenticated setup retention and
+/// durable deletion of the source capsule and its wrapping key.
+#[unsafe(no_mangle)]
+pub extern "C" fn retire_contribution_sources() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(enrollment) = state.enrollment.as_ref() else {
+            return 1;
+        };
+        if enrollment.sources_retired() {
+            return 1;
+        }
+        let Some((poll, setup)) = setup_aggregate::setup_browser::context() else {
+            return 1;
+        };
+        let Some(original) = crate::own_verification::verified() else {
+            return 1;
+        };
+        let proposal = setup.inventory().proposal().proposal();
+        let Some(position) = proposal.records().iter().position(|record| {
+            record.body_digest() == original.body_digest()
+                && record.header().signing_public == *enrollment.credential.signing_public()
+        }) else {
+            return 1;
+        };
+        let same_context = if let Some(context) = state.retained_context.as_ref() {
+            context.position() == position && *context.identity() == proposal.identity()
+        } else {
+            state
+                .signed_proposal
+                .as_ref()
+                .is_some_and(|held| held.proposal().identity() == proposal.identity())
+        };
+        if !same_context
+            || poll.identity() != state.poll_identity
+            || poll.identity() != original.header().poll
+            || poll.runtime() != original.header().runtime
+        {
+            return 1;
+        }
+        state.enrollment.as_mut().unwrap().retire_sources();
+        contribution_prover::browser::retire();
+        crate::operation_random::retire_contribution();
         0
     })
 }
@@ -1117,7 +1316,7 @@ pub extern "C" fn participant_ballot_command(
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
         session.contribution_output.clear();
-        if length > INPUT_BYTES {
+        if length > session.input.len() {
             return 1;
         }
         let input = Zeroizing::new(session.input[..length].to_vec());
@@ -1129,6 +1328,9 @@ pub extern "C" fn participant_ballot_command(
             let Some(enrollment) = session.enrollment.as_ref() else {
                 return 1;
             };
+            if !enrollment.sources_retired() {
+                return 1;
+            }
             let Some(context) = session.retained_context.as_ref() else {
                 return 1;
             };
@@ -1193,7 +1395,7 @@ pub extern "C" fn participant_close_command(operation: u32, argument: usize, len
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
         session.contribution_output.clear();
-        if length > INPUT_BYTES {
+        if length > session.input.len() {
             return 1;
         }
         let input = Zeroizing::new(session.input[..length].to_vec());
@@ -1205,6 +1407,9 @@ pub extern "C" fn participant_close_command(operation: u32, argument: usize, len
             let Some(enrollment) = session.enrollment.as_ref() else {
                 return 1;
             };
+            if !enrollment.sources_retired() {
+                return 1;
+            }
             let Some(context) = session.retained_context.as_ref() else {
                 return 1;
             };

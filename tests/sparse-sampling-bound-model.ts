@@ -62,9 +62,11 @@ export const compileSparseSupportSamplingCensus = (
             ),
         },
         {
-            role: 'Contribution FHE secrets',
+            role: 'Contribution FHE auxiliary secret',
             scope: 'contribution',
-            callsPerOperation: 2n,
+            // The original FHE secret is sampled separately for each
+            // registration source family and supplied to from_source.
+            callsPerOperation: 1n,
             ...boundSparseSupportSampling(
                 fixedModulusBfvInputs.polynomialDegree,
                 fixedModulusBfvInputs.secretSupportWeight,

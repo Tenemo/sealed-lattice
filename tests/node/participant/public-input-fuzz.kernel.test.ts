@@ -125,7 +125,7 @@ const organizer = await (async () => {
         );
         requests += 1;
     };
-    const control = concatenate(input, shake(organizerName + '/data-keys', 64));
+    const control = concatenate(input, shake(organizerName + '/data-keys', 96));
     writeInput(kernel, control);
     if (kernel.prepare_creator(control.length) !== 0)
         throw new Error('The organizer enrollment was refused.');

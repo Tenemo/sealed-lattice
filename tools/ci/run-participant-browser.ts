@@ -49,6 +49,7 @@ import type {
     PaddingHaltObservation,
     PaddingSlotObservation,
 } from '#tools/ci/participant-padding-halt.js';
+import type { SourceCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
@@ -832,6 +833,7 @@ await runWithLocalRunLog(
                     ? [
                           'tools/ci/participant-padding-halt.ts',
                           'tools/ci/participant-padding-corruption.ts',
+                          'tools/ci/participant-preparation-storage.ts',
                       ]
                     : []),
             ]) {
@@ -859,7 +861,7 @@ await runWithLocalRunLog(
                           ]),
                       )
                     : undefined;
-            let paddingMutationBundle: string | undefined;
+            let preparationStorageBundle: string | undefined;
             if (mode === 'preparation') {
                 const bundles = await build({
                     config: false,
@@ -867,13 +869,13 @@ await runWithLocalRunLog(
                     write: false,
                     dts: false,
                     entry: {
-                        padding: path.join(
+                        preparationStorage: path.join(
                             root,
-                            'tools/ci/participant-padding-corruption.ts',
+                            'tools/ci/participant-preparation-storage.ts',
                         ),
                     },
                     format: 'iife',
-                    globalName: 'participantPaddingFixture',
+                    globalName: 'participantPreparationFixture',
                     platform: 'browser',
                     target: 'es2022',
                     minify: false,
@@ -892,14 +894,14 @@ await runWithLocalRunLog(
                 );
                 assert.equal(chunks[0].type, 'chunk');
                 if (chunks[0].type === 'chunk')
-                    paddingMutationBundle = chunks[0].code;
-                assert.ok(paddingMutationBundle);
+                    preparationStorageBundle = chunks[0].code;
+                assert.ok(preparationStorageBundle);
                 await writeFile(
                     path.join(
                         log.runDirectoryPath,
-                        'padding-corruption-fixture.js',
+                        'preparation-storage-fixture.js',
                     ),
-                    paddingMutationBundle,
+                    preparationStorageBundle,
                     { flag: 'wx' },
                 );
                 for (const client of paddingClients!.values())
@@ -1382,8 +1384,8 @@ await runWithLocalRunLog(
 })`),
                     ),
                 );
-            const retainedHead = async (position: number) =>
-                inBrowser(position, undefined, (chrome) =>
+            const retainedHead = async (position: number, copy?: string) =>
+                inBrowser(position, copy, (chrome) =>
                     chrome.evaluate(`new Promise((resolve,reject) => {
     const opening=indexedDB.open(${JSON.stringify(participantDatabase)});
     opening.onerror=()=>reject(opening.error);
@@ -1480,6 +1482,152 @@ await runWithLocalRunLog(
                     maxRetries: 10,
                     retryDelay: 500,
                 });
+            };
+            const sourceCustody: (SourceCustodyObservation & {
+                position: number;
+                stage: string;
+            })[] = [];
+            const sourceRefusals: Record<string, unknown>[] = [];
+            const inspectSourceCustody = async (
+                position: number,
+                stage: string,
+                copy?: string,
+                mutation?: 'missing' | 'damaged',
+            ) => {
+                assert.ok(preparationStorageBundle);
+                const observed = (await inBrowser(position, copy, (chrome) =>
+                    chrome.evaluate(
+                        preparationStorageBundle +
+                            '\nparticipantPreparationFixture.inspectParticipantSourceCustody(' +
+                            JSON.stringify({
+                                namespace: participantNamespace,
+                                runtimeIdentity: runtime.identity.runtime,
+                                moduleDigest: runtime.identity.module,
+                                mutation,
+                            }) +
+                            ');',
+                    ),
+                )) as SourceCustodyObservation;
+                const required = observed.generation < 12;
+                assert.equal(
+                    observed.dataKeyBytes,
+                    required ? 3 * 32 : 2 * 32,
+                    'The root retained another data-key inventory.',
+                );
+                assert.equal(
+                    observed.sourceReferences,
+                    required ? 1 : 0,
+                    'The root retained another source reference inventory.',
+                );
+                assert.equal(
+                    observed.sourceRecords,
+                    required ? 1 : 0,
+                    'The data store retained another source capsule inventory.',
+                );
+                const details = { position, stage, ...observed };
+                if (copy === undefined) sourceCustody.push(details);
+                log.writeEvent({
+                    eventType: 'participant-source-custody',
+                    details: { ...details, copy, mutation },
+                });
+                return observed;
+            };
+            const refuseLostSource = async (
+                position: number,
+                operation: string,
+            ) => {
+                assert.ok(honest(position));
+                assert.ok(relay);
+                for (const mutation of ['missing', 'damaged'] as const) {
+                    const copy = `source-${mutation}-${position}-${operation}`;
+                    await copyState(position, copy);
+                    try {
+                        const before = await retainedHead(position, copy);
+                        const observed = await inspectSourceCustody(
+                            position,
+                            'before fault',
+                            copy,
+                            mutation,
+                        );
+                        assert.ok(observed.generation < 12);
+                        const publications: number =
+                            relay.publicationAttempts[position];
+                        const refused = await request(
+                            position,
+                            operation,
+                            {},
+                            copy,
+                        );
+                        assert.deepEqual(refused, {
+                            status: 'stopped',
+                            stopPersistence: 'confirmed',
+                            reason:
+                                mutation === 'missing'
+                                    ? 'Participant data inventory changed.'
+                                    : 'A participant data record changed.',
+                        });
+                        assert.deepEqual(
+                            await retainedHead(position, copy),
+                            before,
+                            'A damaged source replaced the original root authority.',
+                        );
+                        await browsers.crash(copyBrowser(copy));
+                        const stopped = await request(
+                            position,
+                            'status',
+                            {},
+                            copy,
+                        );
+                        assert.deepEqual(stopped, {
+                            status: 'stopped',
+                            stopPersistence: 'confirmed',
+                            reason: 'Missing or inconsistent participant authority.',
+                        });
+                        const replacement = await request(
+                            position,
+                            'create',
+                            {
+                                role: 'join',
+                                poll: organizer.poll,
+                                definition: hexadecimal(definition),
+                                definitionSignature:
+                                    hexadecimal(definitionSignature),
+                                username: 'Replacement refused',
+                            },
+                            copy,
+                        );
+                        assert.deepEqual(replacement, {
+                            status: 'refused',
+                            reason: 'participant exists',
+                        });
+                        assert.deepEqual(
+                            await retainedHead(position, copy),
+                            before,
+                        );
+                        assert.equal(
+                            relay.publicationAttempts[position],
+                            publications,
+                            'A source fault caused a relay publication attempt.',
+                        );
+                        const details = {
+                            position,
+                            generation: observed.generation,
+                            operation,
+                            mutation,
+                            result: refused,
+                            coldResult: stopped,
+                            replacement,
+                            publicationAttempts: 0,
+                        };
+                        sourceRefusals.push(details);
+                        log.writeEvent({
+                            eventType: 'participant-source-refusal',
+                            details,
+                        });
+                    } finally {
+                        await removeCopy(copy);
+                    }
+                }
             };
             // Loses the last record of one store in a copy of an honest
             // participant's state and runs the operation there: the copy
@@ -2494,7 +2642,12 @@ await runWithLocalRunLog(
             // stored and continues from its retained seed, checkpoint or
             // coins.
             const setupReplay = [...contributors].reverse().find(honest);
-            assert.notEqual(setupReplay, undefined);
+            assert.ok(setupReplay !== undefined);
+            if (mode === 'preparation') {
+                for (const position of positions)
+                    await inspectSourceCustody(position, 'accepted roster');
+                await refuseLostSource(setupReplay, 'contribute');
+            }
             const bodyRecords = bounds.contribution.publicRecords.length;
             await Promise.all(
                 contributors.map(async (position) => {
@@ -2604,7 +2757,9 @@ await runWithLocalRunLog(
             }
             const paddingRefusals: Record<string, unknown>[] = [];
             if (mode === 'preparation') {
-                assert.ok(paddingMutationBundle && setupReplay !== undefined);
+                assert.ok(
+                    preparationStorageBundle && setupReplay !== undefined,
+                );
                 for (const kind of ['missing', 'nonzero'] as const) {
                     const copy = 'padding-' + kind;
                     await copyState(setupReplay, copy);
@@ -2614,8 +2769,8 @@ await runWithLocalRunLog(
                             copy,
                             (chrome) =>
                                 chrome.evaluate(
-                                    paddingMutationBundle +
-                                        '\nparticipantPaddingFixture.mutateParticipantPadding(' +
+                                    preparationStorageBundle +
+                                        '\nparticipantPreparationFixture.mutateParticipantPadding(' +
                                         JSON.stringify({
                                             namespace: participantNamespace,
                                             runtimeIdentity:
@@ -2702,6 +2857,8 @@ await runWithLocalRunLog(
                 ...[...contributors].reverse(),
             ].find((position) => honest(position) && position !== lateSetup);
             assert.ok(verificationReplay !== undefined);
+            if (mode === 'preparation')
+                await refuseLostSource(verificationReplay, 'verify-setup');
             await Promise.all(
                 positions
                     .filter((position) => position !== lateSetup)
@@ -2737,6 +2894,86 @@ await runWithLocalRunLog(
                 assert.equal((await run(confirmer, 'confirm')).generation, 12);
             }
             if (mode === 'preparation') {
+                const sourceRestarts: Record<string, unknown>[] = [];
+                const publishedShape = async () =>
+                    Promise.all(
+                        (await publicRecordNames(publicDirectory))
+                            .sort()
+                            .map(async (name) => ({
+                                name,
+                                bytes: (
+                                    await stat(path.join(publicDirectory, name))
+                                ).size,
+                            })),
+                    );
+                const publicBefore = await publishedShape();
+                for (const position of positions) {
+                    const before = await retainedHead(position);
+                    assert.equal(before.generation, 12);
+                    await inspectSourceCustody(position, 'verified setup');
+                    await endBrowser(position);
+                    const restored = await run(position, 'status');
+                    assert.equal(restored.generation, 12);
+                    assert.equal(restored.bodyDigest, recordIds[position]);
+                    assert.equal(restored.ballot, 'open');
+                    // With no closeTime and no published intent, close only
+                    // restores the credential-authenticated setup and scans
+                    // the empty ballot inventory; it creates no close intent.
+                    const attempts: number =
+                        relay.publicationAttempts[position];
+                    const ready = await run(position, 'close');
+                    assert.equal(ready.generation, 12);
+                    assert.equal(ready.ballot, 'open');
+                    assert.equal(relay.publicationAttempts[position], attempts);
+                    if (position < setupContributorCount) {
+                        for (const operation of ['confirm', 'open']) {
+                            await endBrowser(position);
+                            const published =
+                                relay.publicationAttempts[position];
+                            const repeated = await run(position, operation);
+                            assert.equal(repeated.generation, 12);
+                            assert.equal(
+                                repeated.bodyDigest,
+                                recordIds[position],
+                            );
+                            assert.ok(
+                                relay.publicationAttempts[position] > published,
+                                'The prepared participant did not retransmit its original setup records.',
+                            );
+                        }
+                    }
+                    assert.deepEqual(
+                        await retainedHead(position),
+                        before,
+                        'Prepared recovery replaced the original root.',
+                    );
+                    await inspectSourceCustody(
+                        position,
+                        'cold prepared recovery',
+                    );
+                    const details = {
+                        position,
+                        generation: 12,
+                        originalBodyDigest: recordIds[position],
+                        restoredSetup: true,
+                        retransmitted:
+                            position < setupContributorCount
+                                ? ['confirm', 'open']
+                                : [],
+                    };
+                    sourceRestarts.push(details);
+                    log.writeEvent({
+                        eventType: 'participant-prepared-source-recovery',
+                        details,
+                    });
+                }
+                // The relay compares every repeated span byte-for-byte;
+                // unchanged names and lengths also exclude appended records.
+                assert.deepEqual(
+                    await publishedShape(),
+                    publicBefore,
+                    'Prepared retransmission extended or replaced public setup records.',
+                );
                 assert.equal(paddingInterruptions.length, 2);
                 const last = paddingInterruptions[1];
                 const proofPath = path.join(
@@ -2753,7 +2990,7 @@ await runWithLocalRunLog(
                     header.length,
                     bounds.contribution.bodyHeaderBytes,
                 );
-                assert.equal(header.subarray(0, 4).toString('ascii'), 'SCB1');
+                assert.equal(header.subarray(0, 4).toString('ascii'), 'SCB2');
                 assert.equal(
                     header.readBigUInt64LE(4),
                     BigInt(last.observation.halt.proofBytes),
@@ -2818,10 +3055,13 @@ await runWithLocalRunLog(
                             interruptions,
                             paddingInterruptions,
                             paddingRefusals,
+                            sourceCustody,
+                            sourceRefusals,
+                            sourceRestarts,
                             coincidentPaddingCuts:
                                 first.slotOffset === final.slotOffset,
                             logicalProofBytes: last.observation.halt.proofBytes,
-                            scope: 'Original fixed-roster setup only: real contribution generation and original-intent restart, confirmation, opening and every recipient setup verifier. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run establishes no replacement setup, departure tolerance, ballots, outcome, exact-build qualification or phone support.',
+                            scope: 'Original fixed-roster setup only: real contribution generation and original-intent restart, confirmation, opening and every recipient setup verifier. Missing or damaged required source capsules stop copied original namespaces; verified setup retires its source capsule and wrapping key, and cold recovery restores the original credential and setup without them. Prepared contributors retransmit identical public confirmation/opening records. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run establishes no replacement setup, departure tolerance, ballots, outcome, exact-build qualification or phone support.',
                         },
                         null,
                         2,

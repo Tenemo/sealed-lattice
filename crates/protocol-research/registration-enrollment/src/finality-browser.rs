@@ -1,4 +1,4 @@
-use super::{INPUT_BYTES, SESSION, Session};
+use super::{SESSION, Session};
 use registration_credentials::{
     Error,
     target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_VOTE_BYTES},
@@ -85,7 +85,7 @@ pub extern "C" fn participant_finality_command(operation: u32, length: usize) ->
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
         session.contribution_output.clear();
-        if length > INPUT_BYTES {
+        if length > session.input.len() {
             return 1;
         }
         let input = Zeroizing::new(session.input[..length].to_vec());

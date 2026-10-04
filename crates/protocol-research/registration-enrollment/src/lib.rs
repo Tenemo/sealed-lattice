@@ -16,6 +16,8 @@ pub mod close_work;
 pub mod contribution_signing;
 #[path = "custody-identity.rs"]
 pub mod custody_identity;
+#[path = "fhe-sources.rs"]
+mod fhe_sources;
 #[path = "finality-work.rs"]
 pub mod finality_work;
 #[path = "memory-plan.rs"]
@@ -43,6 +45,7 @@ mod parallel_browser;
 pub struct Enrollment {
     pub key: RegistrationKey,
     pub credential: Credential,
+    sources: Option<fhe_sources::Sources>,
 }
 #[derive(Debug)]
 pub enum Error {
@@ -150,10 +153,11 @@ impl Enrollment {
         username: &[u8],
         recipient_data_key: &[u8; 32],
         credential_data_key: &[u8; 32],
+        source_data_key: &[u8; 32],
         output: impl FnMut(u32, usize, &[u8]),
     ) -> Result<(registration_credentials::poll::SignedPoll, Self), Error> {
         normalize_username(username).map_err(|_| Error::Shape)?;
-        if recipient_data_key == credential_data_key {
+        if !distinct_data_keys(recipient_data_key, credential_data_key, source_data_key) {
             return Err(Error::Shape);
         }
         let mut credential = fresh_credential();
@@ -170,11 +174,11 @@ impl Enrollment {
         )
         .map_err(|_| Error::State)?;
         let enrollment = Self::create_with_credential(
-            verified.identity(),
-            runtime,
+            &verified,
             username,
             recipient_data_key,
             credential_data_key,
+            source_data_key,
             credential,
             output,
         )?;
@@ -188,32 +192,36 @@ impl Enrollment {
         username: &[u8],
         recipient_data_key: &[u8; 32],
         credential_data_key: &[u8; 32],
+        source_data_key: &[u8; 32],
         output: impl FnMut(u32, usize, &[u8]),
     ) -> Result<Self, Error> {
         normalize_username(username).map_err(|_| Error::Shape)?;
-        if recipient_data_key == credential_data_key {
+        if !distinct_data_keys(recipient_data_key, credential_data_key, source_data_key) {
             return Err(Error::Shape);
         }
         Self::create_with_credential(
-            poll.identity(),
-            poll.runtime(),
+            poll,
             username,
             recipient_data_key,
             credential_data_key,
+            source_data_key,
             fresh_credential(),
             output,
         )
     }
     fn create_with_credential(
-        poll: [u8; 64],
-        runtime: [u8; 64],
+        verified_poll: &registration_credentials::poll::VerifiedPoll,
         username: &[u8],
         recipient_data_key: &[u8; 32],
         credential_data_key: &[u8; 32],
+        source_data_key: &[u8; 32],
         mut credential: Credential,
         mut output: impl FnMut(u32, usize, &[u8]),
     ) -> Result<Self, Error> {
         let username = normalize_username(username).map_err(|_| Error::Shape)?;
+        let poll = verified_poll.identity();
+        let runtime = verified_poll.runtime();
+        let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
         let role = credential.proof_role(poll, runtime);
         let proof = RegistrationProof::create(&role, false, false);
         proof.check_retained_key().map_err(|_| Error::State)?;
@@ -236,6 +244,7 @@ impl Enrollment {
             signing_public: *credential.signing_public(),
             recipient_key_hash: key_hash,
             proof_length: length,
+            fhe_key_commitments: sources.commitments().to_vec(),
         }
         .encode()
         .map_err(|_| Error::Shape)?;
@@ -254,6 +263,7 @@ impl Enrollment {
             return Err(Error::State);
         }
         let body = body_output.body.finish().map_err(|_| Error::State)?;
+        let sealed_sources = sources.seal(body.bytes(), source_data_key)?;
         let coins = random::<32>();
         let signature = credential
             .sign_registration(body, *coins)
@@ -273,25 +283,127 @@ impl Enrollment {
             (3, signature.as_slice()),
             (4, sealed_key.as_slice()),
             (5, sealed_credential.as_slice()),
+            (14, sealed_sources.as_slice()),
         ] {
             output(kind, 0, bytes);
         }
-        Ok(Self { key, credential })
+        Ok(Self {
+            key,
+            credential,
+            sources: Some(sources),
+        })
+    }
+    /// Reconstructs only this enrollment's original source for the selected family.
+    pub fn contribution_source(
+        &self,
+        profile: supported_profile::Profile,
+    ) -> Result<setup_witness::fhe_key_source::FheKeySource, Error> {
+        self.sources.as_ref().ok_or(Error::State)?.source(profile)
+    }
+    pub fn contribution_header(
+        &self,
+        profile: supported_profile::Profile,
+        proof_length: usize,
+    ) -> Result<[u8; registration_credentials::contribution_commitment::BODY_HEADER_BYTES], Error>
+    {
+        self.sources
+            .as_ref()
+            .ok_or(Error::State)?
+            .body_header(profile, proof_length)
+    }
+    /// Retires the seed material that could reconstruct contribution secrets.
+    /// The participant root owns authentication and durable retirement first.
+    pub fn retire_sources(&mut self) {
+        self.sources = None;
+    }
+    pub fn sources_retired(&self) -> bool {
+        self.sources.is_none()
     }
     pub fn check(&self) -> bool {
         self.key.validate_retained().is_ok() && self.credential.check_retained()
     }
     pub fn restore(
+        poll: &registration_credentials::poll::VerifiedPoll,
+        header: &RegistrationHeader,
+        public_bytes: &[u8],
+        proof_hash: [u8; 64],
+        body_digest: [u8; 64],
+        data_keys: &[u8; 96],
+        records: [&[u8]; 3],
+    ) -> Result<Self, Error> {
+        if !distinct_data_keys(
+            data_keys[..32].try_into().unwrap(),
+            data_keys[32..64].try_into().unwrap(),
+            data_keys[64..].try_into().unwrap(),
+        ) {
+            return Err(Error::Shape);
+        }
+        let mut result = Self::restore_base(
+            poll,
+            header,
+            public_bytes,
+            proof_hash,
+            body_digest,
+            data_keys[..64].try_into().unwrap(),
+            [records[0], records[1]],
+        )?;
+        result.sources = Some(fhe_sources::Sources::open(
+            poll,
+            &result.credential,
+            &header.fhe_key_commitments,
+            body_digest,
+            data_keys[64..].try_into().unwrap(),
+            records[2],
+        )?);
+        Ok(result)
+    }
+
+    /// Restores only after authenticating this original participant's saved
+    /// setup result. This does not restore a public setup capability.
+    pub fn restore_prepared(
+        poll: &registration_credentials::poll::VerifiedPoll,
         header: &RegistrationHeader,
         public_bytes: &[u8],
         proof_hash: [u8; 64],
         body_digest: [u8; 64],
         data_keys: &[u8; 64],
-        recipient_capsule: &[u8],
-        signing_capsule: &[u8],
+        records: [&[u8]; 3],
+    ) -> Result<Self, Error> {
+        let result = Self::restore_base(
+            poll,
+            header,
+            public_bytes,
+            proof_hash,
+            body_digest,
+            data_keys,
+            [records[0], records[1]],
+        )?;
+        let tag_start = records[2]
+            .len()
+            .checked_sub(registration_credentials::RETAINED_TAG_BYTES)
+            .ok_or(Error::Shape)?;
+        let (reference, tag) = records[2].split_at(tag_start);
+        result
+            .credential
+            .check_retained_setup_tag(poll, reference, tag)
+            .map_err(|_| Error::State)?;
+        Ok(result)
+    }
+
+    fn restore_base(
+        poll: &registration_credentials::poll::VerifiedPoll,
+        header: &RegistrationHeader,
+        public_bytes: &[u8],
+        proof_hash: [u8; 64],
+        body_digest: [u8; 64],
+        data_keys: &[u8; 64],
+        records: [&[u8]; 2],
     ) -> Result<Self, Error> {
         use num_bigint::{BigInt, Sign};
-        if public_bytes.len() != 65536 * 21
+        if poll.identity() != header.poll
+            || poll.runtime() != header.runtime
+            || data_keys[..32] == data_keys[32..]
+            || public_bytes.len() != 65536 * 21
             || ProtocolHash::digest(public_bytes) != header.recipient_key_hash
         {
             return Err(Error::Shape);
@@ -310,7 +422,7 @@ impl Enrollment {
             header.signing_public,
             body_digest,
             data_keys[32..].try_into().unwrap(),
-            signing_capsule,
+            records[1],
         )
         .map_err(|_| Error::State)?;
         let role = credential.proof_role(header.poll, header.runtime);
@@ -318,13 +430,21 @@ impl Enrollment {
             public,
             data_keys[..32].try_into().unwrap(),
             &key_associated(&role, header.runtime, header.recipient_key_hash, proof_hash),
-            recipient_capsule,
+            records[0],
         )
         .map_err(|_| Error::State)?;
-        Ok(Self { key, credential })
+        Ok(Self {
+            key,
+            credential,
+            sources: None,
+        })
     }
 }
 
 fn fresh_credential() -> Credential {
     Credential::from_seed(*random::<32>())
+}
+
+fn distinct_data_keys(recipient: &[u8; 32], credential: &[u8; 32], source: &[u8; 32]) -> bool {
+    recipient != credential && recipient != source && credential != source
 }

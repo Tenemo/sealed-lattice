@@ -281,6 +281,16 @@ pub(super) fn validate_list_payload(
     nesting_depth: u16,
     base_offset: usize,
 ) -> Result<(), CanonicalCodecError> {
+    if element_type == CanonicalItemType::Hash512 {
+        if count.checked_mul(64) != Some(bytes.len()) {
+            return Err(CanonicalCodecError::new(
+                CanonicalCodecErrorKind::InvalidItem,
+                base_offset,
+                "hash-list payload has the wrong length",
+            ));
+        }
+        return Ok(());
+    }
     if element_type != CanonicalItemType::NestedTuple {
         return Err(CanonicalCodecError::new(
             CanonicalCodecErrorKind::InvalidItem,

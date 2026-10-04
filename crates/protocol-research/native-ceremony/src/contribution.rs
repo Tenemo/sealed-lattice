@@ -1,12 +1,8 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
 use parallel_work::ProtocolHash;
-use registration_credentials::{
-    contribution_commitment::{
-        ComputedContributionCommitment, ContributionCommitmentHasher, body_header,
-    },
-    roster_authentication::OrganizerSignedRoster,
-};
+use registration_credentials::roster_authentication::OrganizerSignedRoster;
+use registration_enrollment::{Enrollment, contribution_signing::ContributionSigning};
 use setup_aggregate::contribution_family;
 use setup_witness::{
     PolynomialOutput,
@@ -17,6 +13,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use supported_profile::{Profile, relation::setup_relation};
 use word_proof::{bridge::Prover, transcript};
@@ -111,11 +108,12 @@ fn polynomial_bytes(roster: &OrganizerSignedRoster, directory: &Path, index: usi
     )
 }
 pub fn generate(
-    roster: &OrganizerSignedRoster,
+    roster: &Arc<OrganizerSignedRoster>,
+    enrollment: &mut Enrollment,
     position: usize,
     directory: &Path,
     salt: &[u8; 64],
-) -> (ComputedContributionCommitment, Vec<u8>) {
+) -> (ContributionSigning, Vec<u8>) {
     std::fs::create_dir(directory).unwrap();
     let profile = roster.proposal().profile();
     let role = roster.proposal().contribution_role(position).unwrap();
@@ -129,7 +127,8 @@ pub fn generate(
     };
     output.hash.update(&header);
     output.context.update(&header);
-    let mut generator = Contribution::new(profile);
+    let source = enrollment.contribution_source(profile).unwrap();
+    let mut generator = Contribution::from_source(profile, source).unwrap();
     for gadget in 0..profile.gadget_length() {
         generator.gadget(gadget, &mut output).unwrap();
     }
@@ -186,15 +185,24 @@ pub fn generate(
     }
     file.finish().unwrap();
     drop(prover);
-    let body_header = body_header(
-        profile,
-        std::fs::metadata(&proof_path).unwrap().len() as usize,
-    )
-    .unwrap();
-    let mut hash =
-        ContributionCommitmentHasher::new(roster.proposal(), position, salt, &body_header).unwrap();
+    let body_header = enrollment
+        .contribution_header(
+            profile,
+            std::fs::metadata(&proof_path).unwrap().len() as usize,
+        )
+        .unwrap();
+    let mut signing = ContributionSigning::default();
+    signing
+        .begin_body(
+            &enrollment.credential,
+            roster.clone(),
+            position,
+            salt,
+            &body_header,
+        )
+        .unwrap();
     let mut buffer = vec![0; 1 << 20];
-    while let Some((index, _)) = hash.next_polynomial() {
+    for index in profile.contribution_body_polynomials() {
         let mut file = File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
         let mut offset = 0;
         loop {
@@ -202,7 +210,8 @@ pub fn generate(
             if length == 0 {
                 break;
             }
-            hash.push_polynomial(index, offset, &buffer[..length])
+            signing
+                .polynomial(index, offset, &buffer[..length])
                 .unwrap();
             offset += length;
         }
@@ -214,8 +223,17 @@ pub fn generate(
         if length == 0 {
             break;
         }
-        hash.push_proof(offset, &buffer[..length]).unwrap();
+        signing.proof(offset, &buffer[..length]).unwrap();
         offset += length;
     }
-    (hash.finish().unwrap(), body_header.to_vec())
+    signing.finish_body().unwrap();
+    let commitment = *signing.commitment().unwrap();
+    signing
+        .sign_confirmation(
+            &mut enrollment.credential,
+            &commitment,
+            *crate::random::<32>(),
+        )
+        .unwrap();
+    (signing, body_header.to_vec())
 }

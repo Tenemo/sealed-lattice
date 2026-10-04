@@ -1,5 +1,6 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const setupGaussianParameters = {
@@ -10,19 +11,31 @@ export const setupGaussianParameters = {
     maximum: 63,
 } as const;
 
-// Every setup contributor draws its contribution's errors, which encrypt a
-// share to every participant, and every participant draws its registration
-// key's errors.
-export const compileSetupRandomnessCensus = (profile: SupportedProfile) => {
+// One roster's fresh enrollments and completed contributions. By default the
+// original poll admits exactly this roster size; a larger poll maximum is a
+// separate operand. This is not a population bound for abandoned credentials.
+export const compileSetupRandomnessCensus = (
+    profile: SupportedProfile,
+    originalPollMaximumParticipants = profile.participantCount,
+) => {
+    if (originalPollMaximumParticipants < profile.participantCount)
+        throw new RangeError('The poll maximum cannot exclude the roster.');
+    const sourceFamilyCount = compileRegistrationSetupBindingScreen(
+        originalPollMaximumParticipants,
+        profile.optionCount,
+    ).coordinateCount;
     const gadgetLength = profile.gadgetLength;
     const participants = BigInt(profile.participantCount);
     const contributors = BigInt(profile.setupContributorCount);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
-        (4n * gadgetLength + 2n * participants) * degree +
+        (4n * gadgetLength + 2n * participants - 1n) * degree +
         auxiliaryInputEncryptionParameters.degree;
+    const samplesPerSourceFamily = degree;
+    const samplesPerEnrollment = (1n + sourceFamilyCount) * degree;
     const samplesPerPreparation =
-        contributors * samplesPerContribution + participants * degree;
+        contributors * samplesPerContribution +
+        participants * samplesPerEnrollment;
     const thresholdCount = BigInt(
         setupGaussianParameters.maximum - setupGaussianParameters.minimum,
     );
@@ -67,6 +80,10 @@ export const compileSetupRandomnessCensus = (profile: SupportedProfile) => {
     )
         preparationSamplingBits++;
     return {
+        originalPollMaximumParticipants,
+        sourceFamilyCount,
+        samplesPerSourceFamily,
+        samplesPerEnrollment,
         samplesPerContribution,
         samplesPerPreparation,
         thresholdCount,

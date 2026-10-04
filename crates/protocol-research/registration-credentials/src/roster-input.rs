@@ -136,7 +136,7 @@ impl RosterInputVerifier {
                 if header_digest(header) != record.header_digest {
                     return Err(Error::Context);
                 }
-                let header = checked_header(header, self.poll.identity(), self.poll.runtime())?;
+                let header = checked_header(header, &self.poll)?;
                 self.records[position] = Record::Restoring {
                     header,
                     record,

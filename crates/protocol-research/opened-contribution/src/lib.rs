@@ -1,7 +1,8 @@
 use parallel_work::Ticket;
 use registration_credentials::{
     contribution_authentication::{CommitmentInventory, verify_opening},
-    contribution_commitment::ContributionCommitmentHasher,
+    contribution_commitment::{ContributionBodyHeader, ContributionCommitmentHasher},
+    source_binding::FheKeyCommitmentHasher,
 };
 use setup_witness::{Profile, contribution::common_records_job};
 use std::{collections::VecDeque, sync::Arc};
@@ -46,6 +47,7 @@ pub struct OpenedContributionVerifier {
     profile: Profile,
     position: usize,
     commitment: ContributionCommitmentHasher,
+    source_binding: Option<FheKeyCommitmentHasher>,
     verifier: Verifier,
     proof_header: Vec<u8>,
     statement_index: usize,
@@ -71,6 +73,12 @@ impl OpenedContributionVerifier {
             .map_err(|_| Refusal::Context)?;
         let proposal = inventory.proposal().proposal();
         let profile = proposal.profile();
+        let source_salt = ContributionBodyHeader::decode(profile, body_header)
+            .map_err(|_| Refusal::Shape)?
+            .source_salt;
+        let source_binding =
+            FheKeyCommitmentHasher::for_contribution(proposal, opening.position(), &source_salt)
+                .map_err(|_| Refusal::Context)?;
         let role = proposal
             .contribution_role(opening.position())
             .map_err(|_| Refusal::Context)?;
@@ -104,6 +112,7 @@ impl OpenedContributionVerifier {
             profile,
             position: opening.position(),
             commitment,
+            source_binding: Some(source_binding),
             verifier,
             proof_header: proof_header.to_vec(),
             statement_index: 0,
@@ -185,6 +194,34 @@ impl OpenedContributionVerifier {
             self.commitment
                 .push_polynomial(index, offset, bytes)
                 .map_err(|_| Refusal::Shape)?;
+            if index == self.profile.fhe_polynomial(0, 1) {
+                self.source_binding
+                    .as_mut()
+                    .ok_or(Refusal::Consumed)?
+                    .push(offset, bytes)
+                    .map_err(|_| Refusal::Statement)?;
+                if self
+                    .commitment
+                    .next_polynomial()
+                    .is_none_or(|(next, _)| next != index)
+                {
+                    let digest = self
+                        .source_binding
+                        .take()
+                        .ok_or(Refusal::Consumed)?
+                        .finish()
+                        .map_err(|_| Refusal::Statement)?;
+                    let expected = self
+                        .inventory
+                        .proposal()
+                        .proposal()
+                        .fhe_key_commitment(self.position)
+                        .map_err(|_| Refusal::Context)?;
+                    if &digest != expected {
+                        return Err(Refusal::Commitment);
+                    }
+                }
+            }
             self.verifier
                 .push_statement(bytes)
                 .map_err(|_| Refusal::Statement)?;
@@ -205,7 +242,7 @@ impl OpenedContributionVerifier {
     }
 
     pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
-        if self.failed || !self.statement_done {
+        if self.failed || !self.statement_done || self.source_binding.is_some() {
             return Err(Refusal::Consumed);
         }
         let result = (|| {
@@ -230,7 +267,7 @@ impl OpenedContributionVerifier {
     }
 
     pub fn finish(mut self) -> Result<VerifiedOpenedContribution, Refusal> {
-        if self.failed || !self.statement_done {
+        if self.failed || !self.statement_done || self.source_binding.is_some() {
             return Err(Refusal::Consumed);
         }
         let commitment = *self

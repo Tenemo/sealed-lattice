@@ -35,6 +35,7 @@ fn check_owner(
     if credential.signing_public() != &header.signing_public
         || poll.identity() != header.poll
         || poll.runtime() != header.runtime
+        || header.fhe_key_commitments.len() != crate::source_binding::fhe_key_families(poll).len()
     {
         return Err(Error::Context);
     }
@@ -137,6 +138,10 @@ mod tests {
             signing_public: *credential.signing_public(),
             recipient_key_hash: ProtocolHash::digest(&key),
             proof_length: PROOF_HEADER_BYTES + 1,
+            fhe_key_commitments: vec![
+                [7; 64];
+                crate::source_binding::fhe_key_families(&poll).len()
+            ],
         };
         Registration {
             header: header.encode().unwrap(),

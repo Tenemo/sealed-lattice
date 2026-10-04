@@ -91,7 +91,7 @@ export const projectContributionProofPadding = (
         additionalProofReadBytes:
             completeReadPasses * additionalProofCiphertextBytes,
         additionalProofVerificationCalls: completeReadPasses * addedRecords,
-        // Published SCB1 framing and the proof prefix remain byte-identical.
+        // The source-opening salt stays in SCB2; padding changes no proof bytes.
         publishedProofBytes: observedProofBytes,
     };
 };
@@ -427,6 +427,16 @@ export const compileParticipantVaultKeyClasses = (
                 invocation(
                     enrollment.signingCapsuleBytes - 16n,
                     enrollment.signingAssociatedBytes,
+                ),
+            ],
+        },
+        {
+            name: 'FHE source capsule',
+            maximumPerCompletedCorpus: 1n,
+            encryptions: [
+                invocation(
+                    enrollment.maximumSourceCapsuleBytes - 16n,
+                    enrollment.sourceAssociatedBytes,
                 ),
             ],
         },

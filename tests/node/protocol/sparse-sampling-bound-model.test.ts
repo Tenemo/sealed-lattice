@@ -93,7 +93,13 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(support(registration, 'registration-secret')).toBe(
             rows[0].support,
         );
+        // The standalone new() constructor still samples its own original
+        // key. Active enrollment supplies it through from_source instead.
         expect(support(contribution, 'fhe-secret')).toBe(rows[1].support);
+        expect(contribution).toContain(
+            'witness.sparse_from_values(values, &plan)',
+        );
+        expect(rows[1].callsPerOperation).toBe(1n);
         expect(support(contribution, 'fhe-auxiliary')).toBe(rows[1].support);
         expect(support(contribution, 'auxiliary-secret')).toBe(rows[3].support);
         // One share-encryption ephemeral per roster position.
@@ -162,7 +168,7 @@ describe('bounded sparse-support sampling comparison', () => {
             ]),
         ).toEqual([
             [65_536n, 256n, 1n],
-            [65_536n, 1024n, 2n],
+            [65_536n, 1024n, 1n],
             [65_536n, 256n, 10n],
             [4096n, 256n, 1n],
         ]);

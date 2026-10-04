@@ -22,27 +22,23 @@ export const proofRecordLayout = (bounds: ProofBounds): ProofSlot[] =>
         }),
     );
 
-export const bodyHeader = (bounds: ProofBounds, length: number) => {
+const checkProofLength = (bounds: ProofBounds, length: number) => {
     if (
-        bounds.bodyHeaderBytes !== 12 ||
+        bounds.bodyHeaderBytes !== 4 + 8 + 64 ||
         !Number.isSafeInteger(length) ||
         length < bounds.minimumProofBytes ||
         length > bounds.maximumProofBytes
     )
         throw new Error('The contribution proof has an invalid length.');
-    const header = new Uint8Array(bounds.bodyHeaderBytes);
-    header.set(encodeText('SCB1'));
-    new DataView(header.buffer).setBigUint64(4, BigInt(length), true);
-    return header;
 };
 
 // This fixed-width authenticated body header is the only retained carrier
 // of the actual proof length. Physical record lengths always follow the plan.
 export const proofLength = (bounds: ProofBounds, header: Uint8Array) => {
     if (
-        bounds.bodyHeaderBytes !== 12 ||
+        bounds.bodyHeaderBytes !== 4 + 8 + 64 ||
         header.length !== bounds.bodyHeaderBytes ||
-        !equalBytes(header.subarray(0, 4), encodeText('SCB1'))
+        !equalBytes(header.subarray(0, 4), encodeText('SCB2'))
     )
         throw new Error('The contribution body header is malformed.');
     const length = readUnsigned64(header, 4);
@@ -108,9 +104,9 @@ export const createProofWriter = (
             if (closed)
                 throw new Error('The contribution proof writer is closed.');
             try {
-                const header = bodyHeader(bounds, length);
+                checkProofLength(bounds, length);
                 while (next < slots.length) await appendSlot();
-                return header;
+                return length;
             } finally {
                 close();
             }

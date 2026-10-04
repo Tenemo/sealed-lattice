@@ -21,7 +21,9 @@ const maximum = (...values: number[]) => Math.max(...values);
 // The encrypted root manifest: its marker, data keys, poll and record
 // count, then one reference per data record. Generation two retains the
 // organizer's proposal signing coins, and each suffix has a length.
-const rootPrefixBytes = 4 + 64 + 64 + 4;
+// The reservation includes the source key retained before setup. Later
+// roots retire that key and its capsule and use a shorter actual prefix.
+const rootPrefixBytes = 4 + 96 + 64 + 4;
 const rootReferenceBytes = 1 + 4 + 4 + identityBytes;
 const suffixLengthBytes = 4;
 
@@ -37,6 +39,7 @@ export type ParticipantLimits = Readonly<{
         signatureBytes: number;
         recipientCapsuleBytes: number;
         signingCapsuleBytes: number;
+        maximumSourceCapsuleBytes: number;
         maximumProposalBytes: number;
         // The participant's verification of its own registration, keyed to
         // its credential.
@@ -198,6 +201,7 @@ const readModuleLimits = (kernel: ParticipantKernel) => {
             signatureBytes: take(),
             recipientCapsuleBytes: take(),
             signingCapsuleBytes: take(),
+            maximumSourceCapsuleBytes: take(),
             maximumProposalBytes: take(),
             retainedRegistrationBytes: take(),
         },
@@ -308,6 +312,7 @@ const dataKindMaximums = (
     setupInventoryBytes,
     retainedRosterBytes,
     registration.retainedRegistrationBytes,
+    registration.maximumSourceCapsuleBytes,
 ];
 
 // The largest enrollment root: every record but the setup reference and
@@ -339,6 +344,7 @@ const enrollmentPayloadBytes = (
     registration.signatureBytes +
     registration.recipientCapsuleBytes +
     registration.signingCapsuleBytes +
+    registration.maximumSourceCapsuleBytes +
     enrollmentRootBytes(registration, retainedRosterBytes) +
     registration.maximumPollDefinitionBytes +
     registration.signatureBytes +

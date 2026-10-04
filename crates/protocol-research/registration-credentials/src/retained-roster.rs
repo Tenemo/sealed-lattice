@@ -150,6 +150,10 @@ mod tests {
                 signing_public: *credential.signing_public(),
                 recipient_key_hash: ProtocolHash::digest(&keys[position]),
                 proof_length: PROOF_HEADER_BYTES + position,
+                fhe_key_commitments: vec![
+                    [7; 64];
+                    crate::source_binding::fhe_key_families(&poll).len()
+                ],
             };
             headers.push(header.encode().unwrap());
             records.push(Arc::new(VerifiedRegistration::restored(

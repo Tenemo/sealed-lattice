@@ -6,7 +6,7 @@
                 "tests/**/*.test.ts",
                 "tools/ci/sdk-package-tsdown.config.ts",
                 // Browser entry bundled by the guarded preparation runner.
-                "tools/ci/participant-padding-corruption.ts",
+                "tools/ci/participant-preparation-storage.ts",
             ],
             "project": ["tests/**/*.ts", "tools/**/*.ts"],
         },

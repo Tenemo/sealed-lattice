@@ -5,6 +5,7 @@ use crate::{
 use registration_credentials::{
     Credential,
     contribution_authentication::{CommitmentInventory, VerifiedConfirmation, verify_confirmation},
+    contribution_commitment::BODY_HEADER_BYTES,
     poll::VerifiedPoll,
     roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
     roster_input::RosterInputVerifier,
@@ -226,7 +227,7 @@ pub extern "C" fn setup_begin_opening(length: usize) -> u32 {
         };
         let packet_length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
         if packet_length > 4 + 1024 + 3309
-            || bytes.len() != 4 + packet_length + 12 + PROOF_HEADER_BYTES
+            || bytes.len() != 4 + packet_length + BODY_HEADER_BYTES + PROOF_HEADER_BYTES
         {
             return 1;
         }
@@ -242,8 +243,8 @@ pub extern "C" fn setup_begin_opening(length: usize) -> u32 {
                 .begin(
                     body,
                     signature,
-                    &bytes[start..start + 12],
-                    &bytes[start + 12..],
+                    &bytes[start..start + BODY_HEADER_BYTES],
+                    &bytes[start + BODY_HEADER_BYTES..],
                 )
                 .is_err(),
         )

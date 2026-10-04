@@ -100,7 +100,7 @@ pub fn owner_of(
     let retained = RetainedContributionContext::parse(
         credential,
         &setup.inventory().proposal().proposal().records()[position],
-        setup.profile().options(),
+        poll,
         position,
         setup.inventory().proposal().proposal().body(),
     )

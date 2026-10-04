@@ -27,22 +27,27 @@ pub struct RetainedContributionContext {
     pub(crate) owner_body: [u8; 64],
     profile: Profile,
     role: Vec<u8>,
+    fhe_key_commitment: [u8; 64],
 }
 impl RetainedContributionContext {
-    /// The option count comes from the same retained poll whose identity the
-    /// proposal names; together with the roster size it fixes the profile.
+    /// The verified poll fixes both the profile's option count and the
+    /// original registration's complete source family inventory.
     /// The original verified registration must be this credential's completed
     /// body and occupy the requested proposal position before a role exists.
     pub fn parse(
         credential: &Credential,
         original: &VerifiedRegistration,
-        options: usize,
+        verified_poll: &VerifiedPoll,
         position: usize,
         bytes: &[u8],
     ) -> Result<Self, Error> {
         let header = original.header();
         if credential.signing_public() != &header.signing_public
             || credential.completed_body != Some(original.body_digest())
+            || header.poll != verified_poll.identity()
+            || header.runtime != verified_poll.runtime()
+            || header.fhe_key_commitments.len()
+                != crate::source_binding::fhe_key_families(verified_poll).len()
         {
             return Err(Error::Context);
         }
@@ -76,7 +81,13 @@ impl RetainedContributionContext {
             .get(..4)
             .map(|count| u32::from_le_bytes(count.try_into().unwrap()) as usize)
             .ok_or(Error::Shape)?;
-        let profile = Profile::new(count, options).map_err(|_| Error::Shape)?;
+        let profile = Profile::new(count, verified_poll.manifest().option_count())
+            .map_err(|_| Error::Shape)?;
+        let family = crate::source_binding::fhe_key_family_index(verified_poll, profile)?;
+        let fhe_key_commitment = *header
+            .fhe_key_commitments
+            .get(family)
+            .ok_or(Error::Context)?;
         if bodies.len() != 4 + count * 64 || position >= count {
             return Err(Error::Shape);
         }
@@ -99,6 +110,7 @@ impl RetainedContributionContext {
             owner_body,
             profile,
             role,
+            fhe_key_commitment,
         })
     }
     pub fn identity(&self) -> &[u8; 64] {
@@ -109,6 +121,9 @@ impl RetainedContributionContext {
     }
     pub fn profile(&self) -> Profile {
         self.profile
+    }
+    pub fn fhe_key_commitment(&self) -> &[u8; 64] {
+        &self.fhe_key_commitment
     }
     pub(crate) fn role(&self) -> &[u8] {
         &self.role
@@ -168,6 +183,7 @@ pub struct RosterProposal {
     records: Vec<Arc<VerifiedRegistration>>,
     organizer_position: usize,
     profile: Profile,
+    fhe_key_family_index: usize,
 }
 impl RosterProposal {
     pub fn new(
@@ -182,13 +198,18 @@ impl RosterProposal {
         if records.len() > usize::from(poll.maximum_participants()) {
             return Err(Error::Context);
         }
+        let fhe_key_family_index = crate::source_binding::fhe_key_family_index(poll, profile)?;
+        let family_count = crate::source_binding::fhe_key_families(poll).len();
         let mut entries = Vec::with_capacity(records.len());
         let mut bodies = Vec::with_capacity(4 + 64 * records.len());
         bodies.extend((records.len() as u32).to_le_bytes());
         let mut organizer_position = None;
         for (position, record) in records.iter().enumerate() {
             let header = record.header();
-            if header.poll != poll.identity() || header.runtime != poll.runtime() {
+            if header.poll != poll.identity()
+                || header.runtime != poll.runtime()
+                || header.fhe_key_commitments.len() != family_count
+            {
                 return Err(Error::Context);
             }
             entries.push(
@@ -218,6 +239,7 @@ impl RosterProposal {
             records,
             organizer_position,
             profile,
+            fhe_key_family_index,
         })
     }
     pub fn profile(&self) -> Profile {
@@ -234,6 +256,19 @@ impl RosterProposal {
     }
     pub fn records(&self) -> &[Arc<VerifiedRegistration>] {
         &self.records
+    }
+    /// The original registration commitment for this roster's exact FHE
+    /// modulus and common-sampler family.
+    pub fn fhe_key_commitment(&self, position: usize) -> Result<&[u8; 64], Error> {
+        self.records
+            .get(position)
+            .and_then(|record| {
+                record
+                    .header()
+                    .fhe_key_commitments
+                    .get(self.fhe_key_family_index)
+            })
+            .ok_or(Error::Context)
     }
     pub fn organizer_position(&self) -> usize {
         self.organizer_position

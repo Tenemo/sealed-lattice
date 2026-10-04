@@ -126,7 +126,11 @@ struct Work {
     next_recipient: usize,
 }
 impl Work {
-    fn new(proposal: &RosterProposal, position: usize) -> Result<Self, ()> {
+    fn new(
+        proposal: &RosterProposal,
+        position: usize,
+        source: setup_witness::fhe_key_source::FheKeySource,
+    ) -> Result<Self, ()> {
         let profile = proposal.profile();
         let role = proposal.contribution_role(position).map_err(|_| ())?;
         Ok(Self {
@@ -138,7 +142,7 @@ impl Work {
                 .iter()
                 .map(|record| record.header().recipient_key_hash)
                 .collect(),
-            generator: Some(Contribution::new(profile)),
+            generator: Some(Contribution::from_source(profile, source).map_err(|_| ())?),
             proof: None,
             public: Some(PublicOutput::new(profile, &role)),
             role,
@@ -315,6 +319,7 @@ thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input:
 pub fn begin_verified(
     proposal: &RosterProposal,
     position: usize,
+    source: setup_witness::fhe_key_source::FheKeySource,
 ) -> Result<(), registration_credentials::Error> {
     use registration_credentials::Error;
     SESSION.with(|state| {
@@ -326,7 +331,7 @@ pub fn begin_verified(
         {
             return Err(Error::Consumed);
         }
-        let work = Work::new(proposal, position).map_err(|_| Error::Context)?;
+        let work = Work::new(proposal, position, source).map_err(|_| Error::Context)?;
         state.output.clear();
         state.work = Some(work);
         Ok(())
@@ -469,6 +474,21 @@ pub fn output_length() -> usize {
 }
 pub fn phase() -> u32 {
     SESSION.with(|state| state.borrow().work.as_ref().map_or(0, Work::phase))
+}
+/// Drops the completed private source/proof state after the enrollment owner
+/// has verified setup and the participant root has retired its dependencies.
+pub fn retire() {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.work = None;
+        state.checkpoint_export = None;
+        state.checkpoint_import = None;
+        state.restore_keys.clear();
+        state.input.zeroize();
+        state.output.zeroize();
+        state.output.clear();
+        state.stopped = true;
+    });
 }
 pub fn command(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|state| {

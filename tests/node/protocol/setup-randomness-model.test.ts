@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
     compileSetupRandomnessCensus,
     reduceSignedDigitModel,
@@ -9,16 +10,48 @@ import { completionProfile } from '#tests/supported-profile-model.js';
 describe('setup randomness and bounded integer reduction', () => {
     it('charges all contribution and registration errors in the preparation profile', () => {
         const result = compileSetupRandomnessCensus(completionProfile());
-        expect(result.samplesPerContribution).toBe(44n * 65536n + 4096n);
-        // Four setup contributors draw contribution errors and all ten
-        // participants draw registration errors.
+        const families = compileRegistrationSetupBindingScreen(
+            10,
+            10,
+        ).coordinateCount;
+        expect(result.samplesPerContribution).toBe(43n * 65536n + 4096n);
+        expect(result.samplesPerSourceFamily).toBe(65536n);
+        expect(result.samplesPerEnrollment).toBe((1n + families) * 65536n);
+        // Four contributors reuse their original first error. Every
+        // registrant generated all families, including unselected ones.
         expect(result.samplesPerPreparation).toBe(
-            4n * (44n * 65536n + 4096n) + 10n * 65536n,
+            4n * (43n * 65536n + 4096n) + 10n * (1n + families) * 65536n,
         );
         expect(result.encodedThresholdBytes).toBe(127n * 20n);
         expect(result.quantizationBits).toBeGreaterThan(120);
         expect(result.tailExponent).toBe(200n);
-        expect(result.preparationSamplingBits).toBe(129);
+        expect(result.preparationSamplingBits).toBe(
+            (
+                result.preparationVariationDenominator /
+                result.preparationVariationNumerator
+            ).toString(2).length - 1,
+        );
+    });
+    it('keeps the original poll maximum independent from its final roster', () => {
+        const profile = completionProfile();
+        const small = compileSetupRandomnessCensus(profile);
+        const larger = compileSetupRandomnessCensus(profile, 20);
+        const families = compileRegistrationSetupBindingScreen(
+            20,
+            10,
+        ).coordinateCount;
+        expect(larger.originalPollMaximumParticipants).toBe(20);
+        expect(larger.sourceFamilyCount).toBe(families);
+        expect(larger.samplesPerContribution).toBe(
+            small.samplesPerContribution,
+        );
+        expect(larger.samplesPerPreparation - small.samplesPerPreparation).toBe(
+            10n * 65536n * (families - small.sourceFamilyCount),
+        );
+        expect(() => compileSetupRandomnessCensus(profile, 9)).toThrow(
+            'exclude',
+        );
+        expect(() => compileSetupRandomnessCensus(profile, 21)).toThrow();
     });
     it('matches direct centered division across signed carries and both correction outcomes', () => {
         const corrections = new Set<bigint>();

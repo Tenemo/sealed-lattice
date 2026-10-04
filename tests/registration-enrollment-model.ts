@@ -1,9 +1,65 @@
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
-import { supportedProfileRanges } from '#tests/supported-profile-model.js';
+import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
+import {
+    deriveSupportedProfile,
+    supportedProfileRanges,
+} from '#tests/supported-profile-model.js';
 
 export const registrationSigningPublicKeyBytes = 1952n;
 // ParticipantIdentity renders its foundation Hash512 as lowercase hex.
 export const participantIdentityAsciiBytes = 2n * 64n;
+
+// The verified poll fixes this ordered family inventory before any roster.
+// The existing independent screen groups exact modulus/sampler pairs.
+export const compileRegistrationSourceCustody = (
+    maximumParticipants: number,
+    optionCount: number,
+) => {
+    const source = compileRegistrationSetupBindingScreen(
+        maximumParticipants,
+        optionCount,
+    );
+    return {
+        familyCount: source.coordinateCount,
+        commitmentListBytes: 2n + 4n + source.commitmentDigestPayloadBytes,
+        capsulePlaintextBytes: 4n + source.privateSeedAndSaltPayloadBytes,
+        capsuleBytes: 4n + source.privateSeedAndSaltPayloadBytes + 16n,
+    };
+};
+
+let sourceMaximums:
+    | { familyCount: bigint; capsuleBytes: bigint; retainedSetupBytes: bigint }
+    | undefined;
+const maximumSourceInventory = () => {
+    if (sourceMaximums !== undefined) return sourceMaximums;
+    const { participants, options } = supportedProfileRanges();
+    let familyCount = 0n;
+    let retainedSetupBytes = 0n;
+    for (let option = options.minimum; option <= options.maximum; option++) {
+        const source = compileRegistrationSourceCustody(
+            participants.maximum,
+            option,
+        );
+        if (source.familyCount > familyCount) familyCount = source.familyCount;
+        for (
+            let count = participants.minimum;
+            count <= participants.maximum;
+            count++
+        ) {
+            const profile = deriveSupportedProfile(count, option);
+            const polynomials =
+                4n * profile.gadgetLength + 2n * BigInt(count) + 1n;
+            const bytes = 4n + 64n + 64n * polynomials + 64n;
+            if (bytes > retainedSetupBytes) retainedSetupBytes = bytes;
+        }
+    }
+    sourceMaximums = {
+        familyCount,
+        capsuleBytes: 4n + familyCount * 128n + 16n,
+        retainedSetupBytes,
+    };
+    return sourceMaximums;
+};
 
 // A retained roster: its marker, the proposal identity and the record count,
 // each record's header digest, body digest and proof hash, and the SHA3-512
@@ -36,29 +92,34 @@ const registrationEnrollmentInputs = {
 export const compileRegistrationEnrollmentCensus = () => {
     const key = compileRegistrationKeyRelationCensus();
     const inputs = registrationEnrollmentInputs;
+    const source = maximumSourceInventory();
     const ceiling = (value: bigint, divisor: bigint) =>
         (value + divisor - 1n) / divisor;
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'utf8'));
     const maximumHeaderBytes =
         8n +
-        7n * 6n +
+        8n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header/v3') +
+        bytes('sealed-lattice/registration-header/v4') +
         3n * 64n +
         inputs.signingPublicKeyBytes +
         8n +
         4n +
-        inputs.maximumUsernameBytes;
+        inputs.maximumUsernameBytes +
+        2n +
+        4n +
+        64n * source.familyCount;
     const recipientCapsuleBytes = 4n + key.support * 2n + 16n;
     const signingCapsuleBytes = 4n + 32n + 16n;
     const maximumEnrollmentRecords =
         ceiling(key.publicKeyBytes, 1_048_576n) +
         ceiling(key.maximumProofBytes, 1_048_576n) +
-        6n;
+        7n;
     // The proposal, its signature, the retained roster and the retained
     // registration.
     const maximumRecords = maximumEnrollmentRecords + 4n;
-    const manifestPrefixBytes = 4n + 2n * 32n + 64n + 4n;
+    const manifestPrefixBytes = 4n + 3n * 32n + 64n + 4n;
+    const preparedManifestPrefixBytes = manifestPrefixBytes - 32n;
     const maximumEnrollmentManifestBytes =
         manifestPrefixBytes + maximumEnrollmentRecords * 73n;
     const maximumProposalIntentManifestBytes =
@@ -97,7 +158,7 @@ export const compileRegistrationEnrollmentCensus = () => {
     };
     // The creator input carries the runtime, the result length, the
     // participant maximum, the question, the option count, each label and
-    // the username, each text after its four-byte length, then the two data
+    // the username, each text after its four-byte length, then the three data
     // keys. The texts fill what the poll definition leaves beside its own
     // framing and the manifest's, which grows faster with the option count
     // than the input's framing, so the fewest options give the longest input.
@@ -113,7 +174,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         manifestFramingBytes(options) +
         4n +
         inputs.maximumUsernameIngressBytes +
-        64n;
+        96n;
     const { options } = supportedProfileRanges();
     let maximumCreatorInputBytes = 0n;
     for (let count = options.minimum; count <= options.maximum; count++) {
@@ -125,6 +186,8 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumHeaderBytes,
         recipientCapsuleBytes,
         signingCapsuleBytes,
+        maximumSourceFamilyCount: source.familyCount,
+        maximumSourceCapsuleBytes: source.capsuleBytes,
         maximumRecords,
         maximumEnrollmentRecords,
         maximumRetainedRosterBytes: maximumRetainedRosterBytes(),
@@ -132,6 +195,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumEnrollmentManifestBytes,
         maximumProposalIntentManifestBytes,
         manifestPrefixBytes,
+        preparedManifestPrefixBytes,
         maximumManifestBytes,
         maximumRootBytes,
         proofRoleBytes,
@@ -144,21 +208,29 @@ export const compileRegistrationEnrollmentCensus = () => {
             inputs.signatureBytes +
             4n +
             inputs.maximumUsernameIngressBytes +
-            64n,
+            96n,
         recipientAssociatedBytes: 4n + 4n + proofRoleBytes + 3n * 64n,
         signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
+        sourceAssociatedBytes:
+            8n +
+            2n * 6n +
+            4n +
+            bytes('sealed-lattice/fhe-source-custody/v1') +
+            64n,
         rootAssociatedBytes: 4n + 64n,
         // The restore control ends with the two-byte mask of signing
         // purposes that the authenticated root shows unused.
         maximumRestoreInputBytes:
             128n +
             4n +
-            inputs.maximumHeaderInputBytes +
+            maximumHeaderBytes +
             128n +
-            64n +
             key.publicKeyBytes +
             recipientCapsuleBytes +
             signingCapsuleBytes +
+            (96n + source.capsuleBytes > 64n + 4n + source.retainedSetupBytes
+                ? 96n + source.capsuleBytes
+                : 64n + 4n + source.retainedSetupBytes) +
             2n,
         maximumRetainedPayloadBytes:
             key.publicKeyBytes +
@@ -167,6 +239,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             inputs.signatureBytes +
             recipientCapsuleBytes +
             signingCapsuleBytes +
+            source.capsuleBytes +
             maximumRootBytes +
             inputs.maximumPollDefinitionBytes +
             inputs.signatureBytes +
@@ -183,5 +256,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         rootDistinctBlockInputs: 2n + ceiling(maximumManifestBytes, 16n),
         signingDistinctBlockInputs:
             1n + 1n + ceiling(signingCapsuleBytes - 16n, 16n),
+        sourceDistinctBlockInputs:
+            1n + 1n + ceiling(source.capsuleBytes - 16n, 16n),
     };
 };

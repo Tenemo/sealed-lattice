@@ -37,7 +37,11 @@ import type { ParticipantHead } from './storage.js';
 // signing, then release.
 export const chunkBytes = 1 << 20;
 const referenceBytes = 73;
-const prefixBytes = 4 + 64 + 64 + 4;
+export const requiresFheKeySources = (generation: number) => generation < 12;
+const dataKeyBytes = (generation: number) =>
+    requiresFheKeySources(generation) ? 96 : 64;
+const prefixBytes = (generation: number) =>
+    4 + dataKeyBytes(generation) + 64 + 4;
 const lastGeneration = 29;
 const suffixStarts = {
     contribution: 4,
@@ -75,6 +79,8 @@ export const dataKind = {
     // This participant's verification of its own registration, keyed to its
     // credential.
     retainedRegistration: 13,
+    // Original private FHE family sources, retired with verified setup.
+    sourceCapsule: 14,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -137,13 +143,14 @@ export const encodeManifest = (
     });
     if (
         (generation === 2) !== (manifest.proposalCoins !== undefined) ||
+        manifest.dataKeys.length !== dataKeyBytes(generation) ||
         Object.keys(manifest.suffixes).length !== suffixes.length
     )
         throw new Error(
             'Participant root fields disagree with its generation.',
         );
     return concatenate(
-        encodeText('ERM5'),
+        encodeText('ERM6'),
         manifest.dataKeys,
         manifest.poll,
         unsigned32(manifest.references.length),
@@ -190,6 +197,8 @@ const checkReferences = (
         !exact(dataKind.signature, registration.signatureBytes) ||
         !exact(dataKind.recipientCapsule, registration.recipientCapsuleBytes) ||
         !exact(dataKind.signingCapsule, registration.signingCapsuleBytes) ||
+        requiresFheKeySources(generation) !==
+            lengths[dataKind.sourceCapsule] > 0 ||
         lengths[dataKind.pollDefinition] === 0 ||
         !exact(dataKind.pollSignature, registration.signatureBytes) ||
         generation >= 2 !== lengths[dataKind.proposal] > 0 ||
@@ -213,19 +222,21 @@ const decodeManifest = (
         !Number.isSafeInteger(generation) ||
         generation < 1 ||
         generation > lastGeneration ||
-        bytes.length < prefixBytes ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('ERM5'))
+        bytes.length < prefixBytes(generation) ||
+        !equalBytes(bytes.subarray(0, 4), encodeText('ERM6'))
     )
         throw new Error('Invalid participant root manifest.');
-    const count = readUnsigned32(bytes, 132);
+    const prefix = prefixBytes(generation);
+    const keysEnd = 4 + dataKeyBytes(generation);
+    const count = readUnsigned32(bytes, prefix - 4);
     if (
         count > limits.root.maximumRecords ||
-        bytes.length < prefixBytes + referenceBytes * count
+        bytes.length < prefix + referenceBytes * count
     )
         throw new Error('Invalid participant record inventory.');
     const references: RecordReference[] = [];
     for (let index = 0; index < count; index++) {
-        const start = prefixBytes + referenceBytes * index;
+        const start = prefix + referenceBytes * index;
         const view = new DataView(
             bytes.buffer,
             bytes.byteOffset + start,
@@ -239,7 +250,7 @@ const decodeManifest = (
         });
     }
     checkReferences(references, generation, limits);
-    let offset = prefixBytes + referenceBytes * count;
+    let offset = prefix + referenceBytes * count;
     let proposalCoins: Uint8Array | undefined;
     if (generation === 2) {
         if (bytes.length - offset < 32)
@@ -260,8 +271,8 @@ const decodeManifest = (
     if (offset !== bytes.length)
         throw new Error('Participant root manifest has trailing bytes.');
     return {
-        dataKeys: bytes.slice(4, 68),
-        poll: bytes.slice(68, 132),
+        dataKeys: bytes.slice(4, keysEnd),
+        poll: bytes.slice(keysEnd, keysEnd + 64),
         references,
         ...(proposalCoins === undefined ? {} : { proposalCoins }),
         suffixes,
@@ -587,8 +598,9 @@ export const commitRoot = async (
     if (!equalBytes(reopened, plaintext))
         throw new Error('Participant root readback differs.');
     const manifest = transition.manifest;
-    for (const reference of manifest.references.slice(
-        predecessor.manifest.references.length,
+    const addedKinds = new Set(added.map(({ kind }) => kind));
+    for (const reference of manifest.references.filter(({ kind }) =>
+        addedKinds.has(kind),
     ))
         await readDataRecord(context, reference);
     return { head, plaintext: reopened, manifest };

@@ -47,6 +47,7 @@ fn registration() -> (VerifiedPoll, Record, Enrollment) {
         b"Creator",
         &[1; 32],
         &[2; 32],
+        &[3; 32],
         |kind, offset, bytes| {
             if let Some(part) = parts.get_mut(kind as usize) {
                 assert_eq!(offset, part.len());
@@ -195,8 +196,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     .encode()
     .unwrap();
     let context =
-        RetainedContributionContext::parse(credential, original, profile.options(), 0, &proposal)
-            .unwrap();
+        RetainedContributionContext::parse(credential, original, poll, 0, &proposal).unwrap();
     let prefix = [poll.identity(), poll.runtime(), *context.identity()].concat();
     let role = |credential: &Credential, position: u16, purpose: &str| {
         CanonicalTuple::new(

@@ -91,7 +91,7 @@ impl BallotInputs<'_> {
         let proposal = RetainedContributionContext::parse(
             &enrollment.credential,
             &self.setup.inventory().proposal().proposal().records()[position],
-            profile.options(),
+            self.poll,
             position,
             self.setup.inventory().proposal().proposal().body(),
         )
@@ -276,7 +276,11 @@ fn main() {
         })
         .collect::<Vec<_>>();
     let mut controls: Vec<[Vec<u8>; 2]> = (0..count).map(|_| [Vec::new(), Vec::new()]).collect();
-    let data_keys = random::<64>();
+    let data_keys = random::<96>();
+    let mut enrollment_data_keys = vec![Zeroizing::new(*data_keys)];
+    let mut enrollment_capsules: Vec<[Zeroizing<Vec<u8>>; 3]> = (0..count)
+        .map(|_| std::array::from_fn(|_| Zeroizing::new(Vec::new())))
+        .collect();
     let mut signing_capsule = Vec::new();
     let mut creator_output = EnrollmentOutput::new(&directories[0], &mut controls[0]);
     let (packet, creator) = Enrollment::create_creator(
@@ -284,9 +288,19 @@ fn main() {
         runtime,
         b"Creator",
         data_keys[..32].try_into().unwrap(),
-        data_keys[32..].try_into().unwrap(),
+        data_keys[32..64].try_into().unwrap(),
+        data_keys[64..].try_into().unwrap(),
         |kind, offset, bytes| {
             creator_output.emit(kind, offset, bytes);
+            if let Some(capsule) = match kind {
+                4 => Some(0),
+                5 => Some(1),
+                14 => Some(2),
+                _ => None,
+            } {
+                assert_eq!(offset, enrollment_capsules[0][capsule].len());
+                enrollment_capsules[0][capsule].extend(bytes);
+            }
             if kind == 5 {
                 assert_eq!(offset, signing_capsule.len());
                 signing_capsule.extend(bytes);
@@ -309,7 +323,7 @@ fn main() {
     let mut corrupt_signing_capsule = Zeroizing::new(Vec::new());
     let mut corrupt_wrapping_key = Zeroizing::new([0u8; 32]);
     for (position, directory) in directories.iter().enumerate().skip(1) {
-        let keys = random::<64>();
+        let keys = random::<96>();
         let equivocator = Some(position) == scenario.equivocator;
         let mut record_output = EnrollmentOutput::new(directory, &mut controls[position]);
         enrollments.push(
@@ -317,9 +331,19 @@ fn main() {
                 &poll,
                 format!("Participant {position}").as_bytes(),
                 keys[..32].try_into().unwrap(),
-                keys[32..].try_into().unwrap(),
+                keys[32..64].try_into().unwrap(),
+                keys[64..].try_into().unwrap(),
                 |kind, offset, bytes| {
                     record_output.emit(kind, offset, bytes);
+                    if let Some(capsule) = match kind {
+                        4 => Some(0),
+                        5 => Some(1),
+                        14 => Some(2),
+                        _ => None,
+                    } {
+                        assert_eq!(offset, enrollment_capsules[position][capsule].len());
+                        enrollment_capsules[position][capsule].extend(bytes);
+                    }
                     if equivocator && kind == 5 {
                         assert_eq!(offset, corrupt_signing_capsule.len());
                         corrupt_signing_capsule.extend(bytes);
@@ -330,8 +354,9 @@ fn main() {
         );
         record_output.finish();
         if equivocator {
-            corrupt_wrapping_key.copy_from_slice(&keys[32..]);
+            corrupt_wrapping_key.copy_from_slice(&keys[32..64]);
         }
+        enrollment_data_keys.push(keys);
     }
     let mut records = Vec::new();
     let mut buffer = vec![0; 1 << 20];
@@ -373,9 +398,48 @@ fn main() {
                 verifier.finish_key().unwrap();
             }
         }
-        records.push(Arc::new(verifier.finish().unwrap()));
+        let record = Arc::new(verifier.finish().unwrap());
+        let capsules = &enrollment_capsules[position];
+        let restore = |source_capsule: &[u8]| {
+            Enrollment::restore(
+                &poll,
+                record.header(),
+                record.public_key(),
+                record.proof_hash(),
+                record.body_digest(),
+                &enrollment_data_keys[position],
+                [&capsules[0], &capsules[1], source_capsule],
+            )
+        };
+        if position == 0 {
+            assert!(restore(&[]).is_err());
+            let mut changed = Zeroizing::new(capsules[2].to_vec());
+            changed[0] ^= 1;
+            assert!(restore(&changed).is_err());
+            assert!(restore(&enrollment_capsules[1][2]).is_err());
+        }
+        let mut restored = restore(&capsules[2]).unwrap();
+        assert_eq!(
+            restored
+                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .unwrap(),
+            enrollments[position]
+                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .unwrap(),
+        );
+        // The original completed enrollment has not acted on any roster yet.
+        restored
+            .credential
+            .unlock_unused_purposes(
+                2 * registration_credentials::SigningPurpose::Release.mask() - 1,
+            )
+            .unwrap();
+        enrollments[position] = restored;
+        records.push(record);
         println!("Verified fresh registration {position}");
     }
+    drop(enrollment_capsules);
+    drop(enrollment_data_keys);
     let proposal = RosterProposal::new(&poll, records).unwrap();
     assert_eq!(proposal.profile(), profile);
     let proposal_signature = enrollments[0]
@@ -418,12 +482,9 @@ fn main() {
     let mut body_headers = Vec::new();
     for (position, enrollment) in enrollments.iter_mut().enumerate().take(contributors) {
         let directory = output.join(format!("contribution-{position}"));
-        let (commitment, header) =
-            contribution::generate(&roster, position, &directory, &random::<64>());
-        let signed = enrollment
-            .credential
-            .sign_confirmation(&roster, commitment, *random::<32>())
-            .unwrap();
+        let (signing, header) =
+            contribution::generate(&roster, enrollment, position, &directory, &random::<64>());
+        let signed = signing.confirmation().unwrap();
         write(directory.join("confirmation.bin"), signed.body());
         write(
             directory.join("confirmation-signature.bin"),
@@ -455,6 +516,12 @@ fn main() {
         );
         openings.push(opening);
     }
+    aggregate::verify_source_refusals(
+        inventory.clone(),
+        &contribution_directories,
+        &body_headers,
+        &openings,
+    );
     let setup = Arc::new(aggregate::verify(
         inventory.clone(),
         &contribution_directories,
@@ -462,6 +529,16 @@ fn main() {
         &openings,
         &output.join("aggregates"),
     ));
+    for enrollment in &mut enrollments {
+        enrollment.retire_sources();
+        assert!(enrollment.sources_retired());
+        assert!(enrollment.contribution_source(profile).is_err());
+        assert!(
+            enrollment
+                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .is_err()
+        );
+    }
     if let Some(mode) = arguments.get(5) {
         let invalid_only = mode == "invalid-only";
         let barrier = no_result_close::run(
@@ -505,7 +582,7 @@ fn main() {
     let retained_proposal = RetainedContributionContext::parse(
         &enrollments[0].credential,
         &inventory.proposal().proposal().records()[0],
-        profile.options(),
+        &poll,
         0,
         inventory.proposal().proposal().body(),
     )
@@ -520,32 +597,51 @@ fn main() {
             openings[0].signature(),
         )
         .unwrap();
-    // A retained proposal read with another option count names another
-    // profile, which the original poll refuses.
+    // A separately verified poll cannot supply another option count for
+    // this original registration's retained context.
     let other_options = if profile.options() < 20 {
         profile.options() + 1
     } else {
         profile.options() - 1
     };
-    let other_profile = RetainedContributionContext::parse(
-        &enrollments[0].credential,
-        &inventory.proposal().proposal().records()[0],
-        other_options,
-        0,
-        inventory.proposal().proposal().body(),
+    let other_manifest = Manifest::new(
+        text("Another poll"),
+        (0..other_options as u16)
+            .map(|index| {
+                OptionDefinition::new(
+                    index,
+                    format!("option-{index}"),
+                    text(&format!("Option {index}")),
+                )
+                .unwrap()
+            })
+            .collect(),
+    )
+    .unwrap();
+    let other_packet = registration_credentials::Credential::from_seed(*random::<32>())
+        .create_poll(
+            PollDraft::new(other_manifest, 1, count as u16).unwrap(),
+            runtime,
+            *random::<32>(),
+            *random::<32>(),
+        )
+        .unwrap();
+    let other_poll = verify_poll(
+        other_packet.identity,
+        runtime,
+        &other_packet.body,
+        &other_packet.signature,
     )
     .unwrap();
     assert!(
-        enrollments[0]
-            .credential
-            .retain_ballot_owner(
-                &poll,
-                &other_profile,
-                inventory.identity(),
-                openings[0].body(),
-                openings[0].signature()
-            )
-            .is_err()
+        RetainedContributionContext::parse(
+            &enrollments[0].credential,
+            &inventory.proposal().proposal().records()[0],
+            &other_poll,
+            0,
+            inventory.proposal().proposal().body(),
+        )
+        .is_err()
     );
     assert!(
         enrollments[1]
@@ -688,7 +784,7 @@ fn main() {
     let outsider_proposal = RetainedContributionContext::parse(
         &enrollments[outsider].credential,
         &inventory.proposal().proposal().records()[outsider],
-        profile.options(),
+        &poll,
         outsider,
         inventory.proposal().proposal().body(),
     )
@@ -944,7 +1040,7 @@ fn main() {
         registration_credentials::Credential::open_complete(
             original.header().signing_public,
             original.body_digest(),
-            data_keys[32..].try_into().unwrap(),
+            data_keys[32..64].try_into().unwrap(),
             &signing_capsule,
         )
         .unwrap()

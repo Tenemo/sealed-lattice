@@ -118,6 +118,12 @@ pub(super) fn verified() -> Option<Arc<VerifiedRegistration>> {
     STATE.with(|state| state.borrow().verified.clone())
 }
 
+/// The signed poll was checked before either fresh or retained registration
+/// verification. It fixes enrollment source families even during restoration.
+pub(super) fn with_poll<T>(operation: impl FnOnce(&VerifiedPoll) -> T) -> Option<T> {
+    STATE.with(|state| state.borrow().poll.as_ref().map(operation))
+}
+
 /// Restores the participant's own registration from the retained copy the
 /// host delivered in place of the proof, for the credential that the
 /// registration's capsules opened.

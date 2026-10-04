@@ -692,7 +692,11 @@ mod tests {
 
     // Three credentials whose completed bodies a signed roster lists in
     // order, with the organizer first.
-    fn signed_roster() -> (Vec<Credential>, OrganizerSignedRoster) {
+    fn signed_roster() -> (
+        Vec<Credential>,
+        OrganizerSignedRoster,
+        crate::poll::VerifiedPoll,
+    ) {
         let text =
             |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
         let options = (0..2)
@@ -727,6 +731,11 @@ mod tests {
                         signing_public: *credential.signing_public(),
                         recipient_key_hash: [0; 64],
                         proof_length: 0,
+                        fhe_key_commitments: vec![
+                            [7; 64];
+                            crate::source_binding::fhe_key_families(&poll)
+                                .len()
+                        ],
                     },
                     [body; 64],
                 ))
@@ -739,6 +748,7 @@ mod tests {
         (
             credentials,
             verify_roster_proposal(proposal, &signature).unwrap(),
+            poll,
         )
     }
 
@@ -757,7 +767,7 @@ mod tests {
 
     #[test]
     fn a_restored_owner_reinstalls_its_confirmation_but_signs_no_other() {
-        let (mut credentials, roster) = signed_roster();
+        let (mut credentials, roster, _) = signed_roster();
         let verify = |confirmation: SignedConfirmation| {
             verify_confirmation(&roster, confirmation.body(), confirmation.signature()).unwrap()
         };
@@ -817,7 +827,7 @@ mod tests {
 
     #[test]
     fn every_participant_confirms_and_only_setup_contributors_commit_and_open() {
-        let (mut credentials, roster) = signed_roster();
+        let (mut credentials, roster, _) = signed_roster();
         // Three participants have two setup contributors, so the last
         // position commits to no contribution: it neither signs nor has
         // accepted a confirmation that carries a commitment.
@@ -932,7 +942,7 @@ mod tests {
 
     #[test]
     fn a_retained_roster_confirmation_is_signed_once_at_its_own_position() {
-        let (mut credentials, roster) = signed_roster();
+        let (mut credentials, roster, poll) = signed_roster();
         let contexts: Vec<_> = credentials
             .iter()
             .enumerate()
@@ -940,7 +950,7 @@ mod tests {
                 RetainedContributionContext::parse(
                     credential,
                     &roster.proposal().records()[position],
-                    2,
+                    &poll,
                     position,
                     roster.proposal().body(),
                 )

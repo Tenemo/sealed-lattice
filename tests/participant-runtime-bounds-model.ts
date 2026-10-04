@@ -73,6 +73,9 @@ export const compileParticipantRuntimeProfile = (
             signatureBytes: number(enrollment.signatureBytes),
             recipientCapsuleBytes: number(enrollment.recipientCapsuleBytes),
             signingCapsuleBytes: number(enrollment.signingCapsuleBytes),
+            maximumSourceCapsuleBytes: number(
+                enrollment.maximumSourceCapsuleBytes,
+            ),
             maximumProposalBytes: number(enrollment.maximumProposalBytes),
             retainedRegistrationBytes: number(
                 enrollment.retainedRegistrationBytes,

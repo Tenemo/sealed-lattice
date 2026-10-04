@@ -12,6 +12,7 @@ use registration_credentials::{
         CloseProposalMessage, ClosePurpose, CloseResponseMessage, maximum_close_message_bytes,
     },
     contribution_authentication::{CommitmentInventory, verify_confirmation},
+    contribution_commitment::BODY_HEADER_BYTES,
     roster_authentication::verify_roster_proposal,
     roster_input::RosterInputVerifier,
 };
@@ -345,7 +346,11 @@ fn main() -> io::Result<()> {
         fs::create_dir(&stage)?;
         let opening = bounded(directory.join("opening.bin"), 2048, &mut work)?;
         let signature = bounded(directory.join("opening-signature.bin"), 3309, &mut work)?;
-        let header = bounded(directory.join("body-header.bin"), 12, &mut work)?;
+        let header = bounded(
+            directory.join("body-header.bin"),
+            BODY_HEADER_BYTES,
+            &mut work,
+        )?;
         let mut proof = File::open(directory.join("proof.bin"))?;
         let mut proof_header = [0; PROOF_HEADER_BYTES];
         work.read(&mut proof, &mut proof_header)?;

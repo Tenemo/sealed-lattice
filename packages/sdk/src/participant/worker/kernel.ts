@@ -26,6 +26,8 @@ export const kernelFunctions = [
     'prepare_creator',
     'prepare_join',
     'restore',
+    'restore_prepared',
+    'retire_contribution_sources',
     'check_retained',
     'own_registration_input_pointer',
     'own_registration_input_capacity',

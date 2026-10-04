@@ -117,7 +117,7 @@ describe('shared participant custody', () => {
                 expect(storage.recordReferenceBytes).toBe(
                     referenceBytes * records,
                 );
-                expect(storage.completedBodyHeaderBytes).toBe(4n + 8n);
+                expect(storage.completedBodyHeaderBytes).toBe(4n + 8n + 64n);
                 const prefix = 4n + 2n + body.saltBytes + 4n * 4n;
                 const bodyRecords = body.polynomials.reduce(
                     (count, polynomial) =>
@@ -399,6 +399,7 @@ describe('shared participant custody', () => {
             'Later root',
             'Recipient capsule',
             'Signing capsule',
+            'FHE source capsule',
             'Contribution body record',
             'Contribution checkpoint record',
             'Contribution signing record',

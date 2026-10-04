@@ -13,8 +13,30 @@ use zeroize::Zeroizing;
 
 /// A contribution commitment's secret salt.
 pub const SALT_BYTES: usize = 64;
-/// A contribution body opens with its magic and its proof's length.
-pub const BODY_HEADER_BYTES: usize = 4 + 8;
+/// A contribution body opens with its magic, proof length and the original
+/// registration-coordinate opening salt. The whole-body salt stays separate.
+pub const BODY_HEADER_BYTES: usize = 4 + 8 + crate::source_binding::SOURCE_SALT_BYTES;
+
+pub struct ContributionBodyHeader {
+    pub proof_length: usize,
+    pub source_salt: [u8; crate::source_binding::SOURCE_SALT_BYTES],
+}
+impl ContributionBodyHeader {
+    pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() != BODY_HEADER_BYTES || &bytes[..4] != b"SCB2" {
+            return Err(Error::Shape);
+        }
+        let proof_length = usize::try_from(u64::from_le_bytes(bytes[4..12].try_into().unwrap()))
+            .map_err(|_| Error::Shape)?;
+        if !proof_lengths(profile).contains(&proof_length) {
+            return Err(Error::Shape);
+        }
+        Ok(Self {
+            proof_length,
+            source_salt: bytes[12..].try_into().unwrap(),
+        })
+    }
+}
 
 pub struct ComputedContributionCommitment {
     pub(crate) proposal: [u8; 64],
@@ -35,13 +57,15 @@ pub fn proof_lengths(profile: Profile) -> RangeInclusive<usize> {
 pub fn body_header(
     profile: Profile,
     proof_length: usize,
+    source_salt: &[u8; crate::source_binding::SOURCE_SALT_BYTES],
 ) -> Result<[u8; BODY_HEADER_BYTES], Error> {
     if !proof_lengths(profile).contains(&proof_length) {
         return Err(Error::Shape);
     }
     let mut header = [0; BODY_HEADER_BYTES];
-    header[..4].copy_from_slice(b"SCB1");
-    header[4..].copy_from_slice(&(proof_length as u64).to_le_bytes());
+    header[..4].copy_from_slice(b"SCB2");
+    header[4..12].copy_from_slice(&(proof_length as u64).to_le_bytes());
+    header[12..].copy_from_slice(source_salt);
     Ok(header)
 }
 
@@ -112,14 +136,7 @@ impl ContributionCommitmentHasher {
         salt: &[u8; SALT_BYTES],
         header: &[u8],
     ) -> Result<Self, Error> {
-        if header.len() != 12 || &header[..4] != b"SCB1" {
-            return Err(Error::Shape);
-        }
-        let proof_length = usize::try_from(u64::from_le_bytes(header[4..].try_into().unwrap()))
-            .map_err(|_| Error::Shape)?;
-        if body_header(profile, proof_length)?.as_slice() != header {
-            return Err(Error::Shape);
-        }
+        let proof_length = ContributionBodyHeader::decode(profile, header)?.proof_length;
         let polynomials = polynomials(profile);
         let prefix = [
             CanonicalItem::fixed_bytes(*signing_public).map_err(|_| Error::Shape)?,
@@ -215,6 +232,26 @@ mod tests {
     use crate::foundation::CanonicalTuple;
 
     #[test]
+    fn body_header_binds_the_source_opening_and_rejects_other_formats() {
+        let profile = Profile::new(3, 2).unwrap();
+        let length = *proof_lengths(profile).start();
+        let bytes = body_header(profile, length, &[9; 64]).unwrap();
+        let parsed = ContributionBodyHeader::decode(profile, &bytes).unwrap();
+        assert_eq!(parsed.proof_length, length);
+        assert_eq!(parsed.source_salt, [9; 64]);
+        let mut changed = bytes;
+        changed[3] = b'1';
+        assert!(ContributionBodyHeader::decode(profile, &changed).is_err());
+        assert!(ContributionBodyHeader::decode(profile, &bytes[..12]).is_err());
+        assert!(
+            ContributionBodyHeader::decode(profile, &[bytes.as_slice(), &[0]].concat()).is_err()
+        );
+        changed = bytes;
+        changed[4..12].copy_from_slice(&(length as u64 - 1).to_le_bytes());
+        assert!(ContributionBodyHeader::decode(profile, &changed).is_err());
+    }
+
+    #[test]
     fn emitted_hash_matches_canonical_sender_prefix() {
         let public_key = std::array::from_fn::<_, 1952, _>(|index| (index % 251) as u8);
         let salt = [4; 64];
@@ -239,7 +276,7 @@ mod tests {
             let proofs = proof_lengths(profile);
             let polynomial_bytes: usize = polynomials(profile).iter().map(|(_, bytes)| bytes).sum();
             for proof_length in [*proofs.start(), *proofs.end()] {
-                let header = body_header(profile, proof_length).unwrap();
+                let header = body_header(profile, proof_length, &[6; 64]).unwrap();
                 let payload_length = header.len() + polynomial_bytes + proof_length;
                 let mut prefix = CanonicalTuple::new(
                     1,
@@ -313,11 +350,11 @@ mod tests {
                 profile.contribution_body_polynomials()
             );
             let proofs = proof_lengths(profile);
-            assert!(body_header(profile, *proofs.start()).is_ok());
-            assert!(body_header(profile, *proofs.end()).is_ok());
-            assert!(body_header(profile, proofs.start() - 1).is_err());
-            assert!(body_header(profile, proofs.end() + 1).is_err());
-            let header = body_header(profile, *proofs.start()).unwrap();
+            assert!(body_header(profile, *proofs.start(), &[6; 64]).is_ok());
+            assert!(body_header(profile, *proofs.end(), &[6; 64]).is_ok());
+            assert!(body_header(profile, proofs.start() - 1, &[6; 64]).is_err());
+            assert!(body_header(profile, proofs.end() + 1, &[6; 64]).is_err());
+            let header = body_header(profile, *proofs.start(), &[6; 64]).unwrap();
             let mut hasher = ContributionCommitmentHasher::from_parts(
                 profile, [3; 64], 0, &[5; 1952], b"role", &[4; 64], &header,
             )
@@ -341,6 +378,6 @@ mod tests {
         assert_eq!(polynomials(completion).len(), 45);
         assert_eq!(*proof_lengths(completion).end(), 41_855_840);
         let longest = Profile::new(20, 20).unwrap();
-        assert!(body_header(completion, *proof_lengths(longest).end()).is_err());
+        assert!(body_header(completion, *proof_lengths(longest).end(), &[6; 64]).is_err());
     }
 }

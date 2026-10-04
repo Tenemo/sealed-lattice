@@ -28,6 +28,7 @@ import {
     encodeManifest,
     readDataKind,
     readDataRecord,
+    requiresFheKeySources,
     rootAssociatedData,
     sealRoot,
 } from './root.js';
@@ -147,7 +148,7 @@ export const createEnrollment = async (
                 unsigned32(name.length),
                 name,
             );
-            if (input.length + 64 > kernel.input_capacity())
+            if (input.length + 96 > kernel.input_capacity())
                 return 'invalid request';
             sessionInput(context, input);
             if (kernel.validate_creator(input.length) !== 0)
@@ -168,7 +169,7 @@ export const createEnrollment = async (
                 unsigned32(name.length),
                 name,
             );
-            if (input.length + 64 > kernel.input_capacity())
+            if (input.length + 96 > kernel.input_capacity())
                 return 'invalid request';
             sessionInput(context, input);
             if (kernel.validate_join(input.length) !== 0)
@@ -217,16 +218,21 @@ export const createEnrollment = async (
         });
         enrollmentIncomplete = true;
         onIntent();
-        // The two capsule data keys must differ.
-        const dataKeys = crypto.getRandomValues(new Uint8Array(64));
-        if (equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(32)))
+        // Each capsule uses its own one-use data key.
+        const dataKeys = crypto.getRandomValues(new Uint8Array(96));
+        if (
+            equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(32, 64)) ||
+            equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(64)) ||
+            equalBytes(dataKeys.subarray(32, 64), dataKeys.subarray(64))
+        )
             throw new Error('Repeated enrollment data keys.');
         const maximums = participantDataKindMaximums(limits);
         const lengths = maximums.map(() => 0);
         const records: StagedRecord[] = [];
         handlers.staged = (kind, offset, bytes) => {
             if (
-                kind > dataKind.pollSignature ||
+                (kind > dataKind.pollSignature &&
+                    kind !== dataKind.sourceCapsule) ||
                 bytes.length === 0 ||
                 bytes.length > chunkBytes ||
                 offset !== lengths[kind] ||
@@ -288,6 +294,7 @@ export const createEnrollment = async (
                 registration.recipientCapsuleBytes ||
             lengths[dataKind.signingCapsule] !==
                 registration.signingCapsuleBytes ||
+            lengths[dataKind.sourceCapsule] === 0 ||
             lengths[dataKind.pollDefinition] === 0 ||
             lengths[dataKind.pollSignature] !== registration.signatureBytes
         )
@@ -515,6 +522,10 @@ export const restoreEnrollment = async (
             64,
         );
     }
+    const sourcesRequired = requiresFheKeySources(root.head.generation);
+    const sourceState = sourcesRequired
+        ? await read(dataKind.sourceCapsule)
+        : await read(dataKind.setupReference);
     const control = concatenate(
         pollContext,
         unsigned32(header.length),
@@ -525,12 +536,17 @@ export const restoreEnrollment = async (
         publicKey,
         await read(dataKind.recipientCapsule),
         await read(dataKind.signingCapsule),
+        ...(sourcesRequired
+            ? [sourceState]
+            : [unsigned32(sourceState.length), sourceState]),
         unsigned16(created ? 0 : unusedPurposes(root.head.generation)),
     );
     let status: number;
     try {
         sessionInput(context, control);
-        status = kernel.restore(control.length);
+        status = sourcesRequired
+            ? kernel.restore(control.length)
+            : kernel.restore_prepared(control.length);
     } finally {
         control.fill(0);
     }
@@ -538,7 +554,8 @@ export const restoreEnrollment = async (
         status !== 0 ||
         kernel.prepare_creator(0) !== 1 ||
         kernel.prepare_join(0) !== 1 ||
-        kernel.restore(0) !== 1
+        kernel.restore(0) !== 1 ||
+        kernel.restore_prepared(0) !== 1
     )
         throw new Error('The original enrollment keys could not be restored.');
     const poll = readVerifiedPoll(context);

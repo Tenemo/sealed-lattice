@@ -114,7 +114,7 @@ const fixture = async () => {
         encryption: { key: newRecord.key, additionalData: newAssociatedData },
     };
     const manifest: ParticipantManifest = {
-        dataKeys: new Uint8Array(64).fill(37),
+        dataKeys: new Uint8Array(96).fill(37),
         poll: new Uint8Array(64).fill(41),
         references: [],
         suffixes: {

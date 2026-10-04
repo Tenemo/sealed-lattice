@@ -148,6 +148,7 @@ impl State {
 mod browser {
     use super::{Purpose, State};
     use std::cell::RefCell;
+    use zeroize::Zeroize;
 
     thread_local! {static STATE:RefCell<State>=RefCell::new(State::default());}
 
@@ -155,6 +156,23 @@ mod browser {
     /// undrawn, so that the operation draws only from that seed.
     pub fn ready(purpose: Purpose) -> bool {
         STATE.with(|state| state.borrow().ready(purpose))
+    }
+
+    /// The completed setup retires the contribution's remaining private
+    /// stream state along with its persisted seed and witness records.
+    pub fn retire_contribution() {
+        STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if state
+                .streams
+                .as_ref()
+                .is_some_and(|streams| streams.purpose == Purpose::Contribution)
+            {
+                state.streams = None;
+                state.input.zeroize();
+                state.output.zeroize();
+            }
+        });
     }
 
     #[unsafe(no_mangle)]
@@ -171,7 +189,7 @@ mod browser {
     }
 }
 #[cfg(target_arch = "wasm32")]
-pub use browser::ready;
+pub use browser::{ready, retire_contribution};
 
 #[cfg(test)]
 mod tests {

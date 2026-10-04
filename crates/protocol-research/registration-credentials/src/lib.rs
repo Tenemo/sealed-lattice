@@ -26,6 +26,8 @@ pub mod roster;
 pub mod roster_authentication;
 #[path = "roster-input.rs"]
 pub mod roster_input;
+#[path = "source-binding.rs"]
+pub mod source_binding;
 #[path = "target-signing.rs"]
 pub mod target_signing;
 
@@ -277,14 +279,16 @@ fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
 /// registration verifier checks it.
 pub(crate) fn checked_header(
     bytes: &[u8],
-    poll: [u8; 64],
-    runtime: [u8; 64],
+    poll: &VerifiedPoll,
 ) -> Result<RegistrationHeader, Error> {
     let (header, consumed) = RegistrationHeader::decode_prefix(bytes)?;
     if consumed != bytes.len() {
         return Err(Error::Shape);
     }
-    if header.poll != poll || header.runtime != runtime {
+    if header.poll != poll.identity()
+        || header.runtime != poll.runtime()
+        || header.fhe_key_commitments.len() != source_binding::fhe_key_families(poll).len()
+    {
         return Err(Error::Context);
     }
     check_header(&header)?;
@@ -312,6 +316,7 @@ mod tests {
             signing_public: *credential.signing_public(),
             recipient_key_hash: [3; 64],
             proof_length: 5000,
+            fhe_key_commitments: vec![[7; 64]],
         })
         .unwrap();
         hasher.absorb(&[4; 4999]).unwrap();
@@ -353,6 +358,7 @@ mod tests {
                 signing_public: *credential.signing_public(),
                 recipient_key_hash: [3; 64],
                 proof_length: 5000,
+                fhe_key_commitments: vec![[7; 64]],
             })
             .unwrap()
         };
@@ -374,6 +380,7 @@ mod tests {
             signing_public: *credential.signing_public(),
             recipient_key_hash: [3; 64],
             proof_length: 5000,
+            fhe_key_commitments: vec![[7; 64]],
         }
         .encode()
         .unwrap();
@@ -404,6 +411,7 @@ mod tests {
             signing_public: *credential.signing_public(),
             recipient_key_hash: [3; 64],
             proof_length: 5000,
+            fhe_key_commitments: vec![[7; 64]],
         };
         let original = make(b"Jose\xcc\x81");
         assert_eq!(original.username.as_str(), "Jos\u{e9}");
@@ -425,11 +433,13 @@ mod tests {
             .unwrap();
         assert!(verify_registration_signature(hash(&encoded), &signature));
         assert!(!verify_registration_signature(hash(&other), &signature));
-        let mut noncanonical = encoded[..encoded.len() - 15].to_vec();
+        let name_end = encoded.len() - (6 + 6 + 64);
+        let mut noncanonical = encoded[..name_end - 15].to_vec();
         noncanonical.extend(12u16.to_le_bytes());
         noncanonical.extend(10u32.to_le_bytes());
         noncanonical.extend(6u32.to_le_bytes());
         noncanonical.extend(b"Jose\xcc\x81");
+        noncanonical.extend(&encoded[name_end..]);
         assert!(BodyHasher::from_header(&noncanonical, [1; 64], [2; 64]).is_err());
     }
 }

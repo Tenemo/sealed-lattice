@@ -48,6 +48,7 @@ pub fn limits() -> Vec<u64> {
         SIGNATURE_BYTES,
         setup_witness::registration::SEALED_KEY_BYTES,
         SEALED_SIGNING_SEED_BYTES,
+        crate::fhe_sources::maximum_capsule_bytes(),
         MAXIMUM_PROPOSAL_BYTES,
         RETAINED_REGISTRATION_BYTES,
         SALT_BYTES,
@@ -218,7 +219,7 @@ mod tests {
     #[test]
     fn records_have_their_declared_lengths() {
         let limits = limits();
-        assert_eq!(limits.len(), 36);
+        assert_eq!(limits.len(), 37);
         for profile in [Profile::new(3, 2).unwrap(), Profile::new(20, 20).unwrap()] {
             let bounds = profile_bounds(profile);
             let checkpoints = bounds[22] as usize;

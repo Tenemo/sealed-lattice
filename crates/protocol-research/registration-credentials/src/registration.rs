@@ -76,6 +76,7 @@ pub struct RegistrationVerifier {
 }
 impl RegistrationVerifier {
     pub fn new(poll: &VerifiedPoll, header_bytes: &[u8], signature: &[u8]) -> Result<Self, Error> {
+        crate::checked_header(header_bytes, poll)?;
         Self::open(poll.identity(), poll.runtime(), header_bytes, signature)
     }
     // A verification against the identity and runtime of the verified poll
@@ -258,6 +259,11 @@ mod tests {
                             signing_public: *credential.signing_public(),
                             recipient_key_hash: [0; 64],
                             proof_length: 0,
+                            fhe_key_commitments: vec![
+                                [7; 64];
+                                crate::source_binding::fhe_key_families(poll)
+                                    .len()
+                            ],
                         },
                         [0; 64],
                     ))

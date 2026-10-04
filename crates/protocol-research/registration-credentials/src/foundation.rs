@@ -40,6 +40,7 @@ pub struct RegistrationHeader {
     pub signing_public: [u8; 1952],
     pub recipient_key_hash: [u8; 64],
     pub proof_length: usize,
+    pub fhe_key_commitments: Vec<[u8; 64]>,
 }
 impl RegistrationHeader {
     /// The encoded length of a header with the longest username.
@@ -53,6 +54,10 @@ impl RegistrationHeader {
             signing_public: [0; 1952],
             recipient_key_hash: [0; 64],
             proof_length: 0,
+            fhe_key_commitments: vec![
+                [0; 64];
+                crate::source_binding::maximum_fhe_key_family_count()
+            ],
         }
         .encode()
         .expect("The longest username encodes.")
@@ -61,6 +66,9 @@ impl RegistrationHeader {
     pub fn encode(&self) -> Result<Vec<u8>, crate::Error> {
         if self.username.as_str().is_empty()
             || self.username.as_str().len() > MAXIMUM_USERNAME_BYTES
+            || self.fhe_key_commitments.is_empty()
+            || self.fhe_key_commitments.len()
+                > crate::source_binding::maximum_fhe_key_family_count()
         {
             return Err(crate::Error::Shape);
         }
@@ -68,13 +76,15 @@ impl RegistrationHeader {
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v3").unwrap(),
+                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v4").unwrap(),
                 CanonicalItem::hash512(self.poll),
                 CanonicalItem::hash512(self.runtime),
                 CanonicalItem::fixed_bytes(self.signing_public).unwrap(),
                 CanonicalItem::hash512(self.recipient_key_hash),
                 CanonicalItem::unsigned64(self.proof_length as u64),
                 CanonicalItem::display_text(&self.username).map_err(|_| crate::Error::Shape)?,
+                CanonicalItem::hash512_list(&self.fhe_key_commitments)
+                    .map_err(|_| crate::Error::Shape)?,
             ],
         )
         .encode()
@@ -84,7 +94,7 @@ impl RegistrationHeader {
         use canonical_tuple::{CanonicalDecodeBudget, CanonicalDecodeLimits};
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: 4096,
-            maximum_item_count: 7,
+            maximum_item_count: 8.max(crate::source_binding::maximum_fhe_key_family_count()),
             maximum_item_byte_length: 1952,
             maximum_nesting_depth: 0,
             maximum_cumulative_work_byte_length: 16384,
@@ -97,7 +107,7 @@ impl RegistrationHeader {
             0,
         )
         .map_err(|_| crate::Error::Shape)?;
-        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 7 {
+        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 8 {
             return Err(crate::Error::Shape);
         }
         let items = &tuple.items;
@@ -105,7 +115,7 @@ impl RegistrationHeader {
             || items[0]
                 .variable_value_bytes()
                 .map_err(|_| crate::Error::Shape)?
-                != b"sealed-lattice/registration-header/v3"
+                != b"sealed-lattice/registration-header/v4"
         {
             return Err(crate::Error::Context);
         }
@@ -145,6 +155,23 @@ impl RegistrationHeader {
         }
         let username = StabilizedDisplayText::from_canonical_utf8(username_bytes)
             .map_err(|_| crate::Error::Shape)?;
+        let commitments = field(7, CanonicalItemType::HomogeneousList)?;
+        if commitments.len() < 6
+            || commitments[..2] != CanonicalItemType::Hash512.canonical_code().to_le_bytes()
+        {
+            return Err(crate::Error::Shape);
+        }
+        let count = u32::from_le_bytes(commitments[2..6].try_into().unwrap()) as usize;
+        if count == 0
+            || count > crate::source_binding::maximum_fhe_key_family_count()
+            || commitments.len() != 6 + count * 64
+        {
+            return Err(crate::Error::Shape);
+        }
+        let fhe_key_commitments = commitments[6..]
+            .chunks_exact(64)
+            .map(|digest| digest.try_into().unwrap())
+            .collect();
         Ok((
             Self {
                 username,
@@ -153,6 +180,7 @@ impl RegistrationHeader {
                 signing_public,
                 recipient_key_hash,
                 proof_length,
+                fhe_key_commitments,
             },
             consumed,
         ))

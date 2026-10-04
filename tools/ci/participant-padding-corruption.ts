@@ -38,7 +38,7 @@ import {
     readParticipantValue,
 } from '#packages/sdk/src/participant/worker/storage.js';
 
-export type ParticipantPaddingMutation = Readonly<{
+type ParticipantPaddingMutation = Readonly<{
     namespace: string;
     runtimeIdentity: string;
     moduleDigest: string;

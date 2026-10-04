@@ -809,15 +809,16 @@ export const retainSetup = async (
         { kind: dataKind.setupReference, bytes: verified.reference },
         { kind: dataKind.setupInventory, bytes: verified.inventory },
     ];
-    return commitRoot(context, root, {
+    const retainedKeys = root.manifest.dataKeys.slice(0, 64);
+    const retainedReferences = root.manifest.references.filter(
+        (reference) => reference.kind !== dataKind.sourceCapsule,
+    );
+    const retained = await commitRoot(context, root, {
         generation: 12,
         manifest: {
             ...root.manifest,
-            references: addedReferences(
-                context,
-                root.manifest.references,
-                added,
-            ),
+            dataKeys: retainedKeys,
+            references: addedReferences(context, retainedReferences, added),
             suffixes: {
                 ...root.manifest.suffixes,
                 ballot: new Uint8Array(),
@@ -829,5 +830,15 @@ export const retainSetup = async (
             ...contributionRecords(session),
         ],
         addedData: added,
+        write: (transaction) => {
+            transaction.objectStore('data').delete([dataKind.sourceCapsule, 0]);
+        },
     });
+    // Both storage and live private sources retire only after the exact
+    // predecessor and committed successor have authenticated.
+    root.manifest.dataKeys.subarray(64).fill(0);
+    root.plaintext.subarray(4 + 64, 4 + 96).fill(0);
+    if (context.kernel.retire_contribution_sources() !== 0)
+        throw new Error('The original key sources could not be retired.');
+    return retained;
 };

@@ -102,6 +102,7 @@ import { compileRegistrationCustodyCensus } from '#tests/registration-custody-mo
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
+import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
@@ -198,6 +199,10 @@ export const renderDocumentationCensus = (): string => {
         contributionBody.participantCount,
     );
     const setupRandomness = compileSetupRandomnessCensus(completion);
+    const registrationSourceRandomness = compileRegistrationSourceRandomness(
+        completion.participantCount,
+        completion.optionCount,
+    );
     const registrationKey = compileRegistrationKeyRelationCensus();
     const registrationCustody = compileRegistrationCustodyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
@@ -1228,7 +1233,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Operation randomness seeds',
         '',
-        "All the randomness that the participant module's samplers and provers draw for a contribution generation or continuation, a ballot or a release is SHAKE256 output over its stream's domain and one seed that the participant's root retains before the operation draws any byte. A repeated operation reads its retained seed again, so it draws the same bytes; no finite budget is exhausted. The count bounds the seeds of one roster: two for each setup contributor and two for each participant. An honest ballot's and release's proof streams serve exactly the listed bytes when no candidate word is rejected; a release's include its noise, drawn in whole reads.",
+        "Fresh randomness that the participant module's samplers and provers draw for a contribution generation or continuation, a ballot or a release is SHAKE256 output over its stream's domain and one seed that the participant's root retains before the operation draws any byte. The contribution's original FHE secret and first encryption error come from its separately retained registration source. A repeated operation reads its retained seed again, so it draws the same bytes; no finite budget is exhausted. The count bounds operation seeds of one roster: two for each setup contributor and two for each participant, excluding the registration sources below. An honest ballot's and release's proof streams serve exactly the listed bytes when no candidate word is rejected; a release's include its noise, drawn in whole reads.",
         '',
         table(
             ['Property', 'Value'],
@@ -1255,6 +1260,75 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(compileOperationProofDraws(completion).release),
                 ],
             ],
+        ),
+        '',
+        '## Registration source randomness and hash work',
+        '',
+        'This local census uses the completion profile as both the final roster and the original poll maximum. The model takes the original maximum explicitly because a smaller final roster does not erase the families sampled at enrollment. Each family has an independent retained source seed and commitment salt; the source samples one balanced FHE secret and the first encryption error. Its direct SHAKE reader has no browser RNG buffer tail. Source-output maxima below use the existing proof-only sparse draw comparison, never a runtime limit. Reconstructing a source repeats work on the same seed, while common-polynomial streams can repeat the same input across families. The summed permutations are computational work, not distinct oracle queries. Abandoned credentials, repeated reconstruction and the global source-seed population require separate accounting; these rows do not establish the composed security ledger.',
+        '',
+        table(
+            ['Property', 'Value'],
+            [
+                [
+                    'Original poll maximum',
+                    formatCount(
+                        registrationSourceRandomness.originalPollMaximumParticipants,
+                    ),
+                ],
+                [
+                    'Source seeds per original enrollment',
+                    formatCount(registrationSourceRandomness.sourceSeedCount),
+                ],
+                [
+                    'Fresh seed and salt bytes per original enrollment',
+                    formatCount(
+                        registrationSourceRandomness.freshSeedAndSaltBytes,
+                    ),
+                ],
+                [
+                    'Source Gaussian samples per original enrollment',
+                    formatCount(registrationSourceRandomness.gaussianSamples),
+                ],
+                [
+                    'Source sparse calls per original enrollment',
+                    formatCount(registrationSourceRandomness.sparseCalls),
+                ],
+                [
+                    'Hash permutations per original enrollment under the sparse comparison',
+                    formatCount(
+                        registrationSourceRandomness.comparisonHashPermutations,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Family',
+                'Modulus bytes',
+                'Sampler bits',
+                'Source input bytes',
+                'Minimum source output bytes',
+                'Comparison maximum source output bytes',
+                'Commitment input bytes',
+                'Common stream output bytes',
+                'Source permutations',
+                'Commitment permutations',
+                'Common permutations',
+            ],
+            registrationSourceRandomness.families.map((family) => [
+                formatCount(family.index),
+                formatCount(family.modulusBytes),
+                formatCount(family.sampleBits),
+                formatCount(family.sourceInputBytes),
+                formatCount(family.minimumSourceOutputBytes),
+                formatCount(family.comparisonMaximumSourceOutputBytes),
+                formatCount(family.commitmentInputBytes),
+                formatCount(family.commonOutputBytes),
+                formatCount(family.comparisonSourcePermutations),
+                formatCount(family.commitmentPermutations),
+                formatCount(family.commonPermutations),
+            ]),
         ),
         '',
         '## Participant ballot custody',
@@ -1930,7 +2004,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Contribution generation and sampling census',
         '',
-        'The combined browser path keeps witness columns inside Rust, regenerates fixed common polynomials, and retains the remaining public statement and proof as bounded local blobs. Allocation allowances require measured closure. The sampling bound charges finite-word quantization and the omitted Gaussian tails for preparation; it is not a lattice-security or composed-protocol bound.',
+        'The combined browser path keeps witness columns inside Rust, regenerates fixed common polynomials, and retains the remaining public statement and proof as bounded local blobs. Allocation allowances require measured closure. The sampling rows describe one completed roster whose original poll maximum equals its displayed size: every enrolled participant samples its recipient error and every source family, then contributors reuse the selected original first error while sampling their remaining contribution errors. A different original maximum is an explicit model operand. The sampling bound charges finite-word quantization and the omitted Gaussian tails for that local corpus; it does not bound abandoned credentials or establish lattice or composed-protocol security.',
         '',
         table(
             ['Property', 'Value'],
@@ -1956,15 +2030,33 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(setupRandomness.encodedThresholdBytes),
                 ],
                 [
-                    'Error samples per contribution',
+                    'Fresh error samples per contribution operation',
                     formatCount(setupRandomness.samplesPerContribution),
+                ],
+                [
+                    'Original poll maximum for these sampling rows',
+                    formatCount(
+                        setupRandomness.originalPollMaximumParticipants,
+                    ),
+                ],
+                [
+                    'Source families per enrollment',
+                    formatCount(setupRandomness.sourceFamilyCount),
+                ],
+                [
+                    'Error samples per original source family',
+                    formatCount(setupRandomness.samplesPerSourceFamily),
+                ],
+                [
+                    'Recipient and source error samples per enrollment',
+                    formatCount(setupRandomness.samplesPerEnrollment),
                 ],
                 [
                     'Error samples across preparation and registration',
                     formatCount(setupRandomness.samplesPerPreparation),
                 ],
                 [
-                    'Uniform sample bytes per contribution',
+                    'Gaussian uniform sample bytes per contribution operation',
                     formatCount(setupRandomness.contributionSampleBytes),
                 ],
                 [
@@ -3283,7 +3375,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Shared participant custody census',
         '',
-        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. The expanded statement header is regenerated rather than retained as another body record. The existing length-prefixed contribution header field instead retains the canonical SCB1 body header from completed generation onward, replacing the retired first-oracle progress header. Proof storage always seals the maximum proof capacity into fixed slots. A complete consumer pass authenticates every slot and checks its zero tail, supplying only the actual-length prefix; commitment completion waits for that pass, and the existing body-commitment preflight precedes publication. The maximum payload, record-key, tag and reference envelopes already reserved this capacity. The added body header changes completed metadata and any maxima it dominates. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
+        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. The expanded statement header is regenerated rather than retained as another body record. The existing length-prefixed contribution header field instead retains the canonical SCB2 body header from completed generation onward, replacing the retired first-oracle progress header. Proof storage always seals the maximum proof capacity into fixed slots. A complete consumer pass authenticates every slot and checks its zero tail, supplying only the actual-length prefix; commitment completion waits for that pass, and the existing body-commitment preflight precedes publication. The maximum payload, record-key, tag and reference envelopes already reserved this capacity. The added body header changes completed metadata and any maxima it dominates. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
         '',
         table(
             ['Property', 'Value'],
@@ -4082,7 +4174,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'Arithmetic of the composed real-ideal argument owned by the security argument. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. A corrupt organizer can complete several rosters of one poll, of any supported sizes, for disjoint honest groups; each honest registration confirms at most one roster, and a roster that reaches an honest opening holds at least `n-f` honest registrations, so the honest credential population bounds the number of such rosters. Statistical terms are evaluated at the query cap of the proof compiler and the largest honest credential population of a poll, and each term takes its largest value over every supported profile; every roster has one profile, so the subtotal bounds each roster, and the ledger charges it once for every roster that can reach an honest opening. The last column names the first profile that attains a term that varies between profiles. Every profile reduces the same FHE common streams modulo its own ciphertext modulus, and the adversary may fix the profile after querying them, so the FHE Ring-LWE and circular-security reductions also guess the ciphertext modulus. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
+        'Reference arithmetic for the all-confirmation chronology; the [candidate ledger scope](security-argument.md#registration-bound-clear-preparation-argument) owns its missing registration-source and replacement-preparation correspondence. These rows set no revised credential scope or security-bits claim. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. A corrupt organizer can complete several rosters of one poll, of any supported sizes, for disjoint honest groups; each honest registration confirms at most one roster, and a roster that reaches an honest opening holds at least `n-f` honest registrations, so the honest credential population bounds the number of such rosters. Statistical terms are evaluated at the query cap of the proof compiler and the largest honest credential population of a poll, and each term takes its largest value over every supported profile; every roster has one profile, so the subtotal bounds each roster, and the ledger charges it once for every roster that can reach an honest opening. The last column names the first profile that attains a term that varies between profiles. Every profile reduces the same FHE common streams modulo its own ciphertext modulus, and the adversary may fix the profile after querying them, so the FHE Ring-LWE and circular-security reductions also guess the ciphertext modulus. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
         '',
         table(
             ['Statistical term', 'Bound exponent', 'Largest at'],

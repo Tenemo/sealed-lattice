@@ -10,7 +10,7 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const contributionBodyHeaderBytes = 4n + 8n;
+export const contributionBodyHeaderBytes = 4n + 8n + 64n;
 const commitmentDomain = Buffer.from(
     'sealed-lattice/setup-commitment/v1',
     'ascii',
