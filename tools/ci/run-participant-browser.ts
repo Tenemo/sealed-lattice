@@ -33,6 +33,7 @@ import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
+import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { summarizeCpuTrace } from '#tools/ci/participant-cpu-profile.js';
 import type { CpuProfileSummary } from '#tools/ci/participant-cpu-profile.js';
@@ -84,72 +85,24 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // --memory-pressure, a plain run's second contributor first contributes in a
 // browser that caps each WebAssembly memory below what its contribution
 // needs, which must leave it pending rather than stopped, and its next visit
-// completes the contribution.
-const foreignOption = '--foreign-poll=';
-const profileOption = '--profile';
-const basePortOption = '--base-port=';
-const memoryPressureOption = '--memory-pressure';
-const sequentialOption = '--sequential';
-const allArguments = process.argv.slice(2).filter((value) => value !== '--');
-const foreignPoll = allArguments
-    .find((value) => value.startsWith(foreignOption))
-    ?.slice(foreignOption.length);
-const profiling = allArguments.includes(profileOption);
-const memoryPressure = allArguments.includes(memoryPressureOption);
-const sequential = allArguments.includes(sequentialOption);
-const basePortArgument = allArguments
-    .find((value) => value.startsWith(basePortOption))
-    ?.slice(basePortOption.length);
-const commandArguments = allArguments.filter(
-    (value) =>
-        !value.startsWith(foreignOption) &&
-        value !== profileOption &&
-        value !== memoryPressureOption &&
-        value !== sequentialOption &&
-        !value.startsWith(basePortOption),
-);
-const mode =
-    (['no-result', 'empty', 'rosters', 'plain'] as const).find(
-        (value) => value === commandArguments[commandArguments.length - 1],
-    ) ?? 'result';
+// completes the contribution. With --scalar, the origins are not isolated,
+// so every operation uses one scalar worker without optional helpers. With
+// --top-count=<count>, the poll requests that many ranked option identifiers.
+const {
+    participantCount,
+    optionCount,
+    mode,
+    foreignPoll,
+    profiling,
+    scalar,
+    memoryPressure,
+    sequential,
+    basePort,
+    topCount,
+    commandLineArguments,
+} = selectParticipantBrowserOptions(process.argv.slice(2));
 const noResult = mode !== 'result';
-const counts =
-    mode === 'result' ? commandArguments : commandArguments.slice(0, -1);
-assert.ok(
-    counts.length === 0 ||
-        (counts.length === 2 &&
-            counts.every((value) => /^[1-9]\d*$/u.test(value))),
-    'Optionally select the participant and option counts, then no-result, empty, rosters or plain, another poll with --foreign-poll=<run directory>, --profile, --memory-pressure and --base-port=<port>.',
-);
-assert.ok(
-    !memoryPressure || mode === 'plain',
-    'Only a plain run applies memory pressure.',
-);
-assert.ok(
-    !sequential || mode === 'plain',
-    'Only an ordinary plain run selects sequential execution.',
-);
-assert.ok(
-    (mode !== 'rosters' && mode !== 'plain') || foreignPoll === undefined,
-    'Rosters and plain runs serve no other poll.',
-);
-const [participantCount, optionCount] =
-    counts.length === 0 ? [3, 2] : counts.map(Number);
-assert.ok(
-    mode !== 'rosters' ||
-        deriveSupportedProfile(participantCount, optionCount)
-            .maximumCorruptParticipantCount >= 1,
-    'Two rosters need a profile that tolerates the corrupt organizer.',
-);
 const root = path.resolve('.');
-const basePort =
-    basePortArgument === undefined ? 43_600 : Number(basePortArgument);
-assert.ok(
-    /^[1-9]\d*$/u.test(basePortArgument ?? '1') &&
-        basePort >= 1024 &&
-        basePort + 2 * participantCount + 1 <= 65_535,
-    'The base port leaves no room for every origin.',
-);
 // A registrant that the organizer leaves out of the roster has the origin
 // after the roster participants'. In a rosters run the second roster's
 // registrants take the origins from there on instead.
@@ -169,10 +122,31 @@ const pressurePages = 2048;
 // beside the operation's worker, so the host runs as many browsers at once
 // as it has processors for all of their workers, and no operation's work
 // waits for another's.
-const browserProcessors = Math.min(availableParallelism(), 9);
+const browserProcessors = scalar ? 1 : Math.min(availableParallelism(), 9);
 // The functions each operation's CPU profile summary ranks.
 const cpuProfileEntries = 60;
 const operationMilliseconds = 3_600_000;
+
+const requireScalarMemory = (details: Readonly<Record<string, unknown>>) => {
+    assert.ok(
+        details.memory !== undefined,
+        'The scalar operation reported no memory.',
+    );
+    for (const memory of [details.memory, details.evaluationMemory]) {
+        if (memory === undefined) continue;
+        assert.ok(
+            memory !== null &&
+                typeof memory === 'object' &&
+                'helpers' in memory &&
+                'helperBytes' in memory &&
+                'arenaBytes' in memory,
+            'The scalar operation reported incomplete memory.',
+        );
+        assert.equal(memory.helpers, 0);
+        assert.equal(memory.helperBytes, 0);
+        assert.equal(memory.arenaBytes, 0);
+    }
+};
 
 // The relay's layout: lower-case path segments of letters, digits, dots and
 // hyphens, with no traversal.
@@ -507,10 +481,15 @@ const startRelay = async (
                 ? secondRoster
                 : publicDirectory;
         const server = createServer((request, response) => {
-            // Every page is cross-origin isolated, so its worker may start
-            // parallel helpers.
-            response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-            response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+            // Nonisolated pages exercise the required single-worker path;
+            // isolated pages may also start optional parallel helpers.
+            if (!scalar) {
+                response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+                response.setHeader(
+                    'Cross-Origin-Embedder-Policy',
+                    'require-corp',
+                );
+            }
             const client = halting.get(position);
             handle(
                 origin,
@@ -715,18 +694,7 @@ const prose = (words: readonly string[]) =>
 
 await runWithLocalRunLog(
     {
-        commandLineArguments: [
-            String(participantCount),
-            String(optionCount),
-            ...(mode === 'result' ? [] : [mode]),
-            ...(foreignPoll === undefined ? [] : [foreignOption + foreignPoll]),
-            ...(profiling ? [profileOption] : []),
-            ...(sequential ? [sequentialOption] : []),
-            ...(memoryPressure ? [memoryPressureOption] : []),
-            ...(basePortArgument === undefined
-                ? []
-                : [basePortOption + basePortArgument]),
-        ],
+        commandLineArguments,
         lanes: [
             'Participant runtime assembly',
             'Browser registration and roster agreement',
@@ -837,16 +805,20 @@ await runWithLocalRunLog(
             const proofDraws = compileOperationProofDraws(
                 deriveSupportedProfile(participantCount, optionCount),
             );
-            const runnerSnapshot = path.join(
-                log.runDirectoryPath,
-                'sources/tools/ci/run-participant-browser.ts',
-            );
-            await mkdir(path.dirname(runnerSnapshot), { recursive: true });
-            await writeFile(
-                runnerSnapshot,
-                await readFile(import.meta.filename),
-                { flag: 'wx' },
-            );
+            for (const file of [
+                'tools/ci/run-participant-browser.ts',
+                'tools/ci/participant-browser-options.ts',
+            ]) {
+                const runnerSnapshot = path.join(
+                    log.runDirectoryPath,
+                    'sources',
+                    file,
+                );
+                await mkdir(path.dirname(runnerSnapshot), { recursive: true });
+                await writeFile(runnerSnapshot, await readFile(file), {
+                    flag: 'wx',
+                });
+            }
             const { runtime, invalidBallotClient } =
                 await assembleParticipantRuntime(
                     log,
@@ -1062,6 +1034,16 @@ await runWithLocalRunLog(
                                 ? `--wasm-max-mem-pages=${String(pressurePages)}`
                                 : undefined,
                         );
+                        try {
+                            assert.equal(
+                                await chrome.evaluate('crossOriginIsolated'),
+                                !scalar,
+                                'The browser isolation differs from the selected execution mode.',
+                            );
+                        } catch (error) {
+                            await chrome.crash();
+                            throw error;
+                        }
                         browserDetails.set(key, details);
                         log.writeEvent({
                             eventType: 'participant-browser',
@@ -1070,6 +1052,7 @@ await runWithLocalRunLog(
                                 milliseconds: performance.now() - launching,
                                 version: chrome.version,
                                 launchArguments: chrome.launchArguments,
+                                scalar,
                             },
                         });
                         return chrome;
@@ -1169,6 +1152,8 @@ await runWithLocalRunLog(
                         deadline.abort();
                     }
                     if (guardFailure !== undefined) throw guardFailure;
+                    if (scalar && result.status === 'completed')
+                        requireScalarMemory(result.details);
                     const milliseconds = performance.now() - started;
                     if (
                         recovery &&
@@ -1633,7 +1618,6 @@ await runWithLocalRunLog(
             // participant after the organizer casts the all-minimum ballot,
             // an ordinary valid ballot that counts like any other.
             const { minimumScore, maximumScore } = bounds.ballot;
-            const topCount = Math.max(1, optionCount - 1);
             const minimumBallotAuthor =
                 mode === 'result'
                     ? positions.find(
@@ -1926,6 +1910,7 @@ await runWithLocalRunLog(
                             optionCount,
                             mode,
                             sequential,
+                            scalar,
                             poll: organizer.poll,
                             recordIds: plainRecordIds,
                             runtimeIdentity: runtime.identity.runtime,
@@ -2155,6 +2140,7 @@ await runWithLocalRunLog(
                             crossRosterProbes,
                             topCount,
                             scope: rostersScope,
+                            scalar,
                         },
                         null,
                         2,
@@ -3851,6 +3837,7 @@ await runWithLocalRunLog(
                     'The standalone verification did not complete.',
                 );
                 assert.equal(verified.details.poll, organizer.poll);
+                if (scalar) requireScalarMemory(verified.details);
                 assert.equal(verified.details.encrypted, result.encrypted);
                 assert.deepEqual(
                     verified.details.identifiers,
@@ -3976,6 +3963,7 @@ await runWithLocalRunLog(
                                       probes: foreignProbes,
                                   },
                         topCount,
+                        scalar,
                         result: noResult
                             ? { kind: 'no-result' }
                             : { kind: 'result', identifiers: expectedResult },

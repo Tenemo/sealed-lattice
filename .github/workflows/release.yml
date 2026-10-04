@@ -29,6 +29,7 @@ jobs:
         outputs:
             tag: ${{ steps.version.outputs.tag }}
             version: ${{ steps.version.outputs.version }}
+            integrity: ${{ steps.package.outputs.integrity }}
         steps:
             - name: Require the default branch
               env:
@@ -50,13 +51,6 @@ jobs:
                   workspaces: |
                       crates/protocol-research -> ../../target/participant-module
                       crates/protocol-research
-
-            - name: Install Chromium
-              run: pnpm exec playwright install --with-deps chromium
-            - name: Verify release source
-              run: pnpm run check:desktop
-            - name: Verify reproducible build output
-              run: pnpm run build:verify-reproducible
 
             - name: Prepare public package version
               id: version
@@ -96,8 +90,17 @@ jobs:
                     exit ${npm_status}
                   fi
 
-            - name: Smoke the versioned package
-              run: pnpm run smoke:pack:npm
+            - name: Install Chromium
+              run: pnpm exec playwright install --with-deps chromium
+            - name: Verify versioned release source
+              run: pnpm run check:desktop
+            - name: Verify versioned reproducible build output
+              run: pnpm run build:verify-reproducible
+            - name: Record the verified package integrity
+              id: package
+              env:
+                  RELEASE_VERSION: ${{ steps.version.outputs.version }}
+              run: pnpm exec tsx ./tools/ci/verify-packed-package.ts --out "${RUNNER_TEMP}/verified-sealed-lattice-${RELEASE_VERSION}.tgz"
 
             - name: Upload verification diagnostics
               if: ${{ always() }}
@@ -193,6 +196,15 @@ jobs:
               env:
                   RELEASE_VERSION: ${{ needs.verify.outputs.version }}
               run: pnpm run smoke:pack:npm -- --out "${RUNNER_TEMP}/sealed-lattice-${RELEASE_VERSION}.tgz"
+
+            - name: Require the package verified before tagging
+              env:
+                  VERIFIED_INTEGRITY: ${{ needs.verify.outputs.integrity }}
+                  TAG_PACKAGE_INTEGRITY: ${{ steps.package.outputs.integrity }}
+              run: |
+                  test -n "${VERIFIED_INTEGRITY}"
+                  test -n "${TAG_PACKAGE_INTEGRITY}"
+                  test "${TAG_PACKAGE_INTEGRITY}" = "${VERIFIED_INTEGRITY}"
 
             - name: Upload exact package
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
