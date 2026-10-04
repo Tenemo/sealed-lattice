@@ -13,7 +13,17 @@ import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 // the leaf's index through SHAKE256.
 export const merkleSaltSeedBytes = 64n;
 
-const compileWordProofLayout = (wordCount: number, lookupCount: number) => {
+export const compileWordProofLayout = (
+    wordCount: number,
+    lookupCount: number,
+) => {
+    if (
+        !Number.isSafeInteger(wordCount) ||
+        wordCount <= 0 ||
+        !Number.isSafeInteger(lookupCount) ||
+        lookupCount <= 0
+    )
+        throw new RangeError('Invalid word-proof column shape.');
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
     const foldCount = Math.log2(agreement.domainSize / 2);

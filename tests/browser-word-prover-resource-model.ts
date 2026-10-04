@@ -1,32 +1,37 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import {
+    compileFullWordProofLayout,
+    compileWordProofLayout,
+} from '#tests/full-word-proof-layout-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const compileBrowserWordProverResources = (
-    profile: SupportedProfile,
+export const publicCoefficientAllowance = 1024n;
+
+export const compileWordProverResources = (
+    input: Readonly<{
+        columns: number;
+        lookups: number;
+        preparedAdjointBytes: bigint;
+    }>,
 ) => {
     const agreement = compileCommonAgreementDegreeCensus();
-    const relation = compileSetupContributionRelationCensus(profile);
-    const layout = compileFullWordProofLayout(profile);
+    const layout = compileWordProofLayout(input.columns, input.lookups);
+    if (input.preparedAdjointBytes < 0n)
+        throw new RangeError('Invalid prepared affine storage size.');
     const field = compileSmallLimbProofFieldCensus();
     const systematic = BigInt(agreement.systematicSize);
     const domain = BigInt(agreement.domainSize);
     const mask = BigInt(agreement.maskDimension);
     const base = field.packedFieldElementByteLength;
     const extension = field.packedExtensionElementByteLength;
-    const columns = BigInt(relation.wordColumns + relation.booleanColumns);
-    const lookups = BigInt(relation.lookupEntries);
-    const fullDegreeCommonPolynomials =
-        3n * profile.gadgetLength + BigInt(profile.participantCount) + 1n;
-    const preparedAdjointBytes =
-        (fullDegreeCommonPolynomials * systematic +
-            auxiliaryInputEncryptionParameters.degree) *
-        extension;
+    const columns = BigInt(input.columns);
+    const lookups = BigInt(input.lookups);
+    const preparedAdjointBytes = input.preparedAdjointBytes;
     const witness = 2n * columns * systematic + systematic * base;
     const tree = domain * (2n * 64n + 128n);
     const first =
@@ -108,7 +113,6 @@ export const compileBrowserWordProverResources = (
         bytes: (bytes as bigint) + metadataAndAllocatorAllowance,
     }));
     return {
-        fullDegreeCommonPolynomials,
         preparedAdjointBytes,
         maximumHasherBytes,
         metadataAndAllocatorAllowance,
@@ -117,6 +121,28 @@ export const compileBrowserWordProverResources = (
             (maximum, stage) => (stage.bytes > maximum ? stage.bytes : maximum),
             0n,
         ),
+    };
+};
+
+export const compileBrowserWordProverResources = (
+    profile: SupportedProfile,
+) => {
+    const relation = compileSetupContributionRelationCensus(profile);
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    const fullDegreeCommonPolynomials =
+        3n * profile.gadgetLength + BigInt(profile.participantCount) + 1n;
+    return {
+        fullDegreeCommonPolynomials,
+        ...compileWordProverResources({
+            columns: relation.wordColumns + relation.booleanColumns,
+            lookups: relation.lookupEntries,
+            preparedAdjointBytes:
+                (fullDegreeCommonPolynomials *
+                    BigInt(agreement.systematicSize) +
+                    auxiliaryInputEncryptionParameters.degree) *
+                field.packedExtensionElementByteLength,
+        }),
     };
 };
 
@@ -137,7 +163,6 @@ export const compileContributionGenerationResources = (
     const transforms = 3n * (degree + auxiliaryDegree) * 16n;
     const sharing = sharingDegree * degree * 16n;
     const privateWorkspace = 24n * degree * 16n;
-    const publicCoefficientAllowance = 1024n;
     const publicWorkspace = 4n * degree * publicCoefficientAllowance;
     const generationAllowance =
         relation.syntheticWitnessByteLength +

@@ -90,6 +90,10 @@ import {
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import {
+    compileRecoverableSetupResourceScreen,
+    compileRecoverableSeedSharingProofResources,
+} from '#tests/recoverable-setup-resource-model.js';
 import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
@@ -218,6 +222,26 @@ export const renderDocumentationCensus = (): string => {
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
+    const recoverableSetup = compileRecoverableSetupResourceScreen(
+        completion.participantCount,
+        completion.optionCount,
+    );
+    const boundedSeedSharingProof = compileRecoverableSeedSharingProofResources(
+        4,
+        2,
+        256n,
+        4n,
+    );
+    const fullFourParticipantSeedSharingProof =
+        compileRecoverableSeedSharingProofResources(4, 2);
+    const recoverableSetupProfiles = supportedProfiles.profiles.flatMap((row) =>
+        row.map((profile) =>
+            compileRecoverableSetupResourceScreen(
+                profile.participantCount,
+                profile.optionCount,
+            ),
+        ),
+    );
     const contributionBodies = supportedProfiles.profiles.map((row) =>
         row.map((profile) => compileContributionBodyCensus(profile)),
     );
@@ -2596,6 +2620,221 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionBody.maximumAllContributorBodies),
                 ],
             ],
+        ),
+        '',
+        '## Recoverable setup resource screen',
+        '',
+        'Existing-format arithmetic for the [recoverable sealed preparation candidate](security-argument.md#recoverable-sealed-preparation-candidate), computed by the independent [resource model](../tests/recoverable-setup-resource-model.ts). The eligible pool is `k=d+f` and the selected subset is `s=d=max(f+1,2)`. One existing inner contribution body has bound `B` from the contribution-body model, including its existing proof. Thus `kB` bounds the unchanged inner-body bytes of all eligible offers, while `sB` bounds only the selected inner bodies. Selected reads never remove unselected offers from the uploaded corpus.',
+        '',
+        'The candidate encrypts each opening-seed evaluation as two polynomials in the original registered-recipient ring. Its raw ciphertext subtotal is `k*n*2*N*w`, where `N` and the signed coefficient width `w` come from the registration-key relation and modulus. This is distinct from the smaller auxiliary encryption ring already inside the inner body. The separately counted outer proofs use the conservative sharing widths and proof layout below. These figures bound only the named components, not a final candidate package; they are not a lower bound or an impossibility result. They exclude the new sealed-body length and padding framing, package signatures and metadata, public recovery shares and their proofs, ECHO/READY carriers, registrations, ballots, release, storage amplification, transfers and execution work. Any changed inner proof or parameter invalidates the reuse of `B`; full correctness, security and resource derivation remain open.',
+        '',
+        table(
+            ['Completion-profile operand', 'Value'],
+            [
+                [
+                    'Participants',
+                    formatCount(recoverableSetup.participantCount),
+                ],
+                ['Options', formatCount(recoverableSetup.optionCount)],
+                [
+                    'Maximum total faults',
+                    formatCount(recoverableSetup.maximumFaultCount),
+                ],
+                [
+                    'Eligible contributor pool',
+                    formatCount(recoverableSetup.eligibleContributorCount),
+                ],
+                [
+                    'Selected contributions',
+                    formatCount(recoverableSetup.selectedContributorCount),
+                ],
+                ['ECHO threshold', formatCount(recoverableSetup.echoThreshold)],
+                [
+                    'READY relay threshold',
+                    formatCount(recoverableSetup.readyRelayThreshold),
+                ],
+                [
+                    'READY delivery threshold',
+                    formatCount(recoverableSetup.readyDeliveryThreshold),
+                ],
+                [
+                    'Seed-share polynomial degree',
+                    formatCount(recoverableSetup.seedSharePolynomialDegree),
+                ],
+                [
+                    'Seed-share encoded coefficient bytes',
+                    formatCount(recoverableSetup.seedShareCoefficientBytes),
+                ],
+                [
+                    'Raw ciphertext bytes per recipient',
+                    formatCount(recoverableSetup.seedShareCiphertextBytes),
+                ],
+                [
+                    'Seed-share ciphertexts per offer',
+                    formatCount(recoverableSetup.seedShareCiphertextsPerOffer),
+                ],
+                [
+                    'Eligible-pool seed-share ciphertext count',
+                    formatCount(
+                        recoverableSetup.eligibleSeedShareCiphertextCount,
+                    ),
+                ],
+                [
+                    'Selected seed-share ciphertext count',
+                    formatCount(
+                        recoverableSetup.selectedSeedShareCiphertextCount,
+                    ),
+                ],
+                [
+                    'Profiles screened',
+                    formatCount(recoverableSetupProfiles.length),
+                ],
+            ],
+        ),
+        '',
+        table(
+            [
+                'Existing-format subtotal in bytes',
+                'Completion profile',
+                'Minimum and first attaining profile',
+                'Maximum and first attaining profile',
+            ],
+            (
+                [
+                    ['One inner body bound', 'maximumInnerBodyBytes'],
+                    [
+                        'All eligible inner bodies',
+                        'maximumEligibleInnerBodyCorpusBytes',
+                    ],
+                    [
+                        'Selected inner bodies',
+                        'maximumSelectedInnerBodyCorpusBytes',
+                    ],
+                    [
+                        'All eligible raw seed-share ciphertexts',
+                        'eligibleSeedShareCiphertextBytes',
+                    ],
+                    [
+                        'Selected raw seed-share ciphertexts',
+                        'selectedSeedShareCiphertextBytes',
+                    ],
+                    [
+                        'All eligible inner bodies and raw seed-share ciphertexts',
+                        'maximumEligibleBodyAndSeedCiphertextBytes',
+                    ],
+                    [
+                        'Selected inner bodies and raw seed-share ciphertexts',
+                        'maximumSelectedBodyAndSeedCiphertextBytes',
+                    ],
+                    [
+                        'All eligible outer proofs',
+                        'maximumEligibleOuterProofBytes',
+                    ],
+                    ['Selected outer proofs', 'maximumSelectedOuterProofBytes'],
+                    [
+                        'All eligible inner bodies, raw seed-share ciphertexts and outer proofs',
+                        'maximumEligibleBodyCiphertextAndOuterProofBytes',
+                    ],
+                ] as const
+            ).map(([label, field]) => {
+                const minimum = recoverableSetupProfiles.reduce(
+                    (smallest, value) =>
+                        value[field] < smallest[field] ? value : smallest,
+                );
+                const maximum = recoverableSetupProfiles.reduce(
+                    (largest, value) =>
+                        value[field] > largest[field] ? value : largest,
+                );
+                const atProfile = (value: typeof recoverableSetup) =>
+                    `${formatCount(value[field])} at ${formatCount(value.participantCount)} participants, ${formatCount(value.optionCount)} options`;
+                return [
+                    label,
+                    formatCount(recoverableSetup[field]),
+                    atProfile(minimum),
+                    atProfile(maximum),
+                ];
+            }),
+        ),
+        '',
+        '### Outer seed-sharing proof layout and live-set planning',
+        '',
+        "The [bounded relation](../crates/protocol-research/seed-sharing-proof/src/layout.rs) retains the common proof engine dimensions even though its physical ring and seed are reduced. The full-ring columns extend the same witness-family count using the existing supported profile's conservative sharing cube, limb and carry widths; they are a model projection, not an implemented full-roster proof. Each nonconstant sharing coefficient contributes its low and high signed variables. Each recipient contributes the two quotient/carry/error triples, two sparse Boolean columns and two support rows; the seed adds one Boolean column whose first seed-width positions the public operator reads. The shared [word-proof layout](../tests/full-word-proof-layout-model.ts) supplies the encoded multiproof bound, including Merkle paths.",
+        '',
+        'The native proof planning adds the materialized physical-ring operator, one serialized operator column, the existing public-coefficient allocation allowance for the statement, two encoded statement polynomial payloads, and one complete proof-size allowance to the [generic prover schedule](../tests/browser-word-prover-resource-model.ts). The native case streams proofs, so the complete proof-size allowance is conservative. Metadata and allocator allowances are already in the generic schedule. These are allocation plans, not measured peaks or guarantees for fixture generation, verification, browser integration or a complete setup. An oversized conservative plan does not prove a memory lower bound; it requires a tighter justified representation before a larger experiment.',
+        '',
+        table(
+            [
+                'Property',
+                'Bounded native relation',
+                'Same roster with full ring and seed',
+                'Completion-profile full ring and seed',
+            ],
+            (
+                [
+                    ['Participants', (value) => value.participantCount],
+                    ['Options', (value) => value.optionCount],
+                    [
+                        'Physical polynomial degree',
+                        (value) => value.polynomialDegree,
+                    ],
+                    ['Opening seed bits', (value) => value.seedBits],
+                    [
+                        'Sharing coefficient bits',
+                        (value) => value.sharingCoefficientBits,
+                    ],
+                    ['Sharing limb bits', (value) => value.limbBits],
+                    [
+                        'Constant-equation carry bits',
+                        (value) => value.carryBits,
+                    ],
+                    ['Systematic proof rows', (value) => value.systematicSize],
+                    [
+                        'Verification domain points',
+                        (value) => value.verificationDomainSize,
+                    ],
+                    ['Mask dimension', (value) => value.maskDimension],
+                    ['Queries', (value) => value.queryCount],
+                    ['Word columns', (value) => value.relation.wordColumns],
+                    [
+                        'Boolean columns',
+                        (value) => value.relation.booleanColumns,
+                    ],
+                    ['Lookup entries', (value) => value.relation.lookupEntries],
+                    [
+                        'Disjoint Boolean pairs',
+                        (value) => value.relation.disjointPairs,
+                    ],
+                    ['Support rows', (value) => value.relation.supportRows],
+                    [
+                        'Affine rows including support',
+                        (value) => value.relation.affineRows,
+                    ],
+                    [
+                        'Maximum encoded multiproof bytes',
+                        (value) => value.layout.maximumMultiproofBytes,
+                    ],
+                    [
+                        'Generic prover maximum live-byte allowance',
+                        (value) => value.proofEngine.maximumLiveBytes,
+                    ],
+                    [
+                        'Resident physical operator bytes',
+                        (value) => value.residentOperatorBytes,
+                    ],
+                    [
+                        'Native proof planning bytes',
+                        (value) => value.nativeProofPlanningBytes,
+                    ],
+                ] satisfies readonly (readonly [
+                    string,
+                    (value: typeof boundedSeedSharingProof) => bigint | number,
+                ])[]
+            ).map(([label, select]) => [
+                label,
+                formatCount(select(boundedSeedSharingProof)),
+                formatCount(select(fullFourParticipantSeedSharingProof)),
+                formatCount(select(recoverableSetup.outerProof)),
+            ]),
         ),
         '',
         '## Setup aggregate cache census',

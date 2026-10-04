@@ -138,6 +138,63 @@ describe('guarded protocol research entry', () => {
         });
     });
 
+    it('selects only the fixed scalar seed-sharing fixture without profile overrides', () => {
+        expect(
+            selectProtocolResearchCase(['--', 'native-seed-sharing']),
+        ).toEqual({
+            name: 'native-seed-sharing',
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const values of [
+            ['native-seed-sharing', '4', '2'],
+            ['native-seed-sharing', '10', '10'],
+            ['native-seed-sharing', '4'],
+            ['native-seed-sharing', ''],
+            ['native-seed-sharing', '--simulated-helpers', '1'],
+            ['native-seed-sharing', 'native-result'],
+            ['seed-sharing'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+    });
+
+    it('selects scalar seed-sharing verification only with one native source run', () => {
+        expect(
+            selectProtocolResearchCase([
+                '--',
+                'scalar-seed-sharing',
+                'logs/2026-10-04/passed-native-run',
+            ]),
+        ).toEqual({
+            name: 'scalar-seed-sharing',
+            source: 'logs/2026-10-04/passed-native-run',
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const values of [
+            ['scalar-seed-sharing'],
+            ['scalar-seed-sharing', ''],
+            ['scalar-seed-sharing', '   '],
+            ['scalar-seed-sharing', 'source', 'extra'],
+            ['scalar-seed-sharing', '4', '2'],
+            ['scalar-seed-sharing', 'source', '4', '2'],
+            ['scalar-seed-sharing', '--simulated-helpers'],
+            ['scalar-seed-sharing', '--simulated-helpers', '1'],
+            ['scalar-seed-sharing', 'source', '--simulated-helpers', '1'],
+            ['--simulated-helpers', '1', 'scalar-seed-sharing', 'source'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+        expect(
+            selectProtocolResearchCase(['native-seed-sharing']),
+        ).not.toHaveProperty('source');
+    });
+
     it('derives the native ceremony expectations from the thresholds', () => {
         // Totals 21, 30, 39, 28, 17, 16, 35, 24, 23 and 22 over voters 0 and
         // 4 to 7; no two options tie.

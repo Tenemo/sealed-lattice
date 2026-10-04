@@ -1,0 +1,73 @@
+//! Bounded outer seed-sharing relation experiment. The arithmetic ring has
+//! degree 256; the common word engine still has its full proof domain. This
+//! module supplies no setup capability or distributed recovery protocol.
+#![deny(unsafe_op_in_unsafe_fn)]
+
+#[cfg(any(test, all(feature = "scalar-fixture", target_arch = "wasm32")))]
+mod browser;
+#[cfg(any(test, feature = "native-fixture", feature = "scalar-fixture"))]
+pub mod fixture;
+pub mod layout;
+pub mod operator;
+#[cfg(feature = "native-fixture")]
+pub mod proof;
+pub mod statement;
+#[cfg(any(test, feature = "native-fixture", feature = "scalar-fixture"))]
+pub mod verification;
+pub mod witness;
+
+use num_bigint::{BigInt, Sign};
+use supported_profile::Profile;
+
+pub const DEGREE: usize = 256;
+pub const RECIPIENTS: usize = 4;
+pub const SEED_BITS: usize = 4;
+pub const SUPPORT: usize = supported_profile::SHARE_EPHEMERAL_SUPPORT;
+pub const SCALE: i128 = supported_profile::SHARE_SCALE as i128;
+pub type Error = &'static str;
+
+pub fn profile() -> Profile {
+    Profile::new(RECIPIENTS, 2).unwrap()
+}
+pub fn modulus() -> BigInt {
+    BigInt::from_bytes_le(Sign::Plus, supported_profile::share_modulus())
+}
+pub fn center(value: BigInt) -> BigInt {
+    let modulus = modulus();
+    let positive = ((value % &modulus) + &modulus) % &modulus;
+    if positive > (&modulus >> 1usize) {
+        positive - modulus
+    } else {
+        positive
+    }
+}
+pub(crate) fn digit(value: &BigInt, limb: usize) -> i128 {
+    let magnitude = value.magnitude();
+    let bits = profile().share_limb_bits();
+    let part = (magnitude >> (limb * bits)) % (num_bigint::BigUint::from(1u8) << bits);
+    let result = i128::try_from(part).unwrap();
+    if value.sign() == Sign::Minus {
+        -result
+    } else {
+        result
+    }
+}
+pub(crate) fn rotation(recipient: usize, output: usize) -> (usize, i128) {
+    let exponent = recipient * (DEGREE / profile().interpolation_degree());
+    let source = (output + 2 * DEGREE - exponent) % DEGREE;
+    let signed_exponent = source + exponent;
+    (
+        source,
+        if (signed_exponent / DEGREE).is_multiple_of(2) {
+            1
+        } else {
+            -1
+        },
+    )
+}
+
+#[cfg(test)]
+#[path = "reference/dense.rs"]
+mod dense;
+#[cfg(test)]
+mod tests;

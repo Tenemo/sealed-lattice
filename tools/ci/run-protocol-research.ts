@@ -19,6 +19,7 @@ import { compileContributionAuthenticationCensus } from '#tests/contribution-aut
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { compileRecoverableSeedSharingProofResources } from '#tests/recoverable-setup-resource-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
@@ -33,9 +34,22 @@ import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
+import { runSeedSharingScalar } from '#tools/ci/run-seed-sharing-scalar.js';
 
 type NativeResult = {
     kind: string;
+    positive?: number;
+    falseWitnesses?: number;
+    falseStatements?: number;
+    hostileCases?: number;
+    participants?: number;
+    degree?: number;
+    seedBits?: number;
+    proofDomain?: number;
+    wordColumns?: number;
+    booleanColumns?: number;
+    affineRows?: number;
+    proofBytes?: number[];
     accepted?: number[];
     invalid?: number[];
     conflicting?: number[];
@@ -55,7 +69,21 @@ type NativeResult = {
     }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
+if ('source' in selected) {
+    await runSeedSharingScalar(selected.source);
+    // The selected runner has finished its diagnostics and process cleanup.
+    process.exit(process.exitCode ?? 0);
+}
 const prefixCase = selected.name === 'native-prefix';
+const seedSharingCase = selected.name === 'native-seed-sharing';
+const seedSharingResources = seedSharingCase
+    ? compileRecoverableSeedSharingProofResources(
+          selected.participantCount,
+          selected.optionCount,
+          256n,
+          4n,
+      )
+    : undefined;
 // The ceremony's roles and expected outcome for the selected profile.
 const scenario = deriveResearchScenario(
     selected.participantCount,
@@ -88,16 +116,21 @@ const proofCrates = [
 ];
 // A native ceremony generates and proves one contribution per participant,
 // which dominates its duration.
-const executionTimeout = prefixCase
-    ? 3_600_000
-    : 900_000 * selected.participantCount;
+const executionTimeout =
+    prefixCase || seedSharingCase
+        ? 3_600_000
+        : 900_000 * selected.participantCount;
 
 await runWithLocalRunLog(
     {
         commandLineArguments: [
             selected.name,
-            String(selected.participantCount),
-            String(selected.optionCount),
+            ...(seedSharingCase
+                ? []
+                : [
+                      String(selected.participantCount),
+                      String(selected.optionCount),
+                  ]),
             ...(selected.simulatedHelpers === 0
                 ? []
                 : ['--simulated-helpers', String(selected.simulatedHelpers)]),
@@ -106,9 +139,11 @@ await runWithLocalRunLog(
             'Pinned protocol research build',
             ...(selected.execution
                 ? [
-                      prefixCase
-                          ? 'Encrypted requested-output gates'
-                          : 'Native original-credential completion',
+                      seedSharingCase
+                          ? 'Bounded seed-sharing proof gates'
+                          : prefixCase
+                            ? 'Encrypted requested-output gates'
+                            : 'Native original-credential completion',
                   ]
                 : []),
         ],
@@ -233,22 +268,30 @@ await runWithLocalRunLog(
                     (ballot.maximumSignedBodyBytes +
                         ballot.envelopeBytes +
                         enrollment.signatureBytes);
-            const publicPayloadBound =
-                sourceBound +
-                2048n +
-                2n * degree * coefficientBytes +
-                participants *
-                    (2n +
-                        64n +
-                        enrollment.signatureBytes +
-                        releaseBody +
-                        270n +
-                        enrollment.signatureBytes) +
-                enrollment.maximumPollDefinitionBytes;
-            const diagnosticBound =
-                publicPayloadBound +
-                contributors * aggregate.aggregateBytes +
-                ballot.maximumProofBytes;
+            const publicPayloadBound = seedSharingResources
+                ? 3n * seedSharingResources.layout.maximumMultiproofBytes
+                : sourceBound +
+                  2048n +
+                  2n * degree * coefficientBytes +
+                  participants *
+                      (2n +
+                          64n +
+                          enrollment.signatureBytes +
+                          releaseBody +
+                          270n +
+                          enrollment.signatureBytes) +
+                  enrollment.maximumPollDefinitionBytes;
+            const diagnosticBound = seedSharingResources
+                ? publicPayloadBound
+                : publicPayloadBound +
+                  contributors * aggregate.aggregateBytes +
+                  ballot.maximumProofBytes;
+            if (seedSharingResources)
+                assert.ok(
+                    seedSharingResources.nativeProofPlanningBytes <
+                        BigInt(memoryLimit),
+                    'The seed-sharing proof planning screen exceeds the memory guard.',
+                );
             assert.equal(participants, BigInt(selected.participantCount));
             assert.ok(
                 freemem() >= 2 * memoryLimit,
@@ -256,21 +299,30 @@ await runWithLocalRunLog(
             );
             await writeFile(
                 path.join(log.runDirectoryPath, 'resource-inputs.json'),
-                JSON.stringify({
-                    publicPayloadBound: String(publicPayloadBound),
-                    diagnosticBound: String(diagnosticBound),
-                    memoryLimit,
-                    memoryKind:
-                        process.platform === 'win32'
-                            ? 'process-tree private bytes'
-                            : 'process-tree resident bytes',
-                    unmeasured: {
-                        physicalStorage: null,
-                        participantVisits: null,
-                        networkTransfers: null,
-                        recoveryWork: null,
+                JSON.stringify(
+                    {
+                        participantCount: selected.participantCount,
+                        optionCount: selected.optionCount,
+                        ...(seedSharingResources
+                            ? { seedSharingResources }
+                            : {}),
+                        publicPayloadBound: String(publicPayloadBound),
+                        diagnosticBound: String(diagnosticBound),
+                        memoryLimit,
+                        memoryKind:
+                            process.platform === 'win32'
+                                ? 'process-tree private bytes'
+                                : 'process-tree resident bytes',
+                        unmeasured: {
+                            physicalStorage: null,
+                            participantVisits: null,
+                            networkTransfers: null,
+                            recoveryWork: null,
+                        },
                     },
-                }) + '\n',
+                    (_key, value: unknown) =>
+                        typeof value === 'bigint' ? String(value) : value,
+                ) + '\n',
                 { flag: 'wx' },
             );
             const sources: { file: string; sha512: string; bytes: number }[] =
@@ -313,6 +365,27 @@ await runWithLocalRunLog(
                 }
             };
             await snapshot(workspace);
+            if (seedSharingCase)
+                for (const relative of [
+                    'tools/ci/protocol-research-registry.ts',
+                    'tests/recoverable-setup-resource-model.ts',
+                ]) {
+                    const bytes = await readFile(path.join(root, relative));
+                    const destination = path.join(
+                        log.runDirectoryPath,
+                        'sources',
+                        relative,
+                    );
+                    await mkdir(path.dirname(destination), { recursive: true });
+                    await writeFile(destination, bytes, { flag: 'wx' });
+                    sources.push({
+                        file: relative,
+                        sha512: createHash('sha512')
+                            .update(bytes)
+                            .digest('hex'),
+                        bytes: bytes.length,
+                    });
+                }
             await writeFile(
                 path.join(log.runDirectoryPath, 'source-manifest.json'),
                 JSON.stringify({ compiler, sources }, null, 2) + '\n',
@@ -323,147 +396,205 @@ await runWithLocalRunLog(
                 await readFile(import.meta.filename),
                 { flag: 'wx' },
             );
-            // Every workspace member.
-            await execute(
-                'cargo',
-                ['+1.95.0', 'fmt', '--all', '--', '--check'],
-                'format',
-            );
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
+            if (seedSharingCase) {
+                const fixturePackage = ['-p', 'seed-sharing-proof'];
+                await execute(
+                    'cargo',
+                    ['+1.95.0', 'fmt', ...fixturePackage, '--', '--check'],
+                    'format',
+                );
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'clippy',
+                        '--offline',
+                        '--locked',
+                        '--no-default-features',
+                        ...fixturePackage,
+                        '--features',
+                        'native-fixture',
+                        '--all-targets',
+                        '--',
+                        '-D',
+                        'warnings',
+                    ],
                     'clippy',
+                );
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'test',
+                        '--offline',
+                        '--locked',
+                        ...fixturePackage,
+                        '--lib',
+                    ],
+                    'unit-verification',
+                );
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'build',
+                        '--offline',
+                        '--locked',
+                        '--release',
+                        '--no-default-features',
+                        ...fixturePackage,
+                        '--features',
+                        'native-fixture',
+                        '--bin',
+                        'check-seed-sharing-proof',
+                    ],
+                    'build-native',
+                );
+            } else {
+                // Every workspace member.
+                await execute(
+                    'cargo',
+                    ['+1.95.0', 'fmt', '--all', '--', '--check'],
+                    'format',
+                );
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'clippy',
+                        '--offline',
+                        '--locked',
+                        '--no-default-features',
+                        '--workspace',
+                        '--all-targets',
+                        '--',
+                        '-D',
+                        'warnings',
+                    ],
+                    'clippy',
+                );
+                // The numerical probes decrypt synthetic test ciphertexts, so only
+                // their explicit feature compiles them; lint that build as well.
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'clippy',
+                        '--offline',
+                        '--locked',
+                        '--no-default-features',
+                        '-p',
+                        'rns-arithmetic-probe',
+                        '--features',
+                        'numerical-probes',
+                        '--all-targets',
+                        '--',
+                        '-D',
+                        'warnings',
+                    ],
+                    'clippy-numerical-probes',
+                );
+                // A corrupt participant's browser module signs false ballot
+                // statements only under its explicit feature; lint that build.
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'clippy',
+                        '--offline',
+                        '--locked',
+                        '--target',
+                        'wasm32-unknown-unknown',
+                        '-p',
+                        'registration-enrollment',
+                        '--features',
+                        'invalid-ballot',
+                        '--lib',
+                        '--',
+                        '-D',
+                        'warnings',
+                    ],
+                    'clippy-invalid-ballot',
+                );
+                // The participant module is a wasm32 cdylib whose host supplies
+                // randomness, so its dependency graph must build there without an
+                // operating-system generator.
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'check',
+                        '--offline',
+                        '--locked',
+                        '--target',
+                        'wasm32-unknown-unknown',
+                        '-p',
+                        'registration-enrollment',
+                        '--lib',
+                    ],
+                    'browser-target',
+                );
+                // Unit tests of every member, including the ceremony's
+                // profile-derived roles, alone and then with every job on a
+                // simulated helper.
+                const unitTests = [
+                    '+1.95.0',
+                    'test',
                     '--offline',
                     '--locked',
-                    '--no-default-features',
                     '--workspace',
-                    '--all-targets',
-                    '--',
-                    '-D',
-                    'warnings',
-                ],
-                'clippy',
-            );
-            // The numerical probes decrypt synthetic test ciphertexts, so only
-            // their explicit feature compiles them; lint that build as well.
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
-                    'clippy',
-                    '--offline',
-                    '--locked',
-                    '--no-default-features',
-                    '-p',
-                    'rns-arithmetic-probe',
-                    '--features',
-                    'numerical-probes',
-                    '--all-targets',
-                    '--',
-                    '-D',
-                    'warnings',
-                ],
-                'clippy-numerical-probes',
-            );
-            // A corrupt participant's browser module signs false ballot
-            // statements only under its explicit feature; lint that build.
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
-                    'clippy',
-                    '--offline',
-                    '--locked',
-                    '--target',
-                    'wasm32-unknown-unknown',
-                    '-p',
-                    'registration-enrollment',
-                    '--features',
-                    'invalid-ballot',
                     '--lib',
-                    '--',
-                    '-D',
-                    'warnings',
-                ],
-                'clippy-invalid-ballot',
-            );
-            // The participant module is a wasm32 cdylib whose host supplies
-            // randomness, so its dependency graph must build there without an
-            // operating-system generator.
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
-                    'check',
-                    '--offline',
-                    '--locked',
-                    '--target',
-                    'wasm32-unknown-unknown',
-                    '-p',
-                    'registration-enrollment',
-                    '--lib',
-                ],
-                'browser-target',
-            );
-            // Unit tests of every member, including the ceremony's
-            // profile-derived roles, alone and then with every job on a
-            // simulated helper.
-            const unitTests = [
-                '+1.95.0',
-                'test',
-                '--offline',
-                '--locked',
-                '--workspace',
-                '--lib',
-                '--bins',
-            ];
-            await execute('cargo', unitTests, 'unit-verification');
-            await execute(
-                'cargo',
-                unitTests,
-                'unit-verification-simulated-helpers',
-                withSimulatedHelpers(unitSimulatedHelpers),
-            );
-            await execute(
-                'cargo',
-                [
-                    ...unitTests.filter(
-                        (argument) => argument !== '--workspace',
-                    ),
-                    ...proofCrates.flatMap((name) => ['-p', name]),
-                ],
-                'unit-verification-proof-helpers',
-                withSimulatedHelpers(proofSimulatedHelpers),
-            );
-            await execute(
-                'cargo',
-                [
-                    '+1.95.0',
-                    'build',
-                    '--offline',
-                    '--locked',
-                    '--release',
-                    '--no-default-features',
-                    ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
-                        (name) => ['-p', name],
-                    ),
-                    ...(prefixCase
-                        ? [
-                              '--features',
-                              'rns-arithmetic-probe/numerical-probes',
-                          ]
-                        : []),
                     '--bins',
-                ],
-                'build-native',
-            );
+                ];
+                await execute('cargo', unitTests, 'unit-verification');
+                await execute(
+                    'cargo',
+                    unitTests,
+                    'unit-verification-simulated-helpers',
+                    withSimulatedHelpers(unitSimulatedHelpers),
+                );
+                await execute(
+                    'cargo',
+                    [
+                        ...unitTests.filter(
+                            (argument) => argument !== '--workspace',
+                        ),
+                        ...proofCrates.flatMap((name) => ['-p', name]),
+                    ],
+                    'unit-verification-proof-helpers',
+                    withSimulatedHelpers(proofSimulatedHelpers),
+                );
+                await execute(
+                    'cargo',
+                    [
+                        '+1.95.0',
+                        'build',
+                        '--offline',
+                        '--locked',
+                        '--release',
+                        '--no-default-features',
+                        ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
+                            (name) => ['-p', name],
+                        ),
+                        ...(prefixCase
+                            ? [
+                                  '--features',
+                                  'rns-arithmetic-probe/numerical-probes',
+                              ]
+                            : []),
+                        '--bins',
+                    ],
+                    'build-native',
+                );
+            }
             const executable = path.join(
                 workspace,
                 'target/release/' +
-                    (prefixCase
-                        ? 'check-requested-output'
-                        : 'native-ceremony') +
+                    (seedSharingCase
+                        ? 'check-seed-sharing-proof'
+                        : prefixCase
+                          ? 'check-requested-output'
+                          : 'native-ceremony') +
                     (process.platform === 'win32' ? '.exe' : ''),
             );
             const runtime = createHash('sha512')
@@ -496,14 +627,21 @@ await runWithLocalRunLog(
                 'runtime.bin',
             );
             await writeFile(runtimeFile, runtime, { flag: 'wx' });
-            const scratch = prefixCase
-                ? undefined
-                : await mkdtemp(path.join(root, 'temp/protocol-research-'));
+            const scratch =
+                prefixCase || seedSharingCase
+                    ? undefined
+                    : await mkdtemp(path.join(root, 'temp/protocol-research-'));
             const output = path.join(
                 log.artifactDirectoryPath,
-                prefixCase ? 'requested-output' : 'ceremony',
+                seedSharingCase
+                    ? 'seed-sharing'
+                    : prefixCase
+                      ? 'requested-output'
+                      : 'ceremony',
             );
+            if (seedSharingCase) await mkdir(output);
             const controller = new AbortController();
+            let seedSharingOutput = '';
             let active = false,
                 monitor: Promise<void> | undefined,
                 peakMemory = 0,
@@ -515,27 +653,30 @@ await runWithLocalRunLog(
                     [
                         {
                             command: executable,
-                            args: prefixCase
-                                ? [output]
-                                : [
-                                      output,
-                                      runtimeFile,
-                                      scratch!,
-                                      String(selected.participantCount),
-                                      String(selected.optionCount),
-                                      ...(selected.name ===
-                                      'native-invalid-only'
-                                          ? ['invalid-only']
-                                          : selected.noResult
-                                            ? ['empty']
-                                            : []),
-                                  ],
+                            args:
+                                prefixCase || seedSharingCase
+                                    ? [output]
+                                    : [
+                                          output,
+                                          runtimeFile,
+                                          scratch!,
+                                          String(selected.participantCount),
+                                          String(selected.optionCount),
+                                          ...(selected.name ===
+                                          'native-invalid-only'
+                                              ? ['invalid-only']
+                                              : selected.noResult
+                                                ? ['empty']
+                                                : []),
+                                      ],
                             env: withSimulatedHelpers(
                                 selected.simulatedHelpers,
                             ),
-                            description: prefixCase
-                                ? 'Verify encrypted requested-output coefficients'
-                                : 'Execute original credentials through terminal verification',
+                            description: seedSharingCase
+                                ? 'Prove and reject bounded seed-sharing statements'
+                                : prefixCase
+                                  ? 'Verify encrypted requested-output coefficients'
+                                  : 'Execute original credentials through terminal verification',
                             logFileSlug: 'completion',
                         },
                     ],
@@ -547,6 +688,17 @@ await runWithLocalRunLog(
                             AbortSignal.timeout(executionTimeout),
                         ]),
                         observer: {
+                            onCommandOutput({ chunk, streamName }) {
+                                if (!seedSharingCase || streamName !== 'stdout')
+                                    return;
+                                seedSharingOutput += chunk;
+                                if (seedSharingOutput.length > 1_048_576)
+                                    controller.abort(
+                                        new Error(
+                                            'Seed-sharing diagnostic output exceeds its bound.',
+                                        ),
+                                    );
+                            },
                             onCommandStart({ processIdentifier }) {
                                 assert.ok(processIdentifier);
                                 active = true;
@@ -604,15 +756,71 @@ await runWithLocalRunLog(
             assert.equal(exitCode, 0);
             assert.ok(samples > 0);
             const result = JSON.parse(
-                await readFile(
-                    path.join(
-                        output,
-                        prefixCase ? 'result.json' : 'completion/result.json',
-                    ),
-                    'utf8',
-                ),
+                seedSharingCase
+                    ? seedSharingOutput.trim().split(/\r?\n/u).pop()!
+                    : await readFile(
+                          path.join(
+                              output,
+                              prefixCase
+                                  ? 'result.json'
+                                  : 'completion/result.json',
+                          ),
+                          'utf8',
+                      ),
             ) as NativeResult;
-            if (prefixCase) {
+            if (seedSharingResources) {
+                assert.equal(result.kind, 'seed-sharing-proof-fragment');
+                assert.equal(result.positive, 1);
+                assert.equal(result.falseWitnesses, 1);
+                assert.equal(result.falseStatements, 1);
+                assert.equal(result.participants, selected.participantCount);
+                assert.equal(
+                    result.degree,
+                    Number(seedSharingResources.polynomialDegree),
+                );
+                assert.equal(
+                    result.seedBits,
+                    Number(seedSharingResources.seedBits),
+                );
+                assert.equal(
+                    result.proofDomain,
+                    Number(seedSharingResources.verificationDomainSize),
+                );
+                assert.equal(result.hostileCases, 14);
+                assert.equal(
+                    result.wordColumns,
+                    seedSharingResources.relation.wordColumns,
+                );
+                assert.equal(
+                    result.booleanColumns,
+                    seedSharingResources.relation.booleanColumns,
+                );
+                assert.equal(
+                    result.affineRows,
+                    Number(seedSharingResources.relation.affineRows),
+                );
+                assert.ok(Array.isArray(result.proofBytes));
+                assert.equal(result.proofBytes.length, 3);
+                const proofFiles = [
+                    'proof-honest.bin',
+                    'proof-false-seed.bin',
+                    'proof-false-share.bin',
+                ];
+                assert.deepEqual(
+                    (await readdir(output)).sort(),
+                    [...proofFiles].sort(),
+                );
+                for (const [index, name] of proofFiles.entries()) {
+                    const bytes = (await stat(path.join(output, name))).size;
+                    assert.ok(
+                        bytes > 0 &&
+                            BigInt(bytes) <=
+                                seedSharingResources.layout
+                                    .maximumMultiproofBytes,
+                    );
+                    assert.equal(result.proofBytes[index], bytes);
+                }
+            } else if (prefixCase) {
                 assert.equal(result.kind, 'requested-output');
                 assert.ok(result.cases);
                 const cases = result.cases.map((value) => value.result);
@@ -717,7 +925,7 @@ await runWithLocalRunLog(
                     );
                 }
             }
-            if (!prefixCase && !selected.noResult) {
+            if (!prefixCase && !seedSharingCase && !selected.noResult) {
                 // The reference ranking of the accepted ballots; ties go to
                 // the lower option position.
                 assert.deepEqual(result.identifiers, scenario.identifiers);
@@ -749,7 +957,7 @@ await runWithLocalRunLog(
                         participantCount: selected.participantCount,
                         optionCount: selected.optionCount,
                         simulatedHelpers: selected.simulatedHelpers,
-                        unitSimulatedHelpers,
+                        ...(seedSharingCase ? {} : { unitSimulatedHelpers }),
                         output,
                         runtimeIdentity: runtime.toString('hex'),
                         result,
@@ -765,11 +973,13 @@ await runWithLocalRunLog(
                             networkTransfers: null,
                             recoveryWork: null,
                         },
-                        scope: prefixCase
-                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
-                            : selected.noResult
-                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
-                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or physical qualification.',
+                        scope: seedSharingCase
+                            ? 'Reduced seed-sharing relation over a 256-coefficient physical ring and four synthetic seed bits with the unchanged word-proof domain and four-recipient profile. Real proof generation and verification cover one valid case, one false supplied seed witness and one provably unsatisfiable ciphertext statement. Both fresh negative proofs must fail the relation check. This creates no setup capability, distributed recovery, participant state or terminal, and establishes no complete protocol security or browser qualification.'
+                            : prefixCase
+                              ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
+                              : selected.noResult
+                                ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
+                                : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or physical qualification.',
                     },
                     null,
                     2,

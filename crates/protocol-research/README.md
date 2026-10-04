@@ -40,9 +40,17 @@ The browser participant's worker may hand independent jobs to helper workers, an
 pnpm run research:protocol -- native-invalid-only 3 2 --simulated-helpers 3
 ```
 
-Every case runs the unit tests alone and then with three simulated helpers, and the proof crates' also with eight, whose proof rows hold two residue classes of each coset.
+The build check, ceremony cases and requested-output probe run the workspace unit tests alone and then with three simulated helpers, and the proof crates' also with eight, whose proof rows hold two residue classes of each coset.
 
-The runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
+For a ceremony, the runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
+
+The isolated seed-sharing proof case uses the four-participant, two-option parameter profile with a reduced 256-coefficient ring and four synthetic seed bits, while retaining the word-proof engine's full verification domain:
+
+```text
+pnpm run research:protocol -- native-seed-sharing
+```
+
+This fixed scalar case accepts no profile counts or simulated-helper option. Its runner checks formatting, Clippy and the library unit tests of the isolated `seed-sharing-proof` crate, then builds its explicit `native-fixture` binary and runs one valid proof, one freshly generated proof from an inconsistent seed witness and one freshly generated proof for a provably unsatisfiable ciphertext statement, together with hostile verification controls. Both fresh negative proofs must fail the relation check; a false supplied witness alone is not evidence that the public statement has no satisfying witness. The fixture feature enables deterministic test randomness only for this native research executable; the participant runtime does not consume it. Source snapshots, the executable digest, model-derived resource inputs, stage output and measured process-tree memory remain in the run diagnostics. Proof files and the runtime digest are written only to the corresponding run-artifact directory. The same research lock, available-memory preflight, 1 GiB process-tree guard and process containment govern this case; a planning estimate does not raise that guard. This experiment creates no participant, accepted setup, recovery protocol, ballot, certificate or terminal, and supplies no complete-protocol security or browser qualification.
 
 The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:
 

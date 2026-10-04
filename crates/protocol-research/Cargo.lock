@@ -455,6 +455,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "seed-sharing-proof"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+ "parallel-work",
+ "setup-stream-kernel",
+ "supported-profile",
+ "word-proof",
+ "word-verifier",
+]
+
+[[package]]
 name = "setup-aggregate"
 version = "0.0.0"
 dependencies = [
