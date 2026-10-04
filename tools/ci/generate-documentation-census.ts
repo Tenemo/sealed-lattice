@@ -2423,6 +2423,28 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
+                    'Checkpoint header bytes for the protocol role',
+                    formatCount(firstOracleCheckpoint.headerBytes),
+                ],
+                [
+                    'Checkpoint import bytes including routing context',
+                    formatCount(firstOracleCheckpoint.importBytes),
+                ],
+                [
+                    'Header digest input bytes including fixed domain',
+                    formatCount(firstOracleCheckpoint.headerDigestInputBytes),
+                ],
+                [
+                    'Header digest permutations per record',
+                    formatCount(firstOracleCheckpoint.headerDigestPermutations),
+                ],
+                [
+                    'Header digest permutations per complete seal or import pass',
+                    formatCount(
+                        firstOracleCheckpoint.headerDigestPermutationsPerPass,
+                    ),
+                ],
+                [
                     'Maximum checkpoint header bytes',
                     formatCount(firstOracleCheckpoint.maximumHeaderBytes),
                 ],

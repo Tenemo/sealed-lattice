@@ -4,7 +4,7 @@ use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use registration_credentials::{
     registration::{KEY_BYTES, VerifiedRegistration},
-    roster::{RosterProposal, contribution_role_from_context},
+    roster::{RetainedContributionContext, RosterProposal},
 };
 use setup_witness::{
     PolynomialOutput,
@@ -360,7 +360,12 @@ pub fn checkpoint_records() -> usize {
     })
 }
 
-pub fn checkpoint_command(operation: u32, position: usize, length: usize) -> u32 {
+pub fn checkpoint_command(
+    operation: u32,
+    position: usize,
+    length: usize,
+    retained: Option<&RetainedContributionContext>,
+) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.stopped || (operation != 4 && position != 0) {
@@ -411,22 +416,9 @@ pub fn checkpoint_command(operation: u32, position: usize, length: usize) -> u32
                     && checkpoint_export.is_none()
                     && checkpoint_import.is_none() =>
                 {
-                    if bytes.len() < 192 {
-                        return Err(());
-                    }
-                    let poll = bytes[..64].try_into().unwrap();
-                    let runtime = bytes[64..128].try_into().unwrap();
-                    let proposal = bytes[128..192].try_into().unwrap();
-                    let role = contribution_role_from_context(poll, runtime, proposal, position)
+                    let import = crate::import_checkpoint(retained.ok_or(())?, position, bytes)
                         .map_err(|_| ())?;
-                    let import = first_checkpoint::Import::begin(&bytes[192..]).map_err(|_| ())?;
                     let participants = import.profile().participants();
-                    if import.role() != role
-                        || position >= participants
-                        || import.input_hashes().len() != participants
-                    {
-                        return Err(());
-                    }
                     *checkpoint_import = Some(import);
                     *restore_keys = vec![None; participants];
                 }

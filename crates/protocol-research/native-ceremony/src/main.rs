@@ -89,8 +89,8 @@ impl BallotInputs<'_> {
     ) -> close::Submission {
         let profile = self.scenario.profile();
         let proposal = RetainedContributionContext::parse(
-            self.poll.identity(),
-            self.poll.runtime(),
+            &enrollment.credential,
+            &self.setup.inventory().proposal().proposal().records()[position],
             profile.options(),
             position,
             self.setup.inventory().proposal().proposal().body(),
@@ -503,8 +503,8 @@ fn main() {
     let final_keys = final_keys(&output, profile);
     let [fhe_key, auxiliary_key] = ballot_keys(profile);
     let retained_proposal = RetainedContributionContext::parse(
-        poll.identity(),
-        poll.runtime(),
+        &enrollments[0].credential,
+        &inventory.proposal().proposal().records()[0],
         profile.options(),
         0,
         inventory.proposal().proposal().body(),
@@ -528,8 +528,8 @@ fn main() {
         profile.options() - 1
     };
     let other_profile = RetainedContributionContext::parse(
-        poll.identity(),
-        poll.runtime(),
+        &enrollments[0].credential,
+        &inventory.proposal().proposal().records()[0],
         other_options,
         0,
         inventory.proposal().proposal().body(),
@@ -686,8 +686,8 @@ fn main() {
     // contributor's never from its reference alone.
     let outsider = count - 1;
     let outsider_proposal = RetainedContributionContext::parse(
-        poll.identity(),
-        poll.runtime(),
+        &enrollments[outsider].credential,
+        &inventory.proposal().proposal().records()[outsider],
         profile.options(),
         outsider,
         inventory.proposal().proposal().body(),

@@ -119,4 +119,28 @@ describe('complete contribution body encoding', () => {
             BigInt(contributionSenderPrefix(new Uint8Array(1952)).length),
         );
     });
+    it('frames the complete owner-bound role in the body commitment input', () => {
+        const value = compileContributionBodyCensus(completionProfile());
+        const roleBytes =
+            8n + 6n * 6n + (4n + 36n) + (4n + 128n) + 3n * 64n + 2n;
+        const prefix =
+            8n + 5n * 6n + 4n + 34n + 1952n + 64n + 4n + roleBytes + 4n;
+        expect(value.hashPrefixBytes).toBe(prefix);
+        expect(value.maximumHashInputBytes).toBe(
+            prefix + value.maximumBodyBytes,
+        );
+        expect(value.minimumHashInputBytes).toBe(
+            prefix +
+                value.headerBytes +
+                value.polynomialPayloadBytes +
+                value.minimumProofBytes,
+        );
+        // The sender/salt prefix precedes the role and keeps its own grammar.
+        expect(value.senderSaltPrefixBytes).toBe(
+            BigInt(
+                contributionSaltPrefix(new Uint8Array(1952), new Uint8Array(64))
+                    .length,
+            ),
+        );
+    });
 });

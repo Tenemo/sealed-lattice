@@ -2,8 +2,30 @@
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 
+use registration_credentials::roster::RetainedContributionContext;
 use supported_profile::{Profile, relation::setup_relation};
+use word_proof::bridge::Error;
 use word_proof::bridge::first_checkpoint;
+
+/// Opens only the public checkpoint header under the original owner's
+/// retained context. The importer still authenticates every sealed record
+/// and recipient key before restoring the unfinished proof.
+pub fn import_checkpoint(
+    context: &RetainedContributionContext,
+    position: usize,
+    bytes: &[u8],
+) -> Result<first_checkpoint::Import, Error> {
+    let prefix = bytes.get(..192).ok_or(Error::Operation)?;
+    let import = first_checkpoint::Import::begin(&bytes[192..])?;
+    let expected = context
+        .checkpoint_role(prefix, position, import.profile())
+        .map_err(|_| Error::Operation)?;
+    if import.role() != expected || import.input_hashes().len() != context.profile().participants()
+    {
+        return Err(Error::Operation);
+    }
+    Ok(import)
+}
 
 /// The longest checkpoint header of a profile's contribution and each of its
 /// sealed checkpoint records' lengths, in record order.

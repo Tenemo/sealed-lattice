@@ -3,14 +3,17 @@
 //! interleaved, and the verifier's own refusal of changed bytes.
 use crate::Enrollment;
 use registration_credentials::{
-    Error,
+    Credential, Error,
     foundation::{
-        StabilizedDisplayText,
+        CanonicalItem, CanonicalTuple, StabilizedDisplayText,
         ceremony::{Manifest, OptionDefinition},
+        participant_identity::derive_participant_identity,
     },
     poll::{PollDraft, VerifiedPoll, verify_poll},
     registration::{RegistrationVerifier, VerifiedRegistration, session::RegistrationSession},
+    roster::RetainedContributionContext,
 };
+use supported_profile::Profile;
 
 const CHUNK: usize = 1 << 20;
 
@@ -23,7 +26,7 @@ struct Record {
 }
 
 // A poll and its creator's registration.
-fn registration() -> (VerifiedPoll, Record) {
+fn registration() -> (VerifiedPoll, Record, Enrollment) {
     let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
     let options = (0..2)
         .map(|index| {
@@ -38,7 +41,7 @@ fn registration() -> (VerifiedPoll, Record) {
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
     let runtime = [7; 64];
     let mut parts: [Vec<u8>; 4] = Default::default();
-    let (packet, _) = Enrollment::create_creator(
+    let (packet, enrollment) = Enrollment::create_creator(
         draft,
         runtime,
         b"Creator",
@@ -62,6 +65,7 @@ fn registration() -> (VerifiedPoll, Record) {
             key,
             proof,
         },
+        enrollment,
     )
 }
 
@@ -103,8 +107,13 @@ fn same(left: &VerifiedRegistration, right: &VerifiedRegistration) -> bool {
 
 #[test]
 fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
-    let (poll, record) = registration();
+    let (poll, record, enrollment) = registration();
     let expected = direct(&poll, &record).unwrap();
+    checkpoint_import_preserves_the_verified_original_owner(
+        &poll,
+        &expected,
+        &enrollment.credential,
+    );
     for division in [CHUNK, 65_543, 4_099] {
         assert!(same(
             &streamed(&poll, &record, division).unwrap(),
@@ -158,4 +167,117 @@ fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
             refusal(direct(&poll, &record))
         );
     }
+}
+
+// This reuses the test's one genuinely generated and verified registration.
+// The other proposal entries and the partial checkpoint are framing fixtures:
+// they establish neither a publicly verified roster nor a resumed proof.
+fn checkpoint_import_preserves_the_verified_original_owner(
+    poll: &VerifiedPoll,
+    original: &VerifiedRegistration,
+    credential: &Credential,
+) {
+    let profile = Profile::new(3, poll.manifest().option_count()).unwrap();
+    let mut bodies = (profile.participants() as u32).to_le_bytes().to_vec();
+    bodies.extend(original.body_digest());
+    bodies.extend([7; 64]);
+    bodies.extend([8; 64]);
+    let proposal = CanonicalTuple::new(
+        1,
+        1,
+        vec![
+            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1").unwrap(),
+            CanonicalItem::hash512(poll.identity()),
+            CanonicalItem::hash512(poll.runtime()),
+            CanonicalItem::variable_bytes(bodies).unwrap(),
+        ],
+    )
+    .encode()
+    .unwrap();
+    let context =
+        RetainedContributionContext::parse(credential, original, profile.options(), 0, &proposal)
+            .unwrap();
+    let prefix = [poll.identity(), poll.runtime(), *context.identity()].concat();
+    let role = |credential: &Credential, position: u16, purpose: &str| {
+        CanonicalTuple::new(
+            1,
+            1,
+            vec![
+                CanonicalItem::nonempty_ascii(purpose).unwrap(),
+                CanonicalItem::nonempty_ascii(
+                    &derive_participant_identity(credential.signing_public())
+                        .unwrap()
+                        .to_lowercase_hex(),
+                )
+                .unwrap(),
+                CanonicalItem::hash512(poll.identity()),
+                CanonicalItem::hash512(poll.runtime()),
+                CanonicalItem::hash512(*context.identity()),
+                CanonicalItem::unsigned16(position),
+            ],
+        )
+        .encode()
+        .unwrap()
+    };
+    let expected_role = role(credential, 0, "sealed-lattice/setup-contribution/v2");
+    assert_eq!(
+        context.checkpoint_role(&prefix, 0, profile).unwrap(),
+        expected_role
+    );
+    let header = |role: &[u8], input_hashes: usize| {
+        let mut bytes = b"FPC4".to_vec();
+        bytes.extend([profile.participants() as u8, profile.options() as u8]);
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend((role.len() as u16).to_le_bytes());
+        bytes.extend(role);
+        bytes.extend([0; 128]);
+        bytes.extend(profile.setup_statement_header());
+        bytes.extend((input_hashes as u16).to_le_bytes());
+        for _ in 0..input_hashes {
+            bytes.extend(original.header().recipient_key_hash);
+        }
+        bytes
+    };
+    let request = |role: &[u8], count| [prefix.as_slice(), &header(role, count)].concat();
+    let valid = request(&expected_role, profile.participants());
+    let other_owner = Credential::from_seed([91; 32]);
+    let legacy_role = CanonicalTuple::new(
+        1,
+        1,
+        vec![
+            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v1").unwrap(),
+            CanonicalItem::hash512(poll.identity()),
+            CanonicalItem::hash512(poll.runtime()),
+            CanonicalItem::hash512(*context.identity()),
+            CanonicalItem::unsigned16(0),
+        ],
+    )
+    .encode()
+    .unwrap();
+    for wrong_role in [
+        role(&other_owner, 0, "sealed-lattice/setup-contribution/v2"),
+        role(credential, 1, "sealed-lattice/setup-contribution/v2"),
+        legacy_role,
+    ] {
+        let bytes = request(&wrong_role, profile.participants());
+        // The checkpoint decoder accepts this partial header, isolating the
+        // owning import helper's role check as the reason for refusal.
+        assert!(word_proof::bridge::first_checkpoint::Import::begin(&bytes[192..]).is_ok());
+        assert!(contribution_prover::import_checkpoint(&context, 0, &bytes).is_err());
+    }
+    for position in [1, 2, usize::MAX] {
+        assert!(contribution_prover::import_checkpoint(&context, position, &valid).is_err());
+    }
+    let missing_keys = request(&expected_role, 0);
+    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[192..]).is_ok());
+    assert!(contribution_prover::import_checkpoint(&context, 0, &missing_keys).is_err());
+    for offset in [0, 64, 128] {
+        let mut changed = valid.clone();
+        changed[offset] ^= 1;
+        assert!(contribution_prover::import_checkpoint(&context, 0, &changed).is_err());
+    }
+    let imported = contribution_prover::import_checkpoint(&context, 0, &valid).unwrap();
+    assert_eq!(imported.role(), expected_role);
+    assert!(!imported.complete());
+    assert!(imported.finish().is_err());
 }

@@ -53,7 +53,10 @@ impl Drop for Replay {
 /// The actual public operands of one bounded affine relation. The adapter
 /// supplies canonical bytes and the same operator the owning verifier uses.
 pub trait AffineStatement {
-    const ROLE: &'static [u8];
+    /// The caller's already derived proof role. The controller captures it
+    /// once before the first challenge and retains it after dropping the
+    /// public operands; an adapter cannot change a later oracle's role.
+    fn role(&self) -> &[u8];
     fn relation(&self) -> Relation;
     fn encode(&self) -> Result<Vec<u8>, Error>;
     fn operator(&self, alpha: Element) -> Result<Operator, Error>;
@@ -98,9 +101,10 @@ impl<S: AffineStatement> Prover<S> {
         if witness.relation != relation || witness.statement != statement_digest {
             return Err(Error::Context);
         }
-        let mut hash = transcript::context_hasher(&relation, S::ROLE);
+        let role = statement.role();
+        let mut hash = transcript::context_hasher(&relation, role);
         hash.update(&bytes);
-        let mut transcript = Transcript::new(S::ROLE, hash.finalize(), relation.message_bytes());
+        let mut transcript = Transcript::new(role, hash.finalize(), relation.message_bytes());
         transcript.next();
         let output = Vec::with_capacity(OUTPUT_BYTES);
         crate::random::REPLAYED.with(|state| state.set(Some(seed)));
@@ -151,7 +155,11 @@ impl<S: AffineStatement> Prover<S> {
         let witness = self.witness.as_ref().ok_or(Error::Stage)?;
         match self.phase {
             Phase::FirstInitialize => {
-                self.first = Some(FirstOracle::initialize(&self.relation, S::ROLE, false));
+                self.first = Some(FirstOracle::initialize(
+                    &self.relation,
+                    &self.transcript.role,
+                    false,
+                ));
                 self.phase = Phase::FirstColumn(0);
             }
             Phase::FirstColumn(column) => {
@@ -179,7 +187,10 @@ impl<S: AffineStatement> Prover<S> {
                 self.phase = Phase::SecondInitialize;
             }
             Phase::SecondInitialize => {
-                self.second = Some(SecondOracle::initialize(&self.relation, S::ROLE));
+                self.second = Some(SecondOracle::initialize(
+                    &self.relation,
+                    &self.transcript.role,
+                ));
                 self.phase = Phase::SecondColumn(0);
             }
             Phase::SecondColumn(column) => {
@@ -209,7 +220,7 @@ impl<S: AffineStatement> Prover<S> {
             }
             Phase::Linear => {
                 let linear = LinearOracle::create(
-                    S::ROLE,
+                    &self.transcript.role,
                     witness,
                     self.first.as_ref().unwrap(),
                     self.second.as_ref().unwrap(),
@@ -236,8 +247,9 @@ impl<S: AffineStatement> Prover<S> {
             }
             Phase::Folding => {
                 let mut combination = self.combination.take().unwrap();
+                let role = self.transcript.role.clone();
                 self.folding = Some(Fri::create(
-                    S::ROLE,
+                    &role,
                     self.relation.oracles(),
                     std::mem::take(&mut *combination),
                     &mut self.transcript,

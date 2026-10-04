@@ -18,6 +18,9 @@ pub mod registration;
 pub mod release_signing;
 #[path = "retained-roster.rs"]
 pub mod retained_roster;
+#[cfg(test)]
+#[path = "role-ownership-tests.rs"]
+mod role_ownership_tests;
 pub mod roster;
 #[path = "roster-authentication.rs"]
 pub mod roster_authentication;

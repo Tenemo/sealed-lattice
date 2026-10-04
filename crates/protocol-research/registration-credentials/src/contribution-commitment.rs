@@ -218,8 +218,15 @@ mod tests {
     fn emitted_hash_matches_canonical_sender_prefix() {
         let public_key = std::array::from_fn::<_, 1952, _>(|index| (index % 251) as u8);
         let salt = [4; 64];
-        let role =
-            crate::roster::contribution_role_from_context([1; 64], [2; 64], [3; 64], 2).unwrap();
+        let role = crate::roster::encode_contribution_role(
+            [1; 64],
+            [2; 64],
+            [3; 64],
+            2,
+            crate::foundation::participant_identity::derive_participant_identity(&public_key)
+                .unwrap(),
+        )
+        .unwrap();
         let zeros = vec![0u8; 1 << 20];
         let hexadecimal = |bytes: &[u8]| {
             bytes

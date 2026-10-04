@@ -1,5 +1,6 @@
 import {
     compileRegistrationEnrollmentCensus,
+    participantIdentityAsciiBytes,
     retainedRosterBytes,
 } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
@@ -17,9 +18,11 @@ export const compileRosterProposalCensus = (participantCount: number) => {
     const bytes = (value: string) => BigInt(Buffer.byteLength(value));
     const roleBytes =
         8n +
-        5n * 6n +
+        6n * 6n +
         4n +
-        bytes('sealed-lattice/setup-contribution/v1') +
+        bytes('sealed-lattice/setup-contribution/v2') +
+        4n +
+        participantIdentityAsciiBytes +
         3n * 64n +
         2n;
     const proposalBytes =

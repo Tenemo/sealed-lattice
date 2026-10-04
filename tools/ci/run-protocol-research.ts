@@ -44,6 +44,7 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
 import { runPublicOperatorFixture } from '#tools/ci/run-public-operator-screen.js';
+import { runRegistrationSession } from '#tools/ci/run-registration-session.js';
 import { runScalarProofFixture } from '#tools/ci/run-seed-sharing-scalar.js';
 import {
     assertSeedSharingSourceStable,
@@ -96,6 +97,10 @@ type NativeResult = {
     }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
+if (selected.name === 'registration-session') {
+    await runRegistrationSession();
+    process.exit(process.exitCode ?? 0);
+}
 if (
     selected.name === 'native-public-operator' ||
     selected.name === 'scalar-public-operator' ||

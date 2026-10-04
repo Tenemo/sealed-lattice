@@ -98,8 +98,8 @@ pub fn owner_of(
     position: usize,
 ) -> RetainedBallotOwner {
     let retained = RetainedContributionContext::parse(
-        poll.identity(),
-        poll.runtime(),
+        credential,
+        &setup.inventory().proposal().proposal().records()[position],
         setup.profile().options(),
         position,
         setup.inventory().proposal().proposal().body(),

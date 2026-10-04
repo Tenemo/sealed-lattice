@@ -4,6 +4,9 @@ import { completionProfileCounts } from '#tests/supported-profile-model.js';
 // simulate for an executing case.
 const maximumSimulatedHelpers = 8;
 
+export const registrationSessionTest =
+    'registration_session_tests::sessions_verify_and_refuse_a_registration_as_its_verifier_does';
+
 // Only the native ceremony cases take a profile; the build check and the
 // requested-output and seed-sharing probes cover fixed profiles.
 const protocolResearchCases = {
@@ -24,6 +27,7 @@ type ProtocolResearchSelection = {
 } & (
     | { name: keyof typeof protocolResearchCases; reference?: string }
     | { name: 'native-public-operator' }
+    | { name: 'registration-session' }
     | {
           name: 'scalar-public-operator' | 'browser-public-operator';
           source: string;
@@ -47,6 +51,20 @@ export const selectProtocolResearchCase = (
     arguments_: readonly string[],
 ): ProtocolResearchSelection => {
     const values = arguments_.filter((value) => value !== '--');
+    if (values[0] === 'registration-session') {
+        if (values.length !== 1)
+            throw new Error(
+                'The registration session case accepts no profile, filter or helper options.',
+            );
+        return {
+            name: 'registration-session',
+            execution: true,
+            noResult: false,
+            participantCount: 3,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        };
+    }
     if (
         values[0] === 'native-public-operator' ||
         values[0] === 'scalar-public-operator' ||

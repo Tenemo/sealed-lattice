@@ -919,7 +919,14 @@ pub extern "C" fn contribution_checkpoint_command(
     position: usize,
     length: usize,
 ) -> u32 {
-    contribution_prover::browser::checkpoint_command(operation, position, length)
+    SESSION.with(|state| {
+        contribution_prover::browser::checkpoint_command(
+            operation,
+            position,
+            length,
+            state.borrow().retained_context.as_ref(),
+        )
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -937,6 +944,9 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
             crate::own_verification::verified(),
             crate::own_verification::verified_option_count(),
         ) else {
+            return 1;
+        };
+        let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
         if !(134..=INPUT_BYTES).contains(&length)
@@ -957,8 +967,8 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
             return 1;
         }
         let Ok(context) = RetainedContributionContext::parse(
-            input[..64].try_into().unwrap(),
-            input[64..128].try_into().unwrap(),
+            &enrollment.credential,
+            &verified,
             options,
             u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize,
             &input[134..],

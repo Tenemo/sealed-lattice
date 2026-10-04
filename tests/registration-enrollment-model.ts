@@ -2,6 +2,8 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { supportedProfileRanges } from '#tests/supported-profile-model.js';
 
 export const registrationSigningPublicKeyBytes = 1952n;
+// ParticipantIdentity renders its foundation Hash512 as lowercase hex.
+export const participantIdentityAsciiBytes = 2n * 64n;
 
 // A retained roster: its marker, the proposal identity and the record count,
 // each record's header digest, body digest and proof hash, and the SHA3-512
@@ -65,7 +67,9 @@ export const compileRegistrationEnrollmentCensus = () => {
         manifestPrefixBytes + maximumRecords * 73n + 32n;
     const maximumRootBytes = maximumManifestBytes + 16n;
     const proofRoleBytes =
-        bytes('registered-recipient-key/1') + 2n * 64n + 128n;
+        bytes('registered-recipient-key/1') +
+        2n * 64n +
+        participantIdentityAsciiBytes;
     // Seven items: the purpose, runtime, nonce, organizer key, manifest,
     // result length and participant maximum.
     const pollDefinitionOverheadBytes =

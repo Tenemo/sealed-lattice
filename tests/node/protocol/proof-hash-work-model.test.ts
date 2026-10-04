@@ -66,7 +66,7 @@ describe('proof hash work', () => {
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
             282n,
-            272n,
+            410n,
             266n,
             341n,
         ]);
@@ -118,7 +118,7 @@ describe('proof hash work', () => {
             ...Array.from({ length: 16 }, (_value, index) => 17 - index),
         ];
         const profile = proofHashProfiles(completionProfile())[0];
-        for (const roleBytes of [64, 72, 136, 282, 341, 1024]) {
+        for (const roleBytes of [64, 72, 136, 282, 341, 410, 1024]) {
             const prefix = (domain: string, level: boolean) =>
                 Buffer.concat([
                     Buffer.alloc(64),
@@ -204,7 +204,7 @@ describe('proof hash work', () => {
                     value.proverCore.permutations,
             ),
         ).toEqual(
-            [2n, 2n, 2n, 3n].map(
+            [2n, 3n, 2n, 3n].map(
                 (prefixBlocks) => reusedPrefixes * prefixBlocks,
             ),
         );
@@ -239,7 +239,7 @@ describe('proof hash work', () => {
         );
         // Every leaf and node hash of a group but the first of each reuses
         // the prefix blocks, including the fixed 64-byte digest domain: two blocks for
-        // roles of 266, 272 and 282 bytes and three for 341 bytes at SHAKE256's rate.
+        // roles of 266/282 bytes and three for 341/410 bytes at SHAKE256's rate.
         const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
             (sum, group) =>
                 sum +
@@ -254,7 +254,7 @@ describe('proof hash work', () => {
                     value.verifierCore.permutations,
             ),
         ).toEqual(
-            [2n, 2n, 2n, 3n].map(
+            [2n, 3n, 2n, 3n].map(
                 (prefixBlocks) => reusedPrefixes * prefixBlocks,
             ),
         );
@@ -266,5 +266,29 @@ describe('proof hash work', () => {
                 value.verifierCoreWithoutPrefixReuse.inputBytes,
             );
         }
+    });
+
+    it('charges the complete owner item in every contribution hash input', () => {
+        const profile = completionProfile();
+        const role = proofHashProfiles(profile).find(
+            (value) => value.role === 'setup',
+        )!;
+        const previousRoleBytes = 8n + 5n * 6n + 4n + 36n + 3n * 64n + 2n;
+        const ownerItemBytes = 6n + 4n + 2n * 64n;
+        expect(role.roleBytes).toBe(previousRoleBytes + ownerItemBytes);
+        const current = compileProofHashWork(profile, role);
+        const previous = compileProofHashWork(profile, role, previousRoleBytes);
+        for (const member of ['proverCore', 'verifierCore'] as const) {
+            expect(current[member].queries).toBe(previous[member].queries);
+            expect(current[member].outputBytes).toBe(
+                previous[member].outputBytes,
+            );
+            expect(
+                current[member].inputBytes - previous[member].inputBytes,
+            ).toBe(ownerItemBytes * current[member].queries);
+        }
+        expect(current.statementDigestPass).toEqual(
+            previous.statementDigestPass,
+        );
     });
 });

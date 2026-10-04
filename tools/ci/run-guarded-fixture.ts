@@ -18,6 +18,7 @@ export const runGuardedFixture = async ({
     args,
     name,
     handshake,
+    parseResult,
 }: Readonly<{
     root: string;
     log: ActiveLocalRunLog;
@@ -27,6 +28,7 @@ export const runGuardedFixture = async ({
     args: string[];
     name: string;
     handshake?: 'verifier' | 'operator';
+    parseResult?: (output: string) => Record<string, unknown>;
 }>) => {
     assert.ok(freemem() >= 2 * processMemoryLimit);
     const gateDirectory = handshake
@@ -180,11 +182,13 @@ export const runGuardedFixture = async ({
         assert.equal(guardResult.samples.initial, 1);
         assert.equal(guardResult.samples.final, 1);
     }
-    const reports = output
-        .trim()
-        .split(/\r?\n/u)
-        .map((line) => JSON.parse(line) as Record<string, unknown>)
-        .filter((record) => typeof record.kind === 'string');
+    const reports = parseResult
+        ? [parseResult(output)]
+        : output
+              .trim()
+              .split(/\r?\n/u)
+              .map((line) => JSON.parse(line) as Record<string, unknown>)
+              .filter((record) => typeof record.kind === 'string');
     assert.equal(
         reports.length,
         1,

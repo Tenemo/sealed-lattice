@@ -13,7 +13,9 @@ pub const POSITIVE_PROOF_RANDOMNESS_SEED: u64 = 0x2165_5c07_319b_8481;
 pub type Prover = word_proof::staged::Prover<Statement>;
 
 impl AffineStatement for Statement {
-    const ROLE: &'static [u8] = ROLE;
+    fn role(&self) -> &[u8] {
+        ROLE
+    }
     fn relation(&self) -> Relation {
         Layout::new(encoded_bytes()).relation
     }

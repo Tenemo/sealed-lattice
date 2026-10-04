@@ -1,8 +1,9 @@
 use crate::{
-    Error,
+    Credential, Error,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
+        participant_identity::{ParticipantIdentity, derive_participant_identity},
         schemas::{Roster, RosterEntry},
     },
     poll::VerifiedPoll,
@@ -30,13 +31,22 @@ pub struct RetainedContributionContext {
 impl RetainedContributionContext {
     /// The option count comes from the same retained poll whose identity the
     /// proposal names; together with the roster size it fixes the profile.
+    /// The original verified registration must be this credential's completed
+    /// body and occupy the requested proposal position before a role exists.
     pub fn parse(
-        poll: [u8; 64],
-        runtime: [u8; 64],
+        credential: &Credential,
+        original: &VerifiedRegistration,
         options: usize,
         position: usize,
         bytes: &[u8],
     ) -> Result<Self, Error> {
+        let header = original.header();
+        if credential.signing_public() != &header.signing_public
+            || credential.completed_body != Some(original.body_digest())
+        {
+            return Err(Error::Context);
+        }
+        let (poll, runtime) = (header.poll, header.runtime);
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_PROPOSAL_BYTES,
             maximum_item_count: 4,
@@ -70,21 +80,23 @@ impl RetainedContributionContext {
         if bodies.len() != 4 + count * 64 || position >= count {
             return Err(Error::Shape);
         }
+        let owner_body = original.body_digest();
+        if bodies[4 + 64 * position..4 + 64 * (position + 1)] != owner_body {
+            return Err(Error::Context);
+        }
         let proposal = hash_foundation_tuple_512(
             "sealed-lattice/roster-proposal-id/v1",
             &[CanonicalItem::variable_bytes(bytes).map_err(|_| Error::Shape)?],
         )
         .map_err(|_| Error::Shape)?
         .into_bytes();
-        let role = contribution_role_from_context(poll, runtime, proposal, position)?;
+        let role = contribution_role(original, proposal, position)?;
         Ok(Self {
             poll,
             runtime,
             proposal,
             position,
-            owner_body: bodies[4 + 64 * position..4 + 64 * (position + 1)]
-                .try_into()
-                .unwrap(),
+            owner_body,
             profile,
             role,
         })
@@ -100,6 +112,27 @@ impl RetainedContributionContext {
     }
     pub(crate) fn role(&self) -> &[u8] {
         &self.role
+    }
+    /// The checkpoint's routing and profile must match this original owner
+    /// before its sealed records are read. Noncontributors retain a context
+    /// for ballots, but never import a contribution checkpoint.
+    pub fn checkpoint_role(
+        &self,
+        prefix: &[u8],
+        position: usize,
+        profile: Profile,
+    ) -> Result<&[u8], Error> {
+        if prefix.len() != 192
+            || prefix[..64] != self.poll
+            || prefix[64..128] != self.runtime
+            || prefix[128..] != self.proposal
+            || position != self.position
+            || position >= self.profile.setup_contributors()
+            || profile != self.profile
+        {
+            return Err(Error::Context);
+        }
+        Ok(&self.role)
     }
 }
 
@@ -130,8 +163,6 @@ pub fn proposal_bytes(participants: usize) -> usize {
 }
 
 pub struct RosterProposal {
-    poll: [u8; 64],
-    runtime: [u8; 64],
     identity: [u8; 64],
     body: Vec<u8>,
     records: Vec<Arc<VerifiedRegistration>>,
@@ -182,8 +213,6 @@ impl RosterProposal {
         .map_err(|_| Error::Shape)?
         .into_bytes();
         Ok(Self {
-            poll: poll.identity(),
-            runtime: poll.runtime(),
             identity,
             body,
             records,
@@ -217,15 +246,32 @@ impl RosterProposal {
         if position >= self.profile.setup_contributors() {
             return Err(Error::Context);
         }
-        contribution_role_from_context(self.poll, self.runtime, self.identity, position)
+        contribution_role(&self.records[position], self.identity, position)
     }
 }
 
-pub fn contribution_role_from_context(
+fn contribution_role(
+    original: &VerifiedRegistration,
+    proposal: [u8; 64],
+    position: usize,
+) -> Result<Vec<u8>, Error> {
+    let header = original.header();
+    encode_contribution_role(
+        header.poll,
+        header.runtime,
+        proposal,
+        position,
+        derive_participant_identity(&header.signing_public).map_err(|_| Error::Shape)?,
+    )
+}
+
+// Byte encoding alone supplies no original-owner or contribution authority.
+pub(crate) fn encode_contribution_role(
     poll: [u8; 64],
     runtime: [u8; 64],
     proposal: [u8; 64],
     position: usize,
+    participant_identity: ParticipantIdentity,
 ) -> Result<Vec<u8>, Error> {
     if position >= *Profile::participant_range().end() {
         return Err(Error::Shape);
@@ -234,7 +280,9 @@ pub fn contribution_role_from_context(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v1")
+            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v2")
+                .map_err(|_| Error::Shape)?,
+            CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error::Shape)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::hash512(runtime),

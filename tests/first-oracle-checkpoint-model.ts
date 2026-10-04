@@ -1,6 +1,7 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { merkleSaltSeedBytes } from '#tests/full-word-proof-layout-model.js';
+import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
@@ -55,20 +56,28 @@ export const compileFirstOracleCheckpointCensus = (
                 count + (polynomial.bytes + (1n << 20n) - 1n) / (1n << 20n),
             0n,
         );
-    // Magic, participant and option counts, column, role length, the
-    // longest role, the expected and context digests, the statement header,
-    // and the count and recipient key hashes.
-    const maximumHeaderBytes =
+    // Fixed fields: magic, participant and option counts, column, role
+    // length, expected/context digests, statement header and complete
+    // original recipient-key hash list. Only the role payload varies.
+    const fixedHeaderBytes =
         4n +
         2n +
         4n +
         2n +
-        1024n +
         64n +
         64n +
         relation.expandedStatementHeaderByteLength +
         2n +
         BigInt(body.participantCount) * 64n;
+    const headerBytes =
+        fixedHeaderBytes +
+        compileRosterProposalCensus(profile.participantCount).roleBytes;
+    const maximumHeaderBytes = fixedHeaderBytes + 1024n;
+    // Header::associated hashes the actual encoding once per successful
+    // private record. ProtocolHash prepends its fixed 64-byte domain; the
+    // 64-byte SHAKE256 digest fits the first output block at rate 136.
+    const headerDigestInputBytes = 64n + headerBytes;
+    const headerDigestPermutations = headerDigestInputBytes / 136n + 1n;
     const maximumRootPlaintextBytes =
         80n + maximumHeaderBytes + 106n * publicRecordCount + 96n * recordCount;
     return {
@@ -80,6 +89,11 @@ export const compileFirstOracleCheckpointCensus = (
         recordHashBytes: 64n * recordCount,
         maximumPlaintextRecordBytes: recordBytes,
         maximumCiphertextRecordBytes: recordBytes + 16n,
+        headerBytes,
+        importBytes: 3n * 64n + headerBytes,
+        headerDigestInputBytes,
+        headerDigestPermutations,
+        headerDigestPermutationsPerPass: recordCount * headerDigestPermutations,
         maximumHeaderBytes,
         publicRecordCount,
         publicPlaintextBytes,

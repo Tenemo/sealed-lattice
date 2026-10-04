@@ -933,36 +933,39 @@ mod tests {
     #[test]
     fn a_retained_roster_confirmation_is_signed_once_at_its_own_position() {
         let (mut credentials, roster) = signed_roster();
-        let header = roster.proposal().records()[0].header();
-        let context = |position| {
-            RetainedContributionContext::parse(
-                header.poll,
-                header.runtime,
-                2,
-                position,
-                roster.proposal().body(),
-            )
-            .unwrap()
-        };
+        let contexts: Vec<_> = credentials
+            .iter()
+            .enumerate()
+            .map(|(position, credential)| {
+                RetainedContributionContext::parse(
+                    credential,
+                    &roster.proposal().records()[position],
+                    2,
+                    position,
+                    roster.proposal().body(),
+                )
+                .unwrap()
+            })
+            .collect();
         // A setup contributor's position and another participant's position
         // are refused.
         for (signer, position) in [(0, 0), (2, 0), (1, 2)] {
             assert!(matches!(
-                credentials[signer].retained_roster_confirmation_body(&context(position)),
+                credentials[signer].retained_roster_confirmation_body(&contexts[position]),
                 Err(Error::Context)
             ));
         }
         let body = credentials[2]
-            .retained_roster_confirmation_body(&context(2))
+            .retained_roster_confirmation_body(&contexts[2])
             .unwrap();
         let signed = credentials[2]
-            .sign_retained_roster_confirmation(&context(2), [8; 32])
+            .sign_retained_roster_confirmation(&contexts[2], [8; 32])
             .unwrap();
         assert_eq!(signed.body(), body);
         let verified = verify_confirmation(&roster, signed.body(), signed.signature()).unwrap();
         assert_eq!((verified.position(), verified.commitment()), (2, None));
         assert!(matches!(
-            credentials[2].sign_retained_roster_confirmation(&context(2), [8; 32]),
+            credentials[2].sign_retained_roster_confirmation(&contexts[2], [8; 32]),
             Err(Error::Consumed)
         ));
     }
