@@ -10,11 +10,14 @@ import {
 
 import { createBoundedOutputSink } from './bounded-output-sink.mjs';
 import { withOperatorProcessGates } from './operator-process-gates.mjs';
-import { runPublicOperatorScreen } from './public-operator-scalar.mjs';
+import {
+    runPublicOperatorScreen,
+    runFheKeySourceScreen,
+} from './public-operator-scalar.mjs';
 import { withPinnedProofReaders } from './scalar-proof-file-reader.mjs';
 import { generateBoundedProof } from './seed-sharing-scalar-prover.mjs';
 
-/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation?:'public-operator',caseIndex?:number,relation?:'seed-sharing'|'opening-share',predecessors?:import('./scalar-proof-file-reader.mjs').Proof[]}} Configuration */
+/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation?:'public-operator'|'fhe-key-source',caseIndex?:number,relation?:'seed-sharing'|'opening-share',predecessors?:import('./scalar-proof-file-reader.mjs').Proof[]}} Configuration */
 /** @typedef {Awaited<ReturnType<typeof import('./bounded-output.mjs').driveBoundedOutput>>} GenerationResult */
 /** @typedef {import('./seed-sharing-scalar-prover.mjs').OutputAcknowledgment} OutputAcknowledgment */
 
@@ -58,9 +61,9 @@ if (isMainThread) {
                             console.log(
                                 JSON.stringify({
                                     event:
-                                        configuration.operation ===
-                                        'public-operator'
-                                            ? 'public-operator-progress'
+                                        configuration.operation !== undefined
+                                            ? configuration.operation +
+                                              '-progress'
                                             : (configuration.relation ??
                                                   'seed-sharing') +
                                               '-generation-progress',
@@ -138,13 +141,13 @@ if (isMainThread) {
             console.log(
                 JSON.stringify({
                     kind:
-                        configuration.operation === 'public-operator'
-                            ? 'scalar-public-operator-screen'
+                        configuration.operation !== undefined
+                            ? 'scalar-' + configuration.operation + '-screen'
                             : 'scalar-' +
                               (configuration.relation ?? 'seed-sharing') +
                               '-generation',
                     ...result,
-                    ...(configuration.operation === 'public-operator'
+                    ...(configuration.operation !== undefined
                         ? { output: proof }
                         : { proof }),
                 }),
@@ -155,7 +158,7 @@ if (isMainThread) {
             await sink.close();
         }
     };
-    if (configuration.operation === 'public-operator')
+    if (configuration.operation !== undefined)
         await withOperatorProcessGates(process.argv.slice(3), run);
     else {
         assert.equal(process.argv.length, 3);
@@ -226,8 +229,12 @@ if (isMainThread) {
                 readPredecessor,
             });
         const result =
-            configuration.operation === 'public-operator'
-                ? await runPublicOperatorScreen({
+            configuration.operation !== undefined
+                ? await (
+                      configuration.operation === 'fhe-key-source'
+                          ? runFheKeySourceScreen
+                          : runPublicOperatorScreen
+                  )({
                       ...outputInput,
                       caseIndex: configuration.caseIndex ?? -1,
                   })

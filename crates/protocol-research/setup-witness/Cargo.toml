@@ -26,3 +26,9 @@ getrandom = "=0.3.3"
 
 [features]
 custody = ["dep:aes-gcm", "dep:aes"]
+key-source-screen = []
+
+[[bin]]
+name = "screen-fhe-key-source"
+path = "src/bin/screen-fhe-key-source.rs"
+required-features = ["key-source-screen"]

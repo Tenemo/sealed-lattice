@@ -338,12 +338,14 @@ const runBoundedExperimentInChrome = async ({
     relation = 'seed-sharing',
     outputTarget,
     caseIndex,
+    screenKind = 'public-operator',
     processMemoryLimit,
     linearMemoryLimit,
 }: ChromeInputs & {
     proofs?: readonly Proof[];
     outputTarget?: OutputTarget;
     caseIndex?: 0 | 1;
+    screenKind?: 'public-operator' | 'fhe-key-source';
 }) => {
     const phase =
         caseIndex !== undefined
@@ -351,10 +353,10 @@ const runBoundedExperimentInChrome = async ({
             : outputTarget
               ? 'generation'
               : 'verification';
-    const operationIdentity =
-        caseIndex !== undefined ? 'public-operator' : relation;
+    const operationIdentity = caseIndex !== undefined ? screenKind : relation;
     if (caseIndex !== undefined) {
         assert.ok(caseIndex === 0 || caseIndex === 1);
+        if (screenKind === 'fhe-key-source') assert.equal(caseIndex, 0);
         assert.ok(outputTarget);
         assert.equal(proofs.length, 0);
         assert.equal(predecessors.length, 0);
@@ -501,7 +503,7 @@ const runBoundedExperimentInChrome = async ({
                           relation,
                           predecessors: browserPredecessors,
                       }
-                    : { mode: 'operator', caseIndex }),
+                    : { mode: 'operator', screenKind, caseIndex }),
                 timeoutMilliseconds,
                 moduleUrl: serving.origin + '/module.wasm',
                 moduleBytes: serving.moduleBytes,
@@ -536,7 +538,7 @@ const runBoundedExperimentInChrome = async ({
                           proof: artifact,
                       }
                     : {
-                          kind: 'browser-public-operator-screen',
+                          kind: 'browser-' + screenKind + '-screen',
                           caseIndex,
                           ...emitted,
                           output: artifact,
@@ -682,5 +684,15 @@ export const runPublicOperatorInChrome = (
 ) =>
     runBoundedExperimentInChrome({
         ...input,
+        outputTarget: resolveOutputTarget(input),
+    });
+
+export const runFheKeySourceInChrome = (
+    input: Omit<ChromeInputs, 'relation' | 'predecessors'> & OutputInputs,
+) =>
+    runBoundedExperimentInChrome({
+        ...input,
+        screenKind: 'fhe-key-source',
+        caseIndex: 0,
         outputTarget: resolveOutputTarget(input),
     });

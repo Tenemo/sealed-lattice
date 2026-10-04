@@ -8,6 +8,7 @@ use supported_profile::{
 pub enum Error {
     Phase,
     PublicKey,
+    SourceFamily,
 }
 pub struct Contribution {
     profile: Profile,
@@ -16,6 +17,7 @@ pub struct Contribution {
     auxiliary_modulus: BigInt,
     witness: Witness,
     secret: Sparse,
+    first_encryption_error: Option<Zeroizing<Vec<i128>>>,
     auxiliary: Sparse,
     ephemerals: Vec<Sparse>,
     auxiliary_secret: Sparse,
@@ -118,11 +120,32 @@ pub fn common_records_job(profile: Profile, index: usize) -> Result<Ticket, Erro
 }
 impl Contribution {
     pub fn new(profile: Profile) -> Self {
+        Self::create(profile, None)
+    }
+    /// Continues the original source's FHE key in its exact parameter family.
+    /// The caller owns registration authentication and retained-source custody.
+    pub fn from_source(
+        profile: Profile,
+        source: fhe_key_source::FheKeySource,
+    ) -> Result<Self, Error> {
+        source.check_profile(profile)?;
+        Ok(Self::create(profile, Some(source)))
+    }
+    fn create(profile: Profile, source: Option<fhe_key_source::FheKeySource>) -> Self {
         let modulus = integer(&profile.family_modulus(Family::Fhe));
         let plan = Plan::new(DEGREE);
         let auxiliary_plan = Plan::new(AUXILIARY_DEGREE);
         let mut witness = Witness::new();
-        let secret = witness.sparse("fhe-secret", DEGREE, FHE_SECRET_SUPPORT, &plan);
+        let (secret, first_encryption_error) = match source {
+            Some(source) => {
+                let (values, error) = source.into_parts();
+                (witness.sparse_from_values(values, &plan), Some(error))
+            }
+            None => (
+                witness.sparse("fhe-secret", DEGREE, FHE_SECRET_SUPPORT, &plan),
+                None,
+            ),
+        };
         let auxiliary = witness.sparse("fhe-auxiliary", DEGREE, FHE_SECRET_SUPPORT, &plan);
         let ephemerals = (0..profile.participants())
             .map(|index| {
@@ -182,6 +205,7 @@ impl Contribution {
             auxiliary_modulus: integer(auxiliary_modulus()),
             witness,
             secret,
+            first_encryption_error,
             auxiliary,
             ephemerals,
             auxiliary_secret,
@@ -243,7 +267,13 @@ impl Contribution {
         };
         let first_relinearization_products = first_relinearization.products();
         output.polynomial(&first, modulus, width);
-        key(witness, output, encryption, encryption_products);
+        if gadget == 0
+            && let Some(error) = self.first_encryption_error.take()
+        {
+            key_with_error(witness, output, encryption, encryption_products, &error);
+        } else {
+            key(witness, output, encryption, encryption_products);
+        }
         let second = common_polynomial(profile, profile.fhe_polynomial(gadget, 3))?;
         let second_relinearization = KeyInput {
             label: &format!("second-relinearization-{gadget}"),

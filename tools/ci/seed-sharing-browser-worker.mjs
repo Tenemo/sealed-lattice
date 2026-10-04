@@ -12,7 +12,7 @@ import { verifyBoundedProof } from './seed-sharing-scalar-verifier.mjs';
 /** @typedef {SharedConfiguration & {proofs:BrowserProof[],probe:import('./scalar-proof-stream.mjs').Probe}} VerificationConfiguration */
 
 /** @typedef {SharedConfiguration & {mode:'generate',expectedBytes:number,sinkUrl:string}} GenerationConfiguration */
-/** @typedef {{mode:'operator',caseIndex:0|1,moduleUrl:string,moduleBytes:number,moduleSha512:string,expectedBytes:number,sinkUrl:string}} OperatorConfiguration */
+/** @typedef {{mode:'operator',screenKind:'public-operator'|'fhe-key-source',caseIndex:0|1,moduleUrl:string,moduleBytes:number,moduleSha512:string,expectedBytes:number,sinkUrl:string}} OperatorConfiguration */
 
 self.onmessage = ({ data }) => {
     void (async () => {
@@ -33,9 +33,13 @@ self.onmessage = ({ data }) => {
         if ((await browserSha512(bytes)) !== moduleSha512)
             throw new Error('The browser module identity differs.');
         if ('mode' in configuration && configuration.mode === 'operator') {
-            const { runPublicOperatorScreen } =
+            const { runPublicOperatorScreen, runFheKeySourceScreen } =
                 await import('./public-operator-scalar.mjs');
-            const result = await runPublicOperatorScreen({
+            const result = await (
+                configuration.screenKind === 'fhe-key-source'
+                    ? runFheKeySourceScreen
+                    : runPublicOperatorScreen
+            )({
                 moduleBytes: bytes,
                 caseIndex: configuration.caseIndex,
                 expectedBytes: configuration.expectedBytes,

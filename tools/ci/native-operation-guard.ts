@@ -12,6 +12,7 @@ export const createNativeOperationGuard = (
         finishFile: string;
         memoryLimit: number;
         operation?: 'verifier' | 'operator';
+        allowedProgressLines?: readonly string[];
         readMemory: (
             phase: NativeOperationSamplePhase,
         ) => Promise<number | undefined>;
@@ -55,6 +56,7 @@ export const createNativeOperationGuard = (
                 const line = pending.slice(0, newline).trim();
                 pending = pending.slice(newline + 1);
                 if (!line) continue;
+                if (input.allowedProgressLines?.includes(line)) continue;
                 const event = JSON.parse(line) as Record<string, unknown>;
                 if (event.event === 'native-' + operation + '-ready') {
                     assert.ok(

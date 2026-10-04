@@ -82,10 +82,14 @@ export const inspectScalarFixtureModule = async (
     bytes: Uint8Array,
     generation = false,
     relation:
-        'seed-sharing' | 'opening-share' | 'public-operator' = 'seed-sharing',
+        | 'seed-sharing'
+        | 'opening-share'
+        | 'public-operator'
+        | 'fhe-key-source' = 'seed-sharing',
 ) => {
     assert.ok(
-        relation !== 'public-operator' || !generation,
+        (relation !== 'public-operator' && relation !== 'fhe-key-source') ||
+            !generation,
         'A public operator screen has no proof-generation mode.',
     );
     const inspected = binaryen.readBinary(bytes);
@@ -115,13 +119,16 @@ export const inspectScalarFixtureModule = async (
                     allowedImports.has(entry.name)) ||
                     (generation &&
                         entry.module === 'word_proof' &&
+                        entry.name === 'fill_random') ||
+                    (relation === 'fhe-key-source' &&
+                        entry.module === 'setup_witness' &&
                         entry.name === 'fill_random')),
         ),
         'The verifier declares an unknown host import.',
     );
     const exports = WebAssembly.Module.exports(module);
     const required =
-        relation === 'public-operator'
+        relation === 'public-operator' || relation === 'fhe-key-source'
             ? [
                   'begin',
                   'phase',
@@ -131,7 +138,12 @@ export const inspectScalarFixtureModule = async (
                   'output_length',
                   'output_capacity',
                   'ack_output',
-              ].map((name) => 'operator_screen_' + name)
+              ].map(
+                  (name) =>
+                      (relation === 'fhe-key-source'
+                          ? 'key_source_screen_'
+                          : 'operator_screen_') + name,
+              )
             : relation === 'opening-share'
               ? [
                     'opening_input_pointer',
@@ -192,12 +204,17 @@ export const inspectScalarFixtureModule = async (
 
 export const buildScalarFixtureModule = async (
     context: FixtureBuildContext,
-    kind: 'seed-sharing' | 'opening-share' | 'public-operator',
+    kind:
+        'seed-sharing' | 'opening-share' | 'public-operator' | 'fhe-key-source',
     feature?: 'scalar-fixture' | 'scalar-prover-fixture',
 ) => {
     const generation = feature === 'scalar-prover-fixture';
     const crateName =
-        kind === 'public-operator' ? 'public-operator-screen' : kind + '-proof';
+        kind === 'fhe-key-source'
+            ? 'setup-witness'
+            : kind === 'public-operator'
+              ? 'public-operator-screen'
+              : kind + '-proof';
     const stem = crateName.replace(/-/gu, '_');
     const targetDirectory = path.join(
         context.root,
@@ -221,7 +238,7 @@ export const buildScalarFixtureModule = async (
         'cargo',
         [
             '+1.95.0',
-            'build',
+            kind === 'fhe-key-source' ? 'rustc' : 'build',
             '--offline',
             '--locked',
             '--release',
@@ -229,6 +246,9 @@ export const buildScalarFixtureModule = async (
             '-p',
             crateName,
             ...(feature === undefined ? [] : ['--features', feature]),
+            ...(kind === 'fhe-key-source'
+                ? ['--features', 'key-source-screen', '--crate-type', 'cdylib']
+                : []),
             '--lib',
             '--target',
             'wasm32-unknown-unknown',
@@ -250,7 +270,7 @@ export const buildScalarFixtureModule = async (
     const moduleFile = path.join(
         context.log.artifactDirectoryPath,
         kind +
-            (kind === 'public-operator'
+            (kind === 'public-operator' || kind === 'fhe-key-source'
                 ? ''
                 : generation
                   ? '-prover'

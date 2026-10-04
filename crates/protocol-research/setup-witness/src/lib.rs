@@ -1,5 +1,10 @@
 pub mod contribution;
 pub mod convolution;
+#[path = "fhe-key-source.rs"]
+pub mod fhe_key_source;
+#[cfg(feature = "key-source-screen")]
+#[path = "fhe-key-source-screen.rs"]
+pub mod fhe_key_source_screen;
 pub mod gaussian;
 pub mod reduction;
 pub mod registration;
@@ -135,6 +140,9 @@ impl Products {
 
 fn errors(label: &str, degree: usize) -> Vec<i128> {
     let mut random = private_reader(label);
+    errors_from_reader(degree, &mut random)
+}
+fn errors_from_reader(degree: usize, random: &mut impl XofReader) -> Vec<i128> {
     (0..degree)
         .map(|_| {
             let mut bytes = Zeroizing::new([0; 20]);
@@ -144,8 +152,15 @@ fn errors(label: &str, degree: usize) -> Vec<i128> {
         .collect()
 }
 fn sparse_values(label: &str, degree: usize, support: usize) -> Vec<i8> {
-    assert!(degree.is_power_of_two() && support.is_multiple_of(2) && support <= degree);
     let mut random = private_reader(label);
+    sparse_values_from_reader(degree, support, &mut random)
+}
+fn sparse_values_from_reader(
+    degree: usize,
+    support: usize,
+    random: &mut impl XofReader,
+) -> Vec<i8> {
+    assert!(degree.is_power_of_two() && support.is_multiple_of(2) && support <= degree);
     let mut values = vec![0; degree];
     let mut selected = 0;
     while selected < support {
@@ -209,6 +224,10 @@ impl Witness {
     }
     fn sparse(&mut self, label: &str, degree: usize, support: usize, plan: &Plan) -> Sparse {
         let values = Zeroizing::new(sparse_values(label, degree, support));
+        self.sparse_from_values(values, plan)
+    }
+    fn sparse_from_values(&mut self, values: Zeroizing<Vec<i8>>, plan: &Plan) -> Sparse {
+        let degree = values.len();
         let stride = DEGREE / degree;
         for sign in [1, -1] {
             let mut column = vec![0; DEGREE];
@@ -302,6 +321,17 @@ fn key(
 ) {
     let degree = input.common.len();
     let error = Zeroizing::new(errors(input.label, degree));
+    key_with_error(witness, output, input, products, &error);
+}
+fn key_with_error(
+    witness: &mut Witness,
+    output: &mut impl PolynomialOutput,
+    input: KeyInput<'_>,
+    products: Products,
+    error: &[i128],
+) {
+    let degree = input.common.len();
+    assert_eq!(error.len(), degree);
     let transformed = Zeroizing::new(transformed(input.right, input.automorphism));
     let limbs = input.limbs;
     let modulus = reduction::Modulus::new(&input.modulus.to_bytes_le().1, RADIX_BITS).unwrap();
@@ -356,7 +386,7 @@ fn key(
     for carry in carries.iter() {
         witness.signed(SETUP_FHE_CARRY_BITS, carry);
     }
-    witness.signed(SETUP_ERROR_BITS, &error);
+    witness.signed(SETUP_ERROR_BITS, error);
     let values: Vec<BigInt> = (0..degree)
         .map(|position| {
             from_digits(

@@ -39,11 +39,11 @@ import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
+import { runArithmeticScreenFixture } from '#tools/ci/run-arithmetic-screen.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
-import { runPublicOperatorFixture } from '#tools/ci/run-public-operator-screen.js';
 import { runRegistrationSession } from '#tools/ci/run-registration-session.js';
 import { runScalarProofFixture } from '#tools/ci/run-seed-sharing-scalar.js';
 import {
@@ -104,15 +104,21 @@ if (selected.name === 'registration-session') {
 if (
     selected.name === 'native-public-operator' ||
     selected.name === 'scalar-public-operator' ||
-    selected.name === 'browser-public-operator'
+    selected.name === 'browser-public-operator' ||
+    selected.name === 'native-fhe-key-source' ||
+    selected.name === 'scalar-fhe-key-source' ||
+    selected.name === 'browser-fhe-key-source'
 ) {
-    await runPublicOperatorFixture(
-        selected.name === 'native-public-operator'
+    await runArithmeticScreenFixture(
+        selected.name.startsWith('native-')
             ? 'native'
-            : selected.name === 'scalar-public-operator'
+            : selected.name.startsWith('scalar-')
               ? 'node'
               : 'chrome',
         'source' in selected ? selected.source : undefined,
+        selected.name.endsWith('fhe-key-source')
+            ? 'fhe-key-source'
+            : 'public-operator',
     );
     process.exit(process.exitCode ?? 0);
 }

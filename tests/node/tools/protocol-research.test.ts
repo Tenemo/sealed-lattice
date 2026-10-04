@@ -12,6 +12,39 @@ import {
 import { parseRegistrationSessionResult } from '#tools/ci/run-registration-session.js';
 
 describe('guarded protocol research entry', () => {
+    it('fixes the FHE key source screen and requires one native source for each scalar host', () => {
+        expect(
+            selectProtocolResearchCase(['native-fhe-key-source']),
+        ).toMatchObject({
+            name: 'native-fhe-key-source',
+            participantCount: 3,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const name of [
+            'scalar-fhe-key-source',
+            'browser-fhe-key-source',
+        ]) {
+            expect(selectProtocolResearchCase([name, 'source'])).toMatchObject({
+                name,
+                source: 'source',
+            });
+            for (const values of [
+                [name],
+                [name, ''],
+                [name, '--source'],
+                [name, 'source', 'extra'],
+                [name, 'source', '--simulated-helpers', '1'],
+            ])
+                expect(() => selectProtocolResearchCase(values)).toThrow();
+        }
+        for (const values of [
+            ['native-fhe-key-source', '3', '2'],
+            ['native-fhe-key-source', '--simulated-helpers', '1'],
+            ['native-fhe-key-source', 'source'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+    });
     it('executes only the named original-registration session case', () => {
         expect(
             selectProtocolResearchCase(['registration-session']),

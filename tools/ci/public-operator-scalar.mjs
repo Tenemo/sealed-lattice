@@ -12,23 +12,34 @@ export const publicOperatorPhases = {
     13: 'complete',
 };
 
+export const fheKeySourcePhases = {
+    0: 'initialization',
+    1: 'original source',
+    2: 'original public coordinate',
+    3: 'restore into contribution',
+    4: 'first gadget',
+    5: 'independent checks and report',
+    12: 'report output',
+    13: 'complete',
+};
+
 /** @param {{moduleBytes:Uint8Array,caseIndex:number,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<import('./bounded-output.mjs').OutputAcknowledgment>,onProgress?:(progress:import('./bounded-output.mjs').OutputProgress)=>void}} input */
-export const runPublicOperatorScreen = async ({
-    moduleBytes,
-    caseIndex,
-    expectedBytes,
-    emitChunk,
-    onProgress,
-}) => {
-    if (caseIndex !== 0 && caseIndex !== 1)
+const runArithmeticScreen = async (
+    { moduleBytes, caseIndex, expectedBytes, emitChunk, onProgress },
+    keySource = false,
+) => {
+    if (caseIndex !== 0 && (keySource || caseIndex !== 1))
         throw new Error('Unknown public operator case.');
     const started = performance.now();
     const instance = await instantiateScalarModule(moduleBytes, {
-        operation: 'operator',
+        operation: keySource ? 'fhe-key-source' : 'operator',
     });
     /** @param {string} name */
     const binding = (name) => {
-        const method = instance.exports['operator_screen_' + name];
+        const method =
+            instance.exports[
+                (keySource ? 'key_source_screen_' : 'operator_screen_') + name
+            ];
         if (typeof method !== 'function')
             throw new Error('The operator screen is missing its bounded ABI.');
         return /** @type {(...values:number[])=>number} */ (method);
@@ -57,6 +68,13 @@ export const runPublicOperatorScreen = async ({
         caseIndex,
         initializationMilliseconds,
         milliseconds: performance.now() - started,
-        phaseLabels: publicOperatorPhases,
+        phaseLabels: keySource ? fheKeySourcePhases : publicOperatorPhases,
     };
 };
+
+/** @param {Parameters<typeof runArithmeticScreen>[0]} input */
+export const runPublicOperatorScreen = (input) => runArithmeticScreen(input);
+
+/** @param {Parameters<typeof runArithmeticScreen>[0]} input */
+export const runFheKeySourceScreen = (input) =>
+    runArithmeticScreen(input, true);

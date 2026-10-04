@@ -25,6 +25,30 @@ const scratch = async () => {
 };
 
 describe('native operation sampling handshake', () => {
+    it('allows only explicitly listed arithmetic progress while preserving strict JSON events', () => {
+        const make = (allowedProgressLines?: readonly string[]) =>
+            createNativeOperationGuard({
+                startFile: 'unused-start',
+                finishFile: 'unused-finish',
+                memoryLimit: 1024,
+                allowedProgressLines,
+                readMemory: () => Promise.resolve(1),
+                recordSample: () => undefined,
+            });
+        const strict = make();
+        expect(() =>
+            strict.observeStdout('Generated encryption-0\n'),
+        ).toThrow();
+        strict.stop();
+        const screen = make(['Generated encryption-0']);
+        expect(() => screen.observeStdout('Generated encrypt')).not.toThrow();
+        expect(() => screen.observeStdout('ion-0\n')).not.toThrow();
+        expect(() =>
+            screen.observeStdout('Generated encryption-1\n'),
+        ).toThrow();
+        expect(() => screen.observeStdout('{broken event}\n')).toThrow();
+        screen.stop();
+    });
     it.each(['verifier', 'operator', 'operator host'] as const)(
         'keeps a fast %s child behind initial and final observations without timing sleeps',
         async (name) => {

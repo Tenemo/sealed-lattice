@@ -26,10 +26,14 @@ type ProtocolResearchSelection = {
     simulatedHelpers: number;
 } & (
     | { name: keyof typeof protocolResearchCases; reference?: string }
-    | { name: 'native-public-operator' }
+    | { name: 'native-public-operator' | 'native-fhe-key-source' }
     | { name: 'registration-session' }
     | {
-          name: 'scalar-public-operator' | 'browser-public-operator';
+          name:
+              | 'scalar-public-operator'
+              | 'browser-public-operator'
+              | 'scalar-fhe-key-source'
+              | 'browser-fhe-key-source';
           source: string;
       }
     | { name: 'native-opening-share'; source: string; reference?: string }
@@ -68,16 +72,22 @@ export const selectProtocolResearchCase = (
     if (
         values[0] === 'native-public-operator' ||
         values[0] === 'scalar-public-operator' ||
-        values[0] === 'browser-public-operator'
+        values[0] === 'browser-public-operator' ||
+        values[0] === 'native-fhe-key-source' ||
+        values[0] === 'scalar-fhe-key-source' ||
+        values[0] === 'browser-fhe-key-source'
     ) {
         const settings = {
             execution: true,
             noResult: false,
-            participantCount: 4,
+            participantCount: values[0].endsWith('fhe-key-source') ? 3 : 4,
             optionCount: 2,
             simulatedHelpers: 0,
         };
-        if (values[0] === 'native-public-operator') {
+        if (
+            values[0] === 'native-public-operator' ||
+            values[0] === 'native-fhe-key-source'
+        ) {
             if (values.length !== 1)
                 throw new Error(
                     'The native public operator screen accepts no additional options.',

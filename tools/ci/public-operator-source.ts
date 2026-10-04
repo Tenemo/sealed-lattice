@@ -194,7 +194,10 @@ export const readPublicOperatorNativeSource = async (
 };
 
 export const assertPublicOperatorSourceStable = async (
-    source: Awaited<ReturnType<typeof readPublicOperatorNativeSource>>,
+    source: Pick<
+        Awaited<ReturnType<typeof readPublicOperatorNativeSource>>,
+        'directory' | 'diagnosticDigests' | 'artifacts'
+    >,
     root: string,
 ) => {
     const current = await readPublicOperatorNativeSource(

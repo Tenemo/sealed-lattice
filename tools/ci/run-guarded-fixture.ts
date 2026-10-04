@@ -19,6 +19,7 @@ export const runGuardedFixture = async ({
     name,
     handshake,
     parseResult,
+    nativeProgressLines,
 }: Readonly<{
     root: string;
     log: ActiveLocalRunLog;
@@ -29,6 +30,7 @@ export const runGuardedFixture = async ({
     name: string;
     handshake?: 'verifier' | 'operator';
     parseResult?: (output: string) => Record<string, unknown>;
+    nativeProgressLines?: readonly string[];
 }>) => {
     assert.ok(freemem() >= 2 * processMemoryLimit);
     const gateDirectory = handshake
@@ -122,6 +124,7 @@ export const runGuardedFixture = async ({
                     if (gateFiles !== undefined) {
                         nativeGuard = createNativeOperationGuard({
                             operation: handshake,
+                            allowedProgressLines: nativeProgressLines,
                             ...gateFiles,
                             memoryLimit: processMemoryLimit,
                             readMemory: () =>

@@ -45,7 +45,8 @@ export const readNativeSourceMetadata = async (
     expectedCase:
         | 'native-seed-sharing'
         | 'native-opening-share'
-        | 'native-public-operator',
+        | 'native-public-operator'
+        | 'native-fhe-key-source',
 ) => {
     const directory = path.resolve(source);
     const relative = path.relative(path.join(root, 'logs'), directory);
@@ -75,7 +76,10 @@ export const readNativeSourceMetadata = async (
     assert.equal(summary.value.exitCode, 0);
     assert.equal(summary.value.scriptName, 'research:protocol');
     assert.equal(result.value.case, expectedCase);
-    assert.equal(result.value.participantCount, 4);
+    assert.equal(
+        result.value.participantCount,
+        expectedCase === 'native-fhe-key-source' ? 3 : 4,
+    );
     assert.equal(result.value.optionCount, 2);
     assert.equal(result.value.simulatedHelpers, 0);
     const artifactDirectory = runArtifactDirectoryPath(directory);
@@ -455,7 +459,8 @@ export const assertScalarNativeInputs = async (
     files: readonly string[],
     compiler: string,
     root: string,
-    relation: 'seed-sharing' | 'opening-share' | 'public-operator',
+    relation:
+        'seed-sharing' | 'opening-share' | 'public-operator' | 'fhe-key-source',
 ) => {
     assert.equal(
         compiler,
@@ -464,12 +469,17 @@ export const assertScalarNativeInputs = async (
     );
     const prefix =
         'crates/protocol-research/' +
-        (relation === 'public-operator'
-            ? 'public-operator-screen'
-            : relation + '-proof') +
+        (relation === 'fhe-key-source'
+            ? 'setup-witness'
+            : relation === 'public-operator'
+              ? 'public-operator-screen'
+              : relation + '-proof') +
         '/';
     const adapters = new Set([
-        prefix + 'src/browser.rs',
+        prefix +
+            (relation === 'fhe-key-source'
+                ? 'src/browser_random.rs'
+                : 'src/browser.rs'),
         ...(relation === 'seed-sharing'
             ? [prefix + 'src/prover-browser.rs']
             : []),

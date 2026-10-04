@@ -8,7 +8,12 @@ import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-
 // a*dx=de has probability at most (2S*sqrt(N)/p)^N. Secret and error
 // coefficient bounds S and E are distinct. This covers every public key
 // simultaneously. It is a bad-matrix bound, not computational security.
-export const compileRecipientKeyUniquenessBound = (): Readonly<{
+export const compileBoundedKeyUniqueness = (
+    polynomialModulusDegree: bigint,
+    primeModulus: bigint,
+    secretCoefficientBound: bigint,
+    errorCoefficientBound: bigint,
+): Readonly<{
     secretCoefficientBound: bigint;
     errorCoefficientBound: bigint;
     secretDifferenceValueCount: bigint;
@@ -18,18 +23,12 @@ export const compileRecipientKeyUniquenessBound = (): Readonly<{
     squaredFailureBaseNumerator: bigint;
     uniformMatrixFailureExponent: bigint;
 }> => {
-    const relation = compileRegistrationKeyRelationCensus();
-    const primeModulus = compileSmallLimbProofFieldCensus().modulus;
-    const polynomialModulusDegree = relation.degree;
-    // The proved secret is the difference of disjoint Boolean columns. Its
-    // sparse support is an additional constraint that this union overcounts.
-    const secretCoefficientBound = 1n;
-    const errorCoefficientBound = relation.error;
     if (
         polynomialModulusDegree <= 0n ||
+        secretCoefficientBound < 1n ||
+        errorCoefficientBound < 0n ||
         primeModulus <= 2n * secretCoefficientBound ||
         primeModulus <= 2n * errorCoefficientBound ||
-        relation.modulus % primeModulus !== 0n ||
         (polynomialModulusDegree & (polynomialModulusDegree - 1n)) !== 0n ||
         (primeModulus - 1n) % (2n * polynomialModulusDegree) !== 0n
     ) {
@@ -63,4 +62,21 @@ export const compileRecipientKeyUniquenessBound = (): Readonly<{
         uniformMatrixFailureExponent:
             polynomialModulusDegree * exponentPerCoefficient,
     };
+};
+
+export const compileRecipientKeyUniquenessBound = () => {
+    const relation = compileRegistrationKeyRelationCensus();
+    const prime = compileSmallLimbProofFieldCensus().modulus;
+    if (relation.modulus % prime !== 0n)
+        throw new Error(
+            'The registration modulus lacks the required prime factor.',
+        );
+    // The proved secret is the difference of disjoint Boolean columns. Its
+    // sparse support is an additional constraint that this union overcounts.
+    return compileBoundedKeyUniqueness(
+        relation.degree,
+        prime,
+        1n,
+        relation.error,
+    );
 };

@@ -18,6 +18,14 @@ pnpm run research:profiles -- --output crates/protocol-research/supported-profil
 
 ## Build and run
 
+The FHE key source screen generates the first public encryption coordinate from a fixed synthetic source, discards working state, reconstructs the source and checks the coordinate emitted by the first contribution gadget. It checks selected coefficients with direct integer convolution and compares identical public report bytes across native, scalar Node and external Chrome. It creates no registration, proof, authenticated checkpoint or setup capability. The existing preparation requirement described above is unchanged.
+
+```text
+pnpm run research:protocol -- native-fhe-key-source
+pnpm run research:protocol -- scalar-fhe-key-source <passed-native-run>
+pnpm run research:protocol -- browser-fhe-key-source <passed-native-run>
+```
+
 Prerequisites are Node.js satisfying the repository's engine requirement, the pinned pnpm version, and Rust 1.95.0 with rustfmt, Clippy and the `wasm32-unknown-unknown` target. The runner checks the compiler version and records the native executable digest. Cargo's lockfile pins registry dependency versions and checksums. Before an offline run, populate the Cargo cache with:
 
 ```text

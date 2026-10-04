@@ -54,6 +54,7 @@ import {
 } from '#tests/compressed-oracle-model.js';
 import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import {
     compileBallotWordProofLayout,
@@ -100,6 +101,7 @@ import {
 import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
@@ -114,6 +116,11 @@ import {
     compileSetupRandomnessCensus,
     setupGaussianParameters,
 } from '#tests/setup-randomness-model.js';
+import {
+    compileSetupSelectionCensus,
+    countStagePath,
+    preparationStagePath,
+} from '#tests/setup-selection-model.js';
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -2611,6 +2618,161 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionBody.maximumAllContributorBodies),
                 ],
             ],
+        ),
+        '',
+        '## Preparation selection and registration binding screen',
+        '',
+        'The [selection model](../tests/setup-selection-model.ts) checks the fixed eligible pool, selected subset and quorum intersection. Its close-only counterexample keeps a valid ballot under one setup, enough honest pre-close holders and a closing quorum for another setup: the ciphertext cannot be retargeted. The [candidate analysis](collective-preparation-analysis.md#registration-bound-clear-preparation) owns that failure and the pre-ballot certification repair. These counts do not establish a construction or its security loss.',
+        '',
+        table(
+            [
+                'Participants',
+                'Eligible',
+                'Selected',
+                'Quorum',
+                'Minimum honest selected',
+                'Minimum quorum intersection',
+                'Possible selected sets',
+            ],
+            [3, 10, 20].map((participants) => {
+                const value = compileSetupSelectionCensus(participants);
+                return [
+                    participants,
+                    value.eligibleCount,
+                    value.selectedCount,
+                    value.quorum,
+                    value.minimumHonestSelected,
+                    value.minimumCertificateIntersection,
+                    value.possibleSelectedSets,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'Candidate productive-stage upper bounds include registration, setup, an optional ballot and the existing close/target/release/outcome suffix. Same-stage restarts, status checks and organizer collection sessions add no nodes. The paths require the local coalescences in the [visit owner](non-forking-state.md#preparation-candidate-stage-paths), complete retained payload availability and no additional participant-dependent output. They are conditional stage graphs, not emitted workflow measurements or a security verdict. Nonvoters may still perform setup before a later close request and therefore share this conservative bound.',
+        '',
+        table(
+            ['Candidate path', 'Participant stages', 'Organizer stages'],
+            (
+                [
+                    'clear-close-only',
+                    'clear-certified',
+                    'recoverable-sealed',
+                ] as const
+            ).map((candidate) => [
+                candidate,
+                formatCount(
+                    countStagePath(preparationStagePath(candidate, false)),
+                ),
+                formatCount(
+                    countStagePath(preparationStagePath(candidate, true)),
+                ),
+            ]),
+        ),
+        '',
+        'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](security-argument.md#registration-bound-clear-preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
+        '',
+        table(
+            [
+                'Maximum participants / options',
+                'FHE families',
+                'Commitment digest payload bytes',
+                'Private seed and salt payload bytes',
+                'Generated public coordinate bytes',
+                'Largest public coordinate bytes',
+                'Weakest FHE uniform-matrix uniqueness exponent',
+                'Fixed auxiliary public pair bytes',
+                'Auxiliary good-key phase error bound',
+                'Auxiliary scale',
+            ],
+            [
+                [3, 2],
+                [10, 10],
+                [20, 20],
+            ].map(([participants, options]) => {
+                const screen = compileRegistrationSetupBindingScreen(
+                    participants,
+                    options,
+                );
+                const weakest = screen.fhe.reduce(
+                    (minimum, family) =>
+                        family.uniqueness.uniformMatrixFailureExponent < minimum
+                            ? family.uniqueness.uniformMatrixFailureExponent
+                            : minimum,
+                    screen.fhe[0].uniqueness.uniformMatrixFailureExponent,
+                );
+                return [
+                    `${participants} / ${options}`,
+                    formatCount(screen.fhe.length),
+                    formatCount(screen.commitmentDigestPayloadBytes),
+                    formatCount(screen.privateSeedAndSaltPayloadBytes),
+                    formatCount(screen.generatedPublicCoordinateBytes),
+                    formatCount(screen.largestPublicCoordinateBytes),
+                    formatCount(weakest),
+                    formatCount(screen.auxiliary.fixedPublicPairBytes),
+                    formatCount(screen.auxiliary.goodKeyPhaseError),
+                    formatCount(screen.auxiliary.scale),
+                ];
+            }),
+        ),
+        '',
+        'The FHE uniqueness exponents apply to independently uniform common polynomials and all bounded public keys, using the existing determinant lemma with the current ternary and error supports. The auxiliary good-key bound is `(2*h_aux+1)*E`, and twice this value must be strictly below its scale. Fixed-suite sampling and initialization, all distinct matrices, global auxiliary-key reuse, commitment extraction/equivocation, adaptive selection, proof soundness and the complete global credential population still require their separate charges. These exponents are not end-to-end security bits.',
+        '',
+        '### FHE key source generation screen',
+        '',
+        'The [source screen model](../tests/fhe-key-source-resource-model.ts) counts one full-ring original source and its reconstruction into the first contribution gadget. It retains a fixed synthetic seed, public digest and bounded samples between phases; no complete public coordinate or private source survives the phase transition. The source phase includes its retained sparse/error vectors, temporary sparse transform, first-key word columns, public/native-check working vectors and allocation allowance. Continuation conservatively reuses the existing complete contribution-generation allowance plus the retained first-key error. The separate reference phase uses direct sparse BigInt convolution at fixed coordinates. These are phase planning allowances, not measured peaks, a complete registration or a proof-generation bound.',
+        '',
+        table(
+            ['Source-screen property', 'Value'],
+            (() => {
+                const screen = compileFheKeySourceScreenResources();
+                return [
+                    ['Participants', screen.participantCount],
+                    ['Options', screen.optionCount],
+                    ['Ring degree', screen.degree],
+                    [
+                        'Signed public coefficient bytes',
+                        screen.coefficientBytes,
+                    ],
+                    ['Common coefficient sample bits', screen.commonSampleBits],
+                    [
+                        'Independent coordinate samples',
+                        screen.samplePositions.length,
+                    ],
+                    ['Canonical FKS1 report bytes', screen.reportBytes],
+                    ['Output capacity bytes', screen.outputCapacity],
+                    [
+                        'Original private source payload bytes',
+                        screen.sourcePayloadBytes,
+                    ],
+                    [
+                        'First-key word-column payload bytes',
+                        screen.keyWitnessBytes,
+                    ],
+                    [
+                        'Source generation phase allowance bytes',
+                        screen.sourcePhaseBytes,
+                    ],
+                    [
+                        'First-gadget continuation phase allowance bytes',
+                        screen.continuationPhaseBytes,
+                    ],
+                    [
+                        'Independent reference phase allowance bytes',
+                        screen.referencePhaseBytes,
+                    ],
+                    [
+                        'Native operation planning bytes',
+                        screen.nativePlanningBytes,
+                    ],
+                    [
+                        'Scalar operation planning bytes',
+                        screen.scalarPlanningBytes,
+                    ],
+                ].map(([label, value]) => [
+                    String(label),
+                    formatCount(value as number | bigint),
+                ]);
+            })(),
         ),
         '',
         '## Recoverable setup resource screen',
