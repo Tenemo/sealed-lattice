@@ -30,9 +30,10 @@ import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {
-    compiledRustSources,
-    requireCheckoutBytes,
-} from '#tools/ci/compiled-inputs.js';
+    snapshotResearchSources,
+    compiledFixtureFiles,
+    checkFixtureSources,
+} from '#tools/ci/fixture-sources.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
@@ -42,6 +43,7 @@ import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
+import { runPublicOperatorFixture } from '#tools/ci/run-public-operator-screen.js';
 import { runScalarProofFixture } from '#tools/ci/run-seed-sharing-scalar.js';
 import {
     assertSeedSharingSourceStable,
@@ -94,6 +96,22 @@ type NativeResult = {
     }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
+if (
+    selected.name === 'native-public-operator' ||
+    selected.name === 'scalar-public-operator' ||
+    selected.name === 'browser-public-operator'
+) {
+    await runPublicOperatorFixture(
+        selected.name === 'native-public-operator'
+            ? 'native'
+            : selected.name === 'scalar-public-operator'
+              ? 'node'
+              : 'chrome',
+        'source' in selected ? selected.source : undefined,
+    );
+    process.exit(process.exitCode ?? 0);
+}
+
 if ('source' in selected && selected.name !== 'native-opening-share') {
     await runScalarProofFixture(
         selected.source,
@@ -432,70 +450,18 @@ await runWithLocalRunLog(
                 ) + '\n',
                 { flag: 'wx' },
             );
-            const sources: { file: string; sha512: string; bytes: number }[] =
-                [];
-            const snapshot = async (directory: string): Promise<void> => {
-                for (const entry of await readdir(directory, {
-                    withFileTypes: true,
-                })) {
-                    if (entry.name === 'target' || entry.name === '.git')
-                        continue;
-                    const file = path.join(directory, entry.name);
-                    if (entry.isDirectory()) {
-                        await snapshot(file);
-                        continue;
-                    }
-                    assert.ok(
-                        entry.isFile(),
-                        'Research sources must be ordinary files.',
-                    );
-                    const relative = path.relative(root, file);
-                    assert.ok(
-                        !relative.startsWith('..') &&
-                            !path.isAbsolute(relative),
-                    );
-                    const bytes = await readFile(file),
-                        destination = path.join(
-                            log.runDirectoryPath,
-                            'sources',
-                            relative,
-                        );
-                    await mkdir(path.dirname(destination), { recursive: true });
-                    await writeFile(destination, bytes, { flag: 'wx' });
-                    sources.push({
-                        file: relative,
-                        sha512: createHash('sha512')
-                            .update(bytes)
-                            .digest('hex'),
-                        bytes: bytes.length,
-                    });
-                }
-            };
-            await snapshot(workspace);
-            if (fragmentCase)
-                for (const relative of [
-                    'tools/ci/protocol-research-registry.ts',
-                    'tools/ci/seed-sharing-scalar-source.ts',
-                    'tools/ci/compiled-inputs.ts',
-                    'tests/recoverable-setup-resource-model.ts',
-                    'tests/recoverable-opening-share-model.ts',
-                ]) {
-                    const bytes = await readFile(path.join(root, relative));
-                    const destination = path.join(
-                        log.runDirectoryPath,
-                        'sources',
-                        relative,
-                    );
-                    await mkdir(path.dirname(destination), { recursive: true });
-                    await writeFile(destination, bytes, { flag: 'wx' });
-                    sources.push({
-                        file: relative,
-                        sha512: createHash('sha512')
-                            .update(bytes)
-                            .digest('hex'),
-                        bytes: bytes.length,
-                    });
-                }
+            const sources = await snapshotResearchSources(log, root, [
+                'tools/ci/fixture-sources.ts',
+                ...(fragmentCase
+                    ? [
+                          'tools/ci/protocol-research-registry.ts',
+                          'tools/ci/seed-sharing-scalar-source.ts',
+                          'tools/ci/compiled-inputs.ts',
+                          'tests/recoverable-setup-resource-model.ts',
+                          'tests/recoverable-opening-share-model.ts',
+                      ]
+                    : []),
+            ]);
             await writeFile(
                 path.join(log.runDirectoryPath, 'source-manifest.json'),
                 JSON.stringify({ compiler, sources }, null, 2) + '\n',
@@ -697,64 +663,31 @@ await runWithLocalRunLog(
                     'build-native',
                 );
             }
-            const compiledInputs: {
+            let compiledInputs: {
                 file: string;
                 sha512: string;
                 bytes: number;
             }[] = [];
-            const sharedInputs: string[] = [];
+            let sharedInputs: string[] = [];
             if (fragmentCase) {
-                const compiled = await compiledRustSources(
+                const files = await compiledFixtureFiles(
                     path.join(
                         workspace,
                         'target/release/' + fragmentBinary + '.d',
                     ),
+                    sources,
                 );
-                const files = new Set([
-                    ...compiled,
-                    'crates/protocol-research/Cargo.lock',
-                ]);
-                for (const file of compiled) {
-                    let directory = path.posix.dirname(file);
-                    while (directory.startsWith('crates/protocol-research')) {
-                        const manifest = path.posix.join(
-                            directory,
-                            'Cargo.toml',
-                        );
-                        if (
-                            sources.some(
-                                (entry) =>
-                                    entry.file.replace(/\\/gu, '/') ===
-                                    manifest,
-                            )
-                        )
-                            files.add(manifest);
-                        directory = path.posix.dirname(directory);
-                    }
-                }
-                requireCheckoutBytes([...files]);
-                for (const file of [...files].sort()) {
-                    const pinned = sources.find(
-                        (entry) => entry.file.replace(/\\/gu, '/') === file,
-                    );
-                    assert.ok(
-                        pinned,
-                        'A compiled input was absent from the pre-build source snapshot: ' +
-                            file,
-                    );
-                    assert.equal(
-                        await fileDigest(path.join(root, file)),
-                        pinned.sha512,
-                        'A compiled source changed during the build: ' + file,
-                    );
-                    compiledInputs.push({ ...pinned, file });
-                    if (
+                compiledInputs = await checkFixtureSources(
+                    root,
+                    sources,
+                    files,
+                );
+                sharedInputs = files.filter(
+                    (file) =>
                         !file.startsWith(
                             'crates/protocol-research/opening-share-proof/',
-                        )
-                    )
-                        sharedInputs.push(file);
-                }
+                        ),
+                );
                 if (predecessor !== undefined)
                     await assertSeedSharingSharedInputs(
                         predecessor,

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     pinBrowserProofChunks,
-    serveSeedSharingBrowserInputs,
+    serveBoundedBrowserInputs,
 } from '#tools/ci/run-seed-sharing-browser.js';
 import {
     createBrowserProofReader,
@@ -209,8 +209,7 @@ describe('authenticated browser proof transport', () => {
         await writeFile(proofFile, bytes);
         await writeFile(moduleFile, bytes);
         let server:
-            | Awaited<ReturnType<typeof serveSeedSharingBrowserInputs>>
-            | undefined;
+            Awaited<ReturnType<typeof serveBoundedBrowserInputs>> | undefined;
         try {
             const proof = {
                 name: 'synthetic',
@@ -225,7 +224,7 @@ describe('authenticated browser proof transport', () => {
             await expect(
                 pinBrowserProofChunks({ ...proof, sha512: '0'.repeat(128) }),
             ).rejects.toThrow('changed');
-            server = await serveSeedSharingBrowserInputs(
+            server = await serveBoundedBrowserInputs(
                 path.resolve('.'),
                 moduleFile,
                 [pinned],
@@ -240,6 +239,12 @@ describe('authenticated browser proof transport', () => {
                 ],
             );
             expect(new URL(server.origin).port).not.toBe('80');
+            for (const asset of [
+                '/public-operator-scalar.mjs',
+                '/scalar-module.mjs',
+                '/bounded-output.mjs',
+            ])
+                expect((await fetch(server.origin + asset)).status).toBe(200);
             const response = await fetch(server.origin + '/proof/0/0');
             expect(response.status).toBe(200);
             expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);

@@ -11,6 +11,37 @@ import {
 } from '#tools/ci/protocol-research-scenario.js';
 
 describe('guarded protocol research entry', () => {
+    it('registers two-case public arithmetic screens without proof/profile overrides', () => {
+        expect(selectProtocolResearchCase(['native-public-operator'])).toEqual({
+            name: 'native-public-operator',
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const name of [
+            'scalar-public-operator',
+            'browser-public-operator',
+        ])
+            expect(
+                selectProtocolResearchCase([name, 'native-source']),
+            ).toMatchObject({
+                name,
+                source: 'native-source',
+                simulatedHelpers: 0,
+            });
+        for (const values of [
+            ['native-public-operator', 'source'],
+            ['native-public-operator', '4', '2'],
+            ['native-public-operator', '--simulated-helpers', '1'],
+            ['scalar-public-operator'],
+            ['browser-public-operator', ''],
+            ['scalar-public-operator', 'source', 'extra'],
+            ['browser-public-operator', '--unknown'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+    });
     it('selects opening scalar and browser cases only with one native opening source', () => {
         for (const name of [
             'scalar-opening-share',

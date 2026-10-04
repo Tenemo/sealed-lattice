@@ -1,22 +1,31 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 
-export type NativeVerifierSamplePhase = 'initial' | 'periodic' | 'final';
+export type NativeOperationSamplePhase = 'initial' | 'periodic' | 'final';
 
-// The native reader waits at both boundaries, so a fast verification cannot
+// The native operation waits at both boundaries, so a fast operation cannot
 // disappear before its process is observed. These are sampled values, not
 // an operating-system lifetime peak; short internal peaks can remain unseen.
-export const createNativeVerifierGuard = (
+export const createNativeOperationGuard = (
     input: Readonly<{
         startFile: string;
         finishFile: string;
         memoryLimit: number;
+        operation?: 'verifier' | 'operator';
         readMemory: (
-            phase: NativeVerifierSamplePhase,
+            phase: NativeOperationSamplePhase,
         ) => Promise<number | undefined>;
-        recordSample: (phase: NativeVerifierSamplePhase, bytes: number) => void;
+        recordSample: (
+            phase: NativeOperationSamplePhase,
+            bytes: number,
+        ) => void;
     }>,
 ) => {
+    const operation = input.operation ?? 'verifier';
+    const elapsedField =
+        operation === 'operator'
+            ? 'operationMilliseconds'
+            : 'verificationMilliseconds';
     let readySeen = false;
     let started = false;
     let completionSeen = false;
@@ -46,36 +55,37 @@ export const createNativeVerifierGuard = (
                 const line = pending.slice(0, newline).trim();
                 pending = pending.slice(newline + 1);
                 if (!line) continue;
-                const event = JSON.parse(line) as {
-                    event?: string;
-                    verificationMilliseconds?: number;
-                };
-                if (event.event === 'native-verifier-ready') {
+                const event = JSON.parse(line) as Record<string, unknown>;
+                if (event.event === 'native-' + operation + '-ready') {
                     assert.ok(
                         !readySeen,
-                        'The native reader announced readiness twice.',
+                        'The native operation announced readiness twice.',
                     );
                     readySeen = true;
                     readyResolve();
-                } else if (event.event === 'native-verifier-completed') {
+                } else if (
+                    event.event ===
+                    'native-' + operation + '-completed'
+                ) {
                     assert.ok(
                         started && !completionSeen,
-                        'The native reader completed outside its guarded operation.',
+                        'The native operation completed outside its guarded operation.',
                     );
+                    const milliseconds = event[elapsedField];
                     assert.ok(
-                        typeof event.verificationMilliseconds === 'number' &&
-                            Number.isFinite(event.verificationMilliseconds) &&
-                            event.verificationMilliseconds >= 0,
+                        typeof milliseconds === 'number' &&
+                            Number.isFinite(milliseconds) &&
+                            milliseconds >= 0,
                     );
                     completionSeen = true;
-                    completeResolve(event.verificationMilliseconds);
+                    completeResolve(milliseconds);
                 }
             }
         },
         stop: () => {
             if (finishReleased) return;
             const error = new Error(
-                'The native reader exited before its guard handshake completed.',
+                'The native operation exited before its guard handshake completed.',
             );
             readyReject(error);
             completeReject(error);
@@ -83,20 +93,20 @@ export const createNativeVerifierGuard = (
         monitor: async () => {
             let peakMemory = 0;
             const samples = { initial: 0, periodic: 0, final: 0 };
-            const sample = async (phase: NativeVerifierSamplePhase) => {
+            const sample = async (phase: NativeOperationSamplePhase) => {
                 const bytes = await input.readMemory(phase);
                 assert.ok(
                     bytes !== undefined &&
                         Number.isSafeInteger(bytes) &&
                         bytes > 0,
-                    'The waiting native reader was not observed by the process guard.',
+                    'The waiting native operation was not observed by the process guard.',
                 );
                 input.recordSample(phase, bytes);
                 samples[phase]++;
                 peakMemory = Math.max(peakMemory, bytes);
                 assert.ok(
                     bytes <= input.memoryLimit,
-                    'Verifier process-tree memory guard exceeded.',
+                    'Native process-tree memory guard exceeded.',
                 );
             };
             await ready;
@@ -116,13 +126,13 @@ export const createNativeVerifierGuard = (
                 if (finished) break;
                 await sample('periodic');
             }
-            const verificationMilliseconds = await completed;
+            const operationMilliseconds = await completed;
             // This observation starts only after the completed event, rather
             // than relabeling a snapshot already in progress when it arrived.
             await sample('final');
             finishReleased = true;
             await writeFile(input.finishFile, new Uint8Array(), { flag: 'wx' });
-            return { peakMemory, samples, verificationMilliseconds };
+            return { peakMemory, samples, operationMilliseconds };
         },
     };
 };

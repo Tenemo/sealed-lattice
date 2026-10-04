@@ -4,6 +4,7 @@
 // remain obligations of the protocol that would consume this relation.
 import { compileWordProverResources } from '#tests/browser-word-prover-resource-model.js';
 import { compileWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { compilePublicPolynomialOperatorBuffers } from '#tests/public-polynomial-operator-resource-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
@@ -130,6 +131,13 @@ export const compileOpeningShareResources = (
         (2n + 2n * BigInt(parameters.selectedCount)) *
         physicalDegree *
         BigInt(1 + Math.ceil(bits(parameters.modulus) / 8));
+    const operator = compilePublicPolynomialOperatorBuffers(
+        physicalDegree,
+        BigInt(1 + Math.ceil(bits(parameters.modulus) / 8)),
+        columns,
+        1,
+        2,
+    );
     return {
         parameters,
         physicalDegree,
@@ -140,6 +148,7 @@ export const compileOpeningShareResources = (
         lookupEntries,
         disjointPairs: 1,
         supportRows: 2,
+        ...operator,
         affineRows:
             2n * BigInt(parameters.selectedCount + 1) * physicalDegree + 2n,
         publicShareBytes,

@@ -77,6 +77,16 @@ These reuse the bounded Node and external Chrome harnesses. Every fresh worker s
 
 Scalar and browser seed-sharing cases require a native baseline with recorded compiled inputs and the same compiler. Shared source files and manifests must match that compiled inventory; the target-only browser adapters are separately checked against the baseline snapshot. Historical archives remain usable for deterministic comparison after shared code changes, but do not authorize scalar execution of that changed code.
 
+The public operator screen exercises both factored operators at the full physical ring without constructing witnesses or proofs:
+
+```text
+pnpm run research:protocol -- native-public-operator
+pnpm run research:protocol -- scalar-public-operator <passed-native-operator-run>
+pnpm run research:protocol -- browser-public-operator <passed-native-operator-run>
+```
+
+Each case streams a fixed synthetic public polynomial recipe, checks selected coefficients against original equation sums, and evaluates the actual operator on the complete paired query inventory. It hashes the combined operator one column at a time and compares query values through the existing interpolation kernel. Small canonical reports contain the target, lookup weight, selected values and the digests of the complete operator and query outputs; Node and Chrome must reproduce the native report bytes exactly. The same source, bounded-memory, process-containment and output-acknowledgment rules apply. Native and Node cases wait for initial and final process observations. Timings distinguish recipe and operator construction, actual query evaluation, and reference/digest instrumentation; they do not measure participant completion or qualify a phone.
+
 The same pinned native proof files can also be checked in a dedicated worker in the installed external desktop Chrome:
 
 ```text

@@ -1,6 +1,9 @@
 use crate::{DEGREE, Error, RECIPIENTS, SEED_BITS, modulus, profile};
 use num_bigint::{BigInt, Sign};
 use parallel_work::ProtocolHash;
+use setup_stream_kernel::CHUNK_LIMIT;
+
+const COEFFICIENT_BYTES: usize = 21;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scope {
@@ -38,17 +41,49 @@ fn header() -> Vec<u8> {
     bytes
 }
 pub fn encoded_bytes() -> usize {
-    header().len() + 194 + (1 + 3 * RECIPIENTS) * DEGREE * 21
+    header().len() + 194 + (1 + 3 * RECIPIENTS) * DEGREE * COEFFICIENT_BYTES
 }
 pub(crate) fn valid_polynomial(values: &[BigInt]) -> bool {
+    valid_polynomial_degree(values, DEGREE)
+}
+fn valid_polynomial_degree(values: &[BigInt], degree: usize) -> bool {
     let half = modulus() >> 1usize;
-    values.len() == DEGREE
+    values.len() == degree
         && values
             .iter()
             .all(|value| value >= &(-&half) && value <= &half)
 }
+// Callers validate the polynomial before allocating or writing its records.
+fn append_polynomial(bytes: &mut Vec<u8>, values: &[BigInt]) {
+    for value in values {
+        let (sign, magnitude) = value.to_bytes_le();
+        bytes.push(u8::from(sign == Sign::Minus));
+        bytes.extend(&magnitude);
+        bytes.resize(bytes.len() + COEFFICIENT_BYTES - 1 - magnitude.len(), 0);
+    }
+}
+
+/// Feeds the same canonical records the seed statement emits to an owning
+/// stream accumulator, retaining at most one bounded encoding chunk.
+pub fn feed_polynomial(
+    values: &[BigInt],
+    degree: usize,
+    mut consume: impl FnMut(&[u8]) -> Result<(), Error>,
+) -> Result<(), Error> {
+    if !valid_polynomial_degree(values, degree) {
+        return Err("Statement shape or coefficient");
+    }
+    let records = CHUNK_LIMIT / COEFFICIENT_BYTES;
+    let mut bytes = Vec::with_capacity(degree.min(records) * COEFFICIENT_BYTES);
+    for chunk in values.chunks(records) {
+        bytes.clear();
+        append_polynomial(&mut bytes, chunk);
+        consume(&bytes)?;
+    }
+    Ok(())
+}
 impl Statement {
-    pub fn encode(&self) -> Result<Vec<u8>, Error> {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
         if usize::from(self.scope.author) >= RECIPIENTS
             || self.recipients.len() != RECIPIENTS
             || !valid_polynomial(&self.common)
@@ -62,6 +97,10 @@ impl Statement {
         {
             return Err("Statement shape or coefficient");
         }
+        Ok(())
+    }
+    pub fn encode(&self) -> Result<Vec<u8>, Error> {
+        self.validate()?;
         let mut bytes = header();
         bytes.extend(self.scope.poll);
         bytes.extend(self.scope.roster);
@@ -76,12 +115,7 @@ impl Statement {
                 ]
             }))
         {
-            for value in polynomial {
-                let (sign, magnitude) = value.to_bytes_le();
-                bytes.push(u8::from(sign == Sign::Minus));
-                bytes.extend(&magnitude);
-                bytes.resize(bytes.len() + 20 - magnitude.len(), 0);
-            }
+            append_polynomial(&mut bytes, polynomial);
         }
         Ok(bytes)
     }
@@ -104,8 +138,8 @@ impl Statement {
         let mut polynomial = || -> Result<Vec<BigInt>, Error> {
             let mut values = Vec::with_capacity(DEGREE);
             for _ in 0..DEGREE {
-                let record = &bytes[offset..offset + 21];
-                offset += 21;
+                let record = &bytes[offset..offset + COEFFICIENT_BYTES];
+                offset += COEFFICIENT_BYTES;
                 if record[0] > 1 || (record[0] == 1 && record[1..].iter().all(|byte| *byte == 0)) {
                     return Err("Noncanonical coefficient");
                 }

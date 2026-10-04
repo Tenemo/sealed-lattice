@@ -246,11 +246,427 @@ pub(crate) fn apply_operator(operator: &Operator, columns: &[Vec<u16>]) -> Eleme
     result
 }
 
+// Expand the public Term definition, including overlapping weights and
+// different dyadic embeddings, without allocating SYSTEMATIC-sized columns.
+fn physical_columns(operator: &Operator, columns: usize) -> Vec<Vec<Element>> {
+    let terms: Vec<_> = operator
+        .terms
+        .iter()
+        .map(|term| {
+            let values = match &term.public {
+                PublicColumn::Values(values) => values.clone(),
+                PublicColumn::Ones(degree) => vec![ONE; *degree],
+                PublicColumn::Powers(degree) => {
+                    let mut power = ONE;
+                    (0..*degree)
+                        .map(|_| {
+                            let value = power;
+                            power = field::multiply(power, operator.alpha);
+                            value
+                        })
+                        .collect()
+                }
+            };
+            assert!(values.len().is_power_of_two() && SYSTEMATIC.is_multiple_of(values.len()));
+            (values, &term.weights)
+        })
+        .collect();
+    let grid = terms
+        .iter()
+        .map(|(values, _)| values.len())
+        .max()
+        .unwrap_or(DEGREE);
+    let mut matrix = vec![vec![ZERO; DEGREE]; columns];
+    for point in (0..SYSTEMATIC).step_by(SYSTEMATIC / grid) {
+        let mut row = vec![ZERO; columns];
+        for (values, weights) in &terms {
+            let stride = SYSTEMATIC / values.len();
+            if point.is_multiple_of(stride) {
+                for &(column, weight) in *weights {
+                    row[column] =
+                        field::add(row[column], field::multiply(values[point / stride], weight));
+                }
+            }
+        }
+        if point.is_multiple_of(SYSTEMATIC / DEGREE) {
+            for (column, value) in row.into_iter().enumerate() {
+                matrix[column][point / (SYSTEMATIC / DEGREE)] = value;
+            }
+        } else {
+            assert!(
+                row.iter().all(|value| *value == ZERO),
+                "Nonzero off-ring coefficient at {point}"
+            );
+        }
+    }
+    matrix
+}
+
+fn residue_scalar(value: BigInt) -> u128 {
+    let prime = BigInt::from(MODULUS);
+    u128::try_from(((value % &prime) + &prime) % &prime).unwrap()
+}
+
+// Expand the integer equations above forward: a public coefficient at i
+// times a private coefficient at j enters row i+j, with the negacyclic sign.
+// Signed-word offsets are checked independently by evaluating zero encoded
+// columns through residuals, not by copying the emitted target formula.
+fn dense_matrix(statement: &Statement, alpha: Element) -> (Vec<Vec<Element>>, Element, Element) {
+    let widths = variable_widths();
+    let words: usize = widths.iter().map(|bits| (bits / 16).max(1)).sum();
+    let seed_column = words + 2 * RECIPIENTS;
+    let mut word = 0;
+    let mut boolean = seed_column + 1;
+    let encodings: Vec<Vec<(usize, u128)>> = widths
+        .iter()
+        .map(|bits| {
+            let whole = (bits / 16).max(1);
+            let mut digits = Vec::new();
+            for index in 0..whole {
+                digits.push((word, 1u128 << (16 * index)));
+                word += 1;
+            }
+            if *bits >= 16 {
+                for bit in 0..bits % 16 {
+                    digits.push((boolean, 1u128 << (16 * whole + bit)));
+                    boolean += 1;
+                }
+            }
+            digits
+        })
+        .collect();
+    let mut matrix = vec![vec![ZERO; DEGREE]; boolean];
+    let add_signed = |matrix: &mut [Vec<Element>], variable: usize, row: usize, factor: Element| {
+        for &(column, place) in &encodings[variable] {
+            matrix[column][row] = field::add(matrix[column][row], field::scale(factor, place));
+        }
+    };
+    let bits = profile().share_limb_bits();
+    let radix = BigInt::from(1u8) << bits;
+    let scale = supported_profile::SHARE_SCALE as u128;
+    let modulus = modulus();
+    let mut weight = ONE;
+    for (recipient, public) in statement.recipients.iter().enumerate() {
+        for component in 0..2 {
+            let polynomial = if component == 0 {
+                &public.public_key
+            } else {
+                &statement.common
+            };
+            for digit in 0..2 {
+                let weights: Vec<_> = (0..DEGREE)
+                    .map(|_| {
+                        let previous = weight;
+                        weight = field::multiply(weight, alpha);
+                        previous
+                    })
+                    .collect();
+                let positive = words + 2 * recipient;
+                for (public_row, coefficient) in polynomial.iter().enumerate() {
+                    let coefficient = residue_scalar(limb(coefficient, digit, bits));
+                    let (before, after) = matrix.split_at_mut(positive + 1);
+                    for (private_row, (positive_value, negative_value)) in
+                        before[positive].iter_mut().zip(&mut after[0]).enumerate()
+                    {
+                        let position = public_row + private_row;
+                        let value = field::scale(weights[position % DEGREE], coefficient);
+                        let value = if position < DEGREE {
+                            value
+                        } else {
+                            field::subtract(ZERO, value)
+                        };
+                        *positive_value = field::add(*positive_value, value);
+                        *negative_value = field::subtract(*negative_value, value);
+                    }
+                }
+                let first = 2 + 6 * recipient + 3 * component;
+                for (row, &weight) in weights.iter().enumerate() {
+                    add_signed(
+                        &mut matrix,
+                        first,
+                        row,
+                        field::scale(weight, residue_scalar(-limb(&modulus, digit, bits))),
+                    );
+                    add_signed(
+                        &mut matrix,
+                        first + 1,
+                        row,
+                        field::scale(
+                            weight,
+                            residue_scalar(if digit == 0 { -&radix } else { BigInt::from(1) }),
+                        ),
+                    );
+                    if digit == 0 {
+                        add_signed(&mut matrix, first + 2, row, weight);
+                    }
+                }
+                if component == 0 {
+                    let exponent = recipient * (DEGREE / profile().interpolation_degree());
+                    for source in 0..DEGREE {
+                        let destination = source + exponent;
+                        let value = field::scale(weights[destination % DEGREE], scale);
+                        add_signed(
+                            &mut matrix,
+                            digit,
+                            source,
+                            if (destination / DEGREE).is_multiple_of(2) {
+                                value
+                            } else {
+                                field::subtract(ZERO, value)
+                            },
+                        );
+                    }
+                    if digit == 0 {
+                        for (row, &weight) in weights.iter().enumerate().take(SEED_BITS) {
+                            matrix[seed_column][row] =
+                                field::add(matrix[seed_column][row], field::scale(weight, scale));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for column in &mut matrix[words..words + 2 * RECIPIENTS] {
+        for value in column {
+            *value = field::add(*value, weight);
+        }
+        weight = field::multiply(weight, alpha);
+    }
+    let zero = vec![vec![0; SYSTEMATIC]; boolean];
+    let target = field::subtract(ZERO, weighted_residual(statement, &zero, alpha));
+    (matrix, target, weight)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{layout::Layout, operator, statement::encoded_bytes};
     use word_proof::oracles::Witness;
+
+    fn canonical_records(values: &[BigInt]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(21 * values.len());
+        for value in values {
+            let (sign, magnitude) = value.to_bytes_le();
+            assert!(magnitude.len() <= 20);
+            bytes.push(u8::from(sign == num_bigint::Sign::Minus));
+            bytes.extend(&magnitude);
+            bytes.resize(bytes.len() + 20 - magnitude.len(), 0);
+        }
+        bytes
+    }
+
+    fn public_streams(statement: &Statement) -> Vec<Vec<u8>> {
+        std::iter::once(&statement.common)
+            .chain(statement.recipients.iter().flat_map(|recipient| {
+                [
+                    &recipient.public_key,
+                    &recipient.ciphertext[0],
+                    &recipient.ciphertext[1],
+                ]
+            }))
+            .map(|polynomial| canonical_records(polynomial))
+            .collect()
+    }
+
+    fn streamed_accumulator(
+        statement: &Statement,
+        alpha: Element,
+        pieces: &[usize],
+    ) -> operator::Accumulator {
+        let mut accumulator = operator::Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+        for (polynomial, bytes) in public_streams(statement).iter().enumerate() {
+            let mut position = 0;
+            let mut piece = 0;
+            while position < bytes.len() {
+                let end = bytes.len().min(position + pieces[piece % pieces.len()]);
+                accumulator.push(polynomial, &bytes[position..end]).unwrap();
+                position = end;
+                piece += 1;
+            }
+            accumulator.finish_polynomial(polynomial).unwrap();
+        }
+        accumulator
+    }
+
+    #[test]
+    fn raw_stream_partitions_preserve_the_independent_physical_operator() {
+        let (statement, _) = crate::tests::fixture();
+        let alpha = [17, 29, 43];
+        let expected = dense_matrix(&statement, alpha);
+        for pieces in [&[1][..], &[20, 1, 22, 97][..], &[4093, 10_000][..]] {
+            let actual = streamed_accumulator(&statement, alpha, pieces)
+                .finish()
+                .unwrap();
+            assert_eq!(physical_columns(&actual, expected.0.len()), expected.0);
+            assert_eq!(actual.target, expected.1);
+            assert_eq!(actual.lookup_weight, expected.2);
+        }
+    }
+
+    #[test]
+    fn raw_stream_refusals_are_terminal_and_complete_streams_cannot_take_extra_input() {
+        use operator::Accumulator;
+        let alpha = [17, 29, 43];
+        for degree in [0, 128, 768, 2 * SYSTEMATIC, usize::MAX] {
+            assert!(Accumulator::new(degree, SEED_BITS, alpha).is_err());
+        }
+        for seed_bits in [0, DEGREE + 1, usize::MAX] {
+            assert!(Accumulator::new(DEGREE, seed_bits, alpha).is_err());
+        }
+        let (statement, _) = crate::tests::fixture();
+        let bytes = public_streams(&statement).remove(0);
+        assert!(
+            Accumulator::new(DEGREE, SEED_BITS, alpha)
+                .unwrap()
+                .finish()
+                .is_err()
+        );
+        for wrong in [1, 1 + 3 * RECIPIENTS, usize::MAX] {
+            let mut accumulator = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+            assert!(accumulator.push(wrong, &bytes).is_err());
+            assert!(accumulator.push(0, &bytes).is_err());
+            assert!(accumulator.finish_polynomial(0).is_err());
+            assert!(accumulator.finish().is_err());
+        }
+        for retained in [0, 1, 20, bytes.len() - 1] {
+            let mut accumulator = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+            accumulator.push(0, &bytes[..retained]).unwrap();
+            assert!(accumulator.finish_polynomial(0).is_err());
+            assert!(accumulator.push(0, &bytes[retained..]).is_err());
+            assert!(accumulator.finish().is_err());
+        }
+        let mut repeated = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+        repeated.push(0, &bytes).unwrap();
+        repeated.finish_polynomial(0).unwrap();
+        assert!(repeated.finish_polynomial(0).is_err());
+        assert!(repeated.finish().is_err());
+        for sign in [1, 2] {
+            let mut malformed = vec![0; 21];
+            malformed[0] = sign;
+            let mut accumulator = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+            assert!(accumulator.push(0, &malformed).is_err());
+            assert!(accumulator.push(0, &bytes).is_err());
+            assert!(accumulator.finish().is_err());
+        }
+        let mut outside = vec![255; 21];
+        outside[0] = 0;
+        let mut accumulator = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+        assert!(accumulator.push(0, &outside).is_err());
+        assert!(accumulator.finish().is_err());
+        let mut extra = bytes.clone();
+        extra.push(0);
+        let mut accumulator = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+        assert!(accumulator.push(0, &extra).is_err());
+        assert!(accumulator.finish().is_err());
+        let half = modulus() / 2u8;
+        let values: Vec<_> = (0..DEGREE)
+            .map(|row| match row % 3 {
+                0 => -&half,
+                1 => half.clone(),
+                _ => BigInt::from(0),
+            })
+            .collect();
+        let mut edge = Accumulator::new(DEGREE, SEED_BITS, alpha).unwrap();
+        for part in canonical_records(&values).chunks(20) {
+            edge.push(0, part).unwrap();
+        }
+        edge.finish_polynomial(0).unwrap();
+        assert!(edge.finish().is_err());
+        for push in [false, true] {
+            let mut complete = streamed_accumulator(&statement, alpha, &[21]);
+            if push {
+                assert!(complete.push(1 + 3 * RECIPIENTS, &[0]).is_err());
+            } else {
+                assert!(complete.finish_polynomial(3 * RECIPIENTS).is_err());
+            }
+            assert!(complete.finish().is_err());
+        }
+    }
+
+    #[test]
+    fn factorization_preserves_every_physical_coefficient_target_and_lookup_weight() {
+        let (ordinary, _) = crate::tests::fixture();
+        let mut extremes = ordinary.clone();
+        let half = modulus() / 2u8;
+        let radix = BigInt::from(1u8) << profile().share_limb_bits();
+        let edges = [
+            -&half,
+            half,
+            BigInt::from(0),
+            BigInt::from(-1),
+            BigInt::from(1),
+            -&radix,
+            radix.clone(),
+            1u8 - &radix,
+            &radix - 1u8,
+        ];
+        for (family, polynomial) in std::iter::once(&mut extremes.common)
+            .chain(extremes.recipients.iter_mut().flat_map(|recipient| {
+                std::iter::once(&mut recipient.public_key).chain(recipient.ciphertext.iter_mut())
+            }))
+            .enumerate()
+        {
+            for (row, value) in polynomial.iter_mut().enumerate() {
+                *value = edges[(row + 3 * family) % edges.len()].clone();
+            }
+        }
+        let cyclic = field::root(DEGREE);
+        let negacyclic = field::root(2 * DEGREE);
+        assert_eq!(field::base::power(cyclic, DEGREE as u128), 1);
+        assert_eq!(field::base::power(negacyclic, DEGREE as u128), MODULUS - 1);
+        for statement in [ordinary, extremes] {
+            statement.encode().unwrap();
+            for alpha in [
+                ZERO,
+                ONE,
+                [MODULUS - 1, 0, 0],
+                [0, 1, 0],
+                [17, 29, 43],
+                [cyclic, 0, 0],
+                [negacyclic, 0, 0],
+                [MODULUS - 1, MODULUS - 2, MODULUS - 3],
+            ] {
+                let expected = dense_matrix(&statement, alpha);
+                let actual = operator::build(&statement, alpha).unwrap();
+                assert_eq!(
+                    physical_columns(&actual, expected.0.len()),
+                    expected.0,
+                    "physical matrix at {alpha:?}"
+                );
+                assert_eq!(actual.target, expected.1, "target at {alpha:?}");
+                assert_eq!(actual.lookup_weight, expected.2, "lookup at {alpha:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn factorization_rejects_noncanonical_challenges_and_public_operands() {
+        let (original, _) = crate::tests::fixture();
+        for coordinate in 0..3 {
+            let mut alpha = [17, 29, 43];
+            alpha[coordinate] = MODULUS;
+            assert!(operator::build(&original, alpha).is_err());
+        }
+        for outside in [modulus() / 2u8 + 1u8, -(modulus() / 2u8) - 1u8] {
+            for family in 0..1 + 3 * RECIPIENTS {
+                let mut changed = original.clone();
+                if family == 0 {
+                    changed.common[7] = outside.clone();
+                } else {
+                    let recipient = &mut changed.recipients[(family - 1) / 3];
+                    match (family - 1) % 3 {
+                        0 => recipient.public_key[11] = outside.clone(),
+                        1 => recipient.ciphertext[0][13] = outside.clone(),
+                        _ => recipient.ciphertext[1][17] = outside.clone(),
+                    }
+                }
+                assert!(operator::build(&changed, [17, 29, 43]).is_err());
+            }
+        }
+        let mut truncated = original;
+        truncated.recipients[RECIPIENTS - 1].ciphertext[1].pop();
+        assert!(operator::build(&truncated, [17, 29, 43]).is_err());
+    }
 
     #[test]
     fn quarter_modulus_ciphertext_has_no_bounded_witness_with_zero_public_polynomials() {

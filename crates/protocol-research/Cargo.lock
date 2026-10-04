@@ -383,6 +383,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "public-operator-screen"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+ "opening-share-proof",
+ "parallel-work",
+ "seed-sharing-proof",
+ "setup-stream-kernel",
+ "supported-profile",
+ "word-proof",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -112,7 +112,7 @@ export const createBrowserProofReader = (proof, fetchBytes = fetch) => {
  * @param {Uint8Array<ArrayBuffer>} bytes
  * @param {typeof fetch} [fetchBytes]
  */
-export const emitBrowserProofChunk = async (
+export const emitBrowserOutputChunk = async (
     sinkUrl,
     index,
     offset,
@@ -127,9 +127,7 @@ export const emitBrowserProofChunk = async (
         bytes.length === 0 ||
         bytes.length > seedSharingChunkBytes
     )
-        throw new Error(
-            'The generated proof chunk exceeds its transport bounds.',
-        );
+        throw new Error('The output chunk exceeds its transport bounds.');
     const sha512 = await browserSha512(bytes);
     const response = await fetchBytes(sinkUrl + index + '/' + offset, {
         method: 'POST',
@@ -141,7 +139,7 @@ export const emitBrowserProofChunk = async (
         response.headers.get('X-Chunk-Sha512') !== sha512
     )
         throw new Error(
-            'The proof sink did not acknowledge the written chunk.',
+            'The output sink did not acknowledge the written chunk.',
         );
     /** @param {string} name */
     const coordinate = (name) => {
@@ -152,7 +150,7 @@ export const emitBrowserProofChunk = async (
             !Number.isSafeInteger(Number(value))
         )
             throw new Error(
-                'The proof sink acknowledgment has an invalid coordinate.',
+                'The output sink acknowledgment has an invalid coordinate.',
             );
         return Number(value);
     };
@@ -167,7 +165,7 @@ export const emitBrowserProofChunk = async (
         receipt.length !== bytes.length ||
         coordinate('X-Next-Offset') !== offset + bytes.length
     )
-        throw new Error('The proof sink acknowledged another chunk.');
+        throw new Error('The output sink acknowledged another chunk.');
     return receipt;
 };
 

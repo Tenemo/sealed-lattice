@@ -23,6 +23,11 @@ type ProtocolResearchSelection = {
     simulatedHelpers: number;
 } & (
     | { name: keyof typeof protocolResearchCases; reference?: string }
+    | { name: 'native-public-operator' }
+    | {
+          name: 'scalar-public-operator' | 'browser-public-operator';
+          source: string;
+      }
     | { name: 'native-opening-share'; source: string; reference?: string }
     | {
           name:
@@ -42,6 +47,33 @@ export const selectProtocolResearchCase = (
     arguments_: readonly string[],
 ): ProtocolResearchSelection => {
     const values = arguments_.filter((value) => value !== '--');
+    if (
+        values[0] === 'native-public-operator' ||
+        values[0] === 'scalar-public-operator' ||
+        values[0] === 'browser-public-operator'
+    ) {
+        const settings = {
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        };
+        if (values[0] === 'native-public-operator') {
+            if (values.length !== 1)
+                throw new Error(
+                    'The native public operator screen accepts no additional options.',
+                );
+            return { name: values[0], ...settings };
+        }
+        const source = values[1];
+        if (values.length !== 2 || !source?.trim() || source.startsWith('--'))
+            throw new Error(
+                'A scalar or browser public operator screen requires exactly one native source.',
+            );
+        return { name: values[0], source, ...settings };
+    }
+
     if (values[0] === 'native-opening-share') {
         const source = values[1];
         const reference = values[3];

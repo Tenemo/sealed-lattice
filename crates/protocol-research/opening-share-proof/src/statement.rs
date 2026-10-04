@@ -152,7 +152,7 @@ impl Statement {
         Ok(statement)
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, Error> {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
         if usize::from(self.recipient) >= RECIPIENTS
             || self.packages.len() != SELECTED
             || self.selection.records[0] == self.selection.records[1]
@@ -166,6 +166,11 @@ impl Statement {
         {
             return Err("Opening statement shape or range");
         }
+        Ok(())
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, Error> {
+        self.validate()?;
         let mut bytes = header();
         bytes.extend(self.selection.digest());
         bytes.extend(self.recipient.to_le_bytes());
@@ -206,9 +211,9 @@ impl Statement {
         hash.update(self.encode()?);
         Ok(hash.finalize())
     }
-    pub(crate) fn equations(&self) -> Vec<(Vec<BigInt>, &[BigInt])> {
-        std::iter::once((self.public_key.clone(), self.common.as_slice()))
-            .chain(self.packages.iter().map(|package| {
+    pub(crate) fn equations(&self) -> impl Iterator<Item = (Vec<BigInt>, &[BigInt])> {
+        std::iter::once((self.public_key.clone(), self.common.as_slice())).chain(
+            self.packages.iter().map(|package| {
                 (
                     package
                         .constant
@@ -220,7 +225,7 @@ impl Statement {
                         .collect(),
                     package.linear.as_slice(),
                 )
-            }))
-            .collect()
+            }),
+        )
     }
 }

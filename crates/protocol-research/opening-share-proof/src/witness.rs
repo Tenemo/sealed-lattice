@@ -64,7 +64,7 @@ pub fn create(statement: &Statement, secret: &[i8]) -> Result<Witness, Error> {
     }
     let modulus = modulus();
     let radix = 1i128 << crate::LIMB_BITS;
-    for (equation, (constant, linear)) in statement.equations().into_iter().enumerate() {
+    for (equation, (constant, linear)) in statement.equations().enumerate() {
         let products = product(linear, secret);
         let raw: Vec<_> = products
             .iter()

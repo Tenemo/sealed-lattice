@@ -19,18 +19,21 @@ import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { seedSharingChunkBytes } from '#tools/ci/seed-sharing-browser-input.mjs';
-import { createBrowserProofSink } from '#tools/ci/seed-sharing-browser-sink.js';
+import { createBrowserOutputSink } from '#tools/ci/seed-sharing-browser-sink.js';
 import { fileDigest } from '#tools/ci/seed-sharing-scalar-source.js';
 import { seedSharingProbes } from '#tools/ci/seed-sharing-scalar-verifier.mjs';
 
-export const boundedProofBrowserSources = [
+export const boundedBrowserSources = [
     'tools/ci/run-seed-sharing-browser.ts',
     'tools/ci/seed-sharing-browser-input.mjs',
     'tools/ci/seed-sharing-browser-worker.mjs',
     'tools/ci/seed-sharing-browser-sink.ts',
-    'tools/ci/seed-sharing-proof-sink.mjs',
+    'tools/ci/bounded-output-sink.mjs',
     'tools/ci/opening-share-scalar.mjs',
     'tools/ci/scalar-proof-stream.mjs',
+    'tools/ci/bounded-output.mjs',
+    'tools/ci/scalar-module.mjs',
+    'tools/ci/public-operator-scalar.mjs',
     'tools/ci/participant-runtime-chrome.ts',
 ];
 
@@ -93,9 +96,9 @@ export const pinBrowserProofChunks = async (
     }
 };
 
-const page = `<!doctype html><meta charset="utf-8"><title>Bounded proof experiment</title>
+const page = `<!doctype html><meta charset="utf-8"><title>Bounded operator and proof experiment</title>
 <script>
-window.runBoundedProofProbe = (configuration) => new Promise((resolve, reject) => {
+window.runBoundedExperiment = (configuration) => new Promise((resolve, reject) => {
     const worker = new Worker('/seed-sharing-browser-worker.mjs', {type: 'module'});
     let finished = false;
     const finish = (error, result) => {
@@ -106,23 +109,23 @@ window.runBoundedProofProbe = (configuration) => new Promise((resolve, reject) =
         if (error) reject(new Error(error));
         else resolve(result);
     };
-    window.boundedProofProgress = {sequence:0,progress:null};
-    const timer = setTimeout(() => finish('The browser proof worker exceeded its deadline.'), configuration.timeoutMilliseconds);
+    window.boundedExperimentProgress = {sequence:0,progress:null};
+    const timer = setTimeout(() => finish('The browser experiment worker exceeded its deadline.'), configuration.timeoutMilliseconds);
     worker.onmessage = ({data}) => {
         if (Object.hasOwn(data,'progress')) {
-            window.boundedProofProgress = {sequence:window.boundedProofProgress.sequence+1,progress:data.progress};
+            window.boundedExperimentProgress = {sequence:window.boundedExperimentProgress.sequence+1,progress:data.progress};
         } else finish(data.error, data.result);
     };
-    worker.onerror = (event) => finish(event.message || 'The browser verification worker failed.');
+    worker.onerror = (event) => finish(event.message || 'The browser experiment worker failed.');
     worker.postMessage(configuration);
 });
 </script>`;
 
-export const serveSeedSharingBrowserInputs = async (
+export const serveBoundedBrowserInputs = async (
     root: string,
     moduleFile: string,
     proofs: readonly PinnedProof[],
-    generation?: {
+    outputTarget?: {
         file: string;
         expectedBytes: number;
         expectedSha512: string;
@@ -142,17 +145,20 @@ export const serveSeedSharingBrowserInputs = async (
         'seed-sharing-scalar-verifier.mjs',
         'opening-share-scalar.mjs',
         'scalar-proof-stream.mjs',
-        ...(generation ? ['seed-sharing-scalar-prover.mjs'] : []),
+        'scalar-module.mjs',
+        'public-operator-scalar.mjs',
+        'bounded-output.mjs',
+        ...(outputTarget ? ['seed-sharing-scalar-prover.mjs'] : []),
     ])
         assets.set('/' + name, {
             bytes: await readFile(path.join(root, 'tools/ci', name)),
             type: 'text/javascript',
         });
-    const sink = generation
-        ? await createBrowserProofSink(
-              generation.file,
-              generation.expectedBytes,
-              generation.expectedSha512,
+    const sink = outputTarget
+        ? await createBrowserOutputSink(
+              outputTarget.file,
+              outputTarget.expectedBytes,
+              outputTarget.expectedSha512,
           )
         : undefined;
     let responsePayloadBytes = 0;
@@ -167,10 +173,9 @@ export const serveSeedSharingBrowserInputs = async (
                 response.writeHead(400).end();
                 return;
             }
-            const posted =
-                /^\/generated\/(0|[1-9][0-9]*)\/(0|[1-9][0-9]*)$/u.exec(
-                    request.url ?? '',
-                );
+            const posted = /^\/output\/(0|[1-9][0-9]*)\/(0|[1-9][0-9]*)$/u.exec(
+                request.url ?? '',
+            );
             if (request.method === 'POST' && sink && posted) {
                 const length = Number(request.headers['content-length']);
                 const sha512 = request.headers['x-chunk-sha512'];
@@ -288,7 +293,7 @@ export const serveSeedSharingBrowserInputs = async (
             transferScope:
                 'Response payload bytes handed to the HTTP server and upload payload bytes consumed by its sink handler. HTTP headers, link overhead and unread aborted bodies are not measured.',
         }),
-        generatedProof: () => {
+        completedOutput: () => {
             assert.ok(sink);
             return sink.result();
         },
@@ -317,13 +322,13 @@ type ChromeInputs = {
     processMemoryLimit: number;
     linearMemoryLimit: number;
 };
-type Generation = {
+type OutputTarget = {
     file: string;
     expectedBytes: number;
     expectedSha512: string;
 };
 
-const runBoundedProofInChrome = async ({
+const runBoundedExperimentInChrome = async ({
     root,
     log,
     moduleFile,
@@ -331,15 +336,33 @@ const runBoundedProofInChrome = async ({
     proofs = [],
     predecessors = [],
     relation = 'seed-sharing',
-    generation,
+    outputTarget,
+    caseIndex,
     processMemoryLimit,
     linearMemoryLimit,
-}: ChromeInputs & { proofs?: readonly Proof[]; generation?: Generation }) => {
-    const phase = generation ? 'generation' : 'verification';
-    assert.equal(predecessors.length, relation === 'opening-share' ? 2 : 0);
+}: ChromeInputs & {
+    proofs?: readonly Proof[];
+    outputTarget?: OutputTarget;
+    caseIndex?: 0 | 1;
+}) => {
+    const phase =
+        caseIndex !== undefined
+            ? 'operator-screen'
+            : outputTarget
+              ? 'generation'
+              : 'verification';
+    const operationIdentity =
+        caseIndex !== undefined ? 'public-operator' : relation;
+    if (caseIndex !== undefined) {
+        assert.ok(caseIndex === 0 || caseIndex === 1);
+        assert.ok(outputTarget);
+        assert.equal(proofs.length, 0);
+        assert.equal(predecessors.length, 0);
+    } else
+        assert.equal(predecessors.length, relation === 'opening-share' ? 2 : 0);
     assert.ok(
         freemem() >= 2 * processMemoryLimit,
-        'Insufficient host memory before Chrome verification.',
+        'Insufficient host memory before Chrome execution.',
     );
     const pinned = [];
     for (const proof of proofs) pinned.push(await pinBrowserProofChunks(proof));
@@ -349,19 +372,22 @@ const runBoundedProofInChrome = async ({
     await writeFile(
         path.join(
             log.runDirectoryPath,
-            generation
-                ? 'browser-generation-input-bindings.json'
-                : 'browser-input-bindings.json',
+            caseIndex !== undefined
+                ? 'browser-operator-' + caseIndex + '-input-bindings.json'
+                : outputTarget
+                  ? 'browser-generation-input-bindings.json'
+                  : 'browser-input-bindings.json',
         ),
         JSON.stringify(
             {
                 moduleSha512,
                 phase,
-                relation,
+                relation: operationIdentity,
                 predecessors: pinnedPredecessors,
                 chunkBytes: seedSharingChunkBytes,
                 proofs: pinned,
-                generation,
+                outputTarget,
+                caseIndex,
             },
             null,
             2,
@@ -369,11 +395,9 @@ const runBoundedProofInChrome = async ({
         { flag: 'wx' },
     );
     await mkdir(path.join(root, 'temp'), { recursive: true });
-    const profile = await mkdtemp(
-        path.join(root, 'temp/seed-sharing-browser-'),
-    );
+    const profile = await mkdtemp(path.join(root, 'temp/bounded-browser-'));
     let server:
-        Awaited<ReturnType<typeof serveSeedSharingBrowserInputs>> | undefined;
+        Awaited<ReturnType<typeof serveBoundedBrowserInputs>> | undefined;
     const controller = new AbortController();
     let chrome: ChromeParticipant | undefined;
     let active = false;
@@ -384,21 +408,22 @@ const runBoundedProofInChrome = async ({
     const started = performance.now();
     const timeoutMilliseconds = 600_000;
     try {
-        const serving = await serveSeedSharingBrowserInputs(
+        const serving = await serveBoundedBrowserInputs(
             root,
             moduleFile,
             pinned,
-            generation,
+            outputTarget,
             pinnedPredecessors,
         );
         server = serving;
         chrome = await launchChromeParticipant(profile, serving.origin);
         const browser = chrome;
         log.writeEvent({
-            eventType: relation + '-browser',
+            eventType: operationIdentity + '-browser',
             details: {
                 phase,
-                relation,
+                relation: operationIdentity,
+                caseIndex,
                 version: browser.version,
                 launchArguments: browser.launchArguments,
                 processIdentifier: browser.processIdentifier,
@@ -435,17 +460,18 @@ const runBoundedProofInChrome = async ({
                     samples++;
                     peakMemory = Math.max(peakMemory, bytes);
                     log.writeEvent({
-                        eventType: relation + '-browser-memory',
+                        eventType: operationIdentity + '-browser-memory',
                         details: {
                             phase,
-                            relation,
+                            relation: operationIdentity,
+                            caseIndex,
                             bytes,
                             limit: processMemoryLimit,
                             heaps: browser.heaps(),
-                            ...(generation
+                            ...(outputTarget
                                 ? {
                                       progress: await browser.evaluate(
-                                          'window.boundedProofProgress',
+                                          'window.boundedExperimentProgress',
                                       ),
                                   }
                                 : {}),
@@ -467,38 +493,56 @@ const runBoundedProofInChrome = async ({
             url: serving.origin + '/predecessor/' + index + '/',
         }));
         let result: Record<string, unknown>;
-        if (generation) {
+        if (outputTarget) {
             const configuration = {
-                mode: 'generate',
-                relation,
-                predecessors: browserPredecessors,
+                ...(caseIndex === undefined
+                    ? {
+                          mode: 'generate',
+                          relation,
+                          predecessors: browserPredecessors,
+                      }
+                    : { mode: 'operator', caseIndex }),
                 timeoutMilliseconds,
                 moduleUrl: serving.origin + '/module.wasm',
                 moduleBytes: serving.moduleBytes,
                 moduleSha512,
-                expectedBytes: generation.expectedBytes,
-                sinkUrl: serving.origin + '/generated/',
+                expectedBytes: outputTarget.expectedBytes,
+                sinkUrl: serving.origin + '/output/',
             };
-            const generated = (await Promise.race([
+            const emitted = (await Promise.race([
                 browser.evaluate(
-                    'window.runBoundedProofProbe(' +
+                    'window.runBoundedExperiment(' +
                         JSON.stringify(configuration) +
                         ')',
                 ),
                 interrupted,
-            ])) as { bytes: number; maximumLinearMemoryBytes: number };
-            assert.equal(generated.bytes, generation.expectedBytes);
-            assert.ok(generated.maximumLinearMemoryBytes <= linearMemoryLimit);
-            const proof = serving.generatedProof();
-            assert.equal(await fileDigest(proof.file), proof.sha512);
-            assert.equal(proof.sha512, generation.expectedSha512);
-            result = {
-                kind: 'browser-' + relation + '-generation',
-                ...generated,
-                proof,
+            ])) as {
+                bytes: number;
+                maximumLinearMemoryBytes: number;
+                caseIndex?: number;
             };
+            assert.equal(emitted.bytes, outputTarget.expectedBytes);
+            if (caseIndex !== undefined)
+                assert.equal(emitted.caseIndex, caseIndex);
+            assert.ok(emitted.maximumLinearMemoryBytes <= linearMemoryLimit);
+            const artifact = serving.completedOutput();
+            assert.equal(await fileDigest(artifact.file), artifact.sha512);
+            assert.equal(artifact.sha512, outputTarget.expectedSha512);
+            result =
+                caseIndex === undefined
+                    ? {
+                          kind: 'browser-' + relation + '-generation',
+                          ...emitted,
+                          proof: artifact,
+                      }
+                    : {
+                          kind: 'browser-public-operator-screen',
+                          caseIndex,
+                          ...emitted,
+                          output: artifact,
+                      };
             log.writeEvent({
-                eventType: relation + '-browser-generation',
+                eventType: operationIdentity + '-browser-output',
                 details: { phase, ...result },
             });
         } else {
@@ -524,7 +568,7 @@ const runBoundedProofInChrome = async ({
                 };
                 const verified = (await Promise.race([
                     browser.evaluate(
-                        'window.runBoundedProofProbe(' +
+                        'window.runBoundedExperiment(' +
                             JSON.stringify(configuration) +
                             ')',
                     ),
@@ -600,28 +644,43 @@ const runBoundedProofInChrome = async ({
 
 export const verifyBoundedProofInChrome = (
     input: ChromeInputs & { proofs: readonly Proof[] },
-) => runBoundedProofInChrome(input);
+) => runBoundedExperimentInChrome(input);
 
-export const generateBoundedProofInChrome = (
-    input: ChromeInputs & {
-        outputFile: string;
-        expectedBytes: number;
-        expectedSha512: string;
-    },
-) => {
+type OutputInputs = {
+    outputFile: string;
+    expectedBytes: number;
+    expectedSha512: string;
+};
+const resolveOutputTarget = (
+    input: ChromeInputs & OutputInputs,
+): OutputTarget => {
     const output = path.resolve(input.outputFile);
     assert.ok(
         output.startsWith(
             path.resolve(input.log.artifactDirectoryPath) + path.sep,
         ),
-        'The generated proof must remain in its run artifact directory.',
+        'The output must remain in its run artifact directory.',
     );
-    return runBoundedProofInChrome({
-        ...input,
-        generation: {
-            file: output,
-            expectedBytes: input.expectedBytes,
-            expectedSha512: input.expectedSha512,
-        },
-    });
+    return {
+        file: output,
+        expectedBytes: input.expectedBytes,
+        expectedSha512: input.expectedSha512,
+    };
 };
+
+export const generateBoundedProofInChrome = (
+    input: ChromeInputs & OutputInputs,
+) =>
+    runBoundedExperimentInChrome({
+        ...input,
+        outputTarget: resolveOutputTarget(input),
+    });
+
+export const runPublicOperatorInChrome = (
+    input: Omit<ChromeInputs, 'relation' | 'predecessors'> &
+        OutputInputs & { caseIndex: 0 | 1 },
+) =>
+    runBoundedExperimentInChrome({
+        ...input,
+        outputTarget: resolveOutputTarget(input),
+    });

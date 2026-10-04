@@ -39,10 +39,13 @@ export type NativeReferenceArtifact = Readonly<{
 
 // Diagnostics describe only this recorded native run. A consuming build
 // separately checks its actual compiled inputs against this recorded closure.
-const readNativeSourceMetadata = async (
+export const readNativeSourceMetadata = async (
     source: string,
     root: string,
-    expectedCase: 'native-seed-sharing' | 'native-opening-share',
+    expectedCase:
+        | 'native-seed-sharing'
+        | 'native-opening-share'
+        | 'native-public-operator',
 ) => {
     const directory = path.resolve(source);
     const relative = path.relative(path.join(root, 'logs'), directory);
@@ -77,12 +80,44 @@ const readNativeSourceMetadata = async (
     assert.equal(result.value.simulatedHelpers, 0);
     const artifactDirectory = runArtifactDirectoryPath(directory);
     assert.match(String(result.value.runtimeIdentity), /^[0-9a-f]{128}$/u);
-    assert.equal(
-        (await readFile(path.join(artifactDirectory, 'runtime.bin'))).toString(
-            'hex',
-        ),
-        result.value.runtimeIdentity,
+    const expectedRuntimeBytes =
+        String(result.value.runtimeIdentity).length / 2;
+    const runtime = await open(
+        path.join(artifactDirectory, 'runtime.bin'),
+        'r',
     );
+    try {
+        const details = await runtime.stat();
+        assert.ok(details.isFile());
+        assert.equal(
+            details.size,
+            expectedRuntimeBytes,
+            'The recorded runtime digest has another length.',
+        );
+        const buffer = Buffer.alloc(expectedRuntimeBytes + 1);
+        let read = 0;
+        while (read < buffer.length) {
+            const { bytesRead } = await runtime.read(
+                buffer,
+                read,
+                buffer.length - read,
+                read,
+            );
+            if (bytesRead === 0) break;
+            read += bytesRead;
+        }
+        assert.equal(
+            read,
+            expectedRuntimeBytes,
+            'The runtime digest length changed while reading.',
+        );
+        assert.equal(
+            buffer.subarray(0, read).toString('hex'),
+            result.value.runtimeIdentity,
+        );
+    } finally {
+        await runtime.close();
+    }
     assert.ok(
         typeof manifest.value.compiler === 'string' &&
             Array.isArray(manifest.value.sources),
@@ -420,14 +455,19 @@ export const assertScalarNativeInputs = async (
     files: readonly string[],
     compiler: string,
     root: string,
-    relation: 'seed-sharing' | 'opening-share',
+    relation: 'seed-sharing' | 'opening-share' | 'public-operator',
 ) => {
     assert.equal(
         compiler,
         source.compiler,
         'The native source used another compiler.',
     );
-    const prefix = 'crates/protocol-research/' + relation + '-proof/';
+    const prefix =
+        'crates/protocol-research/' +
+        (relation === 'public-operator'
+            ? 'public-operator-screen'
+            : relation + '-proof') +
+        '/';
     const adapters = new Set([
         prefix + 'src/browser.rs',
         ...(relation === 'seed-sharing'

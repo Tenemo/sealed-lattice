@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { createSeedSharingProofSink } from '#tools/ci/seed-sharing-proof-sink.mjs';
+import { createBoundedOutputSink } from '#tools/ci/bounded-output-sink.mjs';
 
 const digest = (bytes: Uint8Array) =>
     createHash('sha512').update(bytes).digest('hex');
@@ -18,14 +18,14 @@ describe('generated proof artifact writer', () => {
     it('exclusively creates its artifact and matches complete bytes before finishing', async () => {
         const files = await fixture();
         const bytes = new Uint8Array([1, 3, 5, 7]);
-        const sink = await createSeedSharingProofSink(
+        const sink = await createBoundedOutputSink(
             files.file,
             bytes.length,
             digest(bytes),
         );
         try {
             await expect(
-                createSeedSharingProofSink(
+                createBoundedOutputSink(
                     files.file,
                     bytes.length,
                     digest(bytes),
@@ -53,7 +53,7 @@ describe('generated proof artifact writer', () => {
     });
     it('refuses a mismatched complete digest permanently', async () => {
         const files = await fixture();
-        const sink = await createSeedSharingProofSink(
+        const sink = await createBoundedOutputSink(
             files.file,
             3,
             '0'.repeat(128),
@@ -72,7 +72,7 @@ describe('generated proof artifact writer', () => {
     });
     it('fails a reentrant writer without queuing another chunk or acknowledging the first', async () => {
         const files = await fixture();
-        const sink = await createSeedSharingProofSink(
+        const sink = await createBoundedOutputSink(
             files.file,
             4,
             digest(new Uint8Array([1, 2, 3, 4])),

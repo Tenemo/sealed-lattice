@@ -93,6 +93,7 @@ import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniquen
 import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
 import {
     compileBoundedOpeningShareProofResources,
+    compilePublicOperatorScreenResources,
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
@@ -241,6 +242,9 @@ export const renderDocumentationCensus = (): string => {
         compileRecoverableSeedSharingProofResources(4, 2);
     const boundedOpeningShareProof = compileOpeningShareResources(4, 256n);
     const boundedOpeningNative = compileBoundedOpeningShareProofResources();
+    const publicOperatorScreens = (['seed', 'opening'] as const).map(
+        compilePublicOperatorScreenResources,
+    );
     const recoverableSetupProfiles = supportedProfiles.profiles.flatMap((row) =>
         row.map((profile) =>
             compileRecoverableSetupResourceScreen(
@@ -2741,7 +2745,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         "The [bounded relation](../crates/protocol-research/seed-sharing-proof/src/layout.rs) retains the common proof engine dimensions even though its physical ring and seed are reduced. The full-ring columns extend the same witness-family count using the existing supported profile's conservative sharing cube, limb and carry widths; they are a model projection, not an implemented full-roster proof. Each nonconstant sharing coefficient contributes its low and high signed variables. Each recipient contributes the two quotient/carry/error triples, two sparse Boolean columns and two support rows; the seed adds one Boolean column whose first seed-width positions the public operator reads. The shared [word-proof layout](../tests/full-word-proof-layout-model.ts) supplies the encoded multiproof bound, including Merkle paths.",
         '',
-        'The native proof planning adds the materialized physical-ring operator, one serialized operator column, the existing public-coefficient allocation allowance for the statement, two encoded statement polynomial payloads, and one complete proof-size allowance to the [generic prover schedule](../tests/browser-word-prover-resource-model.ts). The native case streams proofs, so the complete proof-size allowance is conservative. Metadata and allocator allowances are already in the generic schedule. These are allocation plans, not measured peaks or guarantees for fixture generation, verification, browser integration or a complete setup. An oversized conservative plan does not prove a memory lower bound; it requires a tighter justified representation before a larger experiment.',
+        "The factored operator retains each recipient-key adjoint, one common adjoint, the sharing bases and the seed prefix; word and support columns share geometric terms. The [public-operator buffer model](../tests/public-polynomial-operator-resource-model.ts) retains the parser fingerprints and canonical encoding chunk during construction, one serialized operator column, and the scalar query evaluator's materialized geometric vectors, outputs, scratch and twiddles. Full-profile sharing-basis counts extrapolate the factorization beyond the fixed bounded fixture. Native planning conservatively adds these buffers, the existing public-coefficient allocation allowance, two encoded statement polynomial payloads and one complete proof-size allowance to the [generic prover schedule](../tests/browser-word-prover-resource-model.ts). The native case streams proofs. Metadata and allocator allowances are already in that schedule. These plans are not measured peaks or complete bounds for fixture generation, verification, browser integration or setup; an oversized conservative plan does not prove a memory lower bound.",
         '',
         table(
             [
@@ -2799,8 +2803,20 @@ export const renderDocumentationCensus = (): string => {
                         (value) => value.proofEngine.maximumLiveBytes,
                     ],
                     [
+                        'Retained operator value vectors',
+                        (value) => value.residentValueColumns,
+                    ],
+                    [
                         'Resident physical operator bytes',
                         (value) => value.residentOperatorBytes,
+                    ],
+                    [
+                        'Operator build coefficient and encoding buffers',
+                        (value) => value.operatorBuildBufferBytes,
+                    ],
+                    [
+                        'Operator scalar query buffers',
+                        (value) => value.operatorQueryBufferBytes,
                     ],
                     [
                         'Native proof planning bytes',
@@ -2822,7 +2838,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'The [opening-share model](../tests/recoverable-opening-share-model.ts) projects one original recipient-key equation and one decoding equation for every selected package. The public integer shares have an explicit canonical range; the verifier must derive the centered ciphertext difference from the authenticated source ciphertext and the supplied share. A different bounded recipient-key witness cannot change that plaintext under the [opening-share argument](security-argument.md#recoverable-sealed-preparation-candidate). The selected decision, package identities, original key and complete scope remain required inputs of the future protocol. This is a relation and format projection, not an emitted opening protocol or a decryption capability.',
         '',
-        'The projected batch uses the shared word engine: signed quotient and carry words, a narrow registration error, a signed recovery error split into words and Boolean remainder bits, and one sparse recipient-secret pair. The byte subtotal includes only the new public integer-share vectors and their encoded proof. Expanded statement polynomial bytes additionally include existing public predecessors for verification work; those are not new uploads. The generic proof-engine allowance excludes the new operator representation, public-input reconstruction, context/framing, fixture generation, verifier work, storage and browser integration.',
+        'The projected batch uses the shared word engine: signed quotient and carry words, a narrow registration error, a signed recovery error split into words and Boolean remainder bits, and one sparse recipient-secret pair. Its factored operator retains one combined secret adjoint, a geometric signed-variable term and a support term; construction still needs a transient parser vector, and query evaluation materializes its geometric inputs. The byte subtotal includes only new public integer-share vectors and their encoded proof. Expanded statement polynomial bytes include existing predecessors for verification work, not new uploads. Operator buffers are separate from the generic proof-engine allowance; public-input reconstruction, full protocol framing, fixture generation, remaining verifier work, storage and browser integration remain outside that allowance.',
         '',
         table(
             [
@@ -2869,6 +2885,22 @@ export const renderDocumentationCensus = (): string => {
                     ['Lookup entries', (value) => value.lookupEntries],
                     ['Disjoint Boolean pairs', (value) => value.disjointPairs],
                     ['Support rows', (value) => value.supportRows],
+                    [
+                        'Retained operator value vectors',
+                        (value) => value.residentValueColumns,
+                    ],
+                    [
+                        'Resident physical operator bytes',
+                        (value) => value.residentOperatorBytes,
+                    ],
+                    [
+                        'Operator build coefficient and encoding buffers',
+                        (value) => value.operatorBuildBufferBytes,
+                    ],
+                    [
+                        'Operator scalar query buffers',
+                        (value) => value.operatorQueryBufferBytes,
+                    ],
                     [
                         'Affine rows including support',
                         (value) => value.affineRows,
@@ -2944,6 +2976,72 @@ export const renderDocumentationCensus = (): string => {
             ].map(([label, value]) => [
                 String(label),
                 formatCount(value as bigint),
+            ]),
+        ),
+        '',
+        '### Full-ring public-operator screen',
+        '',
+        'The [standalone public-operator screen](../crates/protocol-research/public-operator-screen/src/lib.rs) consumes canonical public recipes through the same arithmetic accumulators as the bounded proof paths. Its fixed roster and sharing shape use the full physical ring; it creates no witness, proof, verified package or participant capability. One canonical recipe chunk is temporary during construction. Independent direct-equation checks cover selected physical coordinates and the target; whole query-output comparison uses the existing interpolation kernel through a different column assembly order and is not an independent proof of every equation. One combined physical column and its query result are retained at a time before the factored query evaluation. The model takes the maximum of those phases plus the existing metadata and allocator allowance, without a whole decoded statement or proof engine. These are pre-execution allocation plans; process guards and actual native/scalar measurements remain required.',
+        '',
+        table(
+            ['Property', 'Seed-sharing operator', 'Opening-share operator'],
+            (
+                [
+                    ['Participants', (value) => value.participants],
+                    [
+                        'Sharing and recovery threshold',
+                        (value) => value.threshold,
+                    ],
+                    ['Selected packages', (value) => value.selectedCount],
+                    ['Opening seed bits', (value) => value.seedBits],
+                    ['Physical degree', (value) => value.degree],
+                    ['Relation columns', (value) => value.columns],
+                    [
+                        'Canonical public polynomials consumed',
+                        (value) => value.polynomialCount,
+                    ],
+                    ['Query indices', (value) => value.queryCount],
+                    [
+                        'Independent physical coordinates',
+                        (value) => value.physicalSamples.length,
+                    ],
+                    [
+                        'Reported query coordinates',
+                        (value) => value.querySamples.length,
+                    ],
+                    ['Exact report bytes', (value) => value.reportBytes],
+                    ['ABI output capacity', (value) => value.outputCapacity],
+                    [
+                        'Maximum canonical input chunk bytes',
+                        (value) => value.maximumInputChunkBytes,
+                    ],
+                    [
+                        'Retained operator coefficient bytes',
+                        (value) => value.residentOperatorBytes,
+                    ],
+                    [
+                        'Largest phase coefficient/buffer bytes',
+                        (value) => value.maximumBufferBytes,
+                    ],
+                    [
+                        'Metadata and allocator allowance',
+                        (value) => value.metadataAndAllocatorAllowance,
+                    ],
+                    [
+                        'Process planning allowance',
+                        (value) => value.planningBytes,
+                    ],
+                ] satisfies readonly (readonly [
+                    string,
+                    (
+                        value: (typeof publicOperatorScreens)[number],
+                    ) => bigint | number,
+                ])[]
+            ).map(([label, select]) => [
+                label,
+                ...publicOperatorScreens.map((value) =>
+                    formatCount(select(value)),
+                ),
             ]),
         ),
         '',

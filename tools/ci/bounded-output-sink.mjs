@@ -8,7 +8,7 @@ const maximumChunkBytes = 1_048_576;
 // is acknowledged until its bytes are written and synced; no failed write
 // can be continued or completed as a proof.
 /** @param {string} file @param {number} expectedBytes @param {string} expectedSha512 */
-export const createSeedSharingProofSink = async (
+export const createBoundedOutputSink = async (
     file,
     expectedBytes,
     expectedSha512,

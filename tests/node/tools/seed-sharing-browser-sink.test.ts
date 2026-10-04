@@ -5,12 +5,12 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { serveSeedSharingBrowserInputs } from '#tools/ci/run-seed-sharing-browser.js';
+import { serveBoundedBrowserInputs } from '#tools/ci/run-seed-sharing-browser.js';
 import {
-    emitBrowserProofChunk,
+    emitBrowserOutputChunk,
     seedSharingChunkBytes,
 } from '#tools/ci/seed-sharing-browser-input.mjs';
-import { createBrowserProofSink } from '#tools/ci/seed-sharing-browser-sink.js';
+import { createBrowserOutputSink } from '#tools/ci/seed-sharing-browser-sink.js';
 
 const digest = (bytes: Uint8Array) =>
     createHash('sha512').update(bytes).digest('hex');
@@ -29,10 +29,10 @@ const fixture = async () => {
     };
 };
 
-describe('browser generated-proof sink', () => {
+describe('browser bounded-output sink', () => {
     it('preserves the accepted prefix across invalid chunks and acknowledges completed writes', async () => {
         const files = await fixture();
-        const sink = await createBrowserProofSink(
+        const sink = await createBrowserOutputSink(
             files.file,
             6,
             digest(new Uint8Array([1, 2, 3, 4, 5, 6])),
@@ -105,7 +105,7 @@ describe('browser generated-proof sink', () => {
 
     it('refuses a concurrent upload while an earlier chunk is still arriving', async () => {
         const files = await fixture();
-        const sink = await createBrowserProofSink(
+        const sink = await createBrowserOutputSink(
             files.file,
             3,
             digest(new Uint8Array([1, 2, 3])),
@@ -159,8 +159,8 @@ describe('browser generated-proof sink', () => {
             return response;
         });
         let completed = false;
-        const emitted = emitBrowserProofChunk(
-            'https://fixture.invalid/generated/',
+        const emitted = emitBrowserOutputChunk(
+            'https://fixture.invalid/output/',
             0,
             0,
             bytes,
@@ -188,8 +188,8 @@ describe('browser generated-proof sink', () => {
                 ),
             );
             await expect(
-                emitBrowserProofChunk(
-                    'https://fixture.invalid/generated/',
+                emitBrowserOutputChunk(
+                    'https://fixture.invalid/output/',
                     0,
                     0,
                     bytes,
@@ -204,10 +204,9 @@ describe('browser generated-proof sink', () => {
         const moduleFile = path.join(files.directory, 'module.data');
         await writeFile(moduleFile, new Uint8Array([1, 2, 3]));
         let server:
-            | Awaited<ReturnType<typeof serveSeedSharingBrowserInputs>>
-            | undefined;
+            Awaited<ReturnType<typeof serveBoundedBrowserInputs>> | undefined;
         try {
-            server = await serveSeedSharingBrowserInputs(
+            server = await serveBoundedBrowserInputs(
                 path.resolve('.'),
                 moduleFile,
                 [],
@@ -218,24 +217,24 @@ describe('browser generated-proof sink', () => {
                 },
             );
             expect(
-                await emitBrowserProofChunk(
-                    server.origin + '/generated/',
+                await emitBrowserOutputChunk(
+                    server.origin + '/output/',
                     0,
                     0,
                     new Uint8Array([1, 2, 3]),
                 ),
             ).toEqual({ index: 0, offset: 0, length: 3 });
-            expect(() => server!.generatedProof()).toThrow('incomplete');
+            expect(() => server!.completedOutput()).toThrow('incomplete');
             expect(
-                await emitBrowserProofChunk(
-                    server.origin + '/generated/',
+                await emitBrowserOutputChunk(
+                    server.origin + '/output/',
                     1,
                     3,
                     new Uint8Array([4, 5]),
                 ),
             ).toEqual({ index: 1, offset: 3, length: 2 });
             const expected = new Uint8Array([1, 2, 3, 4, 5]);
-            expect(server.generatedProof()).toMatchObject({
+            expect(server.completedOutput()).toMatchObject({
                 file: files.file,
                 bytes: 5,
                 sha512: digest(expected),
@@ -259,14 +258,14 @@ describe('browser generated-proof sink', () => {
                 expected,
             );
             await expect(
-                emitBrowserProofChunk(
-                    server.origin + '/generated/',
+                emitBrowserOutputChunk(
+                    server.origin + '/output/',
                     0,
                     0,
                     new Uint8Array([1, 2, 3]),
                 ),
             ).rejects.toThrow('acknowledge');
-            expect(server.generatedProof().sha512).toBe(digest(expected));
+            expect(server.completedOutput().sha512).toBe(digest(expected));
         } finally {
             await server?.close();
             await files.cleanup();

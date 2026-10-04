@@ -7,8 +7,10 @@ import {
     compileFullWordProofLayout,
     compileWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
+import { compilePublicPolynomialOperatorBuffers } from '#tests/public-polynomial-operator-resource-model.js';
 import {
     compileBoundedOpeningShareProofResources,
+    compilePublicOperatorScreenResources,
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
@@ -16,6 +18,72 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 describe('recoverable setup resource screen', () => {
+    it.each([
+        ['seed', 44, 18, 13],
+        ['opening', 13, 11, 6],
+    ] as const)(
+        'bounds the streamed %s operator screen and exact report schema',
+        (kind, columns, physicalCount, polynomials) => {
+            const screen = compilePublicOperatorScreenResources(kind);
+            expect(screen.degree).toBe(65536n);
+            expect(screen.seedBits).toBe(512n);
+            expect(screen.columns).toBe(columns);
+            expect(screen.polynomialCount).toBe(polynomials);
+            expect(screen.queryCount).toBe(2 * 704);
+            expect(screen.queries).toHaveLength(2 * 704);
+            expect(new Set(screen.queries).size).toBe(2 * 704);
+            expect(
+                screen.queries.every(
+                    (value, index) =>
+                        index === 0 || value > screen.queries[index - 1],
+                ),
+            ).toBe(true);
+            for (let index = 0; index < 704; index++)
+                expect(
+                    screen.queries[index + 704] - screen.queries[index],
+                ).toBe(131072);
+            for (const boundary of [
+                0, 1, 65535, 65536, 65537, 131070, 131071, 262143,
+            ])
+                expect(screen.queries).toContain(boundary);
+            expect(screen.physicalSamples).toHaveLength(physicalCount);
+            expect(screen.querySamples).toHaveLength(8);
+            expect(
+                screen.physicalSamples.every(
+                    ({ column, index }) => column < columns && index < 65536,
+                ),
+            ).toBe(true);
+            expect(
+                screen.querySamples.every(
+                    ({ column, index }) =>
+                        column < columns && screen.queries.includes(index),
+                ),
+            ).toBe(true);
+            // OPR1, eight u32 operands, three extension values, two hashes,
+            // two u32 sample counts, then (column,index,extension) records.
+            const header = 4n + 8n * 4n + 3n * (3n * 16n) + 2n * 64n + 2n * 4n;
+            expect(screen.reportHeaderBytes).toBe(header);
+            expect(screen.sampleBytes).toBe(2n * 4n + 3n * 16n);
+            expect(screen.reportBytes).toBe(
+                header + BigInt(physicalCount + 8) * 56n,
+            );
+            expect(screen.outputCapacity).toBe(
+                header + BigInt(3 + 8 + 3 + 4 + 8) * 56n,
+            );
+            expect(screen.planningBytes).toBe(
+                screen.stages.reduce(
+                    (maximum, { bytes }) => (bytes > maximum ? bytes : maximum),
+                    0n,
+                ) +
+                    64n * 1024n * 1024n,
+            );
+            expect(screen.maximumInputChunkBytes).toBe((1048576n / 21n) * 21n);
+            expect(screen.residentOperatorBytes).toBe(
+                BigInt(kind === 'seed' ? 7 : 1) * 65536n * 48n,
+            );
+            expect(screen.planningBytes).toBeLessThan(1n << 30n);
+        },
+    );
     it('counts the exact bounded opening fixture framing and sequential proving stages', () => {
         const fixture = compileBoundedOpeningShareProofResources();
         // Independent schema inventory: magic, seven u32 parameters, 20-byte
@@ -26,7 +94,13 @@ describe('recoverable setup resource screen', () => {
         const opening = shape + 64n + 2n + 6n * 256n * 21n + 2n * 256n * 15n;
         expect(fixture.seedStatementBytes).toBe(source);
         expect(fixture.openingStatementBytes).toBe(opening);
-        expect(fixture.residentOperatorBytes).toBe(13n * 256n * 48n);
+        expect(fixture.residentOperatorBytes).toBe(256n * 48n);
+        expect(fixture.opening.operatorBuildBufferBytes).toBe(
+            2n * 256n * 48n + 256n * 21n,
+        );
+        expect(fixture.derivedEquationCoefficientAllowanceBytes).toBe(
+            256n * 1024n,
+        );
         expect(fixture.retainedSourceCoefficientAllowanceBytes).toBe(
             2n * 13n * 256n * 1024n,
         );
@@ -237,8 +311,15 @@ describe('recoverable setup resource screen', () => {
         expect(full.layout).toEqual(reduced.layout);
         expect(full.relation.affineRows).toBe(1_048_584n);
         expect(full.seedBits).toBe(512n);
-        expect(reduced.residentOperatorBytes).toBe(44n * 256n * 48n);
-        expect(full.residentOperatorBytes).toBe(44n * 65536n * 48n);
+        // Four public keys, one common adjoint, one sharing basis and seed
+        // prefix remain; geometric word columns share descriptor terms.
+        expect(reduced.residentValueColumns).toBe(7);
+        expect(reduced.residentOperatorBytes).toBe(7n * 256n * 48n);
+        expect(full.residentOperatorBytes).toBe(7n * 65536n * 48n);
+        expect(
+            compileRecoverableSeedSharingProofResources(10, 10)
+                .residentValueColumns,
+        ).toBe(10 + 1 + 3 + 1);
         // At ten participants, three (96,16)-bit sharing coefficients add
         // 21 words; ten recipients add 70 words and 20 narrow error lookups.
         expect(
@@ -283,5 +364,64 @@ describe('recoverable setup resource screen', () => {
                     seedBits,
                 ),
             ).toThrow();
+    });
+
+    it('retains parser, encoding, geometric-query and transform buffers after factorization', () => {
+        const reduced = compilePublicPolynomialOperatorBuffers(
+            256n,
+            21n,
+            44,
+            7,
+            7,
+        );
+        const full = compilePublicPolynomialOperatorBuffers(
+            65536n,
+            21n,
+            44,
+            7,
+            7,
+        );
+        expect(reduced.operatorBuildBufferBytes).toBe(
+            7n * 256n * 48n + 256n * 21n,
+        );
+        expect(reduced.serializedOperatorColumnBytes).toBe(256n * 48n);
+        // Reduced Powers and Ones are both transformed. Full-degree Ones
+        // are evaluated directly, leaving only the Powers vector to expand.
+        expect(reduced.queryValueColumns).toBe(9);
+        expect(full.queryValueColumns).toBe(8);
+        expect(reduced.queryValuesBytes).toBe(9n * 256n * 48n);
+        expect(full.queryValuesBytes).toBe(8n * 65536n * 48n);
+        expect(full.operatorEncodingChunkBytes).toBe((1048576n / 21n) * 21n);
+        expect(reduced.queryOutputBytes).toBe((44n + 9n) * 1408n * 48n);
+        expect(reduced.queryTemporaryBytes).toBe(
+            256n * 48n + 255n * 16n + 1408n * (24n + 48n),
+        );
+        expect(reduced.operatorQueryBufferBytes).toBe(
+            9n * 256n * 48n +
+                53n * 1408n * 48n +
+                256n * 48n +
+                255n * 16n +
+                1408n * (24n + 48n + 4n),
+        );
+        for (const [degree, width, columns, retained, building] of [
+            [0n, 21n, 44, 7, 7],
+            [255n, 21n, 44, 7, 7],
+            [131072n, 21n, 44, 7, 7],
+            [256n, 0n, 44, 7, 7],
+            [256n, 1048577n, 44, 7, 7],
+            [256n, 21n, 0, 7, 7],
+            [256n, 21n, 44, 0, 7],
+            [256n, 21n, 44, 7, 6],
+            [256n, 21n, 44, 7, 7.5],
+        ] as const)
+            expect(() =>
+                compilePublicPolynomialOperatorBuffers(
+                    degree,
+                    width,
+                    columns,
+                    retained,
+                    building,
+                ),
+            ).toThrow('shape');
     });
 });

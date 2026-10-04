@@ -7,6 +7,7 @@ import { compileContributionBodyCensus } from '#tests/contribution-body-model.js
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
+import { compilePublicPolynomialOperatorBuffers } from '#tests/public-polynomial-operator-resource-model.js';
 import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -66,7 +67,6 @@ export const compileRecoverableSeedSharingProofResources = (
     const columns = wordColumns + booleanColumns;
     const lookupEntries = wordColumns + narrowWordColumns;
     const layout = compileWordProofLayout(columns, lookupEntries);
-    const field = compileSmallLimbProofFieldCensus();
     const relation = {
         wordColumns,
         booleanColumns,
@@ -84,15 +84,6 @@ export const compileRecoverableSeedSharingProofResources = (
         lookups: lookupEntries,
         preparedAdjointBytes: 0n,
     });
-    // The bounded native operator retains one extension-field vector per
-    // column. LinearOracle::create also encodes one such vector at a time.
-    // Count both throughout, even at engine stages that can release them.
-    const residentOperatorBytes =
-        BigInt(columns) *
-        polynomialDegree *
-        field.packedExtensionElementByteLength;
-    const serializedOperatorColumnBytes =
-        polynomialDegree * field.packedExtensionElementByteLength;
     // The statement owns the common polynomial and each recipient's key and
     // two ciphertext polynomials. Reuse the existing BigInt coefficient
     // allocation allowance, not a claim about native allocator object sizes.
@@ -104,6 +95,17 @@ export const compileRecoverableSeedSharingProofResources = (
     const recipient = compileRegistrationKeyRelationCensus();
     const coefficientBytes =
         1n + BigInt(Math.ceil(recipient.modulus.toString(2).length / 8));
+    // n key adjoints, one common adjoint, one sharing basis per nonconstant
+    // coefficient, and the seed prefix. The current fixed fixture has one
+    // such sharing basis; larger profiles extrapolate this factorization.
+    const valueColumns = participantCount + sharingDegree + 2;
+    const operator = compilePublicPolynomialOperatorBuffers(
+        polynomialDegree,
+        coefficientBytes,
+        columns,
+        valueColumns,
+        valueColumns,
+    );
     const publicStatementPolynomialBytes =
         publicStatementPolynomials * polynomialDegree * coefficientBytes;
     return {
@@ -122,19 +124,20 @@ export const compileRecoverableSeedSharingProofResources = (
         relation,
         layout,
         proofEngine,
-        residentOperatorBytes,
-        serializedOperatorColumnBytes,
+        ...operator,
         publicStatementCoefficientAllowanceBytes,
         publicStatementPolynomialBytes,
-        // Proof-engine planning plus resident operator/statement and two
+        // Proof-engine planning plus operator build/query/serialization
+        // buffers, resident statement and two
         // serialized statement payloads. One complete proof's size remains
         // an allocation allowance although the native case streams proofs.
         // The engine includes metadata/allocator allowances. This does not
         // bound fixture generation, verifier work or a complete setup.
         nativeProofPlanningBytes:
             proofEngine.maximumLiveBytes +
-            residentOperatorBytes +
-            serializedOperatorColumnBytes +
+            operator.operatorBuildBufferBytes +
+            operator.serializedOperatorColumnBytes +
+            operator.operatorQueryBufferBytes +
             publicStatementCoefficientAllowanceBytes +
             2n * publicStatementPolynomialBytes +
             layout.maximumMultiproofBytes,
@@ -155,7 +158,6 @@ export const compileBoundedOpeningShareProofResources = () => {
     );
     const opening = compileOpeningShareResources(participants, degree);
     const selected = BigInt(opening.parameters.selectedCount);
-    const field = compileSmallLimbProofFieldCensus();
     const tagBytes = proofCompilerCaps.tagBits / 8n;
     const modulusBytes = BigInt(
         Math.ceil(opening.parameters.modulus.toString(2).length / 8),
@@ -179,27 +181,24 @@ export const compileBoundedOpeningShareProofResources = () => {
         (1n + 3n * BigInt(participants)) *
         degree *
         publicCoefficientAllowance;
-    const residentOperatorBytes =
-        BigInt(opening.wordColumns + opening.booleanColumns) *
-        degree *
-        field.packedExtensionElementByteLength;
-    const serializedOperatorColumnBytes =
-        degree * field.packedExtensionElementByteLength;
+    const { residentOperatorBytes, serializedOperatorColumnBytes } = opening;
     // Positive, shifted, and the active controller's statement; the caller's
     // extra public M vectors are retained until its scope controls finish.
     const openingStatementCoefficientAllowanceBytes =
         3n * (2n + 2n * selected) * degree * publicCoefficientAllowance +
         4n * selected * degree * 16n;
+    // equations() now yields one key/difference polynomial at a time.
     const derivedEquationCoefficientAllowanceBytes =
-        (1n + selected) * degree * publicCoefficientAllowance;
+        degree * publicCoefficientAllowance;
     const secondSourceStageBytes =
         seed.nativeProofPlanningBytes +
         retainedSourceCoefficientAllowanceBytes +
         2n * seedStatementBytes;
     const openingStageBytes =
         opening.proofEngine.maximumLiveBytes +
-        residentOperatorBytes +
+        opening.operatorBuildBufferBytes +
         serializedOperatorColumnBytes +
+        opening.operatorQueryBufferBytes +
         retainedSourceCoefficientAllowanceBytes +
         openingStatementCoefficientAllowanceBytes +
         derivedEquationCoefficientAllowanceBytes +
@@ -229,6 +228,185 @@ export const compileBoundedOpeningShareProofResources = () => {
             2n * opening.layout.maximumMultiproofBytes +
             seedStatementBytes +
             2n * openingStatementBytes,
+    };
+};
+
+// The standalone screen streams public recipes, not decoded Statements,
+// witnesses or proofs. These are its actual fixed shapes, not a full-profile
+// preparation plan; the normal proof wrappers remain at their bounded ring.
+export const compilePublicOperatorScreenResources = (
+    kind: 'seed' | 'opening',
+) => {
+    if (kind !== 'seed' && kind !== 'opening')
+        throw new RangeError('Unknown public operator screen.');
+    const agreement = compileCommonAgreementDegreeCensus();
+    const degree = BigInt(agreement.systematicSize);
+    const seedBits = 8n * operationSeedBytes;
+    const seed = compileRecoverableSeedSharingProofResources(
+        4,
+        2,
+        degree,
+        seedBits,
+    );
+    const opening = compileOpeningShareResources(4, degree);
+    const selected = kind === 'seed' ? seed : opening;
+    const columns =
+        kind === 'seed'
+            ? seed.relation.wordColumns + seed.relation.booleanColumns
+            : opening.wordColumns + opening.booleanColumns;
+    const words =
+        kind === 'seed' ? seed.relation.wordColumns : opening.wordColumns;
+    const queryHalfCount = agreement.queries;
+    const queryCount = 2 * queryHalfCount;
+    const half = agreement.domainSize / 2;
+    const physicalDegree = Number(degree);
+    const lower = new Set([
+        0,
+        1,
+        physicalDegree - 1,
+        physicalDegree,
+        physicalDegree + 1,
+        half - 2,
+        half - 1,
+    ]);
+    for (
+        let index = 0;
+        index < queryHalfCount && lower.size < queryHalfCount;
+        index++
+    )
+        lower.add(Math.floor((index * (half - 1)) / (queryHalfCount - 1)));
+    for (let index = 0; index < half && lower.size < queryHalfCount; index++)
+        lower.add(index);
+    const lowerIndices = [...lower].sort((left, right) => left - right);
+    const queries = [
+        ...lowerIndices,
+        ...lowerIndices.map((index) => index + half),
+    ];
+    // Independent inventory of the fixed report's selected variable families.
+    const physicalPairs: [number, number][] =
+        kind === 'seed'
+            ? [
+                  [0, 0],
+                  [5, physicalDegree - 1],
+                  [6, physicalDegree / 2],
+                  ...[
+                      0,
+                      physicalDegree / 4 - 1,
+                      physicalDegree / 2,
+                      physicalDegree - 1,
+                  ].flatMap((row, recipient): [number, number][] => [
+                      [35 + 2 * recipient, row],
+                      [36 + 2 * recipient, physicalDegree - 1 - row],
+                  ]),
+                  [7, 0],
+                  [9, physicalDegree - 1],
+                  [10, physicalDegree / 4],
+                  ...[
+                      0,
+                      Number(seedBits) - 1,
+                      Number(seedBits),
+                      physicalDegree - 1,
+                  ].map((row): [number, number] => [43, row]),
+              ]
+            : [
+                  [9, 0],
+                  [9, physicalDegree / 2 - 1],
+                  [9, physicalDegree - 1],
+                  [10, 1],
+                  [10, physicalDegree / 2],
+                  [10, physicalDegree - 2],
+                  [0, 0],
+                  [1, physicalDegree - 1],
+                  [2, physicalDegree / 2],
+                  [11, physicalDegree / 4],
+                  [12, physicalDegree - 1],
+              ];
+    const queryPairs = [
+        [0, 0],
+        [0, queryHalfCount - 1],
+        [columns - 1, queryHalfCount],
+        [columns - 1, queryCount - 1],
+        [words, 1],
+        [words, queryHalfCount / 2],
+        [words + 1, queryHalfCount + 1],
+        [words + 1, queryHalfCount + queryHalfCount / 2],
+    ];
+    const physicalSamples = physicalPairs.map(([column, index]) => ({
+        column,
+        index,
+    }));
+    const querySamples = queryPairs.map(([column, position]) => ({
+        column,
+        index: queries[position],
+    }));
+    const extension =
+        compileSmallLimbProofFieldCensus().packedExtensionElementByteLength;
+    const tags = proofCompilerCaps.tagBits / 8n;
+    const reportHeaderBytes =
+        4n + 8n * 4n + 3n * extension + 2n * tags + 2n * 4n;
+    const sampleBytes = 2n * 4n + extension;
+    const reportBytes =
+        reportHeaderBytes +
+        BigInt(physicalSamples.length + querySamples.length) * sampleBytes;
+    const outputCapacity =
+        reportHeaderBytes + BigInt(3 + 8 + 3 + 4 + 8) * sampleBytes;
+    const queryIndicesBytes = BigInt(queryCount) * 4n;
+    const referenceColumnBytes = degree * extension;
+    const referenceQueryBytes = BigInt(queryCount) * extension;
+    const stages = [
+        {
+            stage: 'canonical polynomial streams',
+            bytes: selected.operatorBuildBufferBytes + queryIndicesBytes,
+        },
+        {
+            stage: 'one-column query reference',
+            bytes:
+                selected.residentOperatorBytes +
+                referenceColumnBytes +
+                selected.queryTemporaryBytes +
+                referenceQueryBytes +
+                queryIndicesBytes,
+        },
+        {
+            stage: 'factored query evaluation',
+            bytes: selected.operatorQueryBufferBytes,
+        },
+        {
+            stage: 'report encoding',
+            bytes: BigInt(columns) * referenceQueryBytes + reportBytes,
+        },
+    ];
+    const maximumBufferBytes = stages.reduce(
+        (maximum, value) => (value.bytes > maximum ? value.bytes : maximum),
+        0n,
+    );
+    const metadataAndAllocatorAllowance =
+        selected.proofEngine.metadataAndAllocatorAllowance;
+    return {
+        kind,
+        caseId: kind === 'seed' ? 0 : 1,
+        degree,
+        participants: 4,
+        threshold: 2,
+        selectedCount: 2,
+        seedBits,
+        columns,
+        queryCount,
+        alpha: [13n, 17n, 19n] as const,
+        queries,
+        physicalSamples,
+        querySamples,
+        reportHeaderBytes,
+        sampleBytes,
+        reportBytes,
+        outputCapacity,
+        polynomialCount: kind === 'seed' ? 1 + 3 * 4 : 2 * (2 + 1),
+        maximumInputChunkBytes: selected.operatorEncodingChunkBytes,
+        residentOperatorBytes: selected.residentOperatorBytes,
+        stages,
+        maximumBufferBytes,
+        metadataAndAllocatorAllowance,
+        planningBytes: maximumBufferBytes + metadataAndAllocatorAllowance,
     };
 };
 

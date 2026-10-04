@@ -2,7 +2,7 @@ import {
     browserSha512,
     createBrowserProofReader,
     createBrowserPredecessorReader,
-    emitBrowserProofChunk,
+    emitBrowserOutputChunk,
     readBoundedBrowserResponse,
 } from './seed-sharing-browser-input.mjs';
 import { verifyBoundedProof } from './seed-sharing-scalar-verifier.mjs';
@@ -12,17 +12,18 @@ import { verifyBoundedProof } from './seed-sharing-scalar-verifier.mjs';
 /** @typedef {SharedConfiguration & {proofs:BrowserProof[],probe:import('./scalar-proof-stream.mjs').Probe}} VerificationConfiguration */
 
 /** @typedef {SharedConfiguration & {mode:'generate',expectedBytes:number,sinkUrl:string}} GenerationConfiguration */
+/** @typedef {{mode:'operator',caseIndex:0|1,moduleUrl:string,moduleBytes:number,moduleSha512:string,expectedBytes:number,sinkUrl:string}} OperatorConfiguration */
 
 self.onmessage = ({ data }) => {
     void (async () => {
         const configuration =
-            /** @type {VerificationConfiguration | GenerationConfiguration} */ (
+            /** @type {VerificationConfiguration | GenerationConfiguration | OperatorConfiguration} */ (
                 data
             );
         const { moduleUrl, moduleBytes, moduleSha512 } = configuration;
         if (!isSecureContext || typeof crypto.subtle !== 'object')
             throw new Error(
-                'The verification worker lacks secure browser hashing.',
+                'The experiment worker lacks secure browser hashing.',
             );
         const bytes = await readBoundedBrowserResponse(
             moduleUrl,
@@ -30,7 +31,26 @@ self.onmessage = ({ data }) => {
             8_388_608,
         );
         if ((await browserSha512(bytes)) !== moduleSha512)
-            throw new Error('The browser verifier module identity differs.');
+            throw new Error('The browser module identity differs.');
+        if ('mode' in configuration && configuration.mode === 'operator') {
+            const { runPublicOperatorScreen } =
+                await import('./public-operator-scalar.mjs');
+            const result = await runPublicOperatorScreen({
+                moduleBytes: bytes,
+                caseIndex: configuration.caseIndex,
+                expectedBytes: configuration.expectedBytes,
+                emitChunk: (index, offset, chunk) =>
+                    emitBrowserOutputChunk(
+                        configuration.sinkUrl,
+                        index,
+                        offset,
+                        chunk,
+                    ),
+                onProgress: (progress) => self.postMessage({ progress }),
+            });
+            self.postMessage({ result });
+            return;
+        }
         const predecessors = configuration.predecessors ?? [];
         const predecessorReader = createBrowserPredecessorReader(predecessors);
         const relation = configuration.relation ?? 'seed-sharing';
@@ -45,7 +65,7 @@ self.onmessage = ({ data }) => {
                 readPredecessor: predecessorReader.read,
                 expectedBytes: configuration.expectedBytes,
                 emitChunk: (index, offset, chunk) =>
-                    emitBrowserProofChunk(
+                    emitBrowserOutputChunk(
                         configuration.sinkUrl,
                         index,
                         offset,

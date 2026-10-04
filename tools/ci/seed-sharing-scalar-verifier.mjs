@@ -1,4 +1,5 @@
 import { verifyOpeningShareProof } from './opening-share-scalar.mjs';
+import { instantiateScalarModule } from './scalar-module.mjs';
 import { streamScalarProof } from './scalar-proof-stream.mjs';
 /** @typedef {{bytes: number, sha512: string}} Proof */
 /** @typedef {import('./scalar-proof-stream.mjs').Probe} Probe */
@@ -39,33 +40,9 @@ export const verifyBoundedProof = async ({
     predecessors,
     readPredecessor,
 }) => {
-    const compiled = await WebAssembly.compile(moduleBytes);
-    const unavailable = (name) => () => {
-        throw new Error('Scalar verification invoked ' + name);
-    };
-    // The actual parallel-work scalar contract asks only for the helper
-    // count. Every other host callback must fail without helpers.
-    const imports = {
-        parallel: {
-            helpers: () => 0,
-            share: unavailable('parallel.share'),
-            release: unavailable('parallel.release'),
-            submit: unavailable('parallel.submit'),
-            wait: unavailable('parallel.wait'),
-            take: unavailable('parallel.take'),
-            discard: unavailable('parallel.discard'),
-            ended: unavailable('parallel.ended'),
-            read: unavailable('parallel.read'),
-        },
-    };
-    for (const entry of WebAssembly.Module.imports(compiled))
-        requireCondition(
-            entry.kind === 'function' &&
-                entry.module === 'parallel' &&
-                Object.keys(imports.parallel).includes(entry.name),
-            'Unknown scalar import.',
-        );
-    const instance = await WebAssembly.instantiate(compiled, imports);
+    const instance = await instantiateScalarModule(moduleBytes, {
+        operation: 'verification',
+    });
     if (relation === 'opening-share') {
         requireCondition(
             predecessors !== undefined && readPredecessor !== undefined,

@@ -1,39 +1,29 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import {
-    copyFile,
-    mkdir,
-    mkdtemp,
-    readFile,
-    rm,
-    writeFile,
-} from 'node:fs/promises';
-import { freemem, homedir } from 'node:os';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { freemem } from 'node:os';
 import path from 'node:path';
-import { setTimeout } from 'node:timers/promises';
-
-import binaryen from 'binaryen';
 
 import { compileBoundedOpeningShareProofResources } from '#tests/recoverable-setup-resource-model.js';
-import {
-    compiledRustSources,
-    requireCheckoutBytes,
-} from '#tools/ci/compiled-inputs.js';
+import { requireCheckoutBytes } from '#tools/ci/compiled-inputs.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import { createNativeVerifierGuard } from '#tools/ci/native-verifier-guard.js';
 import { openingShareProbes } from '#tools/ci/opening-share-scalar.mjs';
-import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
-import {
-    runCommandAndCaptureOutput,
-    runCommandsInSeries,
-} from '#tools/ci/run-command.js';
+import { runGuardedFixture } from '#tools/ci/run-guarded-fixture.js';
 import {
     generateBoundedProofInChrome,
-    boundedProofBrowserSources,
+    boundedBrowserSources,
     verifyBoundedProofInChrome,
 } from '#tools/ci/run-seed-sharing-browser.js';
+import {
+    buildScalarFixtureModule,
+    executeFixtureCommand,
+    readFixtureCompiler,
+    scalarFixtureBuildFlags,
+    scalarLinearMemoryLimit as linearMemoryLimit,
+    fixtureProcessMemoryLimit as processMemoryLimit,
+} from '#tools/ci/scalar-fixture-build.js';
 import { seedSharingChunkBytes } from '#tools/ci/seed-sharing-browser-input.mjs';
 import {
     fileDigest,
@@ -44,117 +34,6 @@ import {
     assertScalarNativeInputs,
     compareNativeReferenceArtifacts,
 } from '#tools/ci/seed-sharing-scalar-source.js';
-
-const linearMemoryLimit = 671_088_640;
-const processMemoryLimit = 1_073_741_824;
-const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';
-const allowedImports = new Set([
-    'helpers',
-    'share',
-    'release',
-    'submit',
-    'wait',
-    'take',
-    'discard',
-    'ended',
-    'read',
-]);
-
-export const inspectScalarProofModule = async (
-    bytes: Uint8Array,
-    generation = false,
-    relation: 'seed-sharing' | 'opening-share' = 'seed-sharing',
-) => {
-    const inspected = binaryen.readBinary(bytes);
-    try {
-        assert.doesNotMatch(
-            inspected.emitText(),
-            /\b(?:v128|i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\./u,
-            'The verifier must contain scalar instructions only.',
-        );
-        const memory = inspected.getMemoryInfo();
-        assert.ok(
-            !memory.shared &&
-                !memory.is64 &&
-                memory.max === linearMemoryLimit / 65_536,
-            'The verifier memory is not bounded unshared scalar memory.',
-        );
-    } finally {
-        inspected.dispose();
-    }
-    const module = await WebAssembly.compile(new Uint8Array(bytes));
-    const imports = WebAssembly.Module.imports(module);
-    assert.ok(
-        imports.every(
-            (entry) =>
-                entry.kind === 'function' &&
-                ((entry.module === 'parallel' &&
-                    allowedImports.has(entry.name)) ||
-                    (generation &&
-                        entry.module === 'word_proof' &&
-                        entry.name === 'fill_random')),
-        ),
-        'The verifier declares an unknown host import.',
-    );
-    const exports = WebAssembly.Module.exports(module);
-    const required =
-        relation === 'opening-share'
-            ? [
-                  'opening_input_pointer',
-                  'opening_input_capacity',
-                  'opening_header_length',
-                  ...['source', 'verifier'].flatMap((role) =>
-                      ['begin', 'push', 'finish'].map(
-                          (name) => 'opening_' + role + '_' + name,
-                      ),
-                  ),
-              ]
-            : [
-                  'input_pointer',
-                  'input_capacity',
-                  'header_length',
-                  'begin',
-                  'push',
-                  'finish',
-              ].map((name) => 'seed_verifier_' + name);
-    for (const name of required)
-        assert.ok(
-            exports.some(
-                (entry) => entry.kind === 'function' && entry.name === name,
-            ),
-            'The verifier is missing its bounded ABI.',
-        );
-    assert.ok(
-        exports.some(
-            (entry) => entry.kind === 'memory' && entry.name === 'memory',
-        ),
-    );
-    if (generation)
-        for (const name of [
-            'begin',
-            'phase',
-            'step',
-            'next_output',
-            'output_pointer',
-            'output_length',
-            'output_capacity',
-            'ack_output',
-        ])
-            assert.ok(
-                exports.some(
-                    (entry) =>
-                        entry.kind === 'function' &&
-                        entry.name ===
-                            (relation === 'opening-share'
-                                ? 'opening'
-                                : 'seed') +
-                                '_prover_' +
-                                name,
-                ),
-                'The prover is missing its bounded ABI.',
-            );
-    return { imports, exports };
-};
 
 export const runScalarProofFixture = async (
     sourceDirectory: string,
@@ -167,7 +46,6 @@ export const runScalarProofFixture = async (
         relation +
         (operation === 'generate' ? '-generation' : '');
     const fixturePackage = relation + '-proof';
-    const moduleStem = fixturePackage.replace(/-/gu, '_');
     const root = path.resolve('.');
     const workspace = path.join(root, 'crates/protocol-research');
     await runWithLocalRunLog(
@@ -290,120 +168,23 @@ export const runScalarProofFixture = async (
                     CARGO_TARGET_DIR: path.join(workspace, 'target'),
                 };
                 delete environment.SEALED_LATTICE_SIMULATED_HELPERS;
-                const execute = async (
+                const buildContext = { root, log, environment };
+                const execute = (
                     command: string,
                     args: string[],
                     name: string,
                     env = environment,
-                ) => {
-                    const result = await runCommandAndCaptureOutput(
-                        {
-                            command,
-                            args,
-                            env,
-                            workingDirectoryPath: workspace,
-                            description: name,
-                            logFileSlug: name,
-                        },
-                        {
-                            runLog: log,
-                            echoOutput: true,
-                            signal: AbortSignal.timeout(600_000),
-                        },
+                ) =>
+                    executeFixtureCommand(
+                        { ...buildContext, environment: env },
+                        command,
+                        args,
+                        name,
                     );
-                    assert.equal(result.exitCode, 0, name);
-                    assert.equal(result.terminationSignal, null, name);
-                    return result.stdout;
-                };
-                const compiler = await execute(
-                    'rustc',
-                    ['+1.95.0', '-Vv'],
-                    'compiler',
-                );
-                assert.ok(compiler.includes('commit-hash: ' + compilerCommit));
-                const cargoHome = path.resolve(
-                    process.env.CARGO_HOME ?? path.join(homedir(), '.cargo'),
-                );
-                const flags = (repository: string, cargo: string) => [
-                    '--remap-path-prefix',
-                    repository + '=/workspace',
-                    '--remap-path-prefix',
-                    cargo + '=/cargo',
-                    '-C',
-                    'target-feature=-simd128',
-                    '-C',
-                    'link-arg=--max-memory=' + String(linearMemoryLimit),
-                ];
-                const buildModule = async (
+                const compiler = await readFixtureCompiler(buildContext);
+                const buildModule = (
                     feature: 'scalar-fixture' | 'scalar-prover-fixture',
-                ) => {
-                    const generation = feature === 'scalar-prover-fixture';
-                    const targetDirectory = path.join(
-                        root,
-                        generation
-                            ? 'target/' + relation + '-scalar-prover'
-                            : 'target/' + relation + '-scalar',
-                    );
-                    await execute(
-                        'cargo',
-                        [
-                            '+1.95.0',
-                            'build',
-                            '--offline',
-                            '--locked',
-                            '--release',
-                            '--no-default-features',
-                            '-p',
-                            fixturePackage,
-                            '--features',
-                            feature,
-                            '--lib',
-                            '--target',
-                            'wasm32-unknown-unknown',
-                        ],
-                        generation ? 'build-scalar-prover' : 'build-scalar',
-                        {
-                            ...environment,
-                            CARGO_TARGET_DIR: targetDirectory,
-                            CARGO_ENCODED_RUSTFLAGS: flags(
-                                root,
-                                cargoHome,
-                            ).join('\x1f'),
-                        },
-                    );
-                    const builtDirectory = path.join(
-                        targetDirectory,
-                        'wasm32-unknown-unknown/release',
-                    );
-                    const moduleBytes = await readFile(
-                        path.join(builtDirectory, moduleStem + '.wasm'),
-                    );
-                    const inspected = await inspectScalarProofModule(
-                        moduleBytes,
-                        generation,
-                        relation,
-                    );
-                    const moduleFile = path.join(
-                        log.artifactDirectoryPath,
-                        generation
-                            ? relation + '-prover.wasm'
-                            : relation + '-verifier.wasm',
-                    );
-                    await writeFile(moduleFile, moduleBytes, { flag: 'wx' });
-                    const compiled = await compiledRustSources(
-                        path.join(builtDirectory, moduleStem + '.d'),
-                    );
-                    return {
-                        feature,
-                        moduleBytes,
-                        moduleFile,
-                        inspected,
-                        compiled,
-                        moduleSha512: createHash('sha512')
-                            .update(moduleBytes)
-                            .digest('hex'),
-                    };
-                };
+                ) => buildScalarFixtureModule(buildContext, relation, feature);
                 const verifierModule = await buildModule('scalar-fixture');
                 const proverModule =
                     operation === 'generate'
@@ -430,7 +211,9 @@ export const runScalarProofFixture = async (
                         fixturePackage +
                         '/src/proof.rs',
                     'tools/ci/run-seed-sharing-scalar.ts',
-                    'tools/ci/native-verifier-guard.ts',
+                    'tools/ci/native-operation-guard.ts',
+                    'tools/ci/run-guarded-fixture.ts',
+                    'tools/ci/scalar-fixture-build.ts',
                     'tools/ci/compiled-inputs.ts',
                     'tools/ci/protocol-research-registry.ts',
                     'tools/ci/scalar-proof-file-reader.mjs',
@@ -442,8 +225,9 @@ export const runScalarProofFixture = async (
                     'tools/ci/seed-sharing-scalar-worker.mjs',
                     'tools/ci/seed-sharing-scalar-verifier.mjs',
                     'tools/ci/seed-sharing-scalar-prover.mjs',
-                    'tools/ci/seed-sharing-scalar-prover-worker.mjs',
-                    ...boundedProofBrowserSources,
+                    'tools/ci/bounded-output-worker.mjs',
+                    'tools/ci/operator-process-gates.mjs',
+                    ...boundedBrowserSources,
                 ]);
                 for (const file of compiled) {
                     let directory = path.posix.dirname(file);
@@ -485,7 +269,10 @@ export const runScalarProofFixture = async (
                     JSON.stringify(
                         {
                             compiler,
-                            flags: flags('<repository>', '<cargo-home>'),
+                            flags: scalarFixtureBuildFlags(
+                                '<repository>',
+                                '<cargo-home>',
+                            ),
                             features: [
                                 verifierModule.feature,
                                 ...(proverModule === undefined
@@ -544,211 +331,24 @@ export const runScalarProofFixture = async (
                     JSON.stringify(bindings, null, 2) + '\n',
                     { flag: 'wx' },
                 );
-                const guarded = async (
+                const guarded = (
                     command: string,
                     args: string[],
                     name: string,
                     handshake = false,
-                ) => {
-                    assert.ok(freemem() >= 2 * processMemoryLimit);
-                    const gateDirectory = handshake
-                        ? await mkdtemp(
-                              path.join(root, 'temp/native-verifier-guard-'),
-                          )
-                        : undefined;
-                    const gateFiles =
-                        gateDirectory === undefined
-                            ? undefined
-                            : {
-                                  startFile: path.join(gateDirectory, 'start'),
-                                  finishFile: path.join(
-                                      gateDirectory,
-                                      'finish',
-                                  ),
-                              };
-                    const controller = new AbortController();
-                    let active = false,
-                        peakMemory = 0,
-                        samples = 0,
-                        output = '';
-                    let monitor: Promise<void> | undefined;
-                    let nativeGuard:
-                        | ReturnType<typeof createNativeVerifierGuard>
-                        | undefined;
-                    let guardResult:
-                        | Awaited<
-                              ReturnType<
-                                  ReturnType<
-                                      typeof createNativeVerifierGuard
-                                  >['monitor']
-                              >
-                          >
-                        | undefined;
-                    const recordSample = (
-                        phase: 'initial' | 'periodic' | 'final',
-                        bytes: number,
-                    ) => {
-                        samples++;
-                        peakMemory = Math.max(peakMemory, bytes);
-                        log.writeEvent({
-                            eventType: 'scalar-verifier-process-memory',
-                            details: {
-                                name,
-                                phase,
-                                bytes,
-                                limit: processMemoryLimit,
-                            },
-                        });
-                    };
-                    const started = performance.now();
-                    const exitCode = await runCommandsInSeries(
-                        [
-                            {
-                                command,
-                                args:
-                                    gateFiles === undefined
-                                        ? args
-                                        : [
-                                              ...args,
-                                              '--guard-start',
-                                              gateFiles.startFile,
-                                              '--guard-finish',
-                                              gateFiles.finishFile,
-                                          ],
-                                env: environment,
-                                workingDirectoryPath: root,
-                                description: name,
-                                logFileSlug: name,
-                            },
-                        ],
-                        {
-                            runLog: log,
-                            outputMode: 'inherit',
-                            signal: AbortSignal.any([
-                                controller.signal,
-                                AbortSignal.timeout(600_000),
-                            ]),
-                            observer: {
-                                onCommandOutput({ chunk, streamName }) {
-                                    if (streamName === 'stdout') {
-                                        output += chunk;
-                                        try {
-                                            nativeGuard?.observeStdout(chunk);
-                                        } catch (error) {
-                                            controller.abort(error);
-                                        }
-                                        if (output.length > 1_048_576)
-                                            controller.abort(
-                                                new Error(
-                                                    'Verifier diagnostics exceed their bound.',
-                                                ),
-                                            );
-                                    }
-                                },
-                                onCommandStart({ processIdentifier }) {
-                                    assert.ok(processIdentifier);
-                                    active = true;
-                                    if (gateFiles !== undefined) {
-                                        nativeGuard = createNativeVerifierGuard(
-                                            {
-                                                ...gateFiles,
-                                                memoryLimit: processMemoryLimit,
-                                                readMemory: () =>
-                                                    readProtocolProcessTree(
-                                                        processIdentifier,
-                                                    ),
-                                                recordSample,
-                                            },
-                                        );
-                                        monitor = nativeGuard
-                                            .monitor()
-                                            .then((result) => {
-                                                guardResult = result;
-                                            })
-                                            .catch((error: unknown) =>
-                                                controller.abort(error),
-                                            );
-                                        return;
-                                    }
-                                    monitor = (async () => {
-                                        while (active) {
-                                            const bytes =
-                                                await readProtocolProcessTree(
-                                                    processIdentifier,
-                                                );
-                                            if (bytes !== undefined) {
-                                                recordSample('periodic', bytes);
-                                                assert.ok(
-                                                    bytes <= processMemoryLimit,
-                                                    'Verifier process-tree memory guard exceeded.',
-                                                );
-                                            }
-                                            if (active) await setTimeout(1000);
-                                        }
-                                    })().catch((error: unknown) =>
-                                        controller.abort(error),
-                                    );
-                                },
-                                onCommandExit() {
-                                    active = false;
-                                    nativeGuard?.stop();
-                                },
-                            },
-                        },
-                    ).finally(async () => {
-                        active = false;
-                        await monitor;
-                        if (gateDirectory !== undefined) {
-                            const resolved = path.resolve(gateDirectory);
-                            assert.ok(
-                                resolved.startsWith(
-                                    path.resolve(root, 'temp') + path.sep,
-                                ),
-                            );
-                            await rm(resolved, { recursive: true });
-                        }
+                ) =>
+                    runGuardedFixture({
+                        root,
+                        log,
+                        environment,
+                        processMemoryLimit,
+                        command,
+                        args,
+                        name,
+                        ...(handshake
+                            ? { handshake: 'verifier' as const }
+                            : {}),
                     });
-                    assert.equal(
-                        controller.signal.aborted,
-                        false,
-                        String(controller.signal.reason),
-                    );
-                    assert.equal(exitCode, 0);
-                    assert.ok(samples > 0);
-                    if (handshake) {
-                        assert.ok(guardResult !== undefined);
-                        assert.equal(guardResult.samples.initial, 1);
-                        assert.equal(guardResult.samples.final, 1);
-                    }
-                    const reports = output
-                        .trim()
-                        .split(/\r?\n/u)
-                        .map(
-                            (line) =>
-                                JSON.parse(line) as Record<string, unknown>,
-                        )
-                        .filter((record) => typeof record.kind === 'string');
-                    assert.equal(
-                        reports.length,
-                        1,
-                        'The verifier emitted an ambiguous final report.',
-                    );
-                    return {
-                        result: reports[0],
-                        peakMemory,
-                        samples,
-                        milliseconds: performance.now() - started,
-                        ...(guardResult === undefined
-                            ? {}
-                            : {
-                                  verificationMilliseconds:
-                                      guardResult.verificationMilliseconds,
-                                  samplesByPhase: guardResult.samples,
-                                  samplingScope:
-                                      'Initial sample before work is released, periodic samples while it runs, and a fresh final sample after completion before process exit. Wall time includes coordination; verificationMilliseconds excludes it. Sampled peaks do not bound transient peaks between observations.',
-                              }),
-                    };
-                };
                 let nativeExecutable: string | undefined;
                 let native: Awaited<ReturnType<typeof guarded>> | undefined;
                 if (openingSource === undefined) {
@@ -839,7 +439,7 @@ export const runScalarProofFixture = async (
                             [
                                 path.join(
                                     root,
-                                    'tools/ci/seed-sharing-scalar-prover-worker.mjs',
+                                    'tools/ci/bounded-output-worker.mjs',
                                 ),
                                 configuration,
                             ],

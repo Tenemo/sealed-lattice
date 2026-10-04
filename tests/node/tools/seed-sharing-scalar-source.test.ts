@@ -13,7 +13,7 @@ import binaryen from 'binaryen';
 import { describe, expect, it } from 'vitest';
 
 import { compileBoundedOpeningShareProofResources } from '#tests/recoverable-setup-resource-model.js';
-import { inspectScalarProofModule } from '#tools/ci/run-seed-sharing-scalar.js';
+import { inspectScalarFixtureModule } from '#tools/ci/scalar-fixture-build.js';
 import {
     assertOpeningShareSourceStable,
     assertScalarNativeInputs,
@@ -387,6 +387,23 @@ describe('scalar opening-share evidence inputs', () => {
 });
 
 describe('scalar seed-sharing evidence inputs', () => {
+    it('refuses truncated and oversized runtime digest artifacts before archive admission', async () => {
+        const data = await fixture();
+        try {
+            const file = path.join(
+                data.root,
+                'temp/run-artifacts/2026-10-04/run/runtime.bin',
+            );
+            for (const length of [63, 65]) {
+                await writeFile(file, Buffer.alloc(length, 9));
+                await expect(
+                    readSeedSharingNativeSource(data.source, data.root),
+                ).rejects.toThrow('runtime digest has another length');
+            }
+        } finally {
+            await rm(data.root, { recursive: true });
+        }
+    });
     it('admits only unchanged compiled seed inputs and separately pinned scalar adapters', async () => {
         const data = await fixture();
         try {
@@ -783,10 +800,10 @@ describe('scalar seed-sharing evidence inputs', () => {
             }
         };
         await expect(
-            inspectScalarProofModule(moduleBytes()),
+            inspectScalarFixtureModule(moduleBytes()),
         ).resolves.toMatchObject({ imports: [] });
         await expect(
-            inspectScalarProofModule(
+            inspectScalarFixtureModule(
                 moduleBytes(
                     undefined,
                     '(import "parallel" "helpers" (func (result i32)))',
@@ -798,7 +815,7 @@ describe('scalar seed-sharing evidence inputs', () => {
             ],
         });
         await expect(
-            inspectScalarProofModule(
+            inspectScalarFixtureModule(
                 moduleBytes(
                     undefined,
                     '(import "word_proof" "fill_random" (func))',
@@ -806,7 +823,7 @@ describe('scalar seed-sharing evidence inputs', () => {
             ),
         ).rejects.toThrow('unknown host import');
         await expect(
-            inspectScalarProofModule(
+            inspectScalarFixtureModule(
                 moduleBytes(
                     undefined,
                     '(import "word_proof" "fill_random" (func))',
@@ -820,20 +837,20 @@ describe('scalar seed-sharing evidence inputs', () => {
             ],
         });
         await expect(
-            inspectScalarProofModule(moduleBytes(), true),
+            inspectScalarFixtureModule(moduleBytes(), true),
         ).rejects.toThrow('prover is missing');
         await expect(
-            inspectScalarProofModule(
+            inspectScalarFixtureModule(
                 moduleBytes('(memory (export "memory") 1 16384)'),
             ),
         ).rejects.toThrow('bounded unshared');
         await expect(
-            inspectScalarProofModule(
+            inspectScalarFixtureModule(
                 moduleBytes('(memory (export "memory") 1 10240 shared)'),
             ),
         ).rejects.toThrow('bounded unshared');
         await expect(
-            inspectScalarProofModule(
+            inspectScalarFixtureModule(
                 moduleBytes(
                     undefined,
                     '(func (drop (v128.const i32x4 0 0 0 0)))',

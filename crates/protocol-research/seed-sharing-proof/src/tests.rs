@@ -3,10 +3,7 @@ use crate::{
     layout::{Layout, STRIDE},
     statement::{Statement, encoded_bytes},
 };
-use word_proof::{
-    field::{self, ZERO},
-    oracles::Witness,
-};
+use word_proof::{field::ZERO, oracles::Witness};
 
 pub(crate) use crate::fixture::create as fixture;
 use crate::fixture::{inputs, public_inputs};
@@ -130,23 +127,9 @@ fn honest_witness_satisfies_every_weighted_relation() {
     let (statement, witness) = fixture();
     for challenge in [[17, 29, 43], [911, 71, 5]] {
         let operator = operator::build(&statement, challenge).unwrap();
-        let mut sum = ZERO;
-        for term in &operator.terms {
-            let word_proof::affine::PublicColumn::Values(values) = &term.public else {
-                panic!("Unexpected fixture operator")
-            };
-            for &(column, weight) in &term.weights {
-                for (row, &coefficient) in values.iter().enumerate() {
-                    sum = field::add(
-                        sum,
-                        field::scale(
-                            field::multiply(weight, coefficient),
-                            u128::from(witness.columns[column][row * STRIDE]),
-                        ),
-                    );
-                }
-            }
-        }
-        assert_eq!(sum, operator.target);
+        assert_eq!(
+            crate::dense::apply_operator(&operator, &witness.columns),
+            ZERO
+        );
     }
 }

@@ -58,12 +58,15 @@ pub(crate) fn digit(value: &BigInt, limb: usize) -> i128 {
     }
 }
 pub(crate) fn rotation(recipient: usize, output: usize) -> (usize, i128) {
-    let exponent = recipient * (DEGREE / profile().interpolation_degree());
-    let source = (output + 2 * DEGREE - exponent) % DEGREE;
+    rotation_for_degree(DEGREE, recipient, output)
+}
+pub(crate) fn rotation_for_degree(degree: usize, recipient: usize, output: usize) -> (usize, i128) {
+    let exponent = recipient * (degree / profile().interpolation_degree());
+    let source = (output + 2 * degree - exponent) % degree;
     let signed_exponent = source + exponent;
     (
         source,
-        if (signed_exponent / DEGREE).is_multiple_of(2) {
+        if (signed_exponent / degree).is_multiple_of(2) {
             1
         } else {
             -1
