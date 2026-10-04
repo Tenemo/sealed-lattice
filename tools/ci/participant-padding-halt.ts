@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 export type PaddingCut = 'padding' | 'final-slot';
 export type PreparationCut = Readonly<{
-    kind: 'contribution' | 'selection' | 'endorsement';
+    kind: 'contribution' | 'selection' | 'selection-readback' | 'endorsement';
     phase: number;
 }>;
 
@@ -14,6 +14,30 @@ export const preparationHaltingClient = (
     worker: Buffer,
     cut: PreparationCut,
 ) => {
+    if (cut.kind === 'selection-readback') {
+        assert.equal(cut.phase, 1);
+        const source = worker.toString('utf8');
+        const boundary =
+            /await endorseSetup\(session,\s*relay,\s*published\);/gu;
+        assert.equal(
+            [...source.matchAll(boundary)].length,
+            1,
+            'The worker must contain one authenticated selection-readback continuation.',
+        );
+        const patched = Buffer.from(
+            source.replace(
+                boundary,
+                (matched) =>
+                    `self.postMessage({type:'participant-preparation-halt',kind:'selection-readback',phase:1});\nawait new Promise(() => undefined);\n${matched}`,
+            ),
+        );
+        return {
+            generation: 4,
+            worker: patched,
+            digest: createHash('sha512').update(patched).digest('hex'),
+            preparationCut: cut,
+        };
+    }
     assert.ok(
         cut.kind === 'contribution'
             ? Number.isInteger(cut.phase) && cut.phase >= 4 && cut.phase <= 9

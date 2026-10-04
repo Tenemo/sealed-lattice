@@ -122,7 +122,8 @@ pub fn run(
     crate::write(output.join("selection-signature.bin"), &signature);
     let proposal =
         Arc::new(authenticate_selection(roster.clone(), proposal.body(), &signature).unwrap());
-    assert!(SetupAggregator::new(proposal.clone(), wrong_order).is_err());
+    // Positive holders are a pool; the signed selection alone fixes order.
+    assert!(SetupAggregator::new(proposal.clone(), wrong_order).is_ok());
     assert!(SetupAggregator::new(proposal.clone(), duplicate).is_err());
     if let Some((_, extra)) = offers
         .iter()
@@ -140,6 +141,29 @@ pub fn run(
         &selected_directories,
         &output.join("aggregates"),
     ));
+    let selected_indices: Vec<_> = selected_authors
+        .iter()
+        .map(|position| {
+            offers
+                .iter()
+                .position(|(_, offer)| offer.envelope().position() == *position)
+                .unwrap()
+        })
+        .collect();
+    aggregate::verify_streamed_selection(
+        proposal.clone(),
+        &selected_indices
+            .iter()
+            .map(|index| offers[*index].0.clone())
+            .collect::<Vec<_>>(),
+        &selected_directories,
+        &selected_indices
+            .iter()
+            .map(|index| headers[*index].clone())
+            .collect::<Vec<_>>(),
+        &inputs,
+        &output.join("aggregates"),
+    );
     let retained = inputs.retain(&enrollments[0].credential, poll).unwrap();
     let restored = VerifiedSelectionInputs::restore(
         &enrollments[0].credential,

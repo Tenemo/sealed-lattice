@@ -174,6 +174,19 @@ export const selectSetup = async (
     await delivery.transfer(() =>
         publishRecord(relay, 'selection-signature.bin', retained.signature),
     );
+    let published: SignedPacket | undefined;
+    await delivery.transfer(async () => {
+        const readback = await readSelection(session.context, relay);
+        authenticateSelection(session.context, readback);
+        if (!equalBytes(readback.body, retained.body))
+            throw new PublicInputFailure(
+                'The published selection differs from the original selection.',
+            );
+        published = readback;
+    });
+    // Keep the positive offer holders in this worker. Endorsement still has
+    // its own durable intent and one-shot purpose, including after a restart.
+    await endorseSetup(session, relay, published);
 };
 
 const endorsementPacket = (
@@ -196,12 +209,14 @@ const endorsementPacket = (
 export const endorseSetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
+    publishedSelection?: SignedPacket,
 ) => {
     if (session.root.head.generation !== 4)
         throw new Error('No confirmed roster permits setup endorsement.');
     let retained = session.preparation.endorsement;
     if (retained === undefined) {
-        const selection = await readSelection(session.context, relay);
+        const selection =
+            publishedSelection ?? (await readSelection(session.context, relay));
         await verifySelectionInputs(session, relay, selection);
         const { kernel, profile } = session.context;
         if (kernel.retain_selection_inputs() !== 0)

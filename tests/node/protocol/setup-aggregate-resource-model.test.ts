@@ -35,9 +35,15 @@ describe('setup aggregate cache resources', () => {
             (4n * gadgetCount + 2n * participantCount) *
                 parameters.polynomialDegree,
         );
-        expect(value.maximumTwoGenerationPayloadBytes).toBe(2n * expected);
-        // Every recipient's share sums the first max(f + 1, 2) positions'
-        // contributions, with f = floor((n - 1) / 3).
+        const maximumReplacement = [fheWidth, 21n]
+            .map((width) => (524288n / width) * width)
+            .reduce((maximum, bytes) => (bytes > maximum ? bytes : maximum));
+        expect(value.maximumReplacementChunkBytes).toBe(maximumReplacement);
+        expect(value.maximumLogicalCachePayloadBytes).toBe(
+            expected + maximumReplacement,
+        );
+        // Every recipient's share sums the certified selection's d entries,
+        // with d=max(f+1,2) and f=floor((n-1)/3).
         const contributorCount = BigInt(
             Math.max(Math.floor((profile.participantCount - 1) / 3) + 1, 2),
         );

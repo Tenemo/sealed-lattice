@@ -26,12 +26,13 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
     const maximumCleanPreparationDownloadBytes =
         selectionProposalBytes +
         maximumOfferVerificationReadBytes +
-        selectedPolynomialRereadBytes +
         2n * wire.certificateBytes +
         64n +
         maximumCertificateAssemblyReadBytes;
-    // The current organizer selects in one worker, then endorses in a fresh
-    // worker that verifies the chosen bodies again before aggregation.
+    // Selection and endorsement share a worker's complete verified holders.
+    // Discovery still verifies offers before selection, so the organizer's
+    // aggregation rereads their polynomials. Fresh participants fuse that
+    // polynomial read with full offer verification and aggregation.
     // An honest author announces one ID. A bounded hint page adds its
     // untrusted u64 total and u32 count; corrupt additions are not capped here.
     const discoveryPageHeaderBytes = 8n + 4n;
@@ -39,7 +40,7 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         eligible * (discoveryPageHeaderBytes + 64n);
     const maximumCleanOrganizerPreparationDownloadBytes =
         maximumCleanPreparationDownloadBytes +
-        maximumOfferVerificationReadBytes +
+        selectedPolynomialRereadBytes +
         organizerDiscoveryReadBytes;
     const maximumCleanParticipantUploadBytes =
         body.maximumBodyBytes +
@@ -94,8 +95,7 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         maximumFreshCertificateActivationReadBytes:
             2n * wire.certificateBytes +
             64n +
-            maximumOfferVerificationReadBytes +
-            selectedPolynomialRereadBytes,
+            maximumOfferVerificationReadBytes,
         maximumCertificateAssemblyReadBytes,
         maximumCleanPreparationDownloadBytes,
         maximumCleanOrganizerPreparationDownloadBytes,
@@ -106,10 +106,9 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         maximumCleanTotalUploadBytes,
         transferPlanningBytes,
         planningVarianceCeilingBytes: (3n * transferPlanningBytes) / 2n,
-        cleanParticipantPolynomialReadFloorBytes:
-            2n * selectedPolynomialRereadBytes,
+        cleanParticipantPolynomialReadFloorBytes: selectedPolynomialRereadBytes,
         cleanOrganizerPolynomialReadFloorBytes:
-            3n * selectedPolynomialRereadBytes,
+            2n * selectedPolynomialRereadBytes,
         completeEligiblePolynomialUploadFloorBytes:
             eligible * body.polynomialPayloadBytes,
         preparationDownloadWithinPlanning:

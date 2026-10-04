@@ -79,17 +79,14 @@ describe('clear preparation public resource bounds', () => {
             expect(result.maximumCleanPreparationDownloadBytes).toBe(
                 wire.selectionBodyBytes +
                     3309n +
-                    BigInt(selected) *
-                        (signedOffer +
-                            body.minimumProofBytes +
-                            body.polynomialPayloadBytes) +
+                    BigInt(selected) * (signedOffer + body.minimumProofBytes) +
                     2n * wire.certificateBytes +
                     64n +
                     BigInt(participants) * wire.endorsementPacketBytes,
             );
             expect(result.maximumCleanOrganizerPreparationDownloadBytes).toBe(
                 result.maximumCleanPreparationDownloadBytes +
-                    result.maximumOfferVerificationReadBytes +
+                    BigInt(selected) * body.polynomialPayloadBytes +
                     BigInt(eligible) * (8n + 4n + 64n),
             );
             expect(result.organizerDiscoveryReadBytes).toBe(
@@ -108,10 +105,10 @@ describe('clear preparation public resource bounds', () => {
                 BigInt(eligible) * 64n,
             );
             expect(result.cleanParticipantPolynomialReadFloorBytes).toBe(
-                2n * BigInt(selected) * body.polynomialPayloadBytes,
+                BigInt(selected) * body.polynomialPayloadBytes,
             );
             expect(result.cleanOrganizerPolynomialReadFloorBytes).toBe(
-                3n * BigInt(selected) * body.polynomialPayloadBytes,
+                2n * BigInt(selected) * body.polynomialPayloadBytes,
             );
             expect(result.completeEligiblePolynomialUploadFloorBytes).toBe(
                 BigInt(eligible) * body.polynomialPayloadBytes,

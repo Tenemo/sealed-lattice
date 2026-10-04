@@ -307,9 +307,19 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         parameters: ['index'],
     },
     {
+        name: 'setup_begin_selected_offer_verification',
+        buffer: 'setup',
+        parameters: ['length'],
+    },
+    {
         name: 'setup_polynomial',
         buffer: 'setup',
         parameters: ['index', 'index', 'length'],
+    },
+    {
+        name: 'setup_selected_offer_proof',
+        buffer: 'setup',
+        parameters: ['index', 'length'],
     },
     {
         name: 'setup_finish_selected_offer',

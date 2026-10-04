@@ -27,6 +27,7 @@ import {
     evaluatedTargetName,
     namespacedName,
     participantDatabaseName,
+    setupCacheName,
 } from '#packages/sdk/src/participant/worker/storage.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
@@ -191,7 +192,10 @@ const publicPath = /^(?:[a-z0-9][a-z0-9.-]*\/)*[a-z0-9][a-z0-9.-]*$/u;
 // What a relay view serves a participant instead of a stored record: other
 // bytes, the record another relay stored in the named file, or nothing when
 // the value is undefined.
-type ViewedRecord = Buffer | Readonly<{ file: string }> | undefined;
+type ViewedRecord =
+    | Buffer
+    | Readonly<{ file: string; beforeServe?: () => Promise<void> }>
+    | undefined;
 
 type Relay = Readonly<{
     servers: Server[];
@@ -460,6 +464,8 @@ const startRelay = async (
             if (url.pathname.startsWith('/public/') && publicPath.test(name)) {
                 const file = path.join(records, name);
                 const viewed = view.get(name);
+                if (viewed !== undefined && !Buffer.isBuffer(viewed))
+                    await viewed.beforeServe?.();
                 const bytes = !view.has(name)
                     ? await readFile(file).catch(() => undefined)
                     : viewed === undefined || Buffer.isBuffer(viewed)
@@ -827,6 +833,17 @@ await runWithLocalRunLog(
         let guardFailure: Error | undefined;
         let completed = false;
         const ordinaryOperations: ParticipantOperationMeasurement[] = [];
+        const measureWorkflow =
+            mode === 'plain' &&
+            !memoryPressure &&
+            !setupDeparture &&
+            !unselectedCheckpoint;
+        const measuredStages = Array.from({ length: participantCount }, () => [
+            0,
+        ]);
+        const browserSessions = new WeakMap<ChromeParticipant, number>();
+        let nextBrowserSession = 0;
+        let nextMeasuredOperation = 0;
         const transfers = Array.from(
             { length: originCount },
             emptyParticipantTransfer,
@@ -883,6 +900,9 @@ await runWithLocalRunLog(
             for (const file of [
                 'tools/ci/run-participant-browser.ts',
                 'tools/ci/participant-browser-options.ts',
+                'tools/ci/participant-workflow-measurements.ts',
+                'tests/setup-selection-model.ts',
+                'tests/threshold-completion-model.ts',
                 'tools/ci/participant-padding-halt.ts',
                 'tools/ci/participant-relay-record.ts',
                 'tools/ci/participant-offer-announcements.ts',
@@ -1191,10 +1211,12 @@ await runWithLocalRunLog(
                             throw error;
                         }
                         browserDetails.set(key, details);
+                        browserSessions.set(chrome, nextBrowserSession++);
                         log.writeEvent({
                             eventType: 'participant-browser',
                             details: {
                                 ...details,
+                                session: browserSessions.get(chrome),
                                 milliseconds: performance.now() - launching,
                                 version: chrome.version,
                                 launchArguments: chrome.launchArguments,
@@ -1225,6 +1247,40 @@ await runWithLocalRunLog(
             ) =>
                 inBrowser(position, copy, async (chrome) => {
                     const started = performance.now();
+                    const measured =
+                        measureWorkflow && copy === undefined
+                            ? {
+                                  id: nextMeasuredOperation++,
+                                  position,
+                                  operation,
+                                  started,
+                                  stages: [...measuredStages[position]],
+                                  session: browserSessions.get(chrome)!,
+                              }
+                            : undefined;
+                    const recordAttempt = (
+                        outcome: ParticipantOperationMeasurement['outcome'],
+                        details?: Record<string, unknown>,
+                    ) => {
+                        if (measured === undefined) return;
+                        const resources = (details ?? {}) as Pick<
+                            ParticipantOperationMeasurement,
+                            'generation' | 'memory' | 'evaluationMemory'
+                        >;
+                        const entry = {
+                            ...measured,
+                            finished: performance.now(),
+                            outcome,
+                            generation: resources.generation,
+                            memory: resources.memory,
+                            evaluationMemory: resources.evaluationMemory,
+                        };
+                        ordinaryOperations.push(entry);
+                        log.writeEvent({
+                            eventType: 'participant-visit-attempt',
+                            details: entry,
+                        });
+                    };
                     const beforeReads = new Map(relay?.reads[position]);
                     const publicRecordReads = () =>
                         [...(relay?.reads[position] ?? [])].flatMap(
@@ -1280,6 +1336,7 @@ await runWithLocalRunLog(
                             );
                         }
                     } catch (error) {
+                        recordAttempt('interrupted');
                         log.writeEvent({
                             eventType: 'participant-interrupted-operation',
                             details: {
@@ -1297,6 +1354,13 @@ await runWithLocalRunLog(
                     } finally {
                         deadline.abort();
                     }
+                    assert.ok(result.status !== 'evaluated');
+                    recordAttempt(
+                        result.status,
+                        result.status === 'completed'
+                            ? result.details
+                            : undefined,
+                    );
                     if (guardFailure !== undefined) throw guardFailure;
                     if (scalar && result.status === 'completed')
                         requireScalarMemory(result.details);
@@ -1307,21 +1371,6 @@ await runWithLocalRunLog(
                         operation !== 'status'
                     )
                         recoveryOperations.delete(position);
-                    if (mode === 'plain' && result.status === 'completed') {
-                        const details = result.details as unknown as Pick<
-                            ParticipantOperationMeasurement,
-                            'generation' | 'memory' | 'evaluationMemory'
-                        >;
-                        ordinaryOperations.push({
-                            position,
-                            operation,
-                            started,
-                            finished: started + milliseconds,
-                            generation: details.generation,
-                            memory: details.memory,
-                            evaluationMemory: details.evaluationMemory,
-                        });
-                    }
                     // A ballot or release generated in this visit drew the
                     // modelled proof randomness.
                     if (
@@ -2244,9 +2293,9 @@ await runWithLocalRunLog(
             };
             // Completes one roster from its proposal to its combined
             // result, every member acting as soon as its inputs exist.
-            // Every member casts a counted ballot, the organizer closes
-            // at the current time after every ballot, the first quorum of
-            // members vote on the target, and every member releases.
+            // Every member casts a counted ballot and releases. Ordinary
+            // measurement also gives every member target and result work;
+            // fault schedules retain quorum target voters and one combiner.
             const setupDiscoveryFaults: Record<string, unknown>[] = [];
             const unselectedCheckpointEvidence: Record<string, unknown>[] = [];
             const inspectCheckpoint = async (
@@ -2316,19 +2365,19 @@ await runWithLocalRunLog(
                 const accepting = active.filter(
                     ({ position }) => position !== 0,
                 );
-                assert.equal(
-                    (await act(organizing, 'propose-roster', { recordIds }))
-                        .generation,
-                    3,
-                );
-                await act(organizing, 'publish');
-                if (absent !== undefined) await depart(members[absent].origin);
-                for (const details of await Promise.all(
-                    accepting.map(({ member }) =>
-                        act(member, 'accept-roster', { recordIds }),
-                    ),
-                ))
-                    assert.equal(details.generation, 3);
+                const markStage = (stages: number[], actors = active) => {
+                    if (measureWorkflow)
+                        for (const { member } of actors)
+                            measuredStages[member.origin] = [...stages];
+                };
+                const each = async (
+                    actors: typeof active,
+                    action: (member: (typeof active)[number]) => Promise<void>,
+                ) => {
+                    if (sequential) {
+                        for (const member of actors) await action(member);
+                    } else await Promise.all(actors.map(action));
+                };
                 const contributing = active
                     .filter(
                         ({ position }) =>
@@ -2337,14 +2386,60 @@ await runWithLocalRunLog(
                     )
                     .slice(0, setupContributorCount);
                 assert.equal(contributing.length, setupContributorCount);
-                await Promise.all(
-                    active.map(async ({ member }) => {
+                const confirmAndContribute = async (
+                    value: (typeof active)[number],
+                ) => {
+                    assert.equal(
+                        (await act(value.member, 'confirm')).generation,
+                        4,
+                    );
+                    if (
+                        contributing.some(
+                            ({ position }) => position === value.position,
+                        )
+                    )
                         assert.equal(
-                            (await act(member, 'confirm')).generation,
+                            (await act(value.member, 'contribute')).generation,
                             4,
                         );
-                    }),
+                };
+                markStage([1]);
+                assert.equal(
+                    (await act(organizing, 'propose-roster', { recordIds }))
+                        .generation,
+                    3,
                 );
+                await act(organizing, 'publish');
+                if (absent !== undefined) await depart(members[absent].origin);
+                if (measureWorkflow) {
+                    await confirmAndContribute(active[0]);
+                    await each(accepting, async (value) => {
+                        assert.equal(
+                            (
+                                await act(value.member, 'accept-roster', {
+                                    recordIds,
+                                })
+                            ).generation,
+                            3,
+                        );
+                        await confirmAndContribute(value);
+                    });
+                } else {
+                    for (const details of await Promise.all(
+                        accepting.map(({ member }) =>
+                            act(member, 'accept-roster', { recordIds }),
+                        ),
+                    ))
+                        assert.equal(details.generation, 3);
+                    await Promise.all(
+                        active.map(async ({ member }) => {
+                            assert.equal(
+                                (await act(member, 'confirm')).generation,
+                                4,
+                            );
+                        }),
+                    );
+                }
                 let originalCheckpoint:
                     CheckpointCustodyObservation | undefined;
                 if (unselectedCheckpoint) {
@@ -2452,22 +2547,21 @@ await runWithLocalRunLog(
                         eventType: 'participant-offer-discovery-fault',
                         details: fault,
                     });
-                } else
+                } else if (!measureWorkflow)
                     await Promise.all(
                         contributing.map(({ member }) => contribute(member)),
                     );
+                markStage([2]);
                 assert.equal(
                     (await act(organizing, 'select-setup')).generation,
                     4,
                 );
-                await Promise.all(
-                    active.map(async ({ member }) => {
-                        assert.equal(
-                            (await act(member, 'endorse-setup')).generation,
-                            4,
-                        );
-                    }),
-                );
+                await each(accepting, async ({ member }) => {
+                    assert.equal(
+                        (await act(member, 'endorse-setup')).generation,
+                        4,
+                    );
+                });
                 if (unselectedCheckpoint) {
                     assert.ok(originalCheckpoint);
                     assert.ok(relay);
@@ -2548,13 +2642,21 @@ await runWithLocalRunLog(
                     sameOwnCheckpoint(originalCheckpoint, healthy);
                     assert.equal(healthy.endorsement, 'signed');
                 }
-                await Promise.all(
-                    active.map(async ({ member }) => {
-                        const verified = await act(member, 'verify-setup');
-                        assert.equal(verified.generation, 12);
-                        assert.equal(verified.ballot, 'open');
-                    }),
-                );
+                markStage([3]);
+                await each(active, async ({ member, position }) => {
+                    const verified = await act(member, 'verify-setup');
+                    assert.equal(verified.generation, 12);
+                    assert.equal(verified.ballot, 'open');
+                    if (measureWorkflow)
+                        assert.equal(
+                            (
+                                await act(member, 'ballot', {
+                                    scores: scores[position],
+                                })
+                            ).generation,
+                            17,
+                        );
+                });
                 if (unselectedCheckpoint) {
                     const retired = await inspectCheckpoint(
                         'certified setup retired unused checkpoint',
@@ -2572,20 +2674,22 @@ await runWithLocalRunLog(
                         undefined,
                     );
                 }
-                await Promise.all(
-                    active.map(async ({ member, position }) => {
-                        assert.equal(
-                            (
-                                await act(member, 'ballot', {
-                                    scores: scores[position],
-                                })
-                            ).generation,
-                            17,
-                        );
-                    }),
-                );
+                if (!measureWorkflow)
+                    await Promise.all(
+                        active.map(async ({ member, position }) => {
+                            assert.equal(
+                                (
+                                    await act(member, 'ballot', {
+                                        scores: scores[position],
+                                    })
+                                ).generation,
+                                17,
+                            );
+                        }),
+                    );
                 // A close collects every other participant's published ballot
                 // with its body.
+                markStage([4]);
                 const authors = active.map(({ position }) => position);
                 const collectsEvery = (position: number) => [
                     { kind: 'own', position },
@@ -2619,36 +2723,40 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
+                markStage([4, 5], [active[0]]);
                 assert.equal((await act(organizing, 'close')).generation, 22);
-                await Promise.all(
-                    active
-                        .slice(0, bounds.close.quorum)
-                        .map(async ({ member }) => {
-                            const voted = await act(member, 'target');
-                            assert.equal(voted.generation, 24);
-                            assert.equal(voted.ballotStatus, 'included');
-                            assert.equal(voted.usableBallots, active.length);
-                            assert.equal(voted.validBallots, active.length);
-                        }),
+                markStage([5]);
+                await each(
+                    measureWorkflow
+                        ? active
+                        : active.slice(0, bounds.close.quorum),
+                    async ({ member }) => {
+                        const voted = await act(member, 'target');
+                        assert.equal(voted.generation, 24);
+                        assert.equal(voted.ballotStatus, 'included');
+                        assert.equal(voted.usableBallots, active.length);
+                        assert.equal(voted.validBallots, active.length);
+                    },
                 );
-                for (const details of await Promise.all(
-                    active.map(({ member }) => act(member, 'release')),
-                )) {
+                markStage([6]);
+                await each(active, async ({ member }) => {
+                    const details = await act(member, 'release');
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
-                }
-                const combined = await act(
-                    active[active.length - 1].member,
-                    'result',
+                });
+                markStage([7]);
+                const expected = rankedIdentifiers(
+                    active.map(({ position }) => scores[position]),
                 );
-                assert.equal(combined.encrypted, true);
-                assert.deepEqual(
-                    combined.identifiers,
-                    rankedIdentifiers(
-                        active.map(({ position }) => scores[position]),
-                    ),
+                await each(
+                    measureWorkflow ? active : [active[active.length - 1]],
+                    async ({ member }) => {
+                        const combined = await act(member, 'result');
+                        assert.equal(combined.encrypted, true);
+                        assert.deepEqual(combined.identifiers, expected);
+                    },
                 );
-                return combined.identifiers as readonly string[];
+                return expected;
             };
             if (mode === 'plain' || setupDeparture || unselectedCheckpoint) {
                 // Every other participant joins, and the roster completes
@@ -2812,7 +2920,9 @@ await runWithLocalRunLog(
                             transfers,
                             sampledResources,
                             unmeasured: [
-                                'Exact productive-visit coalescence; stage groups are not visits, and a participant total is a conservative active-work upper bound for one visit',
+                                measureWorkflow
+                                    ? 'Exact within-call allocation of organizer close work; explicit visit durations are conservative upper bounds'
+                                    : 'Productive-visit traversal for this fault schedule',
                                 'Exact transient browser and JavaScript memory peaks between samples',
                                 'HTTP headers and link-layer transfer overhead',
                                 'Human delays between visits',
@@ -3359,10 +3469,68 @@ await runWithLocalRunLog(
                 replayedSignature,
             );
             assert.deepEqual(relay.earlyContributionRecords, []);
+            const selectionReadbackFaults: Record<string, unknown>[] = [];
             await interruptPreparation(0, 'select-setup', {
                 kind: 'selection',
                 phase: 1,
             });
+            await interruptPreparation(0, 'select-setup', {
+                kind: 'selection',
+                phase: 2,
+            });
+            const selectionHead = await retainedHead(0);
+            for (const fault of ['missing', 'changed'] as const) {
+                const name = 'selection-signature.bin';
+                let changed: Buffer | undefined;
+                if (fault === 'changed') {
+                    changed = await readFile(path.join(publicDirectory, name));
+                    changed[0] ^= 1;
+                }
+                views[0].set(name, changed);
+                try {
+                    const result = await request(0, 'select-setup');
+                    assert.ok(
+                        result.status === 'pending' &&
+                            result.cause === 'public input',
+                        JSON.stringify(result),
+                    );
+                    assert.deepEqual(
+                        await retainedHead(0),
+                        selectionHead,
+                        'Failed selection readback changed the original signed selection or created endorsement intent.',
+                    );
+                    await assert.rejects(
+                        stat(
+                            path.join(
+                                publicDirectory,
+                                'selection-endorsement-0.bin',
+                            ),
+                        ),
+                        { code: 'ENOENT' },
+                    );
+                    const recorded = {
+                        fault,
+                        result,
+                        signedSelectionHead: selectionHead,
+                    };
+                    selectionReadbackFaults.push(recorded);
+                    log.writeEvent({
+                        eventType: 'participant-selection-readback-fault',
+                        details: recorded,
+                    });
+                } finally {
+                    views[0].delete(name);
+                }
+            }
+            await interruptPreparation(0, 'select-setup', {
+                kind: 'selection-readback',
+                phase: 1,
+            });
+            for (const phase of [1, 2])
+                await interruptPreparation(0, 'select-setup', {
+                    kind: 'endorsement',
+                    phase,
+                });
             assert.equal((await run(0, 'select-setup')).generation, 4);
             const selectedBytes = await readFile(
                 path.join(publicDirectory, 'selection.bin'),
@@ -3377,6 +3545,125 @@ await runWithLocalRunLog(
             const finalOffer = await offerDirectory(
                 contributors[contributors.length - 1],
             );
+            const selectedProofFaults: Record<string, unknown>[] = [];
+            const setupCacheSnapshot = async (position: number) =>
+                (await inBrowser(position, undefined, (chrome) =>
+                    chrome.evaluate(`new Promise((resolve, reject) => {
+                const opening = indexedDB.open(${JSON.stringify(namespacedName(setupCacheName, participantNamespace))});
+                opening.onerror = () => reject(opening.error);
+                opening.onsuccess = () => {
+                    const database = opening.result;
+                    if (!database.objectStoreNames.contains('aggregate')) { database.close(); reject(new Error('No aggregate cache exists.')); return; }
+                    const reading = database.transaction('aggregate').objectStore('aggregate').getAllKeys();
+                    reading.onerror = () => { database.close(); reject(reading.error); };
+                    reading.onsuccess = () => {
+                        const keys = reading.result;
+                        const ordinals = [...new Set(keys.filter(key => Array.isArray(key) && key.length === 3).map(key => key[0]))].sort();
+                        database.close(); resolve({records: keys.length, ordinals});
+                    };
+                };
+            })`),
+                )) as { records: number; ordinals: number[] };
+            if (mode === 'preparation') {
+                const proofName = finalOffer + 'proof.bin';
+                const faultDirectory = path.join(
+                    log.artifactDirectoryPath,
+                    'fault-inputs',
+                );
+                await mkdir(faultDirectory, { recursive: true });
+                const damaged = path.join(
+                    faultDirectory,
+                    'late-selected-proof.bin',
+                );
+                const originalProofBytes = (
+                    await stat(path.join(publicDirectory, proofName))
+                ).size;
+                assert.ok(
+                    originalProofBytes >=
+                        bounds.contribution.minimumProofBytes &&
+                        originalProofBytes <=
+                            bounds.contribution.maximumProofBytes,
+                );
+                await cp(path.join(publicDirectory, proofName), damaged, {
+                    errorOnExist: true,
+                    force: false,
+                });
+                const proof = await open(damaged, 'r+');
+                try {
+                    const length = (await proof.stat()).size;
+                    assert.equal(length, originalProofBytes);
+                    const last = Buffer.alloc(1);
+                    assert.equal(
+                        (await proof.read(last, 0, 1, length - 1)).bytesRead,
+                        1,
+                    );
+                    last[0] ^= 1;
+                    await proof.write(last, 0, 1, length - 1);
+                    await proof.sync();
+                } finally {
+                    await proof.close();
+                }
+                let proofReads = 0;
+                let overwritten:
+                    { records: number; ordinals: number[] } | undefined;
+                const head = await retainedHead(endorsementReplay);
+                const attempts: number =
+                    relay.publicationAttempts[endorsementReplay];
+                views[endorsementReplay].set(proofName, {
+                    file: damaged,
+                    beforeServe: async () => {
+                        proofReads++;
+                        if (proofReads === 2) {
+                            overwritten =
+                                await setupCacheSnapshot(endorsementReplay);
+                            assert.ok(overwritten.records > 0);
+                            assert.deepEqual(
+                                overwritten.ordinals,
+                                [setupContributorCount - 1],
+                                'The late-proof control did not observe replaced selected-polynomial chunks.',
+                            );
+                        }
+                    },
+                });
+                try {
+                    const result = await request(
+                        endorsementReplay,
+                        'endorse-setup',
+                    );
+                    assert.ok(
+                        result.status === 'pending' &&
+                            result.cause === 'public input',
+                        JSON.stringify(result),
+                    );
+                    assert.ok(overwritten);
+                    assert.deepEqual(
+                        await setupCacheSnapshot(endorsementReplay),
+                        { records: 0, ordinals: [] },
+                    );
+                    assert.deepEqual(
+                        await retainedHead(endorsementReplay),
+                        head,
+                    );
+                    assert.equal(
+                        relay.publicationAttempts[endorsementReplay],
+                        attempts,
+                    );
+                    const recorded = {
+                        position: endorsementReplay,
+                        proofReads,
+                        overwritten,
+                        result,
+                        publicationAttempts: 0,
+                    };
+                    selectedProofFaults.push(recorded);
+                    log.writeEvent({
+                        eventType: 'participant-selected-proof-fault',
+                        details: recorded,
+                    });
+                } finally {
+                    views[endorsementReplay].delete(proofName);
+                }
+            }
             await Promise.all(
                 positions.map(async (position) => {
                     if (position === endorsementReplay) {
@@ -3392,11 +3679,35 @@ await runWithLocalRunLog(
                             kind: 'endorsement',
                             phase: 1,
                         });
+                        await interruptPreparation(position, 'endorse-setup', {
+                            kind: 'endorsement',
+                            phase: 2,
+                        });
                     }
                     assert.equal(
                         (await run(position, 'endorse-setup')).generation,
                         4,
                     );
+                    if (
+                        mode === 'preparation' &&
+                        position === endorsementReplay
+                    ) {
+                        const cache = await setupCacheSnapshot(position);
+                        assert.ok(cache.records > 0);
+                        assert.deepEqual(cache.ordinals, [
+                            setupContributorCount - 1,
+                        ]);
+                        const recorded = {
+                            position,
+                            stage: 'original selected proof retry',
+                            cache,
+                        };
+                        selectedProofFaults.push(recorded);
+                        log.writeEvent({
+                            eventType: 'participant-selected-proof-retry',
+                            details: recorded,
+                        });
+                    }
                 }),
             );
             await expectStatus(0, 'ballot', 'refused', {
@@ -3668,6 +3979,8 @@ await runWithLocalRunLog(
                             sourceRefusals,
                             stateLosses,
                             setupPublicationFaults,
+                            selectionReadbackFaults,
+                            selectedProofFaults,
                             sourceRestarts,
                             coincidentPaddingCuts:
                                 first.slotOffset === final.slotOffset,
@@ -5177,6 +5490,8 @@ await runWithLocalRunLog(
                         interruptions,
                         stateLosses,
                         setupPublicationFaults,
+                        selectionReadbackFaults,
+                        selectedProofFaults,
                         equivocation:
                             equivocation === undefined
                                 ? undefined

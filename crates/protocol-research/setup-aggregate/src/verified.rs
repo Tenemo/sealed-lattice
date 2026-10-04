@@ -1,8 +1,9 @@
 use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
-use opened_contribution::VerifiedContributionOffer;
+use opened_contribution::{ContributionOfferVerifier, VerifiedContributionOffer};
 use parallel_work::PendingDigest;
 use registration_credentials::{
     Credential, RETAINED_TAG_BYTES,
+    contribution_offer::AuthenticatedContributionOffer,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
     roster_authentication::OrganizerSignedRoster,
@@ -13,7 +14,7 @@ use registration_credentials::{
 use std::{collections::VecDeque, sync::Arc};
 use supported_profile::Profile;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AggregatePolynomial {
     pub(crate) index: usize,
     pub(crate) bytes: usize,
@@ -206,7 +207,7 @@ pub enum Refusal {
 }
 
 struct Pending {
-    offer: Arc<VerifiedContributionOffer>,
+    incoming: IncomingOffer,
     incoming_hash: Option<IdentityHasher>,
     ordinal: usize,
     offset: usize,
@@ -218,7 +219,11 @@ struct Pending {
     // finishing, oldest first.
     finishing: VecDeque<FinishingPolynomial>,
     outputs: Vec<AggregatePolynomial>,
-    failed: bool,
+}
+
+enum IncomingOffer {
+    Verified(Arc<VerifiedContributionOffer>),
+    Verifying(Box<ContributionOfferVerifier>),
 }
 
 struct FinishingPolynomial {
@@ -264,6 +269,7 @@ pub struct SetupAggregator {
     indices: Vec<usize>,
     previous: Vec<AggregatePolynomial>,
     pending: Option<Pending>,
+    failed: bool,
 }
 impl SetupAggregator {
     pub fn new(
@@ -271,9 +277,18 @@ impl SetupAggregator {
         offers: Vec<Arc<VerifiedContributionOffer>>,
     ) -> Result<Self, Refusal> {
         let profile = selection.roster().proposal().profile();
-        let rebuilt = build_selection(selection.roster(), &offers)?;
-        if rebuilt.body() != selection.selection().body() {
-            return Err(Refusal::Context);
+        for (index, offer) in offers.iter().enumerate() {
+            if offer.roster().proposal().identity() != selection.roster().proposal().identity()
+                || !selection.selection().selected().contains(&(
+                    offer.envelope().position(),
+                    *offer.envelope().body_identity(),
+                ))
+                || offers[..index]
+                    .iter()
+                    .any(|previous| previous.envelope().position() == offer.envelope().position())
+            {
+                return Err(Refusal::Context);
+            }
         }
         Ok(Self {
             selection,
@@ -283,32 +298,79 @@ impl SetupAggregator {
             indices: profile.contribution_body_polynomials(),
             previous: Vec::new(),
             pending: None,
+            failed: false,
         })
     }
     pub fn accepted(&self) -> usize {
         self.accepted
     }
+    /// Drops only disposable public aggregation progress. The caller clears
+    /// its mixed cache and replays from the first selected offer; positive
+    /// offer holders and the authenticated selection remain unchanged.
+    pub fn discard_progress(&mut self) {
+        self.pending = None;
+        self.previous.clear();
+        self.accepted = 0;
+        self.failed = false;
+    }
     /// Every selected contribution is aggregated and none is pending.
     pub fn complete(&self) -> bool {
-        self.pending.is_none() && self.accepted == self.profile.setup_contributors()
+        !self.failed && self.pending.is_none() && self.accepted == self.profile.setup_contributors()
     }
     pub fn polynomials(&self) -> &[AggregatePolynomial] {
         &self.previous
     }
     pub fn begin(&mut self, position: usize) -> Result<(), Refusal> {
-        if self.accepted >= self.profile.setup_contributors() {
-            return Err(Refusal::Order);
+        let expected = self.next_offer()?;
+        if expected.0 != position {
+            return Err(Refusal::Context);
         }
         let offer = self
             .offers
-            .get(self.accepted)
+            .iter()
+            .find(|offer| {
+                offer.envelope().position() == expected.0
+                    && offer.envelope().body_identity() == &expected.1
+            })
             .ok_or(Refusal::Order)?
             .clone();
-        if offer.envelope().position() != position {
+        self.begin_incoming(IncomingOffer::Verified(offer));
+        Ok(())
+    }
+    fn next_offer(&self) -> Result<(usize, [u8; 64]), Refusal> {
+        if self.failed || self.pending.is_some() {
             return Err(Refusal::Order);
         }
+        self.selection
+            .selection()
+            .selected()
+            .get(self.accepted)
+            .copied()
+            .ok_or(Refusal::Order)
+    }
+    /// The offer's original context and exact selected identity are checked
+    /// before starting the body verifier or emitting any provisional sum.
+    pub fn begin_verification(
+        &mut self,
+        offer: Arc<AuthenticatedContributionOffer>,
+        body_header: &[u8],
+        proof_header: &[u8],
+    ) -> Result<(), Refusal> {
+        let expected = self.next_offer()?;
+        if offer.roster().proposal().identity() != self.selection.roster().proposal().identity()
+            || offer.envelope().position() != expected.0
+            || offer.envelope().body_identity() != &expected.1
+        {
+            return Err(Refusal::Context);
+        }
+        let verifier = ContributionOfferVerifier::new(offer, body_header, proof_header)
+            .map_err(|_| Refusal::Body)?;
+        self.begin_incoming(IncomingOffer::Verifying(Box::new(verifier)));
+        Ok(())
+    }
+    fn begin_incoming(&mut self, incoming: IncomingOffer) {
         self.pending = Some(Pending {
-            offer,
+            incoming,
             incoming_hash: None,
             ordinal: 0,
             offset: 0,
@@ -316,9 +378,7 @@ impl SetupAggregator {
             output_hash: None,
             finishing: VecDeque::new(),
             outputs: Vec::new(),
-            failed: false,
         });
-        Ok(())
     }
     pub fn polynomial(
         &mut self,
@@ -328,7 +388,7 @@ impl SetupAggregator {
         previous_and_output: &mut [u8],
     ) -> Result<(), Refusal> {
         let pending = self.pending.as_mut().ok_or(Refusal::Order)?;
-        if pending.failed {
+        if self.failed {
             return Err(Refusal::Order);
         }
         let result = (|| {
@@ -349,20 +409,25 @@ impl SetupAggregator {
             if incoming.len() > bytes.saturating_sub(offset) {
                 return Err(Refusal::Order);
             }
+            if let IncomingOffer::Verifying(verifier) = &mut pending.incoming {
+                verifier
+                    .polynomial(index, offset, incoming)
+                    .map_err(|_| Refusal::Body)?;
+            }
             let identity = || {
                 IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes).map_err(|_| Refusal::Body)
             };
             if offset == 0 {
-                pending.incoming_hash = Some(identity()?);
+                pending.incoming_hash = match pending.incoming {
+                    IncomingOffer::Verified(_) => Some(identity()?),
+                    IncomingOffer::Verifying(_) => None,
+                };
                 pending.previous_hash = (self.accepted > 0).then(identity).transpose()?;
                 pending.output_hash = Some(identity()?);
             }
-            pending
-                .incoming_hash
-                .as_mut()
-                .ok_or(Refusal::Order)?
-                .absorb(incoming)
-                .map_err(|_| Refusal::Body)?;
+            if let Some(hash) = pending.incoming_hash.as_mut() {
+                hash.absorb(incoming).map_err(|_| Refusal::Body)?;
+            }
             match pending.previous_hash.as_mut() {
                 None => previous_and_output.fill(0),
                 Some(hash) => hash
@@ -380,22 +445,23 @@ impl SetupAggregator {
                 .map_err(|_| Refusal::Body)?;
             pending.offset += incoming.len();
             if pending.offset == bytes {
-                let original = pending
-                    .offer
-                    .polynomials()
-                    .get(pending.ordinal)
-                    .ok_or(Refusal::Body)?;
-                let digest = pending
-                    .incoming_hash
-                    .take()
-                    .ok_or(Refusal::Order)?
-                    .finish()
-                    .map_err(|_| Refusal::Body)?;
-                if original.index() != index
-                    || original.bytes() != bytes
-                    || original.digest() != &digest
-                {
-                    return Err(Refusal::Body);
+                if let IncomingOffer::Verified(offer) = &pending.incoming {
+                    let original = offer
+                        .polynomials()
+                        .get(pending.ordinal)
+                        .ok_or(Refusal::Body)?;
+                    let digest = pending
+                        .incoming_hash
+                        .take()
+                        .ok_or(Refusal::Order)?
+                        .finish()
+                        .map_err(|_| Refusal::Body)?;
+                    if original.index() != index
+                        || original.bytes() != bytes
+                        || original.digest() != &digest
+                    {
+                        return Err(Refusal::Body);
+                    }
                 }
                 let previous = match pending.previous_hash.take() {
                     None => None,
@@ -435,19 +501,58 @@ impl SetupAggregator {
             Ok(())
         })();
         if result.is_err() {
-            pending.failed = true;
+            self.failed = true;
         }
         result
     }
-    pub fn finish_contribution(&mut self) -> Result<(), Refusal> {
-        let mut pending = self.pending.take().ok_or(Refusal::Order)?;
-        if pending.failed || pending.ordinal != self.indices.len() || pending.offset != 0 {
+    pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
+        if self.failed {
+            return Err(Refusal::Order);
+        }
+        let pending = self.pending.as_mut().ok_or(Refusal::Order)?;
+        let result = match &mut pending.incoming {
+            IncomingOffer::Verifying(verifier)
+                if pending.ordinal == self.indices.len() && pending.offset == 0 =>
+            {
+                verifier.proof(offset, bytes).map_err(|_| Refusal::Body)
+            }
+            _ => Err(Refusal::Order),
+        };
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+    pub fn finish_contribution(&mut self) -> Result<Arc<VerifiedContributionOffer>, Refusal> {
+        if self.failed {
             return Err(Refusal::Incomplete);
         }
-        settle(&mut pending.finishing, 0, &mut pending.outputs)?;
-        self.previous = pending.outputs;
-        self.accepted += 1;
-        Ok(())
+        let result = (|| {
+            let mut pending = self.pending.take().ok_or(Refusal::Order)?;
+            if pending.ordinal != self.indices.len() || pending.offset != 0 {
+                return Err(Refusal::Incomplete);
+            }
+            settle(&mut pending.finishing, 0, &mut pending.outputs)?;
+            let offer = match pending.incoming {
+                IncomingOffer::Verified(offer) => offer,
+                IncomingOffer::Verifying(verifier) => {
+                    Arc::new(verifier.finish().map_err(|_| Refusal::Body)?)
+                }
+            };
+            self.previous = pending.outputs;
+            self.accepted += 1;
+            if !self.offers.iter().any(|held| {
+                held.envelope().position() == offer.envelope().position()
+                    && held.envelope().body_identity() == offer.envelope().body_identity()
+            }) {
+                self.offers.push(offer.clone());
+            }
+            Ok(offer)
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
     }
     pub fn finish(self) -> Result<VerifiedSelectionInputs, Refusal> {
         if !self.complete() {

@@ -6,7 +6,7 @@ use opened_contribution::{ContributionOfferVerifier, VerifiedContributionOffer};
 use registration_credentials::{
     Credential, SIGNATURE_BYTES,
     contribution_body::BODY_HEADER_BYTES,
-    contribution_offer::{MAXIMUM_OFFER_BYTES, authenticate_offer},
+    contribution_offer::{AuthenticatedContributionOffer, MAXIMUM_OFFER_BYTES, authenticate_offer},
     poll::VerifiedPoll,
     roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
     roster_input::RosterInputVerifier,
@@ -53,6 +53,44 @@ fn packet(bytes: &[u8], maximum: usize) -> Option<(&[u8], &[u8])> {
         return None;
     }
     Some((&bytes[4..4 + length], &bytes[4 + length..]))
+}
+
+struct OfferInput<'a> {
+    offer: Arc<AuthenticatedContributionOffer>,
+    body_header: &'a [u8],
+    proof_header: &'a [u8],
+}
+fn offer_input(roster: Arc<OrganizerSignedRoster>, bytes: &[u8]) -> Result<OfferInput<'_>, ()> {
+    let envelope_length =
+        u32::from_le_bytes(bytes.get(..4).ok_or(())?.try_into().unwrap()) as usize;
+    if envelope_length > MAXIMUM_OFFER_BYTES
+        || bytes.len()
+            != 4 + envelope_length + SIGNATURE_BYTES + BODY_HEADER_BYTES + PROOF_HEADER_BYTES
+    {
+        return Err(());
+    }
+    let end = 4 + envelope_length;
+    let offer = authenticate_offer(roster, &bytes[4..end], &bytes[end..end + SIGNATURE_BYTES])
+        .map_err(|_| ())?;
+    let header = end + SIGNATURE_BYTES;
+    Ok(OfferInput {
+        offer: Arc::new(offer),
+        body_header: &bytes[header..header + BODY_HEADER_BYTES],
+        proof_header: &bytes[header + BODY_HEADER_BYTES..],
+    })
+}
+fn keep_offer(
+    offers: &mut Vec<Arc<VerifiedContributionOffer>>,
+    offer: Arc<VerifiedContributionOffer>,
+) {
+    if let Some(slot) = offers
+        .iter_mut()
+        .find(|old| old.envelope().position() == offer.envelope().position())
+    {
+        *slot = offer;
+    } else {
+        offers.push(offer);
+    }
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_input_pointer() -> usize {
@@ -237,28 +275,12 @@ pub extern "C" fn setup_offer_begin(length: usize) -> u32 {
         let result = (|| {
             let roster = state.proposal.clone().ok_or(())?;
             let bytes = state.input.get(..length).ok_or(())?;
-            let envelope_length =
-                u32::from_le_bytes(bytes.get(..4).ok_or(())?.try_into().unwrap()) as usize;
-            if envelope_length > MAXIMUM_OFFER_BYTES
-                || bytes.len()
-                    != 4 + envelope_length
-                        + SIGNATURE_BYTES
-                        + BODY_HEADER_BYTES
-                        + PROOF_HEADER_BYTES
-            {
-                return Err(());
-            }
-            let end = 4 + envelope_length;
-            let offer =
-                authenticate_offer(roster, &bytes[4..end], &bytes[end..end + SIGNATURE_BYTES])
-                    .map_err(|_| ())?;
-            let header = end + SIGNATURE_BYTES;
-            ContributionOfferVerifier::new(
-                Arc::new(offer),
-                &bytes[header..header + BODY_HEADER_BYTES],
-                &bytes[header + BODY_HEADER_BYTES..],
-            )
-            .map_err(|_| ())
+            let OfferInput {
+                offer,
+                body_header,
+                proof_header,
+            } = offer_input(roster, bytes)?;
+            ContributionOfferVerifier::new(offer, body_header, proof_header).map_err(|_| ())
         })();
         match result {
             Ok(verifier) => {
@@ -312,16 +334,7 @@ pub extern "C" fn setup_offer_finish() -> u32 {
         let Ok(offer) = offer.finish() else {
             return 0;
         };
-        let position = offer.envelope().position();
-        if let Some(slot) = state
-            .offers
-            .iter_mut()
-            .find(|old| old.envelope().position() == position)
-        {
-            *slot = Arc::new(offer);
-        } else {
-            state.offers.push(Arc::new(offer));
-        }
+        keep_offer(&mut state.offers, Arc::new(offer));
         1
     })
 }
@@ -480,16 +493,16 @@ pub extern "C" fn setup_selection_identity_pointer() -> usize {
 pub extern "C" fn setup_selection_aggregate() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if state.verified.is_some() || state.aggregator.is_some() || state.inputs.is_some() {
+        if state.aggregator.is_some() {
             return 0;
         }
         let result = (|| {
             let selected = state.selected.clone().ok_or(())?;
-            let offers: Result<Vec<_>, _> = selected
+            let offers: Vec<_> = selected
                 .selection()
                 .selected()
                 .iter()
-                .map(|(position, identity)| {
+                .filter_map(|(position, identity)| {
                     state
                         .offers
                         .iter()
@@ -498,10 +511,9 @@ pub extern "C" fn setup_selection_aggregate() -> u32 {
                                 && offer.envelope().body_identity() == identity
                         })
                         .cloned()
-                        .ok_or(())
                 })
                 .collect();
-            SetupAggregator::new(selected, offers?).map_err(|_| ())
+            SetupAggregator::new(selected, offers).map_err(|_| ())
         })();
         match result {
             Ok(aggregate) => {
@@ -510,6 +522,55 @@ pub extern "C" fn setup_selection_aggregate() -> u32 {
             }
             Err(()) => 0,
         }
+    })
+}
+/// Discards only disposable aggregate progress. Positive offer holders,
+/// selected inputs and certificate authority remain in their owning state.
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_discard_aggregation() -> u32 {
+    SESSION.with(|state| {
+        state.borrow_mut().aggregator = None;
+    });
+    0
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_begin_selected_offer_verification(length: usize) -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let result = (|| {
+            let roster = state.proposal.clone().ok_or(())?;
+            let Session {
+                input, aggregator, ..
+            } = &mut *state;
+            let OfferInput {
+                offer,
+                body_header,
+                proof_header,
+            } = offer_input(roster, input.get(..length).ok_or(())?)?;
+            aggregator
+                .as_mut()
+                .ok_or(())?
+                .begin_verification(offer, body_header, proof_header)
+                .map_err(|_| ())
+        })();
+        u32::from(result.is_err())
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_selected_offer_proof(offset: usize, length: usize) -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let Session {
+            input, aggregator, ..
+        } = &mut *state;
+        let Some(bytes) = input.get(..length) else {
+            return 1;
+        };
+        u32::from(
+            aggregator
+                .as_mut()
+                .is_none_or(|aggregate| aggregate.proof(offset, bytes).is_err()),
+        )
     })
 }
 #[unsafe(no_mangle)]
@@ -545,13 +606,16 @@ pub extern "C" fn setup_polynomial(index: usize, offset: usize, length: usize) -
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_finish_selected_offer() -> u32 {
     SESSION.with(|state| {
-        u32::from(
-            state
-                .borrow_mut()
-                .aggregator
-                .as_mut()
-                .is_some_and(|aggregate| aggregate.finish_contribution().is_ok()),
-        )
+        let mut state = state.borrow_mut();
+        let Some(Ok(offer)) = state
+            .aggregator
+            .as_mut()
+            .map(SetupAggregator::finish_contribution)
+        else {
+            return 0;
+        };
+        keep_offer(&mut state.offers, offer);
+        1
     })
 }
 #[unsafe(no_mangle)]
@@ -578,6 +642,13 @@ pub extern "C" fn setup_selection_finish() -> u32 {
         let Ok(inputs) = state.aggregator.take().unwrap().finish() else {
             return 0;
         };
+        if state.inputs.as_ref().is_some_and(|known| {
+            known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
+        }) || state.verified.as_ref().is_some_and(|known| {
+            known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
+        }) {
+            return 0;
+        }
         state.inputs = Some(Arc::new(inputs));
         1
     })

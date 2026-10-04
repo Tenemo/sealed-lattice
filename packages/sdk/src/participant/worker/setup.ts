@@ -16,7 +16,12 @@ import {
 } from './contribution.js';
 import type { ParticipantSession, SignedPacket } from './contribution.js';
 import { openDelivery } from './delivery.js';
-import { readKernel, ResourceFailure, writeSetupInput } from './kernel.js';
+import {
+    ModuleFailure,
+    readKernel,
+    ResourceFailure,
+    writeSetupInput,
+} from './kernel.js';
 import { encodePreparationState } from './preparation-state.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -34,7 +39,7 @@ import {
     streamRegistrations,
     validRecordIds,
 } from './roster.js';
-import { awaitLater, namespacedName, setupCacheName } from './storage.js';
+import { namespacedName, setupCacheName } from './storage.js';
 
 // The owning Rust verifiers authenticate the roster, complete selected offers,
 // organizer proposal and endorsement certificate. The public aggregate cache
@@ -179,40 +184,30 @@ export const deliverFinalAggregate = async (
     }
 };
 
-// Reads one body polynomial's aggregate after the given count of accepted
-// contributions, every chunk in one transaction.
-const readCachedAggregate = async (
+// Reads one coefficient-aligned chunk. Neither cache rebuild nor a private
+// consumer materializes a complete polynomial's encoded bytes in JavaScript.
+const readCachedAggregateChunk = async (
     cache: IDBDatabase,
     accepted: number,
     expandedIndex: number,
-    chunks: readonly AggregateChunk[],
+    chunk: AggregateChunk,
 ) => {
-    let values: unknown[];
+    let value: unknown;
     try {
         const transaction = cache.transaction(cacheStore, 'readonly');
         const store = transaction.objectStore(cacheStore);
-        [values] = await Promise.all([
-            Promise.all(
-                chunks.map(({ offset }) =>
-                    cacheRequest<unknown>(
-                        store.get([accepted, expandedIndex, offset]),
-                    ),
-                ),
+        [value] = await Promise.all([
+            cacheRequest<unknown>(
+                store.get([accepted, expandedIndex, chunk.offset]),
             ),
             cacheCompletion(transaction),
         ]);
     } catch {
         throw new PublicInputFailure('The setup cache refused a read.');
     }
-    return Promise.all(
-        values.map(async (value, index) => {
-            if (!(value instanceof Blob) || value.size !== chunks[index].length)
-                throw new PublicInputFailure(
-                    'A cached aggregate chunk is missing.',
-                );
-            return new Uint8Array(await value.arrayBuffer());
-        }),
-    );
+    if (!(value instanceof Blob) || value.size !== chunk.length)
+        throw new PublicInputFailure('A cached aggregate chunk is missing.');
+    return new Uint8Array(await value.arrayBuffer());
 };
 
 // Streams the final public aggregate of one body polynomial from the cache
@@ -235,14 +230,16 @@ export const readFinalAggregate = async (
     );
     const cache = await openSetupCache(context.namespace);
     try {
-        const values = await readCachedAggregate(
-            cache,
-            profile.setupContributorCount - 1,
-            expandedIndex,
-            chunks,
-        );
-        for (const [index, { offset }] of chunks.entries())
-            consume(offset, values[index]);
+        for (const chunk of chunks)
+            consume(
+                chunk.offset,
+                await readCachedAggregateChunk(
+                    cache,
+                    profile.setupContributorCount - 1,
+                    expandedIndex,
+                    chunk,
+                ),
+            );
     } finally {
         cache.close();
     }
@@ -356,23 +353,29 @@ const readProofPrefix = async (
     return prefix;
 };
 
-// Discovery never supplies verification authority. Complete named reads from
-// the relay published store and the owning proof verifier establish the exact
-// published dependency. Retention preserves those records; no receipt or
-// arbitrary local buffer substitutes for that completed read and verification.
-export const verifyOffer = async (
+const offerAvailable = (
+    context: PublicProfileContext,
+    offer: SelectedOffer,
+) => {
+    writeSetupInput(context.kernel, offer.identity);
+    return (
+        context.kernel.setup_offer_available(
+            offer.position,
+            offer.identity.length,
+        ) === 1
+    );
+};
+
+// Both discovery and selected aggregation authenticate the same complete
+// envelope and lookahead before reading any polynomial under its named route.
+const beginOffer = async (
     context: PublicProfileContext,
     relay: PublicRelay,
     offer: SelectedOffer,
+    begin: (length: number) => number,
 ) => {
     const { kernel, profile } = context;
     const bounds = profile.contribution;
-    writeSetupInput(kernel, offer.identity);
-    if (
-        kernel.setup_offer_available(offer.position, offer.identity.length) ===
-        1
-    )
-        return;
     const directory = offerDirectory(offer);
     const envelope = await readPublic(
         relay,
@@ -405,7 +408,7 @@ export const verifyOffer = async (
         proofPrefix,
     );
     writeSetupInput(kernel, control);
-    if (kernel.setup_offer_begin(control.length) !== 0)
+    if (begin(control.length) !== 0)
         throw new PublicInputFailure('A contribution offer was refused.');
     // Check the authenticated envelope's transport destination before its
     // proof can replace any author in the module's verified-offer pool.
@@ -417,6 +420,44 @@ export const verifyOffer = async (
         throw new PublicInputFailure(
             'The offer route names another body or author.',
         );
+};
+
+const streamOfferProof = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    offer: SelectedOffer,
+    absorb: (offset: number, length: number) => number,
+) => {
+    let offset = 0;
+    await streamPublic(
+        relay,
+        offerDirectory(offer) + 'proof.bin',
+        context.profile.contribution.maximumProofBytes,
+        (bytes) => {
+            writeSetupInput(context.kernel, bytes);
+            if (absorb(offset, bytes.length) !== 0)
+                throw new PublicInputFailure(
+                    'A contribution offer proof was refused.',
+                );
+            offset += bytes.length;
+        },
+    );
+};
+
+// Discovery never supplies verification authority. Complete named reads from
+// the relay published store and the owning proof verifier establish the exact
+// published dependency. Retention preserves those records; no receipt or
+// arbitrary local buffer substitutes for that completed read and verification.
+export const verifyOffer = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    offer: SelectedOffer,
+) => {
+    const { kernel, profile } = context;
+    if (offerAvailable(context, offer)) return;
+    await beginOffer(context, relay, offer, kernel.setup_offer_begin);
+    const bounds = profile.contribution;
+    const directory = offerDirectory(offer);
     for (const polynomial of bounds.polynomials) {
         let offset = 0;
         const length = await streamPublic(
@@ -443,27 +484,10 @@ export const verifyOffer = async (
                 'A contribution offer polynomial is incomplete.',
             );
     }
-    let proofOffset = 0;
-    await streamPublic(
-        relay,
-        directory + 'proof.bin',
-        bounds.maximumProofBytes,
-        (bytes) => {
-            writeSetupInput(kernel, bytes);
-            if (kernel.setup_offer_proof(proofOffset, bytes.length) !== 0)
-                throw new PublicInputFailure(
-                    'A contribution offer proof was refused.',
-                );
-            proofOffset += bytes.length;
-        },
-    );
+    await streamOfferProof(context, relay, offer, kernel.setup_offer_proof);
     if (kernel.setup_offer_finish() !== 1)
         throw new PublicInputFailure('A contribution offer was refused.');
-    writeSetupInput(kernel, offer.identity);
-    if (
-        kernel.setup_offer_available(offer.position, offer.identity.length) !==
-        1
-    )
+    if (!offerAvailable(context, offer))
         throw new PublicInputFailure(
             'The verified offer differs from its advertised identity.',
         );
@@ -479,48 +503,38 @@ const aggregateOffer = async (
     const bounds = profile.contribution;
     const directory = offerDirectory(offer);
     const accepted = kernel.setup_accepted();
-    if (kernel.setup_begin_selected_offer(offer.position) !== 0)
-        throw new PublicInputFailure('A selected verified offer was refused.');
+    const verified = offerAvailable(context, offer);
+    if (verified) {
+        if (kernel.setup_begin_selected_offer(offer.position) !== 0)
+            throw new PublicInputFailure(
+                'A selected verified offer was refused.',
+            );
+    } else
+        await beginOffer(
+            context,
+            relay,
+            offer,
+            kernel.setup_begin_selected_offer_verification,
+        );
     const chunk = kernel.setup_chunk_capacity();
-    // Each polynomial's previous aggregate is read while the polynomial
-    // before it is verified, and its new aggregate is written while the one
-    // after it is verified. The cache's transactions run in the order they
-    // start, so a read follows every write started before it.
-    const readPrevious = (index: number) => {
-        const polynomial = bounds.polynomials[index];
-        return accepted === 0 || polynomial === undefined
-            ? undefined
-            : awaitLater(
-                  readCachedAggregate(
-                      cache,
-                      accepted - 1,
-                      polynomial.expandedIndex,
-                      aggregateChunks(
-                          aggregateCapacity(context, polynomial),
-                          polynomial.bytes,
-                      ),
-                  ),
-              );
-    };
-    let reading = readPrevious(0);
-    let writing: Promise<void> | undefined;
-    for (const [index, polynomial] of bounds.polynomials.entries()) {
-        const previous = await reading;
-        reading = readPrevious(index + 1);
+    // One incoming chunk and one previous/output chunk suffice. Replacing
+    // each ordinal in one transaction leaves only disposable mixed scratch
+    // until the complete offer and every aggregate digest have verified.
+    for (const polynomial of bounds.polynomials) {
         const capacity = aggregateCapacity(context, polynomial);
         const pending = new Uint8Array(capacity);
-        const written: { offset: number; bytes: Uint8Array }[] = [];
         let used = 0;
         let offset = 0;
-        const absorb = (incoming: Uint8Array) => {
+        const absorb = async (incoming: Uint8Array) => {
             const prior =
-                previous === undefined
+                accepted === 0
                     ? new Uint8Array(incoming.length)
-                    : previous[written.length];
-            if (prior?.length !== incoming.length)
-                throw new PublicInputFailure(
-                    'A cached aggregate chunk is missing.',
-                );
+                    : await readCachedAggregateChunk(
+                          cache,
+                          accepted - 1,
+                          polynomial.expandedIndex,
+                          { offset, length: incoming.length },
+                      );
             writeSetupInput(kernel, incoming);
             writeSetupInput(kernel, prior, chunk);
             if (
@@ -533,13 +547,24 @@ const aggregateOffer = async (
                 throw new PublicInputFailure(
                     'A contribution polynomial was refused.',
                 );
-            written.push({
-                offset,
-                bytes: readKernel(
-                    kernel,
+            // Copy into the existing previous chunk before any awaited work;
+            // no borrowed Wasm view escapes the synchronous kernel call.
+            prior.set(
+                new Uint8Array(
+                    kernel.memory.buffer,
                     kernel.setup_input_pointer() + chunk,
                     incoming.length,
                 ),
+            );
+            const output = new Blob([prior]);
+            await writeCache(cache, (store) => {
+                store.put(output, [accepted, polynomial.expandedIndex, offset]);
+                if (accepted > 0)
+                    store.delete([
+                        accepted - 1,
+                        polynomial.expandedIndex,
+                        offset,
+                    ]);
             });
             offset += incoming.length;
         };
@@ -547,7 +572,7 @@ const aggregateOffer = async (
             relay,
             directory + polynomialFile(polynomial.expandedIndex),
             polynomial.bytes,
-            (bytes) => {
+            async (bytes) => {
                 for (let start = 0; start < bytes.length;) {
                     const count = Math.min(
                         bytes.length - start,
@@ -557,30 +582,25 @@ const aggregateOffer = async (
                     start += count;
                     used += count;
                     if (used === capacity) {
-                        absorb(pending.subarray(0, used));
+                        await absorb(pending.subarray(0, used));
                         used = 0;
                     }
                 }
             },
         );
-        if (used > 0) absorb(pending.subarray(0, used));
+        if (used > 0) await absorb(pending.subarray(0, used));
         if (offset !== polynomial.bytes)
             throw new PublicInputFailure(
                 'A contribution polynomial is incomplete.',
             );
-        await writing;
-        writing = awaitLater(
-            writeCache(cache, (store) => {
-                for (const value of written)
-                    store.put(new Blob([new Uint8Array(value.bytes)]), [
-                        accepted,
-                        polynomial.expandedIndex,
-                        value.offset,
-                    ]);
-            }),
-        );
     }
-    await writing;
+    if (!verified)
+        await streamOfferProof(
+            context,
+            relay,
+            offer,
+            kernel.setup_selected_offer_proof,
+        );
     if (
         kernel.setup_finish_selected_offer() !== 1 ||
         kernel.setup_accepted() !== accepted + 1
@@ -588,11 +608,9 @@ const aggregateOffer = async (
         throw new PublicInputFailure(
             'A selected contribution aggregate was refused.',
         );
-    if (accepted > 0)
-        await writeCache(cache, (store) =>
-            store.delete(
-                IDBKeyRange.bound([accepted - 1], [accepted], false, true),
-            ),
+    if (!offerAvailable(context, offer))
+        throw new PublicInputFailure(
+            'The selected offer differs from its advertised identity.',
         );
 };
 
@@ -603,19 +621,45 @@ const aggregateSelection = async (
 ) => {
     const { kernel } = context;
     if (kernel.setup_selection_aggregate() !== 1)
-        throw new PublicInputFailure(
-            'Complete selected offers are unavailable.',
-        );
-    const cache = await openSetupCache(context.namespace);
+        throw new PublicInputFailure('The selected aggregation was refused.');
+    let cache: IDBDatabase | undefined;
     try {
+        cache = await openSetupCache(context.namespace);
         await writeCache(cache, (store) => store.clear());
         for (const offer of selection.offers)
             await aggregateOffer(context, relay, cache, offer);
+        if (kernel.setup_selection_finish() !== 1)
+            throw new PublicInputFailure('The selected aggregate was refused.');
+    } catch (error) {
+        // The cache may now contain chunks from two different prefixes.
+        // Only the scratch accumulator is discarded: verified offer holders,
+        // retained input capabilities and private authority remain intact.
+        let failure = error;
+        try {
+            if (
+                !(error instanceof ResourceFailure) &&
+                !(error instanceof ModuleFailure) &&
+                kernel.setup_discard_aggregation() !== 0
+            )
+                throw Object.assign(
+                    new Error('The aggregate scratch could not be discarded.'),
+                    { cause: error },
+                );
+        } catch (discardError) {
+            failure = discardError;
+        }
+        try {
+            if (cache !== undefined)
+                await writeCache(cache, (store) => store.clear());
+        } catch (cleanupError) {
+            // Local/module failures take precedence over public cache
+            // availability. A later attempt must clear scratch again.
+            if (failure instanceof PublicInputFailure) failure = cleanupError;
+        }
+        throw failure;
     } finally {
-        cache.close();
+        cache?.close();
     }
-    if (kernel.setup_selection_finish() !== 1)
-        throw new PublicInputFailure('The selected aggregate was refused.');
 };
 
 // Each operation owns one Rust module; this records only whether that module
@@ -699,8 +743,6 @@ export const verifySelectionInputs = async (
 ) => {
     await verifySetupRoster(session, relay);
     const selection = authenticateSelection(session.context, packet, retained);
-    for (const offer of selection.offers)
-        await verifyOffer(session.context, relay, offer);
     await aggregateSelection(session.context, relay, selection);
     return selection;
 };
@@ -773,8 +815,6 @@ const verifyCertificateInputs = async (
     retained = false,
 ) => {
     const selection = authenticateCertificate(context, certificate, retained);
-    for (const offer of selection.offers)
-        await verifyOffer(context, relay, offer);
     await aggregateSelection(context, relay, selection);
     if (context.kernel.setup_finish_certificate() !== 1)
         throw new PublicInputFailure(

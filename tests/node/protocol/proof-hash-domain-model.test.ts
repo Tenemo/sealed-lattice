@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    extractRegistrationGraphPrefix,
-    hasRegistrationHashLayout,
-    isRegistrationChallengeInput,
-    parseRegistrationHashInput,
-    registrationGraphHasCollision,
-    registrationGraphPrefix,
-    registrationGraphReferences,
-    type RegistrationGraphEntry,
-    type RegistrationGraphInput,
-} from '#tests/registration-hash-domain-model.js';
+    extractProofGraphPrefix,
+    hasProofHashLayout,
+    isProofChallengeInput,
+    parseProofHashInput,
+    proofGraphHasCollision,
+    proofGraphPrefix,
+    proofGraphReferences,
+    type ProofGraphEntry,
+    type ProofGraphInput,
+} from '#tests/proof-hash-domain-model.js';
 
 // Independently maintained fixture operands from registration_relation(),
 // context_parameters(), registration_proof_role() and the native hash framing.
@@ -102,13 +102,13 @@ describe('registration hash domain correspondence model', () => {
             ],
         ] as const;
         for (const [family, input, referenceMarkers] of fixtures) {
-            const parsed = parseRegistrationHashInput(input);
+            const parsed = parseProofHashInput(input);
             expect(parsed?.family).toBe(family);
             expect(parsed?.owner).toBe('ab'.repeat(64));
-            expect(parsed && hasRegistrationHashLayout(parsed)).toBe(true);
-            expect(isRegistrationChallengeInput(input, new Set())).toBe(true);
+            expect(parsed && hasProofHashLayout(parsed)).toBe(true);
+            expect(isProofChallengeInput(input, new Set())).toBe(true);
             expect(
-                isRegistrationChallengeInput(input, new Set(['ab'.repeat(64)])),
+                isProofChallengeInput(input, new Set(['ab'.repeat(64)])),
             ).toBe(false);
             const expectedReferences = referenceMarkers.map((marker) =>
                 Buffer.alloc(64, marker),
@@ -127,7 +127,7 @@ describe('registration hash domain correspondence model', () => {
             [2, 262143, 48],
             [18, 3, 48],
         ]) {
-            const parsed = parseRegistrationHashInput(
+            const parsed = parseProofHashInput(
                 frame(true, 'leaf', [
                     number(stage),
                     number(index),
@@ -136,7 +136,7 @@ describe('registration hash domain correspondence model', () => {
                 ]),
             );
             expect(parsed).toBeDefined();
-            expect(hasRegistrationHashLayout(parsed!)).toBe(true);
+            expect(hasProofHashLayout(parsed!)).toBe(true);
         }
         for (const [stage, index, width] of [
             [0, 262144, 144],
@@ -144,7 +144,7 @@ describe('registration hash domain correspondence model', () => {
             [18, 4, 48],
             [19, 0, 48],
         ]) {
-            const parsed = parseRegistrationHashInput(
+            const parsed = parseProofHashInput(
                 frame(true, 'leaf', [
                     number(stage),
                     number(index),
@@ -153,7 +153,7 @@ describe('registration hash domain correspondence model', () => {
                 ]),
             );
             expect(parsed).toBeDefined();
-            expect(hasRegistrationHashLayout(parsed!)).toBe(false);
+            expect(hasProofHashLayout(parsed!)).toBe(false);
         }
     });
 
@@ -179,11 +179,11 @@ describe('registration hash domain correspondence model', () => {
             ]),
             frame(false, 'verifier-message', [context, state, number(0)]),
         ]) {
-            const parsed = parseRegistrationHashInput(input);
+            const parsed = parseProofHashInput(input);
             expect(parsed).toBeDefined();
-            expect(hasRegistrationHashLayout(parsed!)).toBe(false);
+            expect(hasProofHashLayout(parsed!)).toBe(false);
         }
-        const terminal = parseRegistrationHashInput(
+        const terminal = parseProofHashInput(
             frame(true, 'message-root', [
                 context,
                 number(20),
@@ -192,7 +192,7 @@ describe('registration hash domain correspondence model', () => {
             ]),
         );
         expect(terminal).toBeDefined();
-        expect(hasRegistrationHashLayout(terminal!)).toBe(true);
+        expect(hasProofHashLayout(terminal!)).toBe(true);
         expect(terminal?.references).toEqual([context]);
         // Layout acceptance does not assert that these all-ones scalars decode.
     });
@@ -202,21 +202,17 @@ describe('registration hash domain correspondence model', () => {
         const prefixBytes = complete.length - (28 + 2 * 65536 * 21);
         for (const suffixLength of [0, 1, 1275, 28 + 2 * 65536 * 21 - 1]) {
             const partial = complete.subarray(0, prefixBytes + suffixLength);
-            expect(parseRegistrationHashInput(partial)).toBeUndefined();
+            expect(parseProofHashInput(partial)).toBeUndefined();
         }
         const changedDeclaration = contextFields();
         changedDeclaration[6] = Buffer.alloc(1275);
         expect(
-            parseRegistrationHashInput(
-                frame(true, 'statement', changedDeclaration),
-            ),
+            parseProofHashInput(frame(true, 'statement', changedDeclaration)),
         ).toBeUndefined();
         // A recipient-key API name cannot change the classification of bytes
         // imitating a partial context, and cannot make it a resolved instance.
         const keyDigestInput = complete.subarray(0, 64 + 65536 * 21);
-        expect(isRegistrationChallengeInput(keyDigestInput, new Set())).toBe(
-            false,
-        );
+        expect(isProofChallengeInput(keyDigestInput, new Set())).toBe(false);
     });
 
     it('refuses framing and ASCII aliases without interpreting their caller', () => {
@@ -252,9 +248,9 @@ describe('registration hash domain correspondence model', () => {
                 Buffer.alloc(145),
             ]),
         ])
-            expect(parseRegistrationHashInput(input)).toBeUndefined();
-        expect(parseRegistrationHashInput(Buffer.from(good))).toEqual(
-            parseRegistrationHashInput(good),
+            expect(parseProofHashInput(input)).toBeUndefined();
+        expect(parseProofHashInput(Buffer.from(good))).toEqual(
+            parseProofHashInput(good),
         );
     });
 
@@ -263,23 +259,23 @@ describe('registration hash domain correspondence model', () => {
         for (const length of [34, 66, 1952])
             for (const pattern of [0, 1, 255])
                 expect(
-                    parseRegistrationHashInput(Buffer.alloc(length, pattern)),
+                    parseProofHashInput(Buffer.alloc(length, pattern)),
                 ).toBeUndefined();
         // The foundation tuple starts with its schema/version, not a proof tag.
         const participantIdentity = Buffer.alloc(2100);
         participantIdentity.set([1, 0, 1, 0]);
-        expect(parseRegistrationHashInput(participantIdentity)).toBeUndefined();
+        expect(parseProofHashInput(participantIdentity)).toBeUndefined();
         // This is a raw-domain control, not a native key-generation trace.
     });
 
     it('exposes the exact chain references rather than the hexadecimal owner encoding', () => {
-        const verifier = parseRegistrationHashInput(
+        const verifier = parseProofHashInput(
             frame(false, 'verifier-message', [context, state, number(4)]),
         )!;
         expect(verifier.references.map((value) => value[0])).toEqual([
             11, 12, 13,
         ]);
-        const chain = parseRegistrationHashInput(
+        const chain = parseProofHashInput(
             frame(false, 'chain-state', [context, state, Buffer.alloc(64, 24)]),
         )!;
         expect(chain.references.map((value) => value[0])).toEqual([11, 12, 24]);
@@ -289,25 +285,25 @@ describe('registration hash domain correspondence model', () => {
 const alphabet = 32;
 const word = (prefix: number, tail = 0) => prefix * alphabet + tail;
 const entry = (
-    input: RegistrationGraphInput,
+    input: ProofGraphInput,
     prefix: number,
     tail = 0,
-): RegistrationGraphEntry => ({ input, output: word(prefix, tail) });
-const firstQuery: RegistrationGraphInput = {
+): ProofGraphEntry => ({ input, output: word(prefix, tail) });
+const firstQuery: ProofGraphInput = {
     kind: 'verifier',
     role: 'corrupt-a',
     context: 1,
     state: [0, 0],
     round: 1,
 };
-const nextQuery: RegistrationGraphInput = {
+const nextQuery: ProofGraphInput = {
     kind: 'verifier',
     role: 'corrupt-a',
     context: 1,
     state: [3, 7],
     round: 2,
 };
-const graph = (): RegistrationGraphEntry[] => [
+const graph = (): ProofGraphEntry[] => [
     entry(
         {
             kind: 'context',
@@ -372,29 +368,27 @@ const graph = (): RegistrationGraphEntry[] => [
     ),
     entry(nextQuery, 8, 0),
 ];
-const without = (database: readonly RegistrationGraphEntry[], prefix: number) =>
+const without = (database: readonly ProofGraphEntry[], prefix: number) =>
     database.filter(
-        (record) => registrationGraphPrefix(record.output, alphabet) !== prefix,
+        (record) => proofGraphPrefix(record.output, alphabet) !== prefix,
     );
 
 describe('reduced registration reference closure', () => {
     it('extracts the fixed instance, complete challenge and indexed partial oracle', () => {
+        expect(extractProofGraphPrefix(graph(), nextQuery, alphabet)).toEqual({
+            instance: 'false-a',
+            messages: [67],
+            oracles: [[7, 9]],
+        });
         expect(
-            extractRegistrationGraphPrefix(graph(), nextQuery, alphabet),
-        ).toEqual({ instance: 'false-a', messages: [67], oracles: [[7, 9]] });
-        expect(
-            extractRegistrationGraphPrefix(
-                without(graph(), 5),
-                nextQuery,
-                alphabet,
-            ),
+            extractProofGraphPrefix(without(graph(), 5), nextQuery, alphabet),
         ).toEqual({
             instance: 'false-a',
             messages: [67],
             oracles: [[null, 9]],
         });
         expect(
-            [...registrationGraphReferences(graph(), nextQuery, alphabet)].sort(
+            [...proofGraphReferences(graph(), nextQuery, alphabet)].sort(
                 (a, b) => a - b,
             ),
         ).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
@@ -403,7 +397,7 @@ describe('reduced registration reference closure', () => {
     it('requires a complete canonical context and every prior challenge link', () => {
         for (const missing of [1, 2, 3, 7])
             expect(
-                extractRegistrationGraphPrefix(
+                extractProofGraphPrefix(
                     without(graph(), missing),
                     nextQuery,
                     alphabet,
@@ -420,7 +414,7 @@ describe('reduced registration reference closure', () => {
             1,
         );
         expect(
-            extractRegistrationGraphPrefix(malformed, nextQuery, alphabet),
+            extractProofGraphPrefix(malformed, nextQuery, alphabet),
         ).toBeUndefined();
         const unresolved = without(graph(), 1);
         // An input naming the context is insufficient: this would be the
@@ -433,12 +427,12 @@ describe('reduced registration reference closure', () => {
             ),
         ).toBe(true);
         expect(
-            extractRegistrationGraphPrefix(unresolved, nextQuery, alphabet),
+            extractProofGraphPrefix(unresolved, nextQuery, alphabet),
         ).toBeUndefined();
     });
 
     it('checks role, context, round, complete message and initial state bindings', () => {
-        const changes: [number, RegistrationGraphInput][] = [
+        const changes: [number, ProofGraphInput][] = [
             [1, { ...graph()[1].input, role: 'corrupt-b' }],
             [1, { ...firstQuery, context: 9 }],
             [1, { ...firstQuery, round: 2 }],
@@ -468,7 +462,7 @@ describe('reduced registration reference closure', () => {
             const database = graph();
             database[index] = { input, output: database[index].output };
             expect(
-                extractRegistrationGraphPrefix(database, nextQuery, alphabet),
+                extractProofGraphPrefix(database, nextQuery, alphabet),
             ).toBeUndefined();
         }
     });
@@ -500,20 +494,18 @@ describe('reduced registration reference closure', () => {
                 value: 7,
                 canonical: false,
             },
-        ] satisfies RegistrationGraphInput[]) {
+        ] satisfies ProofGraphInput[]) {
             const database = graph();
             database[4] = { input, output: database[4].output };
             // A prefix-only lookup finds the hostile record; typed extraction
             // must refuse to use it at the requested original leaf position.
             expect(
                 database.find(
-                    (record) =>
-                        registrationGraphPrefix(record.output, alphabet) === 5,
+                    (record) => proofGraphPrefix(record.output, alphabet) === 5,
                 ),
             ).toBeDefined();
             expect(
-                extractRegistrationGraphPrefix(database, nextQuery, alphabet)
-                    ?.oracles,
+                extractProofGraphPrefix(database, nextQuery, alphabet)?.oracles,
             ).toEqual([[null, 9]]);
         }
         const wrongLevel = graph();
@@ -530,8 +522,7 @@ describe('reduced registration reference closure', () => {
             4,
         );
         expect(
-            extractRegistrationGraphPrefix(wrongLevel, nextQuery, alphabet)
-                ?.oracles,
+            extractProofGraphPrefix(wrongLevel, nextQuery, alphabet)?.oracles,
         ).toEqual([[null, null]]);
     });
 
@@ -545,25 +536,21 @@ describe('reduced registration reference closure', () => {
             },
             1,
         );
+        expect(proofGraphHasCollision([...graph(), foreign], alphabet)).toBe(
+            false,
+        );
         expect(
-            registrationGraphHasCollision([...graph(), foreign], alphabet),
-        ).toBe(false);
-        expect(
-            extractRegistrationGraphPrefix(
-                [...graph(), foreign],
-                nextQuery,
-                alphabet,
-            ),
-        ).toEqual(extractRegistrationGraphPrefix(graph(), nextQuery, alphabet));
+            extractProofGraphPrefix([...graph(), foreign], nextQuery, alphabet),
+        ).toEqual(extractProofGraphPrefix(graph(), nextQuery, alphabet));
         const collision = {
             ...foreign,
             input: { ...foreign.input, role: 'corrupt-a' },
         };
+        expect(proofGraphHasCollision([...graph(), collision], alphabet)).toBe(
+            true,
+        );
         expect(
-            registrationGraphHasCollision([...graph(), collision], alphabet),
-        ).toBe(true);
-        expect(
-            extractRegistrationGraphPrefix(
+            extractProofGraphPrefix(
                 [...graph(), collision],
                 nextQuery,
                 alphabet,
@@ -577,7 +564,7 @@ describe('reduced registration reference closure', () => {
             graph(),
             ...[1, 2, 3, 4, 5, 7].map((prefix) => without(graph(), prefix)),
         ];
-        const additions: RegistrationGraphInput[] = [
+        const additions: ProofGraphInput[] = [
             ...graph().map((record) => record.input),
             {
                 kind: 'context',
@@ -657,32 +644,29 @@ describe('reduced registration reference closure', () => {
                     )
                 )
                     continue;
-                const references = registrationGraphReferences(
+                const references = proofGraphReferences(
                     database,
                     input,
                     alphabet,
                 );
                 for (let output = 0; output < alphabet ** 2; output++) {
                     const extended = [...database, { input, output }];
-                    if (registrationGraphHasCollision(extended, alphabet))
-                        continue;
+                    if (proofGraphHasCollision(extended, alphabet)) continue;
                     for (const query of database
                         .map((record) => record.input)
                         .filter((candidate) => candidate.kind === 'verifier')) {
-                        const before = extractRegistrationGraphPrefix(
+                        const before = extractProofGraphPrefix(
                             database,
                             query,
                             alphabet,
                         );
-                        const after = extractRegistrationGraphPrefix(
+                        const after = extractProofGraphPrefix(
                             extended,
                             query,
                             alphabet,
                         );
                         if (
-                            references.has(
-                                registrationGraphPrefix(output, alphabet),
-                            )
+                            references.has(proofGraphPrefix(output, alphabet))
                         ) {
                             if (
                                 JSON.stringify(before) !== JSON.stringify(after)
@@ -706,5 +690,276 @@ describe('reduced registration reference closure', () => {
         expect(violations).toEqual([]);
         expect(compared).toBeGreaterThan(0);
         expect(changedOnReference).toBeGreaterThan(0);
+    });
+});
+
+describe('mixed-width finite-family reference closure', () => {
+    const maximumTags = 3;
+    const shortGraph = () =>
+        graph().map((record) => ({
+            ...record,
+            output: record.output * alphabet,
+        }));
+    const longGraph = () =>
+        shortGraph().map((record, index) => {
+            let input: ProofGraphInput = {
+                ...record.input,
+                role: 'corrupt-long',
+            };
+            if (input.kind === 'context')
+                input = {
+                    ...input,
+                    messageTags: 3,
+                    arithmeticKey: 'long-relation',
+                };
+            if (input.kind === 'verifier')
+                input = {
+                    ...input,
+                    state: input.round === 1 ? [0, 0, 0] : [3, 7, 11],
+                };
+            if (input.kind === 'chain')
+                input = { ...input, message: word(2, 3) * alphabet + 4 };
+            return { input, output: record.output + (index === 1 ? 4 : 0) };
+        });
+    const query = (database: readonly ProofGraphEntry[]) =>
+        database[database.length - 1].input;
+
+    it('compares the complete relation word and chain tail, ignoring only unused maximum-word suffixes', () => {
+        const short = shortGraph(),
+            long = longGraph();
+        expect(
+            extractProofGraphPrefix(short, query(short), alphabet, maximumTags)
+                ?.messages,
+        ).toEqual([word(2, 3)]);
+        expect(
+            extractProofGraphPrefix(long, query(long), alphabet, maximumTags)
+                ?.messages,
+        ).toEqual([word(2, 3) * alphabet + 4]);
+        short[1].output += 9;
+        expect(
+            extractProofGraphPrefix(short, query(short), alphabet, maximumTags),
+        ).toBeDefined();
+        long[1].output += 1;
+        expect(
+            extractProofGraphPrefix(long, query(long), alphabet, maximumTags),
+        ).toBeUndefined();
+        const changedTail = longGraph();
+        changedTail[6].output += alphabet;
+        expect(
+            extractProofGraphPrefix(
+                changedTail,
+                query(changedTail),
+                alphabet,
+                maximumTags,
+            ),
+        ).toBeUndefined();
+        // The role's first tag is insufficient to replace a relation-sized word.
+        expect(proofGraphPrefix(long[1].output, alphabet, maximumTags)).toBe(2);
+    });
+
+    it('resolves the width only from a complete context, including a late-arriving context', () => {
+        const database = longGraph();
+        const unresolved = database.slice(1);
+        expect(
+            extractProofGraphPrefix(
+                unresolved,
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        ).toBeUndefined();
+        expect(
+            proofGraphReferences(
+                unresolved,
+                database[0].input,
+                alphabet,
+                maximumTags,
+            ).has(1),
+        ).toBe(true);
+        expect(
+            extractProofGraphPrefix(
+                [...unresolved, database[0]],
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        ).toEqual(
+            extractProofGraphPrefix(
+                database,
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        );
+        const incompatible = [...database];
+        incompatible[0] = {
+            ...database[0],
+            input: {
+                kind: 'context',
+                role: 'corrupt-long',
+                instance: 'false-a',
+                canonical: true,
+                messageTags: 2,
+            },
+        };
+        expect(
+            extractProofGraphPrefix(
+                incompatible,
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        ).toBeUndefined();
+        expect(
+            proofGraphReferences(
+                [],
+                query(database),
+                alphabet,
+                maximumTags,
+            ).has(0),
+        ).toBe(true);
+    });
+
+    it('keeps duplicate queries idempotent and counts collisions only between distinct inputs in one role', () => {
+        const database = longGraph();
+        expect(
+            proofGraphHasCollision(
+                [...database, database[0]],
+                alphabet,
+                maximumTags,
+            ),
+        ).toBe(false);
+        expect(() =>
+            proofGraphHasCollision(
+                [
+                    ...database,
+                    { ...database[0], output: database[0].output + 1 },
+                ],
+                alphabet,
+                maximumTags,
+            ),
+        ).toThrow('two different output words');
+        const alias = {
+            ...database[0],
+            input: {
+                kind: 'context',
+                role: 'corrupt-long',
+                instance: 'different',
+                canonical: true,
+            } satisfies ProofGraphInput,
+        };
+        expect(
+            proofGraphHasCollision([...database, alias], alphabet, maximumTags),
+        ).toBe(true);
+        expect(
+            proofGraphHasCollision(
+                [...database, ...shortGraph()],
+                alphabet,
+                maximumTags,
+            ),
+        ).toBe(false);
+    });
+
+    it('exhausts mixed-width words and covers both gain and loss of a fixed bad-prefix predicate', () => {
+        // A finite mathematical state, not a proof verifier: a false instance
+        // crosses from state zero to one at the second challenge iff a
+        // resolved queried leaf equals 7 and the relation word ends in zero.
+        const bad = (database: readonly ProofGraphEntry[]) =>
+            !proofGraphHasCollision(database, alphabet, maximumTags) &&
+            database.some(
+                ({ input, output }) =>
+                    input.kind === 'verifier' &&
+                    proofGraphPrefix(
+                        output,
+                        alphabet,
+                        maximumTags,
+                        input.state.length,
+                    ) %
+                        alphabet ===
+                        0 &&
+                    extractProofGraphPrefix(
+                        database,
+                        input,
+                        alphabet,
+                        maximumTags,
+                    )?.oracles.some((oracle) => oracle[0] === 7),
+            );
+        const complete = [...shortGraph(), ...longGraph()];
+        const missing = complete.filter(
+            (record) =>
+                record.input.kind !== 'leaf' || record.input.index !== 0,
+        );
+        expect(bad(missing)).toBe(false);
+        expect(bad(complete)).toBe(true);
+        const changedChallenge = shortGraph();
+        changedChallenge[changedChallenge.length - 1].output += alphabet;
+        expect(bad(shortGraph())).toBe(true);
+        expect(bad(changedChallenge)).toBe(false);
+        const collision = {
+            input: {
+                kind: 'context',
+                role: 'corrupt-a',
+                instance: 'different',
+                canonical: true,
+            } satisfies ProofGraphInput,
+            output: complete[0].output,
+        };
+        expect(bad([...complete, collision])).toBe(false);
+        expect(
+            proofGraphHasCollision(
+                [...complete, collision],
+                alphabet,
+                maximumTags,
+            ),
+        ).toBe(true);
+        const violations: number[] = [];
+        let comparisons = 0,
+            referenceChanges = 0;
+        for (const database of [
+            complete,
+            missing,
+            complete.filter((record) => record.input.kind !== 'context'),
+        ]) {
+            const input: ProofGraphInput = {
+                kind: 'leaf',
+                role: 'corrupt-a',
+                stage: 0,
+                index: 0,
+                value: 7,
+                canonical: true,
+            };
+            if (
+                database.some(
+                    (record) =>
+                        JSON.stringify(record.input) === JSON.stringify(input),
+                )
+            )
+                continue;
+            const references = proofGraphReferences(
+                database,
+                input,
+                alphabet,
+                maximumTags,
+            );
+            for (let output = 0; output < alphabet ** maximumTags; output++) {
+                const extended = [...database, { input, output }];
+                if (proofGraphHasCollision(extended, alphabet, maximumTags))
+                    continue;
+                if (
+                    references.has(
+                        proofGraphPrefix(output, alphabet, maximumTags),
+                    )
+                ) {
+                    if (bad(database) !== bad(extended)) referenceChanges++;
+                } else {
+                    if (bad(extended) !== bad(database))
+                        violations.push(output);
+                    comparisons++;
+                }
+            }
+        }
+        expect(violations).toEqual([]);
+        expect(comparisons).toBeGreaterThan(0);
+        expect(referenceChanges).toBeGreaterThan(0);
     });
 });

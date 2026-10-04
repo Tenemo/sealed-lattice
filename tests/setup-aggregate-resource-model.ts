@@ -63,6 +63,11 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
         (sum, polynomial) => sum + polynomial.bytes,
         0n,
     );
+    const maximumReplacementChunkBytes = polynomials.reduce(
+        (maximum, polynomial) =>
+            polynomial.chunkBytes > maximum ? polynomial.chunkBytes : maximum,
+        0n,
+    );
     // The verifier folds every setup contributor's body into the cache.
     const contributorCount = BigInt(body.setupContributorCount);
     return {
@@ -82,7 +87,11 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
                 polynomial.bytes > maximum ? polynomial.bytes : maximum,
             0n,
         ),
-        maximumTwoGenerationPayloadBytes: 2n * aggregateBytes,
+        maximumReplacementChunkBytes,
+        // Awaited atomic put/delete replaces one aligned chunk at a time.
+        // This bounds logical payload, not physical database journals/GC.
+        maximumLogicalCachePayloadBytes:
+            aggregateBytes + maximumReplacementChunkBytes,
         contributionReadBytes: contributorCount * aggregateBytes,
         previousCacheReadBytes: (contributorCount - 1n) * aggregateBytes,
         provisionalCacheWriteBytes: contributorCount * aggregateBytes,

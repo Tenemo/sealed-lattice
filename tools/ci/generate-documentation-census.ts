@@ -84,6 +84,7 @@ import {
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileProofCompilerChronology } from '#tests/proof-compiler-chronology-model.js';
 import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
+import { compileProofHashDomainCensus } from '#tests/proof-hash-domain-model.js';
 import {
     compileProofHashWork,
     proofHashProfiles,
@@ -192,6 +193,7 @@ export const renderDocumentationCensus = (): string => {
     const wideChallengeCompiler =
         compileWideChallengeCompilerCensus(completion);
     const sampledRoundErrors = compileProofRoundErrorCensus(completion);
+    const proofHashDomain = compileProofHashDomainCensus();
     const fullWordProof = compileFullWordProofLayout(completion);
     const ballotWordProof = compileBallotWordProofLayout(completion);
     const ballotBody = compileBallotBodyCensus(completion);
@@ -1832,6 +1834,38 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
+        'The [fixed proof-domain catalogue](../tests/proof-relation-catalogue-model.ts) independently derives the immutable four-purpose descriptors, original participant-identity role framing and complete context grammar. The [raw-domain and mixed-width graph model](../tests/proof-hash-domain-model.ts) keeps raw namespace membership separate from canonical context resolution, allows compatible profile aliases, and compares whole relation-sized prefixes of the maximum output word. Generic mutable relation descriptors remain excluded. These source-conformance and finite structural checks do not establish proof soundness, an honest-credential scope or an end-to-end security level.',
+        '',
+        table(
+            ['Finite-family operand', 'Value'],
+            [
+                [
+                    'Maximum raw input bits W_F',
+                    formatCount(proofHashDomain.maximumInputBits),
+                ],
+                [
+                    'Fixed hash-label sentinels b_F',
+                    formatCount(proofHashDomain.sentinelCount),
+                ],
+                [
+                    'Minimum complete verifier-message bits',
+                    formatCount(proofHashDomain.minimumMessageBits),
+                ],
+                [
+                    'Maximum complete verifier-message bits Lambda',
+                    formatCount(proofHashDomain.maximumMessageBits),
+                ],
+                [
+                    'Maximum accepted verifier expansion queries M_F',
+                    formatCount(
+                        proofHashDomain.maximumAcceptedExpansionQueries,
+                    ),
+                ],
+            ],
+        ),
+        '',
+        'W_F bounds complete raw inputs recognized by the fixed grammar, including full statements rather than their identifiers; it is expressed in bits for the conservative substring reference bound and does not bound arbitrary auxiliary oracle inputs. The only fixed hash-label sentinel is the zero initial-state label; absent or malformed predecessors resolve to no context or oracle entry. M_F reuses the source-linked shared-path Merkle and transcript expansion census. The finite-family expression still requires the complete prior oracle history and mapped reducer costs; these operands select no numerical security claim.',
+        '',
         'The following prefix-compiler caps and exponents are historical role-union reference arithmetic. Its conservative algebraic numerator now includes the weighted folding term, but its finite corrupt-role population and whole-experiment composition are not established for clear preparation. The current finite-family argument takes a maximum of the per-role sampled-round bounds above without adding a family union factor. Reference exponents below do not select a new honest-credential scope or claim admission, end-to-end security, or phone qualification.',
         '',
         table(
@@ -3392,7 +3426,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Setup aggregate cache census',
         '',
-        'The public aggregator retains the previous accepted generation and one provisional generation. Coefficient-aligned reads return one immutable polynomial only after its complete digest matches the owning setup reference. Counts below cover canonical polynomial payload and successful cache traffic; they exclude proof verification, database journals, allocation overhead, failed candidates and participant private state.',
+        'The public aggregator replaces one coefficient-aligned chunk of the previous ordinal in each awaited atomic put/delete transaction. The resulting mixed cache is disposable scratch until complete offer verification and all aggregate digests succeed; failure clears it and drops the aggregator while preserving verified offer holders and authenticated private authority. Counts below bound logical payload and successful cache traffic; physical database journals, garbage collection, allocation overhead, failed candidates and participant private state require separate evidence.',
         '',
         table(
             ['Property', 'Value'],
@@ -3418,10 +3452,8 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(setupAggregate.maximumPolynomialBytes),
                 ],
                 [
-                    'Two-generation cache payload bytes',
-                    formatCount(
-                        setupAggregate.maximumTwoGenerationPayloadBytes,
-                    ),
+                    'Logical cache payload including one replacement chunk',
+                    formatCount(setupAggregate.maximumLogicalCachePayloadBytes),
                 ],
                 [
                     'Contribution polynomial read bytes',
@@ -3693,7 +3725,7 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Selected polynomial aggregation reread bytes',
+                    'Organizer selected polynomial aggregation reread bytes',
                     formatCount(clearPreparation.selectedPolynomialRereadBytes),
                 ],
                 [
@@ -3779,9 +3811,9 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'Clean preparation reads include selected body/proof verification, bounded proof-header lookahead, the polynomial-only aggregation reread and certificate handling. Matching original SPI1 avoids another proof pass at activation; losing or absent local endorsement uses the fresh certificate path. Complete exact named reads with owning verification establish publication under the monotone public-store premise, so selected bodies are not uploaded again. Each extra cache miss or restart must charge its actual verification and aggregation passes; there is no finite lifetime count. These preparation-only logical payload margins exclude registration, ballots, closing, release and transport overhead, and therefore do not establish complete-action qualification.',
+        'Fresh participants fuse selected-body polynomial reads with full offer verification and aggregation, retaining bounded proof-header lookahead and certificate handling. Organizer discovery verifies selected offers before signing; endorsement reuses those verified holders in the same worker and rereads only their polynomials for aggregation. Matching original SPI1 avoids another proof pass at activation; losing or absent local endorsement uses the fresh certificate path. Complete exact named reads with owning verification establish publication under the monotone public-store premise, so selected bodies are not uploaded again. Each extra cache miss or restart must charge its actual verification and aggregation passes; there is no finite lifetime count. These preparation-only logical payload margins exclude registration, ballots, closing, release and transport overhead, and therefore do not establish complete-action qualification.',
         '',
-        'The current organizer performs a selected-offer verification pass while choosing, then another in its fresh endorsement worker before aggregation. The following preparation-only screen charges that extra pass and every eligible discovery pointer. Polynomial-only floors exclude proofs and metadata; exceeding the planning variance ceiling with such a floor requires architecture review. The variance ceiling is not an absolute cryptographic or allocation limit.',
+        'The organizer performs one full selected-offer verification pass during discovery and reuses those holders when endorsing in the same worker; the additional read is only the selected polynomial payload. The following preparation-only screen charges that reread and every eligible discovery page. Polynomial-only floors exclude proofs and metadata; exceeding the planning variance ceiling with such a floor requires architecture review. The variance ceiling is not an absolute cryptographic or allocation limit.',
         '',
         table(
             [

@@ -22,6 +22,55 @@ const source =
 };`);
 
 describe('instrumented participant padding boundaries', () => {
+    it('halts after authenticated selection readback and before any endorsement work', async () => {
+        const worker = Buffer.from(`globalThis.select = async () => {
+            await globalThis.readback();
+            const session = {}, relay = {}, published = {};
+            await endorseSetup(session, relay, published);
+        };`);
+        const client = preparationHaltingClient(worker, {
+            kind: 'selection-readback',
+            phase: 1,
+        });
+        let release!: () => void;
+        const readback = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let observed!: (message: unknown) => void;
+        const reached = new Promise((resolve) => {
+            observed = resolve;
+        });
+        let endorsements = 0;
+        const context = {
+            readback: () => readback,
+            endorseSetup: () => {
+                endorsements++;
+            },
+            self: { postMessage: observed },
+            select: undefined as (() => Promise<void>) | undefined,
+        };
+        runInNewContext(client.worker.toString('utf8'), context);
+        const running = context.select!();
+        await Promise.resolve();
+        expect(endorsements).toBe(0);
+        release();
+        expect(
+            await Promise.race([reached, running.then(() => 'completed')]),
+        ).toEqual({
+            type: 'participant-preparation-halt',
+            kind: 'selection-readback',
+            phase: 1,
+        });
+        expect(endorsements).toBe(0);
+        const rejected = {
+            ...context,
+            readback: () => Promise.reject(new Error('Readback refused.')),
+            select: undefined as (() => Promise<void>) | undefined,
+        };
+        runInNewContext(client.worker.toString('utf8'), rejected);
+        await expect(rejected.select!()).rejects.toThrow('Readback refused.');
+        expect(endorsements).toBe(0);
+    });
     it('halts on independent preparation intents after readback while the root generation stays four', async () => {
         const rootSource =
             Buffer.from(`globalThis.commit = async (head, manifest) => {
@@ -48,7 +97,9 @@ describe('instrumented participant padding boundaries', () => {
             [0, 'contribution', 5],
             [0, 'contribution', 8],
             [1, 'selection', 1],
+            [1, 'selection', 2],
             [2, 'endorsement', 1],
+            [2, 'endorsement', 2],
         ] as const) {
             const cut: PreparationCut = { kind, phase };
             const client = preparationHaltingClient(rootSource, cut);
