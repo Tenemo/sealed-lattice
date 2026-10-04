@@ -37,6 +37,16 @@ const confirmAll = (model: RecoverableSetupModel) => {
         expect(model.confirm(position, scope.roster)).toBe(true);
 };
 
+const completeOwnOffer = (
+    model: RecoverableSetupModel,
+    participant: number,
+) => {
+    while (model.produceOwnBodyRecord(participant)) {
+        // Every successful step adds one retained payload record or stops
+        // that actor. No public decision is delivered by this helper.
+    }
+};
+
 const failureSets = (participantCount: number, maximum: number): number[][] => {
     const result: number[][] = [];
     const visit = (next: number, chosen: number[]) => {
@@ -269,11 +279,98 @@ describe('recoverable setup availability candidate', () => {
         expect(model.advance(0)).toBe(false);
         expect(model.confirm(0, scope.roster)).toBe(true);
         expect(model.advance(0)).toBe(true);
+        expect(model.publications).toHaveLength(0);
+        completeOwnOffer(model, 0);
         expect(model.publications).toHaveLength(1);
         expect(model.participants[1].confirmed).toBe(false);
         confirmAll(model);
         model.drain();
         verifyRecovery(model);
+    });
+
+    it('helps the selected set with an unfinished own body and retires it only after reliable delivery', () => {
+        const model = new RecoverableSetupModel(4, scope, fixture(4), {
+            failures: [{ participant: 3, before: 'offer' }],
+        });
+        confirmAll(model);
+        completeOwnOffer(model, 0);
+        completeOwnOffer(model, 1);
+        expect(model.produceOwnBodyRecord(2)).toBe(true);
+        const partial = model.ownWorkView(2);
+        expect(partial.retainedPrefix).toHaveLength(1);
+        expect(partial.records).toHaveLength(1);
+        for (const record of [...model.publications])
+            model.deliver(record.ordinal, 0);
+        expect(model.advance(0)).toBe(true);
+        for (const record of [...model.publications])
+            model.deliver(record.ordinal, 2);
+        expect(model.advance(2)).toBe(true);
+        expect(model.participants[2].echo).toEqual(['seal-00', 'seal-01']);
+        expect(model.participants[2].offered).toBe(false);
+        expect(model.produceOwnBodyRecord(2)).toBe(false);
+        expect(model.ownWorkView(2)).toEqual(partial);
+        expect(model.participants[2].delivered).toBeUndefined();
+        model.drain();
+        verifyRecovery(model);
+        expect(model.unavailable()).toEqual([3]);
+        expect(model.ownWorkView(2)).toEqual({
+            identity: 'seal-02',
+            retainedPrefix: [],
+            records: [],
+            retiredFor: ['seal-00', 'seal-01'],
+        });
+        expect(
+            model.trace.filter((event) => event.startsWith('2:own-record:')),
+        ).toHaveLength(1);
+        expect(
+            model.publications.some(
+                ({ author, frame }) => author === 2 && frame.kind === 'offer',
+            ),
+        ).toBe(false);
+        expect(model.produceOwnBodyRecord(2)).toBe(false);
+        expect(model.participants[2].confirmed).toBe(true);
+    });
+
+    it.each(['missing', 'changed', 'extra'] as const)(
+        'stops on a %s required own record before retirement while the other continuers finish',
+        (damage) => {
+            const model = new RecoverableSetupModel(4, scope, fixture(4));
+            confirmAll(model);
+            completeOwnOffer(model, 0);
+            completeOwnOffer(model, 1);
+            expect(model.produceOwnBodyRecord(2)).toBe(true);
+            const original = model.ownWorkView(2).retainedPrefix[0];
+            if (damage === 'missing') model.loseOwnBodyRecord(2, 0);
+            else if (damage === 'changed')
+                model.changeOwnBodyRecord(2, 0, original + 1n);
+            else model.changeOwnBodyRecord(2, 99, original);
+            model.drain();
+            verifyRecovery(model);
+            expect(model.unavailable()).toEqual([2]);
+            expect(model.participants[2].delivered).toBeUndefined();
+            expect(model.participants[2].opened).toBe(false);
+            expect(model.ownWorkView(2).retainedPrefix).toEqual([original]);
+            expect(model.ownWorkView(2).retiredFor).toBeUndefined();
+            expect(model.publications.some(({ author }) => author === 2)).toBe(
+                false,
+            );
+            expect(model.produceOwnBodyRecord(2)).toBe(false);
+            expect(model.advance(2)).toBe(false);
+        },
+    );
+
+    it('retains published unselected offers after their private work is retired', () => {
+        const model = new RecoverableSetupModel(4, scope, fixture(4));
+        confirmAll(model);
+        for (const participant of [0, 1, 2])
+            completeOwnOffer(model, participant);
+        const published = model.publications.find(({ author }) => author === 2);
+        expect(published?.frame.selection).toEqual(['seal-02']);
+        model.drain();
+        verifyRecovery(model);
+        expect(model.ownWorkView(2).retiredFor).toEqual(['seal-00', 'seal-01']);
+        expect(model.publications).toContainEqual(published);
+        expect(model.produceOwnBodyRecord(2)).toBe(false);
     });
 
     it('rejects inconsistent recoverability before selection and replaces no selected body', () => {
@@ -339,7 +436,7 @@ describe('recoverable setup availability candidate', () => {
         });
         confirmAll(model);
         model.inject(0, signed(0, 'offer', ['seal-00']));
-        for (const position of [1, 2, 3]) model.advance(position);
+        for (const position of [1, 2, 3]) completeOwnOffer(model, position);
         for (const record of [...model.publications])
             for (const position of [1, 2, 3])
                 model.deliver(record.ordinal, position);
@@ -429,7 +526,8 @@ describe('recoverable setup availability candidate', () => {
                     );
                     confirmAll(model);
                     model.inject(0, signed(0, 'offer', ['seal-00']));
-                    for (const position of [1, 2, 3]) model.advance(position);
+                    for (const position of [1, 2, 3])
+                        completeOwnOffer(model, position);
                     for (const record of [...model.publications])
                         for (const position of [1, 2, 3])
                             model.deliver(record.ordinal, position);

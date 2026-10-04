@@ -70,7 +70,10 @@ type NativeResult = {
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
 if ('source' in selected) {
-    await runSeedSharingScalar(selected.source);
+    await runSeedSharingScalar(
+        selected.source,
+        selected.name === 'browser-seed-sharing' ? 'chrome' : 'node',
+    );
     // The selected runner has finished its diagnostics and process cleanup.
     process.exit(process.exitCode ?? 0);
 }

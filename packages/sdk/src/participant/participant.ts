@@ -125,6 +125,10 @@ export type ParticipantSummary = Readonly<{
     topCount: number;
     /** Whether the participant contributes setup key material, once its roster is retained. */
     isSetupContributor: boolean | undefined;
+    /**
+     * The current local ballot state. `could not vote` means submission is
+     * closed without an own ballot; it does not identify the cause of absence.
+     */
     ballot: 'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
     /**
      * The own ballot's status in the target the participant signs, once it

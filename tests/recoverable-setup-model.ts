@@ -119,6 +119,16 @@ type Participant = {
     stages: Set<string>;
 };
 
+// The retained prefix is an authenticated-root premise of this availability
+// model. Stored records may be lost or changed independently. Comparing their
+// actual values and exact index set models detection, not storage cryptography.
+type OwnWork = {
+    identity: string | undefined;
+    retainedPrefix: bigint[];
+    records: Map<number, bigint>;
+    retiredFor: Selection | undefined;
+};
+
 const selectionIdentity = (selection: Selection): string =>
     JSON.stringify(selection);
 
@@ -135,6 +145,7 @@ export class RecoverableSetupModel {
     private readonly failures: Map<number, SetupFailureStage>;
     private readonly corrupt: ReadonlySet<number>;
     private readonly failed = new Set<number>();
+    private readonly ownWork: OwnWork[];
     private selectionPublished = false;
 
     constructor(
@@ -215,6 +226,12 @@ export class RecoverableSetupModel {
             recovered: new Map(),
             stages: new Set(),
         }));
+        this.ownWork = Array.from({ length: participantCount }, () => ({
+            identity: undefined,
+            retainedPrefix: [],
+            records: new Map(),
+            retiredFor: undefined,
+        }));
     }
 
     confirm(participant: number, roster: string): boolean {
@@ -222,6 +239,99 @@ export class RecoverableSetupModel {
         if (!state?.active || roster !== this.scope.roster) return false;
         state.confirmed = true;
         return true;
+    }
+
+    ownWorkView(participant: number) {
+        const work = this.ownWork[participant];
+        return {
+            identity: work.identity,
+            retainedPrefix: [...work.retainedPrefix],
+            records: [...work.records],
+            retiredFor: work.retiredFor,
+        };
+    }
+
+    loseOwnBodyRecord(participant: number, ordinal: number): void {
+        this.ownWork[participant].records.delete(ordinal);
+    }
+
+    changeOwnBodyRecord(
+        participant: number,
+        ordinal: number,
+        value: bigint,
+    ): void {
+        this.ownWork[participant].records.set(ordinal, value);
+    }
+
+    private inspectOwnWork(participant: number): boolean {
+        const work = this.ownWork[participant];
+        if (
+            work.records.size === work.retainedPrefix.length &&
+            work.retainedPrefix.every(
+                (value, ordinal) => work.records.get(ordinal) === value,
+            )
+        )
+            return true;
+        this.participants[participant].active = false;
+        this.failed.add(participant);
+        this.trace.push(`${participant}:stopped-own-state`);
+        return false;
+    }
+
+    // One real payload element enters the original candidate's retained
+    // prefix. Only its complete unchanged prefix permits publication. This
+    // stands for bounded private work; it is not a proof-generation model.
+    produceOwnBodyRecord(participant: number): boolean {
+        const state = this.participants[participant];
+        const work = this.ownWork[participant];
+        if (
+            !state?.active ||
+            !state.confirmed ||
+            state.offered ||
+            this.corrupt.has(participant) ||
+            work.retiredFor !== undefined
+        )
+            return false;
+        if (!this.inspectOwnWork(participant)) return true;
+        if (this.stopBefore(participant, 'offer')) return true;
+        if (this.selections(state).length > 0) return false;
+        const offer = [...this.offers.values()].find(
+            (candidate) => candidate.dealer === participant,
+        );
+        if (!offer || participant >= this.candidateCount) return false;
+        work.identity ??= offer.identity;
+        if (work.identity !== offer.identity) return false;
+        const ordinal = work.retainedPrefix.length;
+        if (ordinal >= offer.maskedBody.length) return false;
+        const value = offer.maskedBody[ordinal];
+        work.retainedPrefix.push(value);
+        work.records.set(ordinal, value);
+        state.stages.add('contribution');
+        this.trace.push(`${participant}:own-record:${ordinal}`);
+        if (work.retainedPrefix.length === offer.maskedBody.length) {
+            state.offered = true;
+            this.publish(participant, 'offer', [offer.identity]);
+        }
+        return true;
+    }
+
+    private retireUnselectedWork(
+        participant: number,
+        selection: Selection,
+    ): void {
+        const selected = selection.some(
+            (identity) => this.offers.get(identity)!.dealer === participant,
+        );
+        if (selected) return;
+        const work = this.ownWork[participant];
+        // Delivery has already verified the public decision, and advance
+        // authenticated every old required record before reaching this cut.
+        work.retainedPrefix = [];
+        work.records.clear();
+        work.retiredFor = selection;
+        this.trace.push(
+            `${participant}:retired-own:${selectionIdentity(selection)}`,
+        );
     }
 
     private relation(offer: RecoveryOffer): boolean {
@@ -363,18 +473,9 @@ export class RecoverableSetupModel {
         const state = this.participants[participant];
         if (!state?.active || !state.confirmed || this.corrupt.has(participant))
             return false;
-        if (!state.offered) {
-            if (this.stopBefore(participant, 'offer')) return true;
-            state.offered = true;
-            if (participant < this.candidateCount) {
-                const offer = [...this.offers.values()].find(
-                    (value) => value.dealer === participant,
-                );
-                if (offer) this.publish(participant, 'offer', [offer.identity]);
-            }
-            state.stages.add('contribution');
+        if (!this.inspectOwnWork(participant)) return true;
+        if (!state.offered && this.stopBefore(participant, 'offer'))
             return true;
-        }
         if (participant === 0 && !this.selectionPublished) {
             const offered = [...this.available(state).values()].sort(
                 (left, right) => left.identity.localeCompare(right.identity),
@@ -432,6 +533,7 @@ export class RecoverableSetupModel {
                 this.trace.push(
                     `${participant}:delivered:${selectionIdentity(delivered)}`,
                 );
+                this.retireUnselectedWork(participant, delivered);
                 return true;
             }
         }
@@ -490,7 +592,13 @@ export class RecoverableSetupModel {
                 return true;
             }
         }
-        return false;
+        // Public ECHO/READY/delivery/recovery progress has priority and never
+        // depends on completing this participant's own candidate. An excluded
+        // original attempt is retired and can never restart here.
+        // A valid proposal pauses unused generation while its decision is
+        // pending; only reliable delivery can retire the retained prefix.
+        if (selections.length > 0) return false;
+        return this.produceOwnBodyRecord(participant);
     }
 
     // Successful publication survives author loss. A benign suffix delivers

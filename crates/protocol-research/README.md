@@ -52,6 +52,14 @@ pnpm run research:protocol -- native-seed-sharing
 
 This fixed scalar case accepts no profile counts or simulated-helper option. Its runner checks formatting, Clippy and the library unit tests of the isolated `seed-sharing-proof` crate, then builds its explicit `native-fixture` binary and runs one valid proof, one freshly generated proof from an inconsistent seed witness and one freshly generated proof for a provably unsatisfiable ciphertext statement, together with hostile verification controls. Both fresh negative proofs must fail the relation check; a false supplied witness alone is not evidence that the public statement has no satisfying witness. The fixture feature enables deterministic test randomness only for this native research executable; the participant runtime does not consume it. Source snapshots, the executable digest, model-derived resource inputs, stage output and measured process-tree memory remain in the run diagnostics. Proof files and the runtime digest are written only to the corresponding run-artifact directory. The same research lock, available-memory preflight, 1 GiB process-tree guard and process containment govern this case; a planning estimate does not raise that guard. This experiment creates no participant, accepted setup, recovery protocol, ballot, certificate or terminal, and supplies no complete-protocol security or browser qualification.
 
+The same pinned native proof files can also be checked in a dedicated worker in the installed external desktop Chrome:
+
+```text
+pnpm run research:protocol -- browser-seed-sharing <passed-native-run>
+```
+
+This case reuses the scalar source validation, module build and import admission, native verification of identical bytes, source and artifact identity checks, and research lock. Its owned local server serves only the verifier files and bounded proof chunks on an ephemeral loopback port. The browser authenticates each chunk with WebCrypto SHA-512 against hashes computed from the pinned inputs, retaining one chunk and one bounded read buffer. Every case runs in a fresh dedicated worker, which ends before the next case; the harness records the Chrome version and sampled process-tree memory without network-body capture. The honest proof, false witness, false statement and context, truncation, trailing-byte and changed-proof cases exercise the same verifier loop as Node. This is desktop development evidence and does not qualify a phone, generate a proof in a browser or create a protocol capability.
+
 The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:
 
 ```text

@@ -23,14 +23,17 @@ type ProtocolResearchSelection = {
     simulatedHelpers: number;
 } & (
     | { name: keyof typeof protocolResearchCases }
-    | { name: 'scalar-seed-sharing'; source: string }
+    | { name: 'scalar-seed-sharing' | 'browser-seed-sharing'; source: string }
 );
 
 export const selectProtocolResearchCase = (
     arguments_: readonly string[],
 ): ProtocolResearchSelection => {
     const values = arguments_.filter((value) => value !== '--');
-    if (values[0] === 'scalar-seed-sharing') {
+    if (
+        values[0] === 'scalar-seed-sharing' ||
+        values[0] === 'browser-seed-sharing'
+    ) {
         const source = values[1];
         if (
             values.length !== 2 ||
@@ -39,10 +42,10 @@ export const selectProtocolResearchCase = (
             source.startsWith('--')
         )
             throw new Error(
-                'Select scalar-seed-sharing with exactly one passed native run and no profile or helper options.',
+                'Select scalar-seed-sharing or browser-seed-sharing with exactly one passed native run and no profile or helper options.',
             );
         return {
-            name: 'scalar-seed-sharing',
+            name: values[0],
             source,
             execution: true,
             noResult: false,

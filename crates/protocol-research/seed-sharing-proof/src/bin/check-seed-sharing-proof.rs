@@ -7,9 +7,9 @@ use seed_sharing_proof::{
 use std::{
     ffi::OsString,
     fs::File,
-    io::{self, BufReader, BufWriter, Cursor, Read},
+    io::{self, BufReader, BufWriter, Cursor, Read, Write},
     path::{Path, PathBuf},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use word_proof::{oracles::Witness, parameters::DOMAIN};
 use word_verifier::{HEADER_LENGTH, Refusal};
@@ -83,7 +83,14 @@ fn reject_relation(name: &str, result: Result<(), VerificationError>) {
     );
     reject(name, result);
 }
-fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<(PathBuf, bool), &'static str> {
+#[derive(Debug, PartialEq, Eq)]
+struct GuardGates {
+    start: PathBuf,
+    finish: PathBuf,
+}
+fn arguments(
+    values: impl IntoIterator<Item = OsString>,
+) -> Result<(PathBuf, bool, Option<GuardGates>), &'static str> {
     let mut values = values.into_iter();
     let first = values.next().ok_or("Missing artifact directory")?;
     let verify_existing = first == "--verify-existing";
@@ -95,10 +102,85 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<(PathBuf, boo
         }
         first
     };
-    if values.next().is_some() {
-        return Err("Unexpected fixture argument");
+    let mut start = None;
+    let mut finish = None;
+    while let Some(option) = values.next() {
+        if !verify_existing {
+            return Err("Guard gates require existing verification");
+        }
+        let destination = match option.to_str() {
+            Some("--guard-start") => &mut start,
+            Some("--guard-finish") => &mut finish,
+            _ => return Err("Unknown fixture option"),
+        };
+        if destination.is_some() {
+            return Err("Duplicate guard gate");
+        }
+        let path = values.next().ok_or("Missing guard gate path")?;
+        if path.is_empty() || path.to_string_lossy().starts_with("--") {
+            return Err("Missing guard gate path");
+        }
+        *destination = Some(PathBuf::from(path));
     }
-    Ok((PathBuf::from(directory), verify_existing))
+    let gates = match (start, finish) {
+        (None, None) => None,
+        (Some(start), Some(finish)) if start != finish => Some(GuardGates { start, finish }),
+        (Some(_), Some(_)) => return Err("Guard gates must be distinct"),
+        _ => return Err("Guard gates must be paired"),
+    };
+    Ok((PathBuf::from(directory), verify_existing, gates))
+}
+
+// The runner owns these fresh scratch paths and publishes an empty regular
+// file only after taking its process-tree sample. This binary only reads
+// them; gate coordination never retries or changes proof verification.
+impl GuardGates {
+    fn validate(self) -> io::Result<Self> {
+        let resolve = |path: &Path| -> io::Result<PathBuf> {
+            let name = path
+                .file_name()
+                .ok_or_else(|| io::Error::other("Invalid guard gate filename"))?;
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let resolved = parent.canonicalize()?.join(name);
+            match std::fs::symlink_metadata(&resolved) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(resolved),
+                Err(error) => Err(error),
+                Ok(_) => Err(io::Error::other("Guard gate already exists")),
+            }
+        };
+        let start = resolve(&self.start)?;
+        let finish = resolve(&self.finish)?;
+        let same = start == finish
+            || (cfg!(windows)
+                && start
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&finish.to_string_lossy()));
+        if same {
+            return Err(io::Error::other("Guard gates must be distinct"));
+        }
+        Ok(Self { start, finish })
+    }
+}
+fn wait_gate(path: &Path) -> io::Result<()> {
+    let started = Instant::now();
+    loop {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_file() && metadata.len() == 0 => return Ok(()),
+            Ok(_) => return Err(io::Error::other("Guard gate must be an empty regular file")),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if started.elapsed() >= Duration::from_secs(60) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Guard gate timed out",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 fn verify_existing(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let expected = fixture::create().0;
@@ -140,13 +222,29 @@ fn verify_existing(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (directory, existing) = arguments(std::env::args_os().skip(1))?;
+    let (directory, existing, gates) = arguments(std::env::args_os().skip(1))?;
     if !directory.is_dir() {
         return Err("The artifact directory must exist".into());
     }
     let directory = directory.canonicalize()?;
     if existing {
-        return verify_existing(&directory);
+        let gates = gates.map(GuardGates::validate).transpose()?;
+        if let Some(gates) = &gates {
+            println!("{{\"event\":\"native-verifier-ready\"}}");
+            io::stdout().flush()?;
+            wait_gate(&gates.start)?;
+        }
+        let started = Instant::now();
+        verify_existing(&directory)?;
+        let verification_milliseconds = started.elapsed().as_millis();
+        if let Some(gates) = &gates {
+            println!(
+                "{{\"event\":\"native-verifier-completed\",\"verificationMilliseconds\":{verification_milliseconds}}}"
+            );
+            io::stdout().flush()?;
+            wait_gate(&gates.finish)?;
+        }
+        return Ok(());
     }
     let (expected, witness) = fixture::create();
     let statement_bytes = expected.encode()?;
@@ -366,18 +464,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn parse(values: &[&str]) -> Result<(PathBuf, bool), &'static str> {
+    fn parse(values: &[&str]) -> Result<(PathBuf, bool, Option<GuardGates>), &'static str> {
         arguments(values.iter().map(OsString::from))
     }
     #[test]
     fn fixture_modes_keep_generation_and_existing_verification_distinct() {
         assert_eq!(
             parse(&["artifacts"]).unwrap(),
-            (PathBuf::from("artifacts"), false)
+            (PathBuf::from("artifacts"), false, None)
         );
         assert_eq!(
             parse(&["--verify-existing", "artifacts"]).unwrap(),
-            (PathBuf::from("artifacts"), true)
+            (PathBuf::from("artifacts"), true, None)
         );
         for values in [
             &[][..],
@@ -388,5 +486,55 @@ mod tests {
         ] {
             assert!(parse(values).is_err());
         }
+    }
+    #[test]
+    fn guard_gates_are_paired_distinct_and_only_enable_existing_verification() {
+        for flags in [
+            ["--guard-start", "start", "--guard-finish", "finish"],
+            ["--guard-finish", "finish", "--guard-start", "start"],
+        ] {
+            let arguments = [vec!["--verify-existing", "artifacts"], flags.to_vec()].concat();
+            assert_eq!(
+                parse(&arguments).unwrap(),
+                (
+                    PathBuf::from("artifacts"),
+                    true,
+                    Some(GuardGates {
+                        start: PathBuf::from("start"),
+                        finish: PathBuf::from("finish")
+                    })
+                )
+            );
+        }
+        for flags in [
+            &["--guard-start"][..],
+            &["--guard-finish"],
+            &["--guard-start", "start"],
+            &["--guard-finish", "finish"],
+            &["--guard-start", "--guard-finish"],
+            &["--guard-start", "start", "--guard-start", "again"],
+            &["--guard-finish", "finish", "--guard-finish", "again"],
+            &["--guard-start", "same", "--guard-finish", "same"],
+            &[
+                "--guard-start",
+                "start",
+                "--guard-finish",
+                "finish",
+                "extra",
+            ],
+        ] {
+            let arguments = [vec!["--verify-existing", "artifacts"], flags.to_vec()].concat();
+            assert!(parse(&arguments).is_err(), "{arguments:?}");
+        }
+        assert!(
+            parse(&[
+                "artifacts",
+                "--guard-start",
+                "start",
+                "--guard-finish",
+                "finish"
+            ])
+            .is_err()
+        );
     }
 }

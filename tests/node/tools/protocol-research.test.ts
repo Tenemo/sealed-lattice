@@ -195,6 +195,28 @@ describe('guarded protocol research entry', () => {
         ).not.toHaveProperty('source');
     });
 
+    it('selects external Chrome verification with one pinned native source', () => {
+        expect(
+            selectProtocolResearchCase(['browser-seed-sharing', 'logs/source']),
+        ).toEqual({
+            name: 'browser-seed-sharing',
+            source: 'logs/source',
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const values of [
+            ['browser-seed-sharing'],
+            ['browser-seed-sharing', ''],
+            ['browser-seed-sharing', 'source', 'extra'],
+            ['browser-seed-sharing', '4', '2'],
+            ['browser-seed-sharing', 'source', '--simulated-helpers', '1'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+    });
+
     it('derives the native ceremony expectations from the thresholds', () => {
         // Totals 21, 30, 39, 28, 17, 16, 35, 24, 23 and 22 over voters 0 and
         // 4 to 7; no two options tie.

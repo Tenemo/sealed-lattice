@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import {
+    copyFile,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    writeFile,
+} from 'node:fs/promises';
 import { freemem, homedir } from 'node:os';
 import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
@@ -13,12 +20,17 @@ import {
     requireCheckoutBytes,
 } from '#tools/ci/compiled-inputs.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import { createNativeVerifierGuard } from '#tools/ci/native-verifier-guard.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
+import {
+    seedSharingBrowserSources,
+    verifySeedSharingInChrome,
+} from '#tools/ci/run-seed-sharing-browser.js';
 import {
     fileDigest,
     readSeedSharingNativeSource,
@@ -93,17 +105,24 @@ export const inspectSeedSharingScalarModule = async (bytes: Uint8Array) => {
     return { imports, exports };
 };
 
-export const runSeedSharingScalar = async (sourceDirectory: string) => {
+export const runSeedSharingScalar = async (
+    sourceDirectory: string,
+    host: 'node' | 'chrome' = 'node',
+) => {
+    const caseName =
+        host === 'chrome' ? 'browser-seed-sharing' : 'scalar-seed-sharing';
     const root = path.resolve('.');
     const workspace = path.join(root, 'crates/protocol-research');
     await runWithLocalRunLog(
         {
             scriptName: 'research:protocol',
-            commandLineArguments: ['scalar-seed-sharing', sourceDirectory],
+            commandLineArguments: [caseName, sourceDirectory],
             lanes: [
                 'Pin native proof inputs',
                 'Build bounded scalar verifier',
-                'Native and scalar verification of identical proof bytes',
+                host === 'chrome'
+                    ? 'Native and external Chrome verification of identical proof bytes'
+                    : 'Native and scalar verification of identical proof bytes',
             ],
         },
         async (log) => {
@@ -243,8 +262,11 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     'crates/protocol-research/seed-sharing-proof/src/bin/check-seed-sharing-proof.rs',
                     'crates/protocol-research/seed-sharing-proof/src/proof.rs',
                     'tools/ci/run-seed-sharing-scalar.ts',
+                    'tools/ci/native-verifier-guard.ts',
                     'tools/ci/seed-sharing-scalar-source.ts',
                     'tools/ci/seed-sharing-scalar-worker.mjs',
+                    'tools/ci/seed-sharing-scalar-verifier.mjs',
+                    ...seedSharingBrowserSources,
                 ]);
                 for (const file of compiled) {
                     let directory = path.posix.dirname(file);
@@ -327,7 +349,11 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     .update(moduleBytes)
                     .digest('hex');
                 const identity = createHash('sha512')
-                    .update('sealed-lattice/seed-sharing-scalar-research/v1')
+                    .update(
+                        host === 'chrome'
+                            ? 'sealed-lattice/seed-sharing-browser-research/v1'
+                            : 'sealed-lattice/seed-sharing-scalar-research/v1',
+                    )
                     .update(sourceManifest)
                     .update(moduleBytes)
                     .digest('hex');
@@ -352,20 +378,73 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     command: string,
                     args: string[],
                     name: string,
+                    handshake = false,
                 ) => {
                     assert.ok(freemem() >= 2 * processMemoryLimit);
+                    const gateDirectory = handshake
+                        ? await mkdtemp(
+                              path.join(root, 'temp/native-verifier-guard-'),
+                          )
+                        : undefined;
+                    const gateFiles =
+                        gateDirectory === undefined
+                            ? undefined
+                            : {
+                                  startFile: path.join(gateDirectory, 'start'),
+                                  finishFile: path.join(
+                                      gateDirectory,
+                                      'finish',
+                                  ),
+                              };
                     const controller = new AbortController();
                     let active = false,
                         peakMemory = 0,
                         samples = 0,
                         output = '';
                     let monitor: Promise<void> | undefined;
+                    let nativeGuard:
+                        | ReturnType<typeof createNativeVerifierGuard>
+                        | undefined;
+                    let guardResult:
+                        | Awaited<
+                              ReturnType<
+                                  ReturnType<
+                                      typeof createNativeVerifierGuard
+                                  >['monitor']
+                              >
+                          >
+                        | undefined;
+                    const recordSample = (
+                        phase: 'initial' | 'periodic' | 'final',
+                        bytes: number,
+                    ) => {
+                        samples++;
+                        peakMemory = Math.max(peakMemory, bytes);
+                        log.writeEvent({
+                            eventType: 'scalar-verifier-process-memory',
+                            details: {
+                                name,
+                                phase,
+                                bytes,
+                                limit: processMemoryLimit,
+                            },
+                        });
+                    };
                     const started = performance.now();
                     const exitCode = await runCommandsInSeries(
                         [
                             {
                                 command,
-                                args,
+                                args:
+                                    gateFiles === undefined
+                                        ? args
+                                        : [
+                                              ...args,
+                                              '--guard-start',
+                                              gateFiles.startFile,
+                                              '--guard-finish',
+                                              gateFiles.finishFile,
+                                          ],
                                 env: environment,
                                 workingDirectoryPath: root,
                                 description: name,
@@ -383,6 +462,11 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                                 onCommandOutput({ chunk, streamName }) {
                                     if (streamName === 'stdout') {
                                         output += chunk;
+                                        try {
+                                            nativeGuard?.observeStdout(chunk);
+                                        } catch (error) {
+                                            controller.abort(error);
+                                        }
                                         if (output.length > 1_048_576)
                                             controller.abort(
                                                 new Error(
@@ -394,6 +478,28 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                                 onCommandStart({ processIdentifier }) {
                                     assert.ok(processIdentifier);
                                     active = true;
+                                    if (gateFiles !== undefined) {
+                                        nativeGuard = createNativeVerifierGuard(
+                                            {
+                                                ...gateFiles,
+                                                memoryLimit: processMemoryLimit,
+                                                readMemory: () =>
+                                                    readProtocolProcessTree(
+                                                        processIdentifier,
+                                                    ),
+                                                recordSample,
+                                            },
+                                        );
+                                        monitor = nativeGuard
+                                            .monitor()
+                                            .then((result) => {
+                                                guardResult = result;
+                                            })
+                                            .catch((error: unknown) =>
+                                                controller.abort(error),
+                                            );
+                                        return;
+                                    }
                                     monitor = (async () => {
                                         while (active) {
                                             const bytes =
@@ -401,20 +507,7 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                                                     processIdentifier,
                                                 );
                                             if (bytes !== undefined) {
-                                                samples++;
-                                                peakMemory = Math.max(
-                                                    peakMemory,
-                                                    bytes,
-                                                );
-                                                log.writeEvent({
-                                                    eventType:
-                                                        'scalar-verifier-process-memory',
-                                                    details: {
-                                                        name,
-                                                        bytes,
-                                                        limit: processMemoryLimit,
-                                                    },
-                                                });
+                                                recordSample('periodic', bytes);
                                                 assert.ok(
                                                     bytes <= processMemoryLimit,
                                                     'Verifier process-tree memory guard exceeded.',
@@ -428,12 +521,22 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                                 },
                                 onCommandExit() {
                                     active = false;
+                                    nativeGuard?.stop();
                                 },
                             },
                         },
                     ).finally(async () => {
                         active = false;
                         await monitor;
+                        if (gateDirectory !== undefined) {
+                            const resolved = path.resolve(gateDirectory);
+                            assert.ok(
+                                resolved.startsWith(
+                                    path.resolve(root, 'temp') + path.sep,
+                                ),
+                            );
+                            await rm(resolved, { recursive: true });
+                        }
                     });
                     assert.equal(
                         controller.signal.aborted,
@@ -442,13 +545,38 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     );
                     assert.equal(exitCode, 0);
                     assert.ok(samples > 0);
+                    if (handshake) {
+                        assert.ok(guardResult !== undefined);
+                        assert.equal(guardResult.samples.initial, 1);
+                        assert.equal(guardResult.samples.final, 1);
+                    }
+                    const reports = output
+                        .trim()
+                        .split(/\r?\n/u)
+                        .map(
+                            (line) =>
+                                JSON.parse(line) as Record<string, unknown>,
+                        )
+                        .filter((record) => typeof record.kind === 'string');
+                    assert.equal(
+                        reports.length,
+                        1,
+                        'The verifier emitted an ambiguous final report.',
+                    );
                     return {
-                        result: JSON.parse(
-                            output.trim().split(/\r?\n/u).pop()!,
-                        ) as Record<string, unknown>,
+                        result: reports[0],
                         peakMemory,
                         samples,
                         milliseconds: performance.now() - started,
+                        ...(guardResult === undefined
+                            ? {}
+                            : {
+                                  verificationMilliseconds:
+                                      guardResult.verificationMilliseconds,
+                                  samplesByPhase: guardResult.samples,
+                                  samplingScope:
+                                      'Initial sample before work is released, periodic samples while it runs, and a fresh final sample after completion before process exit. Wall time includes coordination; verificationMilliseconds excludes it. Sampled peaks do not bound transient peaks between observations.',
+                              }),
                     };
                 };
                 await execute(
@@ -478,6 +606,7 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     nativeExecutable,
                     ['--verify-existing', inputDirectory],
                     'native-verification',
+                    true,
                 );
                 assert.equal(
                     native.result.kind,
@@ -490,37 +619,52 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     native.result.proofBytes,
                     proofs.map((proof) => proof.bytes),
                 );
-                const configuration = path.join(
-                    log.runDirectoryPath,
-                    'worker-input.json',
-                );
-                await writeFile(
-                    configuration,
-                    JSON.stringify({
-                        module: moduleFile,
+                let verified;
+                if (host === 'chrome') {
+                    verified = await verifySeedSharingInChrome({
+                        root,
+                        log,
+                        moduleFile,
                         moduleSha512,
                         proofs,
-                    }) + '\n',
-                    { flag: 'wx' },
-                );
-                const scalar = await guarded(
-                    process.execPath,
-                    [
-                        path.join(
-                            root,
-                            'tools/ci/seed-sharing-scalar-worker.mjs',
-                        ),
+                        processMemoryLimit,
+                        linearMemoryLimit,
+                    });
+                } else {
+                    const configuration = path.join(
+                        log.runDirectoryPath,
+                        'worker-input.json',
+                    );
+                    await writeFile(
                         configuration,
-                    ],
-                    'scalar-verification',
-                );
+                        JSON.stringify({
+                            module: moduleFile,
+                            moduleSha512,
+                            proofs,
+                        }) + '\n',
+                        { flag: 'wx' },
+                    );
+                    verified = await guarded(
+                        process.execPath,
+                        [
+                            path.join(
+                                root,
+                                'tools/ci/seed-sharing-scalar-worker.mjs',
+                            ),
+                            configuration,
+                        ],
+                        'scalar-verification',
+                    );
+                }
                 assert.equal(
-                    scalar.result.kind,
-                    'scalar-seed-sharing-verification',
+                    verified.result.kind,
+                    host === 'chrome'
+                        ? 'browser-seed-sharing-verification'
+                        : 'scalar-seed-sharing-verification',
                 );
                 assert.ok(
-                    Array.isArray(scalar.result.results) &&
-                        scalar.result.results.length === 8,
+                    Array.isArray(verified.result.results) &&
+                        verified.result.results.length === 8,
                 );
                 for (const entry of sources)
                     assert.equal(
@@ -540,15 +684,20 @@ export const runSeedSharingScalar = async (sourceDirectory: string) => {
                     path.join(log.runDirectoryPath, 'result.json'),
                     JSON.stringify(
                         {
-                            case: 'scalar-seed-sharing',
+                            case: caseName,
                             identity,
                             source: source.directory,
                             moduleSha512,
                             currentNativeExecutableSha512:
                                 await fileDigest(nativeExecutable),
                             native,
-                            scalar,
-                            scope: 'Current native and Node worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the historical native run. Archive digests were first recorded by this scalar run. This is bounded relation verification development evidence, not proof generation in a browser, distributed setup, an admitted capability or phone qualification.',
+                            ...(host === 'chrome'
+                                ? { browser: verified }
+                                : { scalar: verified }),
+                            scope:
+                                host === 'chrome'
+                                    ? 'Current native and dedicated external desktop Chrome worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the historical native run. Browser transfers authenticated bounded chunks with trusted SHA-512 identities. This is bounded relation verification development evidence, not browser proof generation, distributed setup, an admitted capability or physical-phone qualification.'
+                                    : 'Current native and Node worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the historical native run. Archive digests were first recorded by this scalar run. This is bounded relation verification development evidence, not proof generation in a browser, distributed setup, an admitted capability or phone qualification.',
                         },
                         null,
                         2,
