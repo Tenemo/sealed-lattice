@@ -11,6 +11,31 @@ import {
 } from '#tools/ci/protocol-research-scenario.js';
 
 describe('guarded protocol research entry', () => {
+    it('selects opening scalar and browser cases only with one native opening source', () => {
+        for (const name of [
+            'scalar-opening-share',
+            'browser-opening-share',
+            'scalar-opening-share-generation',
+            'browser-opening-share-generation',
+        ]) {
+            expect(selectProtocolResearchCase([name, 'source'])).toEqual({
+                name,
+                source: 'source',
+                execution: true,
+                noResult: false,
+                participantCount: 4,
+                optionCount: 2,
+                simulatedHelpers: 0,
+            });
+            for (const arguments_ of [
+                [name],
+                [name, ''],
+                [name, 'source', 'extra'],
+                [name, 'source', '--simulated-helpers', '1'],
+            ])
+                expect(() => selectProtocolResearchCase(arguments_)).toThrow();
+        }
+    });
     it('requires an explicit public case and a nonempty fixture', () => {
         for (const values of [
             [],
@@ -157,6 +182,83 @@ describe('guarded protocol research entry', () => {
             ['native-seed-sharing', '--simulated-helpers', '1'],
             ['native-seed-sharing', 'native-result'],
             ['seed-sharing'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+    });
+
+    it('keeps deterministic reference comparison separate from fresh opening-share input', () => {
+        expect(
+            selectProtocolResearchCase([
+                'native-opening-share',
+                'fresh-run',
+                '--compare-reference',
+                'old-opening-run',
+            ]),
+        ).toMatchObject({
+            name: 'native-opening-share',
+            source: 'fresh-run',
+            reference: 'old-opening-run',
+        });
+        expect(
+            selectProtocolResearchCase([
+                'native-seed-sharing',
+                '--compare-reference',
+                'historical-run',
+            ]),
+        ).toMatchObject({
+            name: 'native-seed-sharing',
+            reference: 'historical-run',
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        expect(
+            selectProtocolResearchCase(['native-opening-share', 'fresh-run']),
+        ).toEqual({
+            name: 'native-opening-share',
+            source: 'fresh-run',
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const values of [
+            ['native-seed-sharing', '--compare-reference'],
+            ['native-seed-sharing', '--compare-reference', ''],
+            [
+                'native-seed-sharing',
+                '--compare-reference',
+                '--simulated-helpers',
+            ],
+            [
+                'native-seed-sharing',
+                '--compare-reference',
+                'reference',
+                'extra',
+            ],
+            [
+                'native-seed-sharing',
+                '--compare-reference',
+                'reference',
+                '--simulated-helpers',
+                '1',
+            ],
+            ['native-result', '--compare-reference', 'reference'],
+            ['native-opening-share'],
+            ['native-opening-share', ''],
+            ['native-opening-share', '--compare-reference'],
+            ['native-opening-share', 'fresh', '--simulated-helpers', '1'],
+            ['native-opening-share', 'fresh', '4', '2'],
+            ['native-opening-share', 'fresh', '--compare-reference'],
+            ['native-opening-share', 'fresh', '--compare-reference', ''],
+            [
+                'native-opening-share',
+                'fresh',
+                '--compare-reference',
+                'old',
+                'extra',
+            ],
         ])
             expect(() => selectProtocolResearchCase(values)).toThrow();
     });

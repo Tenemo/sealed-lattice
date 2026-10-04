@@ -331,6 +331,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "opening-share-proof"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+ "parallel-work",
+ "seed-sharing-proof",
+ "setup-stream-kernel",
+ "supported-profile",
+ "word-proof",
+ "word-verifier",
+ "zeroize",
+]
+
+[[package]]
 name = "parallel-work"
 version = "0.0.0"
 dependencies = [
@@ -464,7 +478,6 @@ dependencies = [
  "supported-profile",
  "word-proof",
  "word-verifier",
- "zeroize",
 ]
 
 [[package]]

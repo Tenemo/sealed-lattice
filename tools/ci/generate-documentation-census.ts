@@ -92,6 +92,7 @@ import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-mod
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
 import {
+    compileBoundedOpeningShareProofResources,
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
@@ -239,6 +240,7 @@ export const renderDocumentationCensus = (): string => {
     const fullFourParticipantSeedSharingProof =
         compileRecoverableSeedSharingProofResources(4, 2);
     const boundedOpeningShareProof = compileOpeningShareResources(4, 256n);
+    const boundedOpeningNative = compileBoundedOpeningShareProofResources();
     const recoverableSetupProfiles = supportedProfiles.profiles.flatMap((row) =>
         row.map((profile) =>
             compileRecoverableSetupResourceScreen(
@@ -2899,6 +2901,49 @@ export const renderDocumentationCensus = (): string => {
                 label,
                 formatCount(select(boundedOpeningShareProof)),
                 formatCount(select(recoverableSetup.openingProof)),
+            ]),
+        ),
+        '',
+        'The bounded native opening fixture admits two distinct seed-sharing records through their actual verifier, then generates one positive opening batch and one hostile proof for a shifted public share. Its selected descriptor is a fixture premise. The native proving allowance below includes two retained source statements, the physical operator, derived equation constants, bounded public statement copies and serialization; it takes the maximum of the successive second-source and opening proof stages. These are allocation allowances, not measured memory or a full bound on fixture generation, verification, storage, browser execution or the complete preparation workflow. The fresh-artifact envelope excludes the separately copied input proofs.',
+        '',
+        table(
+            ['Bounded native fixture property', 'Value'],
+            [
+                [
+                    'Seed-sharing statement bytes',
+                    boundedOpeningNative.seedStatementBytes,
+                ],
+                [
+                    'Opening statement bytes',
+                    boundedOpeningNative.openingStatementBytes,
+                ],
+                [
+                    'Resident physical opening operator bytes',
+                    boundedOpeningNative.residentOperatorBytes,
+                ],
+                [
+                    'Retained source coefficient allocation allowance',
+                    boundedOpeningNative.retainedSourceCoefficientAllowanceBytes,
+                ],
+                [
+                    'Second-source proving stage allowance',
+                    boundedOpeningNative.secondSourceStageBytes,
+                ],
+                [
+                    'Opening proving stage allowance',
+                    boundedOpeningNative.openingStageBytes,
+                ],
+                [
+                    'Sequential native proving allowance',
+                    boundedOpeningNative.nativeProofPlanningBytes,
+                ],
+                [
+                    'Maximum new binary artifact bytes',
+                    boundedOpeningNative.maximumNewArtifactBytes,
+                ],
+            ].map(([label, value]) => [
+                String(label),
+                formatCount(value as bigint),
             ]),
         ),
         '',

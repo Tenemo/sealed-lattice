@@ -1,7 +1,7 @@
 import binaryen from 'binaryen';
 import { describe, expect, it, vi } from 'vitest';
 
-import { generateSeedSharingProof } from '#tools/ci/seed-sharing-scalar-prover.mjs';
+import { generateBoundedProof } from '#tools/ci/seed-sharing-scalar-prover.mjs';
 
 // A transport fixture, not a cryptographic proof. Its pending span is changed
 // by memory growth only after acknowledgment, exposing stale-view mistakes.
@@ -92,7 +92,7 @@ describe('bounded scalar prover transport', () => {
         });
         const chunks: Uint8Array[] = [];
         try {
-            const generation = generateSeedSharingProof({
+            const generation = generateBoundedProof({
                 moduleBytes: fixture(),
                 expectedBytes: 13,
                 emitChunk: async (index, offset, bytes) => {
@@ -152,7 +152,7 @@ describe('bounded scalar prover transport', () => {
                     Promise.resolve({ index, offset, length: bytes.length }),
             );
             await expect(
-                generateSeedSharingProof({
+                generateBoundedProof({
                     moduleBytes: fixture(13, 5, flaw),
                     expectedBytes: 13,
                     emitChunk: sink,
@@ -164,7 +164,7 @@ describe('bounded scalar prover transport', () => {
             Promise.resolve({ index, offset, length: bytes.length }),
         );
         await expect(
-            generateSeedSharingProof({
+            generateBoundedProof({
                 moduleBytes: fixture(13, 5, 'randomness'),
                 expectedBytes: 13,
                 emitChunk: sink,
@@ -182,7 +182,7 @@ describe('bounded scalar prover transport', () => {
             const observed = captureInstance();
             try {
                 await expect(
-                    generateSeedSharingProof({
+                    generateBoundedProof({
                         moduleBytes: fixture(),
                         expectedBytes: 13,
                         emitChunk: () => Promise.resolve(wrong),
@@ -196,7 +196,7 @@ describe('bounded scalar prover transport', () => {
         const observed = captureInstance();
         try {
             await expect(
-                generateSeedSharingProof({
+                generateBoundedProof({
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: (index, offset, bytes) =>
@@ -218,7 +218,7 @@ describe('bounded scalar prover transport', () => {
         const failure = new Error('The output write failed.');
         try {
             await expect(
-                generateSeedSharingProof({
+                generateBoundedProof({
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: () => Promise.reject(failure),
@@ -232,14 +232,14 @@ describe('bounded scalar prover transport', () => {
             Promise.resolve({ index, offset, length: bytes.length });
         for (const expectedBytes of [12, 14])
             await expect(
-                generateSeedSharingProof({
+                generateBoundedProof({
                     moduleBytes: fixture(),
                     expectedBytes,
                     emitChunk,
                 }),
             ).rejects.toThrow();
         await expect(
-            generateSeedSharingProof({
+            generateBoundedProof({
                 moduleBytes: fixture(13, 1_048_577),
                 expectedBytes: 13,
                 emitChunk,

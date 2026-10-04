@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { open, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import {
     isMainThread,
     parentPort,
@@ -9,26 +8,17 @@ import {
     workerData,
 } from 'node:worker_threads';
 
+import { openingShareProbes } from './opening-share-scalar.mjs';
+import { withPinnedProofReaders } from './scalar-proof-file-reader.mjs';
 import {
     seedSharingProbes,
-    verifySeedSharingProof,
+    verifyBoundedProof,
 } from './seed-sharing-scalar-verifier.mjs';
 
 /** @typedef {{name: string, file: string, bytes: number, sha512: string}} Proof */
-/** @typedef {{module: string, moduleSha512: string, proofs: Proof[]}} Configuration */
+/** @typedef {{module: string, moduleSha512: string, proofs: Proof[],relation?:'seed-sharing'|'opening-share',predecessors?:Proof[]}} Configuration */
 /** @typedef {import('./seed-sharing-scalar-verifier.mjs').Probe} Probe */
 /** @typedef {import('./seed-sharing-scalar-verifier.mjs').ProbeResult} ProbeResult */
-
-/** @param {string} file */
-const digestFile = async (file) => {
-    const digest = createHash('sha512');
-    for await (const chunk of createReadStream(file)) {
-        if (!(chunk instanceof Uint8Array))
-            throw new Error('A proof read returned nonbinary data.');
-        digest.update(chunk);
-    }
-    return digest.digest('hex');
-};
 
 if (isMainThread) {
     const configuration = /** @type {Configuration} */ (
@@ -37,7 +27,9 @@ if (isMainThread) {
     const results = [];
     // Each ended worker relinquishes its module and memory before the next
     // probe. No forced collection or shared-memory path is needed.
-    for (const probe of seedSharingProbes) {
+    for (const probe of configuration.relation === 'opening-share'
+        ? openingShareProbes
+        : seedSharingProbes) {
         /** @type {ProbeResult} */
         const result = await new Promise((resolve, reject) => {
             const worker = new Worker(new URL(import.meta.url), {
@@ -65,7 +57,13 @@ if (isMainThread) {
         results.push(result);
     }
     console.log(
-        JSON.stringify({ kind: 'scalar-seed-sharing-verification', results }),
+        JSON.stringify({
+            kind:
+                'scalar-' +
+                (configuration.relation ?? 'seed-sharing') +
+                '-verification',
+            results,
+        }),
     );
 } else {
     const {
@@ -73,46 +71,28 @@ if (isMainThread) {
         moduleSha512,
         proofs,
         probe,
+        relation,
+        predecessors = [],
     } = /** @type {Configuration & {probe: Probe}} */ (workerData);
     const proof = proofs[probe.proof];
-    assert.equal(await digestFile(proof.file), proof.sha512);
     const moduleBytes = await readFile(modulePath);
     assert.equal(
         createHash('sha512').update(moduleBytes).digest('hex'),
         moduleSha512,
     );
-    const file = await open(proof.file, 'r');
-    const buffer = new Uint8Array(1_048_576);
-    /** @param {number} length @param {number} position */
-    const readExact = async (length, position) => {
-        assert.ok(length > 0 && length <= buffer.length);
-        let filled = 0;
-        while (filled < length) {
-            const { bytesRead } = await file.read(
-                buffer,
-                filled,
-                length - filled,
-                position + filled,
-            );
-            assert.ok(
-                bytesRead > 0,
-                'The pinned proof ended during a bounded read.',
-            );
-            filled += bytesRead;
-        }
-        return buffer.subarray(0, length);
-    };
-    let result;
-    try {
-        result = await verifySeedSharingProof({
-            moduleBytes,
-            proof,
-            probe,
-            readExact,
-        });
-    } finally {
-        await file.close();
-    }
-    assert.equal(await digestFile(proof.file), proof.sha512);
+    const result = await withPinnedProofReaders(
+        [...predecessors, proof],
+        (read) =>
+            verifyBoundedProof({
+                moduleBytes,
+                proof,
+                probe,
+                relation,
+                predecessors,
+                readPredecessor: read,
+                readExact: (length, position) =>
+                    read(predecessors.length, length, position),
+            }),
+    );
     parentPort.postMessage(result);
 }

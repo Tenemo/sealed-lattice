@@ -10,6 +10,7 @@ import {
 } from '#tools/ci/run-seed-sharing-browser.js';
 import {
     createBrowserProofReader,
+    createBrowserPredecessorReader,
     readBoundedBrowserResponse,
     seedSharingChunkBytes,
 } from '#tools/ci/seed-sharing-browser-input.mjs';
@@ -100,6 +101,49 @@ describe('authenticated browser proof transport', () => {
         expect(request).toHaveBeenCalledOnce();
     });
 
+    it('keeps only the active predecessor cache and clears it before the next proof', async () => {
+        const bodies = [
+            new Uint8Array([1, 2, 3, 4, 5]),
+            new Uint8Array([6, 7, 8, 9, 10]),
+        ];
+        const predecessors = bodies.map((bytes, index) => ({
+            bytes: bytes.length,
+            url: 'https://fixture.invalid/predecessor/' + index + '/',
+            chunks: [{ offset: 0, bytes: bytes.length, sha512: digest(bytes) }],
+        }));
+        const request = vi.fn<typeof fetch>((input) => {
+            const url =
+                typeof input === 'string'
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
+            const index = Number(new URL(url).pathname.split('/')[2]);
+            return Promise.resolve(new Response(bodies[index]));
+        });
+        const reader = createBrowserPredecessorReader(predecessors, request);
+        expect(await reader.read(0, 1, 0)).toEqual(new Uint8Array([1]));
+        expect(await reader.read(0, 1, 1)).toEqual(new Uint8Array([2]));
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(await reader.read(1, 1, 0)).toEqual(new Uint8Array([6]));
+        expect(await reader.read(0, 1, 0)).toEqual(new Uint8Array([1]));
+        expect(request).toHaveBeenCalledTimes(3);
+        expect(await reader.read(0, 4, 1)).toEqual(
+            new Uint8Array([2, 3, 4, 5]),
+        );
+        expect(await reader.read(0, 1, 0)).toEqual(new Uint8Array([1]));
+        expect(request).toHaveBeenCalledTimes(4);
+        reader.release();
+        expect(await reader.read(0, 1, 0)).toEqual(new Uint8Array([1]));
+        expect(request).toHaveBeenCalledTimes(5);
+        await expect(reader.read(2, 1, 0)).rejects.toThrow('index');
+        expect(request).toHaveBeenCalledTimes(5);
+        const altered = createBrowserPredecessorReader(predecessors, () =>
+            Promise.resolve(new Response(bodies[1])),
+        );
+        await expect(altered.read(0, 1, 0)).rejects.toThrow('pinned identity');
+    });
+
     it('bounds streamed response length independently of HTTP headers', async () => {
         const fragmented = vi.fn<typeof fetch>(() =>
             Promise.resolve(
@@ -158,6 +202,9 @@ describe('authenticated browser proof transport', () => {
         );
         const proofFile = path.join(directory, 'proof.data');
         const moduleFile = path.join(directory, 'module.data');
+        const predecessorFile = path.join(directory, 'predecessor.data');
+        const predecessorBytes = new Uint8Array([9, 8, 7]);
+        await writeFile(predecessorFile, predecessorBytes);
         const bytes = new Uint8Array([1, 2, 3, 4, 5]);
         await writeFile(proofFile, bytes);
         await writeFile(moduleFile, bytes);
@@ -182,12 +229,30 @@ describe('authenticated browser proof transport', () => {
                 path.resolve('.'),
                 moduleFile,
                 [pinned],
+                undefined,
+                [
+                    await pinBrowserProofChunks({
+                        name: 'predecessor',
+                        file: predecessorFile,
+                        bytes: predecessorBytes.length,
+                        sha512: digest(predecessorBytes),
+                    }),
+                ],
             );
             expect(new URL(server.origin).port).not.toBe('80');
             const response = await fetch(server.origin + '/proof/0/0');
             expect(response.status).toBe(200);
             expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+            const predecessorResponse = await fetch(
+                server.origin + '/predecessor/0/0',
+            );
+            expect(predecessorResponse.status).toBe(200);
+            expect(
+                new Uint8Array(await predecessorResponse.arrayBuffer()),
+            ).toEqual(predecessorBytes);
             for (const route of [
+                '/predecessor/1/0',
+                '/predecessor/0/1',
                 '/proof/0/1',
                 '/proof/1/0',
                 '/proof/00/0',

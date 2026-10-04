@@ -15,6 +15,8 @@ pub mod oracles;
 pub mod parameters;
 pub mod random;
 pub mod rows;
+#[cfg(feature = "test-support")]
+pub mod staged;
 pub mod sums;
 pub mod transcript;
 pub mod tree;

@@ -1,5 +1,7 @@
+import { verifyOpeningShareProof } from './opening-share-scalar.mjs';
+import { streamScalarProof } from './scalar-proof-stream.mjs';
 /** @typedef {{bytes: number, sha512: string}} Proof */
-/** @typedef {{name: string, proof: number, context: number, expected?: number, headerCut?: number, truncate?: number, append?: boolean, change?: boolean}} Probe */
+/** @typedef {import('./scalar-proof-stream.mjs').Probe} Probe */
 /** @typedef {{name: string, code: number, suppliedBytes: number, maximumLinearMemoryBytes: number, milliseconds: number, proofSha512: string}} ProbeResult */
 /** @typedef {{memory: WebAssembly.Memory, seed_verifier_input_capacity(): number, seed_verifier_header_length(): number, seed_verifier_input_pointer(): number, seed_verifier_begin(context: number, length: number): number, seed_verifier_push(length: number): number, seed_verifier_finish(): number}} VerifierApi */
 
@@ -25,14 +27,17 @@ const requireCondition = (condition, message) => {
 // input buffer. Host/ABI failures throw; only the owning Rust verifier emits
 // a refusal code. The caller terminates this worker before the next probe.
 /**
- * @param {{moduleBytes: Uint8Array, proof: Proof, probe: Probe, readExact: (length: number, position: number) => Promise<Uint8Array>}} input
+ * @param {{moduleBytes: Uint8Array, proof: Proof, probe: Probe, readExact: (length: number, position: number) => Promise<Uint8Array>,relation?:'seed-sharing'|'opening-share',predecessors?:Proof[],readPredecessor?:(index:number,length:number,position:number)=>Promise<Uint8Array>}} input
  * @returns {Promise<ProbeResult>}
  */
-export const verifySeedSharingProof = async ({
+export const verifyBoundedProof = async ({
     moduleBytes,
     proof,
     probe,
     readExact,
+    relation = 'seed-sharing',
+    predecessors,
+    readPredecessor,
 }) => {
     const compiled = await WebAssembly.compile(moduleBytes);
     const unavailable = (name) => () => {
@@ -61,84 +66,41 @@ export const verifySeedSharingProof = async ({
             'Unknown scalar import.',
         );
     const instance = await WebAssembly.instantiate(compiled, imports);
+    if (relation === 'opening-share') {
+        requireCondition(
+            predecessors !== undefined && readPredecessor !== undefined,
+            'The opening verifier lacks its predecessor streams.',
+        );
+        return verifyOpeningShareProof({
+            api: /** @type {import('./opening-share-scalar.mjs').OpeningApi} */ (
+                /** @type {unknown} */ (instance.exports)
+            ),
+            predecessors: /** @type {Proof[]} */ (predecessors),
+            readPredecessor:
+                /** @type {(index:number,length:number,position:number)=>Promise<Uint8Array>} */ (
+                    readPredecessor
+                ),
+            proof,
+            probe,
+            readExact,
+        });
+    }
     const api = /** @type {VerifierApi} */ (
         /** @type {unknown} */ (instance.exports)
     );
-    const capacity = api.seed_verifier_input_capacity();
-    const headerLength = api.seed_verifier_header_length();
-    requireCondition(
-        capacity > 0 &&
-            capacity <= 1_048_576 &&
-            headerLength > 0 &&
-            headerLength <= capacity,
-        'The verifier input layout exceeds its bound.',
-    );
-    let maximumLinearMemoryBytes = api.memory.buffer.byteLength;
-    /** @param {Uint8Array} bytes */
-    const transfer = (bytes) => {
-        const pointer = api.seed_verifier_input_pointer();
-        requireCondition(
-            bytes.length <= capacity &&
-                pointer >= 0 &&
-                pointer + bytes.length <= api.memory.buffer.byteLength,
-            'The verifier input lies outside its memory.',
-        );
-        // Reacquire the view after every call that can grow linear memory.
-        new Uint8Array(api.memory.buffer, pointer, bytes.length).set(bytes);
-    };
-    /** @param {number} length @param {number} position */
-    const read = async (length, position) => {
-        requireCondition(
-            length > 0 && length <= capacity,
-            'A proof read exceeds the input bound.',
-        );
-        const bytes = await readExact(length, position);
-        requireCondition(
-            bytes instanceof Uint8Array && bytes.length === length,
-            'A bounded proof read returned the wrong length.',
-        );
-        return bytes;
-    };
-    const sample = () => {
-        maximumLinearMemoryBytes = Math.max(
-            maximumLinearMemoryBytes,
-            api.memory.buffer.byteLength,
-        );
-    };
-    const started = performance.now();
-    let suppliedBytes = 0;
-    const readHeader = headerLength - (probe.headerCut ?? 0);
-    transfer(await read(readHeader, 0));
-    let code = api.seed_verifier_begin(probe.context, readHeader);
-    suppliedBytes += readHeader;
-    sample();
-    const end = proof.bytes - (probe.truncate ?? 0);
-    for (let offset = headerLength; code === 0 && offset < end;) {
-        const length = Math.min(capacity, end - offset);
-        const bytes = await read(length, offset);
-        // Mutation follows the host's integrity check and never changes the
-        // saved artifact or the browser's authenticated cached chunk.
-        if (probe.change && offset + length === end) bytes[length - 1] ^= 1;
-        transfer(bytes);
-        code = api.seed_verifier_push(length);
-        suppliedBytes += length;
-        offset += length;
-        sample();
-    }
-    if (code === 0 && probe.append) {
-        transfer(new Uint8Array([0]));
-        code = api.seed_verifier_push(1);
-        suppliedBytes++;
-        sample();
-    }
-    if (code === 0) code = api.seed_verifier_finish();
-    sample();
-    return {
-        name: probe.name,
-        code,
-        suppliedBytes,
-        maximumLinearMemoryBytes,
-        milliseconds: performance.now() - started,
-        proofSha512: proof.sha512,
-    };
+    return streamScalarProof({
+        api: {
+            memory: api.memory,
+            inputCapacity: () => api.seed_verifier_input_capacity(),
+            inputPointer: () => api.seed_verifier_input_pointer(),
+            headerLength: () => api.seed_verifier_header_length(),
+            begin: (context, length) =>
+                api.seed_verifier_begin(context, length),
+            push: (length) => api.seed_verifier_push(length),
+            finish: () => api.seed_verifier_finish(),
+        },
+        proof,
+        probe,
+        readExact,
+    });
 };

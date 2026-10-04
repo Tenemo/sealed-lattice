@@ -14,6 +14,7 @@ import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
+import { openingShareProbes } from '#tools/ci/opening-share-scalar.mjs';
 import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
@@ -22,12 +23,14 @@ import { createBrowserProofSink } from '#tools/ci/seed-sharing-browser-sink.js';
 import { fileDigest } from '#tools/ci/seed-sharing-scalar-source.js';
 import { seedSharingProbes } from '#tools/ci/seed-sharing-scalar-verifier.mjs';
 
-export const seedSharingBrowserSources = [
+export const boundedProofBrowserSources = [
     'tools/ci/run-seed-sharing-browser.ts',
     'tools/ci/seed-sharing-browser-input.mjs',
     'tools/ci/seed-sharing-browser-worker.mjs',
     'tools/ci/seed-sharing-browser-sink.ts',
     'tools/ci/seed-sharing-proof-sink.mjs',
+    'tools/ci/opening-share-scalar.mjs',
+    'tools/ci/scalar-proof-stream.mjs',
     'tools/ci/participant-runtime-chrome.ts',
 ];
 
@@ -90,9 +93,9 @@ export const pinBrowserProofChunks = async (
     }
 };
 
-const page = `<!doctype html><meta charset="utf-8"><title>Seed-sharing verifier</title>
+const page = `<!doctype html><meta charset="utf-8"><title>Bounded proof experiment</title>
 <script>
-window.runSeedSharingProbe = (configuration) => new Promise((resolve, reject) => {
+window.runBoundedProofProbe = (configuration) => new Promise((resolve, reject) => {
     const worker = new Worker('/seed-sharing-browser-worker.mjs', {type: 'module'});
     let finished = false;
     const finish = (error, result) => {
@@ -103,11 +106,11 @@ window.runSeedSharingProbe = (configuration) => new Promise((resolve, reject) =>
         if (error) reject(new Error(error));
         else resolve(result);
     };
-    window.seedSharingProgress = {sequence:0,progress:null};
+    window.boundedProofProgress = {sequence:0,progress:null};
     const timer = setTimeout(() => finish('The browser proof worker exceeded its deadline.'), configuration.timeoutMilliseconds);
     worker.onmessage = ({data}) => {
         if (Object.hasOwn(data,'progress')) {
-            window.seedSharingProgress = {sequence:window.seedSharingProgress.sequence+1,progress:data.progress};
+            window.boundedProofProgress = {sequence:window.boundedProofProgress.sequence+1,progress:data.progress};
         } else finish(data.error, data.result);
     };
     worker.onerror = (event) => finish(event.message || 'The browser verification worker failed.');
@@ -124,6 +127,7 @@ export const serveSeedSharingBrowserInputs = async (
         expectedBytes: number;
         expectedSha512: string;
     },
+    predecessors: readonly PinnedProof[] = [],
 ) => {
     const assets = new Map<string, { bytes: Uint8Array; type: string }>([
         ['/', { bytes: Buffer.from(page), type: 'text/html; charset=utf-8' }],
@@ -136,6 +140,8 @@ export const serveSeedSharingBrowserInputs = async (
         'seed-sharing-browser-worker.mjs',
         'seed-sharing-browser-input.mjs',
         'seed-sharing-scalar-verifier.mjs',
+        'opening-share-scalar.mjs',
+        'scalar-proof-stream.mjs',
         ...(generation ? ['seed-sharing-scalar-prover.mjs'] : []),
     ])
         assets.set('/' + name, {
@@ -209,12 +215,14 @@ export const serveSeedSharingBrowserInputs = async (
                 response.end(asset.bytes);
                 return;
             }
-            const match = /^\/proof\/(0|[1-9][0-9]*)\/(0|[1-9][0-9]*)$/u.exec(
-                route,
-            );
-            const proof = match ? proofs[Number(match[1])] : undefined;
+            const match =
+                /^\/(proof|predecessor)\/(0|[1-9][0-9]*)\/(0|[1-9][0-9]*)$/u.exec(
+                    route,
+                );
+            const inputs = match?.[1] === 'predecessor' ? predecessors : proofs;
+            const proof = match ? inputs[Number(match[2])] : undefined;
             const chunk =
-                proof && match ? proof.chunks[Number(match[2])] : undefined;
+                proof && match ? proof.chunks[Number(match[3])] : undefined;
             if (!proof || !chunk) {
                 response.writeHead(404).end();
                 return;
@@ -300,6 +308,8 @@ export const serveSeedSharingBrowserInputs = async (
 };
 
 type ChromeInputs = {
+    relation?: 'seed-sharing' | 'opening-share';
+    predecessors?: readonly Proof[];
     root: string;
     log: ActiveLocalRunLog;
     moduleFile: string;
@@ -313,23 +323,29 @@ type Generation = {
     expectedSha512: string;
 };
 
-const runSeedSharingInChrome = async ({
+const runBoundedProofInChrome = async ({
     root,
     log,
     moduleFile,
     moduleSha512,
     proofs = [],
+    predecessors = [],
+    relation = 'seed-sharing',
     generation,
     processMemoryLimit,
     linearMemoryLimit,
 }: ChromeInputs & { proofs?: readonly Proof[]; generation?: Generation }) => {
     const phase = generation ? 'generation' : 'verification';
+    assert.equal(predecessors.length, relation === 'opening-share' ? 2 : 0);
     assert.ok(
         freemem() >= 2 * processMemoryLimit,
         'Insufficient host memory before Chrome verification.',
     );
     const pinned = [];
     for (const proof of proofs) pinned.push(await pinBrowserProofChunks(proof));
+    const pinnedPredecessors = [];
+    for (const proof of predecessors)
+        pinnedPredecessors.push(await pinBrowserProofChunks(proof));
     await writeFile(
         path.join(
             log.runDirectoryPath,
@@ -341,6 +357,8 @@ const runSeedSharingInChrome = async ({
             {
                 moduleSha512,
                 phase,
+                relation,
+                predecessors: pinnedPredecessors,
                 chunkBytes: seedSharingChunkBytes,
                 proofs: pinned,
                 generation,
@@ -371,14 +389,16 @@ const runSeedSharingInChrome = async ({
             moduleFile,
             pinned,
             generation,
+            pinnedPredecessors,
         );
         server = serving;
         chrome = await launchChromeParticipant(profile, serving.origin);
         const browser = chrome;
         log.writeEvent({
-            eventType: 'seed-sharing-browser',
+            eventType: relation + '-browser',
             details: {
                 phase,
+                relation,
                 version: browser.version,
                 launchArguments: browser.launchArguments,
                 processIdentifier: browser.processIdentifier,
@@ -415,16 +435,17 @@ const runSeedSharingInChrome = async ({
                     samples++;
                     peakMemory = Math.max(peakMemory, bytes);
                     log.writeEvent({
-                        eventType: 'seed-sharing-browser-memory',
+                        eventType: relation + '-browser-memory',
                         details: {
                             phase,
+                            relation,
                             bytes,
                             limit: processMemoryLimit,
                             heaps: browser.heaps(),
                             ...(generation
                                 ? {
                                       progress: await browser.evaluate(
-                                          'window.seedSharingProgress',
+                                          'window.boundedProofProgress',
                                       ),
                                   }
                                 : {}),
@@ -438,10 +459,19 @@ const runSeedSharingInChrome = async ({
                 if (active) await setTimeout(1000);
             }
         })().catch(fail);
+        const browserPredecessors = pinnedPredecessors.map((proof, index) => ({
+            name: proof.name,
+            bytes: proof.bytes,
+            sha512: proof.sha512,
+            chunks: proof.chunks,
+            url: serving.origin + '/predecessor/' + index + '/',
+        }));
         let result: Record<string, unknown>;
         if (generation) {
             const configuration = {
                 mode: 'generate',
+                relation,
+                predecessors: browserPredecessors,
                 timeoutMilliseconds,
                 moduleUrl: serving.origin + '/module.wasm',
                 moduleBytes: serving.moduleBytes,
@@ -451,7 +481,7 @@ const runSeedSharingInChrome = async ({
             };
             const generated = (await Promise.race([
                 browser.evaluate(
-                    'window.runSeedSharingProbe(' +
+                    'window.runBoundedProofProbe(' +
                         JSON.stringify(configuration) +
                         ')',
                 ),
@@ -463,18 +493,22 @@ const runSeedSharingInChrome = async ({
             assert.equal(await fileDigest(proof.file), proof.sha512);
             assert.equal(proof.sha512, generation.expectedSha512);
             result = {
-                kind: 'browser-seed-sharing-generation',
+                kind: 'browser-' + relation + '-generation',
                 ...generated,
                 proof,
             };
             log.writeEvent({
-                eventType: 'seed-sharing-browser-generation',
+                eventType: relation + '-browser-generation',
                 details: { phase, ...result },
             });
         } else {
             const results = [];
-            for (const probe of seedSharingProbes) {
+            for (const probe of relation === 'opening-share'
+                ? openingShareProbes
+                : seedSharingProbes) {
                 const configuration = {
+                    relation,
+                    predecessors: browserPredecessors,
                     timeoutMilliseconds,
                     moduleUrl: serving.origin + '/module.wasm',
                     moduleBytes: serving.moduleBytes,
@@ -490,7 +524,7 @@ const runSeedSharingInChrome = async ({
                 };
                 const verified = (await Promise.race([
                     browser.evaluate(
-                        'window.runSeedSharingProbe(' +
+                        'window.runBoundedProofProbe(' +
                             JSON.stringify(configuration) +
                             ')',
                     ),
@@ -511,11 +545,11 @@ const runSeedSharingInChrome = async ({
                 );
                 results.push(verified);
                 log.writeEvent({
-                    eventType: 'seed-sharing-browser-case',
+                    eventType: relation + '-browser-case',
                     details: { phase, ...verified },
                 });
             }
-            result = { kind: 'browser-seed-sharing-verification', results };
+            result = { kind: 'browser-' + relation + '-verification', results };
         }
         assert.ok(
             samples > 0,
@@ -564,11 +598,11 @@ const runSeedSharingInChrome = async ({
     }
 };
 
-export const verifySeedSharingInChrome = (
+export const verifyBoundedProofInChrome = (
     input: ChromeInputs & { proofs: readonly Proof[] },
-) => runSeedSharingInChrome(input);
+) => runBoundedProofInChrome(input);
 
-export const generateSeedSharingInChrome = (
+export const generateBoundedProofInChrome = (
     input: ChromeInputs & {
         outputFile: string;
         expectedBytes: number;
@@ -582,7 +616,7 @@ export const generateSeedSharingInChrome = (
         ),
         'The generated proof must remain in its run artifact directory.',
     );
-    return runSeedSharingInChrome({
+    return runBoundedProofInChrome({
         ...input,
         generation: {
             file: output,

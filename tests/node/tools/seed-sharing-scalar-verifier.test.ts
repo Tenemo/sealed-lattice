@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     seedSharingProbes,
-    verifySeedSharingProof,
+    verifyBoundedProof,
 } from '#tools/ci/seed-sharing-scalar-verifier.mjs';
 
 // This tiny ABI fixture checks byte transport and view invalidation only.
@@ -60,7 +60,7 @@ describe('portable scalar verifier transport', () => {
         for (const bodyLength of [1, 8, 9, 16, 17]) {
             const bytes = proofBytes(bodyLength);
             const reads: number[][] = [];
-            const result = await verifySeedSharingProof({
+            const result = await verifyBoundedProof({
                 moduleBytes: transportFixture(bodyLength),
                 proof: {
                     bytes: bytes.length,
@@ -104,28 +104,28 @@ describe('portable scalar verifier transport', () => {
         };
         const failure = new Error('The host cannot read its pinned input.');
         await expect(
-            verifySeedSharingProof({
+            verifyBoundedProof({
                 ...input,
                 readExact: () => Promise.reject(failure),
             }),
         ).rejects.toBe(failure);
         for (const difference of [-1, 1])
             await expect(
-                verifySeedSharingProof({
+                verifyBoundedProof({
                     ...input,
                     readExact: (length) =>
                         Promise.resolve(new Uint8Array(length + difference)),
                 }),
             ).rejects.toThrow('wrong length');
         await expect(
-            verifySeedSharingProof({
+            verifyBoundedProof({
                 ...input,
                 moduleBytes: transportFixture(9, true),
                 readExact: (length, position) =>
                     Promise.resolve(bytes.slice(position, position + length)),
             }),
         ).rejects.toThrow('Scalar verification invoked parallel.wait');
-        const refused = await verifySeedSharingProof({
+        const refused = await verifyBoundedProof({
             ...input,
             probe: { ...input.probe, context: 3 },
             readExact: (length, position) =>

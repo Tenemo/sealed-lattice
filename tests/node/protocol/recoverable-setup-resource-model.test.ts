@@ -8,6 +8,7 @@ import {
     compileWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import {
+    compileBoundedOpeningShareProofResources,
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
@@ -15,6 +16,37 @@ import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-re
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 describe('recoverable setup resource screen', () => {
+    it('counts the exact bounded opening fixture framing and sequential proving stages', () => {
+        const fixture = compileBoundedOpeningShareProofResources();
+        // Independent schema inventory: magic, seven u32 parameters, 20-byte
+        // modulus; source poll/roster/body hashes + author, or opening
+        // descriptor digest + recipient. Source operands are not uploaded anew.
+        const shape = 4n + 7n * 4n + 20n;
+        const source = shape + 3n * 64n + 2n + 13n * 256n * 21n;
+        const opening = shape + 64n + 2n + 6n * 256n * 21n + 2n * 256n * 15n;
+        expect(fixture.seedStatementBytes).toBe(source);
+        expect(fixture.openingStatementBytes).toBe(opening);
+        expect(fixture.residentOperatorBytes).toBe(13n * 256n * 48n);
+        expect(fixture.retainedSourceCoefficientAllowanceBytes).toBe(
+            2n * 13n * 256n * 1024n,
+        );
+        expect(fixture.nativeProofPlanningBytes).toBe(
+            fixture.secondSourceStageBytes > fixture.openingStageBytes
+                ? fixture.secondSourceStageBytes
+                : fixture.openingStageBytes,
+        );
+        expect(fixture.nativeProofPlanningBytes).toBeLessThan(
+            fixture.secondSourceStageBytes + fixture.openingStageBytes,
+        );
+        // One new outer proof and two opening proofs, with their statements;
+        // three copied source proofs belong to the separate input inventory.
+        expect(fixture.maximumNewArtifactBytes).toBe(
+            compileWordProofLayout(44, 44).maximumMultiproofBytes +
+                2n * compileWordProofLayout(13, 10).maximumMultiproofBytes +
+                source +
+                2n * opening,
+        );
+    });
     it('distinguishes every eligible upload from the fixed selected subset', () => {
         // Independently enumerated candidate sizes and ECHO/READY thresholds
         // from the frozen fault rule and candidate's fixed-pool definition.

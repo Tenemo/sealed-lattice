@@ -11,6 +11,7 @@ import { compileOpeningShareResources } from '#tests/recoverable-opening-share-m
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 // The bounded Rust experiment embeds its physical ring into the unchanged
@@ -137,6 +138,97 @@ export const compileRecoverableSeedSharingProofResources = (
             publicStatementCoefficientAllowanceBytes +
             2n * publicStatementPolynomialBytes +
             layout.maximumMultiproofBytes,
+    };
+};
+
+// Only the bounded native fixture's actual allocation/serialization shape.
+// Its two source records precede one opening batch; proof engines run in
+// sequence. This is a planning allowance, not a complete workflow bound.
+export const compileBoundedOpeningShareProofResources = () => {
+    const participants = 4;
+    const degree = 256n;
+    const seed = compileRecoverableSeedSharingProofResources(
+        participants,
+        2,
+        degree,
+        4n,
+    );
+    const opening = compileOpeningShareResources(participants, degree);
+    const selected = BigInt(opening.parameters.selectedCount);
+    const field = compileSmallLimbProofFieldCensus();
+    const tagBytes = proofCompilerCaps.tagBits / 8n;
+    const modulusBytes = BigInt(
+        Math.ceil(opening.parameters.modulus.toString(2).length / 8),
+    );
+    // Both fixture headers: magic, seven u32 shape operands, exact modulus.
+    const shapeHeaderBytes = 4n + 7n * 4n + modulusBytes;
+    const seedStatementBytes =
+        shapeHeaderBytes +
+        3n * tagBytes +
+        2n +
+        seed.publicStatementPolynomialBytes;
+    // The framed selection digest binds poll/roster/runtime/ordered records.
+    // The original operands are expanded locally; they are not new uploads.
+    const openingStatementBytes =
+        shapeHeaderBytes +
+        tagBytes +
+        2n +
+        opening.expandedStatementPolynomialBytes;
+    const retainedSourceCoefficientAllowanceBytes =
+        2n *
+        (1n + 3n * BigInt(participants)) *
+        degree *
+        publicCoefficientAllowance;
+    const residentOperatorBytes =
+        BigInt(opening.wordColumns + opening.booleanColumns) *
+        degree *
+        field.packedExtensionElementByteLength;
+    const serializedOperatorColumnBytes =
+        degree * field.packedExtensionElementByteLength;
+    // Positive, shifted, and the active controller's statement; the caller's
+    // extra public M vectors are retained until its scope controls finish.
+    const openingStatementCoefficientAllowanceBytes =
+        3n * (2n + 2n * selected) * degree * publicCoefficientAllowance +
+        4n * selected * degree * 16n;
+    const derivedEquationCoefficientAllowanceBytes =
+        (1n + selected) * degree * publicCoefficientAllowance;
+    const secondSourceStageBytes =
+        seed.nativeProofPlanningBytes +
+        retainedSourceCoefficientAllowanceBytes +
+        2n * seedStatementBytes;
+    const openingStageBytes =
+        opening.proofEngine.maximumLiveBytes +
+        residentOperatorBytes +
+        serializedOperatorColumnBytes +
+        retainedSourceCoefficientAllowanceBytes +
+        openingStatementCoefficientAllowanceBytes +
+        derivedEquationCoefficientAllowanceBytes +
+        3n * openingStatementBytes +
+        2n * seedStatementBytes +
+        opening.layout.maximumMultiproofBytes;
+    return {
+        seed,
+        opening,
+        seedStatementBytes,
+        openingStatementBytes,
+        retainedSourceCoefficientAllowanceBytes,
+        residentOperatorBytes,
+        serializedOperatorColumnBytes,
+        openingStatementCoefficientAllowanceBytes,
+        derivedEquationCoefficientAllowanceBytes,
+        secondSourceStageBytes,
+        openingStageBytes,
+        nativeProofPlanningBytes:
+            secondSourceStageBytes > openingStageBytes
+                ? secondSourceStageBytes
+                : openingStageBytes,
+        // One new outer proof, one opening positive, one fresh false opening,
+        // and their exact statements. Copied input artifacts are separate.
+        maximumNewArtifactBytes:
+            seed.layout.maximumMultiproofBytes +
+            2n * opening.layout.maximumMultiproofBytes +
+            seedStatementBytes +
+            2n * openingStatementBytes,
     };
 };
 

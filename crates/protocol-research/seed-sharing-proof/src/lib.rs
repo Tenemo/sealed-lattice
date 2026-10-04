@@ -5,7 +5,7 @@
 
 #[cfg(any(test, all(feature = "scalar-fixture", target_arch = "wasm32")))]
 mod browser;
-#[cfg(any(test, feature = "native-fixture", feature = "scalar-fixture"))]
+#[cfg(any(test, feature = "fixture"))]
 pub mod fixture;
 pub mod layout;
 pub mod operator;
@@ -17,7 +17,7 @@ pub mod prover;
 #[path = "prover-browser.rs"]
 mod prover_browser;
 pub mod statement;
-#[cfg(any(test, feature = "native-fixture", feature = "scalar-fixture"))]
+#[cfg(any(test, feature = "fixture"))]
 pub mod verification;
 pub mod witness;
 

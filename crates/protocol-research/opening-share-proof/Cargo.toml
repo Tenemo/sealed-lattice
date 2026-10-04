@@ -1,5 +1,5 @@
 [package]
-name = "seed-sharing-proof"
+name = "opening-share-proof"
 version = "0.0.0"
 edition = "2024"
 publish = false
@@ -12,21 +12,21 @@ crate-type = ["rlib", "cdylib"]
 num-bigint = "=0.5.1"
 parallel-work = { path = "../parallel-work" }
 supported-profile = { path = "../supported-profile" }
+seed-sharing-proof = { path = "../seed-sharing-proof", features = ["fixture"] }
 word-proof = { path = "../word-proof" }
 word-verifier = { path = "../word-verifier" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
+zeroize = "=1.8.2"
 
 [dev-dependencies]
 word-proof = { path = "../word-proof", features = ["test-support"] }
 
 [features]
-fixture = []
-native-fixture = ["fixture", "word-proof/test-support"]
-scalar-fixture = ["fixture"]
+native-fixture = ["word-proof/test-support", "seed-sharing-proof/native-fixture"]
+scalar-fixture = []
 scalar-prover-fixture = ["scalar-fixture", "word-proof/test-support"]
 
 [[bin]]
-name = "check-seed-sharing-proof"
-path = "src/bin/check-seed-sharing-proof.rs"
+name = "check-opening-share-proof"
+path = "src/bin/check-opening-share-proof.rs"
 required-features = ["native-fixture"]
-

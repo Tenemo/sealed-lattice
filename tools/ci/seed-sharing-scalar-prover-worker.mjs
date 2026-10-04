@@ -8,11 +8,12 @@ import {
     workerData,
 } from 'node:worker_threads';
 
+import { withPinnedProofReaders } from './scalar-proof-file-reader.mjs';
 import { createSeedSharingProofSink } from './seed-sharing-proof-sink.mjs';
-import { generateSeedSharingProof } from './seed-sharing-scalar-prover.mjs';
+import { generateBoundedProof } from './seed-sharing-scalar-prover.mjs';
 
-/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string}} Configuration */
-/** @typedef {Awaited<ReturnType<typeof generateSeedSharingProof>>} GenerationResult */
+/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,relation?:'seed-sharing'|'opening-share',predecessors?:import('./scalar-proof-file-reader.mjs').Proof[]}} Configuration */
+/** @typedef {Awaited<ReturnType<typeof generateBoundedProof>>} GenerationResult */
 /** @typedef {import('./seed-sharing-scalar-prover.mjs').OutputAcknowledgment} OutputAcknowledgment */
 
 if (isMainThread) {
@@ -123,7 +124,10 @@ if (isMainThread) {
         const proof = sink.finish();
         console.log(
             JSON.stringify({
-                kind: 'scalar-seed-sharing-generation',
+                kind:
+                    'scalar-' +
+                    (configuration.relation ?? 'seed-sharing') +
+                    '-generation',
                 ...result,
                 proof,
             }),
@@ -170,24 +174,37 @@ if (isMainThread) {
     };
     port.on('message', acknowledgment);
     try {
-        const result = await generateSeedSharingProof({
-            moduleBytes,
-            expectedBytes: configuration.expectedBytes,
-            onProgress: (progress) =>
-                port.postMessage({ kind: 'progress', progress }),
-            emitChunk: (index, offset, bytes) =>
-                new Promise((resolve, reject) => {
-                    assert.equal(
-                        pending,
-                        undefined,
-                        'More than one output acknowledgment is pending.',
-                    );
-                    pending = { resolve, reject };
-                    port.postMessage({ kind: 'chunk', index, offset, bytes }, [
-                        bytes.buffer,
-                    ]);
-                }),
-        });
+        /** @param {((index:number,length:number,position:number)=>Promise<Uint8Array>)|undefined} readPredecessor */
+        const generate = (readPredecessor) =>
+            generateBoundedProof({
+                relation: configuration.relation,
+                predecessors: configuration.predecessors,
+                readPredecessor,
+                moduleBytes,
+                expectedBytes: configuration.expectedBytes,
+                onProgress: (progress) =>
+                    port.postMessage({ kind: 'progress', progress }),
+                emitChunk: (index, offset, bytes) =>
+                    new Promise((resolve, reject) => {
+                        assert.equal(
+                            pending,
+                            undefined,
+                            'More than one output acknowledgment is pending.',
+                        );
+                        pending = { resolve, reject };
+                        port.postMessage(
+                            { kind: 'chunk', index, offset, bytes },
+                            [bytes.buffer],
+                        );
+                    }),
+            });
+        const result =
+            configuration.relation === 'opening-share'
+                ? await withPinnedProofReaders(
+                      configuration.predecessors ?? [],
+                      generate,
+                  )
+                : await generate(undefined);
         port.postMessage({ kind: 'result', result });
     } finally {
         port.off('message', acknowledgment);

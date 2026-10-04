@@ -22,13 +22,18 @@ type ProtocolResearchSelection = {
     optionCount: number;
     simulatedHelpers: number;
 } & (
-    | { name: keyof typeof protocolResearchCases }
+    | { name: keyof typeof protocolResearchCases; reference?: string }
+    | { name: 'native-opening-share'; source: string; reference?: string }
     | {
           name:
               | 'scalar-seed-sharing'
               | 'browser-seed-sharing'
               | 'scalar-seed-sharing-generation'
-              | 'browser-seed-sharing-generation';
+              | 'browser-seed-sharing-generation'
+              | 'scalar-opening-share'
+              | 'browser-opening-share'
+              | 'scalar-opening-share-generation'
+              | 'browser-opening-share-generation';
           source: string;
       }
 );
@@ -37,11 +42,66 @@ export const selectProtocolResearchCase = (
     arguments_: readonly string[],
 ): ProtocolResearchSelection => {
     const values = arguments_.filter((value) => value !== '--');
+    if (values[0] === 'native-opening-share') {
+        const source = values[1];
+        const reference = values[3];
+        if (
+            (values.length !== 2 &&
+                !(
+                    values.length === 4 &&
+                    values[2] === '--compare-reference' &&
+                    reference?.trim() &&
+                    !reference.startsWith('--')
+                )) ||
+            !source?.trim() ||
+            source.startsWith('--')
+        )
+            throw new Error(
+                'Select native-opening-share with exactly one passed fresh native seed-sharing run.',
+            );
+        return {
+            name: values[0],
+            source,
+            ...(reference === undefined ? {} : { reference }),
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        };
+    }
+    if (
+        values[0] === 'native-seed-sharing' &&
+        values[1] === '--compare-reference'
+    ) {
+        const reference = values[2];
+        if (
+            values.length !== 3 ||
+            !reference?.trim() ||
+            reference.startsWith('--')
+        )
+            throw new Error(
+                'Select one historical native seed-sharing run for deterministic comparison.',
+            );
+        return {
+            name: 'native-seed-sharing',
+            reference,
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        };
+    }
     if (
         values[0] === 'scalar-seed-sharing' ||
         values[0] === 'browser-seed-sharing' ||
         values[0] === 'scalar-seed-sharing-generation' ||
-        values[0] === 'browser-seed-sharing-generation'
+        values[0] === 'browser-seed-sharing-generation' ||
+        values[0] === 'scalar-opening-share' ||
+        values[0] === 'browser-opening-share' ||
+        values[0] === 'scalar-opening-share-generation' ||
+        values[0] === 'browser-opening-share-generation'
     ) {
         const source = values[1];
         if (
@@ -51,7 +111,7 @@ export const selectProtocolResearchCase = (
             source.startsWith('--')
         )
             throw new Error(
-                'Select one scalar or browser seed-sharing verification or generation case with exactly one passed native run and no profile or helper options.',
+                'Select one scalar or browser proof verification or generation case with exactly one matching passed native run and no profile or helper options.',
             );
         return {
             name: values[0],

@@ -170,3 +170,45 @@ export const emitBrowserProofChunk = async (
         throw new Error('The proof sink acknowledged another chunk.');
     return receipt;
 };
+
+// Predecessors are verified sequentially. Only the active predecessor keeps
+// a transport cache, and its last full read releases that cache before the
+// opening proof or private prover begins.
+/** @param {readonly BrowserProof[]} predecessors @param {typeof fetch} [fetchBytes] */
+export const createBrowserPredecessorReader = (
+    predecessors,
+    fetchBytes = fetch,
+) => {
+    /** @type {{index:number,read:ReturnType<typeof createBrowserProofReader>} | undefined} */
+    let active;
+    const release = () => {
+        active = undefined;
+    };
+    return {
+        release,
+        /** @param {number} index @param {number} length @param {number} position */
+        read: async (index, length, position) => {
+            if (
+                !Number.isSafeInteger(index) ||
+                index < 0 ||
+                index >= predecessors.length
+            )
+                throw new Error(
+                    'The predecessor index is outside its pinned inputs.',
+                );
+            if (active?.index !== index) {
+                release();
+                active = {
+                    index,
+                    read: createBrowserProofReader(
+                        predecessors[index],
+                        fetchBytes,
+                    ),
+                };
+            }
+            const bytes = await active.read(length, position);
+            if (position + length === predecessors[index].bytes) release();
+            return bytes;
+        },
+    };
+};

@@ -15,12 +15,14 @@ import { setTimeout } from 'node:timers/promises';
 
 import binaryen from 'binaryen';
 
+import { compileBoundedOpeningShareProofResources } from '#tests/recoverable-setup-resource-model.js';
 import {
     compiledRustSources,
     requireCheckoutBytes,
 } from '#tools/ci/compiled-inputs.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { createNativeVerifierGuard } from '#tools/ci/native-verifier-guard.js';
+import { openingShareProbes } from '#tools/ci/opening-share-scalar.mjs';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import {
@@ -28,13 +30,19 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
 import {
-    generateSeedSharingInChrome,
-    seedSharingBrowserSources,
-    verifySeedSharingInChrome,
+    generateBoundedProofInChrome,
+    boundedProofBrowserSources,
+    verifyBoundedProofInChrome,
 } from '#tools/ci/run-seed-sharing-browser.js';
+import { seedSharingChunkBytes } from '#tools/ci/seed-sharing-browser-input.mjs';
 import {
     fileDigest,
     readSeedSharingNativeSource,
+    readOpeningShareNativeSource,
+    assertOpeningShareSourceStable,
+    assertSeedSharingSourceStable,
+    assertScalarNativeInputs,
+    compareNativeReferenceArtifacts,
 } from '#tools/ci/seed-sharing-scalar-source.js';
 
 const linearMemoryLimit = 671_088_640;
@@ -52,9 +60,10 @@ const allowedImports = new Set([
     'read',
 ]);
 
-export const inspectSeedSharingScalarModule = async (
+export const inspectScalarProofModule = async (
     bytes: Uint8Array,
     generation = false,
+    relation: 'seed-sharing' | 'opening-share' = 'seed-sharing',
 ) => {
     const inspected = binaryen.readBinary(bytes);
     try {
@@ -88,19 +97,30 @@ export const inspectSeedSharingScalarModule = async (
         'The verifier declares an unknown host import.',
     );
     const exports = WebAssembly.Module.exports(module);
-    for (const name of [
-        'input_pointer',
-        'input_capacity',
-        'header_length',
-        'begin',
-        'push',
-        'finish',
-    ])
+    const required =
+        relation === 'opening-share'
+            ? [
+                  'opening_input_pointer',
+                  'opening_input_capacity',
+                  'opening_header_length',
+                  ...['source', 'verifier'].flatMap((role) =>
+                      ['begin', 'push', 'finish'].map(
+                          (name) => 'opening_' + role + '_' + name,
+                      ),
+                  ),
+              ]
+            : [
+                  'input_pointer',
+                  'input_capacity',
+                  'header_length',
+                  'begin',
+                  'push',
+                  'finish',
+              ].map((name) => 'seed_verifier_' + name);
+    for (const name of required)
         assert.ok(
             exports.some(
-                (entry) =>
-                    entry.kind === 'function' &&
-                    entry.name === 'seed_verifier_' + name,
+                (entry) => entry.kind === 'function' && entry.name === name,
             ),
             'The verifier is missing its bounded ABI.',
         );
@@ -124,21 +144,30 @@ export const inspectSeedSharingScalarModule = async (
                 exports.some(
                     (entry) =>
                         entry.kind === 'function' &&
-                        entry.name === 'seed_prover_' + name,
+                        entry.name ===
+                            (relation === 'opening-share'
+                                ? 'opening'
+                                : 'seed') +
+                                '_prover_' +
+                                name,
                 ),
                 'The prover is missing its bounded ABI.',
             );
     return { imports, exports };
 };
 
-export const runSeedSharingScalar = async (
+export const runScalarProofFixture = async (
     sourceDirectory: string,
     host: 'node' | 'chrome' = 'node',
     operation: 'verify' | 'generate' = 'verify',
+    relation: 'seed-sharing' | 'opening-share' = 'seed-sharing',
 ) => {
     const caseName =
-        (host === 'chrome' ? 'browser-seed-sharing' : 'scalar-seed-sharing') +
+        (host === 'chrome' ? 'browser-' : 'scalar-') +
+        relation +
         (operation === 'generate' ? '-generation' : '');
+    const fixturePackage = relation + '-proof';
+    const moduleStem = fixturePackage.replace(/-/gu, '_');
     const root = path.resolve('.');
     const workspace = path.join(root, 'crates/protocol-research');
     await runWithLocalRunLog(
@@ -168,13 +197,52 @@ export const runSeedSharingScalar = async (
                     freemem() >= 2 * processMemoryLimit,
                     'Insufficient host memory before scalar verification.',
                 );
-                const source = await readSeedSharingNativeSource(
-                    sourceDirectory,
-                    root,
+                const openingSource =
+                    relation === 'opening-share'
+                        ? await readOpeningShareNativeSource(
+                              sourceDirectory,
+                              root,
+                          )
+                        : undefined;
+                const source =
+                    openingSource ??
+                    (await readSeedSharingNativeSource(sourceDirectory, root));
+                assert.ok(
+                    source.compiledInputs.size > 0,
+                    'Scalar execution requires a native baseline with recorded compiled inputs.',
                 );
+                if (openingSource !== undefined) {
+                    const resources =
+                        compileBoundedOpeningShareProofResources();
+                    assert.ok(
+                        resources.openingStageBytes +
+                            BigInt(seedSharingChunkBytes) <=
+                            resources.nativeProofPlanningBytes,
+                    );
+                    assert.ok(
+                        resources.nativeProofPlanningBytes <
+                            BigInt(processMemoryLimit),
+                    );
+                    await writeFile(
+                        path.join(log.runDirectoryPath, 'resource-inputs.json'),
+                        JSON.stringify(
+                            {
+                                resources,
+                                scalarInputCapacityBound: seedSharingChunkBytes,
+                                processMemoryLimit,
+                                linearMemoryLimit,
+                            },
+                            (_key, value: unknown) =>
+                                typeof value === 'bigint'
+                                    ? String(value)
+                                    : value,
+                        ) + '\n',
+                        { flag: 'wx' },
+                    );
+                }
                 const inputDirectory = path.join(
                     log.artifactDirectoryPath,
-                    'seed-sharing',
+                    relation,
                 );
                 await mkdir(inputDirectory, { recursive: true });
                 const proofs = [];
@@ -189,6 +257,29 @@ export const runSeedSharingScalar = async (
                         );
                     }
                     proofs.push({ ...proof, file });
+                }
+                const predecessors = [];
+                const statementInputs = [];
+                if (openingSource !== undefined) {
+                    const directory = path.join(
+                        log.artifactDirectoryPath,
+                        'predecessors',
+                    );
+                    await mkdir(directory);
+                    for (const proof of openingSource.predecessors) {
+                        const file = path.join(directory, proof.name);
+                        await copyFile(proof.file, file);
+                        assert.equal(await fileDigest(file), proof.sha512);
+                        predecessors.push({ ...proof, file });
+                    }
+                    for (const artifact of openingSource.artifacts.filter(
+                        (entry) => entry.name.startsWith('statement-'),
+                    )) {
+                        const file = path.join(inputDirectory, artifact.name);
+                        await copyFile(artifact.file, file);
+                        assert.equal(await fileDigest(file), artifact.sha512);
+                        statementInputs.push({ ...artifact, file });
+                    }
                 }
                 const environment: NodeJS.ProcessEnv = {
                     ...process.env,
@@ -250,8 +341,8 @@ export const runSeedSharingScalar = async (
                     const targetDirectory = path.join(
                         root,
                         generation
-                            ? 'target/seed-sharing-scalar-prover'
-                            : 'target/seed-sharing-scalar',
+                            ? 'target/' + relation + '-scalar-prover'
+                            : 'target/' + relation + '-scalar',
                     );
                     await execute(
                         'cargo',
@@ -263,7 +354,7 @@ export const runSeedSharingScalar = async (
                             '--release',
                             '--no-default-features',
                             '-p',
-                            'seed-sharing-proof',
+                            fixturePackage,
                             '--features',
                             feature,
                             '--lib',
@@ -285,21 +376,22 @@ export const runSeedSharingScalar = async (
                         'wasm32-unknown-unknown/release',
                     );
                     const moduleBytes = await readFile(
-                        path.join(builtDirectory, 'seed_sharing_proof.wasm'),
+                        path.join(builtDirectory, moduleStem + '.wasm'),
                     );
-                    const inspected = await inspectSeedSharingScalarModule(
+                    const inspected = await inspectScalarProofModule(
                         moduleBytes,
                         generation,
+                        relation,
                     );
                     const moduleFile = path.join(
                         log.artifactDirectoryPath,
                         generation
-                            ? 'seed-sharing-prover.wasm'
-                            : 'seed-sharing-verifier.wasm',
+                            ? relation + '-prover.wasm'
+                            : relation + '-verifier.wasm',
                     );
                     await writeFile(moduleFile, moduleBytes, { flag: 'wx' });
                     const compiled = await compiledRustSources(
-                        path.join(builtDirectory, 'seed_sharing_proof.d'),
+                        path.join(builtDirectory, moduleStem + '.d'),
                     );
                     return {
                         feature,
@@ -329,16 +421,29 @@ export const runSeedSharingScalar = async (
                     ...compiled,
                     'crates/protocol-research/Cargo.toml',
                     'crates/protocol-research/Cargo.lock',
-                    'crates/protocol-research/seed-sharing-proof/src/bin/check-seed-sharing-proof.rs',
-                    'crates/protocol-research/seed-sharing-proof/src/proof.rs',
+                    'crates/protocol-research/' +
+                        fixturePackage +
+                        '/src/bin/check-' +
+                        fixturePackage +
+                        '.rs',
+                    'crates/protocol-research/' +
+                        fixturePackage +
+                        '/src/proof.rs',
                     'tools/ci/run-seed-sharing-scalar.ts',
                     'tools/ci/native-verifier-guard.ts',
+                    'tools/ci/compiled-inputs.ts',
+                    'tools/ci/protocol-research-registry.ts',
+                    'tools/ci/scalar-proof-file-reader.mjs',
+                    'tools/ci/scalar-proof-stream.mjs',
+                    'tools/ci/opening-share-scalar.mjs',
+                    'tests/recoverable-setup-resource-model.ts',
+                    'tests/recoverable-opening-share-model.ts',
                     'tools/ci/seed-sharing-scalar-source.ts',
                     'tools/ci/seed-sharing-scalar-worker.mjs',
                     'tools/ci/seed-sharing-scalar-verifier.mjs',
                     'tools/ci/seed-sharing-scalar-prover.mjs',
                     'tools/ci/seed-sharing-scalar-prover-worker.mjs',
-                    ...seedSharingBrowserSources,
+                    ...boundedProofBrowserSources,
                 ]);
                 for (const file of compiled) {
                     let directory = path.posix.dirname(file);
@@ -353,47 +458,20 @@ export const runSeedSharingScalar = async (
                     }
                 }
                 requireCheckoutBytes([...files]);
-                // The verifier adapter was extracted without changing the native
-                // core relations. New bridge/build wiring is pinned separately.
-                const adapted = new Set(
-                    [
-                        'Cargo.toml',
-                        'src/lib.rs',
-                        'src/proof.rs',
-                        'src/verification.rs',
-                        'src/browser.rs',
-                        'src/prover.rs',
-                        'src/prover-browser.rs',
-                        'src/bin/check-seed-sharing-proof.rs',
-                    ].map(
-                        (file) =>
-                            'crates/protocol-research/seed-sharing-proof/' +
-                            file,
-                    ),
-                );
+                const { targetAdapters, unchangedNativeInputs } =
+                    await assertScalarNativeInputs(
+                        source,
+                        [...files],
+                        compiler,
+                        root,
+                        relation,
+                    );
                 const sources = [];
-                const unchangedNativeInputs = [];
                 for (const file of [...files].sort()) {
                     const bytes = await readFile(path.join(root, file));
                     const sha512 = createHash('sha512')
                         .update(bytes)
                         .digest('hex');
-                    const previous = source.sources.get(file);
-                    if (compiled.includes(file) && !adapted.has(file)) {
-                        assert.ok(
-                            previous,
-                            'The scalar verifier introduced an unreviewed shared input: ' +
-                                file,
-                        );
-                        assert.equal(
-                            sha512,
-                            previous.sha512,
-                            'A native relation or shared verifier source changed: ' +
-                                file,
-                        );
-                        assert.equal(bytes.length, previous.bytes);
-                        unchangedNativeInputs.push(file);
-                    }
                     const destination = path.join(
                         log.runDirectoryPath,
                         'sources',
@@ -427,9 +505,11 @@ export const runSeedSharingScalar = async (
                 );
                 const identity = createHash('sha512')
                     .update(
-                        host === 'chrome'
-                            ? 'sealed-lattice/seed-sharing-browser-research/v1'
-                            : 'sealed-lattice/seed-sharing-scalar-research/v1',
+                        'sealed-lattice/' +
+                            relation +
+                            (host === 'chrome'
+                                ? '-browser-research/v1'
+                                : '-scalar-research/v1'),
                     )
                     .update(sourceManifest)
                     .update(moduleBytes)
@@ -440,6 +520,10 @@ export const runSeedSharingScalar = async (
                     nativeExecutableSha512: source.nativeExecutableSha512,
                     diagnosticDigests: source.diagnosticDigests,
                     proofs,
+                    predecessors,
+                    statementInputs,
+                    relation,
+                    targetAdapters,
                     unchangedNativeInputs,
                     moduleSha512,
                     identity,
@@ -665,59 +749,65 @@ export const runSeedSharingScalar = async (
                               }),
                     };
                 };
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'build',
-                        '--offline',
-                        '--locked',
-                        '--release',
-                        '--no-default-features',
-                        '-p',
-                        'seed-sharing-proof',
-                        '--features',
-                        'native-fixture',
-                        '--bin',
-                        'check-seed-sharing-proof',
-                    ],
-                    'build-native-reader',
-                );
-                const nativeExecutable = path.join(
-                    workspace,
-                    'target/release/check-seed-sharing-proof' +
-                        (process.platform === 'win32' ? '.exe' : ''),
-                );
-                const native = await guarded(
-                    nativeExecutable,
-                    [
-                        '--verify-existing',
-                        operation === 'generate'
-                            ? source.archive
-                            : inputDirectory,
-                    ],
-                    'native-verification',
-                    true,
-                );
-                assert.equal(
-                    native.result.kind,
-                    'seed-sharing-existing-verification',
-                );
-                assert.equal(native.result.positive, 1);
-                assert.equal(native.result.falseWitnesses, 1);
-                assert.equal(native.result.falseStatements, 1);
-                assert.deepEqual(
-                    native.result.proofBytes,
-                    proofs.map((proof) => proof.bytes),
-                );
+                let nativeExecutable: string | undefined;
+                let native: Awaited<ReturnType<typeof guarded>> | undefined;
+                if (openingSource === undefined) {
+                    await execute(
+                        'cargo',
+                        [
+                            '+1.95.0',
+                            'build',
+                            '--offline',
+                            '--locked',
+                            '--release',
+                            '--no-default-features',
+                            '-p',
+                            'seed-sharing-proof',
+                            '--features',
+                            'native-fixture',
+                            '--bin',
+                            'check-seed-sharing-proof',
+                        ],
+                        'build-native-reader',
+                    );
+                    nativeExecutable = path.join(
+                        workspace,
+                        'target/release/check-seed-sharing-proof' +
+                            (process.platform === 'win32' ? '.exe' : ''),
+                    );
+                    native = await guarded(
+                        nativeExecutable,
+                        [
+                            '--verify-existing',
+                            operation === 'generate'
+                                ? source.archive
+                                : inputDirectory,
+                        ],
+                        'native-verification',
+                        true,
+                    );
+                    assert.equal(
+                        native.result.kind,
+                        'seed-sharing-existing-verification',
+                    );
+                    assert.equal(native.result.positive, 1);
+                    assert.equal(native.result.falseWitnesses, 1);
+                    assert.equal(native.result.falseStatements, 1);
+                    assert.deepEqual(
+                        native.result.proofBytes,
+                        proofs.map((proof) => proof.bytes),
+                    );
+                }
                 let generation;
                 let generatedNative;
                 if (proverModule !== undefined) {
                     const expected = proofs[0];
                     if (host === 'chrome') {
-                        generation = await generateSeedSharingInChrome({
+                        generation = await generateBoundedProofInChrome({
                             root,
                             log,
+                            relation,
+                            predecessors,
                             moduleFile: proverModule.moduleFile,
                             moduleSha512: proverModule.moduleSha512,
                             outputFile: expected.file,
@@ -734,6 +824,8 @@ export const runSeedSharingScalar = async (
                         await writeFile(
                             configuration,
                             JSON.stringify({
+                                relation,
+                                predecessors,
                                 module: proverModule.moduleFile,
                                 moduleSha512: proverModule.moduleSha512,
                                 outputFile: expected.file,
@@ -756,9 +848,9 @@ export const runSeedSharingScalar = async (
                     }
                     assert.equal(
                         generation.result.kind,
-                        host === 'chrome'
-                            ? 'browser-seed-sharing-generation'
-                            : 'scalar-seed-sharing-generation',
+                        (host === 'chrome' ? 'browser-' : 'scalar-') +
+                            relation +
+                            '-generation',
                     );
                     assert.equal(generation.result.bytes, expected.bytes);
                     assert.ok(
@@ -773,22 +865,33 @@ export const runSeedSharingScalar = async (
                         expected.sha512,
                         'The generated positive proof differs from the pinned native bytes.',
                     );
-                    generatedNative = await guarded(
-                        nativeExecutable,
-                        ['--verify-existing', inputDirectory],
-                        'native-generated-verification',
-                        true,
+                    await compareNativeReferenceArtifacts(
+                        [source.proofs[0]],
+                        inputDirectory,
                     );
-                    assert.deepEqual(generatedNative.result, native.result);
+                    if (
+                        nativeExecutable !== undefined &&
+                        native !== undefined
+                    ) {
+                        generatedNative = await guarded(
+                            nativeExecutable,
+                            ['--verify-existing', inputDirectory],
+                            'native-generated-verification',
+                            true,
+                        );
+                        assert.deepEqual(generatedNative.result, native.result);
+                    }
                 }
                 let verified;
                 if (host === 'chrome') {
-                    verified = await verifySeedSharingInChrome({
+                    verified = await verifyBoundedProofInChrome({
                         root,
                         log,
                         moduleFile,
                         moduleSha512,
                         proofs,
+                        relation,
+                        predecessors,
                         processMemoryLimit,
                         linearMemoryLimit,
                     });
@@ -803,6 +906,8 @@ export const runSeedSharingScalar = async (
                             module: moduleFile,
                             moduleSha512,
                             proofs,
+                            relation,
+                            predecessors,
                         }) + '\n',
                         { flag: 'wx' },
                     );
@@ -820,13 +925,16 @@ export const runSeedSharingScalar = async (
                 }
                 assert.equal(
                     verified.result.kind,
-                    host === 'chrome'
-                        ? 'browser-seed-sharing-verification'
-                        : 'scalar-seed-sharing-verification',
+                    (host === 'chrome' ? 'browser-' : 'scalar-') +
+                        relation +
+                        '-verification',
                 );
                 assert.ok(
                     Array.isArray(verified.result.results) &&
-                        verified.result.results.length === 8,
+                        verified.result.results.length ===
+                            (openingSource === undefined
+                                ? 8
+                                : openingShareProbes.length),
                 );
                 for (const entry of sources)
                     assert.equal(
@@ -842,6 +950,14 @@ export const runSeedSharingScalar = async (
                         'A historical archive changed during verification.',
                     );
                 }
+                for (const artifact of [...predecessors, ...statementInputs])
+                    assert.equal(
+                        await fileDigest(artifact.file),
+                        artifact.sha512,
+                    );
+                if (openingSource !== undefined)
+                    await assertOpeningShareSourceStable(openingSource, root);
+                else await assertSeedSharingSourceStable(source, root);
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),
                     JSON.stringify(
@@ -850,9 +966,13 @@ export const runSeedSharingScalar = async (
                             identity,
                             source: source.directory,
                             moduleSha512,
-                            currentNativeExecutableSha512:
-                                await fileDigest(nativeExecutable),
-                            native,
+                            ...(nativeExecutable === undefined
+                                ? { nativeBaseline: source.directory }
+                                : {
+                                      currentNativeExecutableSha512:
+                                          await fileDigest(nativeExecutable),
+                                      native,
+                                  }),
                             ...(generation === undefined
                                 ? {}
                                 : {
@@ -865,11 +985,13 @@ export const runSeedSharingScalar = async (
                                 ? { browser: verified }
                                 : { scalar: verified }),
                             scope:
-                                operation === 'generate'
-                                    ? 'The fixed positive fixture was generated through staged scalar WebAssembly calls and an acknowledged bounded output sink, matched the current-native-verified reference length and SHA-512, and passed unchanged native and WebAssembly verifier controls. Replay randomness remains inside Rust. This is bounded synthetic generation development evidence, not participant state, distributed setup, complete protocol security or physical-phone qualification.'
-                                    : host === 'chrome'
-                                      ? 'Current native and dedicated external desktop Chrome worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the historical native run. Browser transfers authenticated bounded chunks with trusted SHA-512 identities. This is bounded relation verification development evidence, not browser proof generation, distributed setup, an admitted capability or physical-phone qualification.'
-                                      : 'Current native and Node worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the historical native run. Archive digests were first recorded by this scalar run. This is bounded relation verification development evidence, not proof generation in a browser, distributed setup, an admitted capability or phone qualification.',
+                                openingSource !== undefined
+                                    ? 'Fixed synthetic opening-share scalar fixture. Each fresh worker verifies both pinned outer predecessors before opening verification or generation. Honest and genuine shifted-statement proofs use their exact contexts; generated positive bytes match the source-matched native baseline. The fixed selection descriptor grants no broadcast, registration, disclosure or participant capability. This is development evidence, not supported-phone qualification.'
+                                    : operation === 'generate'
+                                      ? 'The fixed positive fixture was generated through staged scalar WebAssembly calls and an acknowledged bounded output sink, matched the current-native-verified reference length and SHA-512, and passed unchanged native and WebAssembly verifier controls. Replay randomness remains inside Rust. This is bounded synthetic generation development evidence, not participant state, distributed setup, complete protocol security or physical-phone qualification.'
+                                      : host === 'chrome'
+                                        ? 'Current native and dedicated external desktop Chrome worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the source-matched native baseline. Browser transfers authenticated bounded chunks with trusted SHA-512 identities. This is bounded relation verification development evidence, not browser proof generation, distributed setup, an admitted capability or physical-phone qualification.'
+                                        : 'Current native and Node worker scalar WebAssembly verifiers consumed identical pinned proof bytes from the source-matched native baseline. Recorded archive digests and compiled input identities match the native baseline. This is bounded relation verification development evidence, not proof generation in a browser, distributed setup, an admitted capability or phone qualification.',
                         },
                         null,
                         2,

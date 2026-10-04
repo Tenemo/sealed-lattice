@@ -1,7 +1,8 @@
+import { admitOpeningSources } from './opening-share-scalar.mjs';
+/** @typedef {import('./scalar-proof-stream.mjs').Proof} Proof */
 /** @typedef {{index:number,offset:number,length:number}} OutputAcknowledgment */
 /** @typedef {{operation:string,phase:number,milliseconds:number}} ProverCall */
 /** @typedef {{phase:number,steps:number,bytes:number,chunks:number,lastCall:ProverCall|undefined,maximumLinearMemoryBytes:number}} ProverProgress */
-/** @typedef {{memory:WebAssembly.Memory,seed_prover_begin():number,seed_prover_phase():number,seed_prover_step():number,seed_prover_next_output():number,seed_prover_output_pointer():number,seed_prover_output_length():number,seed_prover_output_capacity():number,seed_prover_ack_output():number}} ProverApi */
 
 /** @param {boolean} condition @param {string} message */
 const requireCondition = (condition, message) => {
@@ -12,13 +13,16 @@ const requireCondition = (condition, message) => {
 // host authenticates moduleBytes and owns the output sink. Every output span
 // has one acknowledged consumer before Rust may release or replace it.
 /**
- * @param {{moduleBytes:Uint8Array,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<OutputAcknowledgment>,onProgress?:(progress:ProverProgress)=>void}} input
+ * @param {{moduleBytes:Uint8Array,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<OutputAcknowledgment>,onProgress?:(progress:ProverProgress)=>void,relation?:'seed-sharing'|'opening-share',predecessors?:Proof[],readPredecessor?:(index:number,length:number,position:number)=>Promise<Uint8Array>}} input
  */
-export const generateSeedSharingProof = async ({
+export const generateBoundedProof = async ({
     moduleBytes,
     expectedBytes,
     emitChunk,
     onProgress,
+    relation = 'seed-sharing',
+    predecessors,
+    readPredecessor,
 }) => {
     requireCondition(
         Number.isSafeInteger(expectedBytes) && expectedBytes > 0,
@@ -55,9 +59,47 @@ export const generateSeedSharingProof = async ({
             'Unknown scalar prover import.',
         );
     const instance = await WebAssembly.instantiate(compiled, imports);
-    const api = /** @type {ProverApi} */ (
-        /** @type {unknown} */ (instance.exports)
-    );
+    let sourceResults;
+    if (relation === 'opening-share') {
+        if (predecessors === undefined || readPredecessor === undefined)
+            throw new Error(
+                'The opening prover lacks its predecessor streams.',
+            );
+        sourceResults = await admitOpeningSources({
+            api: /** @type {import('./opening-share-scalar.mjs').OpeningApi} */ (
+                /** @type {unknown} */ (instance.exports)
+            ),
+            predecessors,
+            readPredecessor,
+        });
+        requireCondition(
+            sourceResults.length === 2 &&
+                sourceResults.every((source) => source.code === 0),
+            'The opening prover failed predecessor admission.',
+        );
+    }
+    const prefix =
+        relation === 'opening-share' ? 'opening_prover_' : 'seed_prover_';
+    /** @param {string} name */
+    const binding = (name) => {
+        const method = instance.exports[prefix + name];
+        requireCondition(
+            typeof method === 'function',
+            'The prover is missing its bounded ABI.',
+        );
+        return /** @type {()=>number} */ (method);
+    };
+    const api = {
+        memory: /** @type {WebAssembly.Memory} */ (instance.exports.memory),
+        begin: binding('begin'),
+        phase: binding('phase'),
+        step: binding('step'),
+        next_output: binding('next_output'),
+        output_pointer: binding('output_pointer'),
+        output_length: binding('output_length'),
+        output_capacity: binding('output_capacity'),
+        ack_output: binding('ack_output'),
+    };
     const initializationMilliseconds = performance.now() - started;
     let phase = 0;
     let steps = 0;
@@ -118,7 +160,7 @@ export const generateSeedSharingProof = async ({
             maximumLinearMemoryBytes,
         });
     const readPhase = () => {
-        const next = call('phase', () => api.seed_prover_phase());
+        const next = call('phase', () => api.phase());
         requireCondition(
             Number.isInteger(next) && next >= phase && next <= 13,
             'The prover phase moved outside its one-shot sequence.',
@@ -135,20 +177,16 @@ export const generateSeedSharingProof = async ({
             'The prover accepted an invalid control call: ' + operation,
         );
         requireCondition(
-            call('phase', () => api.seed_prover_phase()) === before,
+            call('phase', () => api.phase()) === before,
             'A refused control changed the prover phase: ' + operation,
         );
-        const length = call('output_length', () =>
-            api.seed_prover_output_length(),
-        );
+        const length = call('output_length', () => api.output_length());
         requireCondition(
             length === (expected?.length ?? 0),
             'A refused control changed the pending output length: ' + operation,
         );
         if (expected !== undefined) {
-            const pointer = call('output_pointer', () =>
-                api.seed_prover_output_pointer(),
-            );
+            const pointer = call('output_pointer', () => api.output_pointer());
             requireCondition(
                 Number.isSafeInteger(pointer) &&
                     pointer >= 0 &&
@@ -165,15 +203,13 @@ export const generateSeedSharingProof = async ({
         }
         controlCases++;
     };
-    const capacity = call('output_capacity', () =>
-        api.seed_prover_output_capacity(),
-    );
+    const capacity = call('output_capacity', () => api.output_capacity());
     requireCondition(
         Number.isSafeInteger(capacity) && capacity > 0 && capacity <= 1_048_576,
         'The prover output capacity exceeds its bound.',
     );
     requireCondition(
-        call('begin', () => api.seed_prover_begin()) === 0,
+        call('begin', () => api.begin()) === 0,
         'The fixed prover could not begin.',
     );
     readPhase();
@@ -181,15 +217,11 @@ export const generateSeedSharingProof = async ({
         phase >= 1 && phase <= 11,
         'The prover did not begin at a computational phase.',
     );
-    refusedControl(
-        'premature_ack_output',
-        () => api.seed_prover_ack_output(),
-        undefined,
-    );
+    refusedControl('premature_ack_output', () => api.ack_output(), undefined);
     progress();
     while (phase < 12) {
         requireCondition(
-            call('step', () => api.seed_prover_step()) === 0,
+            call('step', () => api.step()) === 0,
             'The prover refused its next computational step.',
         );
         steps++;
@@ -205,13 +237,11 @@ export const generateSeedSharingProof = async ({
     let lastReportedBytes = 0;
     while (phase === 12) {
         requireCondition(
-            call('next_output', () => api.seed_prover_next_output()) === 0,
+            call('next_output', () => api.next_output()) === 0,
             'The prover refused its next output span.',
         );
         readPhase();
-        const length = call('output_length', () =>
-            api.seed_prover_output_length(),
-        );
+        const length = call('output_length', () => api.output_length());
         requireCondition(
             Number.isSafeInteger(length) && length >= 0 && length <= capacity,
             'The prover output span exceeds its bound.',
@@ -227,9 +257,7 @@ export const generateSeedSharingProof = async ({
             phase === 12 && length > 0 && bytes + length <= expectedBytes,
             'The prover output exceeds the pinned positive proof.',
         );
-        const pointer = call('output_pointer', () =>
-            api.seed_prover_output_pointer(),
-        );
+        const pointer = call('output_pointer', () => api.output_pointer());
         requireCondition(
             Number.isSafeInteger(pointer) &&
                 pointer >= 0 &&
@@ -248,17 +276,17 @@ export const generateSeedSharingProof = async ({
             if (chunks === 0) {
                 refusedControl(
                     'step_with_pending_output',
-                    () => api.seed_prover_step(),
+                    () => api.step(),
                     output,
                 );
                 refusedControl(
                     'next_with_pending_output',
-                    () => api.seed_prover_next_output(),
+                    () => api.next_output(),
                     output,
                 );
                 refusedControl(
                     'rebegin_with_pending_output',
-                    () => api.seed_prover_begin(),
+                    () => api.begin(),
                     output,
                 );
             }
@@ -271,13 +299,13 @@ export const generateSeedSharingProof = async ({
             );
         }
         requireCondition(
-            call('ack_output', () => api.seed_prover_ack_output()) === 0,
+            call('ack_output', () => api.ack_output()) === 0,
             'The prover refused its acknowledged output span.',
         );
         if (chunks === 0)
             refusedControl(
                 'duplicate_ack_output',
-                () => api.seed_prover_ack_output(),
+                () => api.ack_output(),
                 undefined,
             );
         bytes += length;
@@ -293,10 +321,17 @@ export const generateSeedSharingProof = async ({
         chunks,
         steps,
         controlCases,
+        ...(sourceResults === undefined ? {} : { sourceResults }),
         milliseconds: performance.now() - started,
         initializationMilliseconds,
         maximumLinearMemoryBytes,
         longestCall,
+        longestUninterruptedCallMilliseconds: Math.max(
+            longestCall?.milliseconds ?? 0,
+            ...(sourceResults?.map(
+                (source) => source.longestCallMilliseconds,
+            ) ?? []),
+        ),
         calls: [...calls.values()],
     };
 };
