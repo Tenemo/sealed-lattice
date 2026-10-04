@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { contributionBodyHeaderBytes } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import {
+    compileFullWordProofLayout,
+    compileWordProofLayout,
+} from '#tests/full-word-proof-layout-model.js';
 import {
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
@@ -122,6 +125,48 @@ describe('recoverable setup resource screen', () => {
             expect(() =>
                 compileRecoverableSetupResourceScreen(3, options),
             ).toThrow();
+    });
+
+    it('counts each recipient opening batch once and does not upload predecessor polynomials again', () => {
+        for (const [participants, options, selected] of [
+            [4, 2, 2],
+            [10, 10, 4],
+            [20, 20, 7],
+        ]) {
+            const screen = compileRecoverableSetupResourceScreen(
+                participants,
+                options,
+            );
+            const profile = deriveSupportedProfile(participants, options);
+            const maximumShare =
+                1n + BigInt(selected - 1) * profile.shareLifting.sharingRadius;
+            const coefficientBytes =
+                1n + BigInt(Math.ceil(maximumShare.toString(2).length / 8));
+            // Registration (16,16,7), then one (16,16,17) triple per
+            // selected package: each final bit is Boolean, not a new word.
+            const columns = 5 + 4 * selected;
+            const lookups = 4 + 3 * selected;
+            const proof = compileWordProofLayout(columns, lookups);
+            const shares =
+                BigInt(selected) *
+                fixedModulusBfvInputs.polynomialDegree *
+                coefficientBytes;
+            const batch = shares + proof.maximumMultiproofBytes;
+            expect(screen.maximumOpeningBatchPayloadBytes).toBe(batch);
+            expect(screen.maximumAllOpeningBatchPayloadBytes).toBe(
+                BigInt(participants) * batch,
+            );
+            expect(screen.maximumThresholdOpeningBatchPayloadBytes).toBe(
+                BigInt(selected) * batch,
+            );
+            expect(
+                screen.openingProof.expandedStatementPolynomialBytes,
+            ).toBeGreaterThan(shares);
+            expect(screen.maximumPreparationPayloadSubtotalBytes).toBe(
+                screen.maximumEligibleBodyCiphertextAndOuterProofBytes +
+                    BigInt(participants) * batch,
+            );
+        }
     });
 
     it('counts the actual seed, sharing limbs and both encryption-equation witness families', () => {

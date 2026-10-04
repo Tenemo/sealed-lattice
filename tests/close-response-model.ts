@@ -2384,9 +2384,10 @@ export const compileCloseObligationCounterexamples = () => {
 
 // Productive visits observed in the message-level executions, added to the
 // fixed-suite preparation visits. Each honest participant performs all work
-// its newest delivery enables; separate deliveries are separate visits. Every
-// visit performs at least one one-shot stage, so the stage count bounds the
-// visits: a ballot, the close response, the target signature, the release
+// its newest delivery enables. Deliveries and sessions do not define visits:
+// one protocol stage includes its restarts and the organizer's collection
+// across sessions. Each counted visit performs a one-shot stage: a ballot,
+// the close response, the target signature, the release
 // share and verification, and for the organizer the close intent and the
 // proposal with its own response and target signature instead of the
 // response and signature.

@@ -60,6 +60,15 @@ pnpm run research:protocol -- browser-seed-sharing <passed-native-run>
 
 This case reuses the scalar source validation, module build and import admission, native verification of identical bytes, source and artifact identity checks, and research lock. Its owned local server serves only the verifier files and bounded proof chunks on an ephemeral loopback port. The browser authenticates each chunk with WebCrypto SHA-512 against hashes computed from the pinned inputs, retaining one chunk and one bounded read buffer. Every case runs in a fresh dedicated worker, which ends before the next case; the harness records the Chrome version and sampled process-tree memory without network-body capture. The honest proof, false witness, false statement and context, truncation, trailing-byte and changed-proof cases exercise the same verifier loop as Node. This is desktop development evidence and does not qualify a phone, generate a proof in a browser or create a protocol capability.
 
+The bounded generation screen creates the reduced fixture's honest proof through scalar WebAssembly, either in a Node worker or a dedicated external Chrome worker:
+
+```text
+pnpm run research:protocol -- scalar-seed-sharing-generation <passed-native-run>
+pnpm run research:protocol -- browser-seed-sharing-generation <passed-native-run>
+```
+
+The original native run remains unchanged. Each generation run writes a fresh proof artifact and requires its exact length and SHA-512 identity to match the pinned deterministic native fixture before independent native and scalar verification. Generation uses bounded prover steps and records their call costs and live linear memory. The Chrome worker sends one bounded output chunk at a time to its owned local sink, waits for that chunk's completed write and matching hash/coordinate receipt before acknowledging the output to Rust, and keeps only the latest progress snapshot for diagnostic sampling. The sink rejects out-of-order or overlapping writes and never overwrites an existing artifact. The existing process-tree memory guard and experiment deadline remain enforced. This is a reduced synthetic proof-generation screen, not a participant setup, durable private-state workflow, complete resource bound or phone qualification.
+
 The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:
 
 ```text

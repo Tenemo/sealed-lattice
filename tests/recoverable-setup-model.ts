@@ -6,7 +6,8 @@
 // Fixture masking is reversible arithmetic, never protocol encryption.
 
 export type SetupScope = Readonly<{ poll: string; roster: string }>;
-export type SetupFailureStage = 'offer' | 'echo' | 'ready' | 'opening';
+export type SetupFailureStage =
+    'confirmation' | 'offer' | 'echo' | 'ready' | 'opening';
 export type SetupFailure = Readonly<{
     participant: number;
     before: SetupFailureStage;
@@ -144,6 +145,8 @@ export class RecoverableSetupModel {
     private readonly offers: Map<string, RecoveryOffer>;
     private readonly failures: Map<number, SetupFailureStage>;
     private readonly corrupt: ReadonlySet<number>;
+    private readonly refusingCorrupt: ReadonlySet<number>;
+    private readonly unavailablePositions: Set<number>;
     private readonly failed = new Set<number>();
     private readonly ownWork: OwnWork[];
     private selectionPublished = false;
@@ -155,6 +158,10 @@ export class RecoverableSetupModel {
         options: Readonly<{
             failures?: readonly SetupFailure[];
             corrupt?: readonly number[];
+            // These compromised actors also perform the causally enabled
+            // valid actions. They may still inject malicious frames; valid
+            // outer recovery work does not certify their inner body.
+            cooperativeCorrupt?: readonly number[];
             candidateCount?: number;
         }> = {},
     ) {
@@ -171,6 +178,7 @@ export class RecoverableSetupModel {
         this.candidateCount =
             options.candidateCount ?? this.releaseThreshold + this.faultBound;
         const stageOrder: SetupFailureStage[] = [
+            'confirmation',
             'offer',
             'echo',
             'ready',
@@ -188,15 +196,27 @@ export class RecoverableSetupModel {
                 this.failures.set(participant, before);
         }
         this.corrupt = new Set(options.corrupt);
-        // Corrupt positions have no automatic honest production in this
-        // experiment: their scripts may withhold or send invalid work. Charge
-        // them together with stopped positions to the availability budget.
-        // The static secrecy corruption bound remains a separate obligation.
-        const unavailable = new Set([...this.failures.keys(), ...this.corrupt]);
+        const cooperativeCorrupt = new Set(options.cooperativeCorrupt);
+        // Script-only corrupt positions supply no automatic valid progress,
+        // so this experiment reserves them as refusers. Compromised actors
+        // that do continue valid work belong to C but not, for that reason,
+        // to the separate departed/state-lost/refusing set U.
+        this.refusingCorrupt = new Set(
+            [...this.corrupt].filter(
+                (participant) => !cooperativeCorrupt.has(participant),
+            ),
+        );
+        this.unavailablePositions = new Set([
+            ...this.failures.keys(),
+            ...this.refusingCorrupt,
+        ]);
         if (
             this.failures.size > this.faultBound ||
             this.corrupt.size > this.faultBound ||
-            unavailable.size > this.faultBound ||
+            this.unavailablePositions.size > this.faultBound ||
+            [...cooperativeCorrupt].some(
+                (participant) => !this.corrupt.has(participant),
+            ) ||
             this.failures.has(0) ||
             [...this.failures.keys(), ...this.corrupt].some(
                 (position) =>
@@ -237,6 +257,8 @@ export class RecoverableSetupModel {
     confirm(participant: number, roster: string): boolean {
         const state = this.participants[participant];
         if (!state?.active || roster !== this.scope.roster) return false;
+        if (!state.confirmed && this.stopBefore(participant, 'confirmation'))
+            return false;
         state.confirmed = true;
         return true;
     }
@@ -272,8 +294,7 @@ export class RecoverableSetupModel {
             )
         )
             return true;
-        this.participants[participant].active = false;
-        this.failed.add(participant);
+        this.stop(participant);
         this.trace.push(`${participant}:stopped-own-state`);
         return false;
     }
@@ -288,7 +309,7 @@ export class RecoverableSetupModel {
             !state?.active ||
             !state.confirmed ||
             state.offered ||
-            this.corrupt.has(participant) ||
+            this.refusingCorrupt.has(participant) ||
             work.retiredFor !== undefined
         )
             return false;
@@ -459,19 +480,36 @@ export class RecoverableSetupModel {
         );
     }
 
-    private stopBefore(participant: number, stage: SetupFailureStage): boolean {
-        if (this.failures.get(participant) !== stage) return false;
+    private stop(participant: number): void {
+        if (
+            !this.unavailablePositions.has(participant) &&
+            this.unavailablePositions.size >= this.faultBound
+        )
+            throw new RangeError(
+                'The total unavailable set exceeds the fault bound.',
+            );
+        this.unavailablePositions.add(participant);
         this.participants[participant].active = false;
         this.failed.add(participant);
+    }
+
+    private stopBefore(participant: number, stage: SetupFailureStage): boolean {
+        if (this.failures.get(participant) !== stage) return false;
+        this.stop(participant);
         this.trace.push(`${participant}:stopped-before-${stage}`);
         return true;
     }
 
-    // One causally enabled honest action. Stopping happens before emission,
-    // never by filtering messages or shares generated earlier.
+    // One causally enabled valid action, including a cooperative corrupt
+    // actor's work. Stopping happens before emission, never by filtering
+    // messages or shares generated earlier.
     advance(participant: number): boolean {
         const state = this.participants[participant];
-        if (!state?.active || !state.confirmed || this.corrupt.has(participant))
+        if (
+            !state?.active ||
+            !state.confirmed ||
+            this.refusingCorrupt.has(participant)
+        )
             return false;
         if (!this.inspectOwnWork(participant)) return true;
         if (!state.offered && this.stopBefore(participant, 'offer'))
@@ -625,6 +663,8 @@ export class RecoverableSetupModel {
     }
 
     unavailable(): readonly number[] {
-        return [...this.failed].sort((left, right) => left - right);
+        return [...new Set([...this.failed, ...this.refusingCorrupt])].sort(
+            (left, right) => left - right,
+        );
     }
 }

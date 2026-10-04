@@ -22,6 +22,8 @@ describe('documentation census generator', () => {
             '## Certificate custody census',
             '## Roster proposal census',
             '## Contribution body census',
+            '## Recoverable setup resource screen',
+            '### Public opening-share relation and payload screen',
             '## Common-matrix sampling census',
             '## Wide-challenge compiler census',
             '## Common-agreement degree census',
@@ -45,6 +47,12 @@ describe('documentation census generator', () => {
         );
         expect(rendered).toContain(
             '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
+        );
+        expect(rendered).toContain(
+            '| Selected packages in each batch | `2` | `4` |',
+        );
+        expect(rendered).toContain(
+            '| New public integer-share payload bytes per batch | `7,680` | `4,194,304` |',
         );
         expect(rendered).not.toMatch(/\d{4}-\d{2}-\d{2}T/u);
         expect(rendered.endsWith('\n')).toBe(true);

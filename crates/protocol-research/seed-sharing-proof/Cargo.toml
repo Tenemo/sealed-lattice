@@ -15,6 +15,7 @@ supported-profile = { path = "../supported-profile" }
 word-proof = { path = "../word-proof" }
 word-verifier = { path = "../word-verifier" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
+zeroize = "=1.8.2"
 
 [dev-dependencies]
 word-proof = { path = "../word-proof", features = ["test-support"] }
@@ -22,6 +23,7 @@ word-proof = { path = "../word-proof", features = ["test-support"] }
 [features]
 native-fixture = ["word-proof/test-support"]
 scalar-fixture = []
+scalar-prover-fixture = ["scalar-fixture", "word-proof/test-support"]
 
 [[bin]]
 name = "check-seed-sharing-proof"

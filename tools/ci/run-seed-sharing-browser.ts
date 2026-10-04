@@ -18,12 +18,16 @@ import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { seedSharingChunkBytes } from '#tools/ci/seed-sharing-browser-input.mjs';
+import { createBrowserProofSink } from '#tools/ci/seed-sharing-browser-sink.js';
+import { fileDigest } from '#tools/ci/seed-sharing-scalar-source.js';
 import { seedSharingProbes } from '#tools/ci/seed-sharing-scalar-verifier.mjs';
 
 export const seedSharingBrowserSources = [
     'tools/ci/run-seed-sharing-browser.ts',
     'tools/ci/seed-sharing-browser-input.mjs',
     'tools/ci/seed-sharing-browser-worker.mjs',
+    'tools/ci/seed-sharing-browser-sink.ts',
+    'tools/ci/seed-sharing-proof-sink.mjs',
     'tools/ci/participant-runtime-chrome.ts',
 ];
 
@@ -99,8 +103,13 @@ window.runSeedSharingProbe = (configuration) => new Promise((resolve, reject) =>
         if (error) reject(new Error(error));
         else resolve(result);
     };
-    const timer = setTimeout(() => finish('The browser verification worker exceeded its deadline.'), 600000);
-    worker.onmessage = ({data}) => finish(data.error, data.result);
+    window.seedSharingProgress = {sequence:0,progress:null};
+    const timer = setTimeout(() => finish('The browser proof worker exceeded its deadline.'), configuration.timeoutMilliseconds);
+    worker.onmessage = ({data}) => {
+        if (Object.hasOwn(data,'progress')) {
+            window.seedSharingProgress = {sequence:window.seedSharingProgress.sequence+1,progress:data.progress};
+        } else finish(data.error, data.result);
+    };
     worker.onerror = (event) => finish(event.message || 'The browser verification worker failed.');
     worker.postMessage(configuration);
 });
@@ -110,6 +119,11 @@ export const serveSeedSharingBrowserInputs = async (
     root: string,
     moduleFile: string,
     proofs: readonly PinnedProof[],
+    generation?: {
+        file: string;
+        expectedBytes: number;
+        expectedSha512: string;
+    },
 ) => {
     const assets = new Map<string, { bytes: Uint8Array; type: string }>([
         ['/', { bytes: Buffer.from(page), type: 'text/html; charset=utf-8' }],
@@ -122,19 +136,65 @@ export const serveSeedSharingBrowserInputs = async (
         'seed-sharing-browser-worker.mjs',
         'seed-sharing-browser-input.mjs',
         'seed-sharing-scalar-verifier.mjs',
+        ...(generation ? ['seed-sharing-scalar-prover.mjs'] : []),
     ])
         assets.set('/' + name, {
             bytes: await readFile(path.join(root, 'tools/ci', name)),
             type: 'text/javascript',
         });
-    let transferredBytes = 0;
+    const sink = generation
+        ? await createBrowserProofSink(
+              generation.file,
+              generation.expectedBytes,
+              generation.expectedSha512,
+          )
+        : undefined;
+    let responsePayloadBytes = 0;
+    let receivedUploadPayloadBytes = 0;
     let requests = 0;
     let activeReads = 0;
     const server = createServer((request, response) => {
         void (async () => {
             response.setHeader('Cache-Control', 'no-store');
             response.setHeader('X-Content-Type-Options', 'nosniff');
-            if (request.method !== 'GET' || ++requests > 1024) {
+            if (++requests > 1024) {
+                response.writeHead(400).end();
+                return;
+            }
+            const posted =
+                /^\/generated\/(0|[1-9][0-9]*)\/(0|[1-9][0-9]*)$/u.exec(
+                    request.url ?? '',
+                );
+            if (request.method === 'POST' && sink && posted) {
+                const length = Number(request.headers['content-length']);
+                const sha512 = request.headers['x-chunk-sha512'];
+                assert.ok(typeof sha512 === 'string');
+                const body = async function* () {
+                    for await (const chunk of request) {
+                        assert.ok(chunk instanceof Uint8Array);
+                        receivedUploadPayloadBytes += chunk.length;
+                        yield chunk;
+                    }
+                };
+                const received = await sink.receive(
+                    Number(posted[1]),
+                    Number(posted[2]),
+                    length,
+                    sha512,
+                    body(),
+                );
+                response
+                    .writeHead(204, {
+                        'X-Chunk-Sha512': received.sha512,
+                        'X-Next-Offset': String(received.nextOffset),
+                        'X-Chunk-Index': posted[1],
+                        'X-Chunk-Offset': posted[2],
+                        'X-Chunk-Length': String(length),
+                    })
+                    .end();
+                return;
+            }
+            if (request.method !== 'GET') {
                 response.writeHead(400).end();
                 return;
             }
@@ -145,7 +205,7 @@ export const serveSeedSharingBrowserInputs = async (
                     'Content-Type': asset.type,
                     'Content-Length': asset.bytes.length,
                 });
-                transferredBytes += asset.bytes.length;
+                responsePayloadBytes += asset.bytes.length;
                 response.end(asset.bytes);
                 return;
             }
@@ -186,7 +246,7 @@ export const serveSeedSharingBrowserInputs = async (
                         'Content-Type': 'application/octet-stream',
                         'Content-Length': bytes.length,
                     });
-                    transferredBytes += bytes.length;
+                    responsePayloadBytes += bytes.length;
                     response.end(bytes);
                 } finally {
                     await file.close();
@@ -199,42 +259,71 @@ export const serveSeedSharingBrowserInputs = async (
             response.end();
         });
     });
-    await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', resolve);
-    });
+    try {
+        await new Promise<void>((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', resolve);
+        });
+    } catch (error) {
+        await sink?.close();
+        throw error;
+    }
     const address = server.address();
     assert.ok(address && typeof address !== 'string');
     return {
         origin: 'http://127.0.0.1:' + address.port,
         moduleBytes: assets.get('/module.wasm')!.bytes.length,
-        counters: () => ({ requests, transferredBytes }),
+        counters: () => ({
+            requests,
+            responsePayloadBytes,
+            receivedUploadPayloadBytes,
+            transferScope:
+                'Response payload bytes handed to the HTTP server and upload payload bytes consumed by its sink handler. HTTP headers, link overhead and unread aborted bodies are not measured.',
+        }),
+        generatedProof: () => {
+            assert.ok(sink);
+            return sink.result();
+        },
         close: async () => {
             server.closeAllConnections();
-            await new Promise<void>((resolve, reject) =>
-                server.close((error) => (error ? reject(error) : resolve())),
-            );
+            try {
+                await new Promise<void>((resolve, reject) =>
+                    server.close((error) =>
+                        error ? reject(error) : resolve(),
+                    ),
+                );
+            } finally {
+                await sink?.close();
+            }
         },
     };
 };
 
-export const verifySeedSharingInChrome = async ({
-    root,
-    log,
-    moduleFile,
-    moduleSha512,
-    proofs,
-    processMemoryLimit,
-    linearMemoryLimit,
-}: {
+type ChromeInputs = {
     root: string;
     log: ActiveLocalRunLog;
     moduleFile: string;
     moduleSha512: string;
-    proofs: readonly Proof[];
     processMemoryLimit: number;
     linearMemoryLimit: number;
-}) => {
+};
+type Generation = {
+    file: string;
+    expectedBytes: number;
+    expectedSha512: string;
+};
+
+const runSeedSharingInChrome = async ({
+    root,
+    log,
+    moduleFile,
+    moduleSha512,
+    proofs = [],
+    generation,
+    processMemoryLimit,
+    linearMemoryLimit,
+}: ChromeInputs & { proofs?: readonly Proof[]; generation?: Generation }) => {
+    const phase = generation ? 'generation' : 'verification';
     assert.ok(
         freemem() >= 2 * processMemoryLimit,
         'Insufficient host memory before Chrome verification.',
@@ -242,9 +331,20 @@ export const verifySeedSharingInChrome = async ({
     const pinned = [];
     for (const proof of proofs) pinned.push(await pinBrowserProofChunks(proof));
     await writeFile(
-        path.join(log.runDirectoryPath, 'browser-input-bindings.json'),
+        path.join(
+            log.runDirectoryPath,
+            generation
+                ? 'browser-generation-input-bindings.json'
+                : 'browser-input-bindings.json',
+        ),
         JSON.stringify(
-            { moduleSha512, chunkBytes: seedSharingChunkBytes, proofs: pinned },
+            {
+                moduleSha512,
+                phase,
+                chunkBytes: seedSharingChunkBytes,
+                proofs: pinned,
+                generation,
+            },
             null,
             2,
         ) + '\n',
@@ -264,11 +364,13 @@ export const verifySeedSharingInChrome = async ({
     let samples = 0;
     let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
     const started = performance.now();
+    const timeoutMilliseconds = 600_000;
     try {
         const serving = await serveSeedSharingBrowserInputs(
             root,
             moduleFile,
             pinned,
+            generation,
         );
         server = serving;
         chrome = await launchChromeParticipant(profile, serving.origin);
@@ -276,6 +378,7 @@ export const verifySeedSharingInChrome = async ({
         log.writeEvent({
             eventType: 'seed-sharing-browser',
             details: {
+                phase,
                 version: browser.version,
                 launchArguments: browser.launchArguments,
                 processIdentifier: browser.processIdentifier,
@@ -298,8 +401,9 @@ export const verifySeedSharingInChrome = async ({
         });
         void interrupted.catch(() => undefined);
         timer = globalThis.setTimeout(
-            () => fail(new Error('Chrome verification exceeded its deadline.')),
-            600_000,
+            () =>
+                fail(new Error('Chrome ' + phase + ' exceeded its deadline.')),
+            timeoutMilliseconds,
         );
         active = true;
         monitor = (async () => {
@@ -313,9 +417,17 @@ export const verifySeedSharingInChrome = async ({
                     log.writeEvent({
                         eventType: 'seed-sharing-browser-memory',
                         details: {
+                            phase,
                             bytes,
                             limit: processMemoryLimit,
                             heaps: browser.heaps(),
+                            ...(generation
+                                ? {
+                                      progress: await browser.evaluate(
+                                          'window.seedSharingProgress',
+                                      ),
+                                  }
+                                : {}),
                         },
                     });
                     assert.ok(
@@ -326,55 +438,95 @@ export const verifySeedSharingInChrome = async ({
                 if (active) await setTimeout(1000);
             }
         })().catch(fail);
-        const results = [];
-        for (const probe of seedSharingProbes) {
+        let result: Record<string, unknown>;
+        if (generation) {
             const configuration = {
+                mode: 'generate',
+                timeoutMilliseconds,
                 moduleUrl: serving.origin + '/module.wasm',
                 moduleBytes: serving.moduleBytes,
                 moduleSha512,
-                proofs: pinned.map((proof, index) => ({
-                    name: proof.name,
-                    bytes: proof.bytes,
-                    sha512: proof.sha512,
-                    chunks: proof.chunks,
-                    url: serving.origin + '/proof/' + index + '/',
-                })),
-                probe,
+                expectedBytes: generation.expectedBytes,
+                sinkUrl: serving.origin + '/generated/',
             };
-            const result = (await Promise.race([
+            const generated = (await Promise.race([
                 browser.evaluate(
                     'window.runSeedSharingProbe(' +
                         JSON.stringify(configuration) +
                         ')',
                 ),
                 interrupted,
-            ])) as {
-                name: string;
-                code: number;
-                maximumLinearMemoryBytes: number;
-                proofSha512: string;
+            ])) as { bytes: number; maximumLinearMemoryBytes: number };
+            assert.equal(generated.bytes, generation.expectedBytes);
+            assert.ok(generated.maximumLinearMemoryBytes <= linearMemoryLimit);
+            const proof = serving.generatedProof();
+            assert.equal(await fileDigest(proof.file), proof.sha512);
+            assert.equal(proof.sha512, generation.expectedSha512);
+            result = {
+                kind: 'browser-seed-sharing-generation',
+                ...generated,
+                proof,
             };
-            assert.equal(result.name, probe.name);
-            if (probe.expected === undefined)
-                assert.notEqual(result.code, 0, probe.name);
-            else assert.equal(result.code, probe.expected, probe.name);
-            assert.equal(result.proofSha512, pinned[probe.proof].sha512);
-            assert.ok(result.maximumLinearMemoryBytes <= linearMemoryLimit);
-            results.push(result);
             log.writeEvent({
-                eventType: 'seed-sharing-browser-case',
-                details: result,
+                eventType: 'seed-sharing-browser-generation',
+                details: { phase, ...result },
             });
+        } else {
+            const results = [];
+            for (const probe of seedSharingProbes) {
+                const configuration = {
+                    timeoutMilliseconds,
+                    moduleUrl: serving.origin + '/module.wasm',
+                    moduleBytes: serving.moduleBytes,
+                    moduleSha512,
+                    proofs: pinned.map((proof, index) => ({
+                        name: proof.name,
+                        bytes: proof.bytes,
+                        sha512: proof.sha512,
+                        chunks: proof.chunks,
+                        url: serving.origin + '/proof/' + index + '/',
+                    })),
+                    probe,
+                };
+                const verified = (await Promise.race([
+                    browser.evaluate(
+                        'window.runSeedSharingProbe(' +
+                            JSON.stringify(configuration) +
+                            ')',
+                    ),
+                    interrupted,
+                ])) as {
+                    name: string;
+                    code: number;
+                    maximumLinearMemoryBytes: number;
+                    proofSha512: string;
+                };
+                assert.equal(verified.name, probe.name);
+                if (probe.expected === undefined)
+                    assert.notEqual(verified.code, 0, probe.name);
+                else assert.equal(verified.code, probe.expected, probe.name);
+                assert.equal(verified.proofSha512, pinned[probe.proof].sha512);
+                assert.ok(
+                    verified.maximumLinearMemoryBytes <= linearMemoryLimit,
+                );
+                results.push(verified);
+                log.writeEvent({
+                    eventType: 'seed-sharing-browser-case',
+                    details: { phase, ...verified },
+                });
+            }
+            result = { kind: 'browser-seed-sharing-verification', results };
         }
         assert.ok(
             samples > 0,
             'No Chrome process-tree memory sample was recorded.',
         );
         return {
-            result: { kind: 'browser-seed-sharing-verification', results },
+            result,
             peakMemory,
             samples,
             milliseconds: performance.now() - started,
+            experimentDeadlineMilliseconds: timeoutMilliseconds,
             browser: {
                 version: browser.version,
                 launchArguments: browser.launchArguments,
@@ -410,4 +562,32 @@ export const verifySeedSharingInChrome = async ({
             );
         }
     }
+};
+
+export const verifySeedSharingInChrome = (
+    input: ChromeInputs & { proofs: readonly Proof[] },
+) => runSeedSharingInChrome(input);
+
+export const generateSeedSharingInChrome = (
+    input: ChromeInputs & {
+        outputFile: string;
+        expectedBytes: number;
+        expectedSha512: string;
+    },
+) => {
+    const output = path.resolve(input.outputFile);
+    assert.ok(
+        output.startsWith(
+            path.resolve(input.log.artifactDirectoryPath) + path.sep,
+        ),
+        'The generated proof must remain in its run artifact directory.',
+    );
+    return runSeedSharingInChrome({
+        ...input,
+        generation: {
+            file: output,
+            expectedBytes: input.expectedBytes,
+            expectedSha512: input.expectedSha512,
+        },
+    });
 };

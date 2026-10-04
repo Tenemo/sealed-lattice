@@ -217,6 +217,31 @@ describe('guarded protocol research entry', () => {
             expect(() => selectProtocolResearchCase(values)).toThrow();
     });
 
+    it('selects bounded positive generation only from a single native source without helper or profile overrides', () => {
+        for (const name of [
+            'scalar-seed-sharing-generation',
+            'browser-seed-sharing-generation',
+        ]) {
+            expect(selectProtocolResearchCase([name, 'logs/source'])).toEqual({
+                name,
+                source: 'logs/source',
+                execution: true,
+                noResult: false,
+                participantCount: 4,
+                optionCount: 2,
+                simulatedHelpers: 0,
+            });
+            for (const values of [
+                [name],
+                [name, ''],
+                [name, '4', '2'],
+                [name, 'source', 'extra'],
+                [name, 'source', '--simulated-helpers', '1'],
+            ])
+                expect(() => selectProtocolResearchCase(values)).toThrow();
+        }
+    });
+
     it('derives the native ceremony expectations from the thresholds', () => {
         // Totals 21, 30, 39, 28, 17, 16, 35, 24, 23 and 22 over voters 0 and
         // 4 to 7; no two options tie.

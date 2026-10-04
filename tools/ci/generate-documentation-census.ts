@@ -90,6 +90,7 @@ import {
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
+import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
 import {
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
@@ -234,6 +235,7 @@ export const renderDocumentationCensus = (): string => {
     );
     const fullFourParticipantSeedSharingProof =
         compileRecoverableSeedSharingProofResources(4, 2);
+    const boundedOpeningShareProof = compileOpeningShareResources(4, 256n);
     const recoverableSetupProfiles = supportedProfiles.profiles.flatMap((row) =>
         row.map((profile) =>
             compileRecoverableSetupResourceScreen(
@@ -2626,7 +2628,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'Existing-format arithmetic for the [recoverable sealed preparation candidate](security-argument.md#recoverable-sealed-preparation-candidate), computed by the independent [resource model](../tests/recoverable-setup-resource-model.ts). The eligible pool is `k=d+f` and the selected subset is `s=d=max(f+1,2)`. One existing inner contribution body has bound `B` from the contribution-body model, including its existing proof. Thus `kB` bounds the unchanged inner-body bytes of all eligible offers, while `sB` bounds only the selected inner bodies. Selected reads never remove unselected offers from the uploaded corpus.',
         '',
-        'The candidate encrypts each opening-seed evaluation as two polynomials in the original registered-recipient ring. Its raw ciphertext subtotal is `k*n*2*N*w`, where `N` and the signed coefficient width `w` come from the registration-key relation and modulus. This is distinct from the smaller auxiliary encryption ring already inside the inner body. The separately counted outer proofs use the conservative sharing widths and proof layout below. These figures bound only the named components, not a final candidate package; they are not a lower bound or an impossibility result. They exclude the new sealed-body length and padding framing, package signatures and metadata, public recovery shares and their proofs, ECHO/READY carriers, registrations, ballots, release, storage amplification, transfers and execution work. Any changed inner proof or parameter invalidates the reuse of `B`; full correctness, security and resource derivation remain open.',
+        'The candidate encrypts each opening-seed evaluation as two polynomials in the original registered-recipient ring. Its raw ciphertext subtotal is `k*n*2*N*w`, where `N` and the signed coefficient width `w` come from the registration-key relation and modulus. This is distinct from the smaller auxiliary encryption ring already inside the inner body. Outer proofs and the public opening-share batch projection are counted separately below. One opening batch carries the public integer shares of every selected package and one proof under its recipient key; the corpus screen counts one batch from every roster participant. The original common polynomial, registered key and source ciphertexts are predecessors, never counted again as new opening uploads. These figures bound only the named components, not a final candidate package; they are not a lower bound or an impossibility result. They exclude new sealed-body length and padding framing, opening-statement headers, package and opening signatures and metadata, ECHO/READY carriers, registrations, ballots, result release, storage amplification, transfers and execution work. Any changed inner proof or parameter invalidates the reuse of `B`; full correctness, security and resource derivation remain open.',
         '',
         table(
             ['Completion-profile operand', 'Value'],
@@ -2637,7 +2639,7 @@ export const renderDocumentationCensus = (): string => {
                 ],
                 ['Options', formatCount(recoverableSetup.optionCount)],
                 [
-                    'Maximum total faults',
+                    'Fault bound for each budget',
                     formatCount(recoverableSetup.maximumFaultCount),
                 ],
                 [
@@ -2694,7 +2696,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         table(
             [
-                'Existing-format subtotal in bytes',
+                'Candidate component subtotal in bytes',
                 'Completion profile',
                 'Minimum and first attaining profile',
                 'Maximum and first attaining profile',
@@ -2734,6 +2736,22 @@ export const renderDocumentationCensus = (): string => {
                     [
                         'All eligible inner bodies, raw seed-share ciphertexts and outer proofs',
                         'maximumEligibleBodyCiphertextAndOuterProofBytes',
+                    ],
+                    [
+                        'One public opening-share batch and proof, without framing',
+                        'maximumOpeningBatchPayloadBytes',
+                    ],
+                    [
+                        'Payload of d valid opening batches and proofs',
+                        'maximumThresholdOpeningBatchPayloadBytes',
+                    ],
+                    [
+                        'All n public opening batches and proofs',
+                        'maximumAllOpeningBatchPayloadBytes',
+                    ],
+                    [
+                        'Eligible offers plus all opening payloads and proofs',
+                        'maximumPreparationPayloadSubtotalBytes',
                     ],
                 ] as const
             ).map(([label, field]) => {
@@ -2834,6 +2852,92 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(select(boundedSeedSharingProof)),
                 formatCount(select(fullFourParticipantSeedSharingProof)),
                 formatCount(select(recoverableSetup.outerProof)),
+            ]),
+        ),
+        '',
+        '### Public opening-share relation and payload screen',
+        '',
+        'The [opening-share model](../tests/recoverable-opening-share-model.ts) projects one original recipient-key equation and one decoding equation for every selected package. The public integer shares have an explicit canonical range; the verifier must derive the centered ciphertext difference from the authenticated source ciphertext and the supplied share. A different bounded recipient-key witness cannot change that plaintext under the [opening-share argument](security-argument.md#recoverable-sealed-preparation-candidate). The selected decision, package identities, original key and complete scope remain required inputs of the future protocol. This is a relation and format projection, not an emitted opening protocol or a decryption capability.',
+        '',
+        'The projected batch uses the shared word engine: signed quotient and carry words, a narrow registration error, a signed recovery error split into words and Boolean remainder bits, and one sparse recipient-secret pair. The byte subtotal includes only the new public integer-share vectors and their encoded proof. Expanded statement polynomial bytes additionally include existing public predecessors for verification work; those are not new uploads. The generic proof-engine allowance excludes the new operator representation, public-input reconstruction, context/framing, fixture generation, verifier work, storage and browser integration.',
+        '',
+        table(
+            [
+                'Property',
+                'Bounded opening relation projection',
+                'Completion-profile projection',
+            ],
+            (
+                [
+                    [
+                        'Participants',
+                        (value) => value.parameters.participantCount,
+                    ],
+                    [
+                        'Selected packages in each batch',
+                        (value) => value.parameters.selectedCount,
+                    ],
+                    [
+                        'Physical polynomial degree',
+                        (value) => value.physicalDegree,
+                    ],
+                    [
+                        'Maximum public share magnitude',
+                        (value) => value.parameters.maximumShare,
+                    ],
+                    [
+                        'Honest decoding-error magnitude bound',
+                        (value) => value.parameters.honestError,
+                    ],
+                    [
+                        'Accepted recovery-error signed bits',
+                        (value) => value.parameters.recoveryErrorBits,
+                    ],
+                    [
+                        'Quotient and carry signed bits',
+                        (value) => value.parameters.signedWordBits,
+                    ],
+                    [
+                        'Maximum accepted limb residual magnitude bound',
+                        (value) => value.parameters.maximumLimbResidual,
+                    ],
+                    ['Word columns', (value) => value.wordColumns],
+                    ['Boolean columns', (value) => value.booleanColumns],
+                    ['Lookup entries', (value) => value.lookupEntries],
+                    ['Disjoint Boolean pairs', (value) => value.disjointPairs],
+                    ['Support rows', (value) => value.supportRows],
+                    [
+                        'Affine rows including support',
+                        (value) => value.affineRows,
+                    ],
+                    [
+                        'Public integer-share coefficient bytes',
+                        (value) => value.parameters.shareCoefficientBytes,
+                    ],
+                    [
+                        'New public integer-share payload bytes per batch',
+                        (value) => value.publicShareBytes,
+                    ],
+                    [
+                        'Expanded statement polynomial bytes including predecessors',
+                        (value) => value.expandedStatementPolynomialBytes,
+                    ],
+                    [
+                        'Maximum encoded multiproof bytes per batch',
+                        (value) => value.layout.maximumMultiproofBytes,
+                    ],
+                    [
+                        'Generic prover maximum live-byte allowance',
+                        (value) => value.proofEngine.maximumLiveBytes,
+                    ],
+                ] satisfies readonly (readonly [
+                    string,
+                    (value: typeof boundedOpeningShareProof) => bigint | number,
+                ])[]
+            ).map(([label, select]) => [
+                label,
+                formatCount(select(boundedOpeningShareProof)),
+                formatCount(select(recoverableSetup.openingProof)),
             ]),
         ),
         '',

@@ -7,6 +7,7 @@ import { compileContributionBodyCensus } from '#tests/contribution-body-model.js
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
+import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -143,8 +144,8 @@ export const compileRecoverableSeedSharingProofResources = (
 // Existing contribution-body maxima bound only the unchanged inner format.
 // The additional ciphertext subtotal uses the two registered-recipient-ring
 // polynomials U_i and V_i per recipient, with that ring's existing encoding.
-// Outer proof layouts are counted separately. Recovery proofs, sealed-body
-// framing and padding-length fields, signatures, broadcast, storage,
+// Outer and public opening-share proof layouts are counted separately.
+// Sealed-body framing and padding-length fields, signatures, broadcast, storage,
 // transfers and runtime work are not counted in the byte subtotals. No
 // subtotal bounds a complete candidate package or establishes feasibility.
 export const compileRecoverableSetupResourceScreen = (
@@ -179,6 +180,20 @@ export const compileRecoverableSetupResourceScreen = (
         eligibleSeedShareCiphertextCount * seedShareCiphertextBytes;
     const selectedSeedShareCiphertextBytes =
         selectedSeedShareCiphertextCount * seedShareCiphertextBytes;
+    const openingProof = compileOpeningShareResources(
+        participantCount,
+        recipient.degree,
+    );
+    const maximumOpeningBatchPayloadBytes =
+        openingProof.publicShareBytes +
+        openingProof.layout.maximumMultiproofBytes;
+    const maximumAllOpeningBatchPayloadBytes =
+        BigInt(participantCount) * maximumOpeningBatchPayloadBytes;
+    const maximumEligibleBodyCiphertextAndOuterProofBytes =
+        maximumEligibleInnerBodyCorpusBytes +
+        eligibleSeedShareCiphertextBytes +
+        BigInt(eligibleContributorCount) *
+            outerProof.layout.maximumMultiproofBytes;
     return {
         participantCount,
         optionCount,
@@ -212,10 +227,14 @@ export const compileRecoverableSetupResourceScreen = (
         maximumSelectedOuterProofBytes:
             BigInt(selectedContributorCount) *
             outerProof.layout.maximumMultiproofBytes,
-        maximumEligibleBodyCiphertextAndOuterProofBytes:
-            maximumEligibleInnerBodyCorpusBytes +
-            eligibleSeedShareCiphertextBytes +
-            BigInt(eligibleContributorCount) *
-                outerProof.layout.maximumMultiproofBytes,
+        maximumEligibleBodyCiphertextAndOuterProofBytes,
+        openingProof,
+        maximumOpeningBatchPayloadBytes,
+        maximumAllOpeningBatchPayloadBytes,
+        maximumThresholdOpeningBatchPayloadBytes:
+            BigInt(selectedContributorCount) * maximumOpeningBatchPayloadBytes,
+        maximumPreparationPayloadSubtotalBytes:
+            maximumEligibleBodyCiphertextAndOuterProofBytes +
+            maximumAllOpeningBatchPayloadBytes,
     };
 };

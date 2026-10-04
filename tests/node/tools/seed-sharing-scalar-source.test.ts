@@ -145,9 +145,10 @@ describe('scalar seed-sharing evidence inputs', () => {
         const moduleBytes = (
             memory = '(memory (export "memory") 1 10240)',
             extra = '',
+            generation = false,
         ) => {
             const module = binaryen.parseText(
-                `(module ${extra} ${memory} ${['input_pointer', 'input_capacity', 'header_length', 'begin', 'push', 'finish'].map((name) => `(func (export "seed_verifier_${name}") (result i32) (i32.const 0))`).join(' ')})`,
+                `(module ${extra} ${memory} ${['input_pointer', 'input_capacity', 'header_length', 'begin', 'push', 'finish'].map((name) => `(func (export "seed_verifier_${name}") (result i32) (i32.const 0))`).join(' ')} ${generation ? ['begin', 'phase', 'step', 'next_output', 'output_pointer', 'output_length', 'output_capacity', 'ack_output'].map((name) => `(func (export "seed_prover_${name}") (result i32) (i32.const 0))`).join(' ') : ''})`,
             );
             try {
                 return module.emitBinary();
@@ -178,6 +179,23 @@ describe('scalar seed-sharing evidence inputs', () => {
                 ),
             ),
         ).rejects.toThrow('unknown host import');
+        await expect(
+            inspectSeedSharingScalarModule(
+                moduleBytes(
+                    undefined,
+                    '(import "word_proof" "fill_random" (func))',
+                    true,
+                ),
+                true,
+            ),
+        ).resolves.toMatchObject({
+            imports: [
+                { module: 'word_proof', name: 'fill_random', kind: 'function' },
+            ],
+        });
+        await expect(
+            inspectSeedSharingScalarModule(moduleBytes(), true),
+        ).rejects.toThrow('prover is missing');
         await expect(
             inspectSeedSharingScalarModule(
                 moduleBytes('(memory (export "memory") 1 16384)'),

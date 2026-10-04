@@ -72,7 +72,8 @@ const selected = selectProtocolResearchCase(process.argv.slice(2));
 if ('source' in selected) {
     await runSeedSharingScalar(
         selected.source,
-        selected.name === 'browser-seed-sharing' ? 'chrome' : 'node',
+        selected.name.startsWith('browser-') ? 'chrome' : 'node',
+        selected.name.endsWith('-generation') ? 'generate' : 'verify',
     );
     // The selected runner has finished its diagnostics and process cleanup.
     process.exit(process.exitCode ?? 0);

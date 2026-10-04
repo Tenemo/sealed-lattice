@@ -139,6 +139,7 @@ describe('recoverable setup availability candidate', () => {
 
     it('survives every allowed unavailable set at each producer cut of the small and completion profiles', () => {
         const stages: SetupFailureStage[] = [
+            'confirmation',
             'offer',
             'echo',
             'ready',
@@ -158,11 +159,25 @@ describe('recoverable setup availability candidate', () => {
                         fixture(participantCount),
                         { failures },
                     );
-                    confirmAll(model);
+                    for (
+                        let participant = 0;
+                        participant < participantCount;
+                        participant++
+                    )
+                        expect(model.confirm(participant, scope.roster)).toBe(
+                            before !== 'confirmation' ||
+                                !missing.includes(participant),
+                        );
                     model.drain(before === 'ready');
                     verifyRecovery(model);
                     expect(model.unavailable()).toEqual(missing);
                     for (const participant of missing) {
+                        expect(model.participants[participant].confirmed).toBe(
+                            before !== 'confirmation',
+                        );
+                        expect(model.confirm(participant, scope.roster)).toBe(
+                            false,
+                        );
                         const stopped = model.trace.indexOf(
                             `${participant}:stopped-before-${before}`,
                         );
@@ -248,7 +263,7 @@ describe('recoverable setup availability candidate', () => {
         );
     });
 
-    it('charges potentially refusing corrupt actors and stopped actors to one availability budget', () => {
+    it('charges actual refusers and stopped actors independently of cooperative corrupt actors', () => {
         expect(
             () =>
                 new RecoverableSetupModel(4, scope, fixture(4), {
@@ -260,15 +275,175 @@ describe('recoverable setup availability candidate', () => {
             () =>
                 new RecoverableSetupModel(4, scope, fixture(4), {
                     corrupt: [1],
+                    cooperativeCorrupt: [1],
+                    failures: [{ participant: 2, before: 'offer' }],
+                }),
+        ).not.toThrow();
+        expect(
+            () =>
+                new RecoverableSetupModel(4, scope, fixture(4), {
+                    corrupt: [1],
                     failures: [{ participant: 1, before: 'offer' }],
                 }),
         ).not.toThrow();
+        for (const options of [
+            { corrupt: [1, 2], cooperativeCorrupt: [1, 2] },
+            { corrupt: [1], cooperativeCorrupt: [2] },
+        ])
+            expect(
+                () => new RecoverableSetupModel(4, scope, fixture(4), options),
+            ).toThrow('scope');
         expect(
             () =>
                 new RecoverableSetupModel(4, scope, fixture(4), {
                     candidateCount: 2.5,
                 }),
         ).toThrow('scope');
+    });
+
+    it.each([4, 10, 20])(
+        'finishes with separate full corruption and honest-departure sets at %i participants',
+        (participantCount) => {
+            const faultBound = Math.floor((participantCount - 1) / 3);
+            const corrupt = Array.from(
+                { length: faultBound },
+                (_unused, index) => index + 1,
+            );
+            const departed = corrupt.map((position) => position + faultBound);
+            const offers = fixture(participantCount);
+            for (const participant of corrupt) {
+                const original = offers[participant];
+                // Valid outer sharing, but an inner body outside the
+                // fixture's version-one grammar. These actors still provide
+                // the ECHO, READY and opening work needed by the continuers.
+                offers[participant] = makeRecoveryOffer(
+                    participantCount,
+                    participant,
+                    original.identity,
+                    original.coefficients,
+                    [0, participant, 17 + participant],
+                );
+            }
+            const model = new RecoverableSetupModel(
+                participantCount,
+                scope,
+                offers,
+                {
+                    corrupt,
+                    cooperativeCorrupt: corrupt,
+                    failures: departed.map((participant) => ({
+                        participant,
+                        before: 'offer',
+                    })),
+                },
+            );
+            confirmAll(model);
+            model.drain();
+            expect(model.unavailable()).toEqual(departed);
+            const selected = offers
+                .slice(0, faultBound + 1)
+                .map(({ identity }) => identity);
+            const continuers = model.participants.filter(
+                (participant) => participant.active,
+            );
+            expect(continuers).toHaveLength(participantCount - faultBound);
+            for (const participant of continuers) {
+                expect(participant.delivered).toEqual(selected);
+                expect([...participant.recovered.keys()]).toEqual(selected);
+                // Classification consumes the recovered bytes. No dealer's
+                // outer-proof verdict substitutes for the inner predicate.
+                expect(
+                    [...participant.recovered.entries()]
+                        .filter(([, body]) => body[0] === 1)
+                        .map(([identity]) => identity),
+                ).toEqual(['seal-00']);
+                for (const corruptParticipant of corrupt)
+                    expect(
+                        participant.recovered.get(
+                            offers[corruptParticipant].identity,
+                        ),
+                    ).toEqual([0, corruptParticipant, 17 + corruptParticipant]);
+            }
+            for (const participant of corrupt)
+                for (const kind of ['offer', 'echo', 'ready', 'opening'])
+                    expect(
+                        model.publications.some(
+                            ({ author, frame }) =>
+                                author === participant && frame.kind === kind,
+                        ),
+                    ).toBe(true);
+            for (const participant of departed)
+                expect(
+                    model.publications.some(
+                        ({ author }) => author === participant,
+                    ),
+                ).toBe(false);
+            expect(model.participants).toHaveLength(participantCount);
+            expect(model.releaseThreshold).toBe(faultBound + 1);
+        },
+    );
+
+    it('ignores invalid corrupt work before the same actor supplies its original valid work', () => {
+        const offers = fixture(4);
+        const malformed = {
+            ...offers[1],
+            identity: 'invalid-seal-01',
+            recipientShares: offers[1].recipientShares.map(
+                (share, position) => share + (position === 3 ? 1n : 0n),
+            ),
+        };
+        const model = new RecoverableSetupModel(
+            4,
+            scope,
+            [...offers, malformed],
+            {
+                corrupt: [1],
+                cooperativeCorrupt: [1],
+                failures: [{ participant: 2, before: 'offer' }],
+            },
+        );
+        confirmAll(model);
+        completeOwnOffer(model, 0);
+        model.inject(1, signed(1, 'offer', [malformed.identity]));
+        for (const record of model.publications)
+            model.deliver(record.ordinal, 0);
+        expect(model.advance(0)).toBe(false);
+        expect(model.participants[0].delivered).toBeUndefined();
+        model.inject(
+            1,
+            signed(1, 'opening', ['seal-00', 'seal-01'], [999n, 999n]),
+        );
+        completeOwnOffer(model, 1);
+        model.drain();
+        verifyRecovery(model);
+        expect(model.unavailable()).toEqual([2]);
+        for (const participant of [0, 1, 3]) {
+            expect(model.participants[participant].delivered).toEqual([
+                'seal-00',
+                'seal-01',
+            ]);
+            expect(
+                model.participants[participant].recovered.get('seal-01'),
+            ).toEqual([1, 1, 18]);
+            expect(
+                model.participants[participant].recovered.has(
+                    malformed.identity,
+                ),
+            ).toBe(false);
+        }
+        expect(model.ownWorkView(1).identity).toBe('seal-01');
+    });
+
+    it('does not grant another loss allowance when retained work is damaged later', () => {
+        const model = new RecoverableSetupModel(4, scope, fixture(4), {
+            corrupt: [1],
+            cooperativeCorrupt: [1],
+            failures: [{ participant: 2, before: 'offer' }],
+        });
+        confirmAll(model);
+        expect(model.produceOwnBodyRecord(1)).toBe(true);
+        model.loseOwnBodyRecord(1, 0);
+        expect(() => model.advance(1)).toThrow('total unavailable set');
     });
 
     it('does not require global roster confirmation before another participant offers', () => {

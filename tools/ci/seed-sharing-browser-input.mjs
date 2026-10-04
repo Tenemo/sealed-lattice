@@ -104,3 +104,69 @@ export const createBrowserProofReader = (proof, fetchBytes = fetch) => {
         return output;
     };
 };
+
+/**
+ * @param {string} sinkUrl
+ * @param {number} index
+ * @param {number} offset
+ * @param {Uint8Array<ArrayBuffer>} bytes
+ * @param {typeof fetch} [fetchBytes]
+ */
+export const emitBrowserProofChunk = async (
+    sinkUrl,
+    index,
+    offset,
+    bytes,
+    fetchBytes = fetch,
+) => {
+    if (
+        !Number.isSafeInteger(index) ||
+        index < 0 ||
+        !Number.isSafeInteger(offset) ||
+        offset < 0 ||
+        bytes.length === 0 ||
+        bytes.length > seedSharingChunkBytes
+    )
+        throw new Error(
+            'The generated proof chunk exceeds its transport bounds.',
+        );
+    const sha512 = await browserSha512(bytes);
+    const response = await fetchBytes(sinkUrl + index + '/' + offset, {
+        method: 'POST',
+        body: bytes,
+        headers: { 'X-Chunk-Sha512': sha512 },
+    });
+    if (
+        response.status !== 204 ||
+        response.headers.get('X-Chunk-Sha512') !== sha512
+    )
+        throw new Error(
+            'The proof sink did not acknowledge the written chunk.',
+        );
+    /** @param {string} name */
+    const coordinate = (name) => {
+        const value = response.headers.get(name);
+        if (
+            value === null ||
+            !/^(0|[1-9][0-9]*)$/u.test(value) ||
+            !Number.isSafeInteger(Number(value))
+        )
+            throw new Error(
+                'The proof sink acknowledgment has an invalid coordinate.',
+            );
+        return Number(value);
+    };
+    const receipt = {
+        index: coordinate('X-Chunk-Index'),
+        offset: coordinate('X-Chunk-Offset'),
+        length: coordinate('X-Chunk-Length'),
+    };
+    if (
+        receipt.index !== index ||
+        receipt.offset !== offset ||
+        receipt.length !== bytes.length ||
+        coordinate('X-Next-Offset') !== offset + bytes.length
+    )
+        throw new Error('The proof sink acknowledged another chunk.');
+    return receipt;
+};
